@@ -16,11 +16,18 @@
  *
  * A worker that throws does NOT stop the pool; other workers continue.
  * The returned promise resolves once all items have been processed.
+ *
+ * `shouldStop` provides cooperative early exit: it is consulted before each
+ * item is dequeued, so in-flight work always finishes cleanly and no further
+ * items are started. Used for conditions that make continuing pointless rather
+ * than merely failing one item — e.g. an expired token, where every remaining
+ * file would fail identically (issue #179).
  */
 export async function runPool<T>(
   items: T[],
   concurrency: number,
   worker: (item: T, index: number) => Promise<void>,
+  shouldStop?: () => boolean,
 ): Promise<void> {
   if (items.length === 0) return;
 
@@ -34,6 +41,8 @@ export async function runPool<T>(
    */
   async function runSlot(): Promise<void> {
     while (true) {
+      if (shouldStop?.()) break;
+
       const index = cursor++;
       if (index >= items.length) break;
 

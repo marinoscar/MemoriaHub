@@ -33,6 +33,7 @@ import type {
   RunProgressPayload,
 } from '../../src/sync/events.js';
 import type { SyncEngineDeps } from '../../src/sync/sync-engine.js';
+import { ApiError } from '../../src/api.js';
 import type { ApiClient } from '../../src/api.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -1158,6 +1159,162 @@ describe('SyncEngine', () => {
       expect(rec.sha256).toBe('ffffffff' + 'ffffffff'.repeat(7));
       expect(typeof rec.mtime_ms).toBe('number');
       expect(rec.mtime_ms).toBeGreaterThan(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Auth failure aborts the run (issue #179)
+  // -------------------------------------------------------------------------
+
+  describe('HTTP 401 mid-run', () => {
+    /** Upload fn that always 401s, as an expired/revoked token would. */
+    function make401UploadFn(): AnyFn {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fn = jest.fn<(...args: any[]) => any>();
+      fn.mockRejectedValue(new ApiError(401, 'Unauthorized'));
+      return fn;
+    }
+
+    it('aborts the run instead of marching through the remaining queue', async () => {
+      for (let i = 0; i < 6; i++) writeTmpJpeg(tmpDir, `auth-${i}.jpg`);
+
+      const ctx = makeEngine(db, {}, make401UploadFn());
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+
+      await expect(
+        ctx.engine.run({ trigger: 'cli', folderIds: [folder.id], concurrency: 1 }),
+      ).rejects.toThrow(/HTTP 401/);
+
+      // Only the file that actually hit the dead token is failed; the rest were
+      // never dequeued, so they keep their prior status and are retryable.
+      const recs = ctx.files.listByFolder(folder.id);
+      const failed = recs.filter((r) => r.status === 'failed');
+      expect(failed).toHaveLength(1);
+      expect(recs.filter((r) => r.status === 'queued').length).toBeGreaterThan(0);
+    });
+
+    it('does not charge an attempt to files it never dequeued', async () => {
+      for (let i = 0; i < 5; i++) writeTmpJpeg(tmpDir, `attempt-${i}.jpg`);
+
+      const ctx = makeEngine(db, {}, make401UploadFn());
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+
+      await expect(
+        ctx.engine.run({ trigger: 'cli', folderIds: [folder.id], concurrency: 1 }),
+      ).rejects.toThrow(/HTTP 401/);
+
+      const untouched = ctx.files
+        .listByFolder(folder.id)
+        .filter((r) => r.status !== 'failed');
+      expect(untouched.length).toBeGreaterThan(0);
+      for (const rec of untouched) {
+        expect(rec.attempt_count).toBe(0);
+      }
+    });
+
+    it('emits an error event carrying the actionable re-auth message', async () => {
+      writeTmpJpeg(tmpDir, 'auth-single.jpg');
+
+      const ctx = makeEngine(db, {}, make401UploadFn());
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+
+      const errors: Array<{ message: string }> = [];
+      ctx.engine.on(EV.ERROR, (p) => errors.push(p as { message: string }));
+
+      await expect(
+        ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] }),
+      ).rejects.toThrow();
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toMatch(/memoriahub login/);
+    });
+
+    it('leaves last_sync untouched so the next run does not skip work', async () => {
+      writeTmpJpeg(tmpDir, 'auth-lastsync.jpg');
+
+      const ctx = makeEngine(db, {}, make401UploadFn());
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+
+      await expect(
+        ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] }),
+      ).rejects.toThrow();
+
+      expect(ctx.folders.getById(folder.id)?.last_sync_at ?? null).toBeNull();
+    });
+
+    it('still fails only the offending file for a non-401 error', async () => {
+      for (let i = 0; i < 4; i++) writeTmpJpeg(tmpDir, `boom-${i}.jpg`);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const failUpload = jest.fn<(...args: any[]) => any>();
+      failUpload.mockRejectedValue(new ApiError(500, 'InternalError'));
+
+      const ctx = makeEngine(db, {}, failUpload);
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'test-circle' });
+
+      // A non-auth failure must NOT abort — the run completes normally.
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id], concurrency: 1 });
+
+      const recs = ctx.files.listByFolder(folder.id);
+      expect(recs.filter((r) => r.status === 'failed')).toHaveLength(4);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Circle resolution precedence (issue #179)
+  // -------------------------------------------------------------------------
+
+  describe('target circle resolution', () => {
+    it('falls back to opts.circleId when the folder has no bound circle_id', async () => {
+      writeTmpJpeg(tmpDir, 'no-folder-circle.jpg');
+
+      const ctx = makeEngine(db, {}, makeUploadFn('obj-circle'));
+      // Registered WITHOUT a circle — what `folders add` and `import` produce.
+      const folder = ctx.folders.add({ path: tmpDir });
+      expect(folder.circle_id).toBeNull();
+
+      await ctx.engine.run({
+        trigger: 'cli',
+        folderIds: [folder.id],
+        circleId: 'circle-from-opts',
+      });
+
+      const recs = ctx.files.listByFolder(folder.id);
+      expect(recs[0].status).toBe('uploaded');
+      expect(recs[0].last_error).toBeNull();
+    });
+
+    it('fails with the actionable message when no circle can be resolved at all', async () => {
+      writeTmpJpeg(tmpDir, 'no-circle-anywhere.jpg');
+
+      const ctx = makeEngine(db, {}, makeUploadFn('obj-none'));
+      const folder = ctx.folders.add({ path: tmpDir });
+
+      await ctx.engine.run({ trigger: 'cli', folderIds: [folder.id] });
+
+      const recs = ctx.files.listByFolder(folder.id);
+      expect(recs[0].status).toBe('failed');
+      expect(recs[0].last_error).toMatch(/No target circle/);
+    });
+
+    it('prefers the folder circle over opts.circleId', async () => {
+      writeTmpJpeg(tmpDir, 'folder-circle-wins.jpg');
+
+      const getSpy = mockResolving({ items: [] });
+      const ctx = makeEngine(db, { get: getSpy }, makeUploadFn('obj-pref'));
+      const folder = ctx.folders.add({ path: tmpDir, circleId: 'circle-folder' });
+
+      await ctx.engine.run({
+        trigger: 'cli',
+        folderIds: [folder.id],
+        circleId: 'circle-opts',
+      });
+
+      // The dedup GET is circle-scoped, so it reveals which circle won.
+      const dedupCall = getSpy.mock.calls.find((c) =>
+        String(c[0]).includes('/api/media?'),
+      );
+      expect(String(dedupCall?.[0])).toContain('circleId=circle-folder');
     });
   });
 });
