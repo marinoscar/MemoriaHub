@@ -12,6 +12,7 @@ import { DuplicateDetectionService } from './duplicate-detection.service';
 import { DuplicateDetectionHandler } from './duplicate-detection.handler';
 import { DuplicateDetectionBatchHandler } from './duplicate-detection-batch.handler';
 import { DuplicateBackfillService } from './duplicate-backfill.service';
+import { DuplicateConfidenceBackfillHandler } from './duplicate-confidence-backfill.handler';
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { ReviewInsightsController } from './review-insights.controller';
 import { ReviewInsightsService } from './review-insights.service';
@@ -25,6 +26,7 @@ import { ReviewInsightsService } from './review-insights.service';
     DuplicateDetectionHandler,
     DuplicateDetectionBatchHandler,
     DuplicateBackfillService,
+    DuplicateConfidenceBackfillHandler,
     VisualEmbeddingService,
     ReviewInsightsService,
   ],

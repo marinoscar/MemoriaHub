@@ -19,6 +19,7 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   geocode: 'Geocoding',
   duplicate_detection: 'Duplicate detection',
   duplicate_detection_batch: 'Duplicate detection (batch)',
+  duplicate_confidence_backfill: 'Duplicate confidence backfill',
   metadata_extraction: 'Metadata extraction',
   social_media_detection: 'Social media detection',
   location_inference: 'Location inference',
