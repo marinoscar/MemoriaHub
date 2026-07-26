@@ -38,6 +38,11 @@ import { EnrichmentJob, JobReason, JobStatus, MediaEnhancementStatus, MediaType 
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { RateLimitError } from '../enrichment/rate-limit.error';
+import {
+  ENRICHMENT_MAX_ATTEMPTS,
+  ENRICHMENT_RATELIMIT_MAX_HITS,
+} from '../enrichment/enrichment-terminal.service';
 
 const mockPrepareImageForProcessing = prepareImageForProcessing as jest.Mock;
 
@@ -403,11 +408,14 @@ describe('PictureEnhancementHandler', () => {
     it('fails when the MediaItem no longer exists', async () => {
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
 
+      // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS), so this is a
+      // retryable failure — the row must be requeued to pending, not
+      // tombstoned as failed, or the automatic retry becomes a silent no-op.
       await expect(handler.process(makeJob())).rejects.toThrow('not an eligible photo');
 
       expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
         where: { id: 'enh-1' },
-        data: { status: MediaEnhancementStatus.failed, lastError: expect.stringContaining('not an eligible photo') },
+        data: { status: MediaEnhancementStatus.pending, lastError: expect.stringContaining('not an eligible photo') },
       });
     });
 
@@ -453,27 +461,33 @@ describe('PictureEnhancementHandler', () => {
     it('fails when the resolved provider does not implement enhanceImage', async () => {
       mockAiProviderRegistry.get.mockReturnValue({ /* no enhanceImage */ });
 
+      // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS) — retryable, so the
+      // row goes back to pending rather than failed (see commit fixing this).
       await expect(handler.process(makeJob())).rejects.toThrow('does not support image enhancement');
 
-      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
-        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      const pendingCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.pending,
       );
-      expect(failedCall).toBeDefined();
-      expect(failedCall![0].data.lastError).toContain('does not support image enhancement');
+      expect(pendingCall).toBeDefined();
+      expect(pendingCall![0].data.lastError).toContain('does not support image enhancement');
     });
 
-    it('marks the row failed and rethrows when provider.enhanceImage rejects', async () => {
+    it('requeues the row to pending (to retry) and rethrows when provider.enhanceImage rejects', async () => {
       mockEnhanceImage.mockRejectedValue(new Error('OpenAI image edit exploded'));
 
+      // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS): this is a
+      // retryable failure. Previously the row was unconditionally tombstoned
+      // as `failed` here, which silently killed all future retries because a
+      // requeued job would then early-return on a non-actionable row.
       await expect(handler.process(makeJob())).rejects.toThrow('OpenAI image edit exploded');
 
-      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
-        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      const pendingCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.pending,
       );
-      expect(failedCall).toBeDefined();
-      expect(failedCall![0]).toEqual({
+      expect(pendingCall).toBeDefined();
+      expect(pendingCall![0]).toEqual({
         where: { id: 'enh-1' },
-        data: { status: MediaEnhancementStatus.failed, lastError: 'OpenAI image edit exploded' },
+        data: { status: MediaEnhancementStatus.pending, lastError: 'OpenAI image edit exploded' },
       });
       // No staging bytes should have been uploaded.
       expect(mockUpload).not.toHaveBeenCalled();
@@ -488,6 +502,77 @@ describe('PictureEnhancementHandler', () => {
         (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
       );
       expect(readyCall).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Retry / rate-limit / final-attempt state machine (fixed by commit
+  // e27f00c "defer rate-limited enhancements instead of stranding them").
+  //
+  // The handler mirrors EnrichmentTerminalService.completeFailed's own
+  // classification so its `media_enhancements` row status never disagrees
+  // with the underlying job's next state:
+  //   - retryable, non-final attempt -> row pending, original error rethrown
+  //   - retryable, final attempt (attempts >= ENRICHMENT_MAX_ATTEMPTS)
+  //     -> row failed
+  //   - rate-limited, under the deferral cap -> row pending, RateLimitError
+  //     thrown (routes through the queue's rate-limit deferral path)
+  //   - rate-limited, deferral cap exhausted (rateLimitHits + 1 >=
+  //     ENRICHMENT_RATELIMIT_MAX_HITS) -> row failed
+  // -------------------------------------------------------------------------
+
+  describe('retry / rate-limit / final-attempt state machine', () => {
+    it('marks the row failed on the final attempt (attempts >= ENRICHMENT_MAX_ATTEMPTS)', async () => {
+      mockEnhanceImage.mockRejectedValue(new Error('boom'));
+
+      await expect(
+        handler.process(makeJob({ attempts: ENRICHMENT_MAX_ATTEMPTS })),
+      ).rejects.toThrow('boom');
+
+      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      );
+      expect(failedCall).toBeDefined();
+      expect(failedCall![0]).toEqual({
+        where: { id: 'enh-1' },
+        data: { status: MediaEnhancementStatus.failed, lastError: 'boom' },
+      });
+    });
+
+    it('defers to pending and throws a RateLimitError on a rate-limited failure (non-final attempt)', async () => {
+      const rateLimitErr = Object.assign(new Error('Too Many Requests'), { status: 429 });
+      mockEnhanceImage.mockRejectedValue(rateLimitErr);
+
+      await expect(
+        handler.process(makeJob({ rateLimitHits: 0 })),
+      ).rejects.toBeInstanceOf(RateLimitError);
+
+      const pendingCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.pending,
+      );
+      expect(pendingCall).toBeDefined();
+      expect(pendingCall![0].data.lastError).toContain('Too Many Requests');
+      // A rate-limit deferral must not have been misclassified as a final
+      // failure.
+      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      );
+      expect(failedCall).toBeUndefined();
+    });
+
+    it('marks the row failed when rate-limit deferrals are exhausted (rateLimitHits + 1 >= ENRICHMENT_RATELIMIT_MAX_HITS)', async () => {
+      const rateLimitErr = Object.assign(new Error('Too Many Requests'), { status: 429 });
+      mockEnhanceImage.mockRejectedValue(rateLimitErr);
+
+      await expect(
+        handler.process(makeJob({ rateLimitHits: ENRICHMENT_RATELIMIT_MAX_HITS - 1 })),
+      ).rejects.toBeInstanceOf(RateLimitError);
+
+      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      );
+      expect(failedCall).toBeDefined();
+      expect(failedCall![0].data.lastError).toContain('Too Many Requests');
     });
   });
 });
