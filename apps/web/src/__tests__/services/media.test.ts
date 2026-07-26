@@ -134,6 +134,16 @@ describe('listMediaLocations', () => {
     expect(capturedUrl!.searchParams.has('bbox')).toBe(false);
   });
 
+  it('should include limit in the query string when provided', async () => {
+    await listMediaLocations({ limit: 24 });
+    expect(capturedUrl!.searchParams.get('limit')).toBe('24');
+  });
+
+  it('should omit limit from the query string when not provided', async () => {
+    await listMediaLocations({ type: 'photo' });
+    expect(capturedUrl!.searchParams.has('limit')).toBe(false);
+  });
+
   it('should include all filters simultaneously', async () => {
     await listMediaLocations({
       type: 'video',
@@ -147,6 +157,7 @@ describe('listMediaLocations', () => {
       circleId: 'circle-1',
       albumId: 'album-1',
       bbox: '-85,9,-84,10',
+      limit: 24,
     });
 
     const params = capturedUrl!.searchParams;
@@ -161,6 +172,7 @@ describe('listMediaLocations', () => {
     expect(params.get('circleId')).toBe('circle-1');
     expect(params.get('albumId')).toBe('album-1');
     expect(params.get('bbox')).toBe('-85,9,-84,10');
+    expect(params.get('limit')).toBe('24');
   });
 
   it('should round-trip a response with thumbnailUrl omitted (optional field)', async () => {

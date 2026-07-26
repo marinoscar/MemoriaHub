@@ -1,17 +1,21 @@
 /**
  * aggregateClusterUtils — pure unit tests (no DOM, no Leaflet needed).
  *
- * Covers the three Leaflet-free helpers backing the imperative
- * AggregateClusterLayer: the count-badge label formatter, the badge-size
- * picker, and the weighted-count summer used to roll up child-marker weights
- * into a cluster's true underlying item total.
+ * Covers the Leaflet-free helpers backing the imperative AggregateClusterLayer:
+ * the count-badge label formatter, the badge-size picker, the weighted-count
+ * summer used to roll up child-marker weights into a cluster's true underlying
+ * item total, and (issue #187) the true-footprint bbox/union helpers that
+ * replaced the fixed +/-0.001deg epsilon around a cell's centroid.
  */
 
 import { describe, it, expect } from 'vitest';
 import {
+  bboxFromExtent,
   clusterLabel,
   pickBadgeSize,
   sumWeights,
+  unionExtents,
+  type ClusterExtent,
 } from '../../../components/map/aggregateClusterUtils';
 
 describe('clusterLabel', () => {
@@ -97,5 +101,54 @@ describe('sumWeights', () => {
 
   it('sums a single-element array', () => {
     expect(sumWeights([7])).toBe(7);
+  });
+});
+
+describe('bboxFromExtent', () => {
+  it('serializes as minLng,minLat,maxLng,maxLat — lng before lat', () => {
+    const extent: ClusterExtent = { minLat: 9.9, minLng: -84.1, maxLat: 9.95, maxLng: -84.08 };
+    // Getting the lng/lat order wrong here is a silent, high-impact bug: the
+    // media APIs parse `bbox` positionally, so a swapped pair would still be
+    // four well-formed numbers and would still "work" for a roughly-square
+    // area near the equator — just against the wrong axis.
+    expect(bboxFromExtent(extent)).toBe('-84.1,9.9,-84.08,9.95');
+  });
+
+  it('applies no epsilon padding for a degenerate single-point cell (min === max)', () => {
+    const extent: ClusterExtent = { minLat: 9.9, minLng: -84.1, maxLat: 9.9, maxLng: -84.1 };
+    expect(bboxFromExtent(extent)).toBe('-84.1,9.9,-84.1,9.9');
+  });
+});
+
+describe('unionExtents', () => {
+  it('returns the single extent unchanged when only one is given', () => {
+    const extent: ClusterExtent = { minLat: 9.9, minLng: -84.1, maxLat: 9.95, maxLng: -84.08 };
+    expect(unionExtents([extent])).toEqual(extent);
+  });
+
+  it('unions multiple overlapping extents to the component-wise min-of-mins / max-of-maxes', () => {
+    const a: ClusterExtent = { minLat: 9.9, minLng: -84.1, maxLat: 9.95, maxLng: -84.08 };
+    const b: ClusterExtent = { minLat: 9.92, minLng: -84.12, maxLat: 9.97, maxLng: -84.05 };
+    expect(unionExtents([a, b])).toEqual({
+      minLat: 9.9,
+      minLng: -84.12,
+      maxLat: 9.97,
+      maxLng: -84.05,
+    });
+  });
+
+  it('unions multiple disjoint extents (e.g. cells from different towns) to their full span', () => {
+    const townA: ClusterExtent = { minLat: 9.9, minLng: -84.2, maxLat: 9.92, maxLng: -84.18 };
+    const townB: ClusterExtent = { minLat: 10.5, minLng: -85.6, maxLat: 10.52, maxLng: -85.58 };
+    expect(unionExtents([townA, townB])).toEqual({
+      minLat: 9.9,
+      minLng: -85.6,
+      maxLat: 10.52,
+      maxLng: -84.18,
+    });
+  });
+
+  it('returns null for an empty array', () => {
+    expect(unionExtents([])).toBeNull();
   });
 });
