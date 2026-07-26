@@ -30,6 +30,7 @@ import {
   Hub as HubIcon,
   Email as EmailIcon,
   AccountTree as AccountTreeIcon,
+  AutoFixHigh as AutoFixHighIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -126,6 +127,14 @@ export default function SettingsHubPage() {
           description: 'Tune visual-duplicate matching sensitivity and run global backfills.',
           icon: <ContentCopyIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/duplicates',
+          permission: 'system_settings:read',
+        },
+        {
+          title: 'AI Picture Enhancer',
+          description:
+            'Enable AI photo enhancement and set the quality, strength, and review presets.',
+          icon: <AutoFixHighIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/enhancer',
           permission: 'system_settings:read',
         },
         {

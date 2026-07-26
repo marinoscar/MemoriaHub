@@ -76,9 +76,28 @@ export interface ApplyEnhancementResult {
   mediaItemId?: string;
 }
 
+/**
+ * Admin readiness snapshot for the AI Picture Enhancer
+ * (`GET /api/admin/ai/enhance/status`). `ready` is true only when the feature
+ * toggle is on AND a model is selected AND an enabled credential exists for the
+ * resolved provider — the same three conditions the enhance endpoint enforces.
+ */
+export interface EnhancerAdminStatus {
+  featureEnabled: boolean;
+  provider: string | null;
+  model: string | null;
+  credentialConfigured: boolean;
+  ready: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
+
+/** Admin: feature/provider readiness for the AI Picture Enhancer. */
+export async function getEnhancerAdminStatus(): Promise<EnhancerAdminStatus> {
+  return api.get<EnhancerAdminStatus>('/admin/ai/enhance/status');
+}
 
 /** Start an enhancement job. An empty params object requests full auto defaults. */
 export async function startEnhance(
