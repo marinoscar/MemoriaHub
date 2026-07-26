@@ -361,4 +361,261 @@ describe('MediaEnhancementDrawer', () => {
       expect(onClose).not.toHaveBeenCalled();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Presets (issue #98 commit set E)
+  // ---------------------------------------------------------------------------
+  describe('presets', () => {
+    it('renders all 6 preset cards', () => {
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      expect(screen.getByRole('button', { name: /^auto —/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^restore old photo —/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^low-light rescue —/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^colorize b&w —/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^portrait polish —/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^custom —/i })).toBeInTheDocument();
+    });
+
+    it('"Auto" is selected by default', () => {
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      expect(screen.getByRole('button', { name: /^auto —/i })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    it('selecting "Restore old photo" pre-fills the Customize panel with its adjustments and strength', async () => {
+      const user = userEvent.setup();
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      await user.click(screen.getByRole('button', { name: /^restore old photo —/i }));
+      expect(screen.getByRole('button', { name: /^restore old photo —/i })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+
+      await user.click(screen.getByRole('button', { name: /customize/i }));
+
+      // restore_old_photo prefill: dehaze:true, strength:'strong'
+      const dehazeSwitch = screen
+        .getByText(/remove haze/i)
+        .closest('.MuiFormControlLabel-root')!
+        .querySelector('input[type="checkbox"]') as HTMLInputElement;
+      expect(dehazeSwitch.checked).toBe(true);
+
+      // The Strength <Select> has no explicit labelId association in the
+      // component, so getByLabelText can't resolve it — scope by DOM order
+      // instead: Strength is the first combobox in the Customize panel,
+      // Output quality the second.
+      const [strengthSelect] = screen.getAllByRole('combobox');
+      expect(strengthSelect).toHaveTextContent(/strong/i);
+    });
+
+    it('selecting "Portrait polish" pre-fills a subtle strength', async () => {
+      const user = userEvent.setup();
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      await user.click(screen.getByRole('button', { name: /^portrait polish —/i }));
+      await user.click(screen.getByRole('button', { name: /customize/i }));
+
+      const [strengthSelect] = screen.getAllByRole('combobox');
+      expect(strengthSelect).toHaveTextContent(/subtle/i);
+    });
+
+    it('sends the preset key in start() params for a real preset with nothing customized', async () => {
+      const start = vi.fn().mockResolvedValue(undefined);
+      mockUseMediaEnhance.mockReturnValue(makeHook({ start }));
+
+      const user = userEvent.setup();
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      await user.click(screen.getByRole('button', { name: /^low-light rescue —/i }));
+      await user.click(screen.getByRole('button', { name: /^enhance$/i }));
+
+      expect(start).toHaveBeenCalledWith(
+        expect.objectContaining({ preset: 'low_light', strength: 'strong' }),
+      );
+      // auto/custom are UI-only and must never be sent as `preset`.
+      expect(start.mock.calls[0][0]).not.toHaveProperty('intent');
+    });
+
+    it('does not send a preset for "Auto"', async () => {
+      const start = vi.fn().mockResolvedValue(undefined);
+      mockUseMediaEnhance.mockReturnValue(makeHook({ start }));
+
+      const user = userEvent.setup();
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      await user.click(screen.getByRole('button', { name: /^enhance$/i }));
+
+      expect(start).toHaveBeenCalledWith({});
+    });
+
+    describe('Colorize B&W interpretive warning', () => {
+      it('shows an "Interpretive" chip on the Colorize B&W card', () => {
+        render(<MediaEnhancementDrawer {...baseProps} />);
+
+        expect(
+          screen.getByRole('button', { name: /^colorize b&w —/i }),
+        ).toHaveTextContent(/interpretive/i);
+      });
+
+      it('shows the interpretive warning alert once Colorize B&W is selected', async () => {
+        const user = userEvent.setup();
+        render(<MediaEnhancementDrawer {...baseProps} />);
+
+        expect(
+          screen.queryByText(/colorizing is interpretive/i),
+        ).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: /^colorize b&w —/i }));
+
+        expect(screen.getByText(/colorizing is interpretive/i)).toBeInTheDocument();
+      });
+
+      it('hides the interpretive warning once a different preset is selected', async () => {
+        const user = userEvent.setup();
+        render(<MediaEnhancementDrawer {...baseProps} />);
+
+        await user.click(screen.getByRole('button', { name: /^colorize b&w —/i }));
+        expect(screen.getByText(/colorizing is interpretive/i)).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: /^auto —/i }));
+        expect(
+          screen.queryByText(/colorizing is interpretive/i),
+        ).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Start error visible in the params step (the fixed bug — see
+  // useMediaEnhance.test.ts for the underlying hook-level coverage)
+  // ---------------------------------------------------------------------------
+  describe('params step — start error', () => {
+    it('shows the hook error alert in the params step', () => {
+      mockUseMediaEnhance.mockReturnValue(
+        makeHook({ status: 'idle', error: 'Picture enhancement is disabled' }),
+      );
+
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      expect(screen.getByText('Picture enhancement is disabled')).toBeInTheDocument();
+      // Still on the params step — the Enhance button is available to retry.
+      expect(screen.getByRole('button', { name: /^enhance$/i })).toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Replace policy (issue #98 — server-resolved replacePolicy prop)
+  // ---------------------------------------------------------------------------
+  describe('replace policy', () => {
+    it('does not render the Replace button when allowReplace is false', () => {
+      mockUseMediaEnhance.mockReturnValue(
+        makeHook({ status: 'ready', data: makeEnhancementDto() }),
+      );
+
+      render(
+        <MediaEnhancementDrawer
+          {...baseProps}
+          replacePolicy={{ allowReplace: false, blockReplaceOnDownscale: false }}
+        />,
+      );
+
+      expect(
+        screen.queryByRole('button', { name: /replace original/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/an administrator has disabled replacing originals/i),
+      ).toBeInTheDocument();
+      // Keep both / discard remain available.
+      expect(screen.getByRole('button', { name: /keep both/i })).toBeInTheDocument();
+    });
+
+    it('renders the Replace button DISABLED when blockReplaceOnDownscale is true and the result is downscaled', () => {
+      mockUseMediaEnhance.mockReturnValue(
+        makeHook({
+          status: 'ready',
+          data: makeEnhancementDto({
+            downscaled: true,
+            enhanced: {
+              url: 'https://cdn.example.com/enhanced.jpg',
+              width: 2016,
+              height: 1512,
+              size: '900000',
+            },
+          }),
+        }),
+      );
+
+      render(
+        <MediaEnhancementDrawer
+          {...baseProps}
+          replacePolicy={{ allowReplace: true, blockReplaceOnDownscale: true }}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: /replace original/i })).toBeDisabled();
+    });
+
+    it('renders the Replace button ENABLED when blockReplaceOnDownscale is true but the result is not downscaled', () => {
+      mockUseMediaEnhance.mockReturnValue(
+        makeHook({ status: 'ready', data: makeEnhancementDto({ downscaled: false }) }),
+      );
+
+      render(
+        <MediaEnhancementDrawer
+          {...baseProps}
+          replacePolicy={{ allowReplace: true, blockReplaceOnDownscale: true }}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: /replace original/i })).not.toBeDisabled();
+    });
+
+    it('renders the Replace button ENABLED (default policy) when no replacePolicy prop is supplied', () => {
+      mockUseMediaEnhance.mockReturnValue(
+        makeHook({ status: 'ready', data: makeEnhancementDto() }),
+      );
+
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      expect(screen.getByRole('button', { name: /replace original/i })).not.toBeDisabled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Model label
+  // ---------------------------------------------------------------------------
+  describe('model label', () => {
+    it('renders the modelLabel prop in the params step when no run data exists yet', () => {
+      render(<MediaEnhancementDrawer {...baseProps} modelLabel="gpt-image-1" />);
+
+      expect(screen.getByText(/model:/i)).toBeInTheDocument();
+      expect(screen.getByText('gpt-image-1')).toBeInTheDocument();
+    });
+
+    it('prefers the run data model over the modelLabel prop once ready', () => {
+      mockUseMediaEnhance.mockReturnValue(
+        makeHook({
+          status: 'ready',
+          data: makeEnhancementDto({ model: 'gpt-image-1-run' }),
+        }),
+      );
+
+      render(<MediaEnhancementDrawer {...baseProps} modelLabel="gpt-image-1-fallback" />);
+
+      expect(screen.getByText(/enhanced with/i)).toBeInTheDocument();
+      expect(screen.getByText('gpt-image-1-run')).toBeInTheDocument();
+      expect(screen.queryByText('gpt-image-1-fallback')).not.toBeInTheDocument();
+    });
+
+    it('renders nothing model-related when neither modelLabel nor run data provide one', () => {
+      render(<MediaEnhancementDrawer {...baseProps} />);
+
+      expect(screen.queryByText(/^model:/i)).not.toBeInTheDocument();
+    });
+  });
 });
