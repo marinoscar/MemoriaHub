@@ -36,18 +36,8 @@ import { useDuplicateGroups } from '../../hooks/useDuplicates';
 import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
-import { ApiError } from '../../services/api';
+import { startRunErrorMessage } from '../../services/reviewRuns';
 import type { DuplicateGroupKind, DuplicateGroupSummary, DuplicateResolveAction } from '../../services/duplicates';
-
-/** Shown when the backend rejects a second concurrent run for this queue. */
-const RUN_IN_PROGRESS_MESSAGE =
-  'A bulk run is already in progress for this queue. Wait for it to finish before starting another.';
-
-/** Message for a failed run start, upgrading a 409 to something actionable. */
-function startRunErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError && err.status === 409) return RUN_IN_PROGRESS_MESSAGE;
-  return err instanceof Error ? err.message : fallback;
-}
 
 const KIND_LABELS: Record<DuplicateGroupKind, string> = {
   exact_variant: 'Exact copy',
