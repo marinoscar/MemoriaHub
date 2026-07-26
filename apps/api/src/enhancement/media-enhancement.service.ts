@@ -381,6 +381,7 @@ export class MediaEnhancementService {
         geoSource: true,
         geocodedAt: true,
         coordSource: true,
+        metadata: true,
       },
     });
     if (!source) {
@@ -419,7 +420,17 @@ export class MediaEnhancementService {
       },
     });
 
-    const breadcrumb = {
+    // Carry the source item's own metadata onto the enhanced copy (spec §5.2),
+    // then layer the breadcrumb on top — same merge ORDER as applyReplace
+    // (existing first, breadcrumb last, so the breadcrumb always wins).
+    //
+    // Unlike applyReplace — which mutates the SAME item, and so legitimately
+    // keeps that item's derived state — keep_both mints a BRAND-NEW item with
+    // its own storage object and its own processing lifecycle, so inherited
+    // derived state would be actively wrong here. inheritableMetadata() drops
+    // it; see that helper for the exact rule.
+    const mergedMeta: Record<string, unknown> = {
+      ...inheritableMetadata(source.metadata),
       _aiEnhanced: {
         model: row.model,
         at: new Date().toISOString(),
@@ -457,7 +468,7 @@ export class MediaEnhancementService {
         geocodedAt: source.geocodedAt,
         coordSource: source.coordSource,
         contentHash: null,
-        metadata: breadcrumb as Prisma.InputJsonValue,
+        metadata: mergedMeta as Prisma.InputJsonValue,
       },
     });
 
@@ -815,4 +826,37 @@ export class MediaEnhancementService {
   // Re-exported for the handler so size/prompt resolution stays in one place.
   static resolveSize = closestSupportedSize;
   static sizeToDims = sizeToDims;
+}
+
+/**
+ * Project a source MediaItem's `metadata` JSON down to the keys a NEW, derived
+ * item may safely inherit (keep_both). Two families are dropped:
+ *
+ *  1. Any key beginning with `_` — the repo-wide marker for internal processing
+ *     state (`_processing`, `_processingRetryCount`, `_thumbnailRepairAttempts`,
+ *     `_thumbnailRepairExhausted`, `_processedAt`, and the `_aiEnhanced` /
+ *     `_enhancedFrom` breadcrumbs themselves). The new object runs its own
+ *     processing pipeline, so inheriting the source's counters/exhaustion flags
+ *     would mis-report or suppress its recovery. Dropping a PRIOR `_aiEnhanced`
+ *     breadcrumb is intentional too: the fresh breadcrumb layered on top records
+ *     this item's immediate ancestor, which is the accurate provenance.
+ *
+ *  2. `thumbnailObjectId` / `thumbnailStorageKey` — not underscore-prefixed, but
+ *     equally derived: they are the pointer the read path signs thumbnails from
+ *     (MediaMetadataSyncService writes them). Copied over, the enhanced item
+ *     would render the ORIGINAL's thumbnail, and — because ThumbnailRepairTask
+ *     looks for `metadata->>'thumbnailStorageKey' IS NULL` — would be invisible
+ *     to the repair sweep if its own sync ever failed. The reprocess +
+ *     syncFromStorageObject that runs right after creation repopulates both.
+ *
+ * Everything else (user/EXIF-ish descriptive keys) carries over.
+ */
+function inheritableMetadata(metadata: unknown): Record<string, unknown> {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+  const DERIVED_KEYS = new Set(['thumbnailObjectId', 'thumbnailStorageKey']);
+  return Object.fromEntries(
+    Object.entries(metadata as Record<string, unknown>).filter(
+      ([key]) => !key.startsWith('_') && !DERIVED_KEYS.has(key),
+    ),
+  );
 }
