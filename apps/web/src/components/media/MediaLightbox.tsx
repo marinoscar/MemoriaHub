@@ -931,6 +931,18 @@ export function MediaLightbox({
             setEnhanceOpen(false);
             setSnack({ message, severity: 'success' });
           }}
+          // Fired when the job finishes while the panel is closed; reopening
+          // AI Enhance restores the review via resumeLatest().
+          onFinishedInBackground={(s) =>
+            setSnack(
+              s === 'ready'
+                ? {
+                    message: 'Your enhanced photo is ready — reopen AI Enhance to review it',
+                    severity: 'success',
+                  }
+                : { message: 'The AI enhancement failed. Open AI Enhance for details.', severity: 'error' },
+            )
+          }
         />
       )}
 

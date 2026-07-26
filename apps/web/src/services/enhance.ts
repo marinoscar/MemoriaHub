@@ -8,6 +8,20 @@ export type EnhanceIntent = 'auto' | 'custom';
 export type EnhanceStrength = 'subtle' | 'balanced' | 'strong';
 export type ApplyDecision = 'keep_both' | 'replace';
 
+/**
+ * Task-specific preset. ORTHOGONAL to `intent` — a preset steers WHAT kind of
+ * photo problem is being solved, while `intent`/`adjustments`/`instructions`
+ * still steer the individual corrections. See the API's `enhance-prompt.builder`.
+ */
+export type EnhancePreset =
+  | 'restore_old_photo'
+  | 'low_light'
+  | 'colorize_bw'
+  | 'portrait_polish';
+
+/** Per-run override of the `pictureEnhancement.defaultQuality` system setting. */
+export type EnhanceQuality = 'low' | 'medium' | 'high';
+
 export type EnhancementStatus =
   | 'pending'
   | 'processing'
@@ -28,9 +42,14 @@ export interface EnhanceAdjustments {
 
 export interface EnhanceParams {
   intent?: EnhanceIntent;
+  /** Task-specific preset; independent of `intent`. Omit for the generic template. */
+  preset?: EnhancePreset;
   adjustments?: EnhanceAdjustments;
   strength?: EnhanceStrength;
+  /** Omit to let the server's `pictureEnhancement.defaultQuality` apply. */
+  quality?: EnhanceQuality;
   preserveFaces?: boolean;
+  /** Only honored by the server when `intent === 'custom'`. */
   instructions?: string;
   model?: string;
 }

@@ -31,6 +31,13 @@ export function useMediaEnhance(mediaId: string) {
   const [data, setData] = useState<EnhancementDto | null>(null);
   const [status, setStatus] = useState<EnhanceUiStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Epoch ms the current run started, used to render elapsed time in the
+   * progress step. Set when a run is kicked off and (approximately — the row
+   * carries no createdAt in the compare payload) when an in-flight run is
+   * resumed.
+   */
+  const [startedAt, setStartedAt] = useState<number | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
@@ -64,11 +71,18 @@ export function useMediaEnhance(mediaId: string) {
               }
             } else if (pollCountRef.current >= MAX_POLLS) {
               stopPolling();
+              // Must also leave the polling state: `polling` is derived from
+              // `status`, so without this the progress spinner would run
+              // forever and the error would never be rendered.
+              setStatus('failed');
               setError('Timed out waiting for the enhancement to finish.');
             }
           })
           .catch((err) => {
             stopPolling();
+            // Same reason as the timeout branch above — resolve the UI to a
+            // terminal state instead of an orphaned spinner.
+            setStatus('failed');
             setError(err instanceof Error ? err.message : 'Failed to poll enhancement');
           });
       }, POLL_INTERVAL_MS);
@@ -82,13 +96,18 @@ export function useMediaEnhance(mediaId: string) {
       setError(null);
       setData(null);
       setStatus('pending');
+      setStartedAt(Date.now());
       stopPolling();
       try {
         const res = await startEnhance(mediaId, params);
         idRef.current = res.enhancementId;
         beginPolling(res.enhancementId);
       } catch (err) {
+        // Back to the params step. `error` is non-null, and the drawer renders
+        // it there regardless of status (a 400 from the enhance endpoint used
+        // to be silently swallowed).
         setStatus('idle');
+        setStartedAt(null);
         setError(err instanceof Error ? err.message : 'Failed to start enhancement');
       }
     },
@@ -110,6 +129,7 @@ export function useMediaEnhance(mediaId: string) {
         setStatus(latest.status);
         if (latest.status === 'failed') setError(latest.lastError ?? 'Enhancement failed');
         if (latest.status === 'pending' || latest.status === 'processing') {
+          setStartedAt((prev) => prev ?? Date.now());
           beginPolling(latest.id);
         }
       }
@@ -142,9 +162,10 @@ export function useMediaEnhance(mediaId: string) {
     setData(null);
     setStatus('idle');
     setError(null);
+    setStartedAt(null);
   }, [stopPolling]);
 
   const polling = status === 'pending' || status === 'processing';
 
-  return { status, data, error, polling, start, resumeLatest, apply, discard, reset };
+  return { status, data, error, polling, startedAt, start, resumeLatest, apply, discard, reset };
 }

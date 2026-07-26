@@ -1027,6 +1027,19 @@ export function MediaGallery({
             setEnhanceOpen(false);
             handleBulkSuccess(msg);
           }}
+          // Fired when the job finishes while the panel is closed. Uses the
+          // snackbar directly rather than handleBulkSuccess, which clears the
+          // selection — that would unmount the drawer and lose the review.
+          onFinishedInBackground={(s) =>
+            setSnackbar(
+              s === 'ready'
+                ? {
+                    message: 'Your enhanced photo is ready — reopen AI Enhance to review it',
+                    severity: 'success',
+                  }
+                : { message: 'The AI enhancement failed. Open AI Enhance for details.', severity: 'error' },
+            )
+          }
         />
       )}
 
