@@ -12,10 +12,13 @@
  *     Archive" calls bulkResolve(ids, 'archive') directly, "Resolve & Delete"
  *     confirms before calling bulkResolve(ids, 'trash')
  *   - Admin-only settings gear icon (links to /admin/settings/bursts)
- *   - "Archive above N" / "Delete above N" threshold buttons: N comes from
- *     useSystemSettings' burst.autoResolveThreshold (default 60 when unset),
- *     Delete is hidden without media:delete, clicking opens a confirm dialog
- *     that calls bulkResolveByThreshold(threshold, action)
+ *   - "Archive above N" / "Delete above N" / "Reject below N" threshold
+ *     buttons: N comes from useSystemSettings' burst.autoResolveThreshold
+ *     (default 60 when unset), Delete is hidden without media:delete, clicking
+ *     opens a confirm dialog that starts EXACTLY ONE async review run and
+ *     navigates to /review-runs/:runId (issue #190 — the old client-side
+ *     auto-loop over `remaining` is gone), and a 409 surfaces as an
+ *     "already in progress" message instead of a generic failure
  *
  *  BurstGroupPage:
  *   - Shows loading spinner while fetching
@@ -86,6 +89,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useBurstGroups, useBurstGroupDetail } from '../../hooks/useBursts';
+import { ApiError } from '../../services/api';
 import type { BurstGroupSummary, BurstGroupDetail } from '../../services/bursts';
 
 const mockUsePermissions = vi.mocked(usePermissions);
@@ -153,21 +157,15 @@ function makeBurstGroupsHook(overrides: Partial<ReturnType<typeof useBurstGroups
       skipped: 0,
       errors: [],
     }),
-    bulkResolveByThreshold: vi.fn().mockResolvedValue({
-      resolvedGroups: 1,
-      keptCount: 1,
-      removedCount: 2,
-      action: 'archive',
-      skipped: 0,
-      errors: [],
-      remaining: 0,
-    }),
-    dismissByThreshold: vi.fn().mockResolvedValue({
-      dismissedGroups: 1,
-      ungroupedCount: 2,
-      skipped: 0,
-      errors: 0,
-    }),
+    // Both threshold actions START AN ASYNC REVIEW RUN (issue #190) and
+    // return only the run handle — the resolve/dismiss counts they used to
+    // return are now surfaced on /review-runs/:runId instead.
+    bulkResolveByThreshold: vi
+      .fn()
+      .mockResolvedValue({ runId: 'run-1', status: 'evaluating', matchedCount: 0 }),
+    dismissByThreshold: vi
+      .fn()
+      .mockResolvedValue({ runId: 'run-1', status: 'evaluating', matchedCount: 0 }),
     ...overrides,
   };
 }
@@ -568,17 +566,11 @@ describe('BurstsPage', () => {
       expect(await screen.findByRole('button', { name: 'Delete above 60' })).toBeInTheDocument();
     });
 
-    it('clicking "Archive above N" opens a confirm dialog and calls bulkResolveByThreshold(threshold, "archive") on confirm', async () => {
+    it('clicking "Archive above N" opens a confirm dialog, then starts ONE run and navigates to it', async () => {
       const user = userEvent.setup();
-      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
-        resolvedGroups: 3,
-        keptCount: 3,
-        removedCount: 5,
-        action: 'archive',
-        skipped: 0,
-        errors: 0,
-        remaining: 0,
-      });
+      const bulkResolveByThreshold = vi
+        .fn()
+        .mockResolvedValue({ runId: 'run-burst-1', status: 'evaluating', matchedCount: 0 });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
@@ -598,19 +590,20 @@ describe('BurstsPage', () => {
       await waitFor(() => {
         expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'archive');
       });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/review-runs/run-burst-1');
+      });
+      // Exactly one call: the old client-side auto-loop (which drained the
+      // queue over up to 100 sequential round-trips) is gone — the backend
+      // materialises the whole matched set into a single async run.
+      expect(bulkResolveByThreshold).toHaveBeenCalledTimes(1);
     });
 
-    it('clicking "Delete above N" opens a confirm dialog and calls bulkResolveByThreshold(threshold, "trash") on confirm', async () => {
+    it('clicking "Delete above N" starts a trash run and navigates to it', async () => {
       const user = userEvent.setup();
-      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
-        resolvedGroups: 2,
-        keptCount: 2,
-        removedCount: 4,
-        action: 'trash',
-        skipped: 0,
-        errors: 0,
-        remaining: 0,
-      });
+      const bulkResolveByThreshold = vi
+        .fn()
+        .mockResolvedValue({ runId: 'run-burst-trash', status: 'evaluating', matchedCount: 0 });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
@@ -630,66 +623,17 @@ describe('BurstsPage', () => {
       await waitFor(() => {
         expect(bulkResolveByThreshold).toHaveBeenCalledWith(60, 'trash');
       });
-    });
-
-    it('shows a success message including the skipped count after a threshold resolve', async () => {
-      const user = userEvent.setup();
-      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
-        resolvedGroups: 2,
-        keptCount: 2,
-        removedCount: 3,
-        action: 'archive',
-        skipped: 1,
-        errors: 0,
-        // remaining:0 -> the auto-loop (added alongside this field) drains in
-        // exactly one iteration, matching this test's single-call assertion.
-        remaining: 0,
-      });
-      mockUseBurstGroups.mockReturnValue(
-        makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
-      );
-
-      render(<BurstsPage />);
-
-      await user.click(await screen.findByRole('button', { name: 'Archive above 60' }));
-      await user.click(await screen.findByRole('button', { name: /^archive$/i }));
-
       await waitFor(() => {
-        expect(screen.getByText(/resolved 2 groups; 3 photos archived \(1 skipped\)\./i)).toBeInTheDocument();
+        expect(mockNavigate).toHaveBeenCalledWith('/review-runs/run-burst-trash');
       });
+      expect(bulkResolveByThreshold).toHaveBeenCalledTimes(1);
     });
 
-    it('auto-loops bulkResolveByThreshold while remaining > 0, stopping once remaining reaches 0', async () => {
+    it('surfaces a 409 as an "already in progress" message and does not navigate', async () => {
       const user = userEvent.setup();
       const bulkResolveByThreshold = vi
         .fn()
-        .mockResolvedValueOnce({
-          resolvedGroups: 10,
-          keptCount: 10,
-          removedCount: 20,
-          action: 'archive',
-          skipped: 0,
-          errors: 0,
-          remaining: 600,
-        })
-        .mockResolvedValueOnce({
-          resolvedGroups: 10,
-          keptCount: 10,
-          removedCount: 20,
-          action: 'archive',
-          skipped: 0,
-          errors: 0,
-          remaining: 100,
-        })
-        .mockResolvedValueOnce({
-          resolvedGroups: 10,
-          keptCount: 10,
-          removedCount: 20,
-          action: 'archive',
-          skipped: 0,
-          errors: 0,
-          remaining: 0,
-        });
+        .mockRejectedValue(new ApiError('Conflict', 409));
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
       );
@@ -700,24 +644,14 @@ describe('BurstsPage', () => {
       await user.click(await screen.findByRole('button', { name: /^archive$/i }));
 
       await waitFor(() => {
-        expect(bulkResolveByThreshold).toHaveBeenCalledTimes(3);
+        expect(screen.getByText(/already in progress for this queue/i)).toBeInTheDocument();
       });
-      // Drained -> no further calls once remaining hits 0.
-      expect(bulkResolveByThreshold).toHaveBeenNthCalledWith(1, 60, 'archive');
-      expect(bulkResolveByThreshold).toHaveBeenNthCalledWith(3, 60, 'archive');
+      expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining('/review-runs/'));
     });
 
-    it('stops the auto-loop early when a batch makes no progress, even if remaining > 0', async () => {
+    it('surfaces a non-409 failure with the underlying error message', async () => {
       const user = userEvent.setup();
-      const bulkResolveByThreshold = vi.fn().mockResolvedValue({
-        resolvedGroups: 0,
-        keptCount: 0,
-        removedCount: 0,
-        action: 'archive',
-        skipped: 5,
-        errors: 0,
-        remaining: 600,
-      });
+      const bulkResolveByThreshold = vi.fn().mockRejectedValue(new Error('Boom'));
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], bulkResolveByThreshold }),
       );
@@ -728,9 +662,9 @@ describe('BurstsPage', () => {
       await user.click(await screen.findByRole('button', { name: /^archive$/i }));
 
       await waitFor(() => {
-        expect(screen.getByText(/resolved 0 groups/i)).toBeInTheDocument();
+        expect(screen.getByText('Boom')).toBeInTheDocument();
       });
-      expect(bulkResolveByThreshold).toHaveBeenCalledTimes(1);
+      expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining('/review-runs/'));
     });
   });
 
@@ -763,12 +697,9 @@ describe('BurstsPage', () => {
 
     it('clicking "Reject below N" opens a confirm dialog and does not call dismissByThreshold before confirming', async () => {
       const user = userEvent.setup();
-      const dismissByThreshold = vi.fn().mockResolvedValue({
-        dismissedGroups: 3,
-        ungroupedCount: 6,
-        skipped: 0,
-        errors: 0,
-      });
+      const dismissByThreshold = vi
+        .fn()
+        .mockResolvedValue({ runId: 'run-burst-dismiss', status: 'evaluating', matchedCount: 0 });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], dismissByThreshold }),
@@ -784,14 +715,11 @@ describe('BurstsPage', () => {
       expect(dismissByThreshold).not.toHaveBeenCalled();
     });
 
-    it('confirming calls dismissByThreshold(threshold) and shows a success message with the dismissed count', async () => {
+    it('confirming calls dismissByThreshold(threshold), starts ONE run and navigates to it', async () => {
       const user = userEvent.setup();
-      const dismissByThreshold = vi.fn().mockResolvedValue({
-        dismissedGroups: 3,
-        ungroupedCount: 6,
-        skipped: 0,
-        errors: 0,
-      });
+      const dismissByThreshold = vi
+        .fn()
+        .mockResolvedValue({ runId: 'run-burst-dismiss', status: 'evaluating', matchedCount: 0 });
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], dismissByThreshold }),
@@ -810,18 +738,14 @@ describe('BurstsPage', () => {
         expect(dismissByThreshold).toHaveBeenCalledWith(60);
       });
       await waitFor(() => {
-        expect(screen.getByText(/dismissed 3 groups\./i)).toBeInTheDocument();
+        expect(mockNavigate).toHaveBeenCalledWith('/review-runs/run-burst-dismiss');
       });
+      expect(dismissByThreshold).toHaveBeenCalledTimes(1);
     });
 
-    it('shows a skipped note in the success message when groups were skipped', async () => {
+    it('surfaces a 409 on dismiss as an "already in progress" message and does not navigate', async () => {
       const user = userEvent.setup();
-      const dismissByThreshold = vi.fn().mockResolvedValue({
-        dismissedGroups: 2,
-        ungroupedCount: 4,
-        skipped: 1,
-        errors: 0,
-      });
+      const dismissByThreshold = vi.fn().mockRejectedValue(new ApiError('Conflict', 409));
       mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(60));
       mockUseBurstGroups.mockReturnValue(
         makeBurstGroupsHook({ items: [makeSummary('g-1')], dismissByThreshold }),
@@ -833,8 +757,9 @@ describe('BurstsPage', () => {
       await user.click(await screen.findByRole('button', { name: /reject all/i }));
 
       await waitFor(() => {
-        expect(screen.getByText(/dismissed 2 groups \(1 skipped\)\./i)).toBeInTheDocument();
+        expect(screen.getByText(/already in progress for this queue/i)).toBeInTheDocument();
       });
+      expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining('/review-runs/'));
     });
   });
 });

@@ -11,7 +11,9 @@
  *     flow now starts an async run (issue mirrors trash-empty-at-scale) rather
  *     than calling a synchronous bulkAccept on the hook.
  *   - react-router-dom's useNavigate is mocked so the post-start navigation to
- *     /location-suggestion-runs/:runId can be asserted.
+ *     /review-runs/:runId can be asserted (issue #190 folded location runs into
+ *     the shared review-run model; /location-suggestion-runs/:runId survives
+ *     only as a redirect).
  *   - LocationMiniMap and LocationPickerMap are mocked to lightweight stubs
  *     (avoids react-leaflet dependency), matching the pattern used in
  *     MediaDetailDrawer.test.tsx / BulkLocationDialog.test.tsx.
@@ -767,7 +769,7 @@ describe('LocationSuggestionsPage', () => {
         expect(mockStartLocationAcceptRun).toHaveBeenCalledWith({ circleId: CIRCLE_ID, threshold: 80 });
       });
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/location-suggestion-runs/run-accept-1');
+        expect(mockNavigate).toHaveBeenCalledWith('/review-runs/run-accept-1');
       });
     });
 
@@ -807,7 +809,7 @@ describe('LocationSuggestionsPage', () => {
         expect(mockStartLocationRejectRun).toHaveBeenCalledWith({ circleId: CIRCLE_ID, threshold: 80 });
       });
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/location-suggestion-runs/run-reject-1');
+        expect(mockNavigate).toHaveBeenCalledWith('/review-runs/run-reject-1');
       });
     });
 

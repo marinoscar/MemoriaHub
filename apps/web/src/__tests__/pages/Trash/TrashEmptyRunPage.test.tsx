@@ -14,6 +14,12 @@
  *
  * All data hooks are mocked directly, so these tests exercise
  * TrashEmptyRunPage's own render/effect logic without a real network.
+ *
+ * As of issue #190 the polling, progress bar, count tiles and cancel button
+ * come from the shared `useRunPolling` + `RunProgressPanel` pieces rather than
+ * page-local copies. These assertions are deliberately unchanged: they are the
+ * evidence that the shared components preserved this page's behaviour,
+ * including its stricter circle_admin cancel gate.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
