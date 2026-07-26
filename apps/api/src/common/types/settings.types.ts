@@ -215,6 +215,25 @@ export function isWorkflowsEnabled(settings: {
 }
 
 /**
+ * Resolve whether the AI Picture Enhancer feature is active: the
+ * `features.pictureEnhancement` system-setting toggle must be on AND the
+ * `PICTURE_ENHANCEMENT_ENABLED` env kill-switch must not be explicitly set to
+ * 'false'.
+ *
+ * Single source of truth shared by the server-side gate
+ * (MediaEnhancementService.startEnhance / getAdminStatus) and the client-visible
+ * gate (GET /api/features), so the UI never offers an action the API rejects.
+ */
+export function isPictureEnhancementEnabled(settings: {
+  features?: Record<string, boolean>;
+}): boolean {
+  return (
+    settings.features?.[FEATURE_KEYS.PICTURE_ENHANCEMENT] === true &&
+    process.env['PICTURE_ENHANCEMENT_ENABLED'] !== 'false'
+  );
+}
+
+/**
  * Default for jobs.stuckThresholdMinutes: the legacy ENRICHMENT_STUCK_MINUTES
  * env var when set to a valid positive integer (clamped to the 1–120 setting
  * bounds), else 3 minutes.

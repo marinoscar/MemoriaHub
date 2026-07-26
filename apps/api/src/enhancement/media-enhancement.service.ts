@@ -23,6 +23,7 @@ import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.serv
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { isPictureEnhancementEnabled } from '../common/types/settings.types';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
@@ -64,9 +65,7 @@ export class MediaEnhancementService {
 
   async getAdminStatus() {
     const settings = await this.systemSettings.getSettings();
-    const featureEnabled =
-      settings.features?.['pictureEnhancement'] === true &&
-      process.env['PICTURE_ENHANCEMENT_ENABLED'] !== 'false';
+    const featureEnabled = isPictureEnhancementEnabled(settings);
     const enhanceCfg = settings.ai?.features?.enhance ?? null;
     const provider = enhanceCfg?.provider ?? null;
     const model = enhanceCfg?.model ?? null;
@@ -95,10 +94,8 @@ export class MediaEnhancementService {
   async startEnhance(mediaItemId: string, params: EnhanceParams, user: RequestUser) {
     const settings = await this.systemSettings.getSettings();
 
-    // Feature gate: system setting + env kill-switch.
-    const featureOn = settings.features?.['pictureEnhancement'] === true;
-    const envKilled = process.env['PICTURE_ENHANCEMENT_ENABLED'] === 'false';
-    if (!featureOn || envKilled) {
+    // Feature gate: system setting + env kill-switch (shared with GET /api/features).
+    if (!isPictureEnhancementEnabled(settings)) {
       throw new BadRequestException('Picture enhancement is disabled');
     }
 

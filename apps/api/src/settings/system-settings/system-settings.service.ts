@@ -12,6 +12,7 @@ import {
   SystemSettingsValue,
   defaultStuckThresholdMinutes,
   defaultEmailSettings,
+  isPictureEnhancementEnabled,
 } from '../../common/types/settings.types';
 import { systemSettingsSchema } from '../../common/schemas/settings.schema';
 
@@ -39,6 +40,24 @@ export interface ResolvedSettings {
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
   version: number;
+}
+
+/**
+ * Least-privilege, client-visible slice of the system settings returned by
+ * GET /api/features. Contains feature toggles only — never secrets, provider
+ * credentials, or any other settings namespace.
+ */
+export interface PublicFeatures {
+  /** Raw global feature-flag record (e.g. `pictureEnhancement`, `workflows`). */
+  features: Record<string, boolean>;
+  pictureEnhancement: {
+    /** Feature toggle AND env kill-switch resolved together. */
+    enabled: boolean;
+    allowReplace: boolean;
+    blockReplaceOnDownscale: boolean;
+    /** Configured enhancement model NAME (never a credential); null when unset. */
+    model: string | null;
+  };
 }
 
 @Injectable()
@@ -126,6 +145,36 @@ export class SystemSettingsService {
     this.settingsCache = { value: result, cachedAt: Date.now() };
 
     return result;
+  }
+
+  /**
+   * Client-visible feature flags, readable by ANY authenticated user.
+   *
+   * Deliberately narrow: only the boolean feature record plus the handful of
+   * picture-enhancement knobs the UI needs to decide whether to render (and
+   * how to render) the AI Enhance affordance. No other settings namespace —
+   * and in particular no credential, secret, or provider identity — is exposed.
+   * Only the enhancement MODEL NAME is surfaced, never a key.
+   *
+   * Reads through the same cached getSettings() (5 s TTL) as every other
+   * caller — no extra DB read path.
+   */
+  async getPublicFeatures(): Promise<PublicFeatures> {
+    const settings = await this.getSettings();
+
+    return {
+      // Copy so callers can never mutate the cached settings object.
+      features: { ...settings.features },
+      pictureEnhancement: {
+        // Same helper the server-side enhance gate uses, so the client gate
+        // and the API gate can never disagree.
+        enabled: isPictureEnhancementEnabled(settings),
+        allowReplace: settings.pictureEnhancement?.allowReplace ?? true,
+        blockReplaceOnDownscale:
+          settings.pictureEnhancement?.blockReplaceOnDownscale ?? false,
+        model: settings.ai?.features?.enhance?.model ?? null,
+      },
+    };
   }
 
   /**
