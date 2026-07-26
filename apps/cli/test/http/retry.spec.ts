@@ -70,10 +70,34 @@ describe('computeBackoffMs', () => {
 });
 
 describe('classifyError / isRetryable', () => {
-  it('treats 429/502/503/504 as retryable', () => {
-    for (const status of [429, 502, 503, 504]) {
+  it('treats 429/500/502/503/504 as retryable', () => {
+    for (const status of [429, 500, 502, 503, 504]) {
       expect(isRetryable({ status })).toBe(true);
     }
+  });
+
+  // Issue #179: R2/S3 return a transient `500 InternalError` on presigned part
+  // PUTs under load. Treating it as permanent lost whole files during a bulk
+  // import, so 500 must retry rather than fail the part outright.
+  it('retries a transient storage-provider 500 InternalError', async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      if (calls < 3) {
+        throw {
+          status: 500,
+          serverMessage:
+            '<?xml version="1.0" encoding="UTF-8"?><Error><Code>InternalError</Code>' +
+            '<Message>We encountered an internal error. Please try again.</Message></Error>',
+        };
+      }
+      return 'etag-ok';
+    };
+
+    await expect(
+      withRetry(fn, { maxRetries: 5, baseMs: 1, maxMs: 2 }, { sleep: async () => {} }),
+    ).resolves.toBe('etag-ok');
+    expect(calls).toBe(3);
   });
 
   it('treats other 4xx as non-retryable', () => {
