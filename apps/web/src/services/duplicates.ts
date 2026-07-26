@@ -1,6 +1,7 @@
 import { api } from './api';
 import { BULK_RESOLVE_CHUNK_SIZE } from './bursts';
-import type { GroupBulkResolveResult, GroupBulkDismissResult } from './bursts';
+import type { GroupBulkResolveResult } from './bursts';
+import type { CreateReviewRunResponse } from '../types/reviewRuns';
 
 /** Max page size the list endpoint accepts; used when collecting all ids. */
 const LIST_MAX_PAGE_SIZE = 100;
@@ -80,15 +81,6 @@ export interface DuplicateRerunResult {
   status: string;
 }
 
-/**
- * Result of a threshold-based duplicate bulk resolve. The endpoint returns
- * `hasMore` (there may be more eligible groups beyond this batch); callers
- * auto-loop while `hasMore === true`.
- */
-export interface DuplicateBulkResolveByThresholdResult extends GroupBulkResolveResult {
-  hasMore: boolean;
-}
-
 export async function listDuplicateGroups(params: {
   circleId: string;
   status?: DuplicateGroupStatus;
@@ -162,12 +154,21 @@ export async function bulkResolveDuplicateGroups(params: {
   return aggregate;
 }
 
+/**
+ * Start an async review run that resolves every pending duplicate group at or
+ * above `threshold` (issue #190).
+ *
+ * Duplicate confidence is now a persisted column, so the threshold filter runs
+ * in SQL and the old 500-group cap (and the client-side `hasMore` auto-loop it
+ * forced) are gone. Rejects with a 409 `ApiError` when a duplicate run is
+ * already active for this circle.
+ */
 export async function bulkResolveDuplicateGroupsByThreshold(params: {
   circleId: string;
   threshold: number;
   action: DuplicateResolveAction;
-}): Promise<DuplicateBulkResolveByThresholdResult> {
-  return api.post<DuplicateBulkResolveByThresholdResult>(
+}): Promise<CreateReviewRunResponse> {
+  return api.post<CreateReviewRunResponse>(
     '/media/duplicates/bulk/resolve-by-threshold',
     params,
   );
@@ -200,11 +201,16 @@ export async function fetchAllPendingDuplicateGroupIds(params: {
   return ids;
 }
 
+/**
+ * Start an async review run that dismisses every pending duplicate group BELOW
+ * `threshold`. Same run semantics as
+ * {@link bulkResolveDuplicateGroupsByThreshold}.
+ */
 export async function bulkDismissDuplicateGroupsByThreshold(params: {
   circleId: string;
   threshold: number;
-}): Promise<GroupBulkDismissResult> {
-  return api.post<GroupBulkDismissResult>('/media/duplicates/bulk/dismiss-by-threshold', params);
+}): Promise<CreateReviewRunResponse> {
+  return api.post<CreateReviewRunResponse>('/media/duplicates/bulk/dismiss-by-threshold', params);
 }
 
 export async function dismissDuplicateGroup(id: string): Promise<DuplicateDismissResult> {

@@ -17,9 +17,8 @@ import type {
   BurstResolveResult,
   GroupResolveAction,
   GroupBulkResolveResult,
-  GroupBulkDismissResult,
-  GroupBulkResolveByThresholdResult,
 } from '../services/bursts';
+import type { CreateReviewRunResponse } from '../types/reviewRuns';
 
 interface FetchBurstGroupsParams {
   circleId: string;
@@ -34,11 +33,13 @@ interface UseBurstGroupsResult {
   error: string | null;
   fetchGroups: (params: FetchBurstGroupsParams) => Promise<void>;
   bulkResolve: (ids: string[], action: GroupResolveAction) => Promise<GroupBulkResolveResult>;
+  /** Start an async review run resolving every pending group at/above `threshold`. */
   bulkResolveByThreshold: (
     threshold: number,
     action: GroupResolveAction,
-  ) => Promise<GroupBulkResolveByThresholdResult>;
-  dismissByThreshold: (threshold: number) => Promise<GroupBulkDismissResult>;
+  ) => Promise<CreateReviewRunResponse>;
+  /** Start an async review run dismissing every pending group below `threshold`. */
+  dismissByThreshold: (threshold: number) => Promise<CreateReviewRunResponse>;
   /** Collect the ids of every pending burst group in the active circle (cross-page). */
   fetchAllPendingIds: () => Promise<string[]>;
 }
@@ -82,35 +83,28 @@ export function useBurstGroups(): UseBurstGroupsResult {
     [fetchGroups],
   );
 
+  // Both threshold actions START A RUN and return immediately (issue #190).
+  // There is deliberately no list refetch here: the work happens in the
+  // background and the caller navigates to /review-runs/:runId, so refreshing
+  // the list we are about to leave would only show a stale mid-run snapshot.
   const bulkResolveByThreshold = useCallback(
     async (threshold: number, action: GroupResolveAction) => {
       const circleId = lastParamsRef.current?.circleId;
       if (!circleId) {
         throw new Error('No active circle to resolve burst groups');
       }
-      const result = await bulkResolveBurstGroupsByThreshold({ circleId, threshold, action });
-      if (lastParamsRef.current) {
-        await fetchGroups(lastParamsRef.current);
-      }
-      return result;
+      return bulkResolveBurstGroupsByThreshold({ circleId, threshold, action });
     },
-    [fetchGroups],
+    [],
   );
 
-  const dismissByThreshold = useCallback(
-    async (threshold: number) => {
-      const circleId = lastParamsRef.current?.circleId;
-      if (!circleId) {
-        throw new Error('No active circle to dismiss burst groups');
-      }
-      const result = await bulkDismissBurstGroupsByThreshold({ circleId, threshold });
-      if (lastParamsRef.current) {
-        await fetchGroups(lastParamsRef.current);
-      }
-      return result;
-    },
-    [fetchGroups],
-  );
+  const dismissByThreshold = useCallback(async (threshold: number) => {
+    const circleId = lastParamsRef.current?.circleId;
+    if (!circleId) {
+      throw new Error('No active circle to dismiss burst groups');
+    }
+    return bulkDismissBurstGroupsByThreshold({ circleId, threshold });
+  }, []);
 
   const fetchAllPendingIds = useCallback(async () => {
     const circleId = lastParamsRef.current?.circleId;

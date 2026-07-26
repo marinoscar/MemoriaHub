@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { CreateReviewRunResponse } from '../types/reviewRuns';
 
 /**
  * Maximum number of group ids accepted by a single explicit-id bulk-resolve
@@ -86,23 +87,6 @@ export interface GroupBulkResolveResult {
   errors: number;
 }
 
-/**
- * Result of a threshold-based bulk resolve. The burst endpoint returns
- * `remaining` (exact count of still-pending eligible groups after this batch);
- * callers auto-loop while `remaining > 0`.
- */
-export interface GroupBulkResolveByThresholdResult extends GroupBulkResolveResult {
-  remaining: number;
-}
-
-/** Result of a bulk dismiss-by-threshold across many groups (shared shape with duplicates). */
-export interface GroupBulkDismissResult {
-  dismissedGroups: number;
-  ungroupedCount: number;
-  skipped: number;
-  errors: number;
-}
-
 export async function listBurstGroups(params: {
   circleId: string;
   status?: BurstGroupStatus;
@@ -174,12 +158,21 @@ export async function bulkResolveBurstGroups(params: {
   return aggregate;
 }
 
+/**
+ * Start an async review run that resolves every pending burst group at or above
+ * `threshold` (issue #190).
+ *
+ * Returns as soon as the run row exists — resolution happens in the background
+ * on the enrichment queue, so callers navigate to `/review-runs/:runId` to watch
+ * progress rather than looping until the queue drains. Rejects with a 409
+ * `ApiError` when a burst run is already active for this circle.
+ */
 export async function bulkResolveBurstGroupsByThreshold(params: {
   circleId: string;
   threshold: number;
   action: GroupResolveAction;
-}): Promise<GroupBulkResolveByThresholdResult> {
-  return api.post<GroupBulkResolveByThresholdResult>('/media/bursts/bulk/resolve-by-threshold', params);
+}): Promise<CreateReviewRunResponse> {
+  return api.post<CreateReviewRunResponse>('/media/bursts/bulk/resolve-by-threshold', params);
 }
 
 /**
@@ -205,11 +198,15 @@ export async function fetchAllPendingBurstGroupIds(circleId: string): Promise<st
   return ids;
 }
 
+/**
+ * Start an async review run that dismisses every pending burst group BELOW
+ * `threshold`. Same run semantics as {@link bulkResolveBurstGroupsByThreshold}.
+ */
 export async function bulkDismissBurstGroupsByThreshold(params: {
   circleId: string;
   threshold: number;
-}): Promise<GroupBulkDismissResult> {
-  return api.post<GroupBulkDismissResult>('/media/bursts/bulk/dismiss-by-threshold', params);
+}): Promise<CreateReviewRunResponse> {
+  return api.post<CreateReviewRunResponse>('/media/bursts/bulk/dismiss-by-threshold', params);
 }
 
 export async function dismissBurstGroup(id: string): Promise<BurstDismissResult> {

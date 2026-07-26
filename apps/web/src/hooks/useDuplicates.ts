@@ -18,9 +18,9 @@ import type {
   DuplicateResolveAction,
   DuplicateResolveResult,
   DuplicateDismissResult,
-  DuplicateBulkResolveByThresholdResult,
 } from '../services/duplicates';
-import type { GroupBulkResolveResult, GroupBulkDismissResult } from '../services/bursts';
+import type { GroupBulkResolveResult } from '../services/bursts';
+import type { CreateReviewRunResponse } from '../types/reviewRuns';
 
 interface FetchDuplicateGroupsParams {
   circleId: string;
@@ -36,11 +36,13 @@ interface UseDuplicateGroupsResult {
   error: string | null;
   fetchGroups: (params: FetchDuplicateGroupsParams) => Promise<void>;
   bulkResolve: (ids: string[], action: DuplicateResolveAction) => Promise<GroupBulkResolveResult>;
+  /** Start an async review run resolving every pending group at/above `threshold`. */
   bulkResolveByThreshold: (
     threshold: number,
     action: DuplicateResolveAction,
-  ) => Promise<DuplicateBulkResolveByThresholdResult>;
-  dismissByThreshold: (threshold: number) => Promise<GroupBulkDismissResult>;
+  ) => Promise<CreateReviewRunResponse>;
+  /** Start an async review run dismissing every pending group below `threshold`. */
+  dismissByThreshold: (threshold: number) => Promise<CreateReviewRunResponse>;
   /** Collect the ids of every pending duplicate group in the active circle (cross-page, respects the kind filter). */
   fetchAllPendingIds: () => Promise<string[]>;
 }
@@ -84,35 +86,27 @@ export function useDuplicateGroups(): UseDuplicateGroupsResult {
     [fetchGroups],
   );
 
+  // Both threshold actions START A RUN and return immediately (issue #190).
+  // No list refetch: the work happens in the background and the caller
+  // navigates to /review-runs/:runId.
   const bulkResolveByThreshold = useCallback(
     async (threshold: number, action: DuplicateResolveAction) => {
       const circleId = lastParamsRef.current?.circleId;
       if (!circleId) {
         throw new Error('No active circle to resolve duplicate groups');
       }
-      const result = await bulkResolveDuplicateGroupsByThreshold({ circleId, threshold, action });
-      if (lastParamsRef.current) {
-        await fetchGroups(lastParamsRef.current);
-      }
-      return result;
+      return bulkResolveDuplicateGroupsByThreshold({ circleId, threshold, action });
     },
-    [fetchGroups],
+    [],
   );
 
-  const dismissByThreshold = useCallback(
-    async (threshold: number) => {
-      const circleId = lastParamsRef.current?.circleId;
-      if (!circleId) {
-        throw new Error('No active circle to dismiss duplicate groups');
-      }
-      const result = await bulkDismissDuplicateGroupsByThreshold({ circleId, threshold });
-      if (lastParamsRef.current) {
-        await fetchGroups(lastParamsRef.current);
-      }
-      return result;
-    },
-    [fetchGroups],
-  );
+  const dismissByThreshold = useCallback(async (threshold: number) => {
+    const circleId = lastParamsRef.current?.circleId;
+    if (!circleId) {
+      throw new Error('No active circle to dismiss duplicate groups');
+    }
+    return bulkDismissDuplicateGroupsByThreshold({ circleId, threshold });
+  }, []);
 
   const fetchAllPendingIds = useCallback(async () => {
     const circleId = lastParamsRef.current?.circleId;
