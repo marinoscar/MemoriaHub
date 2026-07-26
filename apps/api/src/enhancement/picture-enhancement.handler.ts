@@ -128,8 +128,12 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
 
       // Resolve OpenAI call params (spec §4.2).
       const settings = await this.systemSettings.getSettings();
-      const quality = settings.pictureEnhancement?.defaultQuality ?? 'high';
       const rawParams = (row.params as Record<string, unknown> | null) ?? {};
+      // Per-run quality override takes precedence over the system setting.
+      const quality =
+        (rawParams['quality'] as string | undefined) ??
+        settings.pictureEnhancement?.defaultQuality ??
+        'high';
       const preserveFaces = rawParams['preserveFaces'] !== false; // default true
       const strength =
         (rawParams['strength'] as string | undefined) ??
