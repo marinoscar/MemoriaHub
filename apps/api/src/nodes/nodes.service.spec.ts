@@ -746,18 +746,10 @@ describe('NodesService — result/failure ingestion', () => {
       }
     });
 
-    it('returns exactly 5 entries', () => {
+    it('returns exactly 1 entry', () => {
       const manifest = service.getModelManifest();
 
-      expect(manifest).toHaveLength(5);
-    });
-
-    it('includes the blazeface-back.bin entry targeting the human subdir', () => {
-      const manifest = service.getModelManifest();
-
-      const entry = manifest.find((m) => m.name === 'blazeface-back.bin');
-      expect(entry).toBeDefined();
-      expect(entry?.targetSubdir).toBe('human');
+      expect(manifest).toHaveLength(1);
     });
 
     it('targets the CLIP entry at the models root, not a nested "models" subdir', () => {
@@ -789,19 +781,13 @@ describe('NodesService — result/failure ingestion', () => {
       }
     });
 
-    it('has the exact committed sha256/bytes for blazeface-back.json and blazeface-back.bin', () => {
+    it('has the exact committed sha256/bytes for the CLIP entry', () => {
       const manifest = service.getModelManifest();
 
-      const json = manifest.find((m) => m.name === 'blazeface-back.json');
-      expect(json).toMatchObject({
-        sha256: 'a765f7b2a6c1d841ecc0b0686e5f51b141b39b7bcdf2888542dc9d9fc4384a87',
-        bytes: 79043,
-      });
-
-      const bin = manifest.find((m) => m.name === 'blazeface-back.bin');
-      expect(bin).toMatchObject({
-        sha256: 'dc9a97fdc50bc43216554bdd69aa3e7b9361a519ee7bdd996a2f69a98a6f9b72',
-        bytes: 538928,
+      const clip = manifest.find((m) => m.name === 'clip-vit-b32-vision-quantized.onnx');
+      expect(clip).toMatchObject({
+        sha256: '583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299',
+        bytes: 89117001,
       });
     });
   });

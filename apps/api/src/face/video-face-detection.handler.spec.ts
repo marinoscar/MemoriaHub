@@ -201,7 +201,6 @@ const FAKE_FACE = {
   confidence: 0.95,
   embedding: [0.6, 0.8], // pre-normalized; L2 norm = 1
   landmarks: null,
-  externalFaceId: null,
 };
 
 /** Normalized version of FAKE_FACE (as returned by core.normalizeFace). */
@@ -275,7 +274,7 @@ describe('VideoFaceDetectionHandler', () => {
       storageObject: { upsert: jest.fn().mockResolvedValue({ id: 'so-1' }) },
       face: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        create: jest.fn().mockResolvedValue({ id: 'face-1', embedding: [0.6, 0.8], externalFaceId: null }),
+        create: jest.fn().mockResolvedValue({ id: 'face-1', embedding: [0.6, 0.8] }),
         update: jest.fn().mockResolvedValue({}),
       },
       mediaFaceStatus: { upsert: jest.fn().mockResolvedValue({}) },
@@ -291,7 +290,7 @@ describe('VideoFaceDetectionHandler', () => {
         modelVersion: 'arcface-r100-v1',
         provider: {
           detect: jest.fn(),
-          capabilities: { delegatedRecognize: false },
+          capabilities: {},
         },
         creds: { apiKey: 'test-key' },
       }),

@@ -8,22 +8,6 @@
  * IMPORTANT: SECRETS_ENCRYPTION_KEY must be set for encrypt/decrypt to work.
  */
 
-// Stub Docker-only packages loaded transitively via face-provider.registry.
-// { virtual: true } is required for packages not installed locally.
-jest.mock('@tensorflow/tfjs', () => ({
-  setBackend: jest.fn().mockResolvedValue(undefined),
-  ready: jest.fn().mockResolvedValue(undefined),
-  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-}), { virtual: true });
-jest.mock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
-jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
-  Human: jest.fn().mockImplementation(() => ({
-    load: jest.fn().mockResolvedValue(undefined),
-    warmup: jest.fn().mockResolvedValue(undefined),
-    detect: jest.fn().mockResolvedValue({ face: [] }),
-  })),
-  default: jest.fn(),
-}), { virtual: true });
 jest.mock('sharp', () => {
   const mockPipeline = {
     ensureAlpha: jest.fn().mockReturnThis(),
@@ -117,12 +101,11 @@ describe('FaceDetectionService', () => {
     resolveCredentials: jest.Mock;
   };
   let mockRegistry: { get: jest.Mock };
-  let mockProvider: { detect: jest.Mock; capabilities: { delegatedRecognize: boolean } };
+  let mockProvider: { detect: jest.Mock; capabilities: Record<string, never> };
   let mockStorageProvider: { download: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
   let mockMatchingService: {
     matchFaceToPerson: jest.Mock;
-    matchFaceByExternalId: jest.Mock;
   };
   let mockEnrichmentJobService: { recordModel: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
@@ -134,7 +117,7 @@ describe('FaceDetectionService', () => {
     mockPrisma = createMockPrismaService();
     mockProvider = {
       detect: jest.fn(),
-      capabilities: { delegatedRecognize: false },
+      capabilities: {},
     };
     mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
     mockFaceSettingsService = { resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }) };
@@ -143,7 +126,6 @@ describe('FaceDetectionService', () => {
     mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
     mockMatchingService = {
       matchFaceToPerson: jest.fn().mockResolvedValue(null),
-      matchFaceByExternalId: jest.fn().mockResolvedValue(null),
     };
     mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
     // FaceDetectionCore reads auto-archive gating via SystemSettingsService;
@@ -180,7 +162,6 @@ describe('FaceDetectionService', () => {
     (mockPrisma.face.create as jest.Mock).mockResolvedValue({
       id: 'face-1',
       embedding: [],
-      externalFaceId: null,
     });
 
     // Default face.update succeeds
@@ -234,7 +215,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.95,
           embedding: [],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -255,7 +235,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.88,
           embedding: [],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -305,7 +284,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.95,
           embedding: [],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -340,7 +318,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -376,7 +353,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [3, 4],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -384,7 +360,6 @@ describe('FaceDetectionService', () => {
       (mockPrisma.face.create as jest.Mock).mockResolvedValue({
         id: 'face-1',
         embedding: [0.6, 0.8],
-        externalFaceId: null,
       });
 
       await service.processMediaItem(makeJob());
@@ -402,7 +377,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -451,7 +425,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -473,22 +446,20 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [],
           landmarks: null,
-          externalFaceId: 'ext-1',
         },
         {
           boundingBox: { x: 0.5, y: 0.5, w: 0.2, h: 0.2 },
           confidence: 0.85,
           embedding: [],
           landmarks: null,
-          externalFaceId: 'ext-2',
         },
       ];
       mockProvider.detect.mockResolvedValue(detectedFaces);
 
       // Each create call returns a new face row
       (mockPrisma.face.create as jest.Mock)
-        .mockResolvedValueOnce({ id: 'face-1', embedding: [], externalFaceId: 'ext-1' })
-        .mockResolvedValueOnce({ id: 'face-2', embedding: [], externalFaceId: 'ext-2' });
+        .mockResolvedValueOnce({ id: 'face-1', embedding: [] })
+        .mockResolvedValueOnce({ id: 'face-2', embedding: [] });
 
       await service.processMediaItem(makeJob());
 
@@ -508,7 +479,6 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
@@ -641,14 +611,12 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [0.6, 0.8],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
       (mockPrisma.face.create as jest.Mock).mockResolvedValue({
         id: 'face-1',
         embedding: [0.6, 0.8],
-        externalFaceId: null,
       });
 
       mockMatchingService.matchFaceToPerson.mockResolvedValue({
@@ -671,14 +639,12 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [0.6, 0.8],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
       (mockPrisma.face.create as jest.Mock).mockResolvedValue({
         id: 'face-1',
         embedding: [0.6, 0.8],
-        externalFaceId: null,
       });
 
       mockMatchingService.matchFaceToPerson.mockResolvedValue(null);
@@ -688,42 +654,6 @@ describe('FaceDetectionService', () => {
       expect(mockPrisma.face.update).not.toHaveBeenCalled();
     });
 
-    it('uses delegated path (matchFaceByExternalId) when provider.capabilities.delegatedRecognize is true', async () => {
-      // Override provider with delegatedRecognize=true
-      mockProvider.capabilities = { delegatedRecognize: true };
-
-      mockProvider.detect.mockResolvedValue([
-        {
-          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
-          confidence: 0.9,
-          embedding: [],
-          landmarks: null,
-          externalFaceId: 'ext-123',
-        },
-      ]);
-
-      (mockPrisma.face.create as jest.Mock).mockResolvedValue({
-        id: 'face-1',
-        embedding: [],
-        externalFaceId: 'ext-123',
-      });
-
-      mockMatchingService.matchFaceByExternalId.mockResolvedValue({
-        personId: 'person-delegated',
-      });
-
-      await service.processMediaItem(makeJob());
-
-      expect(mockMatchingService.matchFaceByExternalId).toHaveBeenCalledWith(
-        'circle-1',
-        'ext-123',
-      );
-      expect(mockPrisma.face.update).toHaveBeenCalledWith({
-        where: { id: 'face-1' },
-        data: { personId: 'person-delegated' },
-      });
-    });
-
     it('matching failure is non-fatal — detection still completes', async () => {
       mockProvider.detect.mockResolvedValue([
         {
@@ -731,14 +661,12 @@ describe('FaceDetectionService', () => {
           confidence: 0.9,
           embedding: [0.6, 0.8],
           landmarks: null,
-          externalFaceId: null,
         },
       ]);
 
       (mockPrisma.face.create as jest.Mock).mockResolvedValue({
         id: 'face-1',
         embedding: [0.6, 0.8],
-        externalFaceId: null,
       });
 
       mockMatchingService.matchFaceToPerson.mockRejectedValue(new Error('match failed'));

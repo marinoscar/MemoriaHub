@@ -118,7 +118,7 @@ function makeHealthySettings(overrides: Partial<ResolvedSettings> = {}): Resolve
       },
     },
     face: {
-      features: { detection: { provider: 'human', model: null } },
+      features: { detection: { provider: 'compreface', model: null } },
       video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
     },
     ...overrides,
@@ -564,7 +564,7 @@ describe('DoctorService', () => {
         makeSettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false },
           face: {
-            features: { detection: { provider: 'human', model: null } },
+            features: { detection: { provider: 'compreface', model: null } },
             video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
           },
         }),
@@ -579,7 +579,7 @@ describe('DoctorService', () => {
         makeSettings({
           features: { autoTagging: false, faceRecognition: true, burstDetection: false },
           face: {
-            features: { detection: { provider: 'human', model: null } },
+            features: { detection: { provider: 'compreface', model: null } },
             video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
           },
         }),
@@ -1143,11 +1143,11 @@ describe('DoctorService', () => {
         nodeFixture({
           eligibleTypes: ['face_detection'],
           capabilities: {
-            human: {
+            compreface: {
               available: true,
-              detail: '@vladmandic/human',
+              detail: 'compreface-core',
               operational: false,
-              operationalDetail: 'Human self-test failed: model load error',
+              operationalDetail: 'CompreFace self-test failed: sidecar unreachable',
             },
             sharp: { available: true, detail: 'sharp', operational: true },
           },
@@ -1158,7 +1158,7 @@ describe('DoctorService', () => {
       const check = findCheck(report, 'nodes.capabilityHealth');
 
       expect(check.status).toBe('warning');
-      expect(check.message).toContain('worker-1 (human)');
+      expect(check.message).toContain('worker-1 (compreface)');
       expect(check.actionItem).toBeTruthy();
     });
 
@@ -1196,7 +1196,7 @@ describe('DoctorService', () => {
             // them, so (both before and after #148) this produces no entry and the
             // node is never flagged as degraded by this check, regardless of
             // whether the capability itself is actually present.
-            human: { available: false, detail: '@vladmandic/human not installed' },
+            compreface: { available: false, detail: 'compreface-core not reachable' },
             sharp: { available: true, detail: 'sharp' },
           },
         }),

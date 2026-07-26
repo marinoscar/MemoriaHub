@@ -65,7 +65,6 @@ function makeFaceRow(overrides: {
     boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
     confidence: 0.9,
     landmarks: null,
-    externalFaceId: null,
     providerKey: 'compreface',
     modelVersion: 'arcface-r100-v1',
     manuallyAssigned: false,

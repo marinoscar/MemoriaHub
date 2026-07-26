@@ -13,9 +13,8 @@
  *
  * SECRETS_ENCRYPTION_KEY is set to a valid test value so encrypt/decrypt
  * round-trips work, mirroring apps/api/src/geo/geo-settings.service.spec.ts.
- * The @aws-sdk/client-sesv2 module is mocked entirely (see
- * src/face/providers/rekognition.provider.spec.ts for the same pattern) so no
- * real AWS call is ever made.
+ * The @aws-sdk/client-sesv2 module is mocked entirely so no real AWS call is
+ * ever made.
  */
 
 const mockSend = jest.fn();

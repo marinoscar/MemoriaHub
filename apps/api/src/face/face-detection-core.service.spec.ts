@@ -12,8 +12,8 @@
  *    no archive updateMany call.
  *  - A face that DOES match a person is never auto-archived, even if it would
  *    also match the archived pool.
- *  - A face with an empty embedding and no externalFaceId is skipped
- *    entirely: no matching calls, no archive attempt, no crash.
+ *  - A face with an empty embedding is skipped entirely: no matching calls,
+ *    no archive attempt, no crash.
  *  - pgvector routing (usesPgvectorFor=true): NO archived-candidates preload
  *    query and matchFaceToArchived is called WITHOUT candidates; the app
  *    backend keeps the preload+candidates in-loop reuse.
@@ -52,7 +52,6 @@ function makeFace(overrides: Partial<TestFace> = {}): TestFace {
     confidence: 0.9,
     landmarks: undefined,
     embedding: [1, 0],
-    externalFaceId: undefined,
     ...overrides,
   } as TestFace;
 }
@@ -74,7 +73,6 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
   let mockFaceSettingsService: Record<string, unknown>;
   let mockRegistry: { get: jest.Mock };
   let mockMatchingService: {
-    matchFaceByExternalId: jest.Mock;
     matchFaceToPerson: jest.Mock;
     matchFaceToArchived: jest.Mock;
     usesPgvectorFor: jest.Mock;
@@ -105,12 +103,10 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     mockFaceSettingsService = {};
     mockRegistry = {
       get: jest.fn().mockReturnValue({
-        capabilities: { delegatedRecognize: false },
         detect: jest.fn(),
       }),
     };
     mockMatchingService = {
-      matchFaceByExternalId: jest.fn().mockResolvedValue(null),
       matchFaceToPerson: jest.fn().mockResolvedValue(null),
       matchFaceToArchived: jest.fn().mockResolvedValue(null),
       // Default to the app-backend (preload+candidates) path; individual
@@ -123,15 +119,14 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
       getSettings: jest.fn().mockResolvedValue(makeSettings(false)),
     };
 
-    // Echo back the create() input as the "created" row (id + embedding +
-    // externalFaceId are the only fields the service reads back via select).
+    // Echo back the create() input as the "created" row (id + embedding are
+    // the only fields the service reads back via select).
     (mockPrisma.face.create as jest.Mock).mockImplementation(
-      ({ data }: { data: { embedding: number[]; externalFaceId: string | null } }) => {
+      ({ data }: { data: { embedding: number[] } }) => {
         const id = `face-${createCounter++}`;
         return Promise.resolve({
           id,
           embedding: data.embedding,
-          externalFaceId: data.externalFaceId ?? null,
         });
       },
     );
@@ -160,7 +155,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     const count = await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [],
       isVideo: false,
@@ -201,7 +196,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     const count = await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [matchedFace, nonMatchedFace],
       isVideo: false,
@@ -232,7 +227,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -251,7 +246,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -341,7 +336,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [faceA, faceB],
       isVideo: false,
@@ -382,7 +377,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -404,7 +399,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -431,7 +426,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -456,7 +451,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -485,7 +480,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -500,18 +495,18 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Empty-embedding / external-id-only face is skipped
+  // Empty-embedding face (e.g. a manual face) is skipped
   // -------------------------------------------------------------------------
 
-  it('skips matching entirely for a face with an empty embedding and no externalFaceId', async () => {
+  it('skips matching entirely for a face with an empty embedding', async () => {
     mockSystemSettings.getSettings.mockResolvedValue(makeSettings(true, 0.45));
 
-    const face = makeFace({ embedding: [], externalFaceId: undefined });
+    const face = makeFace({ embedding: [] });
 
     const count = await service.persistAndMatchFaces({
       mediaItemId: MEDIA_ID,
       circleId: CIRCLE_ID,
-      providerKey: 'human',
+      providerKey: 'compreface',
       modelVersion: 'v1',
       faces: [face],
       isVideo: false,
@@ -519,7 +514,6 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
 
     expect(count).toBe(1);
     expect(mockMatchingService.matchFaceToPerson).not.toHaveBeenCalled();
-    expect(mockMatchingService.matchFaceByExternalId).not.toHaveBeenCalled();
     expect(mockMatchingService.matchFaceToArchived).not.toHaveBeenCalled();
     expect(mockPrisma.face.update).not.toHaveBeenCalled();
     expect(mockPrisma.face.updateMany).not.toHaveBeenCalled();

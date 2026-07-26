@@ -185,7 +185,10 @@ describe('cross-frame deduplication (clusterDetections)', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Delegated provider path (Rekognition) — skip dedup
+  // Delegated provider path (a provider with no per-detection embeddings) —
+  // skip dedup. No currently-registered provider is delegated (CompreFace
+  // always returns embeddings), but the algorithm still supports the case
+  // for a future keyed/delegated provider.
   // -----------------------------------------------------------------------
   describe('delegated provider (isDelegated=true)', () => {
     it('produces one cluster per detection regardless of embedding similarity', () => {
