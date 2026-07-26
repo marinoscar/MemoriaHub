@@ -26,54 +26,55 @@ model User {
   updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  identities                    UserIdentity[]
-  userRoles                     UserRole[]
-  userSettings                  UserSettings?
-  auditEvents                   AuditEvent[]                @relation("ActorEvents")
-  settingsUpdates               SystemSettings[]            @relation("SettingsUpdater")
-  refreshTokens                 RefreshToken[]              @relation("UserRefreshTokens")
-  allowlistEntriesAdded         AllowedEmail[]              @relation("AllowlistAddedBy")
-  allowlistEntry                AllowedEmail?               @relation("AllowlistClaimedBy")
-  deviceCodes                   DeviceCode[]                @relation("UserDeviceCodes")
-  storageObjects                StorageObject[]             @relation("UserStorageObjects")
-  personalAccessTokens          PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
-  mediaItems                    MediaItem[]                 @relation("MediaAddedBy")
-  albums                        Album[]                     @relation("AlbumAddedBy")
-  tags                          Tag[]                       @relation("TagAddedBy")
+  identities                  UserIdentity[]
+  userRoles                   UserRole[]
+  userSettings                UserSettings?
+  auditEvents                 AuditEvent[]                @relation("ActorEvents")
+  settingsUpdates             SystemSettings[]            @relation("SettingsUpdater")
+  refreshTokens               RefreshToken[]              @relation("UserRefreshTokens")
+  allowlistEntriesAdded       AllowedEmail[]              @relation("AllowlistAddedBy")
+  allowlistEntry              AllowedEmail?               @relation("AllowlistClaimedBy")
+  deviceCodes                 DeviceCode[]                @relation("UserDeviceCodes")
+  storageObjects              StorageObject[]             @relation("UserStorageObjects")
+  personalAccessTokens        PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
+  mediaItems                  MediaItem[]                 @relation("MediaAddedBy")
+  albums                      Album[]                     @relation("AlbumAddedBy")
+  tags                        Tag[]                       @relation("TagAddedBy")
   // Circle relations
-  ownedCircles                  Circle[]                    @relation("CircleOwner")
-  circleMemberships             CircleMember[]
-  circleInvitesAdded            CircleInvite[]              @relation("CircleInviteAddedBy")
-  circleInvitesClaimed          CircleInvite[]              @relation("CircleInviteClaimedBy")
+  ownedCircles                Circle[]                    @relation("CircleOwner")
+  circleMemberships           CircleMember[]
+  circleInvitesAdded          CircleInvite[]              @relation("CircleInviteAddedBy")
+  circleInvitesClaimed        CircleInvite[]              @relation("CircleInviteClaimedBy")
   // AI Search relations
-  aiCredentialsUpdated          AiProviderCredential[]      @relation("AiCredentialUpdater")
+  aiCredentialsUpdated        AiProviderCredential[]      @relation("AiCredentialUpdater")
   // Face Recognition relations
-  faceCredentialsUpdated        FaceProviderCredential[]    @relation("FaceCredentialUpdater")
+  faceCredentialsUpdated      FaceProviderCredential[]    @relation("FaceCredentialUpdater")
   // Storage Provider relations
-  storageCredentialsUpdated     StorageProviderCredential[] @relation("StorageCredentialUpdater")
-  peopleAdded                   Person[]                    @relation("PersonAddedBy")
-  resolvedBursts                BurstGroup[]                @relation("BurstGroupResolvedBy")
+  storageCredentialsUpdated   StorageProviderCredential[] @relation("StorageCredentialUpdater")
+  peopleAdded                 Person[]                    @relation("PersonAddedBy")
+  resolvedBursts              BurstGroup[]                @relation("BurstGroupResolvedBy")
   // Duplicate Detection relations
-  resolvedDuplicates            DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
+  resolvedDuplicates          DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
   // Geo Provider relations
-  geoCredentialsUpdated         GeoProviderCredential[]     @relation("GeoCredentialUpdater")
+  geoCredentialsUpdated       GeoProviderCredential[]     @relation("GeoCredentialUpdater")
   // Media Sharing relations
-  mediaShares                   MediaShare[]                @relation("MediaShareCreatedBy")
+  mediaShares                 MediaShare[]                @relation("MediaShareCreatedBy")
   // Location Inference relations
-  resolvedLocationSuggestions   LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
+  resolvedLocationSuggestions LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
   // Distributed Worker Node relations
-  workerNodes                   WorkerNode[]
-  nodeCredentials               NodeCredential[]            @relation("UserNodeCredentials")
+  workerNodes                 WorkerNode[]
+  nodeCredentials             NodeCredential[]            @relation("UserNodeCredentials")
   // AI Picture Enhancer relations
-  mediaEnhancementsCreated      MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
+  mediaEnhancementsCreated    MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
   // Workflow Automation relations
-  workflowsCreated              Workflow[]                  @relation("WorkflowCreatedBy")
-  workflowRunsStarted           WorkflowRun[]               @relation("WorkflowRunStartedBy")
-  workflowRunsApproved          WorkflowRun[]               @relation("WorkflowRunApprovedBy")
+  workflowsCreated            Workflow[]                  @relation("WorkflowCreatedBy")
+  workflowRunsStarted         WorkflowRun[]               @relation("WorkflowRunStartedBy")
+  workflowRunsApproved        WorkflowRun[]               @relation("WorkflowRunApprovedBy")
   // Empty Trash at Scale relations
-  trashEmptyRunsStarted         TrashEmptyRun[]             @relation("TrashEmptyRunStartedBy")
-  // Location Suggestion Bulk Accept/Reject relations
-  locationSuggestionRunsStarted LocationSuggestionRun[]     @relation("LocationSuggestionRunStartedBy")
+  trashEmptyRunsStarted       TrashEmptyRun[]             @relation("TrashEmptyRunStartedBy")
+  // Review Runs relations (bursts / duplicates / location suggestions —
+  // supersedes the former LocationSuggestionRun-only relation, issue #190)
+  reviewRunsStarted           ReviewRun[]                 @relation("ReviewRunStartedBy")
 
   @@map("users")
 }
@@ -376,39 +377,40 @@ model Circle {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  owner                  User                    @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  members                CircleMember[]
-  invites                CircleInvite[]
-  mediaItems             MediaItem[]
-  albums                 Album[]
-  tags                   Tag[]
+  owner                 User                  @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members               CircleMember[]
+  invites               CircleInvite[]
+  mediaItems            MediaItem[]
+  albums                Album[]
+  tags                  Tag[]
   // Face Recognition relations
-  people                 Person[]
-  faces                  Face[]
-  enrichmentJobs         EnrichmentJob[]
+  people                Person[]
+  faces                 Face[]
+  enrichmentJobs        EnrichmentJob[]
   // Auto-Tagging relations
-  mediaTagStatuses       MediaTagStatus[]
+  mediaTagStatuses      MediaTagStatus[]
   // Metadata Re-run relations
-  mediaMetadataStatuses  MediaMetadataStatus[]
+  mediaMetadataStatuses MediaMetadataStatus[]
   // Geocode Status relations
-  mediaGeocodeStatuses   MediaGeocodeStatus[]
+  mediaGeocodeStatuses  MediaGeocodeStatus[]
   // Burst Detection relations
-  bursts                 BurstGroup[]
+  bursts                BurstGroup[]
   // Duplicate Detection relations
-  duplicateGroups        DuplicateGroup[]
+  duplicateGroups       DuplicateGroup[]
   // Media Sharing relations
-  mediaShares            MediaShare[]
+  mediaShares           MediaShare[]
   // Location Inference relations
-  locationSuggestions    LocationSuggestion[]
+  locationSuggestions   LocationSuggestion[]
   // AI Picture Enhancer relations
-  mediaEnhancements      MediaEnhancement[]
+  mediaEnhancements     MediaEnhancement[]
   // Workflow Automation relations
-  workflows              Workflow[]
-  workflowRuns           WorkflowRun[]
+  workflows             Workflow[]
+  workflowRuns          WorkflowRun[]
   // Empty Trash at Scale relations
-  trashEmptyRuns         TrashEmptyRun[]
-  // Location Suggestion Bulk Accept/Reject relations
-  locationSuggestionRuns LocationSuggestionRun[]
+  trashEmptyRuns        TrashEmptyRun[]
+  // Review Runs relations (bursts / duplicates / location suggestions —
+  // supersedes the former LocationSuggestionRun-only relation, issue #190)
+  reviewRuns            ReviewRun[]
 
   @@index([ownerId])
   @@map("circles")
@@ -1071,10 +1073,11 @@ model BurstGroup {
   updatedAt           DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  circle            Circle      @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  suggestedBestItem MediaItem?  @relation("BurstGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
-  resolvedBy        User?       @relation("BurstGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
-  items             MediaItem[] @relation("BurstGroupItems")
+  circle            Circle          @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  suggestedBestItem MediaItem?      @relation("BurstGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
+  resolvedBy        User?           @relation("BurstGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  items             MediaItem[]     @relation("BurstGroupItems")
+  reviewRunItems    ReviewRunItem[]
 
   @@index([circleId, status])
   @@index([capturedAt])
@@ -1117,10 +1120,11 @@ model DuplicateGroup {
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  circle            Circle      @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  suggestedBestItem MediaItem?  @relation("DuplicateGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
-  resolvedBy        User?       @relation("DuplicateGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
-  items             MediaItem[] @relation("DuplicateGroupItems")
+  circle            Circle          @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  suggestedBestItem MediaItem?      @relation("DuplicateGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
+  resolvedBy        User?           @relation("DuplicateGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  items             MediaItem[]     @relation("DuplicateGroupItems")
+  reviewRunItems    ReviewRunItem[]
 
   @@index([circleId, status])
   @@index([circleId, status, resolutionAction])
@@ -1167,10 +1171,13 @@ model LocationSuggestion {
   updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  mediaItem  MediaItem                   @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
-  circle     Circle                      @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  resolvedBy User?                       @relation("LocationSuggestionResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
-  runItems   LocationSuggestionRunItem[]
+  mediaItem      MediaItem       @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle         Circle          @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  resolvedBy     User?           @relation("LocationSuggestionResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  // Migrated from LocationSuggestionRunItem[] to the shared ReviewRunItem
+  // table in migration 20260726010000_review_runs (issue #190) — see the
+  // Review Runs section below.
+  reviewRunItems ReviewRunItem[]
 
   @@index([circleId, status])
   @@map("location_suggestions")
@@ -1710,22 +1717,36 @@ model TrashEmptyRunItem {
 }
 
 // =============================================================================
-// Location Suggestion Bulk Accept/Reject at Scale
+// Review Runs (Bursts / Duplicates / Location Suggestions) — issue #190
 // =============================================================================
 
-// LocationSuggestionRun mirrors TrashEmptyRun: an async, run-based bulk
-// accept/reject engine for the Location Inference review queue. No
-// conditions, no action list, no approval gate — every pending
-// LocationSuggestion in a circle at/above the snapshotted confidence
-// threshold is either accepted (unmodified, coordSource='inferred') or
-// rejected, driven through the enrichment queue with chunked batch jobs and
-// live progress, instead of a single synchronous request.
-enum LocationSuggestionRunAction {
+// ReviewRun is the single async run record backing every bulk review-queue
+// action: burst resolve/dismiss-by-threshold, duplicate
+// resolve/dismiss-by-threshold, and location-suggestion bulk accept/reject.
+// It replaces the location-suggestion-only LocationSuggestionRun /
+// LocationSuggestionRunItem tables (folded in by migration
+// 20260726010000_review_runs, which also copies their historical rows
+// forward) and generalizes the same evaluate -> chunked execute-batch ->
+// progress-polling -> cancel model already proven by WorkflowRun and
+// TrashEmptyRun. No conditions, no action list, no approval gate — every
+// subject matched at evaluation time (a burst/duplicate group at/above a
+// confidence threshold, or a pending location suggestion) has exactly one
+// action applied to it.
+enum ReviewRunSubject {
+  burst_group
+  duplicate_group
+  location_suggestion
+}
+
+enum ReviewRunAction {
+  resolve_archive
+  resolve_trash
+  dismiss
   accept
   reject
 }
 
-enum LocationSuggestionRunStatus {
+enum ReviewRunStatus {
   evaluating
   running
   completed
@@ -1734,7 +1755,7 @@ enum LocationSuggestionRunStatus {
   cancelled
 }
 
-enum LocationSuggestionRunItemStatus {
+enum ReviewRunItemStatus {
   matched
   processing
   applied
@@ -1742,65 +1763,112 @@ enum LocationSuggestionRunItemStatus {
   skipped
 }
 
-// One row per bulk accept/reject run for a circle. threshold is a snapshot
-// of the confidence threshold (0-100) used when the run was evaluated.
-// matchedCount is the number of pending suggestions discovered at
-// evaluation time; processedCount/succeededCount/failedCount/skippedCount
-// track progress as chunked batch jobs work through the matched set.
-model LocationSuggestionRun {
-  id             String                      @id @default(uuid()) @db.Uuid
-  circleId       String                      @map("circle_id") @db.Uuid
-  action         LocationSuggestionRunAction
+// One row per bulk review-queue run for a circle. subjectType selects which
+// review queue the run belongs to (burst_group | duplicate_group |
+// location_suggestion); action is the operation applied to every matched
+// subject. threshold is a snapshot (0-100) of the confidence/threshold used
+// at evaluation time. matchedCount is the number of subjects discovered
+// when the run was evaluated; processedCount/succeededCount/failedCount/
+// skippedCount track progress as chunked batch jobs work through the
+// matched set. The concurrency guard (see review-run.service.ts) is per
+// (circleId, subjectType), not per circle — a burst run and a
+// location-accept run may be in flight simultaneously; two burst runs may
+// not.
+//
+// processedCount can legitimately end below matchedCount: if a subject is
+// deleted mid-run (e.g. a DuplicateGroup dropping below the member floor,
+// or a LocationSuggestion cascading away with its media item), its
+// ReviewRunItem row is cascade-deleted too (see ReviewRunItem below), and
+// finalize keys off "no rows remain in matched/processing", never off
+// processedCount === matchedCount — so a vanished subject simply shrinks
+// the work set rather than blocking completion. This mirrors
+// trash_empty_run_items' cascade-on-purge behavior.
+model ReviewRun {
+  id             String           @id @default(uuid()) @db.Uuid
+  circleId       String           @map("circle_id") @db.Uuid
+  subjectType    ReviewRunSubject @map("subject_type")
+  action         ReviewRunAction
   threshold      Int
-  status         LocationSuggestionRunStatus @default(evaluating)
-  matchedCount   Int                         @default(0) @map("matched_count")
-  processedCount Int                         @default(0) @map("processed_count")
-  succeededCount Int                         @default(0) @map("succeeded_count")
-  failedCount    Int                         @default(0) @map("failed_count")
-  skippedCount   Int                         @default(0) @map("skipped_count")
-  startedById    String?                     @map("started_by_id") @db.Uuid
-  lastError      String?                     @map("last_error")
-  createdAt      DateTime                    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime                    @updatedAt @map("updated_at") @db.Timestamptz
-  startedAt      DateTime?                   @map("started_at") @db.Timestamptz
-  finishedAt     DateTime?                   @map("finished_at") @db.Timestamptz
+  status         ReviewRunStatus  @default(evaluating)
+  matchedCount   Int              @default(0) @map("matched_count")
+  processedCount Int              @default(0) @map("processed_count")
+  succeededCount Int              @default(0) @map("succeeded_count")
+  failedCount    Int              @default(0) @map("failed_count")
+  skippedCount   Int              @default(0) @map("skipped_count")
+  startedById    String?          @map("started_by_id") @db.Uuid
+  lastError      String?          @map("last_error")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+  startedAt      DateTime?        @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?        @map("finished_at") @db.Timestamptz
 
   // Relations
-  circle    Circle                      @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  startedBy User?                       @relation("LocationSuggestionRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
-  items     LocationSuggestionRunItem[]
+  circle    Circle          @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  startedBy User?           @relation("ReviewRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  items     ReviewRunItem[]
 
-  @@index([circleId, status])
+  // @@unique([id, subjectType]) is the FK target for ReviewRunItem's
+  // composite (run_id, subject_type) FK below, guaranteeing an item can
+  // never belong to a run of a different subject type than its own. This is
+  // a real, representable Prisma directive (unlike the CHECK constraints
+  // and partial unique indexes on ReviewRunItem, which cannot be expressed
+  // in the schema DSL and are hand-authored as raw SQL in migration
+  // 20260726010000_review_runs).
+  @@unique([id, subjectType])
+  @@index([circleId, subjectType, status])
   @@index([status, updatedAt])
-  @@map("location_suggestion_runs")
+  @@map("review_runs")
 }
 
-// Per-suggestion outcome row within a LocationSuggestionRun. @@unique([runId,
-// suggestionId]) is the idempotency anchor for batch retries, mirroring the
-// trash_empty_run_items / workflow_run_items precedent. suggestionId cascades
-// on delete so a deleted LocationSuggestion removes its run-item rows too.
-// Unlike trash_empty_run_items (where a successful purge cascade-deletes the
-// row, so 'deleted' doubles as both claim-marker and terminal-success), an
-// accept/reject leaves the row in place: the execute-batch handler
-// atomically claims matched -> processing (updateMany), does the per-item
-// work, then transitions to a terminal applied (success) / skipped
-// (suggestion no longer pending) / failed. processing is the transient
-// in-flight/claim marker that makes retries crash-safe without
-// double-counting.
-model LocationSuggestionRunItem {
-  id           String                          @id @default(uuid()) @db.Uuid
-  runId        String                          @map("run_id") @db.Uuid
-  suggestionId String                          @map("suggestion_id") @db.Uuid
-  status       LocationSuggestionRunItemStatus @default(matched)
-  error        String?
-  createdAt    DateTime                        @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime                        @updatedAt @map("updated_at") @db.Timestamptz
+// Per-subject outcome row within a ReviewRun. Exactly one of burstGroupId /
+// duplicateGroupId / locationSuggestionId is populated per row, matching
+// subjectType — an "exclusive arc", the same pattern already shipped for
+// MediaShare (targetType + mediaItemId/albumId XOR CHECK, see migration
+// 20260628130000_add_media_shares). Prisma's schema DSL cannot express CHECK
+// constraints or partial unique indexes, so the full integrity guarantee is
+// hand-authored as raw SQL in migration 20260726010000_review_runs:
+//   - three real FKs (this file declares them below), each ON DELETE CASCADE,
+//     from burst_group_id / duplicate_group_id / location_suggestion_id to
+//     their respective tables, so a deleted subject cascades its item row away
+//   - CHECK (num_nonnulls(burst_group_id, duplicate_group_id,
+//     location_suggestion_id) = 1) — exactly one subject per row
+//   - three CHECKs binding subject_type to the populated column, e.g.
+//     CHECK ((subject_type = 'burst_group') = (burst_group_id IS NOT NULL))
+//   - a composite FK (run_id, subject_type) REFERENCES review_runs(id,
+//     subject_type) ON DELETE CASCADE, so an item's subjectType can never
+//     disagree with its parent run's
+//   - three partial unique indexes, UNIQUE (run_id, burst_group_id) WHERE
+//     burst_group_id IS NOT NULL (and likewise for the other two), as the
+//     idempotency anchor for batch retries — mirroring the
+//     trash_empty_run_items / workflow_run_items @@unique([runId,
+//     subjectId]) precedent, split three ways because a single column pair
+//     can't serve all three nullable FK columns
+// This is deliberate, documented schema drift — the same precedent as
+// media_items_gallery_idx / media_items_map_locations_idx. See that
+// migration's header comment for the full rationale.
+//
+// ReviewRunItemStatus keeps location-inference's explicit `processing` claim
+// marker: resolving a group or accepting/rejecting a suggestion doesn't
+// delete the underlying subject row, so matched -> processing -> a terminal
+// status is the only crash-safe claim for a retryable batch job.
+model ReviewRunItem {
+  id                   String              @id @default(uuid()) @db.Uuid
+  runId                String              @map("run_id") @db.Uuid
+  subjectType          ReviewRunSubject    @map("subject_type")
+  burstGroupId         String?             @map("burst_group_id") @db.Uuid
+  duplicateGroupId     String?             @map("duplicate_group_id") @db.Uuid
+  locationSuggestionId String?             @map("location_suggestion_id") @db.Uuid
+  status               ReviewRunItemStatus @default(matched)
+  error                String?
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  run        LocationSuggestionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  suggestion LocationSuggestion    @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  run                ReviewRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  burstGroup         BurstGroup?         @relation(fields: [burstGroupId], references: [id], onDelete: Cascade)
+  duplicateGroup     DuplicateGroup?     @relation(fields: [duplicateGroupId], references: [id], onDelete: Cascade)
+  locationSuggestion LocationSuggestion? @relation(fields: [locationSuggestionId], references: [id], onDelete: Cascade)
 
-  @@unique([runId, suggestionId])
   @@index([runId, status])
-  @@map("location_suggestion_run_items")
+  @@map("review_run_items")
 }
