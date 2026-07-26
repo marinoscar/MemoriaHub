@@ -90,16 +90,18 @@ describe('menu-config', () => {
       expect(labels(nodes)).toEqual([
         'Convert videos to MP4',
         'Organize folder by date',
+        'Find/Clean Screenshots',
         'Date Inference',
       ]);
     });
 
-    it('within Tools when logged in, all six tools are visible in order', () => {
+    it('within Tools when logged in, all seven tools are visible in order', () => {
       const tools = findSubmenu('tools')!;
       const nodes = visibleChildren(tools, true);
       expect(labels(nodes)).toEqual([
         'Convert videos to MP4',
         'Organize folder by date',
+        'Find/Clean Screenshots',
         'Date Inference',
         'Job queue monitor',
         'Backup',
