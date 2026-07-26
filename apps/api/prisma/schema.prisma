@@ -1104,6 +1104,15 @@ model DuplicateGroup {
   resolutionAction    String?              @map("resolution_action")
   keptCount           Int?                 @map("kept_count")
   removedCount        Int?                 @map("removed_count")
+  // Tightest-pair CLIP cosine similarity (0-1) across the group's members,
+  // persisted so threshold filtering (resolve/dismiss-by-threshold, and now
+  // review-run evaluation) runs as a real SQL predicate instead of a
+  // read-time $queryRaw scan. Written by DuplicateDetectionService.recomputeGroupMeta
+  // on every membership change and self-healed opportunistically at read
+  // time; NULL when maxSim is genuinely uncomputable (fewer than two
+  // members carry an embedding), matching BurstGroup.confidence. See
+  // migration 20260726000000_duplicate_group_confidence and issue #190.
+  confidence          Float?
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -1115,6 +1124,7 @@ model DuplicateGroup {
 
   @@index([circleId, status])
   @@index([circleId, status, resolutionAction])
+  @@index([circleId, status, confidence])
   @@map("duplicate_groups")
 }
 
