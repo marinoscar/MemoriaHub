@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { uploadFile, UploadPersistence, UploadResumeState } from '../src/upload.js';
+import { ApiError } from '../src/api.js';
 import type { ApiClient } from '../src/api.js';
 
 // ---------------------------------------------------------------------------
@@ -419,6 +420,104 @@ describe('uploadFile', () => {
       );
 
       expect(result.objectId).toBe('obj-1'); // new objectId from fresh init
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 4. Provider-side stale session (issue #179)
+  //
+  // The API's /upload/status only reads its own DB row, so it happily reports a
+  // resumable session for a multipart upload that S3/R2 has already garbage-
+  // collected. The part PUT is the first place the truth surfaces — as a 404
+  // NoSuchUpload — and before this fix that 404 was permanent for the file.
+  // -------------------------------------------------------------------------
+
+  describe('stale multipart session — provider reports NoSuchUpload', () => {
+    const NO_SUCH_UPLOAD_XML =
+      '<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchUpload</Code>' +
+      '<Message>The specified multipart upload does not exist.</Message></Error>';
+
+    /** A resume state the API still considers valid (status check succeeds). */
+    const resumeState: UploadResumeState = {
+      objectId: 'obj-stale',
+      uploadId: 'upload-stale',
+      partSize: PART_SIZE,
+      completedParts: [{ partNumber: 1, eTag: 'etag-1' }],
+    };
+
+    /** Fake api whose first N part PUTs 404 with NoSuchUpload, then succeed. */
+    function makeApiWith404Until(failCalls: number) {
+      const { api, postSpy, getSpy, putRawSpy } = makeFakeApi({
+        statusResponse: { uploadId: 'upload-stale', status: 'uploading' },
+      });
+      let calls = 0;
+      (putRawSpy as jest.Mock).mockImplementation((() => {
+        calls++;
+        if (calls <= failCalls) {
+          return Promise.reject(new ApiError(404, NO_SUCH_UPLOAD_XML));
+        }
+        return Promise.resolve(`etag-${calls}`);
+      }) as ApiClient['putRaw']);
+      return { api, postSpy, getSpy, putRawSpy };
+    }
+
+    it('discards the dead session and re-inits instead of failing the file', async () => {
+      const { api, postSpy } = makeApiWith404Until(1);
+      const { persistence, onComplete } = makePersistence(resumeState);
+
+      const result = await uploadFile(
+        api as unknown as ApiClient,
+        filePath,
+        'image/jpeg',
+        undefined,
+        persistence,
+      );
+
+      // Recovered: a fresh init ran and the upload finished on the new session.
+      const initCalls = postSpy.mock.calls.filter(
+        (c) => c[0] === '/api/storage/objects/upload/init',
+      );
+      expect(initCalls).toHaveLength(1);
+      expect(result.objectId).toBe('obj-1');
+
+      // The dead session was cleared before re-initializing, so the retry
+      // cannot resume into it again.
+      expect(onComplete).toHaveBeenCalled();
+    });
+
+    it('re-uploads every part on the fresh session, ignoring resumed parts', async () => {
+      const { api, putRawSpy } = makeApiWith404Until(1);
+      const { persistence } = makePersistence(resumeState);
+
+      await uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence);
+
+      // 1 failed PUT (part 2, the first not already resumed) + all 3 parts
+      // re-sent on the clean session.
+      expect(putRawSpy).toHaveBeenCalledTimes(1 + TOTAL_PARTS);
+    });
+
+    it('gives up after one restart when the fresh session also 404s', async () => {
+      // A persistently-404ing provider (e.g. a missing bucket) must not loop.
+      const { api, putRawSpy } = makeApiWith404Until(Number.MAX_SAFE_INTEGER);
+      const { persistence } = makePersistence(resumeState);
+
+      await expect(
+        uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
+      ).rejects.toThrow(/no longer exists on the storage provider/i);
+
+      // Exactly two attempts: the stale session, then one clean retry.
+      expect(putRawSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('still reports a non-404 part failure as a normal per-part error', async () => {
+      const { api, putRawSpy } = makeFakeApi({});
+      (putRawSpy as jest.Mock).mockImplementation((() =>
+        Promise.reject(new ApiError(403, 'AccessDenied'))) as ApiClient['putRaw']);
+      const { persistence } = makePersistence();
+
+      await expect(
+        uploadFile(api as unknown as ApiClient, filePath, 'image/jpeg', undefined, persistence),
+      ).rejects.toThrow(/^Part 1 failed:/);
     });
   });
 });
