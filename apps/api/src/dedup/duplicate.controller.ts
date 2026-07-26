@@ -46,6 +46,8 @@ export class DuplicateController {
   @ApiQuery({ name: 'kind', type: String, required: false, enum: ['exact_variant', 'edited', 'similar'] })
   @ApiQuery({ name: 'page', type: Number, required: false })
   @ApiQuery({ name: 'pageSize', type: Number, required: false })
+  @ApiQuery({ name: 'sortBy', type: String, required: false, enum: ['capturedAt', 'confidence', 'mediaCount'] })
+  @ApiQuery({ name: 'sortOrder', type: String, required: false, enum: ['asc', 'desc'] })
   @ApiResponse({ status: 200, description: 'Duplicate groups listed' })
   async listDuplicateGroups(
     @Query() query: DuplicateQueryDto,

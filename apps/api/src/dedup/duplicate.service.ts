@@ -215,12 +215,31 @@ export class DuplicateService {
 
   async listDuplicateGroups(query: DuplicateQueryDto, userId: string, perms: string[]) {
     const { circleId, status, kind, page, pageSize } = query;
+    // Service specs construct this DTO from a bare object literal (bypassing the
+    // Zod pipe), so the schema defaults may not have been applied at runtime.
+    const by = query.sortBy ?? 'capturedAt';
+    const dir = query.sortOrder ?? 'asc';
 
     await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
 
+    // `capturedAt` is nullable (object form OK); `mediaCount` is non-null (plain
+    // direction only). Confidence is computed per group AFTER the query, so it
+    // keeps today's base order here and is sorted in memory further below.
+    const baseOrder: Prisma.DuplicateGroupOrderByWithRelationInput[] = [
+      { capturedAt: { sort: 'asc', nulls: 'last' } },
+      { createdAt: 'asc' },
+      { id: 'asc' },
+    ];
+    const orderBy: Prisma.DuplicateGroupOrderByWithRelationInput[] =
+      by === 'capturedAt'
+        ? [{ capturedAt: { sort: dir, nulls: 'last' } }, { createdAt: 'asc' }, { id: 'asc' }]
+        : by === 'mediaCount'
+          ? [{ mediaCount: dir }, { capturedAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }]
+          : baseOrder;
+
     const groups = await this.prisma.duplicateGroup.findMany({
       where: { circleId, status: status as DuplicateGroupStatus },
-      orderBy: [{ capturedAt: 'asc' }, { createdAt: 'asc' }],
+      orderBy,
       select: {
         id: true,
         status: true,
@@ -249,12 +268,31 @@ export class DuplicateService {
           ...group,
           kind: kindClass,
           confidence: maxSim ?? 0,
+          // Raw (possibly null) similarity, used only for in-memory sorting
+          // below — never emitted. The wire field stays `confidence`.
+          rawConfidence: maxSim,
           suggestedBestItemId: bestId ?? group.suggestedBestItemId,
         };
       }),
     );
 
     const filtered = kind ? enriched.filter((g) => g.kind === kind) : enriched;
+
+    // Confidence is computed per group at read time, so it cannot be ordered in
+    // SQL — sort here instead. Groups with an uncomputable (null) similarity go
+    // LAST in both directions. Array#sort is stable, so the DB base order above
+    // is the natural tiebreaker; no explicit tiebreaker comparator is needed.
+    if (by === 'confidence') {
+      filtered.sort((a, b) => {
+        if (a.rawConfidence === null && b.rawConfidence === null) return 0;
+        if (a.rawConfidence === null) return 1;
+        if (b.rawConfidence === null) return -1;
+        return dir === 'asc'
+          ? a.rawConfidence - b.rawConfidence
+          : b.rawConfidence - a.rawConfidence;
+      });
+    }
+
     const total = filtered.length;
     const start = (page - 1) * pageSize;
     const pageGroups = filtered.slice(start, start + pageSize);
