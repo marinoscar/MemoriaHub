@@ -112,6 +112,11 @@ export const patchSystemSettingsSchema = z.object({
       stuckThresholdMinutes: z.number().int().min(1).max(120).optional(),
     })
     .optional(),
+  reviewRuns: z
+    .object({
+      runHistoryRetentionDays: z.number().int().min(1).max(365).optional(),
+    })
+    .optional(),
   storage: z
     .object({
       activeProvider: z.string().optional(),
