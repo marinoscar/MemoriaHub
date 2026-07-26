@@ -33,6 +33,8 @@ import {
   tunedChildEnv,
   heapAlreadyTuned,
   maybeReexecWithHeapLimit,
+  currentHeapLimitMb,
+  describeHeapTuning,
 } from '../../src/node/runtime-tuning.js';
 
 const GB = 1024 * 1024 * 1024;
@@ -205,5 +207,49 @@ describe('maybeReexecWithHeapLimit', () => {
   it('returns false under Jest and never spawns a child (JEST_WORKER_ID early return)', () => {
     expect(process.env['JEST_WORKER_ID']).toBeDefined();
     expect(maybeReexecWithHeapLimit()).toBe(false);
+  });
+});
+
+describe('currentHeapLimitMb', () => {
+  it('reports a positive real ceiling for the running process', () => {
+    expect(currentHeapLimitMb()).toBeGreaterThan(0);
+  });
+});
+
+describe('describeHeapTuning', () => {
+  // The env override pins targetMb so results never depend on the machine
+  // running the suite; heapLimitMb is whatever ceiling the Jest process
+  // actually has, which is what the function is FOR (issue #156: warn when
+  // compute is about to run under an untuned default ceiling).
+
+  it('reports untuned when the target is far above any realistic test-process ceiling', () => {
+    process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'] = '99999';
+    const status = describeHeapTuning();
+    expect(status.targetMb).toBe(99999);
+    expect(status.heapLimitMb).toBe(currentHeapLimitMb());
+    expect(status.tuned).toBe(false);
+  });
+
+  it('reports tuned when the target is at/below the real ceiling', () => {
+    process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'] = '64';
+    const status = describeHeapTuning();
+    expect(status.targetMb).toBe(64);
+    expect(status.tuned).toBe(true);
+  });
+
+  it('reports tuned when tuning is explicitly disabled (override 0 = operator choice)', () => {
+    process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'] = '0';
+    const status = describeHeapTuning();
+    expect(status.targetMb).toBe(0);
+    expect(status.tuned).toBe(true);
+  });
+
+  it('ignores the MEMORIAHUB_HEAP_TUNED sentinel — only the real ceiling counts', () => {
+    // heapAlreadyTuned trusts the sentinel (re-exec-loop guard); this
+    // function must not, since it reports the ceiling actually in force.
+    process.env['MEMORIAHUB_HEAP_TUNED'] = '1';
+    process.env['MEMORIAHUB_MAX_OLD_SPACE_MB'] = '99999';
+    expect(heapAlreadyTuned(99999)).toBe(true);
+    expect(describeHeapTuning().tuned).toBe(false);
   });
 });

@@ -48,6 +48,8 @@ jest.unstable_mockModule('../../src/node/runtime-tuning.js', () => ({
   configureSharpRuntime: jest.fn(async () => {}),
   resolveSharpConcurrency: jest.fn(() => 1),
   resolveDefaultConcurrency: jest.fn(() => 2),
+  currentHeapLimitMb: jest.fn(() => 2048),
+  describeHeapTuning: jest.fn(() => ({ tuned: true, heapLimitMb: 2048, targetMb: 0 })),
 }));
 
 const { launchTui } = await import('../../src/tui/app.js');

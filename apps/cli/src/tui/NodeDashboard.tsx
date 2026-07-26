@@ -11,12 +11,15 @@
  *   running. Keys: [d] drain, [x] stop daemon (with confirm), [r] doctor, and
  *   after a socket loss [r] retries the connection.
  *
- *   EMBEDDED — no daemon is running. The dashboard OWNS a NodeEngine instance
- *   (constructed with the ApiClient + persisted node config, exactly like
- *   `memoriahub node start`) which is only constructed/started when the
- *   operator presses `s`, so mounting the screen is cheap and never spins up
- *   compute automatically. The engine is stopped on unmount. Keys: [s] start,
- *   [d] drain/stop, [r] doctor.
+ *   EMBEDDED — no daemon is running. Pressing `s` spawns a DETACHED, memory-
+ *   tuned daemon (node/daemon-launch.ts — raised heap ceiling, near-OOM heap
+ *   snapshot flag, pre-OOM drain-and-restart valve) and attaches to it, so
+ *   sustained compute never runs inside this interactive process, which cannot
+ *   re-exec to raise its own ~2 GB default heap ceiling (issue #156, PR #159).
+ *   `e` remains as an explicit fallback that runs the historical in-process
+ *   NodeEngine — untuned, so it warns and tightens the memory watchdog. The
+ *   in-process engine is stopped on unmount. Keys: [s] start daemon,
+ *   [e] in-process, [d] drain/stop, [r] doctor.
  *
  * Both modes share the pure reducer in node-dashboard-source.ts, so per-slot
  * job state, counters, history, heartbeat, and the error log update through a
@@ -37,8 +40,9 @@ import { ComputeDispatcher, NODE_JOB_TYPES } from '../node/capabilities.js';
 import { NodeEngine, type NodeEngineOptions } from '../node/node-engine.js';
 import { NODE_EV } from '../node/node-events.js';
 import { ensureModels } from '../node/models.js';
-import { configureSharpRuntime } from '../node/runtime-tuning.js';
-import { startMemoryWatchdog } from '../node/memory-watchdog.js';
+import { configureSharpRuntime, describeHeapTuning } from '../node/runtime-tuning.js';
+import { startMemoryWatchdog, untunedWatchdogOptions } from '../node/memory-watchdog.js';
+import { spawnNodeStartDaemon, waitForDaemonReady } from '../node/daemon-launch.js';
 import { isDaemonRunning } from '../node/ipc-client.js';
 import { readPidFile } from '../node/daemon.js';
 import { BOX_BORDER } from './theme.js';
@@ -286,12 +290,82 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   }, []);
 
   // -------------------------------------------------------------------------
-  // Start the embedded engine (on `s`; embedded mode only)
+  // Start a tuned daemon and attach (on `s`; embedded mode only)
+  //
+  // The interactive TUI process runs at Node's default ~2 GB heap ceiling —
+  // it cannot re-exec to raise it without losing raw-mode input (PR #159) —
+  // which is exactly the untuned posture that OOM'd under sustained import
+  // load in issue #156. So the primary start path spawns the detached,
+  // memory-tuned daemon (raised heap, near-OOM snapshot flag, pre-OOM
+  // drain-and-restart valve) and attaches to it over IPC; heavy compute never
+  // runs in this process. The daemon deliberately keeps running after the
+  // dashboard detaches.
+  // -------------------------------------------------------------------------
+  const launchingDaemonRef = useRef<boolean>(false);
+  const startDaemon = useCallback(async (): Promise<void> => {
+    const src = sourceRef.current;
+    if (!(src instanceof EmbeddedDashboardSource)) return;
+    if (engineRef.current || launchingDaemonRef.current) return;
+    if (!config.nodeId) {
+      pushLog('error', 'Not registered — run `memoriahub node register` first.');
+      return;
+    }
+    launchingDaemonRef.current = true;
+    setEngineState('starting');
+    try {
+      // No explicit options: the daemon resolves concurrency/types/poll from
+      // the same persisted node config this dashboard reads, and its unset
+      // defaults (core/RAM-aware concurrency) are better than ours.
+      const spawned = spawnNodeStartDaemon();
+      pushLog('info', `daemon spawned (pid ${spawned.pid}) with a tuned heap — waiting for its IPC socket…`);
+      const ready = await waitForDaemonReady();
+      if (!mountedRef.current) return;
+      if (!ready) {
+        setEngineState('stopped');
+        pushLog(
+          'error',
+          `daemon did not come up — check ${spawned.outPath} or \`memoriahub node logs\`. [e] runs in-process instead.`,
+        );
+        return;
+      }
+      src.close();
+      sourceRef.current = null;
+      setEngineState('stopped'); // engineState is unused once attached
+      await initSource();
+      if (!mountedRef.current) return;
+      // TS narrows sourceRef.current to null from the assignment above and
+      // cannot see that initSource() re-populates it — hence the cast.
+      const nowAttached = sourceRef.current as unknown as DashboardSource | null;
+      if (nowAttached?.mode === 'attached') {
+        pushLog('info', 'attached — the daemon keeps running after you quit this dashboard');
+      } else {
+        pushLog('warn', 'daemon came up but attaching failed — press [r] to retry, or [e] to run in-process');
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setEngineState('stopped');
+        pushLog(
+          'error',
+          `failed to launch the daemon: ${err instanceof Error ? err.message : String(err)} — [e] runs in-process instead.`,
+        );
+      }
+    } finally {
+      launchingDaemonRef.current = false;
+    }
+  }, [config, initSource, pushLog]);
+
+  // -------------------------------------------------------------------------
+  // Start the embedded in-process engine (on `e`; embedded mode only)
+  //
+  // Explicit fallback for when the daemon can't be used (spawn failure,
+  // debugging). This process's heap ceiling is whatever the TUI launched with
+  // — usually Node's untuned ~2 GB default — so the untuned defense below
+  // warns and tightens the memory watchdog.
   // -------------------------------------------------------------------------
   const startEngine = useCallback(async (): Promise<void> => {
     const src = sourceRef.current;
     if (!(src instanceof EmbeddedDashboardSource)) return;
-    if (engineRef.current) return;
+    if (engineRef.current || launchingDaemonRef.current) return;
     if (!config.nodeId) {
       pushLog('error', 'Not registered — run `memoriahub node register` first.');
       return;
@@ -323,9 +397,24 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     }
 
     // Bound libvips/sharp once before the embedded engine claims image work,
-    // so peak native memory doesn't scale with cores × in-flight jobs (the
-    // launchTui guard already raised the V8 heap ceiling for this process).
+    // so peak native memory doesn't scale with cores × in-flight jobs.
     await configureSharpRuntime();
+
+    // Untuned-heap defense (issue #156): the TUI no longer re-execs to raise
+    // the V8 heap ceiling (a re-exec shim breaks Ink raw-mode input, PR #159),
+    // so this in-process engine may be running at Node's ~2 GB default — the
+    // posture that OOM'd straight past the 60s/90% safety valve on 1.2.14.
+    // Warn, and tighten the watchdog (15s sampling, drain at 80%) so the valve
+    // actually catches the climb inside the thin remaining margin.
+    const heap = describeHeapTuning();
+    const watchdogTuning = heap.tuned ? {} : untunedWatchdogOptions();
+    if (!heap.tuned) {
+      pushLog(
+        'warn',
+        `in-process engine is UNTUNED: heap ceiling ${heap.heapLimitMb}MB (a daemon gets ${heap.targetMb}MB) — ` +
+          'watchdog tightened; prefer [s] (tuned daemon) for sustained imports.',
+      );
+    }
 
     // Surface memory pressure in the dashboard log so a slow climb is visible
     // (heapUsed vs external/arrayBuffers vs rss). Stopped when the engine stops.
@@ -335,8 +424,8 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     // restarting just the in-process engine wouldn't free native singletons
     // (the CLIP session, sharp) held for the TUI's lifetime. So on critical
     // pressure we drain and STOP the embedded engine to halt further growth,
-    // and tell the operator to relaunch (ideally as a daemon/container for
-    // sustained loads).
+    // and tell the operator to relaunch (ideally via [s] as a daemon, which
+    // auto-restarts, for sustained loads).
     stopMemWatchRef.current?.();
     stopMemWatchRef.current = startMemoryWatchdog(
       (level, s) =>
@@ -345,11 +434,12 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
           `memory rss=${s.rssMb}MB heapUsed=${s.heapUsedMb}/${s.heapLimitMb}MB external=${s.externalMb}MB arrayBuffers=${s.arrayBuffersMb}MB`,
         ),
       {
+        ...watchdogTuning,
         onCritical: (s) => {
           pushLog(
             'error',
             `heap at ${Math.round(s.heapUsedFraction * 100)}% of ceiling — stopping the embedded worker to pre-empt an out-of-memory crash. ` +
-              'Relaunch it (press s), or run it as a daemon/container (auto-restarts) for sustained loads.',
+              'Restart it as a tuned daemon (press s) for sustained loads.',
           );
           void engineRef.current?.stop('memory-pressure', { deregister: false });
         },
@@ -439,6 +529,8 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       return;
     }
     if (input === 's' && mode === 'embedded') {
+      void startDaemon();
+    } else if (input === 'e' && mode === 'embedded') {
       void startEngine();
     } else if (input === 'd') {
       drainOrStop();
@@ -678,7 +770,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
             <Text>
               <Text bold color="blue">EMBEDDED</Text>
               <Text dimColor>
-                {' '}— no daemon running; press s to start in-process, or run `memoriahub node start --daemon`
+                {' '}— no daemon running; press s to launch one (memory-tuned, keeps running), e for in-process
               </Text>
             </Text>
           ) : (
@@ -818,7 +910,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
             ? disconnected
               ? `[r] retry connection${onOpenConfig ? '   [c] config' : ''}   [q] back`
               : `[d] drain   [x] stop daemon   [r] doctor${onOpenConfig ? '   [c] config' : ''}   [q] detach`
-            : `[s] start   [d] drain/stop   [r] doctor${onOpenConfig ? '   [c] config' : ''}   [q] back`}
+            : `[s] start daemon   [e] in-process   [d] drain/stop   [r] doctor${onOpenConfig ? '   [c] config' : ''}   [q] back`}
         </Text>
       </Box>
 

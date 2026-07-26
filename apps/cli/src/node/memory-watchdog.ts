@@ -117,15 +117,48 @@ export function startMemoryWatchdog(
 /**
  * Resolve the critical (drain-and-restart) heap fraction: the explicit option,
  * else `MEMORIAHUB_HEAP_RESTART_FRACTION` (a value in (0,1]; `0` disables), else
- * the 0.90 default. An out-of-range env value is ignored in favor of the option
- * / default.
+ * `fallback` (default 0.90). An out-of-range env value is ignored in favor of
+ * the option / fallback.
  */
-export function resolveRestartFraction(explicit?: number): number {
+export function resolveRestartFraction(explicit?: number, fallback = 0.9): number {
   if (explicit !== undefined) return explicit;
   const env = process.env['MEMORIAHUB_HEAP_RESTART_FRACTION'];
   if (env !== undefined && env.trim() !== '') {
     const n = Number.parseFloat(env);
     if (Number.isFinite(n) && n >= 0 && n <= 1) return n;
   }
-  return 0.9;
+  return fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Untuned-process tightening (issue #156)
+// ---------------------------------------------------------------------------
+
+/** Sample interval used when the process runs at an untuned heap ceiling. */
+export const UNTUNED_WATCHDOG_INTERVAL_MS = 15_000;
+/** Default critical fraction used when the process runs at an untuned heap ceiling. */
+export const UNTUNED_RESTART_FRACTION = 0.8;
+
+/**
+ * Tightened watchdog options for an engine running in a process whose V8 heap
+ * ceiling was NOT raised to the RAM-aware target (see
+ * `describeHeapTuning()` in runtime-tuning.ts) — e.g. an in-process engine
+ * inside the interactive TUI, which cannot re-exec to set launch flags.
+ *
+ * Rationale (issue #156): at the ~2 GB default ceiling, the standard settings
+ * (60 s sampling, drain at 90%) leave only ~200 MB of margin — a burst of
+ * in-flight image jobs can blow through that between two samples, which is
+ * exactly how the 1.2.14 TUI crash sailed past the safety valve. Sampling 4×
+ * faster and draining at 80% trades a slightly earlier stop for actually
+ * catching the climb. An explicit `MEMORIAHUB_HEAP_RESTART_FRACTION` still
+ * wins over the tightened default.
+ */
+export function untunedWatchdogOptions(): Pick<
+  MemoryWatchdogOptions,
+  'intervalMs' | 'restartFraction'
+> {
+  return {
+    intervalMs: UNTUNED_WATCHDOG_INTERVAL_MS,
+    restartFraction: resolveRestartFraction(undefined, UNTUNED_RESTART_FRACTION),
+  };
 }
