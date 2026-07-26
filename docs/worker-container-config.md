@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.2 |
+| **Version** | 1.3 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -173,11 +173,11 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 | `MEMORIAHUB_CONCURRENCY` | `2` (bundle default in `docker-compose.worker.yml`); CLI-native default is now core/RAM-aware (2–4 on a capable host) instead of a flat `1`, when neither this env var, `--concurrency`, nor persisted node config set an explicit value | integer ≥ 1 | Jobs this replica processes simultaneously. | Keep at 1–2 on memory-constrained hosts / AI-bound work; raise on beefier machines (see §6d). |
 | `MEMORIAHUB_ELIGIBLE_TYPES` | *(unset — advertises everything the local capability probe supports)* | CSV of job-type names | Restricts which job types this node claims. | Narrow if you want a worker dedicated to one job type (e.g. only `face_detection`). |
 | `MEMORIAHUB_POLL_INTERVAL_MS` | `5000` | ms | Claim-loop poll interval when idle. | Rarely changed. |
-| `MEMORIAHUB_FACE_PROVIDER` | `human` (CLI-native); the bundle sets `compreface` | `human` \| `compreface` | Which face-detection provider this node uses locally. | Set to `compreface` whenever the server's active face provider (`PUT /api/face/features/detection`) is `compreface` — mismatched providers land in different embedding spaces (§4). The bundle already does this. |
-| `MEMORIAHUB_COMPREFACE_URL` | `http://localhost:3000` (CLI-native); the bundle sets `http://compreface-core:3000` | URL | Base URL of the node's own local CompreFace sidecar; only consulted when `MEMORIAHUB_FACE_PROVIDER=compreface`. | Only if you point at a non-default port or a remote sidecar. |
+| `MEMORIAHUB_FACE_PROVIDER` | `compreface` (both CLI-native and the bundle — the only accepted value) | `compreface` | Which face-detection provider this node uses locally; any other value is a startup error, not a silent fallback. | Rarely changed — CompreFace is the sole provider (issue #113 removed the Human WASM alternative). Only relevant if pointing at a non-default sidecar. |
+| `MEMORIAHUB_COMPREFACE_URL` | `http://localhost:3000` (CLI-native); the bundle sets `http://compreface-core:3000` | URL | Base URL of the node's own local CompreFace sidecar. | Only if you point at a non-default port or a remote sidecar. |
 | `MEMORIAHUB_STATE_DIR` | `~/.memoriahub` | path | Relocates the state directory (config, pidfile, IPC socket, logs, models); the bundle maps this to the `/data` volume. | Only for custom volume layouts. |
 | `MEMORIAHUB_HEADLESS` | *(image entrypoint always headless regardless)* | `1` | Implies `--headless`: drains in-flight jobs and exits WITHOUT deregistering on `SIGTERM` (so a restart re-attaches instead of accumulating a new node record). | N/A for the published image; relevant only for a custom entrypoint. |
-| `MODELS_DIR` | `~/.memoriahub/models` (CLI-native; the image already bakes models at `/app/models`, distinct from the API-side `MODELS_DIR` default of `./data/models` used for its own CLIP model copy) | path | Overrides where model resolution looks for CLIP/Human files. | Only to point at a different/mounted model directory (e.g. an air-gapped install). |
+| `MODELS_DIR` | `~/.memoriahub/models` (CLI-native; the image already bakes models at `/app/models`, distinct from the API-side `MODELS_DIR` default of `./data/models` used for its own CLIP model copy) | path | Overrides where model resolution looks for the CLIP model file (face detection is served by the CompreFace sidecar, not a model file — see §4). | Only to point at a different/mounted model directory (e.g. an air-gapped install). |
 
 ### 3.2 Bundle/compose knobs (`docker-compose.worker.yml` / `.env.worker`)
 
@@ -233,16 +233,14 @@ See §3.3 above for the full env-var reference: `MEMORIAHUB_MAX_OLD_SPACE_MB`, `
 
 ## 4. CompreFace
 
-The bundled `compreface-core` sidecar (`exadel/compreface-core:1.2.0-mobilenet`) produces 128-dimensional ArcFace/MobileFaceNet embeddings — the codebase is **committed to CompreFace** as its face-embedding space (all existing production face rows live in it), so a worker container defaults `MEMORIAHUB_FACE_PROVIDER=compreface` rather than the CLI's native default (`human`, 1024-d). Running Human on a node while the server is configured for CompreFace lands that node's faces in a different, non-comparable embedding space — person-matching cosine similarity silently produces false negatives or spurious matches. See [Worker Node Setup & Troubleshooting §5](worker-node-setup.md#5-matching-the-servers-face-detection-provider-compreface) for the full rationale and the native (non-container) setup path.
+The bundled `compreface-core` sidecar (`exadel/compreface-core:1.2.0-mobilenet`) produces 128-dimensional ArcFace/MobileFaceNet embeddings. CompreFace is the sole face-recognition provider, server-side and node-side (issue #113 removed the Human WASM and AWS Rekognition alternatives that previously existed), so `MEMORIAHUB_FACE_PROVIDER=compreface` is both the CLI-native and bundle default — there is no other value to set and no cross-provider embedding-space mismatch to worry about. A worker container needs a reachable `compreface-core` sidecar (bundled here) to be face-job-eligible at all. See [Worker Node Setup & Troubleshooting §5](worker-node-setup.md#5-setting-up-compreface-for-a-native-install) for the native (non-container) setup path.
 
 | Setting | Default | What it controls |
 |---|---|---|
 | `UWSGI_PROCESSES` | `${COMPREFACE_PROCESSES:-2}` | Parallel inference processes — CompreFace serves one request per uwsgi worker process, so this is the real parallelism knob (threads alone contend on Python's GIL and don't help). |
 | `UWSGI_THREADS` | `1` | Left at 1 always — see above. |
 
-**Health gating, not silent fallback.** The worker's `depends_on: compreface-core: condition: service_healthy` orders container startup, but the real guarantee against a silent fallback to Human is the worker's own start-time `verifyCompreface` gate: when `MEMORIAHUB_FACE_PROVIDER=compreface` and the node's eligible types include a face job, `node start` blocks on a bounded ~40s wait polling CompreFace's `/status` endpoint before claiming any jobs, and **fails outright** (not falling back to Human) if the sidecar never reports healthy. This matters because CompreFace takes ~15–30s to load its model on (re)create.
-
-**Why not just use Human on the node?** The committed-to-CompreFace decision means every face row across the whole deployment must stay in one 128-d space for cosine-similarity person matching to work at all. Human's 1024-d space is not comparable, so it is never an acceptable substitute once CompreFace is the server's active provider — regardless of Human's lower operational overhead (it needs no sidecar container).
+**Health gating, not silent fallback.** The worker's `depends_on: compreface-core: condition: service_healthy` orders container startup, but the real guarantee is the worker's own start-time `verifyCompreface` gate: when the node's eligible types include a face job, `node start` blocks on a bounded ~40s wait polling CompreFace's `/status` endpoint before claiming any jobs, and **fails outright** if the sidecar never reports healthy — there is no in-process alternative provider to fall back to. This matters because CompreFace takes ~15–30s to load its model on (re)create.
 
 See [Worker Node Setup & Troubleshooting §5.2](worker-node-setup.md#52-prerequisite-run-your-own-local-compreface-sidecar) for the equivalent core-aware sizing guidance on a native (non-container) install.
 
@@ -280,7 +278,7 @@ MEMORIAHUB_TOKEN=nod_...
 MEMORIAHUB_NODE_NAME=home-laptop
 MEMORIAHUB_CONCURRENCY=2
 ```
-The node adds opportunistic capacity on top of the API's own worker; both share the queue safely via `FOR UPDATE SKIP LOCKED` claiming — no coordination needed between them. **Face-provider parity matters:** if the server's active face provider is `compreface`, the node must also run `MEMORIAHUB_FACE_PROVIDER=compreface` (the container bundle default) or its face rows will land in a different, non-comparable embedding space.
+The node adds opportunistic capacity on top of the API's own worker; both share the queue safely via `FOR UPDATE SKIP LOCKED` claiming — no coordination needed between them. Face detection needs no extra configuration to stay consistent: `MEMORIAHUB_FACE_PROVIDER=compreface` is the only accepted value on both the node and the server, so there is no cross-provider embedding-space mismatch to guard against — just make sure the node's `compreface-core` sidecar is reachable (§4).
 
 ### (c) Control-plane VPS + worker fleet
 
@@ -348,3 +346,4 @@ Give the worker container an explicit memory limit and a matching heap cap using
 | 1.0 | July 2026 | AI Assistant | Initial consolidated operator reference for the worker-container architecture: API-side env vars, worker-container env vars, CompreFace sizing, credentials, four recommended presets, and fleet-health verification steps. |
 | 1.1 | July 2026 | AI Assistant | Documented worker-node memory/OOM hardening (`apps/cli/src/node/runtime-tuning.ts`): new §3.5, the three new env vars (`MEMORIAHUB_MAX_OLD_SPACE_MB`, `MEMORIAHUB_HEAP_SNAPSHOT`, `MEMORIAHUB_SHARP_CONCURRENCY`), and the core/RAM-aware `MEMORIAHUB_CONCURRENCY` default. |
 | 1.2 | July 2026 | AI Assistant | Documented the memory watchdog (`MEMORIAHUB_MEMWATCH`), the pre-OOM drain-and-restart safety valve (`MEMORIAHUB_HEAP_RESTART_FRACTION`), the CLIP-path onnxruntime mitigation, and the heap-snapshot capture recipe in §3.5 + §3.3. Companion to the leak investigation (issue #156). |
+| 1.3 | July 2026 | AI Assistant | Issue #113: CompreFace is now the sole face-recognition provider — `MEMORIAHUB_FACE_PROVIDER` defaults to and only accepts `compreface` on both the CLI-native and bundle paths, removing the former CLI-native-vs-bundle default mismatch and the associated Human-provider parity guidance in §4 and the preset in §6(b). |

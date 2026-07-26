@@ -45,9 +45,14 @@ const mockSettings: FaceSettingsResponse = {
       last4: 'abcd',
       baseUrl: 'http://cf:8000',
       region: null,
-      capabilities: { detect: true, embed: true, delegatedRecognize: false },
+      capabilities: { detect: true, embed: true },
     },
   ],
+  // 'rekognition' is kept here only as an arbitrary provider-key string to
+  // exercise "a second, unconfigured known provider" — the hook itself is
+  // provider-agnostic and does not special-case any provider name. Face
+  // provider support was standardized on CompreFace (issue #113); this is
+  // not asserting anything Rekognition-specific.
   knownProviders: [
     {
       provider: 'rekognition',
@@ -56,7 +61,7 @@ const mockSettings: FaceSettingsResponse = {
       last4: null,
       baseUrl: null,
       region: null,
-      capabilities: { detect: true, embed: false, delegatedRecognize: true },
+      capabilities: { detect: true, embed: false },
     },
   ],
   features: {
@@ -219,16 +224,22 @@ describe('useFaceSettings', () => {
       });
     });
 
-    it('forwards region when provided', async () => {
+    it('forwards region when provided (generic pass-through — the hook does not special-case any provider)', async () => {
+      // `region` was only ever surfaced in the UI for the now-removed AWS
+      // Rekognition provider, but it remains a valid field on the wire
+      // type (`putFaceCredentials`'s body), and `saveCredentials` is a
+      // provider-agnostic passthrough. This keeps coverage that the hook
+      // itself doesn't drop the field, using a synthetic provider key so
+      // it doesn't imply any specific real provider still accepts region.
       mockPutFaceCredentials.mockResolvedValue(undefined);
 
       const { result } = renderHook(() => useFaceSettings());
 
       await act(async () => {
-        await result.current.saveCredentials('rekognition', { region: 'us-west-2' });
+        await result.current.saveCredentials('testprovider', { region: 'us-west-2' });
       });
 
-      expect(mockPutFaceCredentials).toHaveBeenCalledWith('rekognition', { region: 'us-west-2' });
+      expect(mockPutFaceCredentials).toHaveBeenCalledWith('testprovider', { region: 'us-west-2' });
     });
 
     it('propagates errors from putFaceCredentials', async () => {

@@ -2,7 +2,7 @@
  * Unit tests for FaceMatchingService.
  *
  * Covers: cosineSimilarity math, computePersonCentroid, matchFaceToPerson,
- * matchFaceByExternalId, and threshold configuration from ConfigService.
+ * and threshold configuration from ConfigService.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -184,7 +184,7 @@ describe('FaceMatchingService', () => {
       expect(s.usesPgvectorFor(vec(128))).toBe(false);
     });
 
-    it('returns false for a 1024-d ("human") embedding even on the pgvector backend', async () => {
+    it('returns false for a non-128-length (1024-d) embedding even on the pgvector backend', async () => {
       const s = await makeService('pgvector');
       expect(s.usesPgvectorFor(vec(1024))).toBe(false);
     });
@@ -415,57 +415,6 @@ describe('FaceMatchingService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // matchFaceByExternalId
-  // -------------------------------------------------------------------------
-
-  describe('matchFaceByExternalId', () => {
-    it('returns personId when face with matching externalFaceId is found', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue({
-        personId: 'person-delegated',
-      });
-
-      const result = await service.matchFaceByExternalId('circle-1', 'ext-abc');
-
-      expect(result).toEqual({ personId: 'person-delegated' });
-    });
-
-    it('returns null when no face with that externalFaceId exists in the circle', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(null);
-
-      const result = await service.matchFaceByExternalId('circle-1', 'ext-notfound');
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when the matching face has no personId', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue({ personId: null });
-
-      const result = await service.matchFaceByExternalId('circle-1', 'ext-orphan');
-
-      expect(result).toBeNull();
-    });
-
-    it('queries face with circle scoping and active person filter', async () => {
-      (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(null);
-
-      await service.matchFaceByExternalId('circle-xyz', 'ext-123');
-
-      expect(mockPrisma.face.findFirst).toHaveBeenCalledWith({
-        where: {
-          circleId: 'circle-xyz',
-          externalFaceId: 'ext-123',
-          personId: { not: null },
-          person: {
-            deletedAt: null,
-            mergedIntoId: null,
-          },
-        },
-        select: { personId: true },
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // matchFaceToArchived
   // -------------------------------------------------------------------------
 
@@ -676,7 +625,7 @@ describe('FaceMatchingService', () => {
         expect(result).toBeNull();
       });
 
-      it('falls back to the in-app path for a 1024-d ("human") embedding even with pgvector configured', async () => {
+      it('falls back to the in-app path for a non-128-length (1024-d) embedding even with pgvector configured', async () => {
         const pgvectorConfig = makeConfigService({ FACE_VECTOR_BACKEND: 'pgvector' });
         const module: TestingModule = await Test.createTestingModule({
           providers: [

@@ -149,7 +149,6 @@ describe('registerWorkerNode', () => {
     // Only geocode's (empty) requirements are satisfiable with everything
     // unavailable — makes auto-detected eligible types deterministic.
     sharp: { available: false },
-    human: { available: false },
     ffmpeg: { available: false },
     ffprobe: { available: false },
     compreface: { available: false },
@@ -167,7 +166,7 @@ describe('registerWorkerNode', () => {
         name: 'worker-box42',
         concurrency: 3,
         requestedTypes: ['geocode', 'auto_tagging'],
-        faceProvider: 'human',
+        faceProvider: 'compreface',
         cliVersion: '1.2.3',
       },
       { detectFn, saveConfigFn, hostnameFn: () => 'box42' },
@@ -195,7 +194,7 @@ describe('registerWorkerNode', () => {
         concurrency: 3,
         eligibleTypes: ['geocode', 'auto_tagging'],
         pollIntervalMs: DEFAULT_NODE_POLL_MS,
-        faceProvider: 'human',
+        faceProvider: 'compreface',
         comprefaceUrl: undefined,
       },
     });
@@ -212,7 +211,7 @@ describe('registerWorkerNode', () => {
         name: 'worker-box42',
         concurrency: 1,
         requestedTypes: ['geocode'],
-        faceProvider: 'human',
+        faceProvider: 'compreface',
         cliVersion: '1.2.3',
       },
       { detectFn, saveConfigFn, hostnameFn: () => 'box42' },
@@ -234,7 +233,7 @@ describe('registerWorkerNode', () => {
         name: 'n',
         concurrency: 1,
         requestedTypes: [],
-        faceProvider: 'human',
+        faceProvider: 'compreface',
         cliVersion: '1.2.3',
       },
       { detectFn, saveConfigFn, hostnameFn: () => 'box42' },
@@ -259,7 +258,7 @@ describe('registerWorkerNode', () => {
         name: 'n',
         concurrency: 1,
         requestedTypes: ['geocode'],
-        faceProvider: 'human',
+        faceProvider: 'compreface',
         cliVersion: '1.2.3',
       },
       { detectFn, saveConfigFn, hostnameFn: () => 'box42' },
@@ -284,7 +283,7 @@ describe('registerWorkerNode', () => {
           name: 'n',
           concurrency: 1,
           requestedTypes: ['geocode'],
-          faceProvider: 'human',
+          faceProvider: 'compreface',
           cliVersion: '1.2.3',
         },
         { detectFn, saveConfigFn, hostnameFn: () => 'box42' },
@@ -298,14 +297,14 @@ describe('supportedTypes', () => {
   it('returns only the job types whose requirements are fully satisfied', () => {
     const caps: Record<string, CapabilityStatus> = {
       sharp: { available: true },
-      human: { available: false },
       ffmpeg: { available: true },
       ffprobe: { available: false },
+      // compreface intentionally absent/unavailable — face_detection requires it.
     };
-    const types = supportedTypes(caps, 'human');
+    const types = supportedTypes(caps, 'compreface');
     expect(types).toContain('thumbnail_regen'); // sharp + ffmpeg
     expect(types).toContain('geocode'); // no requirements
-    expect(types).not.toContain('face_detection'); // human missing
+    expect(types).not.toContain('face_detection'); // compreface missing
     expect(types).not.toContain('social_media_detection'); // ffprobe missing
   });
 });

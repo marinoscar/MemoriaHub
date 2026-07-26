@@ -127,7 +127,7 @@ beforeEach(() => {
   modelManifest = [{ name: 'm1' }];
   mockDetectCapabilities.mockReset().mockResolvedValue({
     sharp: { available: true, detail: 'sharp' },
-    human: { available: true, detail: '@vladmandic/human' },
+    onnxruntime: { available: true, detail: 'onnxruntime-node' },
   });
   mockMissingRequirements.mockReset().mockReturnValue([]);
   mockEvaluateStartupSelfTest
@@ -180,19 +180,19 @@ describe('NodeDashboard doctor overlay ([r]) — one capability issue', () => {
   it('shows the summary count plus only the offending row', async () => {
     mockDetectCapabilities.mockResolvedValue({
       sharp: { available: true, detail: 'sharp' },
-      human: { available: true, detail: '@vladmandic/human' },
+      onnxruntime: { available: true, detail: 'onnxruntime-node' },
     });
-    // Self-test degrades "human" to not-operational; "sharp" stays fine.
+    // Self-test degrades "onnxruntime" to not-operational; "sharp" stays fine.
     mockRunOperationalSelfTests.mockImplementation(async (caps: unknown) => ({
       ...(caps as Record<string, unknown>),
-      human: { available: false, detail: 'human model not downloaded yet' },
+      onnxruntime: { available: false, detail: 'CLIP model not downloaded yet' },
     }));
 
     const { plain, unmount } = await openDoctorOverlay();
 
     expect(plain).toContain('1/2 capabilities operational — showing 1 needing attention:');
-    expect(plain).toContain('human');
-    expect(plain).toContain('human model not downloaded yet');
+    expect(plain).toContain('onnxruntime');
+    expect(plain).toContain('CLIP model not downloaded yet');
     expect(plain).not.toContain('sharp');
     unmount();
   });
@@ -202,14 +202,14 @@ describe('NodeDashboard doctor overlay ([r]) — startup gate blocked', () => {
   it('renders the BLOCKED verdict and lists the required capability that failed', async () => {
     mockEvaluateStartupSelfTest.mockReturnValue({
       ok: false,
-      blockingFailures: [{ capability: 'human', jobType: 'face_detection', detail: 'model missing' }],
+      blockingFailures: [{ capability: 'compreface', jobType: 'face_detection', detail: 'sidecar unreachable' }],
       degraded: [],
     });
 
     const { plain, unmount } = await openDoctorOverlay();
 
     expect(plain).toContain('✖ Startup gate: BLOCKED');
-    expect(plain).toContain('human (required by face_detection)');
+    expect(plain).toContain('compreface (required by face_detection)');
     expect(plain).toContain('✖ Doctor found problems.');
     unmount();
   });
@@ -217,13 +217,13 @@ describe('NodeDashboard doctor overlay ([r]) — startup gate blocked', () => {
 
 describe('NodeDashboard doctor overlay ([r]) — one not-ready job type', () => {
   it('shows the summary count plus only the not-ready row', async () => {
-    mockMissingRequirements.mockImplementation((t: string) => (t === 'auto_tagging' ? ['human'] : []));
+    mockMissingRequirements.mockImplementation((t: string) => (t === 'auto_tagging' ? ['onnxruntime'] : []));
 
     const { plain, unmount } = await openDoctorOverlay();
 
     expect(plain).toContain('1/2 ready');
     expect(plain).toContain('✖ auto_tagging');
-    expect(plain).toContain('missing human');
+    expect(plain).toContain('missing onnxruntime');
     expect(plain).not.toContain('face_detection');
     unmount();
   });

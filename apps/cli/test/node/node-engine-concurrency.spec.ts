@@ -277,7 +277,7 @@ describe('NodeEngine heartbeat face-provider detectFn wiring', () => {
         eligibleTypes: [],
         pollIntervalMs: 5,
         heartbeatIntervalMs: 60_000,
-        // faceProvider/comprefaceUrl intentionally omitted (default 'human').
+        // faceProvider/comprefaceUrl intentionally omitted (default 'compreface').
       },
       detectFn,
     });

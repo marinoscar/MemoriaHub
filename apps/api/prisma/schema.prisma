@@ -745,7 +745,6 @@ model FaceProviderCredential {
   provider        String   @unique
   encryptedKey    String   @map("encrypted_key")
   baseUrl         String?  @map("base_url")
-  region          String?
   last4           String   @map("last4")
   enabled         Boolean  @default(true)
   updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
@@ -799,7 +798,6 @@ model Face {
   confidence        Float?
   landmarks         Json?
   embedding         Float[]
-  externalFaceId    String?   @map("external_face_id")
   providerKey       String    @map("provider_key")
   modelVersion      String    @map("model_version")
   manuallyAssigned  Boolean   @default(false) @map("manually_assigned")
@@ -834,7 +832,6 @@ model Face {
   @@index([circleId])
   @@index([mediaItemId])
   @@index([personId])
-  @@index([externalFaceId])
   @@index([circleId, hiddenAt])
   @@map("faces")
 }

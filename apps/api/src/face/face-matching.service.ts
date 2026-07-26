@@ -14,10 +14,13 @@
 //     `faces_sync_embedding_vec` — application code (including this service and
 //     Prisma) MUST NEVER write it directly; the trigger owns it. Because the
 //     column is vector(128), the pgvector path is only ever taken when the
-//     probe embedding is exactly 128-d (the `compreface` mobilenet provider);
-//     see the dimension guard in each method below. A 1024-d ('human' WASM)
-//     probe, or an empty embedding, would be dimensionally incompatible with
-//     `$1::vector(128)` and is routed to the in-app cosine path instead.
+//     probe embedding is exactly 128-d (the only dimensionality the CompreFace
+//     mobilenet provider produces); see the dimension guard in each method
+//     below. An empty embedding — e.g. a manually-associated Face row
+//     (`providerKey='manual'`, no bounding box, no embedding — see the
+//     "Manual People Association" feature) — is dimensionally incompatible
+//     with `$1::vector(128)` and is routed to the in-app cosine path instead,
+//     where it is filtered out before scoring.
 //   - 'app': the original path — load candidates into the process and compute
 //     cosine similarity in JS.
 //
@@ -31,8 +34,9 @@
 // used by the in-app path. Precision note: avg() over the float4 vector column
 // differs from the float8 mean at ~1e-7/element — negligible vs
 // FACE_MATCH_THRESHOLD 0.38; decision parity is preserved for practical
-// purposes. Persons with no vector-eligible faces (legacy 'human'-only 1024-d
-// embeddings) fall back to the float8 computePersonCentroid() path unchanged.
+// purposes. Persons with no vector-eligible faces (e.g. only manually
+// associated faces with empty embeddings) fall back to the float8
+// computePersonCentroid() path unchanged.
 //
 // Threshold conventions (ArcFace on LFW benchmark):
 //   - Same-person pairs typically score > 0.40 cosine similarity.
@@ -199,9 +203,11 @@ export class FaceMatchingService {
   /**
    * True when a probe embedding would be routed through the pgvector KNN path:
    * the resolved backend is 'pgvector' AND the embedding is exactly 128-d
-   * (the dimensionality mirrored into the vector(128) column). Exposed so
-   * callers (face-detection-core's auto-archive branch) can decide whether a
-   * per-probe indexed KNN beats preloading an in-app candidate set.
+   * (the dimensionality mirrored into the vector(128) column — the only
+   * dimensionality CompreFace produces). Empty embeddings (e.g. manually
+   * associated faces) fail this check and fall through to the in-app path.
+   * Exposed so callers (face-detection-core's auto-archive branch) can decide
+   * whether a per-probe indexed KNN beats preloading an in-app candidate set.
    */
   usesPgvectorFor(embedding: number[]): boolean {
     return (
@@ -297,9 +303,8 @@ export class FaceMatchingService {
    * decision parity is preserved for practical purposes.
    *
    * Falls back to the float8 computePersonCentroid() path when avg() returns
-   * NULL (person has only non-128-d 'human' or empty embeddings, so no
-   * embedding_vec rows exist) — behavior for legacy Human-only persons is
-   * unchanged.
+   * NULL (person has only empty-embedding faces — e.g. manually associated
+   * faces — so no embedding_vec rows exist).
    */
   async computePersonCentroidPgvector(personId: string): Promise<number[]> {
     const rows = await this.prisma.$queryRaw<
@@ -384,10 +389,10 @@ export class FaceMatchingService {
    *     matchThreshold — so the result is numerically identical to the in-app
    *     path; the vector column only accelerates candidate selection. See the
    *     KNN-candidate → centroid parity note in the class header.
-   *   - 'app', OR any non-128-d probe (1024-d 'human', empty): the full in-app
-   *     path below — score every active person's centroid in JS. The dimension
-   *     guard is mandatory because a 1024-d probe against a vector(128) column
-   *     would raise a dimensionality error.
+   *   - 'app', OR an empty probe (e.g. a manually associated face with no
+   *     embedding): the full in-app path below — score every active person's
+   *     centroid in JS. The dimension guard is mandatory because a non-128-d
+   *     probe against a vector(128) column would raise a dimensionality error.
    *
    * `embedding_vec` is a trigger-maintained (`faces_sync_embedding_vec`) derived
    * column; this method never writes it.
@@ -507,42 +512,6 @@ export class FaceMatchingService {
     }
 
     return null;
-  }
-
-  // ---------------------------------------------------------------------------
-  // matchFaceByExternalId
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Delegated-recognition path (e.g. AWS Rekognition).
-   *
-   * Rekognition does not return embeddings; instead it assigns an externalFaceId
-   * when a face is indexed into a collection. This method looks up whether any
-   * existing face in the circle — belonging to an active (non-deleted,
-   * non-merged-away) Person — has the same externalFaceId.
-   *
-   * Limitation: clustering of unknown faces is not possible on the delegated
-   * path because no embedding vector is available.
-   */
-  async matchFaceByExternalId(
-    circleId: string,
-    externalFaceId: string,
-  ): Promise<{ personId: string } | null> {
-    const face = await this.prisma.face.findFirst({
-      where: {
-        circleId,
-        externalFaceId,
-        personId: { not: null },
-        person: {
-          deletedAt: null,
-          mergedIntoId: null,
-        },
-      },
-      select: { personId: true },
-    });
-
-    if (!face?.personId) return null;
-    return { personId: face.personId };
   }
 
   // ---------------------------------------------------------------------------

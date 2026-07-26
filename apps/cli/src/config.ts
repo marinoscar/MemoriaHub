@@ -38,8 +38,14 @@ export interface NodeConfig {
   pollIntervalMs?: number;
   /** Human-friendly node name shown server-side. */
   name?: string;
-  /** Face-detection provider this node uses for local compute (default 'human'). */
-  faceProvider?: 'human' | 'compreface';
+  /**
+   * Face-detection provider this node uses for local compute. CompreFace is
+   * the only accepted value (Human/Rekognition were removed — issue #113);
+   * the field/env-var mechanism is kept structurally in case a future
+   * provider is added, but any other explicit value is rejected outright
+   * rather than silently coerced.
+   */
+  faceProvider?: 'compreface';
   /**
    * Base URL of a locally-running compreface-core sidecar this node calls for
    * face detection. Only meaningful when faceProvider is 'compreface'.
@@ -137,13 +143,19 @@ function applyEnvOverlay(base: CliConfig | null): CliConfig | null {
 
   const faceProvider = env['MEMORIAHUB_FACE_PROVIDER']?.trim();
   if (faceProvider) {
-    if (faceProvider === 'human' || faceProvider === 'compreface') {
+    if (faceProvider === 'compreface') {
       node.faceProvider = faceProvider;
       nodeTouched = true;
     } else {
-      ui.warn(
-        `Ignoring invalid MEMORIAHUB_FACE_PROVIDER="${faceProvider}" (expected 'human' or 'compreface').`,
+      // Reject outright rather than silently coercing/ignoring — an operator
+      // running a stale config (e.g. MEMORIAHUB_FACE_PROVIDER=human from
+      // before issue #113) must get an unambiguous failure, not confusing
+      // downstream behavior from a silently-dropped setting.
+      ui.error(
+        `Invalid MEMORIAHUB_FACE_PROVIDER="${faceProvider}". Only 'compreface' is supported ` +
+          '(Human and AWS Rekognition face providers were removed).',
       );
+      process.exit(1);
     }
   }
 

@@ -2227,13 +2227,9 @@ FaceDetectionService.processMediaItem()
 
 ### Embedding Storage and Matching
 
-- **Default backend (`FACE_VECTOR_BACKEND=app`):** Embeddings stored in a `Float[]` column. Cosine similarity computed in-process as `1 - (A·B)` where A and B are L2-normalized vectors. Dimension depends on provider: 128-d for `compreface` (mobilenet build), 1024-d for `human` WASM.
-- **pgvector backend (`FACE_VECTOR_BACKEND=pgvector`):** Requires the `vector` PostgreSQL extension. An optional follow-up migration converts the column to a native pgvector type and adds an `hnsw vector_cosine_ops` index. The declared dimension must match the active provider. Matching uses the `<=>` operator for native accelerated similarity search.
-- **Provider embedding space isolation:** CompreFace (128-d ArcFace mobilenet), `human` (1024-d WASM), and Rekognition embeddings are not cross-compatible. A circle must use one provider consistently. Switching providers requires re-processing all photos.
-
-### Rekognition Delegated Path
-
-When the active provider is `rekognition`, the app stores only an `externalFaceId` per face (from `IndexFaces`). Matching is delegated to the AWS collection via `SearchFacesByImage`; the app maps the returned external ID back to a `Person` record. No embedding vectors are stored in-app on this path.
+- **App backend (`FACE_VECTOR_BACKEND=app`):** Embeddings stored in a `Float[]` column. Cosine similarity computed in-process as `1 - (A·B)` where A and B are L2-normalized vectors. CompreFace is the sole face-recognition provider (issue #113 removed the Human WASM and AWS Rekognition alternatives), so embedding dimension is fixed at 128-d.
+- **pgvector backend (`FACE_VECTOR_BACKEND=pgvector`, now the default):** Requires the `vector` PostgreSQL extension. A derived `embedding_vec` column mirrors `embedding` via a database trigger and is indexed with HNSW `vector_cosine_ops`. Matching uses the `<=>` operator for native accelerated similarity search.
+- **Single embedding space:** since CompreFace is the only provider, every circle's face embeddings already live in the same 128-d ArcFace MobileFaceNet space — there is no cross-provider isolation concern to manage. Switching the CompreFace image tag/model build to a different embedding dimension would still require re-processing all photos.
 
 ### Biometric Privacy
 

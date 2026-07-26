@@ -4,34 +4,9 @@
  * IMPORTANT: SECRETS_ENCRYPTION_KEY must be set for encrypt/decrypt to work.
  * We set it in beforeAll and clean up in afterAll.
  *
- * The face provider registry imports optional Docker-only packages
- * (@tensorflow/tfjs, @vladmandic/human). We stub them here so the test file
- * compiles and runs without those packages being installed locally.
+ * CompreFace is the only registered face provider (keyless — no credentials
+ * required by default; an optional DB row may still store a custom baseUrl).
  */
-
-// Stub Docker-only optional packages before the registry module loads them.
-// { virtual: true } is required for packages not installed locally.
-jest.mock('@tensorflow/tfjs', () => ({
-  setBackend: jest.fn().mockResolvedValue(undefined),
-  ready: jest.fn().mockResolvedValue(undefined),
-  tensor3d: jest.fn().mockReturnValue({ dispose: jest.fn() }),
-}), { virtual: true });
-jest.mock('@tensorflow/tfjs-backend-wasm', () => ({}), { virtual: true });
-jest.mock('@vladmandic/human/dist/human.node-wasm.js', () => ({
-  Human: jest.fn().mockImplementation(() => ({
-    load: jest.fn().mockResolvedValue(undefined),
-    warmup: jest.fn().mockResolvedValue(undefined),
-    detect: jest.fn().mockResolvedValue({ face: [] }),
-  })),
-  default: jest.fn(),
-}), { virtual: true });
-jest.mock('sharp', () =>
-  jest.fn().mockReturnValue({
-    ensureAlpha: jest.fn().mockReturnThis(),
-    raw: jest.fn().mockReturnThis(),
-    toBuffer: jest.fn().mockResolvedValue({ data: Buffer.alloc(0), info: { width: 1, height: 1 } }),
-  }),
-);
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -68,7 +43,7 @@ describe('FaceSettingsService', () => {
     mockPrisma = createMockPrismaService();
     mockRegistry = {
       get: jest.fn(),
-      keys: jest.fn().mockReturnValue(['compreface', 'rekognition', 'human']),
+      keys: jest.fn().mockReturnValue(['compreface']),
     };
     mockSystemSettings = {
       getSettings: jest.fn(),
@@ -98,7 +73,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: 'somebase64ciphertext',
         last4: '1234',
         baseUrl: 'http://cf:8000',
-        region: null,
         enabled: true,
         updatedByUserId: 'user-1',
         createdAt: new Date(),
@@ -139,7 +113,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: 'somebase64',
         last4: 'abcd',
         baseUrl: null,
-        region: null,
         enabled: true,
         updatedByUserId: 'user-2',
         createdAt: new Date(),
@@ -159,7 +132,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: 'cipher',
         last4: '9999',
         baseUrl: 'http://compreface:8000',
-        region: null,
         enabled: true,
         updatedByUserId: 'user-1',
         createdAt: new Date(),
@@ -176,30 +148,6 @@ describe('FaceSettingsService', () => {
       expect(upsertCall.create.baseUrl).toBe('http://compreface:8000');
     });
 
-    it('passes region through to the upsert', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'rekognition',
-        encryptedKey: 'cipher',
-        last4: '',
-        baseUrl: null,
-        region: 'us-west-2',
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await service.upsertCredential(
-        'rekognition',
-        { region: 'us-west-2' },
-        'user-1',
-      );
-
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.region).toBe('us-west-2');
-    });
-
     it('works with baseUrl only and no apiKey (compreface keyless case)', async () => {
       mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
         id: 'cred-1',
@@ -207,7 +155,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: 'cipher',
         last4: '',
         baseUrl: 'http://compreface-core:3000',
-        region: null,
         enabled: true,
         updatedByUserId: 'user-1',
         createdAt: new Date(),
@@ -229,31 +176,6 @@ describe('FaceSettingsService', () => {
       expect(result.baseUrl).toBe('http://compreface-core:3000');
     });
 
-    it('works with no apiKey (Rekognition case): rawKey empty, last4 empty', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'rekognition',
-        encryptedKey: 'cipher',
-        last4: '',
-        baseUrl: null,
-        region: 'us-east-1',
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const result = await service.upsertCredential(
-        'rekognition',
-        { region: 'us-east-1' },
-        'user-1',
-      );
-
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.last4).toBe('');
-      expect(result.last4).toBeNull(); // empty string is coerced to null in the return
-    });
-
     it('returns object WITHOUT encryptedKey property', async () => {
       mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
         id: 'cred-1',
@@ -261,7 +183,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: 'should-not-appear',
         last4: 'zzzz',
         baseUrl: null,
-        region: null,
         enabled: true,
         updatedByUserId: 'user-1',
         createdAt: new Date(),
@@ -285,14 +206,13 @@ describe('FaceSettingsService', () => {
           provider: 'compreface',
           last4: 'abcd',
           baseUrl: 'http://cf:8000',
-          region: null,
           enabled: true,
           updatedAt: new Date(),
         },
       ] as any);
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
       mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true, delegatedRecognize: false },
+        capabilities: { detect: true, embed: true },
       });
 
       const result = await service.getSettings();
@@ -304,13 +224,13 @@ describe('FaceSettingsService', () => {
 
     it('returns providers with configured:true for stored credentials', async () => {
       mockPrisma.faceProviderCredential.findMany.mockResolvedValue([
-        { provider: 'compreface', last4: 'efgh', baseUrl: 'http://cf:8000', region: null, enabled: true, updatedAt: new Date() },
+        { provider: 'compreface', last4: 'efgh', baseUrl: 'http://cf:8000', enabled: true, updatedAt: new Date() },
       ] as any);
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
       mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true, delegatedRecognize: false },
+        capabilities: { detect: true, embed: true },
       });
-      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition']);
+      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
 
       const result = await service.getSettings();
 
@@ -323,9 +243,9 @@ describe('FaceSettingsService', () => {
     it('returns knownProviders listing unconfigured providers', async () => {
       mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition']);
+      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
       mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true, delegatedRecognize: false },
+        capabilities: { detect: true, embed: true },
         requiresCredentials: true,
       });
 
@@ -363,9 +283,9 @@ describe('FaceSettingsService', () => {
     });
 
     it('includes capabilities from registry for configured providers', async () => {
-      const expectedCaps = { detect: true, embed: true, delegatedRecognize: false };
+      const expectedCaps = { detect: true, embed: true };
       mockPrisma.faceProviderCredential.findMany.mockResolvedValue([
-        { provider: 'compreface', last4: 'abcd', baseUrl: null, region: null, enabled: true, updatedAt: new Date() },
+        { provider: 'compreface', last4: 'abcd', baseUrl: null, enabled: true, updatedAt: new Date() },
       ] as any);
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
       mockRegistry.keys.mockReturnValue(['compreface']);
@@ -377,60 +297,21 @@ describe('FaceSettingsService', () => {
       expect(cf?.capabilities).toEqual(expectedCaps);
     });
 
-    // ---- human (keyless) provider tests ------------------------------------
-
-    it('includes human in providers (not knownProviders) with configured:true, requiresCredentials:false', async () => {
+    it('includes a second registered provider in knownProviders with requiresCredentials:true when not configured', async () => {
       mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
       mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'human') {
-          return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+        if (key === 'other-provider') {
+          return { capabilities: { detect: true, embed: true }, requiresCredentials: true };
         }
-        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: true };
+        return { capabilities: { detect: true, embed: true }, requiresCredentials: false };
       });
 
       const result = await service.getSettings();
 
-      const humanProvider = result.providers.find((p) => p.provider === 'human');
-      expect(humanProvider).toBeDefined();
-      expect(humanProvider!.configured).toBe(true);
-      expect(humanProvider!.enabled).toBe(true);
-      expect(humanProvider!.requiresCredentials).toBe(false);
-    });
-
-    it('does NOT include human in knownProviders', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
-      mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'human') {
-          return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
-        }
-        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: true };
-      });
-
-      const result = await service.getSettings();
-
-      const humanInKnown = result.knownProviders.find((p) => p.provider === 'human');
-      expect(humanInKnown).toBeUndefined();
-    });
-
-    it('includes compreface and rekognition in knownProviders with requiresCredentials:true when not configured', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
-      mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'human') {
-          return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
-        }
-        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: true };
-      });
-
-      const result = await service.getSettings();
-
-      expect(result.knownProviders.map((p) => p.provider)).toContain('compreface');
-      expect(result.knownProviders.map((p) => p.provider)).toContain('rekognition');
+      expect(result.knownProviders.map((p) => p.provider)).toContain('other-provider');
+      expect(result.knownProviders.map((p) => p.provider)).not.toContain('compreface');
     });
 
     // ---- compreface (keyless) provider tests --------------------------------
@@ -438,13 +319,13 @@ describe('FaceSettingsService', () => {
     it('includes compreface in providers (not knownProviders) with configured:true, requiresCredentials:false when keyless', async () => {
       mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
       mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'rekognition') {
-          return { capabilities: { detect: true, embed: true, delegatedRecognize: true }, requiresCredentials: true };
+        if (key === 'other-provider') {
+          return { capabilities: { detect: true, embed: true }, requiresCredentials: true };
         }
-        // compreface and human are both keyless
-        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+        // compreface is keyless
+        return { capabilities: { detect: true, embed: true }, requiresCredentials: false };
       });
 
       const result = await service.getSettings();
@@ -459,12 +340,12 @@ describe('FaceSettingsService', () => {
     it('does NOT include compreface in knownProviders when it is keyless', async () => {
       mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'rekognition', 'human']);
+      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
       mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'rekognition') {
-          return { capabilities: { detect: true, embed: true, delegatedRecognize: true }, requiresCredentials: true };
+        if (key === 'other-provider') {
+          return { capabilities: { detect: true, embed: true }, requiresCredentials: true };
         }
-        return { capabilities: { detect: true, embed: true, delegatedRecognize: false }, requiresCredentials: false };
+        return { capabilities: { detect: true, embed: true }, requiresCredentials: false };
       });
 
       const result = await service.getSettings();
@@ -481,7 +362,7 @@ describe('FaceSettingsService', () => {
       mockSystemSettings.getSettings.mockResolvedValue({ face: null });
       mockRegistry.keys.mockReturnValue(['compreface']);
       mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true, delegatedRecognize: false },
+        capabilities: { detect: true, embed: true },
         requiresCredentials: false,
       });
 
@@ -516,7 +397,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: 'cipher',
         last4: 'abcd',
         baseUrl: null,
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -546,7 +426,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptedValue,
         last4: '0000',
         baseUrl: 'http://cf:8000',
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -573,7 +452,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptedValue,
         last4: 'aaaa',
         baseUrl: 'http://cf:8000',
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -595,7 +473,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptedValue,
         last4: 'aaaa',
         baseUrl: 'http://cf:8000',
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -683,7 +560,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptedValue,
         last4: 'test',
         baseUrl: null,
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -704,7 +580,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptedValue,
         last4: 'test',
         baseUrl: 'http://compreface:8000',
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -714,27 +589,6 @@ describe('FaceSettingsService', () => {
       const creds = await service.resolveCredentials('compreface');
 
       expect(creds.baseUrl).toBe('http://compreface:8000');
-    });
-
-    it('returns region when configured', async () => {
-      const encryptedValue = encryptSecret('any-key');
-
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'rekognition',
-        encryptedKey: encryptedValue,
-        last4: '',
-        baseUrl: null,
-        region: 'eu-west-1',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const creds = await service.resolveCredentials('rekognition');
-
-      expect(creds.region).toBe('eu-west-1');
     });
 
     it('throws BadRequestException when provider is not configured', async () => {
@@ -756,7 +610,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptSecret('some-key'),
         last4: 'test',
         baseUrl: null,
-        region: null,
         enabled: false,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -773,7 +626,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptSecret('some-key'),
         last4: 'test',
         baseUrl: null,
-        region: null,
         enabled: false,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -783,12 +635,12 @@ describe('FaceSettingsService', () => {
       await expect(service.resolveCredentials('compreface')).rejects.toThrow(/disabled/i);
     });
 
-    it('returns {} for keyless provider (human) when no DB row exists', async () => {
+    it('returns {} for keyless provider (compreface) when no DB row exists', async () => {
       mockRegistry.get.mockReturnValue({ requiresCredentials: false });
       // The service checks for an optional baseUrl override row even for keyless providers.
       mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
 
-      const result = await service.resolveCredentials('human');
+      const result = await service.resolveCredentials('compreface');
 
       expect(result).toEqual({});
     });
@@ -801,7 +653,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: '',
         last4: '',
         baseUrl: 'http://custom-compreface:9999',
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -821,7 +672,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: '',
         last4: '',
         baseUrl: null,
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -832,22 +682,6 @@ describe('FaceSettingsService', () => {
 
       // No custom baseUrl stored — provider falls back to env/default
       expect(result).toEqual({});
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // testProvider (human)
-  // ---------------------------------------------------------------------------
-  describe('testProvider — human provider', () => {
-    it('calls testConnection with {} for human provider when no DB row', async () => {
-      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ requiresCredentials: false, testConnection: mockTestConnection });
-      // The service looks up an optional baseUrl override row even for keyless providers.
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      await service.testProvider({ provider: 'human' });
-
-      expect(mockTestConnection).toHaveBeenCalledWith({});
     });
   });
 
@@ -875,7 +709,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: '',
         last4: '',
         baseUrl: 'http://compreface-custom:3000',
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -885,32 +718,6 @@ describe('FaceSettingsService', () => {
       await service.testProvider({ provider: 'compreface' });
 
       expect(mockTestConnection).toHaveBeenCalledWith({ baseUrl: 'http://compreface-custom:3000' });
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // setDetectionFeature (human)
-  // ---------------------------------------------------------------------------
-  describe('setDetectionFeature — human provider', () => {
-    it('succeeds for human provider (no credential row needed)', async () => {
-      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
-
-      const result = await service.setDetectionFeature(
-        { provider: 'human', model: 'human-faceres-1024' },
-        'user-1',
-      );
-
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        expect.objectContaining({
-          face: {
-            features: {
-              detection: { provider: 'human', model: 'human-faceres-1024' },
-            },
-          },
-        }),
-        'user-1',
-      );
-      expect(result).toEqual({ provider: 'human', model: 'human-faceres-1024' });
     });
   });
 
@@ -928,7 +735,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptedValue,
         last4: 'xkey',
         baseUrl: 'http://cf:8000',
-        region: null,
         enabled: true,
         updatedByUserId: null,
         createdAt: new Date(),
@@ -955,7 +761,6 @@ describe('FaceSettingsService', () => {
         encryptedKey: encryptedValue,
         last4: 'abcd',
         baseUrl: 'http://cf:8000',
-        region: null,
         enabled: false,
         updatedByUserId: null,
         createdAt: new Date(),

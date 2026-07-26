@@ -52,27 +52,17 @@ export const faceDetectionResultSchema = z.object({
       }),
       confidence: z.number().optional(),
       /**
-       * Face embedding. Dimensionality is provider-dependent (1024-d for the
-       * Human provider, 128-d for CompreFace mobilenet), so no hard length
-       * is pinned here — the server-side persist half validates against the
-       * active provider's expected dimensions.
+       * Face embedding. CompreFace mobilenet embeddings are always 128-d —
+       * no hard length is pinned here, but the server-side persist half
+       * validates against the active provider's expected dimensions.
        */
       embedding: z.array(z.number()).min(1),
       /**
-       * Provider-specific landmark data (e.g. CompreFace facial landmarks).
+       * Provider-specific landmark data (CompreFace facial landmarks).
        * Opaque passthrough — persisted verbatim, never interpreted by the
-       * compute/persist split. Absent for providers that don't report
-       * landmarks (e.g. the node's Human provider).
+       * compute/persist split.
        */
       landmarks: z.unknown().optional(),
-      /**
-       * Provider-assigned face ID for delegated-recognition providers (e.g.
-       * AWS Rekognition collections). Absent for keyless/embedding-based
-       * providers (Human, CompreFace) and for every node-computed result — a
-       * distributed worker node always runs the keyless Human provider, never
-       * a delegated one.
-       */
-      externalFaceId: z.string().optional(),
     }),
   ),
 });

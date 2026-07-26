@@ -3003,13 +3003,11 @@ For future versions, the API may adopt URL-based versioning: `/api/v2/...`
 
 All endpoints in this group require the Admin system role plus the listed permission. This group mirrors the [AI Settings](#ai-settings) group in structure and credential-handling approach. Only the settings API is active in Phase 1; detection, people management, and recognition endpoints ship in later phases.
 
-**Provider abstraction:** The face domain supports pluggable providers via a `FaceProvider` interface. Three providers are shipped:
+**Provider abstraction:** The face domain supports pluggable providers via a `FaceProvider` interface. CompreFace is the sole provider (issue #113 removed the Human WASM and AWS Rekognition alternatives that previously existed):
 
 | Provider key | Type | Embeddings | Notes |
 |---|---|---|---|
-| `human` | Keyless in-process WASM (no external container) | 1024-d, owned by app | Runs in-process; no credentials needed. |
-| `compreface` | Keyless core sidecar (default) | 128-d ArcFace mobilefacenet, owned by app | `compreface-core` container (no DB, no API key); API calls directly to `http://compreface-core:3000`. |
-| `rekognition` | AWS managed (opt-in) | None returned | Delegated recognition — AWS performs matching against a gallery indexed by the app; only `externalFaceId` is stored. |
+| `compreface` | Keyless core sidecar (default, only provider) | 128-d ArcFace mobilefacenet, owned by app | `compreface-core` container (no DB, no API key); API calls directly to `http://compreface-core:3000`. |
 
 Adding a new provider requires implementing the `FaceProvider` interface and adding one registry entry.
 
@@ -3036,20 +3034,9 @@ Returns configured and known (unconfigured) face providers, per-provider capabil
       "updatedAt": "2026-06-17T10:00:00.000Z"
     }
   ],
-  "knownProviders": [
-    {
-      "provider": "rekognition",
-      "configured": false,
-      "enabled": false,
-      "last4": null,
-      "baseUrl": null,
-      "region": null
-    }
-  ],
+  "knownProviders": [],
   "capabilities": {
-    "human": { "detect": true, "embed": true, "delegatedRecognize": false, "requiresCredentials": false },
-    "compreface": { "detect": true, "embed": true, "delegatedRecognize": false, "requiresCredentials": false },
-    "rekognition": { "detect": true, "embed": false, "delegatedRecognize": true }
+    "compreface": { "detect": true, "embed": true, "requiresCredentials": false }
   },
   "features": {
     "detection": { "provider": "compreface", "model": "compreface-arcface-mobilefacenet-128" }
@@ -3063,25 +3050,23 @@ Returns configured and known (unconfigured) face providers, per-provider capabil
 
 **Permission:** `face_settings:write`
 
-Upsert credentials for the given provider key. The API key (and region for Rekognition) is encrypted at rest with AES-256-GCM; the plaintext is never stored or returned.
+Upsert credentials for the given provider key. The API key is encrypted at rest with AES-256-GCM; the plaintext is never stored or returned.
 
-**Path Parameter:** `provider` — `human` | `compreface` | `rekognition`
+**Path Parameter:** `provider` — `compreface` (the only value)
 
 **Request Body:**
 ```json
 {
   "apiKey": "...",
   "baseUrl": "http://compreface-core:3000",
-  "region": "us-east-1",
   "enabled": true
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `apiKey` | string | No | Provider API key or secret. Not applicable for keyless providers (`human`, `compreface`). |
-| `baseUrl` | string | No | Override default base URL. For `compreface` this is the only meaningful field; for `human` and `rekognition` it is not used. |
-| `region` | string | No | AWS region (Rekognition only) |
+| `apiKey` | string | No | Not applicable — CompreFace is keyless. |
+| `baseUrl` | string | No | Override the default `compreface-core` base URL. |
 | `enabled` | boolean | No | Enable or disable this provider (default: `true`) |
 
 **Response:**

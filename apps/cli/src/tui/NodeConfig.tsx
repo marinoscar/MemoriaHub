@@ -20,16 +20,15 @@
  *     for the multi-select over NODE_JOB_TYPES — the repo ships no multiselect
  *     component, so this mirrors the checkbox convention used elsewhere.
  *
- * The face-detection provider (human/compreface) is a menu row that toggles
- * in place with [space] — no sub-screen, mirroring the same two-option-toggle
- * convention added to NodeRegister.tsx's wizard. When the provider is
- * 'compreface', a CompreFace URL row appears below it and is edited via the
- * same 'edit-text' TextInput flow as the other scalar fields.
+ * CompreFace is the only supported face-detection provider (Human and AWS
+ * Rekognition were removed, issue #113), so the "Face provider" row is a
+ * static, non-toggleable display line rather than a menu item — there is
+ * nothing to switch to. The CompreFace URL row is always shown (unlike the
+ * old conditional-on-provider display) and is edited via the same
+ * 'edit-text' TextInput flow as the other scalar fields.
  *
  * Steps:
- *   'menu'        — SelectInput over the editable fields; Esc/q → onBack;
- *                   [space] on the highlighted "Face provider" row toggles it
- *                   in place without entering a sub-step
+ *   'menu'        — SelectInput over the editable fields; Esc/q → onBack
  *   'edit-text'   — inline TextInput for a scalar field (name / concurrency /
  *                   poll interval / CompreFace URL)
  *   'edit-types'  — checkbox list for eligible job types
@@ -45,7 +44,7 @@ import { DEFAULT_COMPREFACE_URL, NODE_JOB_TYPES } from '../node/capabilities.js'
 import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
 import { BOX_BORDER } from './theme.js';
 
-type FaceProvider = 'human' | 'compreface';
+type FaceProvider = 'compreface';
 
 // ---------------------------------------------------------------------------
 // Defaults (mirror commands/node.ts)
@@ -124,7 +123,7 @@ function initialDraft(config: CliConfig): Draft {
       config.node?.eligibleTypes && config.node.eligibleTypes.length > 0
         ? config.node.eligibleTypes.filter((t) => (NODE_JOB_TYPES as readonly string[]).includes(t))
         : [...NODE_JOB_TYPES],
-    faceProvider: config.node?.faceProvider ?? 'human',
+    faceProvider: 'compreface',
     comprefaceUrl: config.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL,
   };
 }
@@ -145,12 +144,6 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
   const [typeCursor, setTypeCursor] = useState<number>(0);
   const [typeSelection, setTypeSelection] = useState<Set<string>>(new Set());
 
-  // Tracks which menu row is currently highlighted (via SelectInput's
-  // onHighlight) so [space] on the "Face provider" row can toggle it in
-  // place without SelectInput itself knowing about that field's special
-  // toggle behavior.
-  const [highlightedValue, setHighlightedValue] = useState<string>('name');
-
   // Persist the whole node block and surface the new config upward.
   const persist = useCallback(
     (next: Draft): void => {
@@ -162,7 +155,7 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
           pollIntervalMs: next.pollIntervalMs,
           eligibleTypes: next.eligibleTypes,
           faceProvider: next.faceProvider,
-          comprefaceUrl: next.faceProvider === 'compreface' ? next.comprefaceUrl.trim() || DEFAULT_COMPREFACE_URL : undefined,
+          comprefaceUrl: next.comprefaceUrl.trim() || DEFAULT_COMPREFACE_URL,
         },
       };
       saveConfig(newConfig);
@@ -171,29 +164,11 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
     [config, onSaved],
   );
 
-  // Toggle the face-detection provider in place (used by both [space] on the
-  // highlighted menu row and pressing Enter on that row via handleSelect).
-  // Mirrors handleSubmit's pattern of reading `draft` from closure state
-  // rather than a functional setState updater, keeping the persist side
-  // effect outside of React's state-update machinery.
-  const toggleFaceProvider = useCallback((): void => {
-    const next: Draft = { ...draft, faceProvider: draft.faceProvider === 'human' ? 'compreface' : 'human' };
-    setDraft(next);
-    persist(next);
-    setSuccessMsg(`Saved face provider = ${next.faceProvider}`);
-    setErrorMsg('');
-  }, [draft, persist]);
-
-  // ---- menu-step keys (Esc/q back; [space] toggles Face provider row;
-  // SelectInput owns arrows+Enter) ----
+  // ---- menu-step keys (Esc/q back; SelectInput owns arrows+Enter) ----
   useInput((input, key) => {
     if (step !== 'menu') return;
     if (key.escape || input === 'q') {
       onBack();
-      return;
-    }
-    if (input === ' ' && highlightedValue === 'faceProvider') {
-      toggleFaceProvider();
       return;
     }
     setSuccessMsg('');
@@ -268,11 +243,6 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
           setTypeCursor(0);
           setStep('edit-types');
           break;
-        case 'faceProvider':
-          // Enter on this row toggles it in place, same effect as [space] —
-          // there is no sub-screen for a two-option field.
-          toggleFaceProvider();
-          break;
         case 'comprefaceUrl':
           setEditingField('comprefaceUrl');
           setInputVal(draft.comprefaceUrl);
@@ -283,7 +253,7 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
           break;
       }
     },
-    [draft, toggleFaceProvider],
+    [draft],
   );
 
   // ---- TextInput submit for scalar fields ----
@@ -380,10 +350,7 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
       { label: `Node name        = ${draft.name || '(unnamed)'}`, value: 'name' },
       { label: `Concurrency      = ${draft.concurrency}`, value: 'concurrency' },
       { label: `Poll interval    = ${draft.pollIntervalMs} ms`, value: 'poll' },
-      { label: `Face provider    = ${draft.faceProvider}`, value: 'faceProvider' },
-      ...(draft.faceProvider === 'compreface'
-        ? [{ label: `CompreFace URL   = ${draft.comprefaceUrl}`, value: 'comprefaceUrl' }]
-        : []),
+      { label: `CompreFace URL   = ${draft.comprefaceUrl}`, value: 'comprefaceUrl' },
       {
         label: `Eligible types   = ${draft.eligibleTypes.length}/${NODE_JOB_TYPES.length} selected`,
         value: 'types',
@@ -395,9 +362,10 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Configuration</Text>
         <Text dimColor>Select a field to edit. Changes are saved immediately.</Text>
+        <Text dimColor>Face provider    = compreface (fixed — the only supported provider)</Text>
 
         <Box marginTop={1}>
-          <SelectInput items={items} onSelect={handleSelect} onHighlight={(item) => setHighlightedValue(item.value)} />
+          <SelectInput items={items} onSelect={handleSelect} />
         </Box>
 
         {successMsg ? (
@@ -412,7 +380,7 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
         ) : null}
 
         <Box marginTop={1}>
-          <Text dimColor>[↑/↓] navigate  [Enter] edit  [Space] toggle Face provider  [Esc/q] back</Text>
+          <Text dimColor>[↑/↓] navigate  [Enter] edit  [Esc/q] back</Text>
         </Box>
       </Box>
     );

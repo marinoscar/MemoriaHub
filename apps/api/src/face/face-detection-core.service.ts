@@ -7,7 +7,7 @@
 //
 // Responsibilities:
 //   - resolveProviderAndCreds()   — load active detection config + credentials
-//   - detectWithThrottleMapping() — wrap provider.detect + Rekognition throttle mapping
+//   - detectWithThrottleMapping() — wrap provider.detect (throttle mapping hook)
 //   - normalizeFace()             — bbox normalization + L2 embedding normalization
 //   - persistAndMatchFaces()      — create Face rows + run person-matching loop
 //   - markStatus() / markFailed() — MediaFaceStatus upsert helpers
@@ -24,7 +24,6 @@ import {
   FaceProviderCredentials,
 } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
-import { RateLimitError } from '../enrichment/rate-limit.error';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 
 // ---------------------------------------------------------------------------
@@ -117,9 +116,11 @@ export class FaceDetectionCore {
   // ---------------------------------------------------------------------------
 
   /**
-   * Call provider.detect() and map Rekognition throttle errors to RateLimitError
+   * Call provider.detect() and map provider throttle errors to RateLimitError
    * so the enrichment worker routes them through the rate-limit deferral path.
-   * Keyless providers (human, compreface) have no remote rate limit.
+   * Keyless providers (currently only CompreFace, a local sidecar) have no
+   * remote rate limit, so this is currently a pass-through — kept as a hook
+   * point for a future keyed provider that can signal throttling.
    */
   async detectWithThrottleMapping(
     provider: FaceProvider,
@@ -127,31 +128,7 @@ export class FaceDetectionCore {
     buffer: Buffer,
     providerKey: string,
   ): Promise<DetectedFace[]> {
-    try {
-      return await provider.detect(creds, buffer);
-    } catch (detectErr) {
-      if (providerKey === 'rekognition') {
-        const e = detectErr as Record<string, unknown> | null;
-        const name = typeof e?.['name'] === 'string' ? e['name'] : undefined;
-        const awsThrottleNames = new Set([
-          'ThrottlingException',
-          'ProvisionedThroughputExceededException',
-          'TooManyRequestsException',
-          'RequestLimitExceeded',
-          'SlowDown',
-        ]);
-        if (name && awsThrottleNames.has(name)) {
-          throw new RateLimitError(
-            typeof e?.['message'] === 'string'
-              ? e['message']
-              : `Rekognition throttled: ${name}`,
-            undefined,
-            providerKey,
-          );
-        }
-      }
-      throw detectErr;
-    }
+    return provider.detect(creds, buffer);
   }
 
   // ---------------------------------------------------------------------------
@@ -239,12 +216,9 @@ export class FaceDetectionCore {
       autoArchiveOn = false;
     }
 
-    const provider = this.registry.get(providerKey);
-
     const createdFaces: Array<{
       id: string;
       embedding: number[];
-      externalFaceId: string | null;
     }> = [];
 
     for (const face of faces) {
@@ -266,13 +240,12 @@ export class FaceDetectionCore {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           landmarks: (face.landmarks ?? null) as any,
           embedding: face.embedding ?? [],
-          externalFaceId: face.externalFaceId ?? null,
           providerKey,
           modelVersion,
           manuallyAssigned: false,
           ...videoFields,
         },
-        select: { id: true, embedding: true, externalFaceId: true },
+        select: { id: true, embedding: true },
       });
       createdFaces.push(created);
     }
@@ -291,12 +264,7 @@ export class FaceDetectionCore {
       try {
         let matchResult: { personId: string } | null = null;
 
-        if (face.externalFaceId && provider.capabilities.delegatedRecognize) {
-          matchResult = await this.matchingService.matchFaceByExternalId(
-            circleId,
-            face.externalFaceId,
-          );
-        } else if (face.embedding.length > 0) {
+        if (face.embedding.length > 0) {
           matchResult = await this.matchingService.matchFaceToPerson(
             circleId,
             face.embedding,

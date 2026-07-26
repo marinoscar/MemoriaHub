@@ -109,12 +109,12 @@ jest.unstable_mockModule('node:os', () => ({
 
 const mockDetectCapabilities = jest.fn();
 jest.unstable_mockModule('../../src/node/capabilities.js', () => ({
+  // Mirrors the real NATIVE_MODULES post-#113 — @vladmandic/human,
+  // @tensorflow/tfjs, and @tensorflow/tfjs-backend-wasm were removed
+  // entirely (the Human WASM face provider no longer exists).
   NATIVE_MODULES: {
     onnxruntime: 'onnxruntime-node',
     sharp: 'sharp',
-    tfjs: '@tensorflow/tfjs',
-    tfjsWasm: '@tensorflow/tfjs-backend-wasm',
-    human: '@vladmandic/human',
     tesseract: 'tesseract.js',
   },
   detectCapabilities: mockDetectCapabilities,
@@ -177,9 +177,6 @@ type CapabilityStatus = { available: boolean; detail?: string };
 const ALL_CAPS_PRESENT: Record<string, CapabilityStatus> = {
   onnxruntime: { available: true },
   sharp: { available: true },
-  tfjs: { available: true },
-  tfjsWasm: { available: true },
-  human: { available: true },
   tesseract: { available: true },
   ffmpeg: { available: true },
   ffprobe: { available: true },

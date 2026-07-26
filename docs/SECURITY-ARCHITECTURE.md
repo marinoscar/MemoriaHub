@@ -1920,7 +1920,7 @@ Each `Face` row records `providerKey` and `modelVersion`. Embeddings from differ
 
 ### Provider Key Encryption
 
-Face provider credentials (CompreFace API keys, Rekognition AWS credentials) use the same AES-256-GCM encryption path as AI provider credentials, keyed by `SECRETS_ENCRYPTION_KEY`. See [AI Provider Key Encryption at Rest](#ai-provider-key-encryption-at-rest) for the encryption scheme and key rotation procedure.
+Face provider credentials use the same AES-256-GCM encryption path as AI provider credentials, keyed by `SECRETS_ENCRYPTION_KEY`. In practice this path is rarely exercised for face credentials today: CompreFace is the sole face-recognition provider (issue #113 removed the Human WASM and AWS Rekognition alternatives, the latter being the only face provider that previously required a real secret), and it is keyless — a stored `face_provider_credentials` row, if present, holds only an optional `baseUrl` override, never an API key. The shared encryption path remains in place for other credential types (AI, storage, geo, email) that do require secrets. See [AI Provider Key Encryption at Rest](#ai-provider-key-encryption-at-rest) for the encryption scheme and key rotation procedure.
 
 ---
 

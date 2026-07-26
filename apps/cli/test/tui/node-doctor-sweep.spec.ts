@@ -85,7 +85,7 @@ function fakeApi(manifest: Array<{ name: string }> = [{ name: 'm1' }]): ApiClien
 beforeEach(() => {
   mockDetectCapabilities.mockReset().mockResolvedValue({
     sharp: { available: true, detail: 'sharp' },
-    human: { available: false, detail: 'human not installed' },
+    tesseract: { available: false, detail: 'tesseract.js not installed' },
   });
   mockMissingRequirements.mockReset().mockReturnValue([]);
   mockEvaluateStartupSelfTest
@@ -139,7 +139,7 @@ describe('runNodeDoctorSweep — happy path', () => {
     expect(result.apiAccess).toEqual(OK_ACCESS);
     expect(result.caps).toEqual({
       sharp: { available: true, detail: 'sharp' },
-      human: { available: false, detail: 'human not installed' },
+      tesseract: { available: false, detail: 'tesseract.js not installed' },
     });
     expect(result.operationalCaps).toEqual(result.caps);
     expect(result.jobReadiness).toEqual([
@@ -188,14 +188,14 @@ describe('runNodeDoctorSweep — happy path', () => {
   });
 
   it('uses the configured eligibleTypes list (filtered to known types) instead of auto-detecting', async () => {
-    mockMissingRequirements.mockImplementation((t: string) => (t === 'face_detection' ? ['human'] : []));
+    mockMissingRequirements.mockImplementation((t: string) => (t === 'face_detection' ? ['compreface'] : []));
 
     const result = await runNodeDoctorSweep(fakeApi() as never, {
       nodeId: undefined,
       node: { eligibleTypes: ['face_detection', 'not_a_real_type'] },
     });
 
-    expect(result.jobReadiness).toEqual([{ type: 'face_detection', ready: false, missing: ['human'] }]);
+    expect(result.jobReadiness).toEqual([{ type: 'face_detection', ready: false, missing: ['compreface'] }]);
     expect(result.hasError).toBe(true);
   });
 });
@@ -309,7 +309,9 @@ describe('runNodeDoctorSweep — threads faceProvider/comprefaceUrl from config'
     expect(mockMissingRequirements).toHaveBeenCalledWith('auto_tagging', expect.anything(), 'compreface');
   });
 
-  it("defaults to faceProvider='human' when the node config omits it", async () => {
+  it("defaults to faceProvider='compreface' when the node config omits it", async () => {
+    // Post-#113, 'compreface' is the only supported provider — an omitted
+    // node.faceProvider now defaults to 'compreface', not the old 'human'.
     mockMissingRequirements.mockReset().mockReturnValue([]);
 
     await runNodeDoctorSweep(fakeApi() as never, {
@@ -317,16 +319,16 @@ describe('runNodeDoctorSweep — threads faceProvider/comprefaceUrl from config'
       node: { eligibleTypes: ['face_detection'] },
     });
 
-    expect(mockMissingRequirements).toHaveBeenCalledWith('face_detection', expect.anything(), 'human');
+    expect(mockMissingRequirements).toHaveBeenCalledWith('face_detection', expect.anything(), 'compreface');
   });
 
-  it("uses faceProvider='human' for the auto-detected (unconfigured eligibleTypes) job-readiness path too", async () => {
+  it("uses faceProvider='compreface' for the auto-detected (unconfigured eligibleTypes) job-readiness path too", async () => {
     mockMissingRequirements.mockReset().mockReturnValue([]);
 
     await runNodeDoctorSweep(fakeApi() as never, { nodeId: undefined, node: undefined });
 
     for (const t of NODE_JOB_TYPES) {
-      expect(mockMissingRequirements).toHaveBeenCalledWith(t, expect.anything(), 'human');
+      expect(mockMissingRequirements).toHaveBeenCalledWith(t, expect.anything(), 'compreface');
     }
   });
 });

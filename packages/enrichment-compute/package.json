@@ -47,11 +47,6 @@
       "import": "./dist/esm/dto/index.js",
       "require": "./dist/cjs/dto/index.js"
     },
-    "./face": {
-      "types": "./dist/types/face/index.d.ts",
-      "import": "./dist/esm/face/index.js",
-      "require": "./dist/cjs/face/index.js"
-    },
     "./face-compreface": {
       "types": "./dist/types/face-compreface/index.d.ts",
       "import": "./dist/esm/face-compreface/index.js",
@@ -99,9 +94,6 @@
     "zod": "^4.4.3"
   },
   "optionalDependencies": {
-    "@tensorflow/tfjs": "4.22.0",
-    "@tensorflow/tfjs-backend-wasm": "4.22.0",
-    "@vladmandic/human": "3.3.6",
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {

@@ -263,8 +263,8 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
 | `backup` | `--circle <id>` / `--all` / `--dest <path>` | Pull media blobs from the server to a local directory; requires an Admin PAT | Tools ▸ Backup |
 | `node install-deps` | `--dry-run` / `--skip-compreface` / `--compreface-port <port>` | Linux-only one-command installer for everything a machine needs to become a worker node (ffmpeg/ffprobe, npm native compute libs, tesseract OCR language data, model files, Docker + compreface-core) | — |
-| `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` / `--face-provider <human\|compreface>` / `--compreface-url <url>` | Register this machine as a worker node (one-time, PAT-based) | — |
-| `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` / `--face-provider <human\|compreface>` / `--compreface-url <url>` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
+| `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` / `--face-provider <compreface>` / `--compreface-url <url>` | Register this machine as a worker node (one-time, PAT-based) | — |
+| `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` / `--face-provider <compreface>` / `--compreface-url <url>` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
 | `node stop` | (none) | Stop a running node: IPC (graceful drain + deregister) → `SIGTERM` via pidfile → server-side deregister | Tools ▸ Worker Node ▸ Node dashboard (`[d]` drain / `[x]` stop daemon) |
 | `node status` | (none) | Live snapshot via IPC when a daemon is running, else a local config + capability summary | Tools ▸ Worker Node ▸ Node dashboard |
 | `node list` | (none) | List worker nodes registered under the caller's PAT | — |
@@ -936,14 +936,15 @@ memoriahub node install-deps
 # Preview what would happen without changing anything
 memoriahub node install-deps --dry-run
 
-# Skip Docker/CompreFace — only set up Human-provider dependencies
+# Skip Docker/CompreFace — sets up everything else, but this node
+# won't be face-job-eligible until CompreFace is available some other way
 memoriahub node install-deps --skip-compreface
 
 # Bind the local compreface-core container to a non-default port
 memoriahub node install-deps --compreface-port 3100
 ```
 
-A Linux-only, one-command installer for everything a machine needs to become a fully-operational worker node before you run `node register`/`node start`. It checks what's already present and skips it, installs/configures whatever is missing (using `sudo` where required, always announcing the exact command before running it), and ends with a fresh `node doctor`-style pass/fail report. It does not install Node.js or the CLI itself (those are prerequisites), and it does not change which face provider your node advertises — even after it sets up CompreFace, you still opt in with `--face-provider compreface` on `node register`/`node start` below. There is no TUI equivalent; it streams live install output, so run it from a real terminal. See [Worker Node Setup & Troubleshooting §2](../../docs/worker-node-setup.md#2-automated-setup-memoriahub-node-install-deps) for the full walkthrough, including the equivalent standalone `install_worker_dependencies.sh` entrypoint at the repo root.
+A Linux-only, one-command installer for everything a machine needs to become a fully-operational worker node before you run `node register`/`node start`. It checks what's already present and skips it, installs/configures whatever is missing (using `sudo` where required, always announcing the exact command before running it), and ends with a fresh `node doctor`-style pass/fail report. It does not install Node.js or the CLI itself (those are prerequisites), and it does not register or start the node — even after it sets up CompreFace (the sole face provider), you still run `node register`/`node start` below to bring the node online; `--face-provider compreface` is the only accepted value there and exists mainly for explicitness. There is no TUI equivalent; it streams live install output, so run it from a real terminal. See [Worker Node Setup & Troubleshooting §2](../../docs/worker-node-setup.md#2-automated-setup-memoriahub-node-install-deps) for the full walkthrough, including the equivalent standalone `install_worker_dependencies.sh` entrypoint at the repo root.
 
 ### Register: `memoriahub node register`
 
@@ -956,7 +957,7 @@ memoriahub node register --face-provider compreface --compreface-url http://loca
 
 Registration is one-time per machine and authenticates with the same Personal Access Token used everywhere else in the CLI — there is no separate node credential to create or manage. It records the node's hostname, platform, CLI version, and detected/selected eligible job types with the server, and saves the returned node ID locally.
 
-By default, a node's `face_detection`/`video_face_detection` compute uses the keyless Human provider — regardless of which face provider the server itself is actively configured to use. `--face-provider compreface` (paired with `--compreface-url`, default `http://localhost:3000`) opts a node into running its own local `compreface-core` sidecar instead, so its embeddings match a server configured for the `compreface` provider. Both flags are stored in local node config only, never sent to the server. See [Worker Node Setup & Troubleshooting §5](../../docs/worker-node-setup.md#5-matching-the-servers-face-detection-provider-compreface) for the full setup walkthrough (running the sidecar container, hard-fail behavior, troubleshooting).
+A node's `face_detection`/`video_face_detection` compute always uses CompreFace — the Human WASM and AWS Rekognition providers were removed (issue #113), so `compreface` is the only value `--face-provider`/`MEMORIAHUB_FACE_PROVIDER` accepts (passing anything else is a startup error, not a fallback). Point a node at its own local `compreface-core` sidecar with `--compreface-url` (default `http://localhost:3000`); both flags are stored in local node config only, never sent to the server. If that sidecar isn't reachable, the node hard-fails rather than silently running with no face provider — `node start` blocks on a bounded startup wait for CompreFace to report healthy, and fails outright if it doesn't, since there is no alternative provider to fall back to. See [Worker Node Setup & Troubleshooting §5](../../docs/worker-node-setup.md#5-setting-up-compreface-for-a-native-install) for the full setup walkthrough (running the sidecar container, hard-fail behavior, troubleshooting).
 
 ### Start: `memoriahub node start`
 
@@ -970,7 +971,7 @@ memoriahub node start --concurrency 4
 # Background it: detaches, returns immediately
 memoriahub node start --daemon
 
-# Switch this node to the CompreFace face provider (see Register above)
+# Point at a non-default local compreface-core sidecar URL (see Register above)
 memoriahub node start --face-provider compreface --compreface-url http://localhost:3000
 ```
 
@@ -1008,7 +1009,7 @@ memoriahub node doctor
 
 `node doctor` runs a real diagnostic sweep, not just presence checks: an actual `GET /api/auth/me` round-trip confirming the PAT is valid, whether the locally-configured node ID still resolves server-side, and whether the model-manifest endpoint is reachable; a capability presence probe (native-module resolution, ffmpeg/ffprobe binary execution); **operational self-tests** for each present capability — `sharp` actually decodes/encodes a synthetic image, the CLIP model actually embeds a synthetic JPEG (once downloaded), the face detector actually runs detection, tesseract actually inits/terminates an OCR worker (once language data is present) — so a capability that resolves but crashes on first real use is caught, not just reported "available"; job-type readiness gated on those operational results, not mere presence; a model-manifest download-and-verify pass; and finally whether a `node start` process is currently running on this machine, with a live snapshot if so. The command exits non-zero if any hard problem was found.
 
-A node needs several heavy native libraries to serve its job types: `sharp`, `onnxruntime-node` (CLIP), `@vladmandic/human` (face detection), and `tesseract.js` (OCR), plus the TensorFlow.js packages `@vladmandic/human` depends on. These are declared as `optionalDependencies` in the CLI's own `package.json` (matching the shared `packages/enrichment-compute` package's exact version pins), so a normal `memoriahub` install already attempts them — there is no separate install step required to run `node start`. Because they're optional, a platform where one of them fails to build or download doesn't break the rest of the CLI; that job type simply won't be operational until the dependency resolves, which `node doctor` reports clearly rather than crashing. Model files themselves (the CLIP ONNX model, the Human face-detector weights) are downloaded lazily on first `node start` (or `node doctor`) into `~/.memoriahub/models/`, verified against the sha256-pinned manifest the server publishes at `GET /api/nodes/models/manifest`.
+A node needs a couple of heavy native libraries to serve its job types: `sharp` (image decode/encode) and `onnxruntime-node` (CLIP, for near-duplicate detection), plus `tesseract.js` (OCR fallback for social-media video detection). These are declared as `optionalDependencies` in the CLI's own `package.json` (matching the shared `packages/enrichment-compute` package's exact version pins), so a normal `memoriahub` install already attempts them — there is no separate install step required to run `node start`. Because they're optional, a platform where one of them fails to build or download doesn't break the rest of the CLI; that job type simply won't be operational until the dependency resolves, which `node doctor` reports clearly rather than crashing. The CLIP ONNX model file is downloaded lazily on first `node start` (or `node doctor`) into `~/.memoriahub/models/`, verified against the sha256-pinned manifest the server publishes at `GET /api/nodes/models/manifest`. Face detection is a separate case: it isn't an npm dependency or a downloadable model file at all — it runs against a local `compreface-core` sidecar over HTTP (see [Worker Node Setup & Troubleshooting §5](../../docs/worker-node-setup.md#5-setting-up-compreface-for-a-native-install)), and `node doctor` checks it via a live reachability probe instead.
 
 See [Worker Node Setup & Troubleshooting](../../docs/worker-node-setup.md) for how to install and configure each dependency, and what to do when doctor reports a capability as installed-but-not-operational.
 
@@ -1057,7 +1058,7 @@ See the [Distributed Nodes spec](../../docs/specs/distributed-nodes.md) for the 
 | `~/.memoriahub/node.pid` | Worker-node daemon pidfile (see [Worker Nodes](#worker-nodes-distributed-compute)) |
 | `~/.memoriahub/node.sock` | Worker-node daemon IPC socket (Unix domain socket; a named pipe `\\.\pipe\memoriahub-node` on Windows) |
 | `~/.memoriahub/logs/node.log` | Worker-node JSONL structured log, size-rotated at 5 MB (`memoriahub node logs`) |
-| `~/.memoriahub/models/` | Downloaded worker-node model files (CLIP ONNX, Human face-detector weights), verified against the server's sha256-pinned manifest |
+| `~/.memoriahub/models/` | Downloaded worker-node model files (CLIP ONNX), verified against the server's sha256-pinned manifest — face detection has no model file here, it runs against a local `compreface-core` sidecar over HTTP |
 
 ---
 

@@ -252,7 +252,7 @@ export async function runNodeDoctorSweep(
   //    presence, so a node whose sharp binary resolves but crashes on first
   //    use (or whose models aren't downloaded yet) is correctly not-ready.
   enterStep('jobReadiness');
-  const faceProvider = cfg.node?.faceProvider ?? 'human';
+  const faceProvider = cfg.node?.faceProvider ?? 'compreface';
   const configuredTypes = (cfg.node?.eligibleTypes ?? []).filter(isNodeJobType);
   const eligibleTypes: NodeJobType[] =
     configuredTypes.length > 0

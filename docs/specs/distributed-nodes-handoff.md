@@ -44,9 +44,10 @@
 > **actual local model compute**, the **server result-ingestion + persist path**, the
 > **shared parity package**, and **tests** — could NOT be built in the cloud session because
 > that container cannot install the native model libraries (`onnxruntime-node`, `sharp`,
-> `@tensorflow/tfjs`, `@vladmandic/human`, `tesseract.js` all network-fail on their binary
-> downloads), has no Postgres, and no model files. This document is the complete recipe to
-> finish and TEST the feature on a laptop that CAN run all of that.
+> `tesseract.js` all network-fail on their binary downloads — this was written before issue
+> #113 removed the Human WASM provider, whose `@tensorflow/tfjs`/`@vladmandic/human`
+> dependencies had the same problem), has no Postgres, and no model files. This document is
+> the complete recipe to finish and TEST the feature on a laptop that CAN run all of that.
 >
 > Read the full design first: [`docs/specs/distributed-nodes.md`](distributed-nodes.md).
 
@@ -138,16 +139,16 @@ All 9 commits after `357497a`. Each was typecheck-gated.
 A face/CLIP embedding computed on the laptop MUST be numerically comparable to one from the
 server, or faces won't cluster and duplicates won't match. The server's exact pipelines:
 
-**Face — `apps/api/src/face/providers/human.provider.ts`:**
-- Libs: `@tensorflow/tfjs` + `@tensorflow/tfjs-backend-wasm` + `@vladmandic/human` (WASM, NOT onnx).
-- Models: `blazeface-back.json` (detector) + `faceres.json` (description) under
-  `FACE_HUMAN_MODEL_PATH` (default `/app/models/human`).
-- Pipeline: `prepareImageForProcessing(buffer, {maxDim: FACE_MAX_IMAGE_DIM=2000})` (sharp,
-  applies EXIF orientation, JPEG q90) → `bufferToTensor` (sharp ensureAlpha → raw RGBA →
-  `tf.tensor3d`) → `human.detect` → box normalized `/width,/height` → **L2-normalized 1024-d**
-  faceres descriptor. Two load-bearing hacks: the **fs-backed IOHandler** and
-  **`patchFaceresEmbeddingOutput`** (faceres.json's graph doesn't declare the embedding as an
-  output; the patch exposes it). `providerKey='human'`, `modelVersion='human-faceres-1024'`.
+**Face — historical (Human provider, removed by issue #113):** at the time this handoff was
+written, the server's face pipeline was `apps/api/src/face/providers/human.provider.ts`
+(`@tensorflow/tfjs` + `@tensorflow/tfjs-backend-wasm` + `@vladmandic/human`, WASM, NOT onnx;
+`blazeface-back.json`/`faceres.json` model files; L2-normalized 1024-d faceres embeddings,
+`providerKey='human'`). That provider — and AWS Rekognition alongside it — has since been
+removed entirely; CompreFace (`apps/api/src/face/providers/compreface.provider.ts`, a thin
+adapter over the shared `@memoriahub/enrichment-compute/face-compreface` HTTP client, 128-d
+ArcFace MobileFaceNet embeddings) is now the sole face-detection pipeline, server and node
+alike. See [distributed-nodes.md §7](distributed-nodes.md#7-embedding--model-parity) for the
+current parity story.
 
 **CLIP dedup — `apps/api/src/dedup/visual-embedding.service.ts`:**
 - Lib: `onnxruntime-node`. Model `clip-vit-b32-vision-quantized.onnx` (~87 MB) from
@@ -172,15 +173,19 @@ Do them in this order; each has an acceptance check. Respect the mandatory-subag
 The linchpin. One package, imported IDENTICALLY by API and CLI, with **pinned** native deps.
 1. `git mv`/create `packages/enrichment-compute/` and add `"packages/*"` to root
    `package.json` `workspaces`. Use NodeNext + a `package.json` with pinned
-   `sharp`, `onnxruntime-node`, `@tensorflow/tfjs`, `@tensorflow/tfjs-backend-wasm`,
-   `@vladmandic/human`, `tesseract.js`.
+   `sharp`, `onnxruntime-node`, `tesseract.js`. (At the time this was written the plan also
+   pinned `@tensorflow/tfjs`/`@tensorflow/tfjs-backend-wasm`/`@vladmandic/human` for the Human
+   face provider; issue #113 later removed that provider and its pins entirely — CompreFace,
+   a keyless HTTP sidecar client, needs no such native model dependency.)
 2. Move the PURE compute out of the API services into the package and re-export from the API so
    existing imports keep working (behavior-preserving — API tests must stay green):
    - `prepareImageForProcessing` + orientation utils (`image-orientation.util.ts`).
    - CLIP: `preprocessImageForClip`, `l2Normalize`, `VISUAL_EMBEDDING_MODEL_TAG`, the ONNX
      `embedImage(buffer): Promise<number[512]>` (split it out of `ensureEmbedding`'s persist).
-   - Human: `humanConfig`, the fs IOHandler, `patchFaceresEmbeddingOutput`, `bufferToTensor`,
-     `l2Normalize`, `detectFaces(buffer): Promise<{box, confidence, embedding[1024]}[]>`.
+   - Face: the CompreFace HTTP client (`detectComprefaceFaces`, `testComprefaceStatus`) —
+     as-built, this superseded the Human-provider extraction (`humanConfig`, fs IOHandler,
+     `patchFaceresEmbeddingOutput`, `bufferToTensor`, 1024-d `detectFaces`) originally planned
+     here.
    - dHash, OCR (tesseract) core, ffprobe/metadata helpers.
 3. **Acceptance:** `cd apps/api && npx tsc --noEmit` clean; `npm test` in apps/api green;
    `node -e "require('@memoriahub/enrichment-compute')"` loads.
@@ -283,10 +288,13 @@ each laptop → 1 server + 2 + 2 = 5 concurrent workers, all coordinated safely 
 
 ## 6. Gotchas & risks (learned / by design)
 
-- **Parity is the #1 risk.** Pin `sharp`/libvips + `onnxruntime-node` + `tfjs*` + `human` to ONE
-  version in the shared package. Use the API-served manifest sha256 + the CLI startup hash
-  self-check + the golden-vector test as the safety net. Every row records
-  `modelVersion`/`providerKey` so a mismatch is traceable and re-runnable.
+- **Parity is the #1 risk for the compute path that ships model weights to the node** — CLIP
+  (`sharp`/libvips + `onnxruntime-node`, pinned to ONE version in the shared package). Use the
+  API-served manifest sha256 + the CLI startup hash self-check + the golden-vector test as the
+  safety net. Every row records `modelVersion`/`providerKey` so a mismatch is traceable and
+  re-runnable. Face detection no longer carries this risk at all: issue #113 replaced the
+  Human WASM provider (which needed the same version-pinning treatment) with CompreFace, a
+  keyless HTTP sidecar client with no local model weights to keep in sync.
 - **`attempts` is charged at CLAIM time** — the reaper must FAIL (not requeue) a lease-expired
   job once `attempts >= ENRICHMENT_MAX_ATTEMPTS`, else a poison job crash-loops. (Already handled
   in `resetStuck`; preserve it.)
@@ -314,7 +322,7 @@ each laptop → 1 server + 2 + 2 = 5 concurrent workers, all coordinated safely 
 | Lease reaper | `apps/api/src/enrichment/enrichment-admin.service.ts` (`resetStuck`/`stuckRunningWhere`) |
 | Node API | `apps/api/src/nodes/` |
 | Doctor nodes section | `apps/api/src/.../doctor.service.ts` |
-| Parity sources to extract | `apps/api/src/face/providers/human.provider.ts`, `apps/api/src/dedup/visual-embedding.service.ts`, `apps/api/src/storage/processing/image-orientation.util.ts` |
+| Parity sources to extract | `apps/api/src/face/providers/compreface.provider.ts` (as-built; superseded the originally-planned `human.provider.ts` extraction — see §3), `apps/api/src/dedup/visual-embedding.service.ts`, `apps/api/src/storage/processing/image-orientation.util.ts` |
 | Compute/persist split ref | `apps/api/src/face/face-detection.service.ts` |
 | Web UI | `apps/web/src/pages/Admin/WorkersPage.tsx`, `apps/web/src/pages/Admin/JobsPage.tsx` |
 | CLI node engine | `apps/cli/src/node/node-engine.ts` |

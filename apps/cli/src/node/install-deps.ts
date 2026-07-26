@@ -3,9 +3,8 @@
  *
  * Automates installing every dependency a Linux machine needs to become a
  * fully-operational worker node: ffmpeg/ffprobe, the npm native compute
- * libraries (sharp, onnxruntime-node, @vladmandic/human + TensorFlow.js
- * backends, tesseract.js), the tesseract OCR language data, Docker, and the
- * local compreface-core sidecar container.
+ * libraries (sharp, onnxruntime-node, tesseract.js), the tesseract OCR
+ * language data, Docker, and the local compreface-core sidecar container.
  *
  * Every step function here CHECKS first and only acts if something is
  * missing/broken, returning a structured {@link InstallStepResult} so the
@@ -328,7 +327,7 @@ export async function ensureFfmpeg(
 }
 
 // ---------------------------------------------------------------------------
-// npm native compute dependencies (sharp / onnxruntime / tfjs / human / tesseract)
+// npm native compute dependencies (sharp / onnxruntime / tesseract)
 // ---------------------------------------------------------------------------
 
 export async function ensureNpmNativeDeps(

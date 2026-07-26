@@ -1,11 +1,12 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
-// apiKey is optional because Rekognition uses environment-level AWS credentials
+// apiKey is optional because CompreFace (the only face provider) is keyless —
+// a credential row for it, if present at all, stores only an optional
+// baseUrl override.
 export const upsertFaceCredentialsSchema = z.object({
   apiKey: z.string().optional(),
   baseUrl: z.string().url().optional(),
-  region: z.string().optional(),
   enabled: z.boolean().optional(),
 });
 export class UpsertFaceCredentialsDto extends createZodDto(upsertFaceCredentialsSchema) {}
