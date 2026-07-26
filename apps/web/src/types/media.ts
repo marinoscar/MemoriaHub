@@ -27,6 +27,18 @@ export interface MapCluster {
   count: number;
   /** A representative media item id for the cell (used for count === 1). */
   sampleId: string;
+  /**
+   * True bounding box of the cell's MEMBER POINTS — not the grid cell's
+   * geometric bounds, and not derived from `lat`/`lng` (which are the centroid
+   * of those points). A grid cell spans `90 / 2^zoom` degrees (~620 km at zoom
+   * 4), so the centroid alone cannot locate the cell's photos; these four
+   * numbers are what the "Photos here" drawer turns into the `bbox` it refetches
+   * the cell's actual photos with. For a single-point cell min === max.
+   */
+  minLat: number;
+  minLng: number;
+  maxLat: number;
+  maxLng: number;
 }
 
 // ---------------------------------------------------------------------------

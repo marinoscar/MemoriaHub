@@ -374,6 +374,7 @@ export class MediaController {
   @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
   @ApiQuery({ name: 'albumId', required: false, type: String, format: 'uuid', description: 'Scope the map to members of a single album' })
   @ApiQuery({ name: 'bbox', required: false, type: String, description: 'Viewport bounding box "minLng,minLat,maxLng,maxLat" — restrict to items within these bounds' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Cap the number of results (1–500). Applied with the existing capturedAt desc ordering, i.e. "most recent N in the box". Omit to return every matching point (e.g. the album Map view, which needs all members plotted).' })
   @ApiResponse({ status: 200, description: 'Array of geotagged media location objects' })
   async listLocations(
     @Query() query: MediaLocationsQueryDto,
@@ -386,8 +387,10 @@ export class MediaController {
    * GET /api/media/locations/aggregate
    *
    * Server-side spatial clustering for the map view. Groups geotagged,
-   * non-deleted / non-archived items into a grid (cell size controlled by
-   * `precision`) and returns one cluster per occupied cell.
+   * non-deleted / non-archived items into a grid — either the legacy
+   * `precision` (decimal-rounding) grid or, when `zoom` is supplied, a
+   * pixel-uniform Web-Mercator grid — and returns one cluster per occupied
+   * cell, including that cell's true bounding box.
    * Declared before @Get(':id') so it is never shadowed.
    */
   @Get('locations/aggregate')
@@ -395,17 +398,24 @@ export class MediaController {
   @ApiOperation({
     summary: 'Server-side spatial clustering of geotagged media for the map view',
     description:
-      'Groups geotagged non-deleted / non-archived items in the circle into a grid ' +
-      'whose cell size is controlled by `precision` (decimal places of lat/lng rounding). ' +
-      'Returns one cluster per occupied cell: { lat, lng, count, sampleId }.',
+      'Groups geotagged non-deleted / non-archived items in the circle into a grid and returns ' +
+      'one cluster per occupied cell: { lat, lng, count, sampleId, minLat, maxLat, minLng, maxLng }. ' +
+      '`lat`/`lng` is the cell centroid; `minLat`/`maxLat`/`minLng`/`maxLng` is the true bounding box ' +
+      "of the cell's member points, computed on the same GROUP BY (no extra query) so the client can " +
+      "refetch exactly the photos in a cluster by bbox instead of guessing a box around the centroid. " +
+      'By default the grid is keyed by `precision` (decimal places of lat/lng rounding). When `zoom` ' +
+      'is supplied, clustering switches to a Web-Mercator pixel grid keyed to that zoom level, giving ' +
+      'evenly-spaced clusters at every latitude (the legacy `precision` grid is not mercator-projected, ' +
+      'so cell width in km varies by latitude).',
   })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid', description: 'Circle to aggregate' })
-  @ApiQuery({ name: 'precision', required: false, type: Number, description: 'Grid precision (decimal places, 0–5; default 3)' })
+  @ApiQuery({ name: 'precision', required: false, type: Number, description: 'Legacy grid precision (decimal places, 0–5; default 3). Ignored when `zoom` is supplied.' })
+  @ApiQuery({ name: 'zoom', required: false, type: Number, description: 'Map zoom level (0–22). When supplied, switches clustering to a Web-Mercator pixel grid keyed to this zoom instead of the legacy `precision` grid.' })
   @ApiQuery({ name: 'bbox', required: false, type: String, description: 'Viewport bounding box "minLng,minLat,maxLng,maxLat"' })
   @ApiQuery({ name: 'capturedAtFrom', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt >= from' })
   @ApiQuery({ name: 'capturedAtTo', required: false, type: String, description: 'ISO 8601 datetime — filter capturedAt <= to' })
   @ApiQuery({ name: 'type', required: false, enum: ['photo', 'video'], description: 'Filter by media type' })
-  @ApiResponse({ status: 200, description: 'Array of location clusters { lat, lng, count, sampleId }' })
+  @ApiResponse({ status: 200, description: 'Array of location clusters { lat, lng, count, sampleId, minLat, maxLat, minLng, maxLng } — the min/max fields are the cluster cell\'s true bounding box, used by the client to refetch the cluster\'s photos by bbox' })
   async aggregateLocations(
     @Query() query: MediaLocationsAggregateQueryDto,
     @CurrentUser() user: RequestUser,

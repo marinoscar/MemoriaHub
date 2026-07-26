@@ -108,6 +108,13 @@ export interface MediaLocationFilters {
   albumId?: string;
   /** Viewport bounding box: `minLng,minLat,maxLng,maxLat`. */
   bbox?: string;
+  /**
+   * Cap the number of points returned. Optional — callers that need every point
+   * (the album map, which plots the full set) must omit it. Used by the map's
+   * "Photos here" drawer, which only ever renders a fixed-size preview grid and
+   * would otherwise pull thousands of rows for a large cell.
+   */
+  limit?: number;
 }
 
 export async function listMediaLocations(
@@ -125,6 +132,7 @@ export async function listMediaLocations(
   if (filters?.circleId) searchParams.set('circleId', filters.circleId);
   if (filters?.albumId) searchParams.set('albumId', filters.albumId);
   if (filters?.bbox) searchParams.set('bbox', filters.bbox);
+  if (filters?.limit !== undefined) searchParams.set('limit', String(filters.limit));
   const qs = searchParams.toString();
   return api.get<MediaLocation[]>(`/media/locations${qs ? `?${qs}` : ''}`);
 }

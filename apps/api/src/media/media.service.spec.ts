@@ -2013,11 +2013,18 @@ describe('MediaService', () => {
 
     // ----- Where-clause: NO pagination -----
 
-    it('does NOT pass skip or take (no pagination)', async () => {
+    it('does NOT pass skip or take (no pagination) when limit is omitted', async () => {
       await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       expect(call[0]).not.toHaveProperty('skip');
       expect(call[0]).not.toHaveProperty('take');
+    });
+
+    it('passes take = limit when limit is supplied (the map cluster drawer preview bound)', async () => {
+      await service.listLocations({ circleId: CIRCLE_ID, limit: 24 } as any, 'user-1', ownPerms);
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(call[0].take).toBe(24);
+      expect(call[0]).not.toHaveProperty('skip');
     });
 
     // ----- Where-clause: optional filters -----
@@ -2164,6 +2171,10 @@ describe('MediaService', () => {
         n: 3,
         lat: '9.928',
         lng: '-84.09',
+        min_lat: '9.9',
+        max_lat: '9.95',
+        min_lng: '-84.1',
+        max_lng: '-84.08',
         sample_id: randomUUID(),
         ...overrides,
       };
@@ -2188,15 +2199,30 @@ describe('MediaService', () => {
       expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
 
-    it('maps a raw row into { lat, lng, count, sampleId } with lat/lng coerced to JS numbers', async () => {
+    it('maps a raw row into { lat, lng, count, sampleId, minLat, maxLat, minLng, maxLng } with every numeric field coerced to a JS number', async () => {
       const row = mockRawRow();
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([row]);
 
       const results = await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
 
-      expect(results).toEqual([{ lat: 9.928, lng: -84.09, count: 3, sampleId: row.sample_id }]);
+      expect(results).toEqual([
+        {
+          lat: 9.928,
+          lng: -84.09,
+          count: 3,
+          sampleId: row.sample_id,
+          minLat: 9.9,
+          maxLat: 9.95,
+          minLng: -84.1,
+          maxLng: -84.08,
+        },
+      ]);
       expect(typeof results[0].lat).toBe('number');
       expect(typeof results[0].lng).toBe('number');
+      expect(typeof results[0].minLat).toBe('number');
+      expect(typeof results[0].maxLat).toBe('number');
+      expect(typeof results[0].minLng).toBe('number');
+      expect(typeof results[0].maxLng).toBe('number');
     });
 
     it('returns [] when the raw query returns []', async () => {
@@ -2214,6 +2240,19 @@ describe('MediaService', () => {
       expect(sqlObj.text).not.toContain('AND type::text =');
       expect(sqlObj.text).not.toContain('AND taken_lat BETWEEN');
       // Only circleId is interpolated when no optional filter is supplied.
+      expect(sqlObj.values).toEqual([CIRCLE_ID]);
+    });
+
+    it('selects min/max lat/lng extent aggregates in the legacy grid SELECT, adding no bound parameters', async () => {
+      await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+      expect(sqlObj.text).toContain('min(taken_lat)');
+      expect(sqlObj.text).toContain('max(taken_lat)');
+      expect(sqlObj.text).toContain('min(taken_lng)');
+      expect(sqlObj.text).toContain('max(taken_lng)');
+      // The extent aggregates ride along on the existing GROUP BY — they must
+      // not add any new bound parameter alongside circleId.
       expect(sqlObj.values).toEqual([CIRCLE_ID]);
     });
 
@@ -2323,15 +2362,42 @@ describe('MediaService', () => {
         expect(sqlObj.values).not.toContain(64);
       });
 
-      it('maps rows into the same { lat, lng, count, sampleId } shape as the legacy grid', async () => {
+      it('selects min/max lat/lng extent aggregates in the mercator grid SELECT, adding no bound parameters', async () => {
+        await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+
+        expect(sqlObj.text).toContain('min(taken_lat)');
+        expect(sqlObj.text).toContain('max(taken_lat)');
+        expect(sqlObj.text).toContain('min(taken_lng)');
+        expect(sqlObj.text).toContain('max(taken_lng)');
+        // Only circleId is bound — extents ride along on the existing GROUP BY.
+        expect(sqlObj.values).toEqual([CIRCLE_ID]);
+      });
+
+      it('maps rows into the same { lat, lng, count, sampleId, minLat, maxLat, minLng, maxLng } shape as the legacy grid', async () => {
         const row = mockRawRow();
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([row]);
 
         const results = await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
 
-        expect(results).toEqual([{ lat: 9.928, lng: -84.09, count: 3, sampleId: row.sample_id }]);
+        expect(results).toEqual([
+          {
+            lat: 9.928,
+            lng: -84.09,
+            count: 3,
+            sampleId: row.sample_id,
+            minLat: 9.9,
+            maxLat: 9.95,
+            minLng: -84.1,
+            maxLng: -84.08,
+          },
+        ]);
         expect(typeof results[0].lat).toBe('number');
         expect(typeof results[0].lng).toBe('number');
+        expect(typeof results[0].minLat).toBe('number');
+        expect(typeof results[0].maxLat).toBe('number');
+        expect(typeof results[0].minLng).toBe('number');
+        expect(typeof results[0].maxLng).toBe('number');
       });
 
       it('still binds filter values (bbox) as parameters while using the mercator grid', async () => {

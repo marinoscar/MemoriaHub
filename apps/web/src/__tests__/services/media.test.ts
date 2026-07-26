@@ -134,6 +134,16 @@ describe('listMediaLocations', () => {
     expect(capturedUrl!.searchParams.has('bbox')).toBe(false);
   });
 
+  it('should include limit in the query string when provided', async () => {
+    await listMediaLocations({ limit: 24 });
+    expect(capturedUrl!.searchParams.get('limit')).toBe('24');
+  });
+
+  it('should omit limit from the query string when not provided', async () => {
+    await listMediaLocations({ type: 'photo' });
+    expect(capturedUrl!.searchParams.has('limit')).toBe(false);
+  });
+
   it('should include all filters simultaneously', async () => {
     await listMediaLocations({
       type: 'video',
@@ -147,6 +157,7 @@ describe('listMediaLocations', () => {
       circleId: 'circle-1',
       albumId: 'album-1',
       bbox: '-85,9,-84,10',
+      limit: 24,
     });
 
     const params = capturedUrl!.searchParams;
@@ -161,6 +172,7 @@ describe('listMediaLocations', () => {
     expect(params.get('circleId')).toBe('circle-1');
     expect(params.get('albumId')).toBe('album-1');
     expect(params.get('bbox')).toBe('-85,9,-84,10');
+    expect(params.get('limit')).toBe('24');
   });
 
   it('should round-trip a response with thumbnailUrl omitted (optional field)', async () => {
@@ -217,8 +229,26 @@ describe('aggregateLocations', () => {
   let capturedUrl: URL | null = null;
 
   const mockClusters: MapCluster[] = [
-    { lat: 9.9281, lng: -84.0907, count: 1, sampleId: 'loc-1' },
-    { lat: 48.8566, lng: 2.3522, count: 12, sampleId: 'loc-2' },
+    {
+      lat: 9.9281,
+      lng: -84.0907,
+      count: 1,
+      sampleId: 'loc-1',
+      minLat: 9.9281,
+      maxLat: 9.9281,
+      minLng: -84.0907,
+      maxLng: -84.0907,
+    },
+    {
+      lat: 48.8566,
+      lng: 2.3522,
+      count: 12,
+      sampleId: 'loc-2',
+      minLat: 48.8,
+      maxLat: 48.9,
+      minLng: 2.3,
+      maxLng: 2.4,
+    },
   ];
 
   beforeEach(() => {

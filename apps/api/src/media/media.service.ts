@@ -452,6 +452,11 @@ export class MediaService {
    * Return ALL geotagged (takenLat + takenLng non-null) non-deleted media items
    * for the caller — no pagination. Used by the map view.
    *
+   * An optional `limit` caps the row count for preview callers (e.g. the map's
+   * cluster drawer, which renders only a couple dozen thumbnails out of a
+   * cluster's bbox). With the `capturedAt desc` ordering below that means "the
+   * most recent N in the box". When omitted, every matching point is returned.
+   *
    * Applies the same ownership guard and geo/date/type filters as listMedia
    * but returns only the fields needed to render map pins:
    *   id, takenLat, takenLng, capturedAt, geoLocality, thumbnailUrl.
@@ -475,6 +480,7 @@ export class MediaService {
       location,
       albumId,
       bbox,
+      limit,
     } = query;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
@@ -574,6 +580,8 @@ export class MediaService {
         geoLocality: true,
       },
       orderBy: { capturedAt: 'desc' },
+      // Optional preview bound. Absent (e.g. the album map view) => every point.
+      ...(limit !== undefined && { take: limit }),
     });
 
     // Lightweight map-pin payload — no per-row thumbnail signing. Thumbnails
@@ -608,12 +616,33 @@ export class MediaService {
    *    the tile-pixel plane at the given zoom, then bucketed into
    *    CLUSTER_CELL_PX-sized cells, so clusters are uniformly spaced on screen at
    *    every latitude.
+   *
+   * In addition to the cell's centroid (avg lat/lng), each cluster reports the
+   * TRUE bounding box of its member points (minLat/maxLat/minLng/maxLng). The
+   * centroid alone carries no cell extent, so a client wanting to list "the
+   * photos in this cluster" had to guess a box around it — and a guess is
+   * hopeless here, since one 64px cell spans `90 / 2^zoom` degrees of longitude
+   * (hundreds of km at low zoom). Returning the real extent lets the client
+   * refetch the cell's actual photos via GET /api/media/locations?bbox=... The
+   * min/max aggregates ride along on the existing GROUP BY, so they cost no
+   * extra scan and add no bound parameters.
    */
   async aggregateLocations(
     query: MediaLocationsAggregateQueryDto,
     userId: string,
     userPermissions: string[],
-  ): Promise<Array<{ lat: number; lng: number; count: number; sampleId: string }>> {
+  ): Promise<
+    Array<{
+      lat: number;
+      lng: number;
+      count: number;
+      sampleId: string;
+      minLat: number;
+      maxLat: number;
+      minLng: number;
+      maxLng: number;
+    }>
+  > {
     const { circleId, precision, zoom, bbox, capturedAtFrom, capturedAtTo, type } = query;
 
     await this.circleMembershipService.assertCircleAccess(
@@ -643,6 +672,10 @@ export class MediaService {
              count(*)::int AS n,
              avg(taken_lat) AS lat,
              avg(taken_lng) AS lng,
+             min(taken_lat) AS min_lat,
+             max(taken_lat) AS max_lat,
+             min(taken_lng) AS min_lng,
+             max(taken_lng) AS max_lng,
              min(id::text) AS sample_id
     `;
 
@@ -654,6 +687,10 @@ export class MediaService {
              count(*)::int AS n,
              avg(taken_lat) AS lat,
              avg(taken_lng) AS lng,
+             min(taken_lat) AS min_lat,
+             max(taken_lat) AS max_lat,
+             min(taken_lng) AS min_lng,
+             max(taken_lng) AS max_lng,
              min(id::text) AS sample_id
     `;
 
@@ -666,6 +703,10 @@ export class MediaService {
         n: number;
         lat: string | number;
         lng: string | number;
+        min_lat: string | number;
+        max_lat: string | number;
+        min_lng: string | number;
+        max_lng: string | number;
         sample_id: string;
       }>
     >(Prisma.sql`
@@ -684,6 +725,10 @@ export class MediaService {
       lng: Number(row.lng),
       count: row.n,
       sampleId: row.sample_id,
+      minLat: Number(row.min_lat),
+      maxLat: Number(row.max_lat),
+      minLng: Number(row.min_lng),
+      maxLng: Number(row.max_lng),
     }));
   }
 

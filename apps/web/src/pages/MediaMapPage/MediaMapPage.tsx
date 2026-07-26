@@ -314,14 +314,22 @@ export default function MediaMapPage() {
     };
   }, [activeCircle, authIsLoading, timeRange]);
 
-  // ----- "Photos here" cluster drawer (lazy points + thumbnails) -----
+  // ----- "Photos here" cluster drawer (lazy preview points + thumbnails) -----
   // `clusterDrawer === null` means closed; otherwise the drawer is open and
-  // `status` reflects the fetch lifecycle. `points` holds only the first
-  // CLUSTER_THUMB_LIMIT items (with thumbnails merged in); `total` is the full
-  // cluster size so the title and "Show all" button reflect every photo.
+  // `status` reflects the fetch lifecycle.
+  //
+  // `total` is AUTHORITATIVE: it is the badge count the user just clicked,
+  // computed server-side over the whole cell. It is never overwritten by the
+  // preview fetch. `points` is only the preview — at most CLUSTER_THUMB_LIMIT
+  // items, with thumbnails merged in. Conflating the two is what previously let
+  // the panel read "Photos here (0)" under a badge showing 15, and — because
+  // "Show all" was gated on `total > points.length` — simultaneously removed
+  // the last route to those photos.
   type ClusterDrawerState = {
     status: 'loading' | 'loaded' | 'error';
+    /** Preview tiles only (≤ CLUSTER_THUMB_LIMIT); may be empty. */
     points: MediaLocation[];
+    /** The badge count for the clicked cluster — the real number of photos. */
     total: number;
     near: { lat: number; lng: number; radiusKm: number };
   };
@@ -329,7 +337,7 @@ export default function MediaMapPage() {
   const albumReqRef = useRef(0);
 
   const handleOpenClusterBbox = useCallback(
-    ({ bbox, lat, lng }: { bbox: string; lat: number; lng: number; total: number }) => {
+    ({ bbox, lat, lng, total }: { bbox: string; lat: number; lng: number; total: number }) => {
       if (!activeCircle) return;
       const reqId = ++albumReqRef.current;
       const circleId = activeCircle.id;
@@ -345,38 +353,45 @@ export default function MediaMapPage() {
       const radiusKm = Math.max(0.5, diagonalKm / 2);
       const near = { lat, lng, radiusKm };
 
-      // Open immediately in the loading state.
-      setClusterDrawer({ status: 'loading', points: [], total: 0, near });
+      // Open immediately in the loading state. `total` is already known (it is
+      // the badge count) so the title is correct before the preview resolves.
+      setClusterDrawer({ status: 'loading', points: [], total, near });
 
       void (async () => {
         try {
+          // Ask only for as many points as the preview grid can render. With a
+          // correct (full-cell) bbox an unbounded fetch could return thousands
+          // of rows for a single low-zoom cell.
           const pts = await listMediaLocations({
             circleId,
             bbox,
+            limit: CLUSTER_THUMB_LIMIT,
             capturedAtFrom: timeRange.from ?? undefined,
             capturedAtTo: timeRange.to ?? undefined,
           });
           if (albumReqRef.current !== reqId) return;
-          const total = pts.length;
 
-          // Only request thumbnails for the first N points — the server caps
-          // GET /api/media/thumbnails at 200 ids, and a large cluster would
-          // blow past it.
+          // Defensive slice — the server honours `limit`, but the thumbnail
+          // endpoint caps at 200 ids and must never be overrun.
           const head = pts.slice(0, CLUSTER_THUMB_LIMIT);
-          const thumbs = await getThumbnails(
-            circleId,
-            head.map((p) => p.id),
-          );
+          const thumbs = head.length
+            ? await getThumbnails(
+                circleId,
+                head.map((p) => p.id),
+              )
+            : [];
           if (albumReqRef.current !== reqId) return;
           const byId = new Map(thumbs.map((t) => [t.id, t.thumbnailUrl]));
           const headWithThumbs = head.map((p) => ({
             ...p,
             thumbnailUrl: byId.get(p.id) ?? null,
           }));
+          // An empty result means "preview unavailable", NOT "no photos" — the
+          // badge count stays authoritative and "Show all" stays reachable.
           setClusterDrawer({ status: 'loaded', points: headWithThumbs, total, near });
         } catch {
           if (albumReqRef.current === reqId) {
-            setClusterDrawer({ status: 'error', points: [], total: 0, near });
+            setClusterDrawer({ status: 'error', points: [], total, near });
           }
         }
       })();
@@ -631,14 +646,27 @@ export default function MediaMapPage() {
             </Box>
           ) : (
             <>
-              <Grid container spacing={1}>
-                {(clusterDrawer?.points ?? []).map((point) => (
-                  <Grid key={point.id} size={{ xs: 4 }}>
-                    <AlbumTile point={point} onClick={() => handleMarkerOpen(point.id)} />
-                  </Grid>
-                ))}
-              </Grid>
+              {clusterDrawer && clusterDrawer.points.length === 0 ? (
+                // An empty preview is NOT an empty cluster — the badge count in
+                // the title is authoritative, and "Show all" below is still the
+                // route to the photos.
+                <Typography variant="body2" color="text.secondary">
+                  Preview unavailable for this area.
+                </Typography>
+              ) : (
+                <Grid container spacing={1}>
+                  {(clusterDrawer?.points ?? []).map((point) => (
+                    <Grid key={point.id} size={{ xs: 4 }}>
+                      <AlbumTile point={point} onClick={() => handleMarkerOpen(point.id)} />
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
 
+              {/* The preview is capped at CLUSTER_THUMB_LIMIT, so "Show all"
+                  must appear whenever the authoritative badge count exceeds the
+                  number of tiles actually rendered — including the empty-preview
+                  case, where it is the only way through to the photos. */}
               {clusterDrawer &&
                 clusterDrawer.status === 'loaded' &&
                 clusterDrawer.total > clusterDrawer.points.length &&
