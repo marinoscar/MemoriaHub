@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { ApiClient, ApiError } from './api.js';
+import { STALE_SESSION_MESSAGE_RE } from './http/retry.js';
 
 export interface UploadResult {
   objectId: string;
@@ -118,12 +119,13 @@ function readFileSlice(
  */
 class StaleUploadSessionError extends Error {
   constructor(
-    readonly partNumber: number,
+    /** Where the dead session surfaced — a part PUT, or the complete call. */
+    readonly stage: string,
     readonly detail: string,
   ) {
     super(
       `Multipart upload session no longer exists on the storage provider ` +
-        `(part ${partNumber}): ${detail}`,
+        `(${stage}): ${detail}`,
     );
     this.name = 'StaleUploadSessionError';
   }
@@ -141,6 +143,26 @@ class StaleUploadSessionError extends Error {
  */
 function isStaleUploadSession(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404;
+}
+
+/**
+ * True when a failed `POST /upload/complete` means the multipart session is
+ * unusable and the file must restart from a fresh init.
+ *
+ * Two response shapes are accepted so a CLI upgraded ahead of its server still
+ * recovers (issue #183):
+ *   - 409 Conflict — what the API returns once it maps the provider's
+ *     `NoSuchUpload`/`InvalidPart` itself.
+ *   - 500 carrying the provider's message — an older deployment letting the
+ *     raw SDK error escape as a generic server error.
+ *
+ * The message test is deliberately narrow: a bare 500 is a genuine (retryable)
+ * server fault and must NOT be mistaken for a dead session.
+ */
+function isStaleCompleteResponse(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status === 409) return true;
+  return STALE_SESSION_MESSAGE_RE.test(err.serverMessage);
 }
 
 /**
@@ -163,7 +185,7 @@ async function uploadPart(
   } catch (err) {
     const msg = describeStorageFailure(err);
     if (isStaleUploadSession(err)) {
-      throw new StaleUploadSessionError(partNumber, msg);
+      throw new StaleUploadSessionError(`part ${partNumber}`, msg);
     }
     throw new Error(`Part ${partNumber} failed: ${msg}`);
   }
@@ -442,9 +464,24 @@ async function runUploadSession(
   // ------------------------------------------------------------------
   // 4. Finalize the upload on the server
   // ------------------------------------------------------------------
-  await api.post(`/api/storage/objects/${objectId}/upload/complete`, {
-    parts: completedParts,
-  });
+  // The complete call is the ONLY network round-trip left when a resume state
+  // already covers every part — the loop above is skipped entirely in that
+  // case, so the part-PUT stale-session check never runs. Guarding here is what
+  // makes a fully-resumed file recoverable rather than permanently stuck
+  // (issue #183).
+  try {
+    await api.post(`/api/storage/objects/${objectId}/upload/complete`, {
+      parts: completedParts,
+    });
+  } catch (err) {
+    if (isStaleCompleteResponse(err)) {
+      throw new StaleUploadSessionError(
+        'completing the upload',
+        describeStorageFailure(err),
+      );
+    }
+    throw err;
+  }
 
   // ------------------------------------------------------------------
   // 5. Clear in-progress state now that the upload is fully committed

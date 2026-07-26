@@ -100,6 +100,24 @@ describe('classifyError / isRetryable', () => {
     expect(calls).toBe(3);
   });
 
+  // Issue #183: a dead multipart session is terminal regardless of the status
+  // carrying it. Since 500 became retryable in #179, without this the client
+  // spends its whole retry budget on a call that can never succeed.
+  it('treats a stale multipart-session message as non-retryable on any status', () => {
+    expect(
+      isRetryable({ status: 500, serverMessage: 'The specified multipart upload does not exist.' }),
+    ).toBe(false);
+    expect(
+      isRetryable({ status: 500, serverMessage: 'One or more of the specified parts could not be found.' }),
+    ).toBe(false);
+    expect(isRetryable({ status: 503, serverMessage: 'NoSuchUpload' })).toBe(false);
+  });
+
+  it('still retries an ordinary 500 with no stale-session signature', () => {
+    expect(isRetryable({ status: 500, serverMessage: 'Internal server error' })).toBe(true);
+    expect(isRetryable({ status: 500 })).toBe(true);
+  });
+
   it('treats other 4xx as non-retryable', () => {
     for (const status of [400, 401, 403, 404, 409, 413, 422]) {
       expect(isRetryable({ status })).toBe(false);

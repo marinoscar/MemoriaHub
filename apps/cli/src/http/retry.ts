@@ -38,6 +38,18 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
  */
 export const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * Provider/server messages meaning a multipart session is permanently dead.
+ *
+ * These arrive on a `500` from an API deployment that lets the raw S3/R2 error
+ * escape `completeMultipartUpload` (newer servers map them to 409). Since 500
+ * is otherwise retryable, without this the client spends its whole retry budget
+ * on a condition that can never succeed — the upload must be re-initialized
+ * instead (issue #183).
+ */
+export const STALE_SESSION_MESSAGE_RE =
+  /multipart upload does not exist|parts could not be found|NoSuchUpload|InvalidPart/i;
+
 /** Transient network error codes that warrant a retry. */
 const RETRYABLE_NET_CODES = new Set([
   'ECONNRESET',
@@ -72,6 +84,16 @@ export function classifyError(err: unknown): RetryableInfo {
   const status = typeof e.status === 'number' ? e.status : undefined;
   const retryAfterMs =
     typeof e.retryAfterMs === 'number' ? e.retryAfterMs : undefined;
+
+  // A dead multipart session is terminal no matter what status carries it.
+  // Checked BEFORE every retryable rule (including the 500 added for transient
+  // provider faults) so the budget is not burned on an unwinnable call — the
+  // caller re-initializes the upload instead (issue #183).
+  const serverMessage =
+    typeof e.serverMessage === 'string' ? e.serverMessage : undefined;
+  if (serverMessage && STALE_SESSION_MESSAGE_RE.test(serverMessage)) {
+    return { retryable: false, status, retryAfterMs };
+  }
 
   // Explicit retryable marker (e.g. an S3 `SlowDown` body on a non-429 status).
   if (e.retryable === true) {
