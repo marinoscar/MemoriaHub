@@ -729,8 +729,12 @@ function AiSettingsContent() {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Choose the OpenAI image model used to enhance photos. Enhancement is a
-            single-item, human-reviewed action gated by the{' '}
-            <strong>Picture Enhancement</strong> feature toggle in System Settings.
+            single-item, human-reviewed action. Selecting a model here is only half the
+            setup — the feature also has to be switched on under{' '}
+            <Link component={RouterLink} to="/admin/settings/enhancer" underline="hover">
+              AI Picture Enhancer settings
+            </Link>
+            , where you can also review readiness and set the defaults users start from.
           </Typography>
 
           <Alert severity="info" icon={<InfoIcon fontSize="inherit" />} sx={{ mb: 2 }}>

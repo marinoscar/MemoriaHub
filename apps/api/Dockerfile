@@ -31,6 +31,11 @@ WORKDIR /app
 # fallback, retained as a safety net); wget + ca-certificates for the Human model
 # download below (busybox wget is builtin on Alpine but absent on Debian slim,
 # and HTTPS fetches need the CA bundle).
+# perl: required by exiftool-vendored at runtime — on POSIX the package ships the
+#   ExifTool *script* (exiftool-vendored.pl), not a compiled binary, so a perl
+#   interpreter must be on PATH or the EXIF carryover stamp applied to AI-enhanced
+#   images (ExifCarryoverService) silently degrades to a no-op. Must stay in
+#   lockstep with apps/cli/Dockerfile, which installs perl for the same reason.
 # libvips42t64 + libheif1 + libde265-0 + libheif-plugin-libde265: a HEIF-enabled
 #   system libvips so sharp (rebuilt from source against it in the deps stage via
 #   SHARP_FORCE_GLOBAL_LIBVIPS) decodes HEIC/HEIF NATIVELY instead of falling back
@@ -43,7 +48,7 @@ WORKDIR /app
 #   apps/cli/Dockerfile so both executors decode HEIC via the identical libvips
 #   build (cross-executor embedding parity — see #128/#108).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      openssl ffmpeg wget ca-certificates \
+      openssl ffmpeg wget ca-certificates perl \
       libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -352,13 +352,76 @@ export class OpenAiProvider implements AiProvider {
       };
     } catch (err: unknown) {
       const e = err as { status?: number; code?: string; message?: string };
+      // Keep the friendly messages for the two auth/config cases, but ALWAYS
+      // carry the provider's HTTP status (and any Retry-After hint) onto the
+      // rethrown error — see `rethrowWithProviderStatus` for why.
       if (e?.status === 401) {
-        throw new Error('Invalid API key');
+        throw rethrowWithProviderStatus(err, 'Invalid API key');
       }
       if (e?.status === 404 || e?.code === 'model_not_found') {
-        throw new Error(`Model not found: ${req.model}`);
+        throw rethrowWithProviderStatus(err, `Model not found: ${req.model}`);
       }
-      throw new Error(e?.message ?? 'Unknown error calling OpenAI image edit');
+      throw rethrowWithProviderStatus(
+        err,
+        e?.message ?? 'Unknown error calling OpenAI image edit',
+      );
     }
   }
+}
+
+/**
+ * Re-shape a provider SDK error into a plain `Error` with `message`, while
+ * PRESERVING the fields the enrichment queue's rate-limit classifier inspects
+ * (`apps/api/src/enrichment/rate-limit.error.ts` → `classifyRateLimit`):
+ *
+ *   - `status`  — the HTTP status; 429/529 is what routes a job to the
+ *                 rate-limit DEFERRAL path instead of burning retry attempts.
+ *   - `code`    — provider error code, kept for callers/logging.
+ *   - `headers` — normalized to a PLAIN object carrying only `retry-after`,
+ *                 because the classifier indexes `headers['retry-after']`
+ *                 directly and the OpenAI SDK exposes a `Headers` instance
+ *                 (whose `.get()` accessor the classifier does not know about).
+ *   - `cause`   — the original SDK error, for debugging.
+ *
+ * Previously `enhanceImage` rethrew `new Error(e.message)`, discarding
+ * `status`; a genuine OpenAI 429 was therefore classified as an ordinary
+ * failure and never deferred. Naming the friendly message separately keeps the
+ * 401/404 wording intact without losing the machine-readable status.
+ */
+function rethrowWithProviderStatus(original: unknown, message: string): Error {
+  const e = (original ?? {}) as {
+    status?: number;
+    code?: string;
+    headers?: unknown;
+  };
+  const wrapped = new Error(message, { cause: original });
+  if (typeof e.status === 'number') {
+    (wrapped as Error & { status?: number }).status = e.status;
+  }
+  if (typeof e.code === 'string') {
+    (wrapped as Error & { code?: string }).code = e.code;
+  }
+  const retryAfter = readRetryAfter(e.headers);
+  if (retryAfter !== undefined) {
+    (wrapped as Error & { headers?: Record<string, string> }).headers = {
+      'retry-after': retryAfter,
+    };
+  }
+  return wrapped;
+}
+
+/**
+ * Read a `Retry-After` value from either a fetch `Headers` instance (OpenAI SDK
+ * v5+) or a plain header record (older SDKs / mocks). Returns the raw string —
+ * parsing into ms is the classifier's job.
+ */
+function readRetryAfter(headers: unknown): string | undefined {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const asHeaders = headers as { get?: (name: string) => string | null };
+  if (typeof asHeaders.get === 'function') {
+    return asHeaders.get('retry-after') ?? undefined;
+  }
+  const record = headers as Record<string, unknown>;
+  const raw = record['retry-after'] ?? record['Retry-After'];
+  return typeof raw === 'string' ? raw : undefined;
 }

@@ -10,6 +10,7 @@ import { MediaModule } from '../media/media.module';
 import { MediaEnhancementController } from './media-enhancement.controller';
 import { AdminEnhancementController } from './admin-enhancement.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
+import { ExifCarryoverService } from './exif-carryover.service';
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { PictureEnhancementPurgeHandler } from './picture-enhancement-purge.handler';
 import { PictureEnhancementPurgeTask } from './picture-enhancement-purge.task';
@@ -42,6 +43,7 @@ import { PictureEnhancementPurgeTask } from './picture-enhancement-purge.task';
   controllers: [MediaEnhancementController, AdminEnhancementController],
   providers: [
     MediaEnhancementService,
+    ExifCarryoverService,
     PictureEnhancementHandler,
     PictureEnhancementPurgeHandler,
     PictureEnhancementPurgeTask,

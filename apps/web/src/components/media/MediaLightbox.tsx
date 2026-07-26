@@ -62,7 +62,7 @@ import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { MediaOrientationEditor } from './MediaOrientationEditor';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { VideoPlayer } from './VideoPlayer';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 
 // ---------------------------------------------------------------------------
 // Module-scope cache so full items survive lightbox close/reopen
@@ -103,8 +103,8 @@ export function MediaLightbox({
 }: MediaLightboxProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const { settings } = useSystemSettings();
-  const enhanceEnabled = Boolean(settings?.features?.pictureEnhancement);
+  const { pictureEnhancement } = useFeatureFlags();
+  const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
 
   const item = index !== null ? items[index] ?? null : null;
 
@@ -913,6 +913,15 @@ export function MediaLightbox({
           item={displayItem}
           open={enhanceOpen}
           onClose={() => setEnhanceOpen(false)}
+          modelLabel={pictureEnhancement?.model ?? undefined}
+          replacePolicy={
+            pictureEnhancement
+              ? {
+                  allowReplace: pictureEnhancement.allowReplace,
+                  blockReplaceOnDownscale: pictureEnhancement.blockReplaceOnDownscale,
+                }
+              : undefined
+          }
           onReplaced={() => {
             setEnhanceOpen(false);
             void refreshFullItem();
@@ -922,6 +931,18 @@ export function MediaLightbox({
             setEnhanceOpen(false);
             setSnack({ message, severity: 'success' });
           }}
+          // Fired when the job finishes while the panel is closed; reopening
+          // AI Enhance restores the review via resumeLatest().
+          onFinishedInBackground={(s) =>
+            setSnack(
+              s === 'ready'
+                ? {
+                    message: 'Your enhanced photo is ready — reopen AI Enhance to review it',
+                    severity: 'success',
+                  }
+                : { message: 'The AI enhancement failed. Open AI Enhance for details.', severity: 'error' },
+            )
+          }
         />
       )}
 

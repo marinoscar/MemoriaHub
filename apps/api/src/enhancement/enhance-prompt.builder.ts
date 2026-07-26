@@ -2,11 +2,41 @@ import type { EnhanceParams } from './dto/enhance-params.dto';
 
 type Strength = 'subtle' | 'balanced' | 'strong';
 
+type Preset = NonNullable<EnhanceParams['preset']>;
+
 const STRENGTH_WORD: Record<Strength, string> = {
   subtle: 'subtly',
   balanced: 'noticeably',
   strong: 'strongly',
 };
+
+/**
+ * Task-specific preset clauses (spec §4.1). Inserted verbatim after the opening
+ * sentence and before the adjustment sentence. Presets are ORTHOGONAL to
+ * `intent` — they steer WHAT kind of photo problem is being solved, while the
+ * adjustment toggles/instructions still steer the individual corrections.
+ */
+const PRESET_CLAUSE: Record<Preset, string> = {
+  restore_old_photo:
+    "This is an old or damaged photograph. Repair scratches, dust, creases, tears, stains, and faded areas, and recover lost contrast and detail. Keep the photo's period character — do not modernize it or colorize it unless asked.",
+  low_light:
+    'This photo was taken in low light. Brighten the exposure naturally, recover shadow detail, reduce heavy noise, and correct color casts from artificial lighting, while keeping the night-time or indoor atmosphere believable — do not make it look like daytime.',
+  colorize_bw:
+    'Colorize this black-and-white photograph with realistic, historically plausible colors: natural skin tones and a restrained, period-appropriate palette. Preserve the original luminance, contrast, and grain character.',
+  portrait_polish:
+    'This is a portrait. Gently even out skin tone and reduce temporary blemishes while keeping natural skin texture (no plastic smoothing), subtly brighten the eyes, and balance the lighting on the face. Do not reshape facial features, slim the body, or change apparent age.',
+};
+
+const DEFAULT_FIDELITY_CONSTRAINT =
+  'The output must look like a cleaned-up version of the same photo, not a new image.';
+
+/**
+ * `colorize_bw` deliberately changes the photo's color, so the generic
+ * "cleaned-up version" framing reads as a contradiction. Every OTHER hard
+ * constraint is unchanged.
+ */
+const COLORIZE_FIDELITY_CONSTRAINT =
+  'The output must look like a faithfully colorized version of the same photo, not a new image.';
 
 /**
  * Compile the gpt-image-1 edit prompt from the request params (spec §4.3).
@@ -17,8 +47,10 @@ const STRENGTH_WORD: Record<Strength, string> = {
  *
  * `intent=auto` uses the fixed base template; `intent=custom` drives the
  * adjustment clauses from the toggles and appends free-text instructions.
+ * An optional `preset` adds a task-specific clause between the opening sentence
+ * and the adjustment sentence, independently of `intent`.
  * The composition/identity/text hard constraints are ALWAYS present regardless
- * of intent — they are the core safety guardrails of the feature.
+ * of intent or preset — they are the core safety guardrails of the feature.
  */
 export function buildEnhancePrompt(
   params: EnhanceParams,
@@ -26,10 +58,14 @@ export function buildEnhancePrompt(
 ): string {
   const intent = params.intent ?? 'auto';
   const word = STRENGTH_WORD[effectiveStrength];
+  const preset = params.preset;
+  // Colorizing IS a color change, so the generic white-balance clause and the
+  // "cleaned-up version" fidelity constraint would both fight the preset.
+  const isColorize = preset === 'colorize_bw';
 
   // Default toggles: color/tone/sharpness/denoise on, dehaze/straighten off.
   const adj = params.adjustments ?? {};
-  const color = adj.color ?? true;
+  const color = (adj.color ?? true) && !isColorize;
   const tone = adj.tone ?? true;
   const sharpness = adj.sharpness ?? true;
   const denoise = adj.denoise ?? true;
@@ -53,19 +89,13 @@ export function buildEnhancePrompt(
 
   const parts: string[] = [];
 
-  if (intent === 'auto' && clauses.length === 0) {
-    parts.push(
-      'Enhance this photograph to make it look its best while remaining true to the original scene.',
-    );
-  } else if (intent === 'auto') {
-    parts.push(
-      'Enhance this photograph to make it look its best while remaining true to the original scene.',
-    );
-    parts.push(adjustmentSentence);
-  } else {
-    parts.push('Enhance this photograph while remaining true to the original scene.');
-    if (adjustmentSentence) parts.push(adjustmentSentence);
-  }
+  parts.push(
+    intent === 'auto'
+      ? 'Enhance this photograph to make it look its best while remaining true to the original scene.'
+      : 'Enhance this photograph while remaining true to the original scene.',
+  );
+  if (preset) parts.push(PRESET_CLAUSE[preset]);
+  if (adjustmentSentence) parts.push(adjustmentSentence);
 
   // Always-on hard constraints (spec §4.3).
   const constraints = [
@@ -76,7 +106,7 @@ export function buildEnhancePrompt(
       ? "Do NOT alter anyone's face, identity, expression, skin tone, or the number of people."
       : "Do NOT alter anyone's identity or the number of people.",
     'Do NOT add any text, watermark, borders, or artistic filters.',
-    'The output must look like a cleaned-up version of the same photo, not a new image.',
+    isColorize ? COLORIZE_FIDELITY_CONSTRAINT : DEFAULT_FIDELITY_CONSTRAINT,
   ];
   parts.push(constraints.join(' '));
 

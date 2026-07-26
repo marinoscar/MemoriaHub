@@ -618,6 +618,127 @@ describe('MediaEnhancementService', () => {
 
         expect(result).toEqual({ data: { id: 'new-media-1', status: 'applied', decision: 'keep_both' } });
       });
+
+      // -----------------------------------------------------------------------
+      // Metadata merge (commit 256058d "copy source metadata into keep_both
+      // enhanced items"): inheritableMetadata() carries user/descriptive keys
+      // over, drops `_`-prefixed internal-processing-state keys AND
+      // thumbnailObjectId/thumbnailStorageKey (the new item gets its own via
+      // its own reprocess), then the enhancement's own breadcrumb is layered on
+      // top last so it always wins on a key collision.
+      // -----------------------------------------------------------------------
+
+      describe('metadata merge', () => {
+        it('carries plain/descriptive metadata keys over onto the new item', async () => {
+          (mockPrisma.mediaItem.findUnique as jest.Mock).mockImplementation(async () =>
+            makeMediaItem({ metadata: { caption: 'Family reunion', album: 'Summer 2024' } }),
+          );
+
+          await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
+
+          expect(mockPrisma.mediaItem.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+              metadata: expect.objectContaining({
+                caption: 'Family reunion',
+                album: 'Summer 2024',
+              }),
+            }),
+          });
+        });
+
+        it('strips `_`-prefixed internal-processing-state keys from the copied metadata', async () => {
+          (mockPrisma.mediaItem.findUnique as jest.Mock).mockImplementation(async () =>
+            makeMediaItem({
+              metadata: {
+                caption: 'Family reunion',
+                _processing: { exif: 'done' },
+                _processingRetryCount: 2,
+                _thumbnailRepairAttempts: 1,
+                _thumbnailRepairExhausted: true,
+                _processedAt: '2026-01-01T00:00:00Z',
+                _aiEnhanced: { model: 'old-model', enhancementId: 'old-enh' },
+                _enhancedFrom: 'old-source-id',
+              },
+            }),
+          );
+
+          await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
+
+          const call = (mockPrisma.mediaItem.create as jest.Mock).mock.calls[0][0];
+          const meta = call.data.metadata as Record<string, unknown>;
+          expect(meta['caption']).toBe('Family reunion');
+          // The stale internal-processing-state keys are gone entirely.
+          expect(meta).not.toHaveProperty('_processing');
+          expect(meta).not.toHaveProperty('_processingRetryCount');
+          expect(meta).not.toHaveProperty('_thumbnailRepairAttempts');
+          expect(meta).not.toHaveProperty('_thumbnailRepairExhausted');
+          expect(meta).not.toHaveProperty('_processedAt');
+          // The only surviving underscore-prefixed keys are the FRESH
+          // breadcrumb this enhancement writes, layered on top of (not merged
+          // with) whatever stale `_aiEnhanced`/`_enhancedFrom` the source had.
+          expect(Object.keys(meta).filter((k) => k.startsWith('_')).sort()).toEqual([
+            '_aiEnhanced',
+            '_enhancedFrom',
+          ]);
+          expect((meta['_aiEnhanced'] as Record<string, unknown>)['model']).toBe('gpt-image-1');
+        });
+
+        it('strips thumbnailObjectId/thumbnailStorageKey from the copied metadata (new item gets its own)', async () => {
+          (mockPrisma.mediaItem.findUnique as jest.Mock).mockImplementation(async () =>
+            makeMediaItem({
+              metadata: {
+                caption: 'Family reunion',
+                thumbnailObjectId: 'old-thumb-obj-id',
+                thumbnailStorageKey: 'thumbnails/old-thumb.jpg',
+              },
+            }),
+          );
+
+          await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
+
+          const call = (mockPrisma.mediaItem.create as jest.Mock).mock.calls[0][0];
+          const meta = call.data.metadata as Record<string, unknown>;
+          expect(meta).not.toHaveProperty('thumbnailObjectId');
+          expect(meta).not.toHaveProperty('thumbnailStorageKey');
+          expect(meta['caption']).toBe('Family reunion');
+        });
+
+        it("the enhancement's own breadcrumb keys (_aiEnhanced, _enhancedFrom) win on any collision with copied source metadata", async () => {
+          (mockPrisma.mediaItem.findUnique as jest.Mock).mockImplementation(async () =>
+            makeMediaItem({
+              id: MEDIA_ID,
+              metadata: {
+                // A prior _aiEnhanced/_enhancedFrom would be stripped anyway
+                // (underscore rule), but this asserts the WIN-ON-COLLISION
+                // guarantee explicitly, independent of the strip rule.
+                _aiEnhanced: { model: 'stale-model', enhancementId: 'stale-enh', at: 'stale', fromId: 'stale-from' },
+                _enhancedFrom: 'stale-source-id',
+              },
+            }),
+          );
+
+          await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
+
+          const call = (mockPrisma.mediaItem.create as jest.Mock).mock.calls[0][0];
+          const meta = call.data.metadata as Record<string, unknown>;
+          expect(meta['_enhancedFrom']).toBe(MEDIA_ID);
+          expect((meta['_aiEnhanced'] as Record<string, unknown>)['model']).toBe('gpt-image-1');
+          expect((meta['_aiEnhanced'] as Record<string, unknown>)['enhancementId']).toBe(ENH_ID);
+          expect((meta['_aiEnhanced'] as Record<string, unknown>)['fromId']).toBe(MEDIA_ID);
+        });
+
+        it('produces just the breadcrumb metadata when the source has none', async () => {
+          (mockPrisma.mediaItem.findUnique as jest.Mock).mockImplementation(async () =>
+            makeMediaItem({ metadata: null }),
+          );
+
+          await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
+
+          const call = (mockPrisma.mediaItem.create as jest.Mock).mock.calls[0][0];
+          const meta = call.data.metadata as Record<string, unknown>;
+          expect(Object.keys(meta).sort()).toEqual(['_aiEnhanced', '_enhancedFrom']);
+        });
+      });
     });
 
     describe('replace', () => {

@@ -119,10 +119,14 @@ describe('SystemSettingsService', () => {
       // systemSettingsSchema.parse fills in every optional top-level branch
       // with its default when omitted from the DTO — not just `face`. This
       // fixture must mirror ALL of those defaults (face, storage, burst,
-      // dedup, geo, jobs) or the toHaveBeenCalledWith assertion below drifts
-      // out of sync every time a new default branch is added to the schema.
+      // dedup, geo, jobs, pictureEnhancement, workflows) or the
+      // toHaveBeenCalledWith assertion below drifts out of sync every time a
+      // new default branch is added to the schema. `ai.features.enhance` is
+      // also filled with its default (null) even though `ai.features` itself
+      // was supplied, since the DTO's `ai.features` omits the `enhance` key.
       const expectedParsed = {
         ...newSettings,
+        ai: { features: { ...newSettings.ai.features, enhance: null } },
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
@@ -132,6 +136,8 @@ describe('SystemSettingsService', () => {
         geo: DEFAULT_SYSTEM_SETTINGS.geo,
         jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
         email: DEFAULT_SYSTEM_SETTINGS.email,
+        pictureEnhancement: DEFAULT_SYSTEM_SETTINGS.pictureEnhancement,
+        workflows: DEFAULT_SYSTEM_SETTINGS.workflows,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -217,9 +223,11 @@ describe('SystemSettingsService', () => {
 
       // systemSettingsSchema.parse fills in every optional top-level branch
       // with its default when omitted — the validated object (not the
-      // original DTO) is stored in the audit event.
+      // original DTO) is stored in the audit event. See the matching note in
+      // the "should replace entire settings" test above re: ai.features.enhance.
       const expectedValidated = {
         ...newSettings,
+        ai: { features: { ...newSettings.ai.features, enhance: null } },
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
@@ -229,6 +237,8 @@ describe('SystemSettingsService', () => {
         geo: DEFAULT_SYSTEM_SETTINGS.geo,
         jobs: DEFAULT_SYSTEM_SETTINGS.jobs,
         email: DEFAULT_SYSTEM_SETTINGS.email,
+        pictureEnhancement: DEFAULT_SYSTEM_SETTINGS.pictureEnhancement,
+        workflows: DEFAULT_SYSTEM_SETTINGS.workflows,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({

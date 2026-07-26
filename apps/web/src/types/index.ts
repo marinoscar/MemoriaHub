@@ -95,6 +95,15 @@ export interface SystemSettings {
     /** Size fallback (bytes) used only when the duration is unknown. */
     maxSizeBytes?: number;
   };
+  pictureEnhancement?: {
+    defaultQuality?: 'low' | 'medium' | 'high';
+    defaultStrength?: 'subtle' | 'balanced' | 'strong';
+    stampExif?: boolean;
+    allowReplace?: boolean;
+    blockReplaceOnDownscale?: boolean;
+    maxInputMegapixels?: number;
+    retentionHours?: number;
+  };
   workflows?: {
     maxItemsPerRun?: number;
     batchSize?: number;

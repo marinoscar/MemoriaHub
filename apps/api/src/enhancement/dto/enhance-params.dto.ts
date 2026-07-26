@@ -9,6 +9,14 @@ import { z } from 'zod';
  */
 export const enhanceParamsSchema = z.object({
   intent: z.enum(['auto', 'custom']).optional(),
+  /**
+   * Optional task-specific preset for the family-photo-archive cases the
+   * generic template handles poorly. ORTHOGONAL to `intent` — a preset may be
+   * combined with custom adjustment toggles and free-text instructions.
+   */
+  preset: z
+    .enum(['restore_old_photo', 'low_light', 'colorize_bw', 'portrait_polish'])
+    .optional(),
   adjustments: z
     .object({
       color: z.boolean().optional(),
@@ -20,6 +28,8 @@ export const enhanceParamsSchema = z.object({
     })
     .optional(),
   strength: z.enum(['subtle', 'balanced', 'strong']).optional(),
+  /** Optional per-run override of the pictureEnhancement.defaultQuality setting. */
+  quality: z.enum(['low', 'medium', 'high']).optional(),
   preserveFaces: z.boolean().optional(),
   instructions: z.string().max(500).optional(),
   /** Optional per-call override of ai.features.enhance.model. */

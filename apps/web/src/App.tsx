@@ -40,6 +40,7 @@ const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
 const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));
+const EnhancerSettingsPage = lazy(() => import('./pages/Admin/EnhancerSettingsPage'));
 const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
@@ -111,6 +112,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
                 <Route path="/admin/settings/duplicates" element={<DuplicatesSettingsPage />} />
                 <Route path="/admin/settings/social-media" element={<SocialMediaSettingsPage />} />
+                <Route path="/admin/settings/enhancer" element={<EnhancerSettingsPage />} />
                 <Route path="/admin/settings/location-inference" element={<LocationInferenceSettingsPage />} />
                 <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
                 <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />

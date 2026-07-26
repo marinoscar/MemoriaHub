@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ComponentType } from 'react';
 import {
   Drawer,
   Box,
@@ -6,7 +7,10 @@ import {
   IconButton,
   Stack,
   Button,
+  ButtonBase,
+  Chip,
   CircularProgress,
+  LinearProgress,
   Alert,
   Divider,
   Collapse,
@@ -17,6 +21,7 @@ import {
   Select,
   MenuItem,
   TextField,
+  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -26,16 +31,28 @@ import {
 import {
   Close as CloseIcon,
   AutoFixHigh as AutoFixHighIcon,
+  AutoAwesome as AutoAwesomeIcon,
+  Healing as HealingIcon,
+  Nightlight as NightlightIcon,
+  Palette as PaletteIcon,
+  FaceRetouchingNatural as FaceRetouchingNaturalIcon,
+  Tune as TuneIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   WarningAmber as WarningAmberIcon,
+  Schedule as ScheduleIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
+import type { SvgIconProps } from '@mui/material';
 import type { MediaItem } from '../../types/media';
 import { useMediaEnhance } from '../../hooks/useMediaEnhance';
+import type { EnhanceUiStatus } from '../../hooks/useMediaEnhance';
+import { BeforeAfterSlider } from './BeforeAfterSlider';
 import type {
   EnhanceParams,
+  EnhancePreset,
+  EnhanceQuality,
   EnhanceStrength,
   EnhanceImageInfo,
   ApplyDecision,
@@ -51,11 +68,178 @@ interface MediaEnhancementDrawerProps {
   onClose: () => void;
   /** Optional model label, shown in the params step (from ai.features.enhance). */
   modelLabel?: string | null;
+  /**
+   * Server-resolved replace policy (from GET /api/features). Consumed by the
+   * compare step so the user learns replacing is unavailable BEFORE confirming
+   * a destructive action instead of after a 400.
+   */
+  replacePolicy?: {
+    allowReplace: boolean;
+    blockReplaceOnDownscale: boolean;
+  };
   /** Called after a successful "replace" so the parent can bust its cache/reload. */
   onReplaced?: () => void;
   /** Called after a successful "keep both" with a success message. */
   onKeptBoth?: (message: string) => void;
+  /**
+   * Fired when the enhancement reaches a terminal state while this drawer is
+   * CLOSED, so the parent can surface a snackbar. Polling continues while the
+   * drawer is closed as long as the parent keeps this component mounted (both
+   * current call sites do); reopening restores the review via `resumeLatest`.
+   */
+  onFinishedInBackground?: (status: 'ready' | 'failed') => void;
 }
+
+// ---------------------------------------------------------------------------
+// Adjustments
+// ---------------------------------------------------------------------------
+
+interface AdjustmentsState {
+  color: boolean;
+  tone: boolean;
+  sharpness: boolean;
+  denoise: boolean;
+  dehaze: boolean;
+  straighten: boolean;
+}
+
+const ADJUSTMENT_FIELDS: { key: keyof AdjustmentsState; label: string }[] = [
+  { key: 'color', label: 'Correct color & white balance' },
+  { key: 'tone', label: 'Balance exposure & tone' },
+  { key: 'sharpness', label: 'Increase clarity & sharpness' },
+  { key: 'denoise', label: 'Reduce noise' },
+  { key: 'dehaze', label: 'Remove haze' },
+  { key: 'straighten', label: 'Straighten horizon' },
+];
+
+/** Mirrors the server-side defaults in `enhance-prompt.builder.ts`. */
+const DEFAULT_ADJUSTMENTS: AdjustmentsState = {
+  color: true,
+  tone: true,
+  sharpness: true,
+  denoise: true,
+  dehaze: false,
+  straighten: false,
+};
+
+// ---------------------------------------------------------------------------
+// Presets
+// ---------------------------------------------------------------------------
+
+/**
+ * `auto` and `custom` are UI-only choices — neither sends a `preset` to the
+ * API. The four real values map 1:1 onto the server's preset enum.
+ */
+type PresetKey = 'auto' | EnhancePreset | 'custom';
+
+interface PresetDef {
+  key: PresetKey;
+  label: string;
+  description: string;
+  Icon: ComponentType<SvgIconProps>;
+  /** Shown as a warning chip for presets whose output is an AI invention. */
+  interpretive?: boolean;
+  /** Prefill applied when the preset is picked; every field stays editable. */
+  prefill: {
+    adjustments: AdjustmentsState;
+    strength: EnhanceStrength;
+    preserveFaces: boolean;
+  };
+}
+
+const PRESETS: PresetDef[] = [
+  {
+    key: 'auto',
+    label: 'Auto',
+    description: 'Balanced all-round improvement',
+    Icon: AutoAwesomeIcon,
+    prefill: {
+      adjustments: DEFAULT_ADJUSTMENTS,
+      strength: 'balanced',
+      preserveFaces: true,
+    },
+  },
+  {
+    key: 'restore_old_photo',
+    label: 'Restore old photo',
+    description: 'Repair scratches, fading and creases in scans of old prints',
+    Icon: HealingIcon,
+    prefill: {
+      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, sharpness: true, denoise: true, dehaze: true },
+      strength: 'strong',
+      preserveFaces: true,
+    },
+  },
+  {
+    key: 'low_light',
+    label: 'Low-light rescue',
+    description: 'Brighten dim indoor and night photos without washing them out',
+    Icon: NightlightIcon,
+    prefill: {
+      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, denoise: true },
+      strength: 'strong',
+      preserveFaces: true,
+    },
+  },
+  {
+    key: 'colorize_bw',
+    label: 'Colorize B&W',
+    description: 'Add natural color to a black-and-white photo',
+    Icon: PaletteIcon,
+    interpretive: true,
+    prefill: {
+      adjustments: DEFAULT_ADJUSTMENTS,
+      strength: 'balanced',
+      preserveFaces: true,
+    },
+  },
+  {
+    key: 'portrait_polish',
+    label: 'Portrait polish',
+    description: 'Even out skin tone and lighting on faces, gently',
+    Icon: FaceRetouchingNaturalIcon,
+    prefill: {
+      adjustments: { ...DEFAULT_ADJUSTMENTS, sharpness: true, denoise: true },
+      strength: 'subtle',
+      preserveFaces: true,
+    },
+  },
+  {
+    key: 'custom',
+    label: 'Custom',
+    description: 'Choose the corrections yourself',
+    Icon: TuneIcon,
+    prefill: {
+      adjustments: DEFAULT_ADJUSTMENTS,
+      strength: 'balanced',
+      preserveFaces: true,
+    },
+  },
+];
+
+const PRESET_BY_KEY = new Map(PRESETS.map((p) => [p.key, p]));
+
+function adjustmentsEqual(a: AdjustmentsState, b: AdjustmentsState): boolean {
+  return (ADJUSTMENT_FIELDS as { key: keyof AdjustmentsState }[]).every(
+    ({ key }) => a[key] === b[key],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Progress copy
+// ---------------------------------------------------------------------------
+
+/**
+ * Deliberately generic. The API gives us no insight into the model's internal
+ * stage, so these must not claim to know one.
+ */
+const PROGRESS_MESSAGES = [
+  'Sending your photo to the model…',
+  'Recovering detail…',
+  'Balancing color and light…',
+  'Almost there — large photos can take a minute.',
+];
+const MESSAGE_ROTATE_MS = 6000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,72 +265,79 @@ function dimsLabel(info: EnhanceImageInfo | null): string {
   return `${info.width}×${info.height}`;
 }
 
-// Local compare pane (mirrors DuplicateGroupPage's ComparePane).
-function ComparePane({ url, label }: { url: string | null; label: string }) {
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+// ---------------------------------------------------------------------------
+// Preset card
+// ---------------------------------------------------------------------------
+
+function PresetCard({
+  def,
+  selected,
+  onSelect,
+}: {
+  def: PresetDef;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const { Icon } = def;
   return (
-    <Box sx={{ flex: 1, minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-        {label}
+    <ButtonBase
+      onClick={onSelect}
+      aria-pressed={selected}
+      aria-label={`${def.label} — ${def.description}`}
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        textAlign: 'left',
+        gap: 0.5,
+        p: 1.25,
+        minHeight: 96,
+        width: '100%',
+        borderRadius: 1.5,
+        border: '2px solid',
+        borderColor: selected ? 'primary.main' : 'divider',
+        bgcolor: selected ? 'action.selected' : 'transparent',
+        transition: 'border-color 120ms, background-color 120ms',
+        '&:hover': { borderColor: selected ? 'primary.main' : 'text.disabled' },
+        '&:focus-visible': {
+          outline: '3px solid',
+          outlineColor: 'primary.main',
+          outlineOffset: 2,
+        },
+      }}
+    >
+      <Stack direction="row" spacing={0.75} sx={{ width: '100%', alignItems: 'center' }}>
+        <Icon fontSize="small" color={selected ? 'primary' : 'action'} />
+        <Typography variant="body2" sx={{ flex: 1, minWidth: 0, fontWeight: 600 }}>
+          {def.label}
+        </Typography>
+      </Stack>
+      <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.3 }}>
+        {def.description}
       </Typography>
-      <Box
-        sx={{
-          width: '100%',
-          height: { xs: 200, sm: 240 },
-          bgcolor: 'action.hover',
-          borderRadius: 1,
-          border: '1px solid',
-          borderColor: 'divider',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
-      >
-        {url ? (
-          <Box
-            component="img"
-            src={url}
-            alt={label}
-            sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-          />
-        ) : (
-          <CircularProgress size={20} />
-        )}
-      </Box>
-    </Box>
+      {def.interpretive && (
+        <Chip
+          size="small"
+          color="warning"
+          variant="outlined"
+          label="Interpretive"
+          sx={{ height: 20, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }}
+        />
+      )}
+    </ButtonBase>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-
-const ADJUSTMENT_FIELDS: { key: keyof AdjustmentsState; label: string }[] = [
-  { key: 'color', label: 'Correct color & white balance' },
-  { key: 'tone', label: 'Balance exposure & tone' },
-  { key: 'sharpness', label: 'Increase clarity & sharpness' },
-  { key: 'denoise', label: 'Reduce noise' },
-  { key: 'dehaze', label: 'Remove haze' },
-  { key: 'straighten', label: 'Straighten horizon' },
-];
-
-interface AdjustmentsState {
-  color: boolean;
-  tone: boolean;
-  sharpness: boolean;
-  denoise: boolean;
-  dehaze: boolean;
-  straighten: boolean;
-}
-
-const DEFAULT_ADJUSTMENTS: AdjustmentsState = {
-  color: true,
-  tone: true,
-  sharpness: true,
-  denoise: true,
-  dehaze: false,
-  straighten: false,
-};
 
 /**
  * Right-side drawer that walks the user through the enhance → poll → review →
@@ -158,19 +349,24 @@ export function MediaEnhancementDrawer({
   open,
   onClose,
   modelLabel,
+  replacePolicy,
   onReplaced,
   onKeptBoth,
+  onFinishedInBackground,
 }: MediaEnhancementDrawerProps) {
   const theme = useTheme();
-  const { status, data, error, polling, start, resumeLatest, apply, discard, reset } =
+  const { status, data, error, polling, startedAt, start, resumeLatest, apply, discard, reset } =
     useMediaEnhance(item.id);
 
   // Params state
+  const [presetKey, setPresetKey] = useState<PresetKey>('auto');
   const [customize, setCustomize] = useState(false);
   const [adjustments, setAdjustments] = useState<AdjustmentsState>(DEFAULT_ADJUSTMENTS);
   const [strength, setStrength] = useState<EnhanceStrength>('balanced');
   const [preserveFaces, setPreserveFaces] = useState(true);
   const [instructions, setInstructions] = useState('');
+  /** Empty string = "let the server's pictureEnhancement.defaultQuality apply". */
+  const [quality, setQuality] = useState<EnhanceQuality | ''>('');
 
   // Decision confirmation + commit state
   const [pendingDecision, setPendingDecision] = useState<ApplyDecision | 'discard' | null>(null);
@@ -185,21 +381,86 @@ export function MediaEnhancementDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item.id]);
 
+  // ---- Background completion notification ----------------------------------
+  const prevStatusRef = useRef<EnhanceUiStatus>(status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    if (open || prev === status) return;
+    if ((status === 'ready' || status === 'failed') && (prev === 'pending' || prev === 'processing')) {
+      onFinishedInBackground?.(status);
+    }
+  }, [status, open, onFinishedInBackground]);
+
   const handleClose = () => {
     setPendingDecision(null);
     setCommitError(null);
     onClose();
   };
 
+  // ---- Preset selection ----------------------------------------------------
+  const selectPreset = useCallback((key: PresetKey) => {
+    const def = PRESET_BY_KEY.get(key);
+    setPresetKey(key);
+    if (!def) return;
+    // Prefill, but leave everything editable — subsequent tweaks are sent.
+    setAdjustments(def.prefill.adjustments);
+    setStrength(def.prefill.strength);
+    setPreserveFaces(def.prefill.preserveFaces);
+    if (key === 'custom') setCustomize(true);
+  }, []);
+
+  const activePreset = PRESET_BY_KEY.get(presetKey) ?? PRESETS[0];
+
+  /**
+   * True when the user has actually deviated from the selected preset's
+   * prefill (or typed free-text guidance) — NOT merely because the Customize
+   * panel is expanded. This drives `intent`, which changes the prompt's opening
+   * sentence server-side and is the only thing that makes `instructions` count.
+   */
+  const isCustomized = useMemo(
+    () =>
+      !adjustmentsEqual(adjustments, activePreset.prefill.adjustments) ||
+      strength !== activePreset.prefill.strength ||
+      preserveFaces !== activePreset.prefill.preserveFaces ||
+      instructions.trim().length > 0,
+    [adjustments, strength, preserveFaces, instructions, activePreset],
+  );
+
+  /**
+   * Param mapping (deliberate, see issue #98 commit set E):
+   *  - `preset` is sent for the four real presets only; `auto`/`custom` are UI
+   *    affordances and send none.
+   *  - `intent: 'custom'` is sent ONLY when the user genuinely customized. It
+   *    swaps the prompt's base sentence and is the gate for `instructions`.
+   *  - A preset's prefilled adjustments/strength/preserveFaces are still sent
+   *    even when untouched, because they differ from the SERVER's defaults
+   *    (e.g. portrait_polish = subtle). They are honored regardless of intent.
+   *  - Full-auto with nothing touched sends `{}` so every server default wins.
+   */
   const buildParams = (): EnhanceParams => {
-    if (!customize) return {};
-    return {
-      intent: 'custom',
-      adjustments: { ...adjustments },
-      strength,
-      preserveFaces,
-      instructions: instructions.trim() ? instructions.trim() : undefined,
-    };
+    const params: EnhanceParams = {};
+
+    if (presetKey !== 'auto' && presetKey !== 'custom') {
+      params.preset = presetKey;
+    }
+
+    if (isCustomized) {
+      params.intent = 'custom';
+      params.adjustments = { ...adjustments };
+      params.strength = strength;
+      params.preserveFaces = preserveFaces;
+      const trimmed = instructions.trim();
+      if (trimmed) params.instructions = trimmed;
+    } else if (presetKey !== 'auto') {
+      params.adjustments = { ...adjustments };
+      params.strength = strength;
+      params.preserveFaces = preserveFaces;
+    }
+
+    if (quality) params.quality = quality;
+
+    return params;
   };
 
   const handleStart = () => {
@@ -243,10 +504,41 @@ export function MediaEnhancementDrawer({
       original?.width != null &&
       enhanced.width * (enhanced.height ?? 0) < original.width * (original.height ?? 0));
 
-  // ---- Step selection ----
+  // ---- Replace policy ------------------------------------------------------
+  const allowReplace = replacePolicy?.allowReplace ?? true;
+  const blockReplaceOnDownscale = replacePolicy?.blockReplaceOnDownscale ?? false;
+  const replaceBlockedByDownscale = allowReplace && blockReplaceOnDownscale && Boolean(downscaled);
+
+  // ---- Progress ticker -----------------------------------------------------
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!polling) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [polling]);
+
+  const [messageIndex, setMessageIndex] = useState(0);
+  useEffect(() => {
+    if (status !== 'processing') {
+      setMessageIndex(0);
+      return;
+    }
+    const id = setInterval(
+      () => setMessageIndex((i) => Math.min(i + 1, PROGRESS_MESSAGES.length - 1)),
+      MESSAGE_ROTATE_MS,
+    );
+    return () => clearInterval(id);
+  }, [status]);
+
+  const elapsedLabel = startedAt != null ? formatElapsed(now - startedAt) : null;
+  const queued = status === 'pending';
+
+  // ---- Step selection ------------------------------------------------------
   const showCompare = status === 'ready';
   const showProgress = polling;
   const showParams = !showCompare && !showProgress;
+
+  const effectiveModel = data?.model ?? modelLabel ?? null;
 
   return (
     <>
@@ -258,7 +550,7 @@ export function MediaEnhancementDrawer({
         sx={{
           zIndex: (t: Theme) => t.zIndex.modal + 2,
           '& .MuiDrawer-paper': {
-            width: { xs: '100vw', sm: 420 },
+            width: { xs: '100vw', sm: 460 },
             maxWidth: '100vw',
             display: 'flex',
             flexDirection: 'column',
@@ -294,9 +586,10 @@ export function MediaEnhancementDrawer({
           {/* ---------- Params step ---------- */}
           {showParams && (
             <Stack spacing={2}>
-              {status === 'failed' && error && (
-                <Alert severity="error">{error}</Alert>
-              )}
+              {/* Any non-null error belongs here — a rejected start leaves the
+                  hook at `idle`, so gating on status === 'failed' used to
+                  swallow every 400 from the enhance endpoint. */}
+              {error && <Alert severity="error">{error}</Alert>}
               {commitError && <Alert severity="error">{commitError}</Alert>}
 
               <Typography variant="body2" color="text.secondary">
@@ -304,9 +597,42 @@ export function MediaEnhancementDrawer({
                 preview you review before anything is saved.
               </Typography>
 
-              {modelLabel && (
+              {/* Preset picker */}
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }} id="enhance-preset-label">
+                  What are we fixing?
+                </Typography>
+                <Box
+                  role="group"
+                  aria-labelledby="enhance-preset-label"
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                    gap: 1,
+                  }}
+                >
+                  {PRESETS.map((def) => (
+                    <PresetCard
+                      key={def.key}
+                      def={def}
+                      selected={presetKey === def.key}
+                      onSelect={() => selectPreset(def.key)}
+                    />
+                  ))}
+                </Box>
+              </Box>
+
+              {presetKey === 'colorize_bw' && (
+                <Alert severity="warning" variant="outlined">
+                  Colorizing is interpretive: the colors are the AI&apos;s best guess,
+                  not the real colors of the scene. Keep the original if the true
+                  colors matter.
+                </Alert>
+              )}
+
+              {effectiveModel && (
                 <Typography variant="caption" color="text.secondary">
-                  Model: <strong>{modelLabel}</strong>
+                  Model: <strong>{effectiveModel}</strong>
                 </Typography>
               )}
 
@@ -314,7 +640,7 @@ export function MediaEnhancementDrawer({
                 size="small"
                 onClick={() => setCustomize((v) => !v)}
                 endIcon={customize ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                sx={{ alignSelf: 'flex-start' }}
+                sx={{ alignSelf: 'flex-start', minHeight: 44 }}
               >
                 Customize
               </Button>
@@ -350,6 +676,20 @@ export function MediaEnhancementDrawer({
                     </Select>
                   </FormControl>
 
+                  <FormControl size="small" fullWidth>
+                    <InputLabel>Output quality</InputLabel>
+                    <Select
+                      label="Output quality"
+                      value={quality}
+                      onChange={(e) => setQuality(e.target.value as EnhanceQuality | '')}
+                    >
+                      <MenuItem value="">Default (set by administrator)</MenuItem>
+                      <MenuItem value="low">Low — fastest, cheapest</MenuItem>
+                      <MenuItem value="medium">Medium</MenuItem>
+                      <MenuItem value="high">High — slowest, best detail</MenuItem>
+                    </Select>
+                  </FormControl>
+
                   <FormControlLabel
                     control={
                       <Switch
@@ -379,6 +719,7 @@ export function MediaEnhancementDrawer({
                 variant="contained"
                 startIcon={<AutoFixHighIcon />}
                 onClick={handleStart}
+                sx={{ minHeight: 44 }}
               >
                 Enhance
               </Button>
@@ -391,20 +732,51 @@ export function MediaEnhancementDrawer({
 
           {/* ---------- Progress step ---------- */}
           {showProgress && (
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 2,
-                py: 6,
-              }}
-            >
-              <CircularProgress />
-              <Typography variant="body2" color="text.secondary">
-                Enhancing your photo… this can take up to a minute.
+            <Stack spacing={2} sx={{ py: 4, alignItems: 'center', textAlign: 'center' }}>
+              {/* Exactly one progressbar at a time: a "query" bar while the job
+                  is still queued (nothing is computing yet), the familiar
+                  spinner once a worker has actually claimed it. */}
+              {queued ? (
+                <Box sx={{ width: '100%', maxWidth: 320 }}>
+                  <LinearProgress variant="query" aria-label="Queued" />
+                </Box>
+              ) : (
+                <CircularProgress />
+              )}
+
+              <Stack spacing={0.5} sx={{ alignItems: 'center' }}>
+                <Typography variant="subtitle1">
+                  {queued ? 'Waiting for a free worker…' : 'Enhancing your photo…'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {queued
+                    ? 'Your photo is in the queue. It will start as soon as a worker picks it up.'
+                    : PROGRESS_MESSAGES[messageIndex]}
+                </Typography>
+              </Stack>
+
+              {elapsedLabel && (
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  sx={{ color: 'text.secondary', alignItems: 'center' }}
+                >
+                  <ScheduleIcon fontSize="inherit" />
+                  <Typography variant="caption">Elapsed {elapsedLabel}</Typography>
+                </Stack>
+              )}
+
+              <Divider flexItem />
+
+              <Typography variant="caption" color="text.secondary">
+                This usually takes 10–60 seconds. You can close this panel and keep
+                browsing — we&apos;ll let you know when the preview is ready, and it
+                will be waiting here.
               </Typography>
-            </Box>
+              <Button variant="outlined" onClick={handleClose} sx={{ minHeight: 44 }}>
+                Continue in background
+              </Button>
+            </Stack>
           )}
 
           {/* ---------- Compare step ---------- */}
@@ -412,10 +784,17 @@ export function MediaEnhancementDrawer({
             <Stack spacing={2}>
               {commitError && <Alert severity="error">{commitError}</Alert>}
 
-              <Stack direction="row" spacing={1.5}>
-                <ComparePane url={original?.url ?? item.thumbnailUrl ?? null} label="Original" />
-                <ComparePane url={enhanced?.url ?? null} label="Enhanced" />
-              </Stack>
+              <BeforeAfterSlider
+                beforeUrl={original?.url ?? item.thumbnailUrl ?? null}
+                afterUrl={enhanced?.url ?? null}
+                beforeLabel="Original"
+                afterLabel="Enhanced"
+                beforeWidth={original?.width ?? item.width}
+                beforeHeight={original?.height ?? item.height}
+                afterWidth={enhanced?.width}
+                afterHeight={enhanced?.height}
+                height={{ xs: 300, sm: 400 }}
+              />
 
               {/* Metadata delta row */}
               <Box
@@ -440,6 +819,12 @@ export function MediaEnhancementDrawer({
                 <Typography variant="caption">{formatBytes(enhanced?.size ?? null) ?? '—'}</Typography>
               </Box>
 
+              {effectiveModel && (
+                <Typography variant="caption" color="text.secondary">
+                  Enhanced with <strong>{effectiveModel}</strong>
+                </Typography>
+              )}
+
               {downscaled && (
                 <Alert severity="warning" icon={<WarningAmberIcon fontSize="inherit" />}>
                   The enhanced image is smaller than the original. Replacing will
@@ -451,17 +836,44 @@ export function MediaEnhancementDrawer({
 
               {/* Decision bar */}
               <Stack spacing={1}>
-                <Button variant="contained" onClick={() => setPendingDecision('keep_both')}>
+                <Button
+                  variant="contained"
+                  onClick={() => setPendingDecision('keep_both')}
+                  sx={{ minHeight: 44 }}
+                >
                   Keep both
                 </Button>
-                <Button
-                  variant="outlined"
-                  color="warning"
-                  onClick={() => setPendingDecision('replace')}
-                >
-                  Replace original
-                </Button>
-                <Button color="inherit" onClick={() => setPendingDecision('discard')}>
+
+                {allowReplace ? (
+                  <Tooltip
+                    title={
+                      replaceBlockedByDownscale
+                        ? 'Replacing is blocked because the enhanced image is lower resolution than the original. Choose "Keep both" instead.'
+                        : ''
+                    }
+                  >
+                    {/* span keeps the tooltip working on a disabled button */}
+                    <span>
+                      <Button
+                        fullWidth
+                        variant="outlined"
+                        color="warning"
+                        disabled={replaceBlockedByDownscale}
+                        onClick={() => setPendingDecision('replace')}
+                        sx={{ minHeight: 44 }}
+                      >
+                        Replace original
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Typography variant="caption" color="text.secondary">
+                    An administrator has disabled replacing originals, so the enhanced
+                    photo can only be saved as a new copy.
+                  </Typography>
+                )}
+
+                <Button color="inherit" onClick={() => setPendingDecision('discard')} sx={{ minHeight: 44 }}>
                   Discard
                 </Button>
               </Stack>
@@ -484,13 +896,24 @@ export function MediaEnhancementDrawer({
           {pendingDecision === 'discard' && 'Discard this enhancement?'}
         </DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            {pendingDecision === 'keep_both' &&
-              'The enhanced photo will be saved as a new item. The original stays untouched.'}
-            {pendingDecision === 'replace' &&
-              'The original photo will be overwritten with the enhanced version. This cannot be undone.'}
-            {pendingDecision === 'discard' &&
-              'The enhanced preview will be discarded. Your original photo is unchanged.'}
+          <DialogContentText component="div">
+            {pendingDecision === 'keep_both' && (
+              <>
+                The enhanced photo is saved as a new item in this circle. Your
+                original file is left completely untouched, so you can compare them
+                later or delete either one.
+              </>
+            )}
+            {pendingDecision === 'replace' && (
+              <>
+                The original file is overwritten with the enhanced version.{' '}
+                <strong>The original cannot be recovered afterwards.</strong> The
+                photo&apos;s date, location and camera details are preserved.
+              </>
+            )}
+            {pendingDecision === 'discard' && (
+              <>The enhanced preview will be discarded. Your original photo is unchanged.</>
+            )}
           </DialogContentText>
         </DialogContent>
         <DialogActions>

@@ -8,6 +8,20 @@ export type EnhanceIntent = 'auto' | 'custom';
 export type EnhanceStrength = 'subtle' | 'balanced' | 'strong';
 export type ApplyDecision = 'keep_both' | 'replace';
 
+/**
+ * Task-specific preset. ORTHOGONAL to `intent` — a preset steers WHAT kind of
+ * photo problem is being solved, while `intent`/`adjustments`/`instructions`
+ * still steer the individual corrections. See the API's `enhance-prompt.builder`.
+ */
+export type EnhancePreset =
+  | 'restore_old_photo'
+  | 'low_light'
+  | 'colorize_bw'
+  | 'portrait_polish';
+
+/** Per-run override of the `pictureEnhancement.defaultQuality` system setting. */
+export type EnhanceQuality = 'low' | 'medium' | 'high';
+
 export type EnhancementStatus =
   | 'pending'
   | 'processing'
@@ -28,9 +42,14 @@ export interface EnhanceAdjustments {
 
 export interface EnhanceParams {
   intent?: EnhanceIntent;
+  /** Task-specific preset; independent of `intent`. Omit for the generic template. */
+  preset?: EnhancePreset;
   adjustments?: EnhanceAdjustments;
   strength?: EnhanceStrength;
+  /** Omit to let the server's `pictureEnhancement.defaultQuality` apply. */
+  quality?: EnhanceQuality;
   preserveFaces?: boolean;
+  /** Only honored by the server when `intent === 'custom'`. */
   instructions?: string;
   model?: string;
 }
@@ -76,9 +95,28 @@ export interface ApplyEnhancementResult {
   mediaItemId?: string;
 }
 
+/**
+ * Admin readiness snapshot for the AI Picture Enhancer
+ * (`GET /api/admin/ai/enhance/status`). `ready` is true only when the feature
+ * toggle is on AND a model is selected AND an enabled credential exists for the
+ * resolved provider — the same three conditions the enhance endpoint enforces.
+ */
+export interface EnhancerAdminStatus {
+  featureEnabled: boolean;
+  provider: string | null;
+  model: string | null;
+  credentialConfigured: boolean;
+  ready: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
+
+/** Admin: feature/provider readiness for the AI Picture Enhancer. */
+export async function getEnhancerAdminStatus(): Promise<EnhancerAdminStatus> {
+  return api.get<EnhancerAdminStatus>('/admin/ai/enhance/status');
+}
 
 /** Start an enhancement job. An empty params object requests full auto defaults. */
 export async function startEnhance(

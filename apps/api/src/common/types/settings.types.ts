@@ -156,7 +156,10 @@ export interface SystemSettingsValue {
   pictureEnhancement?: {
     defaultQuality: 'low' | 'medium' | 'high';
     defaultStrength: 'subtle' | 'balanced' | 'strong';
-    /** Whether to embed the file-level EXIF/XMP marker (deferred writer — default false). */
+    /**
+     * Whether to carry the original's EXIF/GPS/IPTC/XMP/ICC onto the enhanced
+     * file and stamp the AI marker (ExifCarryoverService). Default true.
+     */
     stampExif: boolean;
     /** If false, only "keep both" is offered — originals are never overwritten. */
     allowReplace: boolean;
@@ -211,6 +214,25 @@ export function isWorkflowsEnabled(settings: {
   return (
     settings.features?.[FEATURE_KEYS.WORKFLOWS] === true &&
     process.env['WORKFLOWS_ENABLED'] !== 'false'
+  );
+}
+
+/**
+ * Resolve whether the AI Picture Enhancer feature is active: the
+ * `features.pictureEnhancement` system-setting toggle must be on AND the
+ * `PICTURE_ENHANCEMENT_ENABLED` env kill-switch must not be explicitly set to
+ * 'false'.
+ *
+ * Single source of truth shared by the server-side gate
+ * (MediaEnhancementService.startEnhance / getAdminStatus) and the client-visible
+ * gate (GET /api/features), so the UI never offers an action the API rejects.
+ */
+export function isPictureEnhancementEnabled(settings: {
+  features?: Record<string, boolean>;
+}): boolean {
+  return (
+    settings.features?.[FEATURE_KEYS.PICTURE_ENHANCEMENT] === true &&
+    process.env['PICTURE_ENHANCEMENT_ENABLED'] !== 'false'
   );
 }
 
@@ -375,7 +397,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   pictureEnhancement: {
     defaultQuality: 'high',
     defaultStrength: 'balanced',
-    stampExif: false,
+    stampExif: true,
     allowReplace: true,
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,

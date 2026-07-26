@@ -34,10 +34,16 @@ jest.mock('../storage/processing/image-orientation.util', () => ({
 }));
 
 import { Readable } from 'stream';
+import sharp from 'sharp';
 import { EnrichmentJob, JobReason, JobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { RateLimitError } from '../enrichment/rate-limit.error';
+import {
+  ENRICHMENT_MAX_ATTEMPTS,
+  ENRICHMENT_RATELIMIT_MAX_HITS,
+} from '../enrichment/enrichment-terminal.service';
 
 const mockPrepareImageForProcessing = prepareImageForProcessing as jest.Mock;
 
@@ -129,6 +135,8 @@ describe('PictureEnhancementHandler', () => {
   let mockEnhanceImage: jest.Mock;
   let mockAiProviderRegistry: { get: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
+  let mockApplyCarryover: jest.Mock;
+  let mockExifCarryover: { applyCarryover: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -187,6 +195,12 @@ describe('PictureEnhancementHandler', () => {
       }),
     };
 
+    // Pass-through default: mirrors the ExifCarryoverService best-effort
+    // contract (returns the enhanced buffer unchanged) so tests that don't
+    // care about EXIF carryover see identical behavior to before it existed.
+    mockApplyCarryover = jest.fn().mockImplementation(async (_original: Buffer, enhanced: Buffer) => enhanced);
+    mockExifCarryover = { applyCarryover: mockApplyCarryover };
+
     handler = new PictureEnhancementHandler(
       mockRegistry as any,
       mockPrisma as any,
@@ -194,6 +208,7 @@ describe('PictureEnhancementHandler', () => {
       mockAiSettings as any,
       mockAiProviderRegistry as any,
       mockSystemSettings as any,
+      mockExifCarryover as any,
     );
   });
 
@@ -403,11 +418,14 @@ describe('PictureEnhancementHandler', () => {
     it('fails when the MediaItem no longer exists', async () => {
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
 
+      // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS), so this is a
+      // retryable failure — the row must be requeued to pending, not
+      // tombstoned as failed, or the automatic retry becomes a silent no-op.
       await expect(handler.process(makeJob())).rejects.toThrow('not an eligible photo');
 
       expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
         where: { id: 'enh-1' },
-        data: { status: MediaEnhancementStatus.failed, lastError: expect.stringContaining('not an eligible photo') },
+        data: { status: MediaEnhancementStatus.pending, lastError: expect.stringContaining('not an eligible photo') },
       });
     });
 
@@ -453,27 +471,33 @@ describe('PictureEnhancementHandler', () => {
     it('fails when the resolved provider does not implement enhanceImage', async () => {
       mockAiProviderRegistry.get.mockReturnValue({ /* no enhanceImage */ });
 
+      // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS) — retryable, so the
+      // row goes back to pending rather than failed (see commit fixing this).
       await expect(handler.process(makeJob())).rejects.toThrow('does not support image enhancement');
 
-      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
-        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      const pendingCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.pending,
       );
-      expect(failedCall).toBeDefined();
-      expect(failedCall![0].data.lastError).toContain('does not support image enhancement');
+      expect(pendingCall).toBeDefined();
+      expect(pendingCall![0].data.lastError).toContain('does not support image enhancement');
     });
 
-    it('marks the row failed and rethrows when provider.enhanceImage rejects', async () => {
+    it('requeues the row to pending (to retry) and rethrows when provider.enhanceImage rejects', async () => {
       mockEnhanceImage.mockRejectedValue(new Error('OpenAI image edit exploded'));
 
+      // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS): this is a
+      // retryable failure. Previously the row was unconditionally tombstoned
+      // as `failed` here, which silently killed all future retries because a
+      // requeued job would then early-return on a non-actionable row.
       await expect(handler.process(makeJob())).rejects.toThrow('OpenAI image edit exploded');
 
-      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
-        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      const pendingCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.pending,
       );
-      expect(failedCall).toBeDefined();
-      expect(failedCall![0]).toEqual({
+      expect(pendingCall).toBeDefined();
+      expect(pendingCall![0]).toEqual({
         where: { id: 'enh-1' },
-        data: { status: MediaEnhancementStatus.failed, lastError: 'OpenAI image edit exploded' },
+        data: { status: MediaEnhancementStatus.pending, lastError: 'OpenAI image edit exploded' },
       });
       // No staging bytes should have been uploaded.
       expect(mockUpload).not.toHaveBeenCalled();
@@ -488,6 +512,284 @@ describe('PictureEnhancementHandler', () => {
         (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
       );
       expect(readyCall).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Retry / rate-limit / final-attempt state machine (fixed by commit
+  // e27f00c "defer rate-limited enhancements instead of stranding them").
+  //
+  // The handler mirrors EnrichmentTerminalService.completeFailed's own
+  // classification so its `media_enhancements` row status never disagrees
+  // with the underlying job's next state:
+  //   - retryable, non-final attempt -> row pending, original error rethrown
+  //   - retryable, final attempt (attempts >= ENRICHMENT_MAX_ATTEMPTS)
+  //     -> row failed
+  //   - rate-limited, under the deferral cap -> row pending, RateLimitError
+  //     thrown (routes through the queue's rate-limit deferral path)
+  //   - rate-limited, deferral cap exhausted (rateLimitHits + 1 >=
+  //     ENRICHMENT_RATELIMIT_MAX_HITS) -> row failed
+  // -------------------------------------------------------------------------
+
+  describe('retry / rate-limit / final-attempt state machine', () => {
+    it('marks the row failed on the final attempt (attempts >= ENRICHMENT_MAX_ATTEMPTS)', async () => {
+      mockEnhanceImage.mockRejectedValue(new Error('boom'));
+
+      await expect(
+        handler.process(makeJob({ attempts: ENRICHMENT_MAX_ATTEMPTS })),
+      ).rejects.toThrow('boom');
+
+      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      );
+      expect(failedCall).toBeDefined();
+      expect(failedCall![0]).toEqual({
+        where: { id: 'enh-1' },
+        data: { status: MediaEnhancementStatus.failed, lastError: 'boom' },
+      });
+    });
+
+    it('defers to pending and throws a RateLimitError on a rate-limited failure (non-final attempt)', async () => {
+      const rateLimitErr = Object.assign(new Error('Too Many Requests'), { status: 429 });
+      mockEnhanceImage.mockRejectedValue(rateLimitErr);
+
+      await expect(
+        handler.process(makeJob({ rateLimitHits: 0 })),
+      ).rejects.toBeInstanceOf(RateLimitError);
+
+      const pendingCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.pending,
+      );
+      expect(pendingCall).toBeDefined();
+      expect(pendingCall![0].data.lastError).toContain('Too Many Requests');
+      // A rate-limit deferral must not have been misclassified as a final
+      // failure.
+      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      );
+      expect(failedCall).toBeUndefined();
+    });
+
+    it('marks the row failed when rate-limit deferrals are exhausted (rateLimitHits + 1 >= ENRICHMENT_RATELIMIT_MAX_HITS)', async () => {
+      const rateLimitErr = Object.assign(new Error('Too Many Requests'), { status: 429 });
+      mockEnhanceImage.mockRejectedValue(rateLimitErr);
+
+      await expect(
+        handler.process(makeJob({ rateLimitHits: ENRICHMENT_RATELIMIT_MAX_HITS - 1 })),
+      ).rejects.toBeInstanceOf(RateLimitError);
+
+      const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
+      );
+      expect(failedCall).toBeDefined();
+      expect(failedCall![0].data.lastError).toContain('Too Many Requests');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // EXIF carryover gating (commit ff53510 "carry original EXIF onto enhanced
+  // images with an AI stamp"). The base `handler` built in the outer
+  // beforeEach already has a PASS-THROUGH mock ExifCarryoverService injected
+  // (see the outer beforeEach — it returns the enhanced buffer unchanged, so
+  // every other test in this file behaves as if carryover were a no-op).
+  // These tests build their own handler instance with a mock that returns
+  // DISTINGUISHABLE ("stamped-jpeg-bytes") output, so invocation/gating/
+  // failure-handling can be asserted precisely without disturbing the
+  // pass-through default the rest of the file relies on.
+  // -------------------------------------------------------------------------
+
+  describe('EXIF carryover gating', () => {
+    let mockApplyCarryover: jest.Mock;
+    let mockExifCarryover: { applyCarryover: jest.Mock };
+    let handlerWithCarryover: PictureEnhancementHandler;
+
+    beforeEach(() => {
+      mockApplyCarryover = jest
+        .fn()
+        .mockResolvedValue(Buffer.from('stamped-jpeg-bytes'));
+      mockExifCarryover = { applyCarryover: mockApplyCarryover };
+
+      handlerWithCarryover = new PictureEnhancementHandler(
+        mockRegistry as any,
+        mockPrisma as any,
+        mockResolver as any,
+        mockAiSettings as any,
+        mockAiProviderRegistry as any,
+        mockSystemSettings as any,
+        mockExifCarryover as any,
+      );
+    });
+
+    it('invokes carryover when stampExif is explicitly true', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).toHaveBeenCalledTimes(1);
+    });
+
+    it('invokes carryover when stampExif is left undefined (defaults to on)', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced' },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips carryover entirely when stampExif is explicitly false', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: false },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).not.toHaveBeenCalled();
+      // Staged bytes are the plain enhanced bytes, never even offered to carryover.
+      const [, , uploadOpts] = mockUpload.mock.calls[0];
+      expect(uploadOpts).toEqual(expect.objectContaining({ mimeType: 'image/jpeg' }));
+    });
+
+    it('passes the model, real output dims, and an extension hint derived from the source mime type', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      expect(mockApplyCarryover).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        expect.any(Buffer),
+        expect.objectContaining({ model: 'gpt-image-1', originalExtension: '.jpg' }),
+      );
+    });
+
+    it('a carryover failure is NON-FATAL: the job still reaches ready, using the UNSTAMPED bytes', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+      mockApplyCarryover.mockRejectedValue(new Error('exiftool exploded'));
+
+      await handlerWithCarryover.process(makeJob());
+
+      const readyCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
+      );
+      expect(readyCall).toBeDefined();
+
+      // The bytes actually uploaded to staging are the plain (unstamped)
+      // enhanced bytes, not the (never-produced) stamped bytes.
+      const uploadedStream = mockUpload.mock.calls[0][1];
+      const uploadedBuffer = await streamToBuffer(uploadedStream);
+      expect(uploadedBuffer.toString()).toBe('enhanced-jpeg-bytes');
+    });
+
+    it('falls back to the unstamped bytes when applyCarryover resolves an empty buffer', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+      mockApplyCarryover.mockResolvedValue(Buffer.alloc(0));
+
+      await handlerWithCarryover.process(makeJob());
+
+      const uploadedStream = mockUpload.mock.calls[0][1];
+      const uploadedBuffer = await streamToBuffer(uploadedStream);
+      expect(uploadedBuffer.toString()).toBe('enhanced-jpeg-bytes');
+    });
+
+    it('uploads the STAMPED bytes to staging when carryover succeeds', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced', stampExif: true },
+      });
+
+      await handlerWithCarryover.process(makeJob());
+
+      const uploadedStream = mockUpload.mock.calls[0][1];
+      const uploadedBuffer = await streamToBuffer(uploadedStream);
+      expect(uploadedBuffer.toString()).toBe('stamped-jpeg-bytes');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Actual output dimensions read via sharp (vs. the sizeToDims fallback
+  // estimate). The default mock `enhanceImage` returns the non-decodable
+  // string 'enhanced-jpeg-bytes', so every OTHER test in this file only ever
+  // exercises the fallback path (see the "records the staged provider..."
+  // happy-path assertion, which asserts the 1536x1024 REQUESTED canvas size).
+  // These tests use a real, sharp-encoded JPEG to exercise the real-dims path.
+  // -------------------------------------------------------------------------
+
+  describe('actual output dimensions (real decodable bytes)', () => {
+    it('persists the ACTUAL decoded dimensions of the enhanced bytes, not the requested-canvas fallback', async () => {
+      const realJpeg = await sharp({
+        create: { width: 300, height: 200, channels: 3, background: { r: 10, g: 20, b: 30 } },
+      })
+        .jpeg()
+        .toBuffer();
+      mockEnhanceImage.mockResolvedValue({
+        imageBase64: realJpeg.toString('base64'),
+        mimeType: 'image/jpeg',
+      });
+
+      await handler.process(makeJob());
+
+      const readyCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
+      );
+      expect(readyCall).toBeDefined();
+      expect(readyCall![0].data.enhancedWidth).toBe(300);
+      expect(readyCall![0].data.enhancedHeight).toBe(200);
+      // Distinct from the 1536x1024 canvas fallback that the non-decodable
+      // stub bytes produce elsewhere in this file.
+      expect(readyCall![0].data.enhancedWidth).not.toBe(1536);
+      expect(readyCall![0].data.enhancedHeight).not.toBe(1024);
+      expect(readyCall![0].data.enhancedSize).toBe(BigInt(realJpeg.length));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Per-run quality override (commit db8648d "add enhancement presets and
+  // per-run quality override")
+  // -------------------------------------------------------------------------
+
+  describe('per-run quality override', () => {
+    it('uses the row params quality over the system-setting default when both are present', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(
+        makeEnhancementRow({ params: { quality: 'low' } }),
+      );
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'high', defaultStrength: 'balanced' },
+      });
+
+      await handler.process(makeJob());
+
+      const [, req] = mockEnhanceImage.mock.calls[0];
+      expect(req.quality).toBe('low');
+    });
+
+    it('falls back to the system-setting default quality when no per-run override is present', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(makeEnhancementRow({ params: {} }));
+      mockSystemSettings.getSettings.mockResolvedValue({
+        pictureEnhancement: { defaultQuality: 'medium', defaultStrength: 'balanced' },
+      });
+
+      await handler.process(makeJob());
+
+      const [, req] = mockEnhanceImage.mock.calls[0];
+      expect(req.quality).toBe('medium');
+    });
+
+    it('falls back to "high" when neither a per-run override nor a system-setting default is present', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(makeEnhancementRow({ params: {} }));
+      mockSystemSettings.getSettings.mockResolvedValue({ pictureEnhancement: {} });
+
+      await handler.process(makeJob());
+
+      const [, req] = mockEnhanceImage.mock.calls[0];
+      expect(req.quality).toBe('high');
     });
   });
 });
