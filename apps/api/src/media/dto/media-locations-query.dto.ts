@@ -21,6 +21,12 @@ export const mediaLocationsQuerySchema = z.object({
   location: z.string().optional(),
   // Scope the map to a single album's members
   albumId: z.string().uuid().optional(),
+  // Optional cap on the number of points returned. Bounds a PREVIEW fetch — the
+  // map's cluster drawer asks for one cluster's bbox but only renders a couple
+  // dozen thumbnails, so it should not pull thousands of rows. Combined with the
+  // endpoint's `capturedAt desc` ordering this yields "the most recent N in the
+  // box". Deliberately optional: the full-album map view needs every point.
+  limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
 export class MediaLocationsQueryDto extends createZodDto(mediaLocationsQuerySchema) {}

@@ -452,6 +452,11 @@ export class MediaService {
    * Return ALL geotagged (takenLat + takenLng non-null) non-deleted media items
    * for the caller — no pagination. Used by the map view.
    *
+   * An optional `limit` caps the row count for preview callers (e.g. the map's
+   * cluster drawer, which renders only a couple dozen thumbnails out of a
+   * cluster's bbox). With the `capturedAt desc` ordering below that means "the
+   * most recent N in the box". When omitted, every matching point is returned.
+   *
    * Applies the same ownership guard and geo/date/type filters as listMedia
    * but returns only the fields needed to render map pins:
    *   id, takenLat, takenLng, capturedAt, geoLocality, thumbnailUrl.
@@ -475,6 +480,7 @@ export class MediaService {
       location,
       albumId,
       bbox,
+      limit,
     } = query;
 
     await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
@@ -574,6 +580,8 @@ export class MediaService {
         geoLocality: true,
       },
       orderBy: { capturedAt: 'desc' },
+      // Optional preview bound. Absent (e.g. the album map view) => every point.
+      ...(limit !== undefined && { take: limit }),
     });
 
     // Lightweight map-pin payload — no per-row thumbnail signing. Thumbnails
