@@ -248,7 +248,7 @@ describe('GroupBulkResolveToolbar', () => {
         />,
       );
 
-      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+      await user.click(screen.getByRole('button', { name: /select all pending/i }));
 
       expect(onSelectAll).toHaveBeenCalledTimes(1);
     });

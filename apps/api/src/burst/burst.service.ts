@@ -533,6 +533,19 @@ export class BurstService {
       }
     }
 
+    // Count still-pending eligible groups after this batch resolved some, so the
+    // caller knows whether another pass is needed (a single call is capped at
+    // MAX_THRESHOLD_RESOLVE). Groups that were skipped or errored above remain
+    // pending and are therefore still counted here — correct, as they still
+    // need attention.
+    const remaining = await this.prisma.burstGroup.count({
+      where: {
+        circleId: dto.circleId,
+        status: BurstGroupStatus.pending,
+        confidence: { gte: dto.threshold / 100 },
+      },
+    });
+
     return {
       data: {
         resolvedGroups,
@@ -541,6 +554,7 @@ export class BurstService {
         action: dto.action,
         skipped,
         errors,
+        remaining,
       },
     };
   }
