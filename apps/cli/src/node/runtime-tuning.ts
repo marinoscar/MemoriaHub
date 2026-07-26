@@ -78,8 +78,31 @@ export function resolveHeapLimitMb(totalBytes: number = os.totalmem()): number {
 }
 
 /** Current process's V8 old-space ceiling in MB. */
-function currentHeapLimitMb(): number {
+export function currentHeapLimitMb(): number {
   return Math.floor(v8.getHeapStatistics().heap_size_limit / MB);
+}
+
+export interface HeapTuningStatus {
+  /**
+   * True when this process's REAL ceiling is at/near the computed target, or
+   * when tuning is explicitly disabled (`MEMORIAHUB_MAX_OLD_SPACE_MB=0` — an
+   * operator choice, not an accident). Unlike `heapAlreadyTuned`, this never
+   * trusts the `MEMORIAHUB_HEAP_TUNED` env sentinel: it reports the ceiling
+   * actually in force, so a caller can warn when compute is about to run in a
+   * process stuck at Node's ~2 GB default (the posture that OOM'd in issue
+   * #156 once the interactive TUI stopped re-exec'ing).
+   */
+  tuned: boolean;
+  heapLimitMb: number;
+  targetMb: number;
+}
+
+/** Describe whether the current process's heap ceiling matches the RAM-aware target. */
+export function describeHeapTuning(): HeapTuningStatus {
+  const targetMb = resolveHeapLimitMb();
+  const heapLimitMb = currentHeapLimitMb();
+  if (targetMb <= 0) return { tuned: true, heapLimitMb, targetMb };
+  return { tuned: heapLimitMb >= Math.floor(targetMb * 0.95), heapLimitMb, targetMb };
 }
 
 /**
