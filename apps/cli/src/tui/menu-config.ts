@@ -21,6 +21,9 @@ export type MenuActionId =
   | 'scan-select'
   | 'scan-report'
   | 'organize'
+  | 'screenshots-find'
+  | 'screenshots-move'
+  | 'screenshots-delete'
   | 'date-infer-diagnose'
   | 'date-infer-apply'
   | 'convert-file'
@@ -140,6 +143,18 @@ export const MENU_TREE: MenuSubmenu = {
           ],
         },
         { kind: 'action', label: 'Organize folder by date', action: 'organize', loggedOut: true },
+        {
+          // Screenshot finder is a fully offline local file operation — visible when logged out.
+          kind: 'submenu',
+          id: 'screenshots',
+          label: 'Find/Clean Screenshots',
+          loggedOut: true,
+          children: [
+            { kind: 'action', label: 'Find screenshots (list only)', action: 'screenshots-find', loggedOut: true },
+            { kind: 'action', label: 'Find & move screenshots', action: 'screenshots-move', loggedOut: true },
+            { kind: 'action', label: 'Find & delete screenshots', action: 'screenshots-delete', loggedOut: true },
+          ],
+        },
         {
           // Date Inference is a fully offline local file operation — visible when logged out.
           kind: 'submenu',

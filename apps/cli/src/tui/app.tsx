@@ -33,6 +33,8 @@ import { DateRangeFilter } from './DateRangeFilter.js';
 import { SyncDashboard } from './SyncDashboard.js';
 import { ScanScreen } from './ScanScreen.js';
 import { OrganizeScreen } from './OrganizeScreen.js';
+import { ScreenshotsScreen } from './ScreenshotsScreen.js';
+import type { ScreenshotMode } from '../screenshots/screenshot-engine.js';
 import { DateInferenceScreen } from './DateInferenceScreen.js';
 import { ConvertScreen } from './ConvertScreen.js';
 import { ConvertFileInput } from './ConvertFileInput.js';
@@ -67,11 +69,12 @@ type Screen =
   | { kind: 'login' }
   | { kind: 'folders' }
   | { kind: 'circles' }
-  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' | 'convert' | 'dateInferDiagnose' | 'dateInferApply' }
+  | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' | 'convert' | 'dateInferDiagnose' | 'dateInferApply' | 'screenshotsFind' | 'screenshotsMove' | 'screenshotsDelete' }
   | { kind: 'dateRange'; all?: boolean; folderIds?: number[] }
   | { kind: 'dashboard'; all?: boolean; folderIds?: number[]; retryFailedOnly?: boolean; fromMs?: number; toMs?: number }
   | { kind: 'scan'; all?: boolean; folderIds?: number[] }
   | { kind: 'organize'; all?: boolean; folderIds?: number[] }
+  | { kind: 'screenshots'; mode: ScreenshotMode; all?: boolean; folderIds?: number[] }
   | { kind: 'dateInference'; mode: 'diagnose' | 'apply'; all?: boolean; folderIds?: number[] }
   | { kind: 'convert'; all?: boolean; folderIds?: number[]; files?: string[] }
   | { kind: 'convertFileInput' }
@@ -247,6 +250,15 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         break;
       case 'organize':
         push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'organize' } });
+        break;
+      case 'screenshots-find':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'screenshotsFind' } });
+        break;
+      case 'screenshots-move':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'screenshotsMove' } });
+        break;
+      case 'screenshots-delete':
+        push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'screenshotsDelete' } });
         break;
       case 'date-infer-diagnose':
         push({ kind: 'screen', screen: { kind: 'pickFolders', purpose: 'dateInferDiagnose' } });
@@ -452,7 +464,13 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
               ? 'Convert Videos to MP4'
               : purpose === 'dateInferDiagnose' || purpose === 'dateInferApply'
                 ? 'Date Inference — Select Folders'
-                : undefined;
+                : purpose === 'screenshotsFind'
+                  ? 'Find Screenshots — Select Folders'
+                  : purpose === 'screenshotsMove'
+                    ? 'Move Screenshots — Select Folders'
+                    : purpose === 'screenshotsDelete'
+                      ? 'Delete Screenshots — Select Folders'
+                      : undefined;
       return (
         <PickFolders
           db={db}
@@ -473,7 +491,13 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                           ? { kind: 'dateInference', mode: 'diagnose', folderIds }
                           : purpose === 'dateInferApply'
                             ? { kind: 'dateInference', mode: 'apply', folderIds }
-                            : { kind: 'dateRange', folderIds },
+                            : purpose === 'screenshotsFind'
+                              ? { kind: 'screenshots', mode: 'find', folderIds }
+                              : purpose === 'screenshotsMove'
+                                ? { kind: 'screenshots', mode: 'move', folderIds }
+                                : purpose === 'screenshotsDelete'
+                                  ? { kind: 'screenshots', mode: 'delete', folderIds }
+                                  : { kind: 'dateRange', folderIds },
               },
             ])
           }
@@ -516,6 +540,18 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       return (
         <OrganizeScreen
           db={db}
+          all={screen.all}
+          folderIds={screen.folderIds}
+          onHome={resetToRoot}
+          onBack={pop}
+        />
+      );
+
+    case 'screenshots':
+      return (
+        <ScreenshotsScreen
+          db={db}
+          mode={screen.mode}
           all={screen.all}
           folderIds={screen.folderIds}
           onHome={resetToRoot}
@@ -768,6 +804,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           <Text>  memoriahub import     Import a folder once (add + sync)</Text>
           <Text>  memoriahub sync       Run a sync (add --scan to reconcile a prior scan)</Text>
           <Text>  memoriahub scan       Dry-run preview: report what a sync would do</Text>
+          <Text>  memoriahub organize   Move files into YEAR/MM - Month/ folders by capture date</Text>
+          <Text>  memoriahub screenshots  Find (and optionally move/delete) screenshot files</Text>
+          <Text>  memoriahub convert    Convert video files to MP4</Text>
           <Text>  memoriahub status     Show sync status and counts</Text>
           <Text>  memoriahub folders    Manage watched folders</Text>
           <Text>  memoriahub circles    Manage active circle</Text>
