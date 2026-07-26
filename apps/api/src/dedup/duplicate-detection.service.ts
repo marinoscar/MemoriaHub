@@ -516,8 +516,21 @@ export class DuplicateDetectionService {
    * duplicateGroupId is then cleared (a 1-member duplicate group is
    * meaningless). Defensive — membership can shrink via trash/archive
    * actions or burst eviction elsewhere.
+   *
+   * This is also the SINGLE WRITER of `duplicate_groups.confidence` (issue
+   * #190): membership is the only input to the tightest-pair CLIP similarity,
+   * and every membership mutation (grouping, merge, evictFromDuplicateGroups,
+   * evictExistingBurstOverlaps, resolve/dismiss) funnels through here, so the
+   * column cannot silently drift. A group whose similarity is genuinely
+   * uncomputable (fewer than two members carry an embedding) keeps
+   * `confidence = NULL` and — matching BurstGroup.confidence — is excluded from
+   * threshold matching in BOTH directions. `DuplicateService`'s read paths
+   * self-heal rows written before this change; the
+   * `duplicate_confidence_backfill` job closes the historical gap in one pass.
+   *
+   * Public so that backfill can reuse it.
    */
-  private async recomputeGroupMeta(
+  async recomputeGroupMeta(
     groupId: string,
     db: Prisma.TransactionClient = this.prisma,
   ): Promise<void> {
@@ -547,13 +560,45 @@ export class DuplicateDetectionService {
       .filter((d): d is Date => d !== null)
       .reduce<Date | null>((min, d) => (!min || d < min ? d : min), null);
 
+    const confidence = await this.computeGroupConfidence(
+      members.map((m) => m.id),
+      db,
+    );
+
     await db.duplicateGroup.update({
       where: { id: groupId },
       data: {
         mediaCount: members.length,
+        confidence,
         ...(earliestCapturedAt ? { capturedAt: earliestCapturedAt } : {}),
       },
     });
+  }
+
+  /**
+   * Tightest-pair CLIP cosine similarity across a group's members — the value
+   * persisted as `duplicate_groups.confidence` and surfaced as a group's
+   * `confidence` in the review-queue API.
+   *
+   * Returns null when it cannot be computed (fewer than two members, or fewer
+   * than two members carrying a visual embedding), which is a meaningful state:
+   * such a group is never auto-resolved and never auto-dismissed by a
+   * threshold run.
+   */
+  async computeGroupConfidence(
+    memberIds: string[],
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<number | null> {
+    if (memberIds.length < 2) return null;
+
+    const rows = await db.$queryRaw<{ sim: unknown }[]>`
+      SELECT (1 - (a.embedding <=> b.embedding)) AS sim
+      FROM media_visual_embedding a
+      JOIN media_visual_embedding b ON b.media_item_id > a.media_item_id
+      WHERE a.media_item_id = ANY(${memberIds}::uuid[]) AND b.media_item_id = ANY(${memberIds}::uuid[])
+    `;
+    if (rows.length === 0) return null;
+    return Math.max(...rows.map((r) => Number(r.sim)));
   }
 
   /**
