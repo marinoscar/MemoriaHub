@@ -6,25 +6,29 @@ import {
   testGeoProvider,
   putGeoReverseFeature,
 } from '../services/geo';
+import { useIsMounted } from './useIsMounted';
 import type { GeoSettingsResponse, GeoTestResult, GeoReverseProvider } from '../services/geo';
 
 export function useGeoSettings() {
   const [settings, setSettings] = useState<GeoSettingsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await getGeoSettings();
+      if (!isMounted()) return;
       setSettings(data);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load geo settings');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const saveCredentials = useCallback(
     async (

@@ -6,6 +6,7 @@ import {
   applyEnhancement,
   discardEnhancement,
 } from '../services/enhance';
+import { useIsMounted } from './useIsMounted';
 import type {
   EnhanceParams,
   EnhancementDto,
@@ -42,6 +43,7 @@ export function useMediaEnhance(mediaId: string) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
   const idRef = useRef<string | null>(null);
+  const isMounted = useIsMounted();
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -62,6 +64,10 @@ export function useMediaEnhance(mediaId: string) {
         pollCountRef.current += 1;
         getEnhancement(mediaId, enhancementId)
           .then((d) => {
+            if (!isMounted()) {
+              stopPolling();
+              return;
+            }
             setData(d);
             setStatus(d.status);
             if (TERMINAL_STATUSES.includes(d.status)) {
@@ -80,6 +86,7 @@ export function useMediaEnhance(mediaId: string) {
           })
           .catch((err) => {
             stopPolling();
+            if (!isMounted()) return;
             // Same reason as the timeout branch above — resolve the UI to a
             // terminal state instead of an orphaned spinner.
             setStatus('failed');
@@ -87,7 +94,7 @@ export function useMediaEnhance(mediaId: string) {
           });
       }, POLL_INTERVAL_MS);
     },
-    [mediaId, stopPolling],
+    [mediaId, stopPolling, isMounted],
   );
 
   /** Kick off a new enhancement and start polling. */
@@ -100,9 +107,11 @@ export function useMediaEnhance(mediaId: string) {
       stopPolling();
       try {
         const res = await startEnhance(mediaId, params);
+        if (!isMounted()) return;
         idRef.current = res.enhancementId;
         beginPolling(res.enhancementId);
       } catch (err) {
+        if (!isMounted()) return;
         // Back to the params step. `error` is non-null, and the drawer renders
         // it there regardless of status (a 400 from the enhance endpoint used
         // to be silently swallowed).
@@ -111,7 +120,7 @@ export function useMediaEnhance(mediaId: string) {
         setError(err instanceof Error ? err.message : 'Failed to start enhancement');
       }
     },
-    [mediaId, beginPolling, stopPolling],
+    [mediaId, beginPolling, stopPolling, isMounted],
   );
 
   /**
@@ -130,7 +139,7 @@ export function useMediaEnhance(mediaId: string) {
       const latest = enhancementId
         ? await getEnhancement(mediaId, enhancementId)
         : await getLatestEnhancement(mediaId);
-      if (!latest) return;
+      if (!latest || !isMounted()) return;
       // Only resume enhancements that are still actionable in the drawer.
       if (['pending', 'processing', 'ready', 'failed'].includes(latest.status)) {
         idRef.current = latest.id;
@@ -145,7 +154,7 @@ export function useMediaEnhance(mediaId: string) {
     } catch {
       // Non-fatal — the drawer simply starts from the params step.
     }
-  }, [mediaId, beginPolling]);
+  }, [mediaId, beginPolling, isMounted]);
 
   /** Commit the current enhancement (keep_both / replace). */
   const apply = useCallback(

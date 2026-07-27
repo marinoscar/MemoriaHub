@@ -3,6 +3,7 @@ import {
   triggerBackup as triggerBackupService,
   listBackupRuns,
 } from '../services/backup';
+import { useIsMounted } from './useIsMounted';
 import type { BackupRun, BackupRunRequest, BackupRunResult } from '../services/backup';
 
 export function useBackup() {
@@ -13,19 +14,22 @@ export function useBackup() {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<BackupRunResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const refreshRuns = useCallback(async () => {
     setRunsLoading(true);
     setRunsError(null);
     try {
       const data = await listBackupRuns();
+      if (!isMounted()) return;
       setRuns(data);
     } catch (err) {
+      if (!isMounted()) return;
       setRunsError(err instanceof Error ? err.message : 'Failed to load backup runs');
     } finally {
-      setRunsLoading(false);
+      if (isMounted()) setRunsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const triggerBackup = useCallback(
     async (dto: BackupRunRequest): Promise<BackupRunResult> => {
@@ -34,18 +38,18 @@ export function useBackup() {
       setRunError(null);
       try {
         const result = await triggerBackupService(dto);
-        setRunResult(result);
+        if (isMounted()) setRunResult(result);
         await refreshRuns();
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Backup failed';
-        setRunError(message);
+        if (isMounted()) setRunError(message);
         throw err;
       } finally {
-        setRunning(false);
+        if (isMounted()) setRunning(false);
       }
     },
-    [refreshRuns],
+    [refreshRuns, isMounted],
   );
 
   return {

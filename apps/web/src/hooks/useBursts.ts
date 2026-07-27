@@ -9,6 +9,7 @@ import {
   fetchAllPendingBurstGroupIds,
   dismissBurstGroup,
 } from '../services/bursts';
+import { useIsMounted } from './useIsMounted';
 import type { SortOrder } from '../types/media';
 import type {
   BurstGroupStatus,
@@ -56,6 +57,7 @@ export function useBurstGroups(): UseBurstGroupsResult {
 
   // Remember the last fetch params so bulkResolve can refresh the same view.
   const lastParamsRef = useRef<FetchBurstGroupsParams | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchGroups = useCallback(async (params: FetchBurstGroupsParams) => {
     lastParamsRef.current = params;
@@ -63,14 +65,16 @@ export function useBurstGroups(): UseBurstGroupsResult {
     setError(null);
     try {
       const result = await listBurstGroups(params);
+      if (!isMounted()) return;
       setItems(result.items);
       setMeta(result.meta);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load burst groups');
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const bulkResolve = useCallback(
     async (ids: string[], action: GroupResolveAction) => {
@@ -148,19 +152,22 @@ export function useBurstGroupDetail(groupId: string): UseBurstGroupDetailResult 
   const [error, setError] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [dismissing, setDismissing] = useState(false);
+  const isMounted = useIsMounted();
 
   const fetchGroup = useCallback(async (id: string) => {
     setIsLoading(true);
     setError(null);
     try {
       const result = await getBurstGroup(id);
+      if (!isMounted()) return;
       setGroup(result);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load burst group');
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const resolve = useCallback(
     async (keepIds: string[], action: GroupResolveAction) => {
@@ -168,10 +175,10 @@ export function useBurstGroupDetail(groupId: string): UseBurstGroupDetailResult 
       try {
         return await resolveBurstGroup(groupId, keepIds, action);
       } finally {
-        setResolving(false);
+        if (isMounted()) setResolving(false);
       }
     },
-    [groupId],
+    [groupId, isMounted],
   );
 
   const dismiss = useCallback(async () => {
@@ -179,9 +186,9 @@ export function useBurstGroupDetail(groupId: string): UseBurstGroupDetailResult 
     try {
       await dismissBurstGroup(groupId);
     } finally {
-      setDismissing(false);
+      if (isMounted()) setDismissing(false);
     }
-  }, [groupId]);
+  }, [groupId, isMounted]);
 
   return { group, isLoading, error, fetchGroup, resolve, dismiss, resolving, dismissing };
 }

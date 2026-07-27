@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem, MediaQueryParams } from '../types/media';
 import { listMedia } from '../services/media';
+import { useIsMounted } from './useIsMounted';
 
 interface UseInfiniteMediaResult {
   items: MediaItem[];
@@ -61,6 +62,7 @@ export function useInfiniteMedia(
   const cursorRef = useRef<string | null>(null);
   // Generation counter: increments on reset so stale fetches are discarded
   const genRef = useRef(0);
+  const isMounted = useIsMounted();
 
   // Keep refs current
   paramsRef.current = params;
@@ -92,19 +94,21 @@ export function useInfiniteMedia(
             pageSize: pageSizeRef.current,
           }).then((r) => ({ items: r.items, nextCursor: r.meta.nextCursor }));
       if (gen !== genRef.current) return; // stale
+      if (!isMounted()) return;
       setItems((prev) => (initial ? response.items : [...prev, ...response.items]));
       cursorRef.current = response.nextCursor;
       setHasMore(response.nextCursor != null);
     } catch (err) {
       if (gen !== genRef.current) return;
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load media');
     } finally {
       if (gen === genRef.current) {
         inflightRef.current = false;
-        setIsLoading(false);
+        if (isMounted()) setIsLoading(false);
       }
     }
-  }, []); // stable — uses refs
+  }, [isMounted]); // otherwise stable — uses refs
 
   // Reset and refetch whenever params change or enabled toggles
   useEffect(() => {

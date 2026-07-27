@@ -5,6 +5,7 @@ import {
   updateUser as updateUserApi,
   updateUserRoles as updateUserRolesApi,
 } from '../services/api';
+import { useIsMounted } from './useIsMounted';
 
 interface UseUsersResult {
   users: UserListItem[];
@@ -36,6 +37,7 @@ export function useUsers(): UseUsersResult {
   const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchUsers = useCallback(
     async (params?: {
@@ -49,20 +51,22 @@ export function useUsers(): UseUsersResult {
       setError(null);
       try {
         const response: UsersResponse = await getUsersApi(params);
+        if (!isMounted()) return;
         setUsers(response.items);
         setTotal(response.total);
         setPage(response.page);
         setPageSize(response.pageSize);
         setTotalPages(response.totalPages);
       } catch (err) {
+        if (!isMounted()) return;
         const message = err instanceof Error ? err.message : 'Failed to fetch users';
         setError(message);
         setUsers([]);
       } finally {
-        setIsLoading(false);
+        if (isMounted()) setIsLoading(false);
       }
     },
-    [],
+    [isMounted],
   );
 
   const updateUser = useCallback(
@@ -71,16 +75,18 @@ export function useUsers(): UseUsersResult {
       try {
         const updatedUser = await updateUserApi(id, data);
         // Update the user in the list
-        setUsers((prevUsers) =>
-          prevUsers.map((user) => (user.id === id ? updatedUser : user)),
-        );
+        if (isMounted()) {
+          setUsers((prevUsers) =>
+            prevUsers.map((user) => (user.id === id ? updatedUser : user)),
+          );
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to update user';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [],
+    [isMounted],
   );
 
   const updateUserRoles = useCallback(
@@ -89,17 +95,19 @@ export function useUsers(): UseUsersResult {
       try {
         const updatedUser = await updateUserRolesApi(id, roles);
         // Update the user in the list
-        setUsers((prevUsers) =>
-          prevUsers.map((user) => (user.id === id ? updatedUser : user)),
-        );
+        if (isMounted()) {
+          setUsers((prevUsers) =>
+            prevUsers.map((user) => (user.id === id ? updatedUser : user)),
+          );
+        }
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Failed to update user roles';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [],
+    [isMounted],
   );
 
   return {

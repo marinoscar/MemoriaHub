@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listEnhancements } from '../services/enhance';
+import { useIsMounted } from './useIsMounted';
 import type {
   EnhancementListItem,
   EnhancementListMeta,
@@ -63,6 +64,8 @@ export function useEnhancements(
   paramsRef.current = params;
   const paramsKey = useMemo(() => (params ? JSON.stringify(params) : null), [params]);
 
+  const isMounted = useIsMounted();
+
   const load = useCallback(async (silent: boolean) => {
     const current = paramsRef.current;
     if (!current) {
@@ -74,15 +77,17 @@ export function useEnhancements(
     if (!silent) setIsLoading(true);
     try {
       const result = await listEnhancements(current);
+      if (!isMounted()) return;
       setItems(result.items);
       setMeta(result.meta);
       setError(null);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load enhancements');
     } finally {
-      if (!silent) setIsLoading(false);
+      if (!silent && isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   useEffect(() => {
     void load(false);

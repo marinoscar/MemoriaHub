@@ -4,6 +4,7 @@ import {
   createNodeCredential as createNodeCredentialService,
   revokeNodeCredential as revokeNodeCredentialService,
 } from '../services/workers';
+import { useIsMounted } from './useIsMounted';
 import type { AdminNodeCredentialDto, CreatedNodeCredentialDto } from '../services/workers';
 
 export interface UseNodeCredentialsResult {
@@ -23,17 +24,20 @@ export function useNodeCredentials(): UseNodeCredentialsResult {
   const [credentials, setCredentials] = useState<AdminNodeCredentialDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   // Silent fetch (no loading spinner toggling on repeated calls).
   const fetchCredentials = useCallback(async () => {
     try {
       const data = await getNodeCredentials();
+      if (!isMounted()) return;
       setCredentials(data);
       setError(null);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load node credentials');
     }
-  }, []);
+  }, [isMounted]);
 
   // Explicit refresh with a loading indicator.
   const refresh = useCallback(async () => {
@@ -41,9 +45,9 @@ export function useNodeCredentials(): UseNodeCredentialsResult {
     try {
       await fetchCredentials();
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [fetchCredentials]);
+  }, [fetchCredentials, isMounted]);
 
   // Initial load.
   useEffect(() => {

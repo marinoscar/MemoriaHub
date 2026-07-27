@@ -6,6 +6,7 @@ import {
   purgeFaces,
   purgeArchivedFaces,
 } from '../services/face';
+import { useIsMounted } from './useIsMounted';
 import type { UnassignedFaceDto } from '../services/face';
 
 export function useUnassignedFaces(
@@ -20,6 +21,7 @@ export function useUnassignedFaces(
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pageRef = useRef(1);
+  const isMounted = useIsMounted();
 
   const refresh = useCallback(async () => {
     if (!circleId) { setFaces([]); setTotal(0); return; }
@@ -27,15 +29,17 @@ export function useUnassignedFaces(
     setError(null);
     try {
       const result = await listUnassignedFaces(circleId, { page: 1, pageSize, archived });
+      if (!isMounted()) return;
       pageRef.current = 1;
       setFaces(result.items);
       setTotal(result.meta.totalItems);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load unassigned faces');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [circleId, archived, pageSize]);
+  }, [circleId, archived, pageSize, isMounted]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -49,6 +53,7 @@ export function useUnassignedFaces(
         pageSize,
         archived,
       });
+      if (!isMounted()) return;
       pageRef.current += 1;
       setFaces((prev) => {
         const seen = new Set(prev.map((f) => f.faceId));
@@ -56,11 +61,12 @@ export function useUnassignedFaces(
       });
       setTotal(result.meta.totalItems);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load more faces');
     } finally {
-      setLoadingMore(false);
+      if (isMounted()) setLoadingMore(false);
     }
-  }, [circleId, archived, pageSize, loadingMore]);
+  }, [circleId, archived, pageSize, loadingMore, isMounted]);
 
   const hide = useCallback(
     async (ids: string[]) => {

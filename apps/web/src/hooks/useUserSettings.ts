@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api, ApiError } from '../services/api';
 import { UserSettings } from '../types';
 import { useThemeContext } from '../contexts/ThemeContext';
+import { useIsMounted } from './useIsMounted';
 
 interface UseUserSettingsReturn {
   settings: UserSettings | null;
@@ -20,22 +21,25 @@ export function useUserSettings(): UseUserSettingsReturn {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const { setMode } = useThemeContext();
+  const isMounted = useIsMounted();
 
   const fetchSettings = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
       const data = await api.get<UserSettings>('/user-settings');
+      if (!isMounted()) return;
       setSettings(data);
       // Sync theme with settings
       setMode(data.theme);
     } catch (err) {
+      if (!isMounted()) return;
       const message = err instanceof ApiError ? err.message : 'Failed to load settings';
       setError(message);
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, [setMode]);
+  }, [setMode, isMounted]);
 
   useEffect(() => {
     fetchSettings();
@@ -55,11 +59,13 @@ export function useUserSettings(): UseUserSettingsReturn {
           },
         });
 
-        setSettings(data);
+        if (isMounted()) {
+          setSettings(data);
 
-        // Sync theme if changed
-        if (updates.theme) {
-          setMode(updates.theme);
+          // Sync theme if changed
+          if (updates.theme) {
+            setMode(updates.theme);
+          }
         }
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
@@ -68,13 +74,13 @@ export function useUserSettings(): UseUserSettingsReturn {
           throw new Error('Settings were updated elsewhere. Please try again.');
         }
         const message = err instanceof ApiError ? err.message : 'Failed to save settings';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       } finally {
-        setIsSaving(false);
+        if (isMounted()) setIsSaving(false);
       }
     },
-    [settings, setMode, fetchSettings],
+    [settings, setMode, fetchSettings, isMounted],
   );
 
   const updateTheme = useCallback(

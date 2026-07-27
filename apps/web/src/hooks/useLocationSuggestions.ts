@@ -16,6 +16,7 @@ import type {
 } from '../services/locationSuggestions';
 import type { SortOrder } from '../types/media';
 import { getMedia } from '../services/media';
+import { useIsMounted } from './useIsMounted';
 
 /**
  * Params accepted by {@link useLocationSuggestions}'s `fetchSuggestions`.
@@ -48,6 +49,7 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actingIds, setActingIds] = useState<Set<string>>(new Set());
+  const isMounted = useIsMounted();
 
   const fetchSuggestions = useCallback(
     async (params: FetchLocationSuggestionsParams) => {
@@ -55,15 +57,17 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
       setError(null);
       try {
         const result = await listLocationSuggestions(params);
+        if (!isMounted()) return;
         setItems(result.items);
         setMeta(result.meta);
       } catch (err) {
+        if (!isMounted()) return;
         setError(err instanceof Error ? err.message : 'Failed to load location suggestions');
       } finally {
-        setIsLoading(false);
+        if (isMounted()) setIsLoading(false);
       }
     },
-    [],
+    [isMounted],
   );
 
   const withActing = useCallback(async <T,>(id: string, fn: () => Promise<T>): Promise<T> => {
@@ -71,13 +75,15 @@ export function useLocationSuggestions(): UseLocationSuggestionsResult {
     try {
       return await fn();
     } finally {
-      setActingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
+      if (isMounted()) {
+        setActingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
     }
-  }, []);
+  }, [isMounted]);
 
   const accept = useCallback(
     (id: string, lat?: number, lng?: number) => withActing(id, () => acceptLocationSuggestion(id, lat, lng)),
@@ -120,6 +126,7 @@ export function useSuggestLocation(mediaId: string, onRefresh: () => void) {
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  const isMounted = useIsMounted();
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -139,12 +146,17 @@ export function useSuggestLocation(mediaId: string, onRefresh: () => void) {
       stopPolling();
       try {
         await inferLocation(mediaId);
+        if (!isMounted()) return;
 
         pollCountRef.current = 0;
         pollRef.current = setInterval(() => {
           pollCountRef.current += 1;
           getMedia(mediaId)
             .then((item) => {
+              if (!isMounted()) {
+                stopPolling();
+                return;
+              }
               if (item.takenLat !== null && item.takenLng !== null) {
                 stopPolling();
                 setLoading(false);
@@ -160,17 +172,19 @@ export function useSuggestLocation(mediaId: string, onRefresh: () => void) {
             })
             .catch(() => {
               stopPolling();
+              if (!isMounted()) return;
               setLoading(false);
               onOutcome('error');
             });
         }, POLL_INTERVAL_MS);
       } catch (err) {
+        if (!isMounted()) return;
         setError(err instanceof Error ? err.message : 'Failed to queue location inference');
         setLoading(false);
         onOutcome('error');
       }
     },
-    [mediaId, onRefresh, stopPolling],
+    [mediaId, onRefresh, stopPolling, isMounted],
   );
 
   return { suggest, loading, error };

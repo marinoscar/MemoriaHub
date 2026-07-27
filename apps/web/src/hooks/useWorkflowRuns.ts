@@ -5,6 +5,7 @@ import type {
   RunsQueryParams,
 } from '../types/workflows';
 import { listWorkflowRuns as listWorkflowRunsApi } from '../services/workflows';
+import { useIsMounted } from './useIsMounted';
 
 interface UseWorkflowRunsResult {
   runs: WorkflowRun[];
@@ -19,22 +20,25 @@ export function useWorkflowRuns(): UseWorkflowRunsResult {
   const [meta, setMeta] = useState<WorkflowListMeta | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchRuns = useCallback(async (id: string, params?: RunsQueryParams) => {
     setIsLoading(true);
     setError(null);
     try {
       const response = await listWorkflowRunsApi(id, params);
+      if (!isMounted()) return;
       setRuns(response.items);
       setMeta(response.meta);
     } catch (err) {
+      if (!isMounted()) return;
       const message = err instanceof Error ? err.message : 'Failed to fetch workflow runs';
       setError(message);
       setRuns([]);
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   return { runs, meta, isLoading, error, fetchRuns };
 }
