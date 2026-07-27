@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MediaItem } from '../types/media';
 import { listTrash } from '../services/media';
+import { useIsMounted } from './useIsMounted';
 
 interface UseInfiniteTrashResult {
   items: MediaItem[];
@@ -26,6 +27,7 @@ export function useInfiniteTrash(
   const pageSizeRef = useRef(pageSize);
   const inflightRef = useRef(false);
   const genRef = useRef(0);
+  const isMounted = useIsMounted();
 
   circleIdRef.current = circleId;
   pageSizeRef.current = pageSize;
@@ -42,20 +44,22 @@ export function useInfiniteTrash(
         pageSize: pageSizeRef.current,
       });
       if (gen !== genRef.current) return;
+      if (!isMounted()) return;
       setItems((prev) =>
         targetPage === 1 ? response.items : [...prev, ...response.items],
       );
       setTotalPages(response.meta.totalPages);
     } catch (err) {
       if (gen !== genRef.current) return;
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load trash');
     } finally {
       if (gen === genRef.current) {
         inflightRef.current = false;
-        setIsLoading(false);
+        if (isMounted()) setIsLoading(false);
       }
     }
-  }, []);
+  }, [isMounted]);
 
   useEffect(() => {
     if (!enabled || !circleId) return;

@@ -16,6 +16,7 @@ import {
   cancelWorkflowRun as cancelWorkflowRunApi,
   duplicateWorkflow as duplicateWorkflowApi,
 } from '../services/workflows';
+import { useIsMounted } from './useIsMounted';
 
 type RunResult = { runId: string; status: WorkflowRunStatus };
 
@@ -35,6 +36,7 @@ interface UseWorkflowMutationsResult {
 export function useWorkflowMutations(): UseWorkflowMutationsResult {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const run = useCallback(
     async <T>(fn: () => Promise<T>, fallback: string): Promise<T> => {
@@ -44,13 +46,13 @@ export function useWorkflowMutations(): UseWorkflowMutationsResult {
         return await fn();
       } catch (err) {
         const message = err instanceof Error ? err.message : fallback;
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       } finally {
-        setIsSaving(false);
+        if (isMounted()) setIsSaving(false);
       }
     },
-    [],
+    [isMounted],
   );
 
   const createWorkflow = useCallback(

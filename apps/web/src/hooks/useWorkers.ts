@@ -3,6 +3,7 @@ import {
   getWorkers,
   deleteWorker as deleteWorkerService,
 } from '../services/workers';
+import { useIsMounted } from './useIsMounted';
 import type { WorkerNodeDto } from '../services/workers';
 
 const POLL_INTERVAL_MS = 5000;
@@ -28,17 +29,20 @@ export function useWorkers(options: UseWorkersOptions = {}): UseWorkersResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(options.autoRefresh ?? true);
+  const isMounted = useIsMounted();
 
   // Silent fetch (no loading spinner) — used by the polling interval.
   const fetchNodes = useCallback(async () => {
     try {
       const data = await getWorkers();
+      if (!isMounted()) return;
       setNodes(data);
       setError(null);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load worker nodes');
     }
-  }, []);
+  }, [isMounted]);
 
   // Explicit refresh with a loading indicator.
   const refresh = useCallback(async () => {
@@ -46,9 +50,9 @@ export function useWorkers(options: UseWorkersOptions = {}): UseWorkersResult {
     try {
       await fetchNodes();
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [fetchNodes]);
+  }, [fetchNodes, isMounted]);
 
   // Initial load.
   useEffect(() => {

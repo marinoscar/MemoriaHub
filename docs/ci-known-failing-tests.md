@@ -2,7 +2,7 @@
 
 These suites are excluded from `test:ci` in each app. Each exclusion is intentional and tracked here as follow-up debt.
 
-> **Lesson (issue #202):** When `apps/web`'s 8 individually-excluded suites were finally investigated, only 3 were genuinely broken (stale mock fixtures / a pagination-shape drift) — the other 5 (`App.test.tsx`, `CircleDetailPage.test.tsx`, `Layout.test.tsx`, `JobsPage.test.tsx`, `Sidebar.test.tsx`) had already been fixed by earlier, unrelated PRs, but nobody ever lifted their exclusion, so the repo carried phantom debt and silently lost that coverage. Same two recommendations as ever: (1) a fix PR must lift its own exclusion in the same PR, never leave it for "later"; (2) entries in this file need periodic re-verification — don't trust an old "still failing" note without re-running the suite.
+> **Lesson (issues #193, #202):** Auditing the rotted-suite exclusions across both apps found that **7 of the 12 were stale** — 2 of the 4 API ones (`system-settings.service`, `search-agent.service`) and 5 of the 8 web ones (`App`, `CircleDetailPage`, `Layout`, `JobsPage`, `Sidebar`). Those tests had already been fixed, or were never actually broken, but nobody ever lifted the exclusion — so the repo carried phantom debt and silently lost that coverage for no reason. Two rules follow: (a) whoever fixes a rotted suite must remove its exclusion in the SAME PR that fixes it, never leaving it for "later"; (b) entries in this file need periodic re-verification — don't trust an old "still failing" note without re-running the suite.
 
 ---
 
@@ -15,21 +15,6 @@ All files matching `*.integration.spec.ts` under `apps/api/src/` and `apps/api/t
 **Root cause:** Integration specs require a live PostgreSQL database (via `createTestApp` helper). The helper attempts to connect on startup, causing each suite to time out after 30 s in CI where no DB is provisioned. Fixing this requires either a PostgreSQL service container in the CI workflow or a dedicated test-DB setup step.
 
 **Fix:** Add a `postgres` service to the GitHub Actions job and set `DATABASE_URL` / individual `POSTGRES_*` env vars before running integration tests. Once wired, re-enable via a separate `test:integration` step.
-
----
-
-## API — Rotted Unit Suites (4 files)
-
-These specs are excluded individually because they contain pre-existing failures unrelated to recent work:
-
-| File | Reason |
-|------|--------|
-| `src/face/face-detection.controller.spec.ts` | Controller interface changed; mock expectations stale |
-| `src/settings/system-settings/system-settings.service.spec.ts` | System-settings schema evolved; Zod validation assertions out of date |
-| `src/search/agent/search-agent.service.spec.ts` | Agent service refactored (SSE/streaming); test doubles not updated |
-| `src/storage/processing/image-dimensions.processor.spec.ts` (both `src/` and `test/` copies) | `sharp` buffer behaviour changed; corrupt-buffer test always resolves `success: true` |
-
-**Fix:** Each file needs its mock/assertion updated to match the current implementation. No behaviour regressions — tests were simply never updated when the code changed.
 
 ---
 
@@ -63,7 +48,6 @@ Added when `apps/cli` first gained CI coverage (`cli-test` job in `ci.yml`, issu
 
 ## Priority
 
-1. **API rotted unit suites** — update mock expectations to match current service interfaces.
-2. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
-3. **CLI TUI concurrency-flaky pattern** — convert the remaining ~13 files to the poll-based `wait-for.ts` helpers, then remove the retry safety net.
-4. **API integration suites** — requires CI infrastructure work (DB service container).
+1. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
+2. **CLI TUI concurrency-flaky pattern** — convert the remaining ~13 files to the poll-based `wait-for.ts` helpers, then remove the retry safety net.
+3. **API integration suites** — requires CI infrastructure work (DB service container).

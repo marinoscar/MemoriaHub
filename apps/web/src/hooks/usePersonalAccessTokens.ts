@@ -5,6 +5,7 @@ import {
   createPersonalAccessToken as createTokenApi,
   revokePersonalAccessToken as revokeTokenApi,
 } from '../services/api';
+import { useIsMounted } from './useIsMounted';
 
 interface UsePersonalAccessTokensResult {
   tokens: PersonalAccessToken[];
@@ -23,21 +24,24 @@ export function usePersonalAccessTokens(): UsePersonalAccessTokensResult {
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchTokens = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const result = await fetchTokensApi();
+      if (!isMounted()) return;
       setTokens(result);
     } catch (err) {
+      if (!isMounted()) return;
       const message = err instanceof Error ? err.message : 'Failed to fetch tokens';
       setError(message);
       setTokens([]);
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const createToken = useCallback(
     async (data: {
@@ -53,11 +57,11 @@ export function usePersonalAccessTokens(): UsePersonalAccessTokensResult {
         return response;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create token';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [fetchTokens],
+    [fetchTokens, isMounted],
   );
 
   const revokeToken = useCallback(
@@ -69,11 +73,11 @@ export function usePersonalAccessTokens(): UsePersonalAccessTokensResult {
         await fetchTokens();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to revoke token';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [fetchTokens],
+    [fetchTokens, isMounted],
   );
 
   useEffect(() => {

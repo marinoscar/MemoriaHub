@@ -10,6 +10,7 @@ import {
   patchMedia as patchMediaApi,
   deleteMedia as deleteMediaApi,
 } from '../services/media';
+import { useIsMounted } from './useIsMounted';
 
 // ---------------------------------------------------------------------------
 // Filter state shape — all optional so callers can compose them incrementally
@@ -55,6 +56,7 @@ export function useMedia(): UseMediaResult {
     sortOrder: 'desc',
     page: 1,
   });
+  const isMounted = useIsMounted();
 
   const setFilters = useCallback((newFilters: MediaFilters) => {
     setFiltersState(newFilters);
@@ -65,42 +67,46 @@ export function useMedia(): UseMediaResult {
     setError(null);
     try {
       const response = await listMediaApi(params);
-      setItems(response.items);
-      setMeta(response.meta);
+      if (isMounted()) {
+        setItems(response.items);
+        setMeta(response.meta);
+      }
       return response.items;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch media';
-      setError(message);
-      setItems([]);
+      if (isMounted()) {
+        setError(message);
+        setItems([]);
+      }
       return [];
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const patchMedia = useCallback(async (id: string, dto: PatchMediaDto) => {
     setError(null);
     try {
       const updated = await patchMediaApi(id, dto);
-      setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      if (isMounted()) setItems((prev) => prev.map((item) => (item.id === id ? updated : item)));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update media item';
-      setError(message);
+      if (isMounted()) setError(message);
       throw err;
     }
-  }, []);
+  }, [isMounted]);
 
   const removeMedia = useCallback(async (id: string) => {
     setError(null);
     try {
       await deleteMediaApi(id);
-      setItems((prev) => prev.filter((item) => item.id !== id));
+      if (isMounted()) setItems((prev) => prev.filter((item) => item.id !== id));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete media item';
-      setError(message);
+      if (isMounted()) setError(message);
       throw err;
     }
-  }, []);
+  }, [isMounted]);
 
   /** Apply a partial patch to an item in local state without an API call. */
   const updateItemLocally = useCallback((id: string, patch: Partial<MediaItem>) => {
