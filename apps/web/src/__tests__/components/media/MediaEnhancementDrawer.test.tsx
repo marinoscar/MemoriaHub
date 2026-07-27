@@ -150,6 +150,22 @@ describe('MediaEnhancementDrawer', () => {
       await waitFor(() => {
         expect(resumeLatest).toHaveBeenCalledTimes(1);
       });
+      // No `enhancementId` prop -> the existing per-item behaviour (resolve
+      // the item's LATEST enhancement) must be preserved exactly.
+      expect(resumeLatest).toHaveBeenCalledWith(undefined);
+    });
+
+    it('resumes a NAMED enhancement when opened from the hub (issue #201)', async () => {
+      const resumeLatest = vi.fn().mockResolvedValue(undefined);
+      mockUseMediaEnhance.mockReturnValue(makeHook({ resumeLatest }));
+
+      render(<MediaEnhancementDrawer {...baseProps} enhancementId="enh-42" />);
+
+      await waitFor(() => {
+        expect(resumeLatest).toHaveBeenCalledWith('enh-42');
+      });
+      // Still the SAME resume path — the hub does not add a second one.
+      expect(resumeLatest).toHaveBeenCalledTimes(1);
     });
 
     it('calls start() with empty params when the Enhance button is clicked without customizing', async () => {

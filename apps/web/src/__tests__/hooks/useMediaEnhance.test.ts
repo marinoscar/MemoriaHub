@@ -387,6 +387,58 @@ describe('useMediaEnhance', () => {
       expect(result.current.status).toBe('idle');
       expect(result.current.data).toBeNull();
     });
+
+    // --- explicit enhancementId (issue #201, AI Enhancements hub) ----------
+
+    it('resolves a NAMED enhancement instead of the latest when given an id', async () => {
+      mockGetEnhancement.mockResolvedValue({
+        ...makeEnhancementDto('ready'),
+        id: 'enh-older',
+      });
+
+      const { result } = renderHook(() => useMediaEnhance('media-1'));
+
+      await act(async () => {
+        await result.current.resumeLatest('enh-older');
+      });
+
+      expect(mockGetEnhancement).toHaveBeenCalledWith('media-1', 'enh-older');
+      // The "latest" lookup must be bypassed entirely, not merely overridden.
+      expect(mockGetLatestEnhancement).not.toHaveBeenCalled();
+      expect(result.current.status).toBe('ready');
+      expect(result.current.data?.id).toBe('enh-older');
+    });
+
+    it('applies decisions against the named enhancement', async () => {
+      mockGetEnhancement.mockResolvedValue({
+        ...makeEnhancementDto('ready'),
+        id: 'enh-older',
+      });
+      mockApplyEnhancement.mockResolvedValue({ id: 'new-item' });
+
+      const { result } = renderHook(() => useMediaEnhance('media-1'));
+      await act(async () => {
+        await result.current.resumeLatest('enh-older');
+      });
+
+      await act(async () => {
+        await result.current.apply('keep_both');
+      });
+
+      expect(mockApplyEnhancement).toHaveBeenCalledWith('media-1', 'enh-older', 'keep_both');
+    });
+
+    it('still resolves the latest when called with no argument', async () => {
+      mockGetLatestEnhancement.mockResolvedValue(makeEnhancementDto('ready'));
+
+      const { result } = renderHook(() => useMediaEnhance('media-1'));
+      await act(async () => {
+        await result.current.resumeLatest();
+      });
+
+      expect(mockGetLatestEnhancement).toHaveBeenCalledWith('media-1');
+      expect(result.current.status).toBe('ready');
+    });
   });
 
   // -------------------------------------------------------------------------

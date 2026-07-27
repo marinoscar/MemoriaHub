@@ -66,6 +66,13 @@ interface MediaEnhancementDrawerProps {
   item: MediaItem;
   open: boolean;
   onClose: () => void;
+  /**
+   * Open directly onto a KNOWN enhancement instead of the item's latest one.
+   * Used by the AI Enhancements hub (issue #201), where the user has already
+   * picked the row they want to review. Omitted by the per-item call sites
+   * (gallery selection bar, lightbox), which keep resolving the latest.
+   */
+  enhancementId?: string;
   /** Optional model label, shown in the params step (from ai.features.enhance). */
   modelLabel?: string | null;
   /**
@@ -348,6 +355,7 @@ export function MediaEnhancementDrawer({
   item,
   open,
   onClose,
+  enhancementId,
   modelLabel,
   replacePolicy,
   onReplaced,
@@ -374,12 +382,14 @@ export function MediaEnhancementDrawer({
   const [commitError, setCommitError] = useState<string | null>(null);
 
   // When the drawer opens, try to resume any in-flight/ready enhancement.
+  // `enhancementId` (when supplied) narrows the SAME resume path to one known
+  // row instead of the item's latest — it does not add a second code path.
   useEffect(() => {
     if (open) {
-      void resumeLatest();
+      void resumeLatest(enhancementId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, item.id]);
+  }, [open, item.id, enhancementId]);
 
   // ---- Background completion notification ----------------------------------
   const prevStatusRef = useRef<EnhanceUiStatus>(status);
