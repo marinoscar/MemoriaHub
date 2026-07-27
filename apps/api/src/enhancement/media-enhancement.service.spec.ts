@@ -37,6 +37,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -148,8 +149,9 @@ describe('MediaEnhancementService', () => {
   let mockRecoveryService: { reprocessObjectNow: jest.Mock };
   let mockMetadataSync: { syncFromStorageObject: jest.Mock };
   let mockMediaEnrichment: { enqueueUploadEnrichment: jest.Mock };
+  let mockThumbnails: { signThumbsBatched: jest.Mock; extractThumbKey: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
-  let mockSystemSettings: { getSettings: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock; getSettingValue: jest.Mock };
 
   let mockObjectProvider: { getSignedDownloadUrl: jest.Mock; download: jest.Mock; upload: jest.Mock; delete: jest.Mock };
   let mockActiveProvider: { upload: jest.Mock; getBucket: jest.Mock; getSignedDownloadUrl: jest.Mock; download: jest.Mock; delete: jest.Mock };
@@ -191,8 +193,15 @@ describe('MediaEnhancementService', () => {
     mockRecoveryService = { reprocessObjectNow: jest.fn().mockResolvedValue(undefined) };
     mockMetadataSync = { syncFromStorageObject: jest.fn().mockResolvedValue(undefined) };
     mockMediaEnrichment = { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined) };
+    mockThumbnails = {
+      signThumbsBatched: jest.fn().mockResolvedValue(new Map()),
+      extractThumbKey: jest.fn().mockReturnValue(null),
+    };
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1', status: 'pending' }) };
-    mockSystemSettings = { getSettings: jest.fn().mockResolvedValue(makeSettings()) };
+    mockSystemSettings = {
+      getSettings: jest.fn().mockResolvedValue(makeSettings()),
+      getSettingValue: jest.fn().mockResolvedValue(undefined),
+    };
 
     // Interactive-transaction passthrough (applySystemTag runs tx.tag.upsert / tx.mediaTag.upsert|updateMany).
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
@@ -218,6 +227,7 @@ describe('MediaEnhancementService', () => {
         { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
         { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichment },
+        { provide: MediaThumbnailService, useValue: mockThumbnails },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
