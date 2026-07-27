@@ -432,5 +432,7 @@ export interface DashboardResponse {
     pendingBurstGroups?: number;
     pendingDuplicateGroups?: number;
     pendingLocationSuggestions?: number;
+    /** Enhancements awaiting a keep-both / replace / discard decision. */
+    pendingEnhancements?: number;
   };
 }
