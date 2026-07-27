@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import {
   DuplicateGroupStatus,
   Prisma,
@@ -49,6 +49,10 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy {
 
   constructor(
     private readonly prisma: PrismaService,
+    // Circular by nature: DuplicateService injects ReviewRunService (wrapped in its own
+    // forwardRef), and ReviewRunService pulls in this strategy via the subject registry —
+    // this is the reverse edge of that same cycle, so it needs forwardRef too.
+    @Inject(forwardRef(() => DuplicateService))
     private readonly duplicateService: DuplicateService,
   ) {}
 
