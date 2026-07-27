@@ -623,6 +623,22 @@ describe('BurstService', () => {
       expect(result.data.removed).toBe(0);
       expect(result.data.kept).toBe(3);
     });
+
+    it('fires the dedup re-enqueue NORMALLY (not deferred) — resolveOneBurstGroup is called with no opts, so reenqueueDuplicateDetection runs inline for the kept item', async () => {
+      setupGroup();
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true); // enable duplicateDetection
+
+      await service.resolveBurstGroup(
+        GROUP_ID,
+        makeResolveDto(['media-1'], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_WRITE,
+      );
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'duplicate_detection', mediaItemId: 'media-1', circleId: CIRCLE_ID }),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -859,6 +875,26 @@ describe('BurstService', () => {
       const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
       expect(findManyCall.where.id.in).toEqual([group.id]);
     });
+
+    it('fires the dedup re-enqueue NORMALLY (not deferred) for each resolved group\'s kept item — this by-id path predates review-run deferral and must keep firing inline', async () => {
+      const groupA = makeBulkGroup({
+        id: 'group-a',
+        suggestedBestItemId: 'media-1',
+        items: [{ id: 'media-1' }, { id: 'media-2' }],
+      });
+      setupGroups([groupA]);
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true); // enable duplicateDetection
+
+      await service.bulkResolveBurstGroups(
+        makeBulkResolveDto(['group-a'], 'archive'),
+        USER_ID,
+        PERMS_MEDIA_DELETE,
+      );
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'duplicate_detection', mediaItemId: 'media-1', circleId: CIRCLE_ID }),
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1064,6 +1100,23 @@ describe('BurstService', () => {
         groupStatus: 'dismissed',
         ungrouped: 3,
       });
+    });
+
+    it('fires the dedup re-enqueue NORMALLY (not deferred) for every ungrouped member — dismissOneBurstGroup is called with no opts', async () => {
+      setupGroupForDismiss();
+      mockSystemSettings.isFeatureEnabled.mockResolvedValue(true); // enable duplicateDetection
+
+      await service.dismissBurstGroup(GROUP_ID, USER_ID, PERMS_MEDIA_WRITE);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'duplicate_detection', mediaItemId: 'media-1', circleId: CIRCLE_ID }),
+      );
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'duplicate_detection', mediaItemId: 'media-2', circleId: CIRCLE_ID }),
+      );
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'duplicate_detection', mediaItemId: 'media-3', circleId: CIRCLE_ID }),
+      );
     });
   });
 
