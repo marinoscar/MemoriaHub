@@ -436,3 +436,24 @@ export interface DashboardResponse {
     pendingEnhancements?: number;
   };
 }
+
+// ---------------------------------------------------------------------------
+// Review counts
+// ---------------------------------------------------------------------------
+
+/**
+ * Response of `GET /api/media/review-counts` — the four review-queue counts
+ * the dashboard nests under `counts`, without the On This Day / recent /
+ * favorites payload or any thumbnail signing.
+ *
+ * Unlike `DashboardResponse['counts']`, every field here is a required number:
+ * the endpoint exists to serve these specific counts and always computes all
+ * four.
+ */
+export interface ReviewCountsResponse {
+  pendingBurstGroups: number;
+  pendingDuplicateGroups: number;
+  pendingLocationSuggestions: number;
+  /** Enhancements awaiting a keep-both / replace / discard decision. */
+  pendingEnhancements: number;
+}

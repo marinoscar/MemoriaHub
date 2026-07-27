@@ -39,7 +39,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
-import { useDashboard } from '../../hooks/useDashboard';
+import { useReviewCounts } from '../../hooks/useReviewCounts';
 
 interface SidebarProps {
   open: boolean;
@@ -69,12 +69,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const { isAdmin, hasPermission } = usePermissions();
   const workflowsEnabled = useWorkflowsEnabled();
   const { pictureEnhancement } = useFeatureFlags();
-  // Sole consumer of the dashboard here is the AI Enhancements badge. The
-  // response is small and already fetched by HomePage; `useDashboard` is
-  // keyed on the active circle, so this is one extra request per circle
-  // switch, not per navigation.
-  const { data: dashboard } = useDashboard();
-  const pendingEnhancements = dashboard?.counts?.pendingEnhancements ?? 0;
+  // The AI Enhancements badge is the sole consumer of these counts, and that
+  // entry only renders when the enhancer flag is on — so the hook is gated on
+  // the same condition and issues NO request while the flag is off or still
+  // loading (issue #204). `useReviewCounts` is keyed on the active circle, so
+  // when it IS enabled this is one small counts-only request per circle
+  // switch, not per navigation, and not the full dashboard payload.
+  const { data: reviewCounts } = useReviewCounts({
+    enabled: pictureEnhancement?.enabled === true,
+  });
+  const pendingEnhancements = reviewCounts?.pendingEnhancements ?? 0;
 
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
