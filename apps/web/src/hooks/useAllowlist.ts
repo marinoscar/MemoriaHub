@@ -5,6 +5,7 @@ import {
   addToAllowlist as addToAllowlistApi,
   removeFromAllowlist as removeFromAllowlistApi,
 } from '../services/api';
+import { useIsMounted } from './useIsMounted';
 
 interface UseAllowlistResult {
   entries: AllowedEmailEntry[];
@@ -32,6 +33,7 @@ export function useAllowlist(): UseAllowlistResult {
   const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchAllowlist = useCallback(
     async (params?: {
@@ -44,20 +46,22 @@ export function useAllowlist(): UseAllowlistResult {
       setError(null);
       try {
         const response: AllowlistResponse = await fetchAllowlistApi(params);
+        if (!isMounted()) return;
         setEntries(response.items);
         setTotal(response.total);
         setPage(response.page);
         setPageSize(response.pageSize);
         setTotalPages(response.totalPages);
       } catch (err) {
+        if (!isMounted()) return;
         const message = err instanceof Error ? err.message : 'Failed to fetch allowlist';
         setError(message);
         setEntries([]);
       } finally {
-        setIsLoading(false);
+        if (isMounted()) setIsLoading(false);
       }
     },
-    [],
+    [isMounted],
   );
 
   const addEmail = useCallback(
@@ -69,11 +73,11 @@ export function useAllowlist(): UseAllowlistResult {
         await fetchAllowlist({ page, pageSize });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to add email';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [fetchAllowlist, page, pageSize],
+    [fetchAllowlist, page, pageSize, isMounted],
   );
 
   const removeEmail = useCallback(
@@ -85,11 +89,11 @@ export function useAllowlist(): UseAllowlistResult {
         await fetchAllowlist({ page, pageSize });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to remove email';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [fetchAllowlist, page, pageSize],
+    [fetchAllowlist, page, pageSize, isMounted],
   );
 
   return {

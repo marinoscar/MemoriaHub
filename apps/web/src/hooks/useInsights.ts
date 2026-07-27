@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getInsights, refreshInsights } from '../services/insights';
+import { useIsMounted } from './useIsMounted';
 import type { InsightsSnapshot, InsightsRefreshState } from '../services/insights';
 
 // Poll every 2.5 s while a job is pending/running
@@ -28,6 +29,7 @@ export function useInsights(): UseInsightsResult {
   // Stable refs for the polling cleanup / timeout
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMounted = useIsMounted();
 
   /** Clear any running poll interval and safety timeout. */
   const stopPolling = useCallback(() => {
@@ -55,6 +57,10 @@ export function useInsights(): UseInsightsResult {
     const tick = async () => {
       try {
         const snapshot = await getInsights();
+        if (!isMounted()) {
+          stopPolling();
+          return;
+        }
         setData(snapshot);
 
         if (snapshot.refresh.state === 'idle' || snapshot.refresh.state === 'failed') {
@@ -72,6 +78,7 @@ export function useInsights(): UseInsightsResult {
       } catch (err) {
         // On network error, stop polling and surface the message
         stopPolling();
+        if (!isMounted()) return;
         setRefreshing(false);
         setError(err instanceof Error ? err.message : 'Failed to poll insights');
       }
@@ -87,7 +94,7 @@ export function useInsights(): UseInsightsResult {
       setRefreshing(false);
       setError('Refresh timed out — the job may still be running in the background.');
     }, POLL_TIMEOUT_MS);
-  }, [stopPolling]);
+  }, [stopPolling, isMounted]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -102,6 +109,7 @@ export function useInsights(): UseInsightsResult {
     setError(null);
     try {
       const snapshot = await getInsights();
+      if (!isMounted()) return;
       setData(snapshot);
 
       // A scheduled or manual job was already running when the page opened
@@ -112,11 +120,12 @@ export function useInsights(): UseInsightsResult {
         startPolling();
       }
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load insights');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [startPolling]);
+  }, [startPolling, isMounted]);
 
   // Run load once on mount
   useEffect(() => {
@@ -133,11 +142,13 @@ export function useInsights(): UseInsightsResult {
     setError(null);
     try {
       await refreshInsights();
+      if (!isMounted()) return;
       startPolling();
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to start refresh');
     }
-  }, [startPolling]);
+  }, [startPolling, isMounted]);
 
   const jobState: InsightsRefreshState = data?.refresh.state ?? 'idle';
 

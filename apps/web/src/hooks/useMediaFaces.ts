@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getMediaFaces, getMediaFaceStatus, rerunMediaFaces } from '../services/face';
+import { useIsMounted } from './useIsMounted';
 import type { DetectedFaceDto, MediaFaceStatusDto, MediaFaceStatusType } from '../services/face';
 
 const TERMINAL_STATUSES: MediaFaceStatusType[] = ['processed', 'failed', 'no_faces'];
@@ -14,6 +15,7 @@ export function useMediaFaces(mediaId: string) {
   const [rerunLoading, setRerunLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  const isMounted = useIsMounted();
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -32,14 +34,16 @@ export function useMediaFaces(mediaId: string) {
         getMediaFaces(mediaId),
         getMediaFaceStatus(mediaId),
       ]);
+      if (!isMounted()) return;
       setFaces(facesData);
       setStatus(statusData);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load face data');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [mediaId]);
+  }, [mediaId, isMounted]);
 
   useEffect(() => {
     void loadData();
@@ -52,6 +56,7 @@ export function useMediaFaces(mediaId: string) {
     stopPolling();
     try {
       await rerunMediaFaces(mediaId);
+      if (!isMounted()) return;
       // Optimistically update status to pending
       setStatus((prev) =>
         prev
@@ -71,26 +76,33 @@ export function useMediaFaces(mediaId: string) {
         pollCountRef.current += 1;
         getMediaFaceStatus(mediaId)
           .then((s) => {
+            if (!isMounted()) {
+              stopPolling();
+              return;
+            }
             setStatus(s);
             if (TERMINAL_STATUSES.includes(s.status) || pollCountRef.current >= MAX_POLLS) {
               stopPolling();
               setRerunLoading(false);
               // Refresh faces after terminal status
               void getMediaFaces(mediaId)
-                .then(setFaces)
+                .then((f) => {
+                  if (isMounted()) setFaces(f);
+                })
                 .catch(() => undefined);
             }
           })
           .catch(() => {
             stopPolling();
-            setRerunLoading(false);
+            if (isMounted()) setRerunLoading(false);
           });
       }, POLL_INTERVAL_MS);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to rerun face detection');
       setRerunLoading(false);
     }
-  }, [mediaId, stopPolling]);
+  }, [mediaId, stopPolling, isMounted]);
 
   return { faces, status, loading, error, rerun, rerunLoading, refresh: loadData };
 }

@@ -1,11 +1,13 @@
 import { useState, useCallback } from 'react';
 import { listMembers, addMember, updateMemberRole, removeMember } from '../services/circles';
+import { useIsMounted } from './useIsMounted';
 import type { CircleMember, CircleRole } from '../types/circles';
 
 export function useCircleMembers(circleId: string) {
   const [members, setMembers] = useState<CircleMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchMembers = useCallback(async () => {
     if (!circleId) return;
@@ -13,37 +15,39 @@ export function useCircleMembers(circleId: string) {
     setError(null);
     try {
       const resp = await listMembers(circleId);
+      if (!isMounted()) return;
       setMembers(resp.items);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load members');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [circleId]);
+  }, [circleId, isMounted]);
 
   const inviteMember = useCallback(
     async (userId: string, role: CircleRole) => {
       const m = await addMember(circleId, { userId, role });
-      setMembers((prev) => [...prev, m]);
+      if (isMounted()) setMembers((prev) => [...prev, m]);
       return m;
     },
-    [circleId],
+    [circleId, isMounted],
   );
 
   const changeRole = useCallback(
     async (userId: string, role: CircleRole) => {
       const m = await updateMemberRole(circleId, userId, role);
-      setMembers((prev) => prev.map((x) => (x.userId === userId ? m : x)));
+      if (isMounted()) setMembers((prev) => prev.map((x) => (x.userId === userId ? m : x)));
     },
-    [circleId],
+    [circleId, isMounted],
   );
 
   const removeMemberById = useCallback(
     async (userId: string) => {
       await removeMember(circleId, userId);
-      setMembers((prev) => prev.filter((x) => x.userId !== userId));
+      if (isMounted()) setMembers((prev) => prev.filter((x) => x.userId !== userId));
     },
-    [circleId],
+    [circleId, isMounted],
   );
 
   return { members, loading, error, fetchMembers, inviteMember, changeRole, removeMemberById };

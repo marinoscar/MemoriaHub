@@ -9,10 +9,10 @@
  *   - Delete confirmation dialog appears on click
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
+import { render, flushPendingAsyncWork } from '../../utils/test-utils';
 import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
 import type { MediaItem } from '../../../types/media';
 
@@ -55,6 +55,35 @@ vi.mock('../../../services/face', () => ({
   getPerson: vi.fn().mockResolvedValue(null),
   createPerson: vi.fn().mockResolvedValue({}),
   updatePerson: vi.fn().mockResolvedValue({}),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock tagging/metadata services (useMediaTags / useMediaMetadata fetch these
+// on mount). Without these mocks the requests fall through to MSW as
+// unhandled, bypass to a real (failing) network call, and settle on an
+// unpredictable timeline instead of a deterministic microtask — exactly the
+// kind of dangling continuation `flushPendingAsyncWork` below exists to
+// drain before this file's tests finish.
+// ---------------------------------------------------------------------------
+vi.mock('../../../services/tagging', () => ({
+  getMediaTagStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    providerKey: null,
+    modelVersion: null,
+    tagCount: 0,
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunMediaTags: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
+}));
+
+vi.mock('../../../services/metadata', () => ({
+  getMediaMetadataStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunMediaMetadata: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -157,6 +186,14 @@ describe('MediaDetailDrawer — archive/trash actions', () => {
     mockBulkDelete.mockResolvedValue({ deleted: 1 });
     // getMedia is called after archive/unarchive to refresh the item
     mockGetMedia.mockResolvedValue(makeMediaItem({ downloadUrl: null }));
+  });
+
+  // Drain any pending mocked-service continuations (useMediaFaces,
+  // useMediaTags, useMediaMetadata, usePeople all fetch on mount) BEFORE the
+  // global `cleanup()` in setup.ts unmounts the tree — see
+  // `flushPendingAsyncWork`'s doc comment for why this matters (issue #196).
+  afterEach(async () => {
+    await flushPendingAsyncWork();
   });
 
   // -------------------------------------------------------------------------

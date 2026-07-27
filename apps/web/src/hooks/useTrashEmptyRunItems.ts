@@ -5,6 +5,7 @@ import type {
   TrashEmptyRunItemsQueryParams,
 } from '../types/trashEmptyRuns';
 import { listTrashEmptyRunItems as listTrashEmptyRunItemsApi } from '../services/trashEmptyRuns';
+import { useIsMounted } from './useIsMounted';
 
 interface UseTrashEmptyRunItemsResult {
   items: TrashEmptyRunItem[];
@@ -19,6 +20,7 @@ export function useTrashEmptyRunItems(): UseTrashEmptyRunItemsResult {
   const [meta, setMeta] = useState<TrashEmptyRunListMeta | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchItems = useCallback(
     async (runId: string, params?: TrashEmptyRunItemsQueryParams) => {
@@ -26,18 +28,20 @@ export function useTrashEmptyRunItems(): UseTrashEmptyRunItemsResult {
       setError(null);
       try {
         const response = await listTrashEmptyRunItemsApi(runId, params);
+        if (!isMounted()) return;
         setItems(response.items);
         setMeta(response.meta);
       } catch (err) {
+        if (!isMounted()) return;
         const message =
           err instanceof Error ? err.message : 'Failed to fetch trash-empty run items';
         setError(message);
         setItems([]);
       } finally {
-        setIsLoading(false);
+        if (isMounted()) setIsLoading(false);
       }
     },
-    [],
+    [isMounted],
   );
 
   return { items, meta, isLoading, error, fetchItems };

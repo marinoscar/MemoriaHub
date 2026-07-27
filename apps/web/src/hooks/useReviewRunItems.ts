@@ -5,6 +5,7 @@ import type {
   ReviewRunListMeta,
 } from '../types/reviewRuns';
 import { listReviewRunItems as listReviewRunItemsApi } from '../services/reviewRuns';
+import { useIsMounted } from './useIsMounted';
 
 interface UseReviewRunItemsResult {
   items: ReviewRunItem[];
@@ -19,6 +20,7 @@ export function useReviewRunItems(): UseReviewRunItemsResult {
   const [meta, setMeta] = useState<ReviewRunListMeta | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchItems = useCallback(
     async (runId: string, params?: ReviewRunItemsQueryParams) => {
@@ -26,18 +28,20 @@ export function useReviewRunItems(): UseReviewRunItemsResult {
       setError(null);
       try {
         const response = await listReviewRunItemsApi(runId, params);
+        if (!isMounted()) return;
         setItems(response.items);
         setMeta(response.meta);
       } catch (err) {
+        if (!isMounted()) return;
         const message =
           err instanceof Error ? err.message : 'Failed to fetch review run items';
         setError(message);
         setItems([]);
       } finally {
-        setIsLoading(false);
+        if (isMounted()) setIsLoading(false);
       }
     },
-    [],
+    [isMounted],
   );
 
   return { items, meta, isLoading, error, fetchItems };

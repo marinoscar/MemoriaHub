@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getMediaTagStatus, rerunMediaTags } from '../services/tagging';
+import { useIsMounted } from './useIsMounted';
 import type { MediaTagStatusDto, MediaTagStatusType } from '../services/tagging';
 
 const TERMINAL_STATUSES: MediaTagStatusType[] = ['processed', 'failed'];
@@ -13,6 +14,7 @@ export function useMediaTags(mediaId: string, onRefreshTags: () => void) {
   const [rerunLoading, setRerunLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  const isMounted = useIsMounted();
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -28,13 +30,15 @@ export function useMediaTags(mediaId: string, onRefreshTags: () => void) {
     setError(null);
     try {
       const statusData = await getMediaTagStatus(mediaId);
+      if (!isMounted()) return;
       setStatus(statusData);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load tag status');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [mediaId]);
+  }, [mediaId, isMounted]);
 
   useEffect(() => {
     void loadData();
@@ -47,6 +51,7 @@ export function useMediaTags(mediaId: string, onRefreshTags: () => void) {
     stopPolling();
     try {
       await rerunMediaTags(mediaId);
+      if (!isMounted()) return;
       // Optimistically update status to pending
       setStatus((prev) =>
         prev
@@ -66,6 +71,10 @@ export function useMediaTags(mediaId: string, onRefreshTags: () => void) {
         pollCountRef.current += 1;
         getMediaTagStatus(mediaId)
           .then((s) => {
+            if (!isMounted()) {
+              stopPolling();
+              return;
+            }
             setStatus(s);
             if (TERMINAL_STATUSES.includes(s.status) || pollCountRef.current >= MAX_POLLS) {
               stopPolling();
@@ -76,14 +85,15 @@ export function useMediaTags(mediaId: string, onRefreshTags: () => void) {
           })
           .catch(() => {
             stopPolling();
-            setRerunLoading(false);
+            if (isMounted()) setRerunLoading(false);
           });
       }, POLL_INTERVAL_MS);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to rerun AI tagging');
       setRerunLoading(false);
     }
-  }, [mediaId, stopPolling, onRefreshTags]);
+  }, [mediaId, stopPolling, onRefreshTags, isMounted]);
 
   return { status, loading, error, rerun, rerunLoading };
 }

@@ -8,6 +8,7 @@ import {
   repairThumbnails as repairThumbnailsService,
   deleteJob as deleteJobService,
 } from '../services/jobs';
+import { useIsMounted } from './useIsMounted';
 import type { JobStats, EnrichmentJobDto, JobsListResponse, ListJobsParams, JobStatus } from '../services/jobs';
 
 const POLL_INTERVAL_MS = 5000;
@@ -64,26 +65,32 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
+  const isMounted = useIsMounted();
+
   const fetchStats = useCallback(async () => {
     try {
       const data = await getJobStats();
+      if (!isMounted()) return;
       setStats(data);
       setStatsError(null);
     } catch (err) {
+      if (!isMounted()) return;
       setStatsError(err instanceof Error ? err.message : 'Failed to load job stats');
     }
-  }, []);
+  }, [isMounted]);
 
   const fetchJobs = useCallback(async (params: ListJobsParams) => {
     try {
       const data = await listJobs(params);
+      if (!isMounted()) return;
       setJobs(data.items);
       setMeta(data.meta);
       setJobsError(null);
     } catch (err) {
+      if (!isMounted()) return;
       setJobsError(err instanceof Error ? err.message : 'Failed to load jobs');
     }
-  }, []);
+  }, [isMounted]);
 
   // Full explicit refresh (sets loading indicators)
   const refresh = useCallback(async () => {
@@ -92,10 +99,12 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
     try {
       await Promise.all([fetchStats(), fetchJobs(filtersRef.current)]);
     } finally {
-      setStatsLoading(false);
-      setJobsLoading(false);
+      if (isMounted()) {
+        setStatsLoading(false);
+        setJobsLoading(false);
+      }
     }
-  }, [fetchStats, fetchJobs]);
+  }, [fetchStats, fetchJobs, isMounted]);
 
   // Silent background poll (no loading spinners)
   const silentPoll = useCallback(async () => {
@@ -116,8 +125,10 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
       return;
     }
     setJobsLoading(true);
-    void fetchJobs(filters).finally(() => setJobsLoading(false));
-  }, [filters, fetchJobs]);
+    void fetchJobs(filters).finally(() => {
+      if (isMounted()) setJobsLoading(false);
+    });
+  }, [filters, fetchJobs, isMounted]);
 
   // Auto-refresh polling
   useEffect(() => {
@@ -138,9 +149,9 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
       await retryJobService(id);
       await Promise.all([fetchStats(), fetchJobs(filtersRef.current)]);
     } finally {
-      setMutating(false);
+      if (isMounted()) setMutating(false);
     }
-  }, [fetchStats, fetchJobs]);
+  }, [fetchStats, fetchJobs, isMounted]);
 
   const retryAllFailed = useCallback(async (type?: string): Promise<{ retried: number }> => {
     setMutating(true);
@@ -149,9 +160,9 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
       await Promise.all([fetchStats(), fetchJobs(filtersRef.current)]);
       return result;
     } finally {
-      setMutating(false);
+      if (isMounted()) setMutating(false);
     }
-  }, [fetchStats, fetchJobs]);
+  }, [fetchStats, fetchJobs, isMounted]);
 
   const resetStuck = useCallback(async (olderThanMinutes?: number): Promise<{ reset: number }> => {
     setMutating(true);
@@ -160,9 +171,9 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
       await Promise.all([fetchStats(), fetchJobs(filtersRef.current)]);
       return result;
     } finally {
-      setMutating(false);
+      if (isMounted()) setMutating(false);
     }
-  }, [fetchStats, fetchJobs]);
+  }, [fetchStats, fetchJobs, isMounted]);
 
   const repairThumbnails = useCallback(async (): Promise<{ jobId: string; status: string }> => {
     setMutating(true);
@@ -171,9 +182,9 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
       await Promise.all([fetchStats(), fetchJobs(filtersRef.current)]);
       return result;
     } finally {
-      setMutating(false);
+      if (isMounted()) setMutating(false);
     }
-  }, [fetchStats, fetchJobs]);
+  }, [fetchStats, fetchJobs, isMounted]);
 
   const deleteJob = useCallback(async (id: string) => {
     setMutating(true);
@@ -181,9 +192,9 @@ export function useJobs(options: UseJobsOptions = {}): UseJobsResult {
       await deleteJobService(id);
       await Promise.all([fetchStats(), fetchJobs(filtersRef.current)]);
     } finally {
-      setMutating(false);
+      if (isMounted()) setMutating(false);
     }
-  }, [fetchStats, fetchJobs]);
+  }, [fetchStats, fetchJobs, isMounted]);
 
   return {
     stats,

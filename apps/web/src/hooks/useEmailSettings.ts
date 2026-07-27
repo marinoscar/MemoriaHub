@@ -9,32 +9,36 @@ import type {
   UpdateEmailSettingsBody,
   TestEmailResult,
 } from '../services/email';
+import { useIsMounted } from './useIsMounted';
 
 export function useEmailSettings() {
   const [settings, setSettings] = useState<EmailSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await getEmailSettings();
+      if (!isMounted()) return;
       setSettings(data);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load email settings');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const saveSettings = useCallback(
     async (body: UpdateEmailSettingsBody): Promise<EmailSettings> => {
       const updated = await updateEmailSettings(body);
-      setSettings(updated);
+      if (isMounted()) setSettings(updated);
       return updated;
     },
-    [],
+    [isMounted],
   );
 
   const sendTest = useCallback(

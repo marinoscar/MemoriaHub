@@ -6,6 +6,7 @@ import {
   updateAlbum as updateAlbumApi,
   deleteAlbum as deleteAlbumApi,
 } from '../services/media';
+import { useIsMounted } from './useIsMounted';
 
 interface UseAlbumsResult {
   albums: Album[];
@@ -23,22 +24,25 @@ export function useAlbums(): UseAlbumsResult {
   const [meta, setMeta] = useState<MediaListMeta | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchAlbums = useCallback(async (params?: AlbumQueryParams) => {
     setIsLoading(true);
     setError(null);
     try {
       const response = await listAlbumsApi(params);
+      if (!isMounted()) return;
       setAlbums(response.items);
       setMeta(response.meta);
     } catch (err) {
+      if (!isMounted()) return;
       const message = err instanceof Error ? err.message : 'Failed to fetch albums';
       setError(message);
       setAlbums([]);
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const addAlbum = useCallback(
     async (dto: CreateAlbumDto) => {
@@ -49,11 +53,11 @@ export function useAlbums(): UseAlbumsResult {
         await fetchAlbums({ page: 1, pageSize: 100 });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create album';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [fetchAlbums],
+    [fetchAlbums, isMounted],
   );
 
   const updateAlbum = useCallback(
@@ -65,11 +69,11 @@ export function useAlbums(): UseAlbumsResult {
         await fetchAlbums({ page: 1, pageSize: 100 });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to update album';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [fetchAlbums],
+    [fetchAlbums, isMounted],
   );
 
   const deleteAlbum = useCallback(
@@ -81,11 +85,11 @@ export function useAlbums(): UseAlbumsResult {
         await fetchAlbums({ page: 1, pageSize: 100 });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to delete album';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [fetchAlbums],
+    [fetchAlbums, isMounted],
   );
 
   return {
