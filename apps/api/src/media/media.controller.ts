@@ -53,6 +53,7 @@ import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
 import { GeoSearchQueryDto } from './dto/geo-search-query.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
 
 @ApiTags('Media')
@@ -752,6 +753,34 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.getDashboard(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/review-counts
+   * Lightweight companion to GET /api/media/dashboard: just the four
+   * review-queue counts, for clients that only need a nav badge.
+   *
+   * Declared in the literal-route block (alongside 'dashboard') so it is never
+   * shadowed by @Get(':id').
+   */
+  @Get('review-counts')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({
+    summary: 'Get circle review-queue counts',
+    description:
+      'Returns only the pending review-queue counts for a circle (burst groups, ' +
+      'duplicate groups, location suggestions, AI enhancements awaiting a decision). ' +
+      'Same numbers the dashboard nests under `counts`, without the On This Day / ' +
+      'recent / favorites payload or any thumbnail signing.',
+  })
+  @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Review-queue counts returned' })
+  @ApiResponse({ status: 403, description: 'Access denied' })
+  async getReviewCounts(
+    @Query() query: ReviewCountsQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.getReviewCounts(query, user.id, user.permissions);
   }
 
   /**

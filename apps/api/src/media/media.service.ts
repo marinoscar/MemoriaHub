@@ -48,6 +48,7 @@ import { EmptyTrashDto } from './dto/empty-trash.dto';
 import { GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
 import { applyLocation } from './geo/apply-location.util';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 
@@ -1701,6 +1702,87 @@ export class MediaService {
     return this.forwardGeocodeService.searchPlaces(q, limit);
   }
 
+  /**
+   * Review-queue counts for a circle — the four pending* integers the dashboard
+   * exposes under `counts`, with none of its On This Day / recent / favorites
+   * payload and no thumbnail signing.
+   *
+   * Backs GET /api/media/review-counts, which exists so a client that only needs
+   * a nav badge does not have to pull the whole dashboard aggregation.
+   *
+   * The counts themselves come from computeReviewCounts(), shared verbatim with
+   * getDashboard so the two endpoints cannot drift. The circle access check
+   * lives here rather than in the shared helper so getDashboard (which runs its
+   * own) never pays for a second circle-membership lookup.
+   */
+  async getReviewCounts(query: ReviewCountsQueryDto, userId: string, perms: string[]) {
+    const { circleId } = query;
+
+    await this.circleMembershipService.assertCircleAccess(userId, circleId, perms, 'viewer' as CircleRole);
+
+    return this.computeReviewCounts(circleId);
+  }
+
+  /**
+   * Single implementation of the four review-queue counts, shared by
+   * getReviewCounts and getDashboard. Callers are responsible for the circle
+   * access check.
+   */
+  private async computeReviewCounts(circleId: string) {
+    // Load burst minGroupSize from system settings for the burst count filter
+    const burstSettings = await this.prisma.systemSettings.findUnique({
+      where: { key: 'global' },
+      select: { value: true },
+    });
+    const burstValue = (burstSettings?.value as Record<string, unknown> | null) ?? {};
+    const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
+    const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
+
+    const [
+      pendingBurstGroups,
+      pendingDuplicateGroups,
+      pendingLocationSuggestions,
+      pendingEnhancements,
+    ] = await Promise.all([
+      this.prisma.burstGroup.count({
+        where: {
+          circleId,
+          status: BurstGroupStatus.pending,
+          mediaCount: { gte: burstMinGroupSize },
+        },
+      }),
+      this.prisma.duplicateGroup.count({
+        where: {
+          circleId,
+          status: DuplicateGroupStatus.pending,
+        },
+      }),
+      this.prisma.locationSuggestion.count({
+        where: {
+          circleId,
+          status: LocationSuggestionStatus.pending,
+        },
+      }),
+      // "Pending review" for an enhancement means STAGED and awaiting a human
+      // keep-both/replace/discard decision — i.e. `ready`. The `pending` status
+      // means "queued for the model" and is not user-actionable, so it is
+      // deliberately excluded. Served by the existing @@index([circleId, status]).
+      this.prisma.mediaEnhancement.count({
+        where: {
+          circleId,
+          status: MediaEnhancementStatus.ready,
+        },
+      }),
+    ]);
+
+    return {
+      pendingBurstGroups,
+      pendingDuplicateGroups,
+      pendingLocationSuggestions,
+      pendingEnhancements,
+    };
+  }
+
   async getDashboard(query: DashboardQueryDto, userId: string, perms: string[]) {
     const { circleId } = query;
 
@@ -1732,25 +1814,13 @@ export class MediaService {
 
     const onThisDayIds = onThisDayRaw.map((r) => r.id);
 
-    // Load burst minGroupSize from system settings for the dashboard count filter
-    const burstSettings = await this.prisma.systemSettings.findUnique({
-      where: { key: 'global' },
-      select: { value: true },
-    });
-    const burstValue = (burstSettings?.value as Record<string, unknown> | null) ?? {};
-    const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
-    const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
-
     const [
       onThisDayItems,
       recentItems,
       favoriteItems,
       totalCount,
       missingGeoCount,
-      pendingBurstGroupsCount,
-      pendingDuplicateGroupsCount,
-      pendingLocationSuggestionsCount,
-      pendingEnhancementsCount,
+      reviewCounts,
     ] =
       await Promise.all([
         onThisDayIds.length > 0
@@ -1773,35 +1843,10 @@ export class MediaService {
         this.prisma.mediaItem.count({
           where: { circleId, deletedAt: null, archivedAt: null, takenLat: null },
         }),
-        this.prisma.burstGroup.count({
-          where: {
-            circleId,
-            status: BurstGroupStatus.pending,
-            mediaCount: { gte: burstMinGroupSize },
-          },
-        }),
-        this.prisma.duplicateGroup.count({
-          where: {
-            circleId,
-            status: DuplicateGroupStatus.pending,
-          },
-        }),
-        this.prisma.locationSuggestion.count({
-          where: {
-            circleId,
-            status: LocationSuggestionStatus.pending,
-          },
-        }),
-        // "Pending review" for an enhancement means STAGED and awaiting a human
-        // keep-both/replace/discard decision — i.e. `ready`. The `pending` status
-        // means "queued for the model" and is not user-actionable, so it is
-        // deliberately excluded. Served by the existing @@index([circleId, status]).
-        this.prisma.mediaEnhancement.count({
-          where: {
-            circleId,
-            status: MediaEnhancementStatus.ready,
-          },
-        }),
+        // Shared with GET /api/media/review-counts — see computeReviewCounts().
+        // Kept inside this Promise.all so the review-queue counts still run
+        // concurrently with the item queries above.
+        this.computeReviewCounts(circleId),
       ]);
 
     const [onThisDay, recent, favorites] = await Promise.all([
@@ -1822,10 +1867,7 @@ export class MediaService {
       counts: {
         total: totalCount,
         missingGeo: missingGeoCount,
-        pendingBurstGroups: pendingBurstGroupsCount,
-        pendingDuplicateGroups: pendingDuplicateGroupsCount,
-        pendingLocationSuggestions: pendingLocationSuggestionsCount,
-        pendingEnhancements: pendingEnhancementsCount,
+        ...reviewCounts,
       },
     };
   }
