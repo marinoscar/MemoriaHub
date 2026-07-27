@@ -2,6 +2,8 @@
 
 These suites are excluded from `test:ci` in each app. Each exclusion is intentional and tracked here as follow-up debt.
 
+> **Lesson (issue #202):** When `apps/web`'s 8 individually-excluded suites were finally investigated, only 3 were genuinely broken (stale mock fixtures / a pagination-shape drift) — the other 5 (`App.test.tsx`, `CircleDetailPage.test.tsx`, `Layout.test.tsx`, `JobsPage.test.tsx`, `Sidebar.test.tsx`) had already been fixed by earlier, unrelated PRs, but nobody ever lifted their exclusion, so the repo carried phantom debt and silently lost that coverage. Same two recommendations as ever: (1) a fix PR must lift its own exclusion in the same PR, never leave it for "later"; (2) entries in this file need periodic re-verification — don't trust an old "still failing" note without re-running the suite.
+
 ---
 
 ## API — Integration Suites (excluded group)
@@ -28,25 +30,6 @@ These specs are excluded individually because they contain pre-existing failures
 | `src/storage/processing/image-dimensions.processor.spec.ts` (both `src/` and `test/` copies) | `sharp` buffer behaviour changed; corrupt-buffer test always resolves `success: true` |
 
 **Fix:** Each file needs its mock/assertion updated to match the current implementation. No behaviour regressions — tests were simply never updated when the code changed.
-
----
-
-## Web — Rotted UI Suites (8 files)
-
-These specs are excluded individually. Components evolved (new props, renamed slots, restructured layouts) and the tests were not kept in sync:
-
-| File |
-|------|
-| `src/__tests__/components/common/Layout.test.tsx` |
-| `src/__tests__/pages/AiSettingsPage.test.tsx` |
-| `src/__tests__/pages/AiSettingsPageExtended.test.tsx` |
-| `src/__tests__/components/navigation/Sidebar.test.tsx` |
-| `src/__tests__/pages/JobsPage.test.tsx` |
-| `src/__tests__/App.test.tsx` |
-| `src/components/media/__tests__/MediaGallery.test.tsx` |
-| `src/__tests__/pages/CircleDetailPage.test.tsx` |
-
-**Fix:** Update each test file to match the current component tree — query selectors, roles, and prop names changed as features were added. No UI regressions; tests became orphaned from the components they cover.
 
 ---
 
@@ -80,8 +63,7 @@ Added when `apps/cli` first gained CI coverage (`cli-test` job in `ci.yml`, issu
 
 ## Priority
 
-1. **Web UI suites** — straightforward RTL query updates; no architectural change needed.
-2. **API rotted unit suites** — update mock expectations to match current service interfaces.
-3. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
-4. **CLI TUI concurrency-flaky pattern** — convert the remaining ~13 files to the poll-based `wait-for.ts` helpers, then remove the retry safety net.
-5. **API integration suites** — requires CI infrastructure work (DB service container).
+1. **API rotted unit suites** — update mock expectations to match current service interfaces.
+2. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
+3. **CLI TUI concurrency-flaky pattern** — convert the remaining ~13 files to the poll-based `wait-for.ts` helpers, then remove the retry safety net.
+4. **API integration suites** — requires CI infrastructure work (DB service container).
