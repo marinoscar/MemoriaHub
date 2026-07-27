@@ -45,6 +45,8 @@ export class BurstController {
   @ApiQuery({ name: 'status', type: String, required: false, enum: ['pending', 'resolved', 'dismissed'] })
   @ApiQuery({ name: 'page', type: Number, required: false })
   @ApiQuery({ name: 'pageSize', type: Number, required: false })
+  @ApiQuery({ name: 'sortBy', type: String, required: false, enum: ['capturedAt', 'confidence', 'mediaCount'] })
+  @ApiQuery({ name: 'sortOrder', type: String, required: false, enum: ['asc', 'desc'] })
   @ApiResponse({ status: 200, description: 'Burst groups listed' })
   async listBurstGroups(
     @Query() query: BurstQueryDto,

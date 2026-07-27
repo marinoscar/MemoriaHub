@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 
@@ -722,6 +722,103 @@ describe('DuplicatesPage', () => {
       await waitFor(() => {
         expect(screen.getByText(/dismissed 2 groups \(1 skipped\)\./i)).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('sort control (issue #189)', () => {
+    it('renders with the page default ("Captured — Oldest") selected', async () => {
+      render(<DuplicatesPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('review-sort-select')).toBeInTheDocument();
+      });
+      expect(
+        within(screen.getByTestId('review-sort-select')).getByText(/captured.*oldest/i),
+      ).toBeInTheDocument();
+    });
+
+    it('changing the sort refetches with the new sortBy/sortOrder and resets to page 1', async () => {
+      const user = userEvent.setup();
+      const fetchGroups = vi.fn().mockResolvedValue(undefined);
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({
+          items: [makeSummary('g-1')],
+          meta: { total: 100, page: 2, pageSize: 1 },
+          fetchGroups,
+        }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await user.click(await screen.findByRole('button', { name: /go to page 2/i }));
+      await waitFor(() => {
+        expect(fetchGroups).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+      });
+      fetchGroups.mockClear();
+
+      const combobox = within(screen.getByTestId('review-sort-select')).getByRole('combobox');
+      fireEvent.mouseDown(combobox);
+      await user.click(await screen.findByRole('option', { name: /similarity.*highest/i }));
+
+      await waitFor(() => {
+        expect(fetchGroups).toHaveBeenCalledWith(
+          expect.objectContaining({ page: 1, sortBy: 'confidence', sortOrder: 'desc' }),
+        );
+      });
+    });
+
+    it('changing the sort clears the current selection', async () => {
+      const user = userEvent.setup();
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<DuplicatesPage />);
+
+      const checkbox = await screen.findByRole('button', { name: 'Select duplicate group' });
+      await user.click(checkbox);
+      await waitFor(() => {
+        expect(screen.getByText('1 selected')).toBeInTheDocument();
+      });
+
+      const combobox = within(screen.getByTestId('review-sort-select')).getByRole('combobox');
+      fireEvent.mouseDown(combobox);
+      await user.click(await screen.findByRole('option', { name: /similarity.*highest/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByText('1 selected')).toBeNull();
+      });
+    });
+
+    it('seeds the control from an initial ?sortBy=confidence&sortOrder=desc URL', async () => {
+      render(<DuplicatesPage />, {
+        wrapperOptions: { route: '/duplicates?sortBy=confidence&sortOrder=desc' },
+      });
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByTestId('review-sort-select')).getByText(/similarity.*highest/i),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('falls back to the default sort and does not forward it to the API when the URL has an invalid sortBy', async () => {
+      const fetchGroups = vi.fn().mockResolvedValue(undefined);
+      mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook({ fetchGroups }));
+
+      render(<DuplicatesPage />, {
+        wrapperOptions: { route: '/duplicates?sortBy=bogus' },
+      });
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByTestId('review-sort-select')).getByText(/captured.*oldest/i),
+        ).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(fetchGroups).toHaveBeenCalled();
+      });
+      const call = fetchGroups.mock.calls[0][0];
+      expect(call).not.toHaveProperty('sortBy');
+      expect(call).not.toHaveProperty('sortOrder');
     });
   });
 });

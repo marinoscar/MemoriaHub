@@ -29,6 +29,13 @@ vi.mock('../../services/duplicates', () => ({
   getDuplicateGroup: vi.fn(),
   resolveDuplicateGroup: vi.fn(),
   dismissDuplicateGroup: vi.fn(),
+  // Needed by useDuplicateGroups' bulkResolve/bulkResolveByThreshold/
+  // dismissByThreshold, which call these directly before replaying the last
+  // fetchGroups() params (see the "replays the last fetch params" tests below).
+  bulkResolveDuplicateGroups: vi.fn(),
+  bulkResolveDuplicateGroupsByThreshold: vi.fn(),
+  bulkDismissDuplicateGroupsByThreshold: vi.fn(),
+  fetchAllPendingDuplicateGroupIds: vi.fn(),
 }));
 
 import {
@@ -36,6 +43,9 @@ import {
   getDuplicateGroup,
   resolveDuplicateGroup,
   dismissDuplicateGroup,
+  bulkResolveDuplicateGroups,
+  bulkResolveDuplicateGroupsByThreshold,
+  bulkDismissDuplicateGroupsByThreshold,
 } from '../../services/duplicates';
 import type {
   DuplicateGroupSummary,
@@ -47,6 +57,9 @@ const mockListDuplicateGroups = vi.mocked(listDuplicateGroups);
 const mockGetDuplicateGroup = vi.mocked(getDuplicateGroup);
 const mockResolveDuplicateGroup = vi.mocked(resolveDuplicateGroup);
 const mockDismissDuplicateGroup = vi.mocked(dismissDuplicateGroup);
+const mockBulkResolveDuplicateGroups = vi.mocked(bulkResolveDuplicateGroups);
+const mockBulkResolveDuplicateGroupsByThreshold = vi.mocked(bulkResolveDuplicateGroupsByThreshold);
+const mockBulkDismissDuplicateGroupsByThreshold = vi.mocked(bulkDismissDuplicateGroupsByThreshold);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -238,6 +251,151 @@ describe('useDuplicateGroups', () => {
       });
 
       expect(result.current.items).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Bulk operations replay the last fetch params, including sort (issue #189)
+  // -------------------------------------------------------------------------
+
+  describe('bulk operations replay the last fetchGroups params, including sort', () => {
+    it('bulkResolve refetches with the sortBy/sortOrder from the last fetchGroups call', async () => {
+      mockListDuplicateGroups.mockResolvedValue(makeListResponse());
+      mockBulkResolveDuplicateGroups.mockResolvedValue({
+        resolvedGroups: 1,
+        keptCount: 1,
+        removedCount: 1,
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+      });
+
+      const { result } = renderHook(() => useDuplicateGroups());
+
+      await act(async () => {
+        await result.current.fetchGroups({
+          circleId: 'circle-1',
+          sortBy: 'confidence',
+          sortOrder: 'desc',
+        });
+      });
+      mockListDuplicateGroups.mockClear();
+
+      await act(async () => {
+        await result.current.bulkResolve(['group-1'], 'archive');
+      });
+
+      expect(mockBulkResolveDuplicateGroups).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        ids: ['group-1'],
+        action: 'archive',
+      });
+      // The refresh after resolving must carry the same sort the user had
+      // selected, not silently reset to the server default.
+      expect(mockListDuplicateGroups).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        sortBy: 'confidence',
+        sortOrder: 'desc',
+      });
+    });
+
+    it('bulkResolveByThreshold refetches with the sortBy/sortOrder from the last fetchGroups call', async () => {
+      mockListDuplicateGroups.mockResolvedValue(makeListResponse());
+      mockBulkResolveDuplicateGroupsByThreshold.mockResolvedValue({
+        resolvedGroups: 1,
+        keptCount: 1,
+        removedCount: 1,
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+        hasMore: false,
+      });
+
+      const { result } = renderHook(() => useDuplicateGroups());
+
+      await act(async () => {
+        await result.current.fetchGroups({
+          circleId: 'circle-1',
+          sortBy: 'mediaCount',
+          sortOrder: 'asc',
+        });
+      });
+      mockListDuplicateGroups.mockClear();
+
+      await act(async () => {
+        await result.current.bulkResolveByThreshold(60, 'archive');
+      });
+
+      expect(mockBulkResolveDuplicateGroupsByThreshold).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        threshold: 60,
+        action: 'archive',
+      });
+      expect(mockListDuplicateGroups).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        sortBy: 'mediaCount',
+        sortOrder: 'asc',
+      });
+    });
+
+    it('dismissByThreshold refetches with the sortBy/sortOrder from the last fetchGroups call', async () => {
+      mockListDuplicateGroups.mockResolvedValue(makeListResponse());
+      mockBulkDismissDuplicateGroupsByThreshold.mockResolvedValue({
+        dismissedGroups: 1,
+        ungroupedCount: 2,
+        skipped: 0,
+        errors: 0,
+      });
+
+      const { result } = renderHook(() => useDuplicateGroups());
+
+      await act(async () => {
+        await result.current.fetchGroups({
+          circleId: 'circle-1',
+          sortBy: 'confidence',
+          sortOrder: 'asc',
+        });
+      });
+      mockListDuplicateGroups.mockClear();
+
+      await act(async () => {
+        await result.current.dismissByThreshold(40);
+      });
+
+      expect(mockBulkDismissDuplicateGroupsByThreshold).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        threshold: 40,
+      });
+      expect(mockListDuplicateGroups).toHaveBeenCalledWith({
+        circleId: 'circle-1',
+        sortBy: 'confidence',
+        sortOrder: 'asc',
+      });
+    });
+
+    it('refetches WITHOUT sortBy/sortOrder when the last fetchGroups call had no sort override (default view)', async () => {
+      mockListDuplicateGroups.mockResolvedValue(makeListResponse());
+      mockBulkResolveDuplicateGroups.mockResolvedValue({
+        resolvedGroups: 1,
+        keptCount: 1,
+        removedCount: 1,
+        action: 'archive',
+        skipped: 0,
+        errors: 0,
+      });
+
+      const { result } = renderHook(() => useDuplicateGroups());
+
+      await act(async () => {
+        await result.current.fetchGroups({ circleId: 'circle-1' });
+      });
+      mockListDuplicateGroups.mockClear();
+
+      await act(async () => {
+        await result.current.bulkResolve(['group-1'], 'archive');
+      });
+
+      expect(mockListDuplicateGroups).toHaveBeenCalledWith({ circleId: 'circle-1' });
     });
   });
 });

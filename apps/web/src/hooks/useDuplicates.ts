@@ -9,9 +9,11 @@ import {
   fetchAllPendingDuplicateGroupIds,
   dismissDuplicateGroup,
 } from '../services/duplicates';
+import type { SortOrder } from '../types/media';
 import type {
   DuplicateGroupStatus,
   DuplicateGroupKind,
+  DuplicateSortBy,
   DuplicateGroupSummary,
   DuplicateGroupDetail,
   DuplicateListMeta,
@@ -22,11 +24,13 @@ import type {
 } from '../services/duplicates';
 import type { GroupBulkResolveResult, GroupBulkDismissResult } from '../services/bursts';
 
-interface FetchDuplicateGroupsParams {
+export interface FetchDuplicateGroupsParams {
   circleId: string;
   status?: DuplicateGroupStatus;
   kind?: DuplicateGroupKind;
   page?: number;
+  sortBy?: DuplicateSortBy;
+  sortOrder?: SortOrder;
 }
 
 interface UseDuplicateGroupsResult {

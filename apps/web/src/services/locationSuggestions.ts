@@ -1,7 +1,14 @@
 import { api } from './api';
+import type { SortOrder } from '../types/media';
 
 export type LocationSuggestionStatus = 'pending' | 'accepted' | 'rejected' | 'auto_applied' | 'reverted';
 export type LocationSuggestionMethod = 'interpolated' | 'nearest';
+
+/**
+ * Sortable columns accepted by `GET /media/location-suggestions`
+ * (server default: `createdAt`).
+ */
+export type LocationSuggestionSortBy = 'createdAt' | 'confidence';
 
 export interface LocationSuggestionSummary {
   id: string;
@@ -58,12 +65,16 @@ export async function listLocationSuggestions(params: {
   status?: LocationSuggestionStatus;
   page?: number;
   pageSize?: number;
+  sortBy?: LocationSuggestionSortBy;
+  sortOrder?: SortOrder;
 }): Promise<LocationSuggestionListResponse> {
   const p = new URLSearchParams({ circleId: params.circleId });
   if (params.mediaItemId) p.set('mediaItemId', params.mediaItemId);
   if (params.status) p.set('status', params.status);
   if (params.page) p.set('page', String(params.page));
   if (params.pageSize) p.set('pageSize', String(params.pageSize));
+  if (params.sortBy) p.set('sortBy', params.sortBy);
+  if (params.sortOrder) p.set('sortOrder', params.sortOrder);
   const result = await api.get<LocationSuggestionListResponse>(`/media/location-suggestions?${p.toString()}`);
   return { items: result.items ?? [], meta: result.meta };
 }

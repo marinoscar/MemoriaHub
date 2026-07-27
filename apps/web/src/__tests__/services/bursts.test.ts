@@ -20,6 +20,7 @@ import { server } from '../mocks/server';
 import {
   bulkResolveBurstGroups,
   fetchAllPendingBurstGroupIds,
+  listBurstGroups,
   BULK_RESOLVE_CHUNK_SIZE,
   type BurstGroupSummary,
 } from '../../services/bursts';
@@ -112,6 +113,61 @@ describe('bulkResolveBurstGroups', () => {
 
     expect(calls).toBe(1);
     expect(result.resolvedGroups).toBe(5);
+  });
+});
+
+describe('listBurstGroups — sortBy/sortOrder (issue #189)', () => {
+  it('omits sortBy and sortOrder from the URL when neither is provided (byte-identical to before)', async () => {
+    let seenSearch = '';
+    server.use(
+      http.get('*/api/media/bursts', ({ request }) => {
+        seenSearch = new URL(request.url).search;
+        return HttpResponse.json({ items: [], meta: { total: 0, page: 1, pageSize: 20 } });
+      }),
+    );
+
+    await listBurstGroups({ circleId: 'circle-1', status: 'pending', page: 1, pageSize: 20 });
+
+    expect(seenSearch).not.toContain('sortBy');
+    expect(seenSearch).not.toContain('sortOrder');
+  });
+
+  it('includes sortBy and sortOrder in the URL when provided', async () => {
+    let seenSearch = '';
+    server.use(
+      http.get('*/api/media/bursts', ({ request }) => {
+        seenSearch = new URL(request.url).search;
+        return HttpResponse.json({ items: [], meta: { total: 0, page: 1, pageSize: 20 } });
+      }),
+    );
+
+    await listBurstGroups({ circleId: 'circle-1', sortBy: 'confidence', sortOrder: 'desc' });
+
+    expect(seenSearch).toContain('sortBy=confidence');
+    expect(seenSearch).toContain('sortOrder=desc');
+  });
+});
+
+describe('fetchAllPendingBurstGroupIds — no sort params', () => {
+  it('never sends sortBy/sortOrder on any page request', async () => {
+    const seenSearches: string[] = [];
+    server.use(
+      http.get('*/api/media/bursts', ({ request }) => {
+        seenSearches.push(new URL(request.url).search);
+        return HttpResponse.json({
+          items: [makeSummary('a')],
+          meta: { total: 1, page: 1, pageSize: 100 },
+        });
+      }),
+    );
+
+    await fetchAllPendingBurstGroupIds('circle-1');
+
+    expect(seenSearches.length).toBeGreaterThan(0);
+    for (const search of seenSearches) {
+      expect(search).not.toContain('sortBy');
+      expect(search).not.toContain('sortOrder');
+    }
   });
 });
 

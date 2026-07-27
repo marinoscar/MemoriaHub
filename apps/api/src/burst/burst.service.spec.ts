@@ -340,6 +340,110 @@ describe('BurstService', () => {
       expect(result.items).toHaveLength(0);
       expect(result.meta.total).toBe(0);
     });
+
+    // -----------------------------------------------------------------------
+    // sortBy / sortOrder (issue #189)
+    // -----------------------------------------------------------------------
+
+    describe('sortBy / sortOrder', () => {
+      it('DEFAULT GUARD: with sortBy/sortOrder omitted, orderBy reproduces today\'s ordering exactly', async () => {
+        (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listBurstGroups(makeQueryDto(), USER_ID, PERMS_MEDIA_READ);
+
+        const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([
+          { capturedAt: { sort: 'asc', nulls: 'last' } },
+          { id: 'asc' },
+        ]);
+      });
+
+      it('sortBy=confidence, sortOrder=asc -> confidence first with nulls:last', async () => {
+        (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listBurstGroups(
+          makeQueryDto({ sortBy: 'confidence', sortOrder: 'asc' }),
+          USER_ID,
+          PERMS_MEDIA_READ,
+        );
+
+        const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([
+          { confidence: { sort: 'asc', nulls: 'last' } },
+          { capturedAt: { sort: 'asc', nulls: 'last' } },
+          { id: 'asc' },
+        ]);
+      });
+
+      it('sortBy=confidence, sortOrder=desc -> confidence first, STILL nulls:last (not nulls:first)', async () => {
+        (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listBurstGroups(
+          makeQueryDto({ sortBy: 'confidence', sortOrder: 'desc' }),
+          USER_ID,
+          PERMS_MEDIA_READ,
+        );
+
+        const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([
+          { confidence: { sort: 'desc', nulls: 'last' } },
+          { capturedAt: { sort: 'asc', nulls: 'last' } },
+          { id: 'asc' },
+        ]);
+      });
+
+      it('sortBy=mediaCount -> plain direction, no nulls key (mediaCount is non-null)', async () => {
+        (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listBurstGroups(
+          makeQueryDto({ sortBy: 'mediaCount', sortOrder: 'desc' }),
+          USER_ID,
+          PERMS_MEDIA_READ,
+        );
+
+        const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([
+          { mediaCount: 'desc' },
+          { capturedAt: { sort: 'asc', nulls: 'last' } },
+          { id: 'asc' },
+        ]);
+      });
+
+      it('sortBy=mediaCount, sortOrder=asc -> plain asc direction', async () => {
+        (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listBurstGroups(
+          makeQueryDto({ sortBy: 'mediaCount', sortOrder: 'asc' }),
+          USER_ID,
+          PERMS_MEDIA_READ,
+        );
+
+        const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy[0]).toEqual({ mediaCount: 'asc' });
+      });
+
+      it('sortBy=capturedAt, sortOrder=desc -> still nulls:last, and the id tiebreak also flips to desc', async () => {
+        (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(0);
+
+        await service.listBurstGroups(
+          makeQueryDto({ sortBy: 'capturedAt', sortOrder: 'desc' }),
+          USER_ID,
+          PERMS_MEDIA_READ,
+        );
+
+        const findManyCall = (mockPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([
+          { capturedAt: { sort: 'desc', nulls: 'last' } },
+          { id: 'desc' },
+        ]);
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
