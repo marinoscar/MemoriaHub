@@ -216,9 +216,11 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Photos, Explore, Map, Circles, Albums, People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash, User Settings
+      // Non-admin: Photos, Explore, Map, Circles, Albums, People, Archive, Trash,
+      //   Review Bursts, Review Duplicates, Review Insights, Location Suggestions,
+      //   User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(12);
+      expect(menuButtons).toHaveLength(13);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -241,12 +243,13 @@ describe('Sidebar', () => {
       // to a single "Settings" hub entry (plus permission-gated items when hasPermission
       // is unconfigured/false, as in this test).
       // Admin layout: Photos, Explore, Map, Circles, Albums,
-      //               People, Review Bursts, Review Duplicates, Location Suggestions,
-      //               Archive, Trash,
+      //               People, Archive, Trash,
+      //               Review Bursts, Review Duplicates, Review Insights,
+      //               Location Suggestions,
       //               Settings (admin hub),
       //               User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(13);
+      expect(menuButtons).toHaveLength(14);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -582,9 +585,10 @@ describe('Sidebar', () => {
       expect(container.textContent).toContain('Storage Insights');
       expect(container.textContent).toContain('Public Sharing');
 
-      // Settings(0) hub + 3 gated items + User Settings pinned at bottom
+      // 13 non-admin entries + Settings hub + 4 permission-gated admin entries
+      // (jobs:read gates BOTH "Job Queue" and "Worker Nodes") = 18.
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(buttons).toHaveLength(16);
+      expect(buttons).toHaveLength(18);
     });
   });
 
@@ -726,11 +730,11 @@ describe('Sidebar', () => {
       });
 
       // After the settings refactor, admin sees: Photos, Explore, Map, Circles, Albums,
-      //   People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash,
-      //   Settings (admin hub), User Settings — 13 total
+      //   People, Archive, Trash, Review Bursts, Review Duplicates, Review Insights,
+      //   Location Suggestions, Settings (admin hub), User Settings — 14 total
       // (hasPermission is unconfigured/false here, so no extra gated items render).
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(13);
+      expect(icons).toHaveLength(14);
     });
 
     it('should highlight icon for selected menu item', () => {
