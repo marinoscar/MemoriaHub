@@ -9,7 +9,14 @@ module.exports = {
   // The shared parity package resolves through a workspace symlink to a real
   // path OUTSIDE node_modules, so the default /node_modules/ ignore pattern
   // misses it. Its dist output is plain prebuilt CommonJS - never transform it.
-  transformIgnorePatterns: ['/node_modules/', '/packages/enrichment-compute/dist/'],
+  // cookie@2 is exception to the node_modules rule: it ships ESM-only
+  // ("type": "module", bare `export` statements, no CJS entry point), so every
+  // suite that boots a real Nest/Fastify app - i.e. all of test/**/*.integration
+  // .spec.ts - died at module load with "Unexpected token 'export'" before
+  // reaching a single assertion. Transforming it makes those suites loadable.
+  // They still need a Postgres instance to actually pass, which is why they
+  // remain excluded from test:ci (see docs/ci-known-failing-tests.md).
+  transformIgnorePatterns: ['/node_modules/(?!cookie/)', '/packages/enrichment-compute/dist/'],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.module.ts',

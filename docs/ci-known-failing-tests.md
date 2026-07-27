@@ -2,6 +2,8 @@
 
 These suites are excluded from `test:ci` in each app. Each exclusion is intentional and tracked here as follow-up debt.
 
+> **Lesson (issue #193):** Auditing the API's rotted-suite exclusions found that 2 of the 4 were stale — the underlying tests had already been fixed or were never actually broken, but nobody removed the CI exclusion, so the repo carried phantom debt and silently lost that test coverage for no reason. Going forward: (a) whoever fixes a rotted suite must remove its exclusion in the SAME PR that fixes it, and (b) entries in this doc should be periodically re-verified rather than trusted indefinitely, since an exclusion can go stale silently.
+
 ---
 
 ## API — Integration Suites (excluded group)
@@ -13,21 +15,6 @@ All files matching `*.integration.spec.ts` under `apps/api/src/` and `apps/api/t
 **Root cause:** Integration specs require a live PostgreSQL database (via `createTestApp` helper). The helper attempts to connect on startup, causing each suite to time out after 30 s in CI where no DB is provisioned. Fixing this requires either a PostgreSQL service container in the CI workflow or a dedicated test-DB setup step.
 
 **Fix:** Add a `postgres` service to the GitHub Actions job and set `DATABASE_URL` / individual `POSTGRES_*` env vars before running integration tests. Once wired, re-enable via a separate `test:integration` step.
-
----
-
-## API — Rotted Unit Suites (4 files)
-
-These specs are excluded individually because they contain pre-existing failures unrelated to recent work:
-
-| File | Reason |
-|------|--------|
-| `src/face/face-detection.controller.spec.ts` | Controller interface changed; mock expectations stale |
-| `src/settings/system-settings/system-settings.service.spec.ts` | System-settings schema evolved; Zod validation assertions out of date |
-| `src/search/agent/search-agent.service.spec.ts` | Agent service refactored (SSE/streaming); test doubles not updated |
-| `src/storage/processing/image-dimensions.processor.spec.ts` (both `src/` and `test/` copies) | `sharp` buffer behaviour changed; corrupt-buffer test always resolves `success: true` |
-
-**Fix:** Each file needs its mock/assertion updated to match the current implementation. No behaviour regressions — tests were simply never updated when the code changed.
 
 ---
 
@@ -81,7 +68,6 @@ Added when `apps/cli` first gained CI coverage (`cli-test` job in `ci.yml`, issu
 ## Priority
 
 1. **Web UI suites** — straightforward RTL query updates; no architectural change needed.
-2. **API rotted unit suites** — update mock expectations to match current service interfaces.
-3. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
-4. **CLI TUI concurrency-flaky pattern** — convert the remaining ~13 files to the poll-based `wait-for.ts` helpers, then remove the retry safety net.
-5. **API integration suites** — requires CI infrastructure work (DB service container).
+2. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
+3. **CLI TUI concurrency-flaky pattern** — convert the remaining ~13 files to the poll-based `wait-for.ts` helpers, then remove the retry safety net.
+4. **API integration suites** — requires CI infrastructure work (DB service container).

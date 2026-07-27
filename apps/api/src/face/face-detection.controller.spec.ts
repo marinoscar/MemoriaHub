@@ -15,6 +15,8 @@ import { FaceDetectionController } from './face-detection.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { PeopleService } from './people.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { JobReason, JobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
@@ -29,6 +31,15 @@ const mockCircleMembershipService = {
 
 const mockEnrichmentJobService = {
   enqueue: jest.fn(),
+};
+
+const mockPeopleService = {
+  addPersonToMedia: jest.fn(),
+  removePersonFromMedia: jest.fn(),
+};
+
+const mockMediaThumbnailService = {
+  signThumb: jest.fn(),
 };
 
 // ---------------------------------------------------------------------------
@@ -82,12 +93,17 @@ describe('FaceDetectionController', () => {
       status: JobStatus.pending,
     });
 
+    // Default: no representative frame thumbnail (not exercised by existing fixtures)
+    mockMediaThumbnailService.signThumb.mockResolvedValue(null);
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [FaceDetectionController],
       providers: [
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: PeopleService, useValue: mockPeopleService },
+        { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
       ],
     })
       .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
