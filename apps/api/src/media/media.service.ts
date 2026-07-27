@@ -1803,13 +1803,18 @@ export class MediaService {
       onThisDay,
       recent,
       favorites,
+      // The pending* review-queue counts live INSIDE `counts` because that is the
+      // client contract: the web app types them under `counts` and reads
+      // `data.counts.pendingBurstGroups` (see apps/web/src/types/media.ts and
+      // HomePage.tsx). Emitting them at the top level left every Home
+      // review-queue banner permanently hidden.
       counts: {
         total: totalCount,
         missingGeo: missingGeoCount,
+        pendingBurstGroups: pendingBurstGroupsCount,
+        pendingDuplicateGroups: pendingDuplicateGroupsCount,
+        pendingLocationSuggestions: pendingLocationSuggestionsCount,
       },
-      pendingBurstGroups: pendingBurstGroupsCount,
-      pendingDuplicateGroups: pendingDuplicateGroupsCount,
-      pendingLocationSuggestions: pendingLocationSuggestionsCount,
     };
   }
 
