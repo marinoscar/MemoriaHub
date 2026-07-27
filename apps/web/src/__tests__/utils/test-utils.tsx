@@ -1,5 +1,5 @@
 import { ReactElement, ReactNode } from 'react';
-import { render, RenderOptions, RenderResult } from '@testing-library/react';
+import { act, render, RenderOptions, RenderResult } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { CssBaseline } from '@mui/material';
 import { vi } from 'vitest';
@@ -185,6 +185,37 @@ export function renderWithProviders(
   return render(ui, {
     wrapper: createWrapper(wrapperOptions),
     ...renderOptions,
+  });
+}
+
+/**
+ * Flushes queued promise continuations (e.g. mocked service calls resolved
+ * via `vi.fn().mockResolvedValue(...)`) before the caller unmounts, or before
+ * Vitest's automatic `afterEach(cleanup)` (registered in `src/__tests__/setup.ts`)
+ * tears down the rendered tree.
+ *
+ * Several component specs (the MediaDetailDrawer family in particular) render
+ * a component whose hooks kick off fetches on mount and never await them
+ * before the test body returns. If a fetch's `.then`/`finally` continuation
+ * is still queued when the test FILE finishes, it fires later — potentially
+ * during an unrelated, later test file sharing the same Vitest worker, after
+ * that file's jsdom `window` has already been torn down. That's the exact
+ * mechanism behind issue #196 (a stray continuation touching a torn-down
+ * `window` inside `dispatchSetState`). The hook-level fix (`useIsMounted`)
+ * stops that continuation from crashing, but the continuation itself would
+ * still be dangling into the next file without this.
+ *
+ * Call this from a local `afterEach` in specs that render such components —
+ * local `afterEach` hooks run before global ones registered via `setupFiles`
+ * (Vitest/Jest run `afterEach` in LIFO order), so this settles pending work
+ * while the component is still mounted, before the global `cleanup()` runs.
+ */
+export async function flushPendingAsyncWork(): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
