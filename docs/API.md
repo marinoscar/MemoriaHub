@@ -1669,6 +1669,46 @@ All items include a freshly signed `thumbnailUrl`.
 
 ---
 
+#### GET /api/media/review-counts
+
+**Requires:** `media:read` permission + `viewer` role in the target circle
+
+Lightweight companion to `GET /api/media/dashboard` above (issue #204). Returns ONLY the four review-queue counts — no On This Day / recent / favorites payload, and no thumbnail signing. Added because the web sidebar's "AI Enhancements" badge needs exactly one integer, but was calling the full dashboard endpoint to get it; since React hooks can't be called conditionally, that request fired on every circle switch even when `features.pictureEnhancement` was off and the badge wasn't rendered at all. Both endpoints share one implementation, `MediaService.computeReviewCounts`, so the counts can never drift between them.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `circleId` | UUID | Yes | Circle to aggregate (caller must be a viewer or higher) |
+
+**Response:**
+
+```json
+{
+  "data": {
+    "pendingBurstGroups": 0,
+    "pendingDuplicateGroups": 0,
+    "pendingLocationSuggestions": 0,
+    "pendingEnhancements": 0
+  }
+}
+```
+
+**Response fields:**
+
+| Field | Description |
+|-------|-------------|
+| `data.pendingBurstGroups` | Same definition as `GET /api/media/dashboard`'s `pendingBurstGroups` |
+| `data.pendingDuplicateGroups` | Same definition as `GET /api/media/dashboard`'s `pendingDuplicateGroups` |
+| `data.pendingLocationSuggestions` | Same definition as `GET /api/media/dashboard`'s `pendingLocationSuggestions` |
+| `data.pendingEnhancements` | Same definition as `GET /api/media/dashboard`'s `pendingEnhancements` (counts only `ready`-status enhancements) |
+
+**Error Cases:**
+- 403 Forbidden — caller is not a member of the circle
+- 404 Not Found — circle does not exist
+
+---
+
 #### GET /api/media/explore/places
 
 **Requires:** `media:read` permission + `viewer` role in the target circle
