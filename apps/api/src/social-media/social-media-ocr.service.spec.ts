@@ -29,6 +29,11 @@ jest.mock('tesseract.js', () => ({
   createWorker: (...args: unknown[]) => mockCreateWorker(...args),
 }));
 
+// Captured before any test calls jest.useFakeTimers() so it always resolves to
+// the genuine, non-faked setTimeout implementation regardless of which timer
+// mode is currently active in a given test.
+const realSetTimeout = setTimeout;
+
 /** Fake already-materialized video path — VideoFrameExtractionService is mocked via DI. */
 const FAKE_VIDEO_PATH = '/tmp/fake-video-input.mp4';
 
@@ -183,6 +188,12 @@ describe('SocialMediaOcrService', () => {
   // recognizeVideo — timeout returns partial texts
   // -------------------------------------------------------------------------
   describe('recognizeVideo — soft timeout returns partial results', () => {
+    afterEach(() => {
+      // Runs even if an assertion above throws, so fake timers never leak
+      // into sibling tests/files.
+      jest.useRealTimers();
+    });
+
     it('returns collected text from completed frames and stops waiting on the budget elapsing', async () => {
       const recognize = jest
         .fn()
@@ -191,7 +202,10 @@ describe('SocialMediaOcrService', () => {
           async () =>
             ({ data: makeFakePage([{ text: 'PARTIAL1', confidence: 90 }]) }) as any,
         )
-        // Second frame hangs well beyond the timeout budget.
+        // Second frame hangs well beyond the timeout budget. Under fake
+        // timers this setTimeout is also frozen, so this mock can never
+        // resolve on its own — a second guarantee (on top of the service's
+        // own `cancelled` flag) that 'TOO_LATE' can never leak in.
         .mockImplementationOnce(
           () =>
             new Promise((resolve) =>
@@ -208,17 +222,42 @@ describe('SocialMediaOcrService', () => {
         { timestampMs: 100, buffer: Buffer.from('frame1') },
       ]);
 
-      const result = await service.recognizeVideo(FAKE_VIDEO_PATH, {
+      jest.useFakeTimers();
+
+      // Don't await yet — the service's internal soft-timeout setTimeout is
+      // now frozen and cannot fire until we explicitly advance the fake
+      // clock below, so however long the real (unmocked) fs.mkdir + sharp
+      // preprocessing work underneath actually takes, there is no race.
+      const resultPromise = service.recognizeVideo(FAKE_VIDEO_PATH, {
         durationMs: 5000,
         maxFrames: 4,
         languages: ['eng'],
         timeoutMs: 40,
       });
 
+      // Flush the real, non-fake-timer async work (fs.mkdir, createWorker
+      // resolution, extractFramesAt resolution, the sharp preprocessing
+      // attempt/catch on frame 1, and frame 1's mocked recognize() call)
+      // via real ticks, using the genuine setTimeout captured before fake
+      // timers were installed. Polling on an event-driven condition (both
+      // recognize() calls having started) rather than a guessed iteration
+      // count keeps this safe to be generous without reintroducing flakiness,
+      // since the fake soft-timeout cannot fire spontaneously in the meantime.
+      for (let i = 0; i < 50 && recognize.mock.calls.length < 2; i++) {
+        await new Promise<void>((resolve) => realSetTimeout(resolve, 1));
+      }
+      expect(recognize.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+      // Deterministically fire the service's internal soft timeout: past the
+      // 40ms budget, well short of frame 2's 300ms mock delay.
+      await jest.advanceTimersByTimeAsync(40);
+
+      const result = await resultPromise;
+
       expect(result.available).toBe(true);
       expect(result.texts).toEqual(['PARTIAL1']);
       expect(result.texts).not.toContain('TOO_LATE');
-    }, 10000);
+    });
   });
 
   // -------------------------------------------------------------------------
