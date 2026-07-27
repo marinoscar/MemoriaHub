@@ -390,11 +390,13 @@ describe('DuplicateService', () => {
         ]);
       });
 
-      it('sortBy=mediaCount -> pushed into the Prisma orderBy; the JS confidence reorder does NOT run', async () => {
+      it('sortBy=mediaCount -> pushed into the Prisma orderBy (mediaCount, not confidence)', async () => {
         const groups = [makeGroupRow({ id: 'g-1' }), makeGroupRow({ id: 'g-2' })];
         (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue(groups);
-        // Arbitrary, unsorted sim values -- if the confidence JS-reorder ran, it
-        // would reshuffle these; asserting DB order is preserved proves it didn't.
+        // Arbitrary, unsorted sim values -- the response never re-sorts by
+        // confidence for this sortBy; DB order is preserved (see the next
+        // test), and the assertion below confirms orderBy is keyed on
+        // mediaCount, not confidence.
         (mockPrisma.$queryRaw as jest.Mock)
           .mockResolvedValueOnce([{ sim: 0.1 }])
           .mockResolvedValueOnce([{ sim: 0.9 }]);
@@ -413,9 +415,10 @@ describe('DuplicateService', () => {
         ]);
       });
 
-      it('sortBy=capturedAt/mediaCount never triggers the JS confidence reorder: items stay in DB (findMany) order', async () => {
-        // Group order here is deliberately NOT confidence-sorted -- if the JS
-        // reorder ran unconditionally, this order would change.
+      it('sortBy=mediaCount: items stay in DB (findMany) order -- the response never reorders by computed confidence', async () => {
+        // Group order here is deliberately NOT confidence-sorted -- since the
+        // service trusts whatever order the DB (mocked findMany) returned,
+        // this order must survive unchanged.
         const groups = [makeGroupRow({ id: 'g-low-conf' }), makeGroupRow({ id: 'g-high-conf' })];
         (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue(groups);
         (mockPrisma.$queryRaw as jest.Mock)
@@ -431,7 +434,12 @@ describe('DuplicateService', () => {
         expect(result.items.map((i) => i.id)).toEqual(['g-low-conf', 'g-high-conf']);
       });
 
-      it('rawConfidence never appears on any returned item', async () => {
+      it('does not leak an internal-only computation field (e.g. a former "rawConfidence") onto any returned item', async () => {
+        // `rawConfidence` was the pre-#194 field that fed the now-deleted
+        // in-memory confidence sort; it no longer exists anywhere in the
+        // implementation. Kept as a general regression guard against a future
+        // internal-only helper field (for sorting, scoring, or anything else)
+        // accidentally riding along on the response item.
         const groups = [makeGroupRow({ id: 'g-1' })];
         (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue(groups);
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([{ sim: 0.5 }]);
@@ -447,11 +455,47 @@ describe('DuplicateService', () => {
         }
       });
 
-      describe('sortBy=confidence (computed at read time, sorted in JS)', () => {
-        it('sorts descending by the computed maxSim, with a null-confidence group last', async () => {
-          // DB/raw order deliberately scrambled relative to the expected
-          // confidence order, to prove the sort — not incidental DB order —
-          // determines the result.
+      describe('sortBy=confidence (ordered at the SQL level)', () => {
+        it('sortBy=confidence, sortOrder=asc -> confidence first with nulls:last', async () => {
+          (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([]);
+
+          await service.listDuplicateGroups(
+            makeQueryDto({ sortBy: 'confidence', sortOrder: 'asc' }),
+            USER_ID,
+            PERMS_MEDIA_READ,
+          );
+
+          const findManyCall = (mockPrisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0];
+          expect(findManyCall.orderBy).toEqual([
+            { confidence: { sort: 'asc', nulls: 'last' } },
+            { capturedAt: { sort: 'asc', nulls: 'last' } },
+            { id: 'asc' },
+          ]);
+        });
+
+        it('sortBy=confidence, sortOrder=desc -> confidence first, STILL nulls:last (not nulls:first)', async () => {
+          (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([]);
+
+          await service.listDuplicateGroups(
+            makeQueryDto({ sortBy: 'confidence', sortOrder: 'desc' }),
+            USER_ID,
+            PERMS_MEDIA_READ,
+          );
+
+          const findManyCall = (mockPrisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0];
+          expect(findManyCall.orderBy).toEqual([
+            { confidence: { sort: 'desc', nulls: 'last' } },
+            { capturedAt: { sort: 'asc', nulls: 'last' } },
+            { id: 'asc' },
+          ]);
+        });
+
+        it('does not reorder in application code: items come back in exactly the findMany (DB) order', async () => {
+          // The DB is now the sole source of ordering (see the orderBy
+          // assertions above) — the service must trust it verbatim. Return
+          // groups in an order that does NOT match their computed confidence,
+          // to prove nothing downstream (kind computation, best-copy scoring)
+          // reshuffles them.
           const groupC = makeGroupRow({ id: 'group-c' }); // null maxSim (no embedding rows)
           const groupA = makeGroupRow({ id: 'group-a' }); // maxSim 0.9
           const groupB = makeGroupRow({ id: 'group-b' }); // maxSim 0.3
@@ -469,45 +513,26 @@ describe('DuplicateService', () => {
             PERMS_MEDIA_READ,
           );
 
-          expect(result.items.map((i) => i.id)).toEqual(['group-a', 'group-b', 'group-c']);
-          expect(result.items.map((i) => i.confidence)).toEqual([0.9, 0.3, 0]);
+          expect(result.items.map((i) => i.id)).toEqual(['group-c', 'group-a', 'group-b']);
+          expect(result.items.map((i) => i.confidence)).toEqual([0, 0.9, 0.3]);
         });
 
-        it('sorts ascending by the computed maxSim, with a null-confidence group STILL last', async () => {
-          const groupC = makeGroupRow({ id: 'group-c' });
-          const groupA = makeGroupRow({ id: 'group-a' });
-          const groupB = makeGroupRow({ id: 'group-b' });
-          (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([groupC, groupA, groupB]);
+        it('PAGINATION SLICES DB ORDER: page 2 of pageSize 1 returns the second item in findMany order', async () => {
+          // In production the DB's ORDER BY already yields confidence order, so
+          // this is really a generic "pagination slices whatever findMany
+          // returned, without re-deriving order from a second source" guard —
+          // the group in position 2 of the mock (already confidence-ordered
+          // here, matching what the real ORDER BY would produce) is what page 2
+          // must return, regardless of each group's later-computed `kind`/
+          // best-copy fields.
+          const groupA = makeGroupRow({ id: 'group-a' }); // highest confidence
+          const groupB = makeGroupRow({ id: 'group-b' }); // middle confidence
+          const groupC = makeGroupRow({ id: 'group-c' }); // null confidence, last
+          (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([groupA, groupB, groupC]);
           (mockPrisma.$queryRaw as jest.Mock)
-            .mockResolvedValueOnce([]) // groupC: null
-            .mockResolvedValueOnce([{ sim: 0.9 }]) // groupA
-            .mockResolvedValueOnce([{ sim: 0.3 }]); // groupB
-
-          const result = await service.listDuplicateGroups(
-            makeQueryDto({ sortBy: 'confidence', sortOrder: 'asc' }),
-            USER_ID,
-            PERMS_MEDIA_READ,
-          );
-
-          // Ascending among the computable ones (B=0.3 before A=0.9), null-confidence
-          // group C is excluded from the comparator's ordering and always lands last.
-          expect(result.items.map((i) => i.id)).toEqual(['group-b', 'group-a', 'group-c']);
-        });
-
-        it('SORT-BEFORE-PAGINATION: page 2 of pageSize 1 returns the second-highest-confidence group, not the second DB-order group', async () => {
-          // Raw/DB order is C, A, B (chronological / arbitrary), but confidence
-          // order (desc) is A (0.99) > B (0.5) > C (null, last). If sorting ran
-          // AFTER pagination/slicing (the bug this guards against), page 2 of
-          // pageSize 1 would return the second group in RAW order (A) instead of
-          // the second group in CONFIDENCE order (B).
-          const groupC = makeGroupRow({ id: 'group-c' });
-          const groupA = makeGroupRow({ id: 'group-a' });
-          const groupB = makeGroupRow({ id: 'group-b' });
-          (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([groupC, groupA, groupB]);
-          (mockPrisma.$queryRaw as jest.Mock)
-            .mockResolvedValueOnce([]) // groupC: null
             .mockResolvedValueOnce([{ sim: 0.99 }]) // groupA
-            .mockResolvedValueOnce([{ sim: 0.5 }]); // groupB
+            .mockResolvedValueOnce([{ sim: 0.5 }]) // groupB
+            .mockResolvedValueOnce([]); // groupC: null
 
           const result = await service.listDuplicateGroups(
             makeQueryDto({ sortBy: 'confidence', sortOrder: 'desc', page: 2, pageSize: 1 }),
