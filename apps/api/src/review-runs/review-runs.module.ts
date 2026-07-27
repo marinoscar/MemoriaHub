@@ -3,6 +3,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaModule } from '../media/media.module';
+import { SettingsModule } from '../settings/settings.module';
 import { BurstModule } from '../burst/burst.module';
 import { DedupModule } from '../dedup/dedup.module';
 import { ReviewRunsController } from './review-runs.controller';
@@ -23,8 +24,9 @@ import { LocationSuggestionReviewStrategy } from './strategies/location-suggesti
  * BurstModule and DedupModule are imported through `forwardRef` because the
  * dependency is genuinely mutual: the strategies here wrap `BurstService` /
  * `DuplicateService` primitives, while those services' threshold endpoints call
- * `ReviewRunService.createRun`. MediaModule (MediaThumbnailService) and the rest
- * are plain imports — none of them import this module.
+ * `ReviewRunService.createRun`. MediaModule (MediaThumbnailService), SettingsModule
+ * (SystemSettingsService, read by ReviewRunHistoryPurgeHandler for the retention
+ * window) and the rest are plain imports — none of them import this module.
  *
  * The location-suggestion strategy deliberately does NOT depend on
  * LocationInferenceModule: it owns the accept/reject transaction outright
@@ -37,6 +39,7 @@ import { LocationSuggestionReviewStrategy } from './strategies/location-suggesti
     CirclesModule,
     EnrichmentModule,
     MediaModule,
+    SettingsModule,
     forwardRef(() => BurstModule),
     forwardRef(() => DedupModule),
   ],
