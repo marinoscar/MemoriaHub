@@ -3905,6 +3905,192 @@ describe('MediaService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getReviewCounts (issue #204)
+  //
+  // Lightweight companion to getDashboard: the same four review-queue counts,
+  // none of the On This Day / recent / favorites payload.
+  // -------------------------------------------------------------------------
+
+  describe('getReviewCounts', () => {
+    const reviewCountsQuery = { circleId: CIRCLE_ID } as any;
+
+    function mockCounts({
+      burst = 0,
+      duplicate = 0,
+      location = 0,
+      enhancement = 0,
+    }: {
+      burst?: number;
+      duplicate?: number;
+      location?: number;
+      enhancement?: number;
+    } = {}) {
+      mockPrisma.burstGroup.count.mockResolvedValue(burst);
+      mockPrisma.duplicateGroup.count.mockResolvedValue(duplicate);
+      mockPrisma.locationSuggestion.count.mockResolvedValue(location);
+      mockPrisma.mediaEnhancement.count.mockResolvedValue(enhancement);
+    }
+
+    it('enforces the viewer-role circle access check', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockCounts();
+
+      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
+
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledTimes(1);
+      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        'user-1',
+        CIRCLE_ID,
+        ownPerms,
+        'viewer',
+      );
+    });
+
+    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Not a circle member'),
+      );
+
+      await expect(
+        service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('does not run any count query when access is denied', async () => {
+      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+        new ForbiddenException('Not a circle member'),
+      );
+
+      await expect(
+        service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.burstGroup.count).not.toHaveBeenCalled();
+      expect(mockPrisma.duplicateGroup.count).not.toHaveBeenCalled();
+      expect(mockPrisma.locationSuggestion.count).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaEnhancement.count).not.toHaveBeenCalled();
+    });
+
+    it('returns exactly the four pending* review-queue counts', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockCounts({ burst: 2, duplicate: 3, location: 4, enhancement: 5 });
+
+      const result = await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
+
+      expect(result).toEqual({
+        pendingBurstGroups: 2,
+        pendingDuplicateGroups: 3,
+        pendingLocationSuggestions: 4,
+        pendingEnhancements: 5,
+      });
+    });
+
+    it('scopes every count to the circle and its pending/ready status', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockCounts();
+
+      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.duplicateGroup.count).toHaveBeenCalledWith({
+        where: { circleId: CIRCLE_ID, status: 'pending' },
+      });
+      expect(mockPrisma.locationSuggestion.count).toHaveBeenCalledWith({
+        where: { circleId: CIRCLE_ID, status: 'pending' },
+      });
+      // Only `ready` enhancements are user-actionable (awaiting a keep-both /
+      // replace / discard decision); `pending` means "queued for the model".
+      expect(mockPrisma.mediaEnhancement.count).toHaveBeenCalledWith({
+        where: { circleId: CIRCLE_ID, status: 'ready' },
+      });
+    });
+
+    it('applies burst.minGroupSize from system settings to the burst count', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue({
+        value: { burst: { minGroupSize: 7 } },
+      } as any);
+      mockCounts();
+
+      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.burstGroup.count).toHaveBeenCalledWith({
+        where: {
+          circleId: CIRCLE_ID,
+          status: 'pending',
+          mediaCount: { gte: 7 },
+        },
+      });
+    });
+
+    it('defaults burst.minGroupSize to 3 when the setting row is absent', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockCounts();
+
+      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.burstGroup.count).toHaveBeenCalledWith({
+        where: {
+          circleId: CIRCLE_ID,
+          status: 'pending',
+          mediaCount: { gte: 3 },
+        },
+      });
+    });
+
+    it('defaults burst.minGroupSize to 3 when the settings row has no burst config', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue({ value: {} } as any);
+      mockCounts();
+
+      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.burstGroup.count).toHaveBeenCalledWith({
+        where: {
+          circleId: CIRCLE_ID,
+          status: 'pending',
+          mediaCount: { gte: 3 },
+        },
+      });
+    });
+
+    it('does none of the dashboard-only work (no On This Day SQL, no item reads)', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockCounts();
+
+      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.count).not.toHaveBeenCalled();
+    });
+
+    it('produces the same counts getDashboard nests under counts (no drift)', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockCounts({ burst: 1, duplicate: 2, location: 3, enhancement: 4 });
+
+      const standalone = await service.getReviewCounts(
+        reviewCountsQuery,
+        'user-1',
+        ownPerms,
+      );
+
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      const dashboard = await service.getDashboard(
+        reviewCountsQuery,
+        'user-1',
+        ownPerms,
+      );
+
+      expect(dashboard.counts).toMatchObject(standalone);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // listMedia — personId filter
   // -------------------------------------------------------------------------
 

@@ -36,6 +36,7 @@ import type {
   GeoSearchResult,
   GeoReverseResult,
   DashboardResponse,
+  ReviewCountsResponse,
 } from '../types/media';
 
 // ---------------------------------------------------------------------------
@@ -467,6 +468,24 @@ export async function searchPlaces(q: string, limit?: number): Promise<GeoSearch
 
 export async function getDashboard(circleId: string): Promise<DashboardResponse> {
   return api.get<DashboardResponse>(`/media/dashboard?circleId=${encodeURIComponent(circleId)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Review counts
+// ---------------------------------------------------------------------------
+
+/**
+ * Lightweight companion to `getDashboard`: just the four review-queue counts.
+ *
+ * Use this when a surface needs a pending-work number for a badge and nothing
+ * else — the dashboard endpoint returns On This Day / recent / favorites with
+ * signed thumbnail URLs for every item, which is a lot of work to deliver one
+ * integer (issue #204).
+ */
+export async function getReviewCounts(circleId: string): Promise<ReviewCountsResponse> {
+  return api.get<ReviewCountsResponse>(
+    `/media/review-counts?circleId=${encodeURIComponent(circleId)}`,
+  );
 }
 
 // ---------------------------------------------------------------------------

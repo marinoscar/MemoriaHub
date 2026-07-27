@@ -42,22 +42,40 @@ vi.mock('../../../components/album/CreateAlbumDialog', () => ({
 }));
 
 // The sidebar gates its "AI Enhancements" entry on GET /api/features and reads
-// the badge count from the dashboard. Both are mocked so navigation tests make
-// no network calls; the default below leaves the flag OFF, which is what keeps
-// every pre-existing menu-item count in this file correct.
+// the badge count from GET /api/media/review-counts. The feature-flag hook is
+// mocked outright; the counts endpoint is mocked at the SERVICE layer (the real
+// `useReviewCounts` hook runs) so these tests can assert on whether a request
+// was actually issued — that is the regression issue #204 is about. The default
+// below leaves the flag OFF, which both keeps every pre-existing menu-item
+// count in this file correct AND means navigation tests make no network calls.
 vi.mock('../../../hooks/useFeatureFlags', () => ({
   useFeatureFlags: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useDashboard', () => ({
-  useDashboard: vi.fn(),
+// Partial mock: only the two count-bearing calls are stubbed, every other
+// export of the media service keeps its real implementation. `getDashboard` is
+// stubbed purely so the specs below can assert the sidebar never calls it.
+vi.mock('../../../services/media', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../services/media')>()),
+  getReviewCounts: vi.fn(),
+  getDashboard: vi.fn(),
 }));
 
 import { usePermissions } from '../../../hooks/usePermissions';
 import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
-import { useDashboard } from '../../../hooks/useDashboard';
+import { getReviewCounts, getDashboard } from '../../../services/media';
 
-/** Default: enhancer flag off, no dashboard data. */
+const mockGetReviewCounts = vi.mocked(getReviewCounts);
+const mockGetDashboard = vi.mocked(getDashboard);
+
+/**
+ * Configure the enhancer feature flag and the review-counts response.
+ *
+ * @param enabled  `null` = flag still loading, `false`/`true` = resolved value.
+ * @param pendingEnhancements  count the endpoint resolves with; omit to leave
+ *   the request permanently in flight (the hook's `data` stays null), which is
+ *   how the sidebar looks before the counts land.
+ */
 function mockEnhancer(
   enabled: boolean | null,
   pendingEnhancements?: number,
@@ -78,20 +96,16 @@ function mockEnhancer(
     refresh: vi.fn().mockResolvedValue(undefined),
   });
 
-  vi.mocked(useDashboard).mockReturnValue({
-    data:
-      pendingEnhancements === undefined
-        ? null
-        : {
-            onThisDay: [],
-            recent: [],
-            favorites: [],
-            counts: { total: 0, missingGeo: 0, pendingEnhancements },
-          },
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  });
+  if (pendingEnhancements === undefined) {
+    mockGetReviewCounts.mockReturnValue(new Promise(() => {}));
+  } else {
+    mockGetReviewCounts.mockResolvedValue({
+      pendingBurstGroups: 0,
+      pendingDuplicateGroups: 0,
+      pendingLocationSuggestions: 0,
+      pendingEnhancements,
+    });
+  }
 }
 
 /**
@@ -1181,37 +1195,45 @@ describe('Sidebar', () => {
       expect(button.classList.contains('Mui-selected')).toBe(true);
     });
 
-    it('renders the pending count as a badge', () => {
+    it('renders the pending count as a badge', async () => {
       vi.mocked(usePermissions).mockReturnValue(nonAdmin());
       mockEnhancer(true, 7);
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const badge = container.querySelector('.MuiBadge-badge');
-      expect(badge).not.toBeNull();
-      expect(badge!.textContent).toBe('7');
+      await waitFor(() => {
+        const badge = container.querySelector('.MuiBadge-badge');
+        expect(badge).not.toBeNull();
+        expect(badge!.textContent).toBe('7');
+      });
     });
 
-    it('caps the badge at 999+', () => {
+    it('caps the badge at 999+', async () => {
       vi.mocked(usePermissions).mockReturnValue(nonAdmin());
       mockEnhancer(true, 1500);
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      expect(container.querySelector('.MuiBadge-badge')!.textContent).toBe('999+');
+      await waitFor(() => {
+        expect(container.querySelector('.MuiBadge-badge')!.textContent).toBe('999+');
+      });
     });
 
-    it('renders no badge when the count is zero', () => {
+    it('renders no badge when the count is zero', async () => {
       vi.mocked(usePermissions).mockReturnValue(nonAdmin());
       mockEnhancer(true, 0);
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
+      await waitFor(() => {
+        expect(mockGetReviewCounts).toHaveBeenCalled();
+      });
+
       expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
       expect(container.querySelector('.MuiBadge-badge')).toBeNull();
     });
 
-    it('renders no badge when the dashboard count is unknown', () => {
+    it('renders no badge while the count request is still in flight', () => {
       vi.mocked(usePermissions).mockReturnValue(nonAdmin());
       mockEnhancer(true);
 
@@ -1219,6 +1241,82 @@ describe('Sidebar', () => {
 
       expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
       expect(container.querySelector('.MuiBadge-badge')).toBeNull();
+    });
+  });
+
+  // The point of issue #204: the badge count no longer comes from the heavy
+  // dashboard endpoint, and no counts request is made at all unless the badge
+  // that consumes it is actually rendered.
+  describe('Review-counts request gating (issue #204)', () => {
+    const nonAdmin = () => ({
+      permissions: new Set<string>(),
+      roles: new Set<string>(),
+      hasPermission: vi.fn(),
+      hasAnyPermission: vi.fn(),
+      hasAllPermissions: vi.fn(),
+      hasRole: vi.fn(),
+      hasAnyRole: vi.fn(),
+      isAdmin: false,
+    });
+
+    it('issues NO review-counts request while the enhancer flag is still loading', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(null);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      // The sidebar has fully rendered — a request, had one been issued, would
+      // already have been kicked off by the hook's mount effect.
+      expect(screen.getByText('Photos')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
+      });
+      expect(mockGetReviewCounts).not.toHaveBeenCalled();
+    });
+
+    it('issues NO review-counts request when the enhancer feature is disabled', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(false, 4);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('Photos')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
+      });
+      expect(mockGetReviewCounts).not.toHaveBeenCalled();
+    });
+
+    it('requests the counts for the active circle when the enhancer is enabled, and badges the result', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 3);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      // `circle-1` is the active circle supplied by the test-utils wrapper.
+      await waitFor(() => {
+        expect(mockGetReviewCounts).toHaveBeenCalledWith('circle-1');
+      });
+
+      await waitFor(() => {
+        expect(container.querySelector('.MuiBadge-badge')!.textContent).toBe('3');
+      });
+    });
+
+    it('never fetches the full dashboard for the badge count', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 3);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        expect(mockGetReviewCounts).toHaveBeenCalledTimes(1);
+      });
+
+      // The sidebar used to read this one integer out of GET /api/media/dashboard,
+      // which also returns On This Day / recent / favorites with a signed
+      // thumbnail URL per item.
+      expect(mockGetDashboard).not.toHaveBeenCalled();
     });
   });
 

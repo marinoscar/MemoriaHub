@@ -12,7 +12,8 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { ExecutionContext, CanActivate } from '@nestjs/common';
+import { ExecutionContext, CanActivate, RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
@@ -28,6 +29,7 @@ import type { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import type { BulkTagsDto } from './dto/bulk-tags.dto';
 import type { BulkDeleteDto } from './dto/bulk-delete.dto';
 import type { DashboardQueryDto } from './dto/dashboard-query.dto';
+import type { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import type { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
 import type { GeoSearchQueryDto } from './dto/geo-search-query.dto';
 import type { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
@@ -87,6 +89,7 @@ const mockMediaService = {
   reverseGeocodeOnDemand: jest.fn(),
   searchPlaces: jest.fn(),
   getDashboard: jest.fn(),
+  getReviewCounts: jest.fn(),
   exploreLocations: jest.fn(),
   exploreLocationLevel: jest.fn(),
 };
@@ -309,6 +312,127 @@ describe('MediaController', () => {
         user.permissions,
       );
       expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getReviewCounts handler (issue #204)
+  // -------------------------------------------------------------------------
+
+  describe('getReviewCounts', () => {
+    it('should call mediaService.getReviewCounts with query and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_READ] });
+      const query: ReviewCountsQueryDto = { circleId: randomUUID() };
+      const expectedResult = {
+        pendingBurstGroups: 1,
+        pendingDuplicateGroups: 2,
+        pendingLocationSuggestions: 3,
+        pendingEnhancements: 4,
+      };
+      mockMediaService.getReviewCounts.mockResolvedValue(expectedResult);
+
+      const result = await controller.getReviewCounts(query, user);
+
+      expect(mockMediaService.getReviewCounts).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.getReviewCounts).toHaveBeenCalledWith(
+        query,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('should NOT invoke the heavyweight dashboard aggregation', async () => {
+      // The entire point of issue #204: a nav badge must not pull On This Day /
+      // recent / favorites and their signed thumbnail URLs.
+      const user = makeUser();
+      mockMediaService.getReviewCounts.mockResolvedValue({
+        pendingBurstGroups: 0,
+        pendingDuplicateGroups: 0,
+        pendingLocationSuggestions: 0,
+        pendingEnhancements: 0,
+      });
+
+      await controller.getReviewCounts({ circleId: randomUUID() }, user);
+
+      expect(mockMediaService.getDashboard).not.toHaveBeenCalled();
+    });
+
+    it('requires MEDIA_READ permission (and no other permission)', () => {
+      const permissions: string[] = Reflect.getMetadata(
+        PERMISSIONS_KEY,
+        controller.getReviewCounts,
+      );
+      expect(permissions).toEqual([PERMISSIONS.MEDIA_READ]);
+    });
+
+    it('is wired to the literal route "review-counts" via @Get', () => {
+      expect(Reflect.getMetadata(PATH_METADATA, controller.getReviewCounts)).toBe(
+        'review-counts',
+      );
+      expect(Reflect.getMetadata(METHOD_METADATA, controller.getReviewCounts)).toBe(
+        RequestMethod.GET,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Route-shadow guard: review-counts declared BEFORE @Get(':id') (issue #204)
+  //
+  // Nest's RouterExplorer scans handlers in prototype declaration order, so a
+  // literal route only wins over a param route if it is declared first. These
+  // tests read that real declaration order out of the compiled prototype rather
+  // than trusting the source layout.
+  // -------------------------------------------------------------------------
+
+  describe('route ordering — review-counts precedes @Get(:id)', () => {
+    function getRouteDeclarationOrder(): Array<{
+      name: string;
+      path: unknown;
+      method: unknown;
+    }> {
+      const prototype = Object.getPrototypeOf(controller);
+      return Object.getOwnPropertyNames(prototype)
+        .filter((name) => name !== 'constructor')
+        .map((name) => ({
+          name,
+          path: Reflect.getMetadata(PATH_METADATA, prototype[name]),
+          method: Reflect.getMetadata(METHOD_METADATA, prototype[name]),
+        }))
+        .filter((entry) => entry.path !== undefined);
+    }
+
+    it('declares GET review-counts at a lower index than GET :id', () => {
+      const routes = getRouteDeclarationOrder();
+
+      const reviewCountsIdx = routes.findIndex(
+        (r) => r.path === 'review-counts' && r.method === RequestMethod.GET,
+      );
+      const paramIdx = routes.findIndex(
+        (r) => r.path === ':id' && r.method === RequestMethod.GET,
+      );
+
+      expect(reviewCountsIdx).toBeGreaterThanOrEqual(0);
+      expect(paramIdx).toBeGreaterThanOrEqual(0);
+      expect(reviewCountsIdx).toBeLessThan(paramIdx);
+    });
+
+    it('declares GET review-counts alongside the other literal routes (with dashboard)', () => {
+      const routes = getRouteDeclarationOrder();
+
+      const dashboardIdx = routes.findIndex(
+        (r) => r.path === 'dashboard' && r.method === RequestMethod.GET,
+      );
+      const reviewCountsIdx = routes.findIndex(
+        (r) => r.path === 'review-counts' && r.method === RequestMethod.GET,
+      );
+
+      expect(dashboardIdx).toBeGreaterThanOrEqual(0);
+      expect(reviewCountsIdx).toBe(dashboardIdx + 1);
+    });
+
+    it('getReviewCounts is a DIFFERENT handler from getMedia', () => {
+      expect(controller.getReviewCounts).not.toBe(controller.getMedia);
     });
   });
 
