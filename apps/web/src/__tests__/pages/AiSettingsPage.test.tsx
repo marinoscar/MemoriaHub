@@ -71,9 +71,36 @@ function defaultSettingsMock() {
     removeCredentials: vi.fn().mockResolvedValue(undefined),
     testProvider: vi.fn().mockResolvedValue({ ok: true }),
     getModels: vi.fn().mockResolvedValue(['gpt-4o', 'gpt-4']),
-    getEmbeddingModels: vi.fn().mockResolvedValue([]),
     saveSearchFeature: vi.fn().mockResolvedValue(undefined),
+    saveTaggingFeature: vi.fn().mockResolvedValue(undefined),
+    saveEmbeddingFeature: vi.fn().mockResolvedValue(undefined),
+    getEmbeddingModels: vi.fn().mockResolvedValue([]),
+    testEmbedding: vi.fn().mockResolvedValue({ ok: true, provider: 'openai', model: 'text-embedding-3-small', dimensions: 1536 }),
+    saveEnhanceFeature: vi.fn().mockResolvedValue(undefined),
+    getImageModels: vi.fn().mockResolvedValue(['gpt-image-1']),
   };
+}
+
+// Guard test: fail loudly (rather than throwing an opaque TypeError from
+// inside a useEffect) if `useAiSettings`'s real contract ever grows a new
+// key that this fixture doesn't mock. `vi.mock('../../hooks/useAiSettings')`
+// above replaces the module entirely, so we can't import the real
+// implementation in this file without un-mocking it — instead we import the
+// hook's source file directly via a dynamic, unmocked require through
+// vitest's `vi.importActual`, which bypasses the module mock for this one
+// call and gives us the real exported function to introspect.
+async function getRealUseAiSettingsKeys(): Promise<string[]> {
+  const actual = await vi.importActual<{ useAiSettings: () => Record<string, unknown> }>(
+    '../../hooks/useAiSettings',
+  );
+  // The hook itself calls the AI settings service (fetch, etc.) internally,
+  // but none of that runs until its returned callbacks are invoked — calling
+  // the hook function directly (outside a component) is enough to read the
+  // shape of the object it returns, since the returned value is just an
+  // object literal of useState/useCallback results.
+  const { renderHook } = await import('@testing-library/react');
+  const { result } = renderHook(() => actual.useAiSettings());
+  return Object.keys(result.current).sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +110,24 @@ describe('AiSettingsPage', () => {
     vi.clearAllMocks();
     mockUsePermissions.mockReturnValue(defaultPermissionsMock() as any);
     mockUseAiSettings.mockReturnValue(defaultSettingsMock() as any);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression guard for the root cause of this suite's prior breakage:
+  // useAiSettings gained new keys (saveTaggingFeature, saveEmbeddingFeature,
+  // testEmbedding, saveEnhanceFeature, getImageModels) and this file's
+  // fixture factory silently fell behind, so every test threw
+  // `TypeError: getImageModels is not a function` from inside a useEffect
+  // (AiSettingsPage.tsx calls it unconditionally on mount) instead of
+  // failing with a clear message. This test compares the fixture's key set
+  // against the REAL (unmocked) hook's key set so the next time the hook's
+  // contract grows, this fails loudly and specifically instead of that.
+  describe('fixture contract', () => {
+    it('defaultSettingsMock() exposes exactly the same keys as the real useAiSettings hook', async () => {
+      const realKeys = await getRealUseAiSettingsKeys();
+      const fixtureKeys = Object.keys(defaultSettingsMock()).sort();
+      expect(fixtureKeys).toEqual(realKeys);
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -145,9 +145,11 @@ describe('MediaGallery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Default feed-mode responses: return empty list to prevent infinite loops.
+    // Keyset (not legacy offset) shape — see useInfiniteMedia.ts, which reads
+    // `r.meta.nextCursor` and never sends/expects `page`/`totalItems`.
     mockListMedia.mockResolvedValue({
       items: [],
-      meta: { page: 1, pageSize: 50, totalItems: 0, totalPages: 1 },
+      meta: { pageSize: 50, nextCursor: null, hasMore: false },
     });
     // Default MediaPreviewContext: no stored preview for any id, no-op writers.
     mockUseMediaPreview.mockReturnValue({
@@ -551,7 +553,7 @@ describe('MediaGallery', () => {
 
       mockListMedia.mockResolvedValueOnce({
         items: feedItems,
-        meta: { page: 1, pageSize: 50, totalItems: 2, totalPages: 1 },
+        meta: { pageSize: 50, nextCursor: null, hasMore: false },
       });
 
       render(
@@ -571,7 +573,7 @@ describe('MediaGallery', () => {
     it('renders the infinite-scroll sentinel element in feed mode', async () => {
       mockListMedia.mockResolvedValueOnce({
         items: [makeItem('s1')],
-        meta: { page: 1, pageSize: 50, totalItems: 5, totalPages: 2 },
+        meta: { pageSize: 50, nextCursor: 'cursor-abc', hasMore: true },
       });
 
       const { container } = render(
@@ -593,8 +595,11 @@ describe('MediaGallery', () => {
       // It has height=1 CSS in sx which becomes height: 1px — a zero-height div in jsdom.
       // We verify at least one <div> with a single-pixel height exists (MUI Box sx).
       // A more reliable check: listMedia was called, items are visible, page has data.
+      // Issue #104 moved the default gallery to keyset pagination: useInfiniteMedia's
+      // default fetcher calls listMedia({...params, cursor, pageSize}) — the initial
+      // load passes cursor: null and never a `page` field at all.
       expect(mockListMedia).toHaveBeenCalledWith(
-        expect.objectContaining({ circleId: 'circle-1', page: 1 }),
+        expect.objectContaining({ circleId: 'circle-1', cursor: null, pageSize: 50 }),
       );
     });
 

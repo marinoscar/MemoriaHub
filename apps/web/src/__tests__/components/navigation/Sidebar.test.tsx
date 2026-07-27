@@ -108,6 +108,40 @@ function mockEnhancer(
   }
 }
 
+/**
+ * Named nav-entry sets shared by the tests below. Encoding the actual entries
+ * (rather than a bare integer) means adding/removing a sidebar item produces a
+ * clear "X is missing" / "Y leaked in" failure instead of an opaque
+ * "expected N to be M" — see issue #202.
+ */
+const BASE_ENTRIES = [
+  'Photos',
+  'Explore',
+  'Map',
+  'Circles',
+  'Albums',
+  'People',
+  'Archive',
+  'Trash',
+  'Review Bursts',
+  'Review Duplicates',
+  'Review Insights',
+  'Location Suggestions',
+];
+const NON_ADMIN_ENTRIES = [...BASE_ENTRIES, 'User Settings'];
+const ADMIN_HUB_ENTRIES = [...BASE_ENTRIES, 'Settings', 'User Settings'];
+const ADMIN_FULL_GATED_ENTRIES = [
+  ...BASE_ENTRIES,
+  'Settings',
+  'Job Queue',
+  'Worker Nodes',
+  'Storage Insights',
+  'Public Sharing',
+  'User Settings',
+];
+const GATED_ADMIN_ONLY_ENTRIES = ['Settings', 'Job Queue', 'Worker Nodes', 'Storage Insights', 'Public Sharing'];
+const FEATURE_FLAGGED_ENTRIES = ['Workflows', 'AI Enhancements'];
+
 describe('Sidebar', () => {
   const mockOnClose = vi.fn();
 
@@ -281,12 +315,19 @@ describe('Sidebar', () => {
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      // Only items with visible: true should be rendered
-      // Non-admin: Photos, Explore, Map, Circles, Albums, People, Archive, Trash,
-      //   Review Bursts, Review Duplicates, Review Insights, Location Suggestions,
-      //   User Settings
+      // Only items with visible: true should be rendered for a non-admin viewer.
+      NON_ADMIN_ENTRIES.forEach((label) => {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      });
+
+      // Admin-only and feature-flag-gated entries must not leak through.
+      [...GATED_ADMIN_ONLY_ENTRIES, ...FEATURE_FLAGGED_ENTRIES].forEach((label) => {
+        expect(screen.queryByText(label)).not.toBeInTheDocument();
+      });
+
+      // No unnamed extras: exactly the named set above renders.
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(13);
+      expect(menuButtons).toHaveLength(NON_ADMIN_ENTRIES.length);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -305,17 +346,20 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // After the settings refactor the admin section collapses from many individual links
-      // to a single "Settings" hub entry (plus permission-gated items when hasPermission
-      // is unconfigured/false, as in this test).
-      // Admin layout: Photos, Explore, Map, Circles, Albums,
-      //               People, Archive, Trash,
-      //               Review Bursts, Review Duplicates, Review Insights,
-      //               Location Suggestions,
-      //               Settings (admin hub),
-      //               User Settings
+      // After the settings refactor the admin section collapses from many individual
+      // links to a single "Settings" hub entry. hasPermission is unconfigured/false
+      // here, so the extra permission-gated admin entries must NOT render.
+      ADMIN_HUB_ENTRIES.forEach((label) => {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      });
+      ['Job Queue', 'Worker Nodes', 'Storage Insights', 'Public Sharing', ...FEATURE_FLAGGED_ENTRIES].forEach(
+        (label) => {
+          expect(screen.queryByText(label)).not.toBeInTheDocument();
+        },
+      );
+
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(14);
+      expect(menuButtons).toHaveLength(ADMIN_HUB_ENTRIES.length);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -647,14 +691,13 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      expect(container.textContent).toContain('Job Queue');
-      expect(container.textContent).toContain('Storage Insights');
-      expect(container.textContent).toContain('Public Sharing');
+      // jobs:read gates BOTH "Job Queue" and "Worker Nodes".
+      ADMIN_FULL_GATED_ENTRIES.forEach((label) => {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      });
 
-      // 13 non-admin entries + Settings hub + 4 permission-gated admin entries
-      // (jobs:read gates BOTH "Job Queue" and "Worker Nodes") = 18.
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(buttons).toHaveLength(18);
+      expect(buttons).toHaveLength(ADMIN_FULL_GATED_ENTRIES.length);
     });
   });
 
@@ -795,12 +838,15 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // After the settings refactor, admin sees: Photos, Explore, Map, Circles, Albums,
-      //   People, Archive, Trash, Review Bursts, Review Duplicates, Review Insights,
-      //   Location Suggestions, Settings (admin hub), User Settings — 14 total
-      // (hasPermission is unconfigured/false here, so no extra gated items render).
+      // hasPermission is unconfigured/false here, so no extra permission-gated admin
+      // items render — every entry that does render must carry its own icon.
+      ADMIN_HUB_ENTRIES.forEach((label) => {
+        const button = screen.getByText(label).closest('.MuiListItemButton-root') as HTMLElement;
+        expect(button.querySelector('.MuiListItemIcon-root')).not.toBeNull();
+      });
+
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(14);
+      expect(icons).toHaveLength(ADMIN_HUB_ENTRIES.length);
     });
 
     it('should highlight icon for selected menu item', () => {

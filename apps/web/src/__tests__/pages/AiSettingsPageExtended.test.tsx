@@ -84,9 +84,28 @@ function defaultSettingsMock() {
     removeCredentials: vi.fn().mockResolvedValue(undefined),
     testProvider: vi.fn().mockResolvedValue({ ok: true }),
     getModels: vi.fn().mockResolvedValue(['gpt-4o', 'gpt-4']),
-    getEmbeddingModels: vi.fn().mockResolvedValue([]),
     saveSearchFeature: vi.fn().mockResolvedValue(undefined),
+    saveTaggingFeature: vi.fn().mockResolvedValue(undefined),
+    saveEmbeddingFeature: vi.fn().mockResolvedValue(undefined),
+    getEmbeddingModels: vi.fn().mockResolvedValue([]),
+    testEmbedding: vi.fn().mockResolvedValue({ ok: true, provider: 'openai', model: 'text-embedding-3-small', dimensions: 1536 }),
+    saveEnhanceFeature: vi.fn().mockResolvedValue(undefined),
+    getImageModels: vi.fn().mockResolvedValue(['gpt-image-1']),
   };
+}
+
+// Guard test: fail loudly (rather than throwing an opaque TypeError from
+// inside a useEffect) if `useAiSettings`'s real contract ever grows a new
+// key that this fixture doesn't mock. `vi.mock('../../hooks/useAiSettings')`
+// above replaces the module entirely, so we read the real implementation
+// via `vi.importActual`, which bypasses the module mock for this one call.
+async function getRealUseAiSettingsKeys(): Promise<string[]> {
+  const actual = await vi.importActual<{ useAiSettings: () => Record<string, unknown> }>(
+    '../../hooks/useAiSettings',
+  );
+  const { renderHook } = await import('@testing-library/react');
+  const { result } = renderHook(() => actual.useAiSettings());
+  return Object.keys(result.current).sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +126,19 @@ describe('AiSettingsPage — extended coverage', () => {
     mockUseAiSettings.mockReturnValue(defaultSettingsMock() as any);
     // Ensure window.confirm is available (jsdom provides it but we want control)
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression guard: see the identical guard in AiSettingsPage.test.tsx for
+  // the full rationale (missing fixture keys caused a TypeError from inside
+  // a useEffect). Duplicated here since this file has its own independent
+  // defaultSettingsMock() fixture.
+  describe('fixture contract', () => {
+    it('defaultSettingsMock() exposes exactly the same keys as the real useAiSettings hook', async () => {
+      const realKeys = await getRealUseAiSettingsKeys();
+      const fixtureKeys = Object.keys(defaultSettingsMock()).sort();
+      expect(fixtureKeys).toEqual(realKeys);
+    });
   });
 
   // -------------------------------------------------------------------------

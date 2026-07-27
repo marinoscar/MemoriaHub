@@ -18,10 +18,10 @@
  *   - Close behaviour and null item guard
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
+import { render, flushPendingAsyncWork } from '../../utils/test-utils';
 import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
 import type { MediaItem } from '../../../types/media';
 
@@ -60,6 +60,37 @@ vi.mock('../../../services/face', () => ({
     lastError: null,
   }),
   rerunMediaFaces: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock tagging/metadata services — useMediaTags / useMediaMetadata (mounted
+// inside the drawer) fetch these on mount. Without these mocks the requests
+// fall through to MSW as unhandled, bypass to a real (failing) network call,
+// and settle on an unpredictable timeline instead of a deterministic
+// microtask — exactly the kind of dangling continuation
+// `flushPendingAsyncWork` below exists to drain before this file's tests
+// finish (issue #196).
+// ---------------------------------------------------------------------------
+
+vi.mock('../../../services/tagging', () => ({
+  getMediaTagStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    providerKey: null,
+    modelVersion: null,
+    tagCount: 0,
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunMediaTags: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
+}));
+
+vi.mock('../../../services/metadata', () => ({
+  getMediaMetadataStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunMediaMetadata: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -243,6 +274,14 @@ describe('MediaDetailDrawer', () => {
     mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: null, loading: false });
     mockRevertLocationSuggestion.mockResolvedValue({ id: 'suggestion-1', status: 'reverted' });
     mockRerunThumbnail.mockResolvedValue({ status: 'ready' });
+  });
+
+  // Drain any pending mocked-service continuations (useMediaFaces,
+  // useMediaTags, useMediaMetadata all fetch on mount) BEFORE the global
+  // `cleanup()` in setup.ts unmounts the tree — see `flushPendingAsyncWork`'s
+  // doc comment for why this matters (issue #196).
+  afterEach(async () => {
+    await flushPendingAsyncWork();
   });
 
   // -------------------------------------------------------------------------
