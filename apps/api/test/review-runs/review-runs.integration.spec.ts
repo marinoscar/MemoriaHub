@@ -5,10 +5,17 @@
 // in this repo. This suite talks to a hard-coded connection string (see
 // DATABASE_URL below) rather than gating on POSTGRES_HOST/DATABASE_URL env
 // vars being pre-set, so it actually exercises real Postgres in an
-// environment (like this sandbox) where a DB is reachable but those env
-// vars were never exported. If the DB is genuinely unreachable, beforeAll's
-// $connect() throws and the whole suite fails loudly — which is more
-// informative than a silent describe.skip.
+// environment where a DB is reachable but those env vars were never
+// exported. DATABASE_URL (or POSTGRES_HOST/PORT/USER/PASSWORD/DB) overrides
+// the default when set, so a developer can point this at their own instance.
+//
+// Reachability is probed synchronously at module load, BEFORE Jest registers
+// the tests, so an unreachable DB produces an honest `describe.skip` (13
+// skipped, clearly reported) rather than 13 red tests. An earlier revision
+// failed loudly instead; that was wrong for the common case of a developer
+// running plain `npm test` without a local `appdb`, since this suite is the
+// only one in the repo that needs a real database — every other
+// `*.integration.spec.ts` here runs against a mocked Prisma.
 //
 // Purpose: exercise the raw-SQL constraint set added by migration
 // 20260726010000_review_runs directly against Postgres — the "exclusive
@@ -48,19 +55,79 @@
 
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------
-// Connection string — hard-coded to the real, already-migrated Postgres
-// instance reachable in this sandbox (verified: `_prisma_migrations` shows
-// 20260726010000_review_runs applied). Deliberately NOT read from
-// POSTGRES_HOST/DATABASE_URL so this suite doesn't silently no-op just
-// because those particular env vars aren't exported here.
+// Connection string. `.env.test` sets DATABASE_URL to
+// postgresql://postgres:postgres@localhost:5433/enterprise_app_test — the
+// repo's conventional test database — and that wins when present. The
+// individual POSTGRES_* vars are honoured next, and a plain local default is
+// the last resort. To actually run this suite, stand up a database at that
+// URL and apply migrations (`npm run prisma:migrate`); otherwise it skips.
 // ---------------------------------------------------------------------------
 
-const DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/appdb';
+function resolveDatabaseUrl(): string {
+  if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
+  const host = process.env['POSTGRES_HOST'] ?? 'localhost';
+  const port = process.env['POSTGRES_PORT'] ?? '5432';
+  const user = process.env['POSTGRES_USER'] ?? 'postgres';
+  const password = process.env['POSTGRES_PASSWORD'] ?? 'postgres';
+  const db = process.env['POSTGRES_DB'] ?? 'appdb';
+  return `postgresql://${user}:${password}@${host}:${port}/${db}`;
+}
 
-describe('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
+const DATABASE_URL = resolveDatabaseUrl();
+
+/**
+ * Synchronous TCP reachability probe, run at module load so the result is
+ * known before Jest registers the tests below — `describe.skip` cannot be
+ * decided from an async `beforeAll`, which runs too late.
+ */
+function isDatabaseReachable(url: string): boolean {
+  let host: string;
+  let port: number;
+  try {
+    const parsed = new URL(url);
+    host = parsed.hostname;
+    port = Number(parsed.port || 5432);
+  } catch {
+    return false;
+  }
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        '-e',
+        `const net=require('net');` +
+          `const s=net.connect({host:process.argv[1],port:Number(process.argv[2])});` +
+          `s.on('connect',()=>{s.destroy();process.exit(0)});` +
+          `s.on('error',()=>process.exit(1));` +
+          `setTimeout(()=>process.exit(1),2000);`,
+        host,
+        String(port),
+      ],
+      { stdio: 'ignore', timeout: 5000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const DB_REACHABLE = isDatabaseReachable(DATABASE_URL);
+
+if (!DB_REACHABLE) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[review-runs.integration] Skipping: no PostgreSQL reachable at ${DATABASE_URL}. ` +
+      `Start a migrated database (or set DATABASE_URL) to exercise the review_run_items constraint set.`,
+  );
+}
+
+const describeDb = DB_REACHABLE ? describe : describe.skip;
+
+describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaClient | null = null;
   let dbReachable = false;
 

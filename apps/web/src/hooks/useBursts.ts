@@ -9,8 +9,10 @@ import {
   fetchAllPendingBurstGroupIds,
   dismissBurstGroup,
 } from '../services/bursts';
+import type { SortOrder } from '../types/media';
 import type {
   BurstGroupStatus,
+  BurstSortBy,
   BurstGroupSummary,
   BurstGroupDetail,
   BurstListMeta,
@@ -20,10 +22,12 @@ import type {
 } from '../services/bursts';
 import type { CreateReviewRunResponse } from '../types/reviewRuns';
 
-interface FetchBurstGroupsParams {
+export interface FetchBurstGroupsParams {
   circleId: string;
   status?: BurstGroupStatus;
   page?: number;
+  sortBy?: BurstSortBy;
+  sortOrder?: SortOrder;
 }
 
 interface UseBurstGroupsResult {

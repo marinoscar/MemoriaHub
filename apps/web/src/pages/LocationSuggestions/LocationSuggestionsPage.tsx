@@ -28,7 +28,7 @@ import {
   Close as CloseIcon,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
@@ -38,8 +38,43 @@ import {
   startLocationRejectRun,
 } from '../../services/locationSuggestionRuns';
 import { LocationMiniMap } from '../../components/media/LocationMiniMap';
+import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
 import { AdjustLocationDialog } from './AdjustLocationDialog';
-import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
+import type {
+  LocationSuggestionSortBy,
+  LocationSuggestionSummary,
+} from '../../services/locationSuggestions';
+import type { SortOrder } from '../../types/media';
+
+// ---------------------------------------------------------------------------
+// Sort model. The API defaults to `createdAt` / `desc`, so those two values are
+// never sent on the wire — an untouched page issues exactly the request it did
+// before this control existed.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_SORT_BY: LocationSuggestionSortBy = 'createdAt';
+const DEFAULT_SORT_ORDER: SortOrder = 'desc';
+
+const SORT_BY_VALUES: LocationSuggestionSortBy[] = ['createdAt', 'confidence'];
+
+const SORT_OPTIONS = [
+  { value: 'createdAt:desc', label: 'Newest first' },
+  { value: 'createdAt:asc', label: 'Oldest first' },
+  { value: 'confidence:desc', label: 'Confidence — Highest' },
+  { value: 'confidence:asc', label: 'Confidence — Lowest' },
+];
+
+/** Coerce an untrusted URL value to a supported column, else the page default. */
+function parseSortBy(raw: string | null): LocationSuggestionSortBy {
+  return SORT_BY_VALUES.includes(raw as LocationSuggestionSortBy)
+    ? (raw as LocationSuggestionSortBy)
+    : DEFAULT_SORT_BY;
+}
+
+/** Coerce an untrusted URL value to a supported direction, else the page default. */
+function parseSortOrder(raw: string | null): SortOrder {
+  return raw === 'asc' || raw === 'desc' ? raw : DEFAULT_SORT_ORDER;
+}
 
 function confidenceChipColor(confidence: number): 'success' | 'warning' | 'default' {
   if (confidence >= 0.8) return 'success';
@@ -206,6 +241,13 @@ export default function LocationSuggestionsPage() {
   const { settings } = useSystemSettings();
   const { items, meta, isLoading, error, fetchSuggestions, accept, reject, actingIds } =
     useLocationSuggestions();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [sortBy, setSortBy] = useState<LocationSuggestionSortBy>(() =>
+    parseSortBy(searchParams.get('sortBy')),
+  );
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() =>
+    parseSortOrder(searchParams.get('sortOrder')),
+  );
   const [page, setPage] = useState(1);
   const [adjustTarget, setAdjustTarget] = useState<LocationSuggestionSummary | null>(null);
   const [bulkAction, setBulkAction] = useState<'accept' | 'reject' | null>(null);
@@ -224,16 +266,42 @@ export default function LocationSuggestionsPage() {
 
   const refresh = useCallback(() => {
     if (!activeCircleId) return;
-    void fetchSuggestions({ circleId: activeCircleId, status: 'pending', page });
-  }, [activeCircleId, page, fetchSuggestions]);
+    void fetchSuggestions({
+      circleId: activeCircleId,
+      status: 'pending',
+      page,
+      // Only non-default values go on the wire, so the default view's request
+      // is byte-identical to the pre-sort-control one.
+      ...(sortBy !== DEFAULT_SORT_BY ? { sortBy } : {}),
+      ...(sortOrder !== DEFAULT_SORT_ORDER ? { sortOrder } : {}),
+    });
+  }, [activeCircleId, page, sortBy, sortOrder, fetchSuggestions]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
+  // Mirror a non-default sort to the URL so the view is shareable/restorable.
+  // `searchParams` is deliberately excluded from the deps — including it would
+  // re-run on every replace and loop.
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    if (sortBy !== DEFAULT_SORT_BY) params.set('sortBy', sortBy);
+    else params.delete('sortBy');
+    if (sortOrder !== DEFAULT_SORT_ORDER) params.set('sortOrder', sortOrder);
+    else params.delete('sortOrder');
+    setSearchParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortBy, sortOrder, setSearchParams]);
+
   useEffect(() => {
     setPage(1);
-  }, [activeCircleId]);
+  }, [activeCircleId, sortBy, sortOrder]);
+
+  const handleSortChange = (by: string, order: SortOrder) => {
+    setSortBy(parseSortBy(by));
+    setSortOrder(order);
+  };
 
   const handleAccept = async (id: string) => {
     setActionError(null);
@@ -320,6 +388,11 @@ export default function LocationSuggestionsPage() {
           )}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <ReviewSortSelect
+            value={`${sortBy}:${sortOrder}`}
+            onChange={handleSortChange}
+            options={SORT_OPTIONS}
+          />
           <TextField
             label="Threshold %"
             type="number"

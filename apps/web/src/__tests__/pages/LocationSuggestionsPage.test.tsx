@@ -46,7 +46,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 
@@ -871,6 +871,90 @@ describe('LocationSuggestionsPage', () => {
         expect(screen.queryByText('Accept suggestions ≥ 80%?')).not.toBeInTheDocument();
       });
       expect(mockStartLocationAcceptRun).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sort control (issue #189)', () => {
+    it('renders with the page default ("Newest first") selected', async () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook());
+
+      render(<LocationSuggestionsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('review-sort-select')).toBeInTheDocument();
+      });
+      expect(
+        within(screen.getByTestId('review-sort-select')).getByText(/newest first/i),
+      ).toBeInTheDocument();
+    });
+
+    it('changing the sort refetches with the new sortBy/sortOrder and resets to page 1', async () => {
+      const user = userEvent.setup();
+      const fetchSuggestions = vi.fn().mockResolvedValue(undefined);
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({
+          items: [makeSuggestion()],
+          meta: { total: 100, page: 2, pageSize: 1 },
+          fetchSuggestions,
+        }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(await screen.findByRole('button', { name: /go to page 2/i }));
+      await waitFor(() => {
+        expect(fetchSuggestions).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+      });
+      fetchSuggestions.mockClear();
+
+      const combobox = within(screen.getByTestId('review-sort-select')).getByRole('combobox');
+      fireEvent.mouseDown(combobox);
+      // "Lowest" (confidence:asc) is chosen deliberately: this page's default
+      // sortOrder is already 'desc', so picking "Highest" (confidence:desc)
+      // would leave sortOrder at its default and omit it from the request —
+      // picking 'asc' forces both fields onto the wire for a clean assertion.
+      await user.click(await screen.findByRole('option', { name: /confidence.*lowest/i }));
+
+      await waitFor(() => {
+        expect(fetchSuggestions).toHaveBeenCalledWith(
+          expect.objectContaining({ page: 1, sortBy: 'confidence', sortOrder: 'asc' }),
+        );
+      });
+    });
+
+    it('seeds the control from an initial ?sortBy=confidence&sortOrder=asc URL', async () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook());
+
+      render(<LocationSuggestionsPage />, {
+        wrapperOptions: { route: '/location-suggestions?sortBy=confidence&sortOrder=asc' },
+      });
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByTestId('review-sort-select')).getByText(/confidence.*lowest/i),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('falls back to the default sort and does not forward it to the API when the URL has an invalid sortBy', async () => {
+      const fetchSuggestions = vi.fn().mockResolvedValue(undefined);
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ fetchSuggestions }));
+
+      render(<LocationSuggestionsPage />, {
+        wrapperOptions: { route: '/location-suggestions?sortBy=bogus' },
+      });
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByTestId('review-sort-select')).getByText(/newest first/i),
+        ).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(fetchSuggestions).toHaveBeenCalled();
+      });
+      const call = fetchSuggestions.mock.calls[0][0];
+      expect(call).not.toHaveProperty('sortBy');
+      expect(call).not.toHaveProperty('sortOrder');
     });
   });
 });

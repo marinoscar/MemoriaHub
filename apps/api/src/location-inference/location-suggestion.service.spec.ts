@@ -232,6 +232,87 @@ describe('LocationSuggestionService', () => {
         }),
       );
     });
+
+    // -----------------------------------------------------------------------
+    // sortBy / sortOrder (issue #189)
+    // -----------------------------------------------------------------------
+
+    describe('sortBy / sortOrder', () => {
+      it("DEFAULT GUARD: with sortBy/sortOrder omitted, orderBy reproduces today's ordering exactly", async () => {
+        (mockPrisma.locationSuggestion.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+
+        await service.listSuggestions(makeQuery(), USER_ID, PERMS);
+
+        const findManyCall = (mockPrisma.locationSuggestion.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
+      });
+
+      it('count is still called without an orderBy (count never takes one)', async () => {
+        (mockPrisma.locationSuggestion.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+
+        await service.listSuggestions(makeQuery(), USER_ID, PERMS);
+
+        const countCall = (mockPrisma.locationSuggestion.count as jest.Mock).mock.calls[0][0];
+        expect(countCall).not.toHaveProperty('orderBy');
+      });
+
+      it('sortBy=confidence, sortOrder=desc -> orderBy is [{confidence:desc},{createdAt:desc},{id:desc}], no nulls key', async () => {
+        (mockPrisma.locationSuggestion.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+
+        await service.listSuggestions(
+          makeQuery({ sortBy: 'confidence', sortOrder: 'desc' }),
+          USER_ID,
+          PERMS,
+        );
+
+        const findManyCall = (mockPrisma.locationSuggestion.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([
+          { confidence: 'desc' },
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ]);
+      });
+
+      it('sortBy=confidence, sortOrder=asc -> orderBy direction flips, still no nulls key anywhere', async () => {
+        (mockPrisma.locationSuggestion.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+
+        await service.listSuggestions(
+          makeQuery({ sortBy: 'confidence', sortOrder: 'asc' }),
+          USER_ID,
+          PERMS,
+        );
+
+        const findManyCall = (mockPrisma.locationSuggestion.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([
+          { confidence: 'asc' },
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ]);
+        // Regression guard: confidence and createdAt are both non-null columns
+        // on LocationSuggestion, so the `{ sort, nulls }` object form is not
+        // applicable here and would be a Prisma type error if ever introduced.
+        const flat = JSON.stringify(findManyCall.orderBy);
+        expect(flat).not.toContain('nulls');
+      });
+
+      it('sortBy=createdAt, sortOrder=asc -> orderBy is [{createdAt:asc},{id:asc}]', async () => {
+        (mockPrisma.locationSuggestion.count as jest.Mock).mockResolvedValue(0);
+        (mockPrisma.locationSuggestion.findMany as jest.Mock).mockResolvedValue([]);
+
+        await service.listSuggestions(
+          makeQuery({ sortBy: 'createdAt', sortOrder: 'asc' }),
+          USER_ID,
+          PERMS,
+        );
+
+        const findManyCall = (mockPrisma.locationSuggestion.findMany as jest.Mock).mock.calls[0][0];
+        expect(findManyCall.orderBy).toEqual([{ createdAt: 'asc' }, { id: 'asc' }]);
+      });
+    });
   });
 
   // -------------------------------------------------------------------------

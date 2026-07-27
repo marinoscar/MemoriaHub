@@ -49,6 +49,10 @@ export class LocationSuggestionService {
 
   async listSuggestions(query: LocationSuggestionQueryDto, userId: string, perms: string[]) {
     const { circleId, status, page, pageSize, mediaItemId } = query;
+    // Service specs construct this DTO from a bare object literal (bypassing the
+    // Zod pipe), so the schema defaults may not have been applied at runtime.
+    const by = query.sortBy ?? 'createdAt';
+    const dir = query.sortOrder ?? 'desc';
 
     await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
 
@@ -57,11 +61,18 @@ export class LocationSuggestionService {
       where.mediaItemId = mediaItemId;
     }
 
+    // Both `confidence` and `createdAt` are non-null columns, so the
+    // `{ sort, nulls }` object form is not applicable here.
+    const orderBy: Prisma.LocationSuggestionOrderByWithRelationInput[] =
+      by === 'confidence'
+        ? [{ confidence: dir }, { createdAt: 'desc' }, { id: 'desc' }]
+        : [{ createdAt: dir }, { id: dir }];
+
     const [total, suggestions] = await Promise.all([
       this.prisma.locationSuggestion.count({ where }),
       this.prisma.locationSuggestion.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {

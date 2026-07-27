@@ -188,6 +188,12 @@ If the CLIP model is degraded (§4.3) and a group was linked purely via Tier 2 (
 
 **This is what removed the 500-group cap on the threshold bulk-resolve/dismiss endpoints (§9.4a/§9.4b).** Before this change, `confidence` had no dedicated column and could not be filtered on directly in SQL — the endpoints had to load an unordered, unfiltered candidate set (capped at `MAX_THRESHOLD_RESOLVE = 500`) and compute+filter `maxSim` per group in application code. Because that candidate query had no `ORDER BY` and no confidence predicate, a circle with more than 500 pending groups could have every call re-scan the same 500 below-threshold candidates and never reach the eligible ones — a genuine correctness bug, not just a UX cap. With `confidence` persisted and indexed (`(circle_id, status, confidence)`), the threshold filter now runs as a real SQL predicate exactly like bursts already did, and both endpoints were rebuilt on the shared asynchronous review-run model — see [review-runs.md](review-runs.md) for the full architecture and §9.4a/§9.4b below for the endpoint-level detail.
 
+### 3.5.1 `sortBy=confidence` is still an in-memory sort (issue #189 + #190 interaction)
+
+`sortBy=confidence` on `GET /api/media/duplicates` (§9.1) was added by issue #189 while `confidence` was still read-time-only, and it remains an **in-memory** sort after #190 persisted the column. `DuplicateService.listDuplicateGroups` runs its DB query with the normal `capturedAt`/`createdAt`/`id` base ordering, `computeGroupKind` enriches every row in the (kind-filtered) result set with its `rawConfidence`, and only then — over the fully-materialized array, before the in-JS pagination slice — does `Array#sort` apply the requested direction. Sorting before slicing is what makes page N a true global rank instead of a per-page reshuffle. A group with no computable similarity (`rawConfidence === null`) sorts last in both directions, matching `burst_groups.confidence`'s nulls-last treatment, even though the wire-level `confidence` field reports `0` rather than `null` for that case. `sortBy=capturedAt`/`mediaCount` are real columns and stay a DB `orderBy`.
+
+Now that `confidence` is a stored, indexed column, this sort **could** become a DB `orderBy` like the other two. It was deliberately left in memory when #190 merged so the read path's observable behaviour stayed byte-identical to what #189 shipped and tested; converting it (and dropping the materialize-then-sort step) is a clean follow-up, not a known defect.
+
 ---
 
 ## 4. Visual Embedding Model Lifecycle
@@ -412,7 +418,7 @@ All endpoints require JWT Bearer authentication. No new system-level RBAC permis
 List duplicate groups for a circle.
 
 - **Auth:** `media:read` + per-circle `viewer` role.
-- **Query params:** `circleId` (required), `status` (`pending`\|`resolved`\|`dismissed`, default `pending`), `kind` (`exact_variant`\|`edited`\|`similar`, optional filter), `page` (default 1), `pageSize` (default 20, max 100).
+- **Query params:** `circleId` (required), `status` (`pending`\|`resolved`\|`dismissed`, default `pending`), `kind` (`exact_variant`\|`edited`\|`similar`, optional filter), `page` (default 1), `pageSize` (default 20, max 100), `sortBy` (`capturedAt` default \| `confidence` \| `mediaCount`), `sortOrder` (`asc` default \| `desc`).
 - **Response `200`:**
   ```json
   {
@@ -431,7 +437,7 @@ List duplicate groups for a circle.
     "meta": { "total": 8, "page": 1, "pageSize": 20 }
   }
   ```
-  Ordered by `capturedAt ASC, createdAt ASC` (chronological — see §3.4's discussion of immich Discussion #25831). `coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 active members. `kind` filtering is applied in application code after read-time classification (§3.4), so `meta.total` reflects the post-filter count. `confidence` is the read-time tightest-pair CLIP cosine similarity (`maxSim`, §3.5), or `null` if the group was linked hash-only.
+  Ordered by `capturedAt ASC, createdAt ASC, id ASC` by default (chronological — see §3.4's discussion of immich Discussion #25831); `sortBy=confidence`/`mediaCount` and `sortOrder=desc` override this — see §3.5 for why a `confidence` sort is computed in memory over the fully-materialized set rather than pushed into the DB `orderBy`, and why a group with no computable similarity always sorts last regardless of direction. Every ordering carries a trailing `id` tiebreaker so offset pagination cannot repeat or drop a group across pages. `coverThumbnailUrls` contains up to 4 signed thumbnail URLs for the first 4 active members. `kind` filtering is applied in application code after read-time classification (§3.4), so `meta.total` reflects the post-filter count. `confidence` is the read-time tightest-pair CLIP cosine similarity (`maxSim`, §3.5), or `null` if the group was linked hash-only.
 
 ### 9.2 `GET /api/media/duplicates/:id`
 
@@ -581,6 +587,8 @@ The frontend review-queue page (`/duplicates`, `/duplicates/:id`) now exists, fo
 
 Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `dedup.autoResolveThreshold` (§8.1) and adjustable before firing, which call `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a). As of issue #190, confirming either button starts an asynchronous review run and navigates immediately to `/review-runs/:runId` — the shared run-progress page described in [review-runs.md §14](review-runs.md#14-frontend) — rather than resolving groups in-place; the old client-side auto-loop against the `hasMore` flag is gone. The group detail page (`/duplicates/:id`) presents two distinctly-colored actions — "Archive" and "Delete" — in place of an archive-vs-trash toggle, each firing `POST /api/media/duplicates/:id/resolve` with the corresponding `action`. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/duplicates`, which now also exposes the auto-resolve threshold alongside the existing global toggle, threshold sliders, backfill panel, and CLIP model status.
 
+The kind-filter chip row is paired with a `ReviewSortSelect` control (shared with the Bursts and Location Suggestions pages) offering Captured (oldest/newest), Similarity (highest/lowest — `confidence`), and group size, backed by the `sortBy`/`sortOrder` params from §9.1. The selection is mirrored into the URL query string, falls back to the page default on an unrecognized URL value, resets to page 1 and clears the current selection on change, and is sent to the API only when non-default.
+
 A per-circle "Review Insights" page (`/review-insights`, §9.10) shows identified/resolved/dismissed and archived-vs-trashed breakdowns for both burst and duplicate review in one place.
 
 ---
@@ -639,6 +647,7 @@ The scenarios below describe the full coverage this module should have; items al
 - **Backfill — force semantics:** seed items with and without existing `media_visual_embedding` rows; verify `force: false` only enqueues the missing ones and `force: true` enqueues all.
 - **Backfill — 400 when disabled:** verify `POST /api/admin/duplicates/backfill` returns `400` when `features.duplicateDetection` is `false`.
 - **Cascade on hard-delete:** hard-delete a `media_items` row with an embedding; verify the `media_visual_embedding` row is removed via `ON DELETE CASCADE`.
+- **Sorting:** seed groups where some have no computable similarity (degraded/hash-only); call `GET /api/media/duplicates?sortBy=confidence&sortOrder=desc` and verify those groups sort last regardless of direction; verify the in-memory sort applied before the pagination slice produces a stable global rank across pages (not a per-page reshuffle); verify an omitted `sortBy`/`sortOrder` reproduces the pre-existing `capturedAt ASC, createdAt ASC` order exactly.
 
 ### RBAC Tests
 

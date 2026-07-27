@@ -120,6 +120,10 @@ export class BurstService {
 
   async listBurstGroups(query: BurstQueryDto, userId: string, perms: string[]) {
     const { circleId, status, page, pageSize } = query;
+    // Service specs construct this DTO from a bare object literal (bypassing the
+    // Zod pipe), so the schema defaults may not have been applied at runtime.
+    const by = query.sortBy ?? 'capturedAt';
+    const dir = query.sortOrder ?? 'asc';
 
     await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
 
@@ -132,10 +136,28 @@ export class BurstService {
       mediaCount: { gte: minGroupSize },
     };
 
+    // Secondary ordering for the non-default sorts: fall back to today's
+    // chronological order, then id for determinism.
+    const tail = [
+      { capturedAt: { sort: 'asc', nulls: 'last' } },
+      { id: 'asc' },
+    ] as Prisma.BurstGroupOrderByWithRelationInput[];
+
+    // `capturedAt`/`confidence` are nullable (object form OK); `mediaCount` is
+    // non-null (plain direction only). The default path (capturedAt/asc) yields
+    // NULLS LAST, which is already Postgres's default for ASC — so the omitted
+    // -params ordering is unchanged.
+    const orderBy: Prisma.BurstGroupOrderByWithRelationInput[] =
+      by === 'confidence'
+        ? [{ confidence: { sort: dir, nulls: 'last' } }, ...tail]
+        : by === 'mediaCount'
+          ? [{ mediaCount: dir }, ...tail]
+          : [{ capturedAt: { sort: dir, nulls: 'last' } }, { id: dir }];
+
     const [groups, total] = await Promise.all([
       this.prisma.burstGroup.findMany({
         where,
-        orderBy: { capturedAt: 'asc' },
+        orderBy,
         skip,
         take: pageSize,
         select: {

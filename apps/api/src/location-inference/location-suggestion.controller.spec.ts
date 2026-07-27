@@ -55,13 +55,24 @@ describe('LocationSuggestionController', () => {
   });
 
   it('listSuggestions delegates to service.listSuggestions(query, user.id, user.permissions)', async () => {
-    const query = { circleId: 'circle-1', status: 'pending', page: 1, pageSize: 20 } as LocationSuggestionQueryDto;
+    const query = {
+      circleId: 'circle-1',
+      status: 'pending',
+      page: 1,
+      pageSize: 20,
+      sortBy: 'confidence',
+      sortOrder: 'desc',
+    } as LocationSuggestionQueryDto;
     const expected = { items: [], meta: { total: 0, page: 1, pageSize: 20 } };
     mockService.listSuggestions.mockResolvedValue(expected);
 
     const result = await controller.listSuggestions(query, USER);
 
     expect(mockService.listSuggestions).toHaveBeenCalledWith(query, USER.id, USER.permissions);
+    // sortBy/sortOrder must pass through untouched to the service (issue #189).
+    const forwardedQuery = mockService.listSuggestions.mock.calls[0][0];
+    expect(forwardedQuery.sortBy).toBe('confidence');
+    expect(forwardedQuery.sortOrder).toBe('desc');
     expect(result).toBe(expected);
   });
 
