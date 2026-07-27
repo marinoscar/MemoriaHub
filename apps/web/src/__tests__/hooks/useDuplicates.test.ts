@@ -299,16 +299,19 @@ describe('useDuplicateGroups', () => {
       });
     });
 
-    it('bulkResolveByThreshold refetches with the sortBy/sortOrder from the last fetchGroups call', async () => {
+    // Issue #190 replaced the synchronous, capped, auto-looped threshold
+    // actions with a background run. The hook therefore no longer refetches
+    // the list after starting one — there is nothing to show yet, and the
+    // page navigates to /review-runs/:runId instead. These two tests
+    // previously asserted the refetch (and the old resolve-tally response
+    // shape); they now assert the run-start contract and the ABSENCE of a
+    // refetch, which is the behaviour change itself.
+    it('bulkResolveByThreshold starts a run and does not refetch the list', async () => {
       mockListDuplicateGroups.mockResolvedValue(makeListResponse());
       mockBulkResolveDuplicateGroupsByThreshold.mockResolvedValue({
-        resolvedGroups: 1,
-        keptCount: 1,
-        removedCount: 1,
-        action: 'archive',
-        skipped: 0,
-        errors: 0,
-        hasMore: false,
+        runId: 'run-1',
+        status: 'evaluating',
+        matchedCount: 0,
       });
 
       const { result } = renderHook(() => useDuplicateGroups());
@@ -322,8 +325,9 @@ describe('useDuplicateGroups', () => {
       });
       mockListDuplicateGroups.mockClear();
 
+      let started: Awaited<ReturnType<typeof result.current.bulkResolveByThreshold>> | undefined;
       await act(async () => {
-        await result.current.bulkResolveByThreshold(60, 'archive');
+        started = await result.current.bulkResolveByThreshold(60, 'archive');
       });
 
       expect(mockBulkResolveDuplicateGroupsByThreshold).toHaveBeenCalledWith({
@@ -331,20 +335,16 @@ describe('useDuplicateGroups', () => {
         threshold: 60,
         action: 'archive',
       });
-      expect(mockListDuplicateGroups).toHaveBeenCalledWith({
-        circleId: 'circle-1',
-        sortBy: 'mediaCount',
-        sortOrder: 'asc',
-      });
+      expect(started).toEqual({ runId: 'run-1', status: 'evaluating', matchedCount: 0 });
+      expect(mockListDuplicateGroups).not.toHaveBeenCalled();
     });
 
-    it('dismissByThreshold refetches with the sortBy/sortOrder from the last fetchGroups call', async () => {
+    it('dismissByThreshold starts a run and does not refetch the list', async () => {
       mockListDuplicateGroups.mockResolvedValue(makeListResponse());
       mockBulkDismissDuplicateGroupsByThreshold.mockResolvedValue({
-        dismissedGroups: 1,
-        ungroupedCount: 2,
-        skipped: 0,
-        errors: 0,
+        runId: 'run-2',
+        status: 'evaluating',
+        matchedCount: 0,
       });
 
       const { result } = renderHook(() => useDuplicateGroups());
@@ -358,19 +358,17 @@ describe('useDuplicateGroups', () => {
       });
       mockListDuplicateGroups.mockClear();
 
+      let started: Awaited<ReturnType<typeof result.current.dismissByThreshold>> | undefined;
       await act(async () => {
-        await result.current.dismissByThreshold(40);
+        started = await result.current.dismissByThreshold(40);
       });
 
       expect(mockBulkDismissDuplicateGroupsByThreshold).toHaveBeenCalledWith({
         circleId: 'circle-1',
         threshold: 40,
       });
-      expect(mockListDuplicateGroups).toHaveBeenCalledWith({
-        circleId: 'circle-1',
-        sortBy: 'confidence',
-        sortOrder: 'asc',
-      });
+      expect(started).toEqual({ runId: 'run-2', status: 'evaluating', matchedCount: 0 });
+      expect(mockListDuplicateGroups).not.toHaveBeenCalled();
     });
 
     it('refetches WITHOUT sortBy/sortOrder when the last fetchGroups call had no sort override (default view)', async () => {

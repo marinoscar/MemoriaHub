@@ -1,14 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box,
   Typography,
   Button,
   Chip,
   CircularProgress,
-  LinearProgress,
   Alert,
-  AlertTitle,
-  Grid,
   Card,
   CardContent,
   Snackbar,
@@ -26,63 +23,33 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useTrashEmptyRun } from '../../hooks/useTrashEmptyRun';
 import { useTrashEmptyRunItems } from '../../hooks/useTrashEmptyRunItems';
+import { useRunPolling } from '../../hooks/useRunPolling';
 import { cancelTrashEmptyRun } from '../../services/trashEmptyRuns';
-import { formatCount, formatRelativeTime } from '../../utils/workflowFormat';
-import type {
-  TrashEmptyRunDetail,
-  TrashEmptyRunStatus,
-} from '../../types/trashEmptyRuns';
+import RunProgressPanel from '../../components/runs/RunProgressPanel';
+import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
+import {
+  formatCaptureDate,
+  formatCount,
+  formatRelativeTime,
+  isTerminalRunStatus,
+  runStatusColor,
+  runStatusLabel,
+} from '../../utils/runFormat';
+import type { TrashEmptyRunDetail } from '../../types/trashEmptyRuns';
 
-const POLL_MS = 2000;
 const ITEMS_PAGE_SIZE = 24;
 
 // ---------------------------------------------------------------------------
-// Local status helpers (trash-empty has a smaller status set than workflows).
+// Empty-trash run page.
+//
+// Polling, progress, counters and the cancel affordance all come from the
+// shared run pieces (issue #190) — `useRunPolling` + `RunProgressPanel` —
+// so this page only owns the empty-trash wording, its circle_admin cancel
+// gate, and the failed-item table.
 // ---------------------------------------------------------------------------
 
-const TERMINAL_STATUSES: ReadonlySet<TrashEmptyRunStatus> = new Set([
-  'completed',
-  'completed_with_errors',
-  'failed',
-  'cancelled',
-]);
-
-function isTerminal(status: TrashEmptyRunStatus): boolean {
-  return TERMINAL_STATUSES.has(status);
-}
-
-function statusColor(
-  status: TrashEmptyRunStatus,
-): 'default' | 'info' | 'success' | 'warning' | 'error' {
-  switch (status) {
-    case 'evaluating':
-    case 'running':
-      return 'info';
-    case 'completed':
-      return 'success';
-    case 'completed_with_errors':
-      return 'warning';
-    case 'failed':
-      return 'error';
-    case 'cancelled':
-      return 'default';
-    default:
-      return 'default';
-  }
-}
-
-function statusLabel(status: TrashEmptyRunStatus): string {
-  const words = status.split('_');
-  return words
-    .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
-    .join(' ');
-}
-
 /** Severity + message for a terminal run status. */
-function terminalSummary(run: TrashEmptyRunDetail): {
-  severity: 'success' | 'warning' | 'error' | 'info';
-  message: string;
-} {
+function terminalSummary(run: TrashEmptyRunDetail): RunTerminalSummary {
   switch (run.status) {
     case 'completed':
       return {
@@ -108,50 +75,6 @@ function terminalSummary(run: TrashEmptyRunDetail): {
   }
 }
 
-/** Safe short date for a capture timestamp. Never throws. */
-function formatCaptureDate(iso: string | null): string {
-  if (!iso) return 'No date';
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return 'No date';
-    return d.toLocaleDateString();
-  } catch {
-    return 'No date';
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Compact counts summary (shared by running/terminal states)
-// ---------------------------------------------------------------------------
-
-function RunCountsSummary({ run }: { run: TrashEmptyRunDetail }) {
-  const stats: { label: string; value: number; color?: string }[] = [
-    { label: 'Total', value: run.matchedCount },
-    { label: 'Processed', value: run.processedCount },
-    { label: 'Deleted', value: run.succeededCount, color: 'success.main' },
-    { label: 'Failed', value: run.failedCount, color: 'error.main' },
-    { label: 'Skipped', value: run.skippedCount },
-  ];
-  return (
-    <Grid container spacing={2} sx={{ mb: 2 }}>
-      {stats.map((s) => (
-        <Grid key={s.label} size={{ xs: 6, sm: 4, md: 2.4 }}>
-          <Card variant="outlined">
-            <CardContent sx={{ textAlign: 'center', py: 2 }}>
-              <Typography variant="h5" sx={{ color: s.color }}>
-                {formatCount(s.value)}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {s.label}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      ))}
-    </Grid>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -174,8 +97,9 @@ export default function TrashEmptyRunPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
+  // Emptying the trash is destructive and irreversible, so cancelling it is
+  // gated at circle_admin — stricter than the collaborator gate the review and
+  // workflow runs use.
   const isCircleAdmin = activeCircleRole === 'circle_admin';
 
   // Initial load.
@@ -183,30 +107,11 @@ export default function TrashEmptyRunPage() {
     if (runId) void fetchRun(runId);
   }, [runId, fetchRun]);
 
-  // Poll every 2s while the run is non-terminal; self-stop once terminal.
-  useEffect(() => {
-    if (!runId || !run) return;
-    if (isTerminal(run.status)) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      return;
-    }
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => {
-      void fetchRun(runId);
-    }, POLL_MS);
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [runId, run, fetchRun]);
+  // Live progress while the run is non-terminal.
+  useRunPolling({ runId, status: run?.status, onPoll: fetchRun });
 
   // Load the failed-item table once the run is terminal and has failures.
-  const terminal = run ? isTerminal(run.status) : false;
+  const terminal = run ? isTerminalRunStatus(run.status) : false;
   useEffect(() => {
     if (!runId || !run || !terminal || run.failedCount <= 0) return;
     void fetchItems(runId, {
@@ -254,8 +159,6 @@ export default function TrashEmptyRunPage() {
     );
   }
 
-  const showCancel = !terminal && isCircleAdmin;
-
   return (
     <Box sx={{ p: { xs: 2, md: 3 } }}>
       {/* Header */}
@@ -272,7 +175,11 @@ export default function TrashEmptyRunPage() {
           <Typography variant="h5" component="h1">
             Empty Trash
           </Typography>
-          <Chip label={statusLabel(run.status)} color={statusColor(run.status)} size="small" />
+          <Chip
+            label={runStatusLabel(run.status)}
+            color={runStatusColor(run.status)}
+            size="small"
+          />
           <Typography variant="body2" color="text.secondary">
             {formatRelativeTime(run.createdAt)}
           </Typography>
@@ -285,162 +192,89 @@ export default function TrashEmptyRunPage() {
         </Alert>
       )}
 
-      {/* Prominent total — the key user ask: how many items are in this run. */}
-      <Card variant="outlined" sx={{ mb: 2 }}>
-        <CardContent sx={{ textAlign: 'center', py: 3 }}>
-          <Typography variant="h3" component="p">
-            {formatCount(run.matchedCount)}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {run.matchedCount === 1 ? 'item in this run' : 'items in this run'}
-          </Typography>
-        </CardContent>
-      </Card>
-
-      {/* Evaluating */}
-      {run.status === 'evaluating' && (
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="subtitle1" gutterBottom>
-              Preparing…
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Finding every trashed item in this circle. This can take a moment for a
-              large trash bin.
-            </Typography>
-            <LinearProgress />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Running */}
-      {run.status === 'running' && (
-        <Box>
-          <Card variant="outlined" sx={{ mb: 2 }}>
+      <RunProgressPanel
+        run={run}
+        subjectNoun="item"
+        countLabels={{ succeeded: 'Deleted' }}
+        evaluatingDescription="Finding every trashed item in this circle. This can take a moment for a large trash bin."
+        runningTitle="Deleting items…"
+        terminalSummary={terminalSummary(run)}
+        canCancel={isCircleAdmin}
+        onCancel={() => void handleCancel()}
+        isCancelling={isCancelling}
+      >
+        {terminal && run.failedCount > 0 && (
+          <Card variant="outlined" sx={{ mt: 1, mb: 2 }}>
             <CardContent>
-              <Typography variant="subtitle1" gutterBottom>
-                Deleting items…
+              <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+                Failed items ({formatCount(run.failedCount)})
               </Typography>
-              <LinearProgress
-                variant={run.matchedCount > 0 ? 'determinate' : 'indeterminate'}
-                value={
-                  run.matchedCount > 0
-                    ? Math.min(100, (run.processedCount / run.matchedCount) * 100)
-                    : undefined
-                }
-                sx={{ height: 8, borderRadius: 1, mb: 1 }}
-              />
-              <Typography variant="body2" color="text.secondary">
-                {formatCount(run.processedCount)} of {formatCount(run.matchedCount)} items
-                processed
-              </Typography>
+              {itemsLoading && items.length === 0 ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                  <CircularProgress size={28} />
+                </Box>
+              ) : (
+                <>
+                  <TableContainer sx={{ overflowX: 'auto' }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>File</TableCell>
+                          <TableCell>Error</TableCell>
+                          <TableCell align="right">Item</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {items.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell sx={{ maxWidth: 220 }}>
+                              <Typography
+                                variant="body2"
+                                noWrap
+                                title={item.media?.filename ?? undefined}
+                              >
+                                {item.media?.filename ?? 'Untitled'}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {formatCaptureDate(item.media?.capturedAt ?? null)}
+                              </Typography>
+                            </TableCell>
+                            <TableCell sx={{ maxWidth: 360 }}>
+                              <Typography variant="body2" color="error">
+                                {item.error ?? 'Unknown error'}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Link
+                                component="button"
+                                type="button"
+                                variant="body2"
+                                onClick={() => navigate(`/media?item=${item.mediaItemId}`)}
+                              >
+                                View
+                              </Link>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  {itemsMeta && itemsMeta.totalPages > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                      <Pagination
+                        count={itemsMeta.totalPages}
+                        page={failedPage}
+                        onChange={(_, p) => setFailedPage(p)}
+                        size="small"
+                      />
+                    </Box>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
-          <RunCountsSummary run={run} />
-        </Box>
-      )}
-
-      {/* Terminal */}
-      {terminal && (
-        <Box>
-          {(() => {
-            const summary = terminalSummary(run);
-            return (
-              <Alert severity={summary.severity} sx={{ mb: 2 }}>
-                <AlertTitle>{statusLabel(run.status)}</AlertTitle>
-                {summary.message}
-              </Alert>
-            );
-          })()}
-
-          <RunCountsSummary run={run} />
-
-          {run.failedCount > 0 && (
-            <Card variant="outlined" sx={{ mt: 1 }}>
-              <CardContent>
-                <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
-                  Failed items ({formatCount(run.failedCount)})
-                </Typography>
-                {itemsLoading && items.length === 0 ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                    <CircularProgress size={28} />
-                  </Box>
-                ) : (
-                  <>
-                    <TableContainer sx={{ overflowX: 'auto' }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>File</TableCell>
-                            <TableCell>Error</TableCell>
-                            <TableCell align="right">Item</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {items.map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell sx={{ maxWidth: 220 }}>
-                                <Typography
-                                  variant="body2"
-                                  noWrap
-                                  title={item.media?.filename ?? undefined}
-                                >
-                                  {item.media?.filename ?? 'Untitled'}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {formatCaptureDate(item.media?.capturedAt ?? null)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell sx={{ maxWidth: 360 }}>
-                                <Typography variant="body2" color="error">
-                                  {item.error ?? 'Unknown error'}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Link
-                                  component="button"
-                                  type="button"
-                                  variant="body2"
-                                  onClick={() => navigate(`/media?item=${item.mediaItemId}`)}
-                                >
-                                  View
-                                </Link>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                    {itemsMeta && itemsMeta.totalPages > 1 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                        <Pagination
-                          count={itemsMeta.totalPages}
-                          page={failedPage}
-                          onChange={(_, p) => setFailedPage(p)}
-                          size="small"
-                        />
-                      </Box>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          )}
-        </Box>
-      )}
-
-      {/* Cancel (non-terminal, circle_admin only) */}
-      {showCancel && (
-        <Button
-          variant="outlined"
-          color="error"
-          disabled={isCancelling}
-          onClick={() => void handleCancel()}
-          sx={{ minHeight: 44, mt: 1 }}
-        >
-          {isCancelling ? <CircularProgress size={18} /> : 'Cancel run'}
-        </Button>
-      )}
+        )}
+      </RunProgressPanel>
 
       {/* Feedback */}
       <Snackbar

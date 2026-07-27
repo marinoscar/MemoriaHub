@@ -1,0 +1,44 @@
+-- Persist duplicate-group confidence (issue #190).
+--
+-- DuplicateService.computeGroupKind has always derived maxSim (the
+-- tightest-pair CLIP cosine similarity across a group's members) at READ
+-- time via a $queryRaw scan over media_visual_embedding. That works for the
+-- existing threshold endpoints only because they cap candidates at
+-- MAX_THRESHOLD_RESOLVE=500 and re-derive maxSim per candidate on every
+-- call — with no ORDER BY and no SQL-level confidence filter, a circle with
+-- more than 500 pending groups can have its auto-loop re-scan the same 500
+-- below-threshold candidates forever and never reach eligible ones.
+--
+-- This migration adds a persisted confidence column mirroring
+-- BurstGroup.confidence, so:
+--   - the threshold filter (resolve/dismiss-by-threshold, and the shared
+--     review-run evaluation strategy landing in a follow-up migration) runs
+--     as a real SQL predicate instead of an in-app read-time computation
+--   - the 500-group cap can be dropped entirely
+--   - a real ORDER BY confidence becomes possible (issue #189)
+--
+-- Write path: DuplicateDetectionService.recomputeGroupMeta already reloads
+-- members and re-derives group metadata on every membership mutation
+-- (grouping, evictFromDuplicateGroups, evictExistingBurstOverlaps,
+-- resolve/dismiss) — this becomes the single writer of confidence, so the
+-- column cannot silently drift out of sync with membership.
+-- DuplicateService.listDuplicateGroups / getDuplicateGroup self-heal
+-- pre-existing NULL rows opportunistically at read time (mirroring their
+-- existing suggestedBestItemId read-time backfill), and a
+-- duplicate_confidence_backfill enrichment job closes the historical gap in
+-- one pass for rows nobody happens to read.
+--
+-- A group whose maxSim is genuinely uncomputable (fewer than two members
+-- carry a visual embedding) keeps confidence = NULL and is excluded from
+-- threshold matching in both directions, matching today's behavior.
+--
+-- No backfill is run here — this migration only adds the column. Existing
+-- rows start NULL and are filled by the read-time self-heal and/or the
+-- admin-triggered backfill job (implemented in the backend module, not this
+-- migration).
+
+-- AlterTable
+ALTER TABLE "duplicate_groups" ADD COLUMN "confidence" DOUBLE PRECISION;
+
+-- CreateIndex
+CREATE INDEX "duplicate_groups_circle_id_status_confidence_idx" ON "duplicate_groups"("circle_id", "status", "confidence");

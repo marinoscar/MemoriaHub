@@ -22,6 +22,7 @@ import { systemModeEligibleTypes } from './enrichment-job.worker';
 import { BurstDetectionHandler } from '../burst/burst-detection.handler';
 import { DuplicateDetectionHandler } from '../dedup/duplicate-detection.handler';
 import { DuplicateDetectionBatchHandler } from '../dedup/duplicate-detection-batch.handler';
+import { DuplicateConfidenceBackfillHandler } from '../dedup/duplicate-confidence-backfill.handler';
 import { JobHistoryPurgeHandler } from './job-history-purge.handler';
 import { FaceAutoArchiveSweepHandler } from '../face/face-auto-archive-sweep.handler';
 import { FaceDetectionHandler } from '../face/face-detection.handler';
@@ -40,6 +41,9 @@ import { TrashEmptyEvaluateHandler } from '../media/trash-empty/trash-empty-eval
 import { TrashEmptyExecuteBatchHandler } from '../media/trash-empty/trash-empty-execute-batch.handler';
 import { LocationSuggestionRunEvaluateHandler } from '../location-inference/runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from '../location-inference/runs/location-suggestion-run-execute-batch.handler';
+import { ReviewRunEvaluateHandler } from '../review-runs/review-run-evaluate.handler';
+import { ReviewRunExecuteBatchHandler } from '../review-runs/review-run-execute-batch.handler';
+import { ReviewRunHistoryPurgeHandler } from '../review-runs/review-run-history-purge.handler';
 import { WorkflowEvaluateItemHandler } from '../workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowEvaluateHandler } from '../workflows/runs/workflow-evaluate.handler';
 import { WorkflowExecuteBatchHandler } from '../workflows/runs/workflow-execute-batch.handler';
@@ -50,6 +54,7 @@ const ALL_HANDLER_CLASSES = [
   BurstDetectionHandler,
   DuplicateDetectionHandler,
   DuplicateDetectionBatchHandler,
+  DuplicateConfidenceBackfillHandler,
   JobHistoryPurgeHandler,
   FaceAutoArchiveSweepHandler,
   FaceDetectionHandler,
@@ -68,6 +73,9 @@ const ALL_HANDLER_CLASSES = [
   TrashEmptyExecuteBatchHandler,
   LocationSuggestionRunEvaluateHandler,
   LocationSuggestionRunExecuteBatchHandler,
+  ReviewRunEvaluateHandler,
+  ReviewRunExecuteBatchHandler,
+  ReviewRunHistoryPurgeHandler,
   WorkflowEvaluateItemHandler,
   WorkflowEvaluateHandler,
   WorkflowExecuteBatchHandler,
@@ -80,12 +88,16 @@ const ALL_HANDLER_CLASSES = [
  */
 const DOCUMENTED_SERVER_ONLY_TYPES = [
   'burst_detection',
+  'duplicate_confidence_backfill',
   'duplicate_detection_batch',
   'face_auto_archive_sweep',
   'job_history_purge',
   'location_inference',
   'location_suggestion_run_evaluate',
   'location_suggestion_run_execute_batch',
+  'review_run_evaluate',
+  'review_run_execute_batch',
+  'review_run_history_purge',
   'storage_insights',
   'storage_migration',
   'trash_empty_evaluate',
@@ -204,6 +216,41 @@ describe('server-only type derivation (drift guard)', () => {
       expect(systemModeEligibleTypes(registry, {})).toContain(
         'location_suggestion_run_execute_batch',
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Shared review runs (issue #190): the generic evaluate / execute-batch pair
+  // that now backs the burst, duplicate AND location-suggestion bulk actions.
+  // Both omit the node-result pair — applying a resolve/dismiss/accept writes
+  // authoritative server-side state (archivedAt/deletedAt, group status,
+  // MediaItem coordinates) that a distributed worker node never touches — so
+  // both fall out of serverOnlyTypes() naturally, with no explicit pinning.
+  // The two location_suggestion_run_* entries above are now deprecated shims
+  // delegating to these; they stay server-only for the same reason.
+  // -------------------------------------------------------------------------
+  describe('review_run_evaluate / review_run_execute_batch (issue #190)', () => {
+    it('review_run_evaluate is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('review_run_evaluate');
+      expect(systemModeEligibleTypes(registry, {})).toContain('review_run_evaluate');
+    });
+
+    it('review_run_execute_batch is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('review_run_execute_batch');
+      expect(systemModeEligibleTypes(registry, {})).toContain('review_run_execute_batch');
+    });
+
+    it('review_run_history_purge is server-only and system-mode eligible', () => {
+      // Nightly retention + stale-run sweep over review_runs / trash_empty_runs
+      // — a pure SQL sweep with no per-item unit of work for a node, same
+      // precedent as job_history_purge / workflow_history_purge.
+      expect(registry.serverOnlyTypes()).toContain('review_run_history_purge');
+      expect(systemModeEligibleTypes(registry, {})).toContain('review_run_history_purge');
+    });
+
+    it('duplicate_confidence_backfill is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('duplicate_confidence_backfill');
+      expect(systemModeEligibleTypes(registry, {})).toContain('duplicate_confidence_backfill');
     });
   });
 });

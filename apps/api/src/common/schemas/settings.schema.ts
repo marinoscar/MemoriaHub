@@ -176,6 +176,12 @@ export const systemSettingsSchema = z.object({
     }).default({ retentionDays: 30, purgeEnabled: true }),
     stuckThresholdMinutes: z.number().int().min(1).max(120).default(3),
   }).optional().default({ history: { retentionDays: 30, purgeEnabled: true }, stuckThresholdMinutes: 3 }),
+  // Review-queue run history (issue #190). Retention for the shared
+  // review_runs table AND trash_empty_runs — one setting retires both tables'
+  // history through the single nightly review_run_history_purge job.
+  reviewRuns: z.object({
+    runHistoryRetentionDays: z.number().int().min(1).max(365).default(30),
+  }).optional().default({ runHistoryRetentionDays: 30 }),
   pictureEnhancement: z.object({
     defaultQuality: z.enum(['low', 'medium', 'high']).default('high'),
     defaultStrength: z.enum(['subtle', 'balanced', 'strong']).default('balanced'),
@@ -330,6 +336,9 @@ export const systemSettingsPatchSchema = z.object({
       purgeEnabled: z.boolean().optional(),
     }).optional(),
     stuckThresholdMinutes: z.number().int().min(1).max(120).optional(),
+  }).optional(),
+  reviewRuns: z.object({
+    runHistoryRetentionDays: z.number().int().min(1).max(365).optional(),
   }).optional(),
   pictureEnhancement: z.object({
     defaultQuality: z.enum(['low', 'medium', 'high']).optional(),

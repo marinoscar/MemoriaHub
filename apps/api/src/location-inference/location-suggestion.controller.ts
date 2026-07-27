@@ -10,9 +10,9 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { LocationSuggestionRunAction } from '@prisma/client';
+import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { LocationSuggestionService } from './location-suggestion.service';
-import { LocationSuggestionRunService } from './runs/location-suggestion-run.service';
+import { ReviewRunService } from '../review-runs/review-run.service';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -27,7 +27,7 @@ import { BulkResolveLocationSuggestionsDto } from './dto/bulk-resolve-location-s
 export class LocationSuggestionController {
   constructor(
     private readonly locationSuggestionService: LocationSuggestionService,
-    private readonly runService: LocationSuggestionRunService,
+    private readonly runService: ReviewRunService,
   ) {}
 
   /**
@@ -70,13 +70,14 @@ export class LocationSuggestionController {
     @Body() dto: BulkResolveLocationSuggestionsDto,
     @CurrentUser() user: RequestUser,
   ) {
-    const run = await this.runService.createRun(
-      dto.circleId,
-      LocationSuggestionRunAction.accept,
-      dto.threshold,
-      user.id,
-      user.permissions,
-    );
+    const run = await this.runService.createRun({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.location_suggestion,
+      action: ReviewRunAction.accept,
+      threshold: dto.threshold,
+      userId: user.id,
+      perms: user.permissions,
+    });
     return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
   }
 
@@ -95,13 +96,14 @@ export class LocationSuggestionController {
     @Body() dto: BulkResolveLocationSuggestionsDto,
     @CurrentUser() user: RequestUser,
   ) {
-    const run = await this.runService.createRun(
-      dto.circleId,
-      LocationSuggestionRunAction.reject,
-      dto.threshold,
-      user.id,
-      user.permissions,
-    );
+    const run = await this.runService.createRun({
+      circleId: dto.circleId,
+      subjectType: ReviewRunSubject.location_suggestion,
+      action: ReviewRunAction.reject,
+      threshold: dto.threshold,
+      userId: user.id,
+      perms: user.permissions,
+    });
     return { data: { runId: run.id, status: run.status, matchedCount: run.matchedCount } };
   }
 

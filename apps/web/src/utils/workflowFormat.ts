@@ -1,13 +1,28 @@
 import type {
   WorkflowTriggerType,
-  WorkflowRunStatus,
   WorkflowActionInstance,
   WorkflowDefinition,
 } from '../types/workflows';
 
 // ---------------------------------------------------------------------------
 // Pure formatting helpers for the Workflows UI. No React, never throw.
+//
+// The run-status/count/relative-time helpers moved to `utils/runFormat.ts`
+// (issue #190) so every async-run surface shares one implementation. They are
+// re-exported here so existing workflow imports keep working unchanged —
+// `WorkflowRunStatus` is a strict subset of `RunStatus`, so the generalised
+// signatures accept every workflow status.
 // ---------------------------------------------------------------------------
+
+export {
+  runStatusColor,
+  runStatusLabel,
+  isTerminalRunStatus,
+  formatCount,
+  formatRelativeTime,
+  formatCaptureDate,
+  runProgressPercent,
+} from './runFormat';
 
 /** Human label for a workflow trigger type. */
 export function triggerLabel(trigger: WorkflowTriggerType): string {
@@ -96,91 +111,9 @@ export function cronToText(expr: string | null): string {
   }
 }
 
-/**
- * Format an ISO timestamp as a coarse relative time ("just now", "N minutes
- * ago", …), falling back to a localized date for anything older than a day.
- * Returns '' for null. Defensive — never throws.
- */
-export function formatRelativeTime(iso: string | null): string {
-  if (!iso) return '';
-  try {
-    const then = new Date(iso).getTime();
-    if (Number.isNaN(then)) return '';
-    const diffMs = Date.now() - then;
-
-    if (diffMs < 0) return 'just now';
-
-    const minutes = Math.floor(diffMs / 60_000);
-    if (minutes < 1) return 'just now';
-    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-
-    const days = Math.floor(hours / 24);
-    if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
-
-    return new Date(iso).toLocaleDateString();
-  } catch {
-    return '';
-  }
-}
-
-/** MUI color token for a run-status chip. */
-export function runStatusColor(
-  status: WorkflowRunStatus,
-): 'default' | 'info' | 'success' | 'warning' | 'error' {
-  switch (status) {
-    case 'evaluating':
-    case 'running':
-      return 'info';
-    case 'awaiting_approval':
-      return 'warning';
-    case 'completed':
-      return 'success';
-    case 'completed_with_errors':
-      return 'warning';
-    case 'failed':
-      return 'error';
-    case 'cancelled':
-    case 'expired':
-      return 'default';
-    default:
-      return 'default';
-  }
-}
-
-/** Title-cased, space-separated label for a run status. */
-export function runStatusLabel(status: WorkflowRunStatus): string {
-  const words = status.split('_');
-  return words
-    .map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w))
-    .join(' ');
-}
-
 // ---------------------------------------------------------------------------
 // Run-page helpers
 // ---------------------------------------------------------------------------
-
-/** The set of run statuses that are final (no more polling). */
-const TERMINAL_RUN_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set([
-  'completed',
-  'completed_with_errors',
-  'failed',
-  'cancelled',
-  'expired',
-]);
-
-/** True when the run has reached a final state and polling can stop. */
-export function isTerminalRunStatus(status: WorkflowRunStatus): boolean {
-  return TERMINAL_RUN_STATUSES.has(status);
-}
-
-/** Format an integer with locale thousands separators, e.g. 2481 → "2,481". */
-export function formatCount(n: number): string {
-  if (!Number.isFinite(n)) return '0';
-  return Math.round(n).toLocaleString();
-}
 
 /**
  * The literal string the user must type to confirm a hard-delete run. Must

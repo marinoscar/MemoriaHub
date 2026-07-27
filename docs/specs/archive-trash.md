@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.2 |
+| **Version** | 1.3 |
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
@@ -356,7 +356,7 @@ Reads use `media:read` + the circle's `viewer` role; starting and cancelling a r
 
 ### 10.7 Frontend — progress page
 
-Starting an empty-trash run from the Trash page (`TrashPage.tsx`) navigates to `/trash/runs/:runId` (`TrashEmptyRunPage.tsx`), which polls `GET /api/trash-empty-runs/:id` every 2 seconds while the run is non-terminal (`evaluating` or `running`) and stops polling once it reaches a terminal status. The page shows:
+Starting an empty-trash run from the Trash page (`TrashPage.tsx`) navigates to `/trash/runs/:runId` (`TrashEmptyRunPage.tsx`), which polls `GET /api/trash-empty-runs/:id` every 2 seconds while the run is non-terminal (`evaluating` or `running`) and stops polling once it reaches a terminal status. As of issue #190, `TrashEmptyRunPage.tsx` is built on the same shared `useRunPolling` hook and `RunProgressPanel` component that now also back Media Workflow Automation's run page and the unified burst/duplicate/location-suggestion `ReviewRunPage` — see [review-runs.md §14](review-runs.md#14-frontend). Only the polling target (`/api/trash-empty-runs/:id`, not `/api/review-runs/:id` — Empty Trash was not folded into the `review_runs` table itself, only into its retention sweep, §10.9 below) and the page's own RBAC/routing chrome stay local to this feature. The page shows:
 - A prominent total (`matchedCount`) — "how many items are in this run", the detail users most wanted visibility into.
 - An indeterminate progress bar while `evaluating` ("Preparing…", finding every trashed item), and a determinate bar (`processedCount / matchedCount`) while `running`.
 - A terminal summary banner (success/warning/error) plus a count-tile row (Total/Processed/Deleted/Failed/Skipped).
@@ -368,6 +368,10 @@ Starting an empty-trash run from the Trash page (`TrashPage.tsx`) navigates to `
 If `trash_empty_evaluate` itself throws (e.g. a transient DB error) partway through paginating, the run is left in `evaluating` and the job retries through the normal enrichment backoff path — `createMany({ skipDuplicates: true })` makes re-materializing the matched set idempotent on retry. Only once the job has exhausted `ENRICHMENT_MAX_ATTEMPTS` does the handler mark the run terminally `failed` (with `lastError` set) before rethrowing so the job itself also fails.
 
 If a `trash_empty_execute_batch` job crashes mid-batch after claiming rows (flipping them to `deleted`) but before calling `purgeMediaItemsBatched`, a retry of that job re-reads every row already at `status='deleted'` for its `itemIds` (not just the ones it newly claimed this attempt) and re-attempts the purge — safe because `purgeMediaItemsBatched` is a no-op for IDs whose `MediaItem` row is already gone.
+
+### 10.9 Retention (issue #190)
+
+`trash_empty_runs`/`trash_empty_run_items` had no automatic purge of their own prior to issue #190 — a circle's run history accumulated forever. The new global `review_run_history_purge` job (introduced for the shared `review_runs` table — see [review-runs.md §10](review-runs.md#10-retention-and-stale-run-sweep)) sweeps **both** `review_runs` and `trash_empty_runs` in the same nightly pass: terminal runs older than `reviewRuns.runHistoryRetentionDays` (default 30 days) are hard-deleted in batches (items cascade with their run), and a run stuck non-terminal for more than a fixed 24 hours is marked `failed` so it stops permanently blocking the per-circle "one active empty-trash run at a time" guard (§10.5). `trash_empty_runs` itself was **not** folded into the `review_runs` table — it keeps its own dedicated schema and job types (§10.2, §10.3); only its retention/stale-sweep housekeeping is now shared.
 
 ---
 
@@ -423,3 +427,4 @@ The Archive/Trash gallery (`MediaGallery`) and item detail drawer (`MediaDetailD
 | 1.0 | June 2026 | AI Assistant | Initial specification matching shipped implementation |
 | 1.1 | July 2026 | AI Assistant | Document Archive/Trash UI origin badge/link for items retaining a resolved (not dismissed) burst/duplicate group id (§11, issue #163) |
 | 1.2 | July 2026 | AI Assistant | Document the async run-based "Empty Trash at Scale" rebuild (§10, issue #165): `trash_empty_runs`/`trash_empty_run_items` data model, `trash_empty_evaluate`/`trash_empty_execute_batch` server-only job types, the shared batched `purgeMediaItemsBatched` purge path, per-circle concurrency guard, run inspection/cancel API, and the progress-polling UI |
+| 1.3 | July 2026 | AI Assistant | Issue #190: `TrashEmptyRunPage.tsx` (§10.7) now shares its polling/progress-panel implementation with the other run types via `useRunPolling`/`RunProgressPanel` (see [review-runs.md](review-runs.md)); added §10.9 documenting that `trash_empty_runs` gained automatic retention/stale-run-sweep coverage for the first time, via the new shared `review_run_history_purge` job — `trash_empty_runs` keeps its own dedicated tables and job types, only its housekeeping is now shared |

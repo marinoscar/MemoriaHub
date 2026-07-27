@@ -12,7 +12,7 @@ import { AdminLocationInferenceController } from './admin-location-inference.con
 import { LocationInferenceService } from './location-inference.service';
 import { LocationInferenceHandler } from './location-inference.handler';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service';
-import { LocationSuggestionRunService } from './runs/location-suggestion-run.service';
+import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { LocationSuggestionRunsController } from './runs/location-suggestion-runs.controller';
 import { LocationSuggestionRunEvaluateHandler } from './runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-suggestion-run-execute-batch.handler';
@@ -25,9 +25,24 @@ import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-sugges
  *
  * Also imports MediaModule for MediaThumbnailService (batched thumbnail
  * signing). This introduces no cycle: MediaModule never imports this module.
+ *
+ * Since issue #190 the bulk accept/reject run lifecycle lives in
+ * ReviewRunsModule (shared with the burst and duplicate review queues); the two
+ * handler classes kept here are deprecated shims that drain jobs queued under
+ * the old `location_suggestion_run_*` types. ReviewRunsModule does not import
+ * this module, so the plain import below is cycle-free.
  */
 @Module({
-  imports: [EnrichmentModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, GeoLocationModule, MediaModule],
+  imports: [
+    EnrichmentModule,
+    StorageProvidersModule,
+    PrismaModule,
+    CirclesModule,
+    SettingsModule,
+    GeoLocationModule,
+    MediaModule,
+    ReviewRunsModule,
+  ],
   controllers: [
     LocationSuggestionController,
     AdminLocationInferenceController,
@@ -38,10 +53,9 @@ import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-sugges
     LocationInferenceHandler,
     LocationInferenceBackfillService,
     LocationSuggestionService,
-    LocationSuggestionRunService,
     LocationSuggestionRunEvaluateHandler,
     LocationSuggestionRunExecuteBatchHandler,
   ],
-  exports: [LocationSuggestionService, LocationSuggestionRunService],
+  exports: [LocationSuggestionService],
 })
 export class LocationInferenceModule {}

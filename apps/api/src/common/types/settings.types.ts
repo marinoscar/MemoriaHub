@@ -153,6 +153,15 @@ export interface SystemSettingsValue {
      */
     stuckThresholdMinutes?: number;
   };
+  /**
+   * Review-queue run history retention (issue #190). Governs the nightly
+   * `review_run_history_purge` sweep over BOTH `review_runs` and
+   * `trash_empty_runs` — neither table had a purge before this setting existed.
+   */
+  reviewRuns?: {
+    /** Days a terminal review/trash-empty run is kept before deletion. */
+    runHistoryRetentionDays: number;
+  };
   pictureEnhancement?: {
     defaultQuality: 'low' | 'medium' | 'high';
     defaultStrength: 'subtle' | 'balanced' | 'strong';
@@ -393,6 +402,9 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       purgeEnabled: true,
     },
     stuckThresholdMinutes: defaultStuckThresholdMinutes(),
+  },
+  reviewRuns: {
+    runHistoryRetentionDays: 30,
   },
   pictureEnhancement: {
     defaultQuality: 'high',

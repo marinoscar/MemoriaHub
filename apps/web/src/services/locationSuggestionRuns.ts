@@ -1,21 +1,17 @@
 import { api } from './api';
-import type {
-  CancelLocationSuggestionRunResponse,
-  CreateLocationSuggestionRunResponse,
-  LocationSuggestionRunDetail,
-  LocationSuggestionRunItemsQueryParams,
-  LocationSuggestionRunItemsResponse,
-} from '../types/locationSuggestionRuns';
+import type { CreateReviewRunResponse } from '../types/reviewRuns';
 
 // ---------------------------------------------------------------------------
-// Location-Suggestion bulk accept/reject at scale — run API client.
+// Location-Suggestion bulk accept/reject — run START endpoints.
 //
-// Two base paths mirror the trash-empty / workflow-runs precedent:
-//   - POST /media/location-suggestions/bulk-accept|bulk-reject (start a run)
-//   - /location-suggestion-runs/:id[/...]                      (detail / items / cancel)
+// These two endpoints now create a REVIEW RUN (issue #190): the old
+// `location_suggestion_runs` table folded into the shared `review_runs` model,
+// preserving run UUIDs. Reading a run, listing its items and cancelling it
+// therefore go through `services/reviewRuns.ts` like every other review queue —
+// this module is only the queue-specific way to START one.
 //
 // `threshold` is an INTEGER 0–100 (confidence percent floor).
-// The `api` client auto-unwraps the `{ data }` envelope, so every return type
+// The `api` client auto-unwraps the `{ data }` envelope, so the return type
 // below is the INNER object.
 // ---------------------------------------------------------------------------
 
@@ -23,51 +19,14 @@ import type {
 export async function startLocationAcceptRun(body: {
   circleId: string;
   threshold: number;
-}): Promise<CreateLocationSuggestionRunResponse> {
-  return api.post<CreateLocationSuggestionRunResponse>(
-    '/media/location-suggestions/bulk-accept',
-    body,
-  );
+}): Promise<CreateReviewRunResponse> {
+  return api.post<CreateReviewRunResponse>('/media/location-suggestions/bulk-accept', body);
 }
 
-/** Start an async REJECT run: reject every pending suggestion at/above `threshold`. */
+/** Start an async REJECT run: reject every pending suggestion BELOW `threshold`. */
 export async function startLocationRejectRun(body: {
   circleId: string;
   threshold: number;
-}): Promise<CreateLocationSuggestionRunResponse> {
-  return api.post<CreateLocationSuggestionRunResponse>(
-    '/media/location-suggestions/bulk-reject',
-    body,
-  );
-}
-
-/** Get a single run's detail (counters + item status tally). */
-export async function getLocationSuggestionRun(
-  runId: string,
-): Promise<LocationSuggestionRunDetail> {
-  return api.get<LocationSuggestionRunDetail>(`/location-suggestion-runs/${runId}`);
-}
-
-/** List a run's items (paginated, signed thumbnails). */
-export async function listLocationSuggestionRunItems(
-  runId: string,
-  params?: LocationSuggestionRunItemsQueryParams,
-): Promise<LocationSuggestionRunItemsResponse> {
-  const searchParams = new URLSearchParams();
-  if (params?.status) searchParams.set('status', params.status);
-  if (params?.page) searchParams.set('page', String(params.page));
-  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-  const qs = searchParams.toString();
-  return api.get<LocationSuggestionRunItemsResponse>(
-    `/location-suggestion-runs/${runId}/items${qs ? `?${qs}` : ''}`,
-  );
-}
-
-/** Cancel a non-terminal run (collaborator). */
-export async function cancelLocationSuggestionRun(
-  runId: string,
-): Promise<CancelLocationSuggestionRunResponse> {
-  return api.post<CancelLocationSuggestionRunResponse>(
-    `/location-suggestion-runs/${runId}/cancel`,
-  );
+}): Promise<CreateReviewRunResponse> {
+  return api.post<CreateReviewRunResponse>('/media/location-suggestions/bulk-reject', body);
 }

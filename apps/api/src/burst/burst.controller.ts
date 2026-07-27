@@ -100,21 +100,26 @@ export class BurstController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Bulk-resolve burst groups at/above a confidence threshold',
+    summary: 'Start a run resolving burst groups at/above a confidence threshold',
     description:
-      'Resolves every pending burst group in the circle whose `confidence` (0–1) ' +
-      'is at/above `threshold / 100`, up to a hard cap of 500 groups. For each ' +
-      'eligible group, keeps its suggested-best item and applies the chosen ' +
+      'Starts an ASYNC review run (issue #190) that resolves every pending burst ' +
+      'group in the circle whose `confidence` (0–1) is at/above `threshold / 100` ' +
+      '— uncapped, cancellable and resumable across reloads. For each eligible ' +
+      'group the run keeps its suggested-best item and applies the chosen ' +
       '`action` to the remaining live members: `archive` sets archivedAt, `trash` ' +
       'soft-deletes (sets deletedAt). Legacy groups with null confidence are ' +
       'excluded. Requires media:write; `action: "trash"` additionally requires media:delete. ' +
-      'The response `data.remaining` is the count of still-pending eligible groups ' +
-      'after this batch (non-zero means run again to drain the rest).',
+      'Returns immediately with `{ runId, status, matchedCount }` (`matchedCount` ' +
+      'is 0 at creation and reflects the real total once evaluated); poll ' +
+      'GET /api/review-runs/:id for progress.',
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Bulk threshold resolve completed; `data` includes `remaining` (still-pending eligible groups)',
+    description: 'Review run started; `data` is `{ runId, status, matchedCount }`',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'A burst review run is already in progress for this circle',
   })
   @ApiResponse({
     status: 400,
@@ -140,15 +145,24 @@ export class BurstController {
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Bulk-dismiss burst groups below a confidence threshold',
+    summary: 'Start a run dismissing burst groups below a confidence threshold',
     description:
-      'Dismisses every pending burst group in the circle whose `confidence` (0–1) ' +
-      'is strictly below `threshold / 100`, up to a hard cap of 500 groups. Each ' +
-      'eligible group is ungrouped (members return to the pool) and marked ' +
-      'dismissed — nothing is archived or trashed, so this never requires ' +
-      'media:delete. Legacy groups with null confidence are excluded. Requires media:write.',
+      'Starts an ASYNC review run (issue #190) that dismisses every pending burst ' +
+      'group in the circle whose `confidence` (0–1) is strictly below ' +
+      '`threshold / 100` — uncapped, cancellable and resumable. Each eligible ' +
+      'group is ungrouped (members return to the pool) and marked dismissed — ' +
+      'nothing is archived or trashed, so this never requires media:delete. ' +
+      'Legacy groups with null confidence are excluded. Requires media:write. ' +
+      'Poll GET /api/review-runs/:id for progress.',
   })
-  @ApiResponse({ status: 200, description: 'Bulk threshold dismiss completed' })
+  @ApiResponse({
+    status: 200,
+    description: 'Review run started; `data` is `{ runId, status, matchedCount }`',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'A burst review run is already in progress for this circle',
+  })
   @ApiResponse({ status: 400, description: 'Invalid body' })
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkDismissBurstGroupsByThreshold(

@@ -35,13 +35,10 @@ import { useBurstGroups } from '../../hooks/useBursts';
 import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
+import { startRunErrorMessage } from '../../services/reviewRuns';
 import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
 import type { BurstGroupSummary, BurstSortBy, GroupResolveAction } from '../../services/bursts';
 import type { SortOrder } from '../../types/media';
-
-// Safety ceiling for the threshold auto-loop so a misbehaving backend can never
-// spin forever. Each iteration resolves a bounded batch of eligible groups.
-const MAX_THRESHOLD_ITERATIONS = 100;
 
 // ---------------------------------------------------------------------------
 // Sort model. The API defaults to `capturedAt` / `asc`, so those two values are
@@ -155,6 +152,7 @@ function BurstGroupCard({ group, selected, onToggle }: BurstGroupCardProps) {
 }
 
 export default function BurstsPage() {
+  const navigate = useNavigate();
   const { activeCircle, activeCircleId } = useCircle();
   const { hasPermission, isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
@@ -260,42 +258,22 @@ export default function BurstsPage() {
     }
   };
 
+  // Both threshold actions START AN ASYNC RUN (issue #190) and hand the user
+  // off to the shared run page, which owns progress, counts and cancellation.
+  // The old client-side auto-loop (up to 100 sequential round-trips behind a
+  // self-overwriting Snackbar) is gone: the backend now materialises the whole
+  // matched set into one cancellable, reload-survivable run.
   const handleThresholdConfirm = async () => {
     const action = thresholdAction;
     setThresholdAction(null);
     if (!action || !activeCircleId) return;
     setActionError(null);
     setThresholdLoading(true);
-    const verb = action === 'trash' ? 'moved to Trash' : 'archived';
-    let totalGroups = 0;
-    let totalRemoved = 0;
-    let totalSkipped = 0;
     try {
-      // The endpoint resolves at most a bounded batch per call and reports how
-      // many eligible groups remain. Auto-loop until the queue is drained.
-      for (let iteration = 0; iteration < MAX_THRESHOLD_ITERATIONS; iteration += 1) {
-        const result = await bulkResolveByThreshold(threshold, action);
-        totalGroups += result.resolvedGroups;
-        totalRemoved += result.removedCount;
-        totalSkipped += result.skipped;
-        // Stop if nothing left, or if a batch made no progress (avoids a spin
-        // when the remaining groups are all ineligible).
-        if (result.remaining <= 0 || result.resolvedGroups === 0) break;
-        setSuccessMsg(`Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''} so far…`);
-      }
-      setSelected(new Set());
-      const skippedNote = totalSkipped > 0 ? ` (${totalSkipped} skipped)` : '';
-      setSuccessMsg(
-        `Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''}; ${totalRemoved} photo${totalRemoved !== 1 ? 's' : ''} ${verb}${skippedNote}.`,
-      );
+      const { runId } = await bulkResolveByThreshold(threshold, action);
+      navigate(`/review-runs/${runId}`);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to resolve burst groups');
-      if (totalGroups > 0) {
-        setSuccessMsg(
-          `Resolved ${totalGroups} group${totalGroups !== 1 ? 's' : ''} before the error.`,
-        );
-      }
-    } finally {
+      setActionError(startRunErrorMessage(err, 'Failed to resolve burst groups'));
       setThresholdLoading(false);
     }
   };
@@ -306,15 +284,10 @@ export default function BurstsPage() {
     setActionError(null);
     setDismissLoading(true);
     try {
-      const result = await dismissByThreshold(threshold);
-      setSelected(new Set());
-      const skippedNote = result.skipped > 0 ? ` (${result.skipped} skipped)` : '';
-      setSuccessMsg(
-        `Dismissed ${result.dismissedGroups} group${result.dismissedGroups !== 1 ? 's' : ''}${skippedNote}.`,
-      );
+      const { runId } = await dismissByThreshold(threshold);
+      navigate(`/review-runs/${runId}`);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to dismiss burst groups');
-    } finally {
+      setActionError(startRunErrorMessage(err, 'Failed to dismiss burst groups'));
       setDismissLoading(false);
     }
   };

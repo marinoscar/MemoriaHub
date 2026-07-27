@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.7 |
+| **Version** | 1.8 |
 | **Last Updated** | July 2026 |
 | **Status** | Specification |
 
@@ -487,7 +487,7 @@ This endpoint powers the review queue's bulk "Resolve & Archive" / "Resolve & De
 
 #### `POST /api/media/bursts/bulk/resolve-by-threshold`
 
-Resolve every **pending** burst group whose detection-time `confidence` (§3.5) meets or exceeds a caller-supplied score threshold, without requiring the reviewer to select groups individually. This is the endpoint behind the review queue's "Archive above N" / "Delete above N" buttons (see §8.1) — a manual, on-demand trigger fired by clicking a button, not an automatic background sweep. There is no cron; nothing resolves a group unless this endpoint (or the per-group/bulk-by-id endpoints above) is called.
+**Rewritten by issue #190 to start an asynchronous run instead of resolving synchronously in the request.** Starts a shared **review run** (see [review-runs.md](review-runs.md) for the full architecture) that resolves every **pending** burst group whose detection-time `confidence` (§3.5) meets or exceeds a caller-supplied score threshold, without requiring the reviewer to select groups individually. This is the endpoint behind the review queue's "Archive above N" / "Delete above N" buttons (see §8.1) — a manual, on-demand trigger fired by clicking a button, not an automatic background sweep. There is no cron; nothing resolves a group unless this endpoint (or the per-group/bulk-by-id endpoints above) is called.
 
 - **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete`, same as the other resolve endpoints.
 - **Request body:**
@@ -495,32 +495,23 @@ Resolve every **pending** burst group whose detection-time `confidence` (§3.5) 
   { "circleId": "uuid", "threshold": 75, "action": "archive" }
   ```
   `threshold` is an integer `0`–`100`, expressed as a percentage; it is compared against the persisted `BurstGroup.confidence` (a `[0, 1]` float) as `confidence >= threshold / 100`.
-- **Behavior:** loads pending groups for the circle, capped at 500 per call (`MAX_THRESHOLD_RESOLVE`), and resolves every group meeting the threshold using the same keep-`suggestedBestItemId`-archive/trash-the-rest semantics as `POST /api/media/bursts/bulk/resolve`, each in its own transaction.
+- **Behavior:** creates a `ReviewRun` (`subjectType = 'burst_group'`, `action = 'resolve_archive'` \| `'resolve_trash'`) and enqueues a `review_run_evaluate` job; returns immediately without waiting for evaluation or execution. Once evaluated and executed, every matched group is resolved using the same keep-`suggestedBestItemId`-archive/trash-the-rest semantics as `POST /api/media/bursts/bulk/resolve`, each still applied via `BurstService.resolveOneBurstGroup` in its own transaction.
   - Groups with `confidence = null` — legacy groups created before the confidence column existed, or otherwise not yet scored — are **excluded** from threshold matching regardless of the threshold value; they are never auto-resolved by this endpoint and must be resolved individually via `POST /api/media/bursts/:id/resolve`.
-  - A group below the threshold, or lacking a `suggestedBestItemId`, is skipped (counted in `skipped`).
-  - A group that is eligible but fails during its own transaction is counted in `errors` and does not block the remaining groups.
+  - A group below the threshold, or lacking a `suggestedBestItemId` by the time its batch runs, is skipped (counted in the run's `skippedCount`).
+  - A group that is eligible but fails during its own transaction is counted in the run's `failedCount` and does not block the rest of the run.
 - **Response `200`:**
   ```json
-  {
-    "data": {
-      "resolvedGroups": 9,
-      "keptCount": 9,
-      "removedCount": 41,
-      "action": "archive",
-      "skipped": 3,
-      "errors": 0,
-      "remaining": 6
-    }
-  }
+  { "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }
   ```
-  `remaining` is the exact count of still-pending groups meeting the threshold after this batch, computed with a fresh SQL `COUNT(*)` against the persisted `confidence` column — cheap because, unlike duplicate confidence (§9.4a of `duplicate-detection.md`), burst confidence doesn't need to be recomputed per group. On a circle whose pending backlog exceeds the 500-group `MAX_THRESHOLD_RESOLVE` cap, a single call only resolves the first 500; the review page auto-loops the call — issuing another request immediately on success — until `remaining === 0`, fully draining the queue without the reviewer needing to click the button repeatedly.
+  `matchedCount` is always `0` at creation; poll `GET /api/review-runs/:id` for the real total once evaluation completes, and see [review-runs.md §12](review-runs.md#12-api-endpoints) for the full run response shape (counters, item listing, cancel).
+- **Response `409`:** a burst review run is already `evaluating` or `running` for this circle ([review-runs.md §8](review-runs.md#8-concurrency-guard)).
 - **Response `400`:** `threshold` is out of range.
 
-`burst.autoResolveThreshold` (§6.1) is the system-setting default that pre-fills the "Archive above N" / "Delete above N" buttons' threshold value on the review queue page; it does not gate or auto-fire this endpoint on its own.
+The old synchronous behavior — a hard 500-group cap (`MAX_THRESHOLD_RESOLVE`) and a `remaining` count in the response the web client auto-looped against — is gone entirely; the run has no upper bound on how many groups it can resolve and reports live progress instead. `burst.autoResolveThreshold` (§6.1) is the system-setting default that pre-fills the "Archive above N" / "Delete above N" buttons' threshold value on the review queue page; it does not gate or auto-fire this endpoint on its own.
 
 #### `POST /api/media/bursts/bulk/dismiss-by-threshold`
 
-Dismiss every **pending** burst group whose detection-time `confidence` (§3.5) is **below** a caller-supplied score threshold — the mirror-image counterpart to `POST /api/media/bursts/bulk/resolve-by-threshold` above. Manual trigger only: there is no cron and nothing dismisses a group unless this endpoint (or the per-group dismiss endpoint) is called.
+**Rewritten by issue #190** on the same asynchronous review-run model as the resolve endpoint above. Dismisses every **pending** burst group whose detection-time `confidence` (§3.5) is **below** a caller-supplied score threshold — the mirror-image counterpart to `POST /api/media/bursts/bulk/resolve-by-threshold`. Manual trigger only: there is no cron and nothing dismisses a group unless this endpoint (or the per-group dismiss endpoint) is called.
 
 One threshold partitions the pending review queue between the two endpoints: groups scoring `>= N%` are resolved (keep-best, archive/trash the rest), groups scoring `< N%` are dismissed (marked "not a burst," ungrouped, nothing deleted). This mirrors the accept/reject split added for Location Suggestions in issue #126 ([location-inference.md §7 "One setting, one number, partitions the pending queue"](location-inference.md#7-configuration)).
 
@@ -530,22 +521,18 @@ One threshold partitions the pending review queue between the two endpoints: gro
   { "circleId": "uuid", "threshold": 25 }
   ```
   `threshold` is an integer `0`–`100`, expressed as a percentage; it is compared against the persisted `BurstGroup.confidence` (a `[0, 1]` float) as `confidence < threshold / 100`.
-- **Behavior:** loads pending groups for the circle, capped at 500 per call (`MAX_THRESHOLD_RESOLVE`, same cap as the resolve endpoint), and dismisses every group scoring below the threshold — ungrouping all members (`burstGroupId`/`burstScore` cleared) and setting `status = dismissed`, exactly as `POST /api/media/bursts/:id/dismiss` does, each in its own transaction.
+- **Behavior:** creates a `ReviewRun` (`subjectType = 'burst_group'`, `action = 'dismiss'`) and enqueues a `review_run_evaluate` job. Once evaluated and executed, every matched group is dismissed — ungrouping all members (`burstGroupId`/`burstScore` cleared) and setting `status = dismissed`, exactly as `POST /api/media/bursts/:id/dismiss` does, each still applied via `BurstService.dismissOneBurstGroup` in its own transaction.
   - Groups with `confidence = null` — legacy groups created before the confidence column existed, or otherwise not yet scored — are **excluded** from threshold matching regardless of the threshold value; they are never auto-dismissed by this endpoint and must be dismissed individually via `POST /api/media/bursts/:id/dismiss`.
-  - A group at or above the threshold is skipped (counted in `skipped`).
-  - A group that is eligible but fails during its own transaction is counted in `errors` and does not block the remaining groups.
+  - A group at or above the threshold is skipped (counted in the run's `skippedCount`).
+  - A group that is eligible but fails during its own transaction is counted in the run's `failedCount` and does not block the rest of the run.
 - **Response `200`:**
   ```json
-  {
-    "data": {
-      "dismissedGroups": 4,
-      "ungroupedCount": 17,
-      "skipped": 2,
-      "errors": 0
-    }
-  }
+  { "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }
   ```
-- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle (narrow the scope by resolving/dismissing in batches, or use the by-id endpoints above).
+- **Response `409`:** a burst review run is already active for this circle.
+- **Response `400`:** `threshold` is out of range.
+
+See [review-runs.md](review-runs.md) for the full run lifecycle (evaluate → chunked execute-batch → progress polling → cancel), the shared data model, and RBAC. There is no longer a pending-group count cap on either endpoint.
 
 ### 7.3 Global Backfill (Admin)
 
@@ -619,7 +606,7 @@ This is the data source for the "Review Insights" page (`/review-insights`), a p
 
 A "Review bursts" page (or tab within the existing review area) lists pending burst groups for the active circle, with a true total count and pagination rather than a single unbounded page. Each group is displayed as a visual stack of thumbnails — typically three to four frames overlapping — with a badge showing the total frame count and a confidence meter reflecting `BurstGroup.confidence` (§3.5). Group cards carry a multi-select checkbox (enlarged for mobile touch targets); a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/bursts/bulk/resolve`).
 
-Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `burst.autoResolveThreshold` (§6.1) and adjustable before firing, which call `POST /api/media/bursts/bulk/resolve-by-threshold` (§7.2) to resolve every qualifying pending group without requiring the reviewer to select cards individually. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/bursts` (§8.3) to adjust detection parameters and the auto-resolve threshold.
+Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `burst.autoResolveThreshold` (§6.1) and adjustable before firing, which call `POST /api/media/bursts/bulk/resolve-by-threshold` (§7.2). As of issue #190, confirming either button starts an asynchronous review run and navigates immediately to `/review-runs/:runId` — the shared run-progress page described in [review-runs.md §14](review-runs.md#14-frontend) — rather than resolving groups in-place and waiting on a client-side auto-loop; the old `MAX_THRESHOLD_ITERATIONS` loop is gone. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/bursts` (§8.3) to adjust detection parameters and the auto-resolve threshold.
 
 A `ReviewSortSelect` control (shared with the Duplicates and Location Suggestions pages) lets the reviewer switch between Captured (oldest/newest), Cohesion (highest/lowest — `confidence`), and group size (largest/smallest), backed by the `sortBy`/`sortOrder` params above. The selection is mirrored into the URL query string so a sorted view survives a reload and can be shared; an unrecognized value in the URL falls back to the default (`capturedAt`/`asc`) rather than being sent to the API. Changing the sort resets to page 1 and clears the current multi-select, and only a non-default selection is included on the wire, so an untouched page's request is unchanged from before this control existed.
 
@@ -741,3 +728,4 @@ The following extensions are left for future iterations. None of them require ch
 | 1.5 | July 2026 | AI Assistant | `POST /api/media/bursts/:id/resolve` gained an `action: 'archive'\|'trash'` option (replacing unconditional soft-delete) and now writes a `burst_group:resolved` audit event; added `POST /api/media/bursts/bulk/resolve` for bulk keep-suggested-best resolution; added the detection-time `confidence` visual-cohesion score (§3.5) and its `resolutionAction`/`keptCount`/`removedCount`/`confidence` columns on `burst_groups` (migration `20260713120000_add_burst_dup_resolution_tracking`); added `GET /api/media/review-insights` (§7.5); documented the review-queue's multi-select bulk toolbar, confidence meter, and pagination (§8.1) |
 | 1.6 | July 2026 | AI Assistant | Lowered `burst_detection`'s upload-time enqueue priority from 10 to 5 (§5.4, Step 6a) so it is claimed before `duplicate_detection` (priority 10, unchanged) in the common case; documented the dedup-side write-time `SELECT ... FOR UPDATE` re-check that closes the residual TOCTOU race the reactive eviction alone didn't fully close — see [duplicate-detection.md §3.2](duplicate-detection.md#32-burst-overlap-exclusion-rules) for the full mechanism |
 | 1.7 | July 2026 | AI Assistant | Added `POST /api/media/bursts/bulk/resolve-by-threshold` (§7.2) and the `burst.autoResolveThreshold` system setting (§6.1) powering the review queue's "Archive above N" / "Delete above N" buttons; null-confidence legacy groups are never auto-resolved by the threshold path; documented the review queue's admin-only settings gear icon and the group detail page's Archive/Delete button pair replacing the archive-vs-trash toggle (§8.1, §8.3) |
+| 1.8 | July 2026 | AI Assistant | Issue #190: `bulk/resolve-by-threshold` and `bulk/dismiss-by-threshold` (§7.2) now start an asynchronous shared review run instead of resolving synchronously in the request — the `MAX_THRESHOLD_RESOLVE` 500-group cap and the `remaining` response field are gone; both endpoints return `{ data: { runId, status, matchedCount } }` and `409` on a concurrent same-queue run. Updated §8.1 to describe navigation to the shared `/review-runs/:runId` progress page. See [review-runs.md](review-runs.md) for the full shared run architecture. |

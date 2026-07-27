@@ -13,6 +13,13 @@
  * All data hooks are mocked directly (mirroring the DuplicateGroupPage.test
  * precedent), so these tests exercise WorkflowRunPage's own render/effect
  * logic without a real network or MSW handler.
+ *
+ * As of issue #190 the polling and the progress/counters/cancel section come
+ * from the shared `useRunPolling` + `RunProgressPanel` pieces. The
+ * `awaiting_approval` flow covered here — the exclusion grid, the per-action
+ * impact list and the hard-delete typed confirmation — stays page-local, so
+ * these assertions double as the guard that sharing the progress section did
+ * not disturb it.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

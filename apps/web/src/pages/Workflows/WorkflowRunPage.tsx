@@ -1,11 +1,10 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
   Button,
   Chip,
   CircularProgress,
-  LinearProgress,
   Alert,
   AlertTitle,
   Grid,
@@ -38,11 +37,15 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import { useWorkflowRunItems } from '../../hooks/useWorkflowRunItems';
 import { useWorkflowMutations } from '../../hooks/useWorkflowMutations';
+import { useRunPolling } from '../../hooks/useRunPolling';
+import RunProgressPanel from '../../components/runs/RunProgressPanel';
+import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
 import {
   runStatusColor,
   runStatusLabel,
   formatRelativeTime,
   formatCount,
+  formatCaptureDate,
   isTerminalRunStatus,
   deriveActionImpacts,
   definitionHasHardDelete,
@@ -50,21 +53,8 @@ import {
 } from '../../utils/workflowFormat';
 import type { WorkflowRunDetail, WorkflowRunItem } from '../../types/workflows';
 
-const POLL_MS = 2000;
 const ITEMS_PAGE_SIZE = 24;
 const MAX_EXCLUSIONS = 500;
-
-/** Safe short date for a capture timestamp. Never throws. */
-function formatCaptureDate(iso: string | null): string {
-  if (!iso) return 'No date';
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return 'No date';
-    return d.toLocaleDateString();
-  } catch {
-    return 'No date';
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Run item tile — thumbnail + filename + capture date, optional exclude checkbox
@@ -151,43 +141,8 @@ function RunItemTile({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Compact counts summary (shared by running/terminal placeholders)
-// ---------------------------------------------------------------------------
-
-function RunCountsSummary({ run }: { run: WorkflowRunDetail }) {
-  const stats: { label: string; value: number; color?: string }[] = [
-    { label: 'Matched', value: run.matchedCount },
-    { label: 'Processed', value: run.processedCount },
-    { label: 'Succeeded', value: run.succeededCount, color: 'success.main' },
-    { label: 'Failed', value: run.failedCount, color: 'error.main' },
-    { label: 'Skipped', value: run.skippedCount },
-  ];
-  return (
-    <Grid container spacing={2} sx={{ mb: 2 }}>
-      {stats.map((s) => (
-        <Grid key={s.label} size={{ xs: 6, sm: 4, md: 2.4 }}>
-          <Card variant="outlined">
-            <CardContent sx={{ textAlign: 'center', py: 2 }}>
-              <Typography variant="h5" sx={{ color: s.color }}>
-                {formatCount(s.value)}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {s.label}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      ))}
-    </Grid>
-  );
-}
-
 /** Severity + message for a terminal run status. */
-function terminalSummary(run: WorkflowRunDetail): {
-  severity: 'success' | 'warning' | 'error' | 'info';
-  message: string;
-} {
+function terminalSummary(run: WorkflowRunDetail): RunTerminalSummary {
   switch (run.status) {
     case 'completed':
       return { severity: 'success', message: 'All actions applied successfully.' };
@@ -233,8 +188,6 @@ export default function WorkflowRunPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // Permission gates (mirror the list page: per-circle role + system permission).
   const canApprove =
     (activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin') &&
@@ -248,27 +201,8 @@ export default function WorkflowRunPage() {
     if (runId) void fetchRun(runId);
   }, [runId, fetchRun]);
 
-  // Poll every 2s while the run is non-terminal (matches the enhancement drawer).
-  useEffect(() => {
-    if (!runId || !run) return;
-    if (isTerminalRunStatus(run.status)) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      return;
-    }
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => {
-      void fetchRun(runId);
-    }, POLL_MS);
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [runId, run, fetchRun]);
+  // Live progress while the run is non-terminal.
+  useRunPolling({ runId, status: run?.status, onPoll: fetchRun });
 
   // Load the matched-item grid while awaiting approval.
   useEffect(() => {
@@ -408,20 +342,116 @@ export default function WorkflowRunPage() {
         </Alert>
       )}
 
-      {/* Evaluating */}
-      {run.status === 'evaluating' && (
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="subtitle1" gutterBottom>
-              Evaluating your library…
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Finding items that match this workflow's conditions. This can take a
-              moment for large libraries.
-            </Typography>
-            <LinearProgress />
-          </CardContent>
-        </Card>
+      {/*
+        Evaluating / running / terminal all render through the shared panel
+        (issue #190). `awaiting_approval` stays local below — the exclusion
+        grid, per-action impact list and hard-delete confirmation are
+        workflow-only and have no equivalent in the other run surfaces.
+      */}
+      {run.status !== 'awaiting_approval' && (
+        <RunProgressPanel
+          run={run}
+          subjectNoun="item"
+          countLabels={{ total: 'Matched' }}
+          evaluatingTitle="Evaluating your library…"
+          evaluatingDescription="Finding items that match this workflow's conditions. This can take a moment for large libraries."
+          runningTitle="Applying actions…"
+          terminalSummary={terminalSummary(run)}
+          // Cancel is offered while APPLYING only; an evaluating run has
+          // nothing to stop yet, matching the pre-shared-panel behaviour.
+          canCancel={canApprove && run.status === 'running'}
+          onCancel={() => void handleCancel()}
+          isCancelling={isSaving}
+          cancelLabel="Cancel"
+        >
+          {isTerminal && run.failedCount > 0 && (
+            <Card variant="outlined" sx={{ mt: 1, mb: 2 }}>
+              <CardContent>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    mb: 1.5,
+                    flexWrap: 'wrap',
+                    gap: 1,
+                  }}
+                >
+                  <Typography variant="subtitle2">
+                    Failed items ({formatCount(run.failedCount)})
+                  </Typography>
+                  {canApprove && (
+                    <Tooltip title="Coming soon">
+                      <span>
+                        <Button size="small" variant="outlined" disabled>
+                          Retry failed items
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  )}
+                </Box>
+                {itemsLoading && items.length === 0 ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                    <CircularProgress size={28} />
+                  </Box>
+                ) : (
+                  <>
+                    <TableContainer sx={{ overflowX: 'auto' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>File</TableCell>
+                            <TableCell>Error</TableCell>
+                            <TableCell align="right">Item</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {items.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell sx={{ maxWidth: 220 }}>
+                                <Typography variant="body2" noWrap title={item.media?.filename ?? undefined}>
+                                  {item.media?.filename ?? 'Untitled'}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {formatCaptureDate(item.media?.capturedAt ?? null)}
+                                </Typography>
+                              </TableCell>
+                              <TableCell sx={{ maxWidth: 360 }}>
+                                <Typography variant="body2" color="error">
+                                  {item.error ?? 'Unknown error'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell align="right">
+                                <Link
+                                  component="button"
+                                  type="button"
+                                  variant="body2"
+                                  onClick={() => navigate(`/media?item=${item.mediaItemId}`)}
+                                >
+                                  View
+                                </Link>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    {itemsMeta && itemsMeta.totalPages > 1 && (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                        <Pagination
+                          count={itemsMeta.totalPages}
+                          page={failedPage}
+                          onChange={(_, p) => setFailedPage(p)}
+                          size="small"
+                        />
+                      </Box>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </RunProgressPanel>
       )}
 
       {/* Awaiting approval */}
@@ -589,149 +619,6 @@ export default function WorkflowRunPage() {
               This run is awaiting approval. You have read-only access — a circle
               collaborator can approve or cancel it.
             </Alert>
-          )}
-        </Box>
-      )}
-
-      {/* Running */}
-      {run.status === 'running' && (
-        <Box>
-          <Card variant="outlined" sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="subtitle1" gutterBottom>
-                Applying actions…
-              </Typography>
-              <LinearProgress
-                variant={run.matchedCount > 0 ? 'determinate' : 'indeterminate'}
-                value={
-                  run.matchedCount > 0
-                    ? Math.min(100, (run.processedCount / run.matchedCount) * 100)
-                    : undefined
-                }
-                sx={{ height: 8, borderRadius: 1, mb: 1 }}
-              />
-              <Typography variant="body2" color="text.secondary">
-                {formatCount(run.processedCount)} of {formatCount(run.matchedCount)} processed
-              </Typography>
-            </CardContent>
-          </Card>
-          <RunCountsSummary run={run} />
-          {canApprove && (
-            <Button
-              variant="outlined"
-              disabled={isSaving}
-              onClick={() => void handleCancel()}
-              sx={{ minHeight: 44 }}
-            >
-              Cancel
-            </Button>
-          )}
-        </Box>
-      )}
-
-      {/* Terminal */}
-      {isTerminal && (
-        <Box>
-          {(() => {
-            const summary = terminalSummary(run);
-            return (
-              <Alert severity={summary.severity} sx={{ mb: 2 }}>
-                <AlertTitle>{runStatusLabel(run.status)}</AlertTitle>
-                {summary.message}
-              </Alert>
-            );
-          })()}
-
-          <RunCountsSummary run={run} />
-
-          {run.failedCount > 0 && (
-            <Card variant="outlined" sx={{ mt: 1 }}>
-              <CardContent>
-                <Box
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    mb: 1.5,
-                    flexWrap: 'wrap',
-                    gap: 1,
-                  }}
-                >
-                  <Typography variant="subtitle2">
-                    Failed items ({formatCount(run.failedCount)})
-                  </Typography>
-                  {canApprove && (
-                    <Tooltip title="Coming soon">
-                      <span>
-                        <Button size="small" variant="outlined" disabled>
-                          Retry failed items
-                        </Button>
-                      </span>
-                    </Tooltip>
-                  )}
-                </Box>
-                {itemsLoading && items.length === 0 ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                    <CircularProgress size={28} />
-                  </Box>
-                ) : (
-                  <>
-                    <TableContainer sx={{ overflowX: 'auto' }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>File</TableCell>
-                            <TableCell>Error</TableCell>
-                            <TableCell align="right">Item</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {items.map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell sx={{ maxWidth: 220 }}>
-                                <Typography variant="body2" noWrap title={item.media?.filename ?? undefined}>
-                                  {item.media?.filename ?? 'Untitled'}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {formatCaptureDate(item.media?.capturedAt ?? null)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell sx={{ maxWidth: 360 }}>
-                                <Typography variant="body2" color="error">
-                                  {item.error ?? 'Unknown error'}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Link
-                                  component="button"
-                                  type="button"
-                                  variant="body2"
-                                  onClick={() =>
-                                    navigate(`/media?item=${item.mediaItemId}`)
-                                  }
-                                >
-                                  View
-                                </Link>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                    {itemsMeta && itemsMeta.totalPages > 1 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                        <Pagination
-                          count={itemsMeta.totalPages}
-                          page={failedPage}
-                          onChange={(_, p) => setFailedPage(p)}
-                          size="small"
-                        />
-                      </Box>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
           )}
         </Box>
       )}

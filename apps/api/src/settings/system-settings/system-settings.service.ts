@@ -35,6 +35,7 @@ export interface ResolvedSettings {
   geo: SystemSettingsValue['geo'];
   email: SystemSettingsValue['email'];
   jobs: SystemSettingsValue['jobs'];
+  reviewRuns: SystemSettingsValue['reviewRuns'];
   pictureEnhancement: SystemSettingsValue['pictureEnhancement'];
   workflows: SystemSettingsValue['workflows'];
   updatedAt: Date;
@@ -134,6 +135,7 @@ export class SystemSettingsService {
       geo: value.geo,
       email: value.email,
       jobs: value.jobs,
+      reviewRuns: value.reviewRuns,
       pictureEnhancement: value.pictureEnhancement,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,
@@ -228,6 +230,7 @@ export class SystemSettingsService {
       geo: value.geo,
       email: value.email,
       jobs: value.jobs,
+      reviewRuns: value.reviewRuns,
       pictureEnhancement: value.pictureEnhancement,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,
@@ -486,6 +489,12 @@ export class SystemSettingsService {
           (current as any).jobs?.stuckThresholdMinutes ??
           defaultStuckThresholdMinutes(),
       },
+      reviewRuns: {
+        runHistoryRetentionDays:
+          (dto as any).reviewRuns?.runHistoryRetentionDays ??
+          (current as any).reviewRuns?.runHistoryRetentionDays ??
+          30,
+      },
       pictureEnhancement: {
         defaultQuality:
           (dto as any).pictureEnhancement?.defaultQuality ??
@@ -609,6 +618,7 @@ export class SystemSettingsService {
       geo: value.geo,
       email: value.email,
       jobs: value.jobs,
+      reviewRuns: value.reviewRuns,
       pictureEnhancement: value.pictureEnhancement,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,

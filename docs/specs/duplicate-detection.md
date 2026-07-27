@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.4 |
+| **Version** | 1.5 |
 | **Last Updated** | July 2026 |
 | **Status** | Specification |
 
@@ -170,21 +170,29 @@ Also computed at read time (never persisted), `DuplicateService.computeGroupKind
 
 This classification, along with the `similarityToBest` value returned per member in the group-detail response (cosine similarity of each member's embedding against the suggested-best member's), was informed directly by user feedback on **immich Discussion #25831** — the most-requested improvements to immich's own duplicate-detection UX were (a) not mixing exact recompressed copies together with loosely-related "similar" photos in one undifferentiated list, and (b) showing *why* a group was linked instead of hiding the similarity score from the reviewer. `kind` badges (queryable via `GET /api/media/duplicates?kind=`) and the exposed `similarityToBest` field address both points directly.
 
-### 3.5 Confidence Score (Read-Time)
+### 3.5 Confidence Score
 
-Unlike `burst_groups.confidence` (persisted at detection time — see [burst-detection.md §3.5](burst-detection.md#35-confidence-score-visual-cohesion)), duplicate-group confidence has no dedicated column. It is computed at read time by `DuplicateService`, alongside `kind` classification (§3.4) and best-copy scoring (§3.3), and returned as `confidence` on both the list (`GET /api/media/duplicates`) and detail (`GET /api/media/duplicates/:id`) responses:
+**As of issue #190, `confidence` is a persisted column** (`duplicate_groups.confidence DOUBLE PRECISION`, nullable, migration `20260726000000_duplicate_group_confidence`), mirroring `burst_groups.confidence Float?` ([burst-detection.md §3.5](burst-detection.md#35-confidence-score-visual-cohesion)). It is still returned as `confidence` on both the list (`GET /api/media/duplicates`) and detail (`GET /api/media/duplicates/:id`) responses:
 
 ```
 confidence = maxSim = max pairwise CLIP cosine similarity across all members of the group
 ```
 
-`maxSim` is the same tightest-pair similarity value used by `computeGroupKind` (§3.4) to decide the `exact_variant` threshold — it is not recomputed separately, just surfaced directly as the group's headline confidence number so a reviewer scanning the list doesn't have to open a group to gauge how tight the match is. Because it depends only on already-stored `media_visual_embedding` rows, it costs no additional storage and stays perfectly in sync with the group's current membership on every read — there is no staleness window the way a persisted score would have.
+`maxSim` is the same tightest-pair similarity value used by `computeGroupKind` (§3.4) to decide the `exact_variant` threshold — `kind` classification is unchanged and still computed at read time; only `confidence` moved to being a stored column.
 
-If the CLIP model is degraded (§4.3) and a group was linked purely via Tier 2 (dHash), no embeddings exist to compare and `confidence` is `null`.
+- **Single writer:** `DuplicateDetectionService.recomputeGroupMeta` — already invoked on every membership mutation (initial grouping, `evictFromDuplicateGroups`, `evictExistingBurstOverlaps`, resolve, dismiss) — now computes and persists `confidence` in the same update that sets `mediaCount`/`capturedAt`. Because membership is the only input to `maxSim` and every membership mutation already funnels through this one method, the column cannot silently drift out of sync with the group's current membership.
+- **Read-time self-heal:** `DuplicateService.listDuplicateGroups`/`getDuplicateGroup` already opportunistically wrote `suggestedBestItemId` back as a fire-and-forget side effect (`persistGroupSelfHeal`); the same call now also backfills `confidence` for any row still `NULL`. This is a backstop for rows written before this column existed, not the primary write path.
+- **Backfill job:** `duplicate_confidence_backfill` (global, server-only, keyset-paginated) closes the historical gap in one pass for `NULL` rows nobody happens to read, triggered by `POST /api/admin/duplicates/confidence/backfill` (§9.11).
 
-Because `confidence` is never persisted, it cannot be filtered — or ordered — on directly in SQL the way `burst_groups.confidence` can. This is the key architectural constraint behind the threshold bulk-resolve endpoint documented in §9.4a: it must load candidate pending groups first, then compute and filter on `maxSim` per group in application code, rather than pushing the threshold down into the query.
+If the CLIP model is degraded (§4.3) and a group was linked purely via Tier 2 (dHash), no embeddings exist to compare and `confidence` stays `null` — the same exclusion rule from before this change applies: a `null`-confidence group is never matched by a threshold filter in either direction (§9.4a/§9.4b).
 
-The same constraint applies to `sortBy=confidence` on `GET /api/media/duplicates` (§9.1). `DuplicateService.listDuplicateGroups` cannot express "order by `maxSim`" as a Prisma `orderBy` because `maxSim` doesn't exist until every group's members have been fetched and scored. Instead, the DB query runs with its normal `capturedAt`/`createdAt`/`id` base ordering, `computeGroupKind` enriches every row in the (kind-filtered) result set with its `rawConfidence`, and only then — over the fully-materialized array, before the existing in-JS pagination slice — does `Array#sort` apply the requested direction. This makes page N a true global rank rather than a per-page reshuffle: sorting after slicing would independently re-order each page's 20 items instead of the whole queue. A group with no computable similarity (`rawConfidence === null` — the degraded-mode case in the paragraph above) sorts last in both directions, same nulls-last treatment as `burst_groups.confidence`, even though the wire-level `confidence` field itself reports `0` rather than `null` for that case. `sortBy=capturedAt`/`mediaCount`, by contrast, are real columns and stay a DB `orderBy` — only the read-time `confidence` sort needs the in-memory step.
+**This is what removed the 500-group cap on the threshold bulk-resolve/dismiss endpoints (§9.4a/§9.4b).** Before this change, `confidence` had no dedicated column and could not be filtered on directly in SQL — the endpoints had to load an unordered, unfiltered candidate set (capped at `MAX_THRESHOLD_RESOLVE = 500`) and compute+filter `maxSim` per group in application code. Because that candidate query had no `ORDER BY` and no confidence predicate, a circle with more than 500 pending groups could have every call re-scan the same 500 below-threshold candidates and never reach the eligible ones — a genuine correctness bug, not just a UX cap. With `confidence` persisted and indexed (`(circle_id, status, confidence)`), the threshold filter now runs as a real SQL predicate exactly like bursts already did, and both endpoints were rebuilt on the shared asynchronous review-run model — see [review-runs.md](review-runs.md) for the full architecture and §9.4a/§9.4b below for the endpoint-level detail.
+
+### 3.5.1 `sortBy=confidence` is still an in-memory sort (issue #189 + #190 interaction)
+
+`sortBy=confidence` on `GET /api/media/duplicates` (§9.1) was added by issue #189 while `confidence` was still read-time-only, and it remains an **in-memory** sort after #190 persisted the column. `DuplicateService.listDuplicateGroups` runs its DB query with the normal `capturedAt`/`createdAt`/`id` base ordering, `computeGroupKind` enriches every row in the (kind-filtered) result set with its `rawConfidence`, and only then — over the fully-materialized array, before the in-JS pagination slice — does `Array#sort` apply the requested direction. Sorting before slicing is what makes page N a true global rank instead of a per-page reshuffle. A group with no computable similarity (`rawConfidence === null`) sorts last in both directions, matching `burst_groups.confidence`'s nulls-last treatment, even though the wire-level `confidence` field reports `0` rather than `null` for that case. `sortBy=capturedAt`/`mediaCount` are real columns and stay a DB `orderBy`.
+
+Now that `confidence` is a stored, indexed column, this sort **could** become a DB `orderBy` like the other two. It was deliberately left in memory when #190 merged so the read path's observable behaviour stayed byte-identical to what #189 shipped and tested; converting it (and dropping the materialize-then-sort step) is a clean follow-up, not a known defect.
 
 ---
 
@@ -247,11 +255,12 @@ One row per detected near-duplicate cluster, circle-scoped, mirroring `burst_gro
 | `resolutionAction` | String? (`'archive'`\|`'trash'`) | Which outcome a resolve applied to the non-kept members; null until resolved |
 | `keptCount` | Int? | Number of members kept by a resolve; null until resolved |
 | `removedCount` | Int? | Number of members archived/trashed by a resolve; null until resolved |
+| `confidence` | Float? | **Persisted as of issue #190** (migration `20260726000000_duplicate_group_confidence`) — the tightest-pair CLIP cosine similarity (`maxSim`); single writer is `DuplicateDetectionService.recomputeGroupMeta`; `null` when fewer than two members carry a `media_visual_embedding` row. See §3.5. |
 | `createdAt` / `updatedAt` | DateTime | |
 
-`resolutionAction`, `keptCount`, and `removedCount` were added by migration `20260713120000_add_burst_dup_resolution_tracking` (the same migration that added the equivalent columns to `burst_groups`), along with a new index `(circleId, status, resolutionAction)`. Unlike `burst_groups`, there is no persisted `confidence` column here — duplicate-group confidence is computed at read time (§3.5).
+`resolutionAction`, `keptCount`, and `removedCount` were added by migration `20260713120000_add_burst_dup_resolution_tracking` (the same migration that added the equivalent columns to `burst_groups`), along with a new index `(circleId, status, resolutionAction)`. `confidence` mirrors `burst_groups.confidence` and was added later, by migration `20260726000000_duplicate_group_confidence` (§3.5) — before that migration, duplicate-group confidence existed only as a read-time computation with no dedicated column.
 
-Indexes: `@@index([circleId, status])`, `@@index([circleId, status, resolutionAction])`.
+Indexes: `@@index([circleId, status])`, `@@index([circleId, status, resolutionAction])`, `@@index([circleId, status, confidence])` (added by the confidence-persistence migration, serving the review-run threshold filter — §9.4a/§9.4b).
 
 **`DuplicateGroupStatus` enum:** `pending` (awaiting review), `resolved` (reviewer picked a keep set; non-kept members archived or trashed), `dismissed` (reviewer indicated this is not actually a duplicate set; members ungrouped).
 
@@ -463,34 +472,47 @@ Resolve multiple pending duplicate groups in a single call, always keeping each 
 
 ### 9.4a `POST /api/media/duplicates/bulk/resolve-by-threshold`
 
-Resolve every **pending** duplicate group whose read-time confidence (`maxSim`, §3.5) meets or exceeds a caller-supplied score threshold — the endpoint behind the duplicate review page's "Archive above N" / "Delete above N" buttons (see §11). Manual trigger only: clicking the button fires this call; there is no cron and nothing resolves automatically in the background.
+**Rewritten by issue #190 to start an asynchronous run instead of resolving synchronously in the request.** Starts a shared **review run** (see [review-runs.md](review-runs.md)) that resolves every **pending** duplicate group whose persisted confidence (`maxSim`, §3.5) meets or exceeds a caller-supplied score threshold — the endpoint behind the duplicate review page's "Archive above N" / "Delete above N" buttons (see §11). Manual trigger only: clicking the button fires this call; there is no cron and nothing resolves automatically in the background.
 
-Unlike the equivalent [burst-detection endpoint](burst-detection.md#72-group-actions) (`POST /api/media/bursts/bulk/resolve-by-threshold`), which filters directly in SQL against a persisted `confidence` column, duplicate confidence is **not persisted** (§3.5). This endpoint therefore has to work in two phases: load candidate pending groups for the circle (capped at 500, same `MAX_THRESHOLD_RESOLVE` cap as the burst endpoint), then, for each group, compute its tightest-pair CLIP similarity via `computeGroupKind`'s `maxSim` (§3.4) and filter against the threshold in application code — there is no way to push the comparison into the database query the way burst detection can.
+Now that `confidence` is a persisted, indexed column (§3.5), this endpoint filters directly in SQL exactly like the [equivalent burst-detection endpoint](burst-detection.md#72-group-actions) — there is no longer a two-phase load-then-filter-in-application-code step, and no candidate cap.
 
 - **Auth:** `media:write` + per-circle `collaborator` role. `action: 'trash'` additionally requires `media:delete`, same as the other resolve endpoints.
-- **Request body:** `{ "circleId": "uuid", "threshold": 80, "action": "archive" | "trash" }`. `threshold` is an integer `0`–`100`, compared against the computed `maxSim` (a `[0, 1]` value) as `maxSim >= threshold / 100`.
-- **Behavior:** for each loaded pending group, keeps `suggestedBestItemId` and archives/trashes the rest, exactly as `POST /api/media/duplicates/bulk/resolve` does, but only for groups meeting the threshold.
-  - A group whose `maxSim` cannot be computed — fewer than two members carry a `media_visual_embedding` row, or the embedding lookup fails — is **excluded from matching** and counted in `skipped`, the same bucket as a group that computed a similarity below the threshold. There is no separate "unscoreable" counter; both cases are indistinguishable from the caller's point of view.
-  - A group below the threshold, or lacking a `suggestedBestItemId`, is also skipped (counted in `skipped`).
-  - A group that is eligible but fails during its own transaction is counted in `errors` without blocking the rest.
-- **Response `200`:** `{ "data": { "resolvedGroups": 11, "keptCount": 11, "removedCount": 37, "action": "archive", "skipped": 4, "errors": 0, "hasMore": true } }`. `hasMore` is a boolean, not an exact count — unlike the burst endpoint's `remaining` (`burst-detection.md#72-group-actions`), duplicate confidence isn't a persisted column, so a cheap `COUNT(*)` of the remaining eligible backlog isn't available; `hasMore` instead reports whether the initial candidate scan hit the `MAX_THRESHOLD_RESOLVE` cap (`groups.length === MAX_THRESHOLD_RESOLVE`), meaning more eligible groups may exist beyond this batch. The duplicate review page auto-loops the call — issuing another request immediately on success — while `hasMore` is `true`, fully draining the queue without the reviewer needing to click the button repeatedly.
+- **Request body:** `{ "circleId": "uuid", "threshold": 80, "action": "archive" | "trash" }`. `threshold` is an integer `0`–`100`, compared against the persisted `confidence` (a `[0, 1]` value) as `confidence >= threshold / 100`.
+- **Behavior:** creates a `ReviewRun` (`subjectType = 'duplicate_group'`, `action = 'resolve_archive'` \| `'resolve_trash'`) and enqueues a `review_run_evaluate` job; returns immediately. Once evaluated and executed, every matched group keeps `suggestedBestItemId` and archives/trashes the rest, exactly as `POST /api/media/duplicates/bulk/resolve` does, each still applied via `DuplicateService.resolveOneDuplicateGroup` in its own transaction.
+  - A group whose `confidence IS NULL` — fewer than two members carry a `media_visual_embedding` row — is **excluded from matching** in both directions, matching the pre-existing behavior.
+  - A group below the threshold, or lacking a `suggestedBestItemId` by the time its batch runs, is skipped (counted in the run's `skippedCount`).
+  - A group that is eligible but fails during its own transaction is counted in the run's `failedCount` and does not block the rest of the run.
+- **Response `200`:** `{ "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }`. `matchedCount` is always `0` at creation; poll `GET /api/review-runs/:id` for the real total and progress counters ([review-runs.md §12](review-runs.md#12-api-endpoints)).
+- **Response `409`:** a duplicate review run is already `evaluating` or `running` for this circle.
 - **Response `400`:** `threshold` is out of range.
 
-`dedup.autoResolveThreshold` (§8.1) is the system-setting default that pre-fills the duplicate review page's "Archive above N" / "Delete above N" buttons; it does not gate or auto-fire this endpoint on its own.
+The old two-phase, 500-group-capped implementation and its `hasMore` boolean (which reported only whether the candidate scan hit the cap, not an exact remaining count) are gone entirely — a run has no upper bound and reports live, exact progress via `matchedCount`/`processedCount` instead. `dedup.autoResolveThreshold` (§8.1) is the system-setting default that pre-fills the duplicate review page's "Archive above N" / "Delete above N" buttons; it does not gate or auto-fire this endpoint on its own.
 
 ### 9.4b `POST /api/media/duplicates/bulk/dismiss-by-threshold`
 
-Dismiss every **pending** duplicate group whose read-time confidence (`maxSim`, §3.5) is **below** a caller-supplied score threshold — the mirror-image counterpart to `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a) above. Manual trigger only: there is no cron and nothing dismisses a group unless this endpoint (or the per-group dismiss endpoint, §9.5) is called.
+**Rewritten by issue #190** on the same asynchronous review-run model as the resolve endpoint above. Dismisses every **pending** duplicate group whose persisted confidence (`maxSim`, §3.5) is **below** a caller-supplied score threshold — the mirror-image counterpart to `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a). Manual trigger only: there is no cron and nothing dismisses a group unless this endpoint (or the per-group dismiss endpoint, §9.5) is called.
 
-One threshold partitions the pending review queue between the two endpoints: groups scoring `>= N%` are resolved (keep-best, archive/trash the rest), groups scoring `< N%` are dismissed (marked "not duplicates," ungrouped, nothing deleted) — the same one-threshold-two-buckets model as burst detection's dismiss-by-threshold ([burst-detection.md §7.2](burst-detection.md#72-group-actions)), which itself mirrors the accept/reject split added for Location Suggestions in issue #126 ([location-inference.md §7](location-inference.md#7-configuration)). As with §9.4a, confidence here is **not persisted**: this endpoint loads candidate pending groups for the circle (capped at 500, same `MAX_THRESHOLD_RESOLVE` cap), then computes each group's `maxSim` via `computeGroupKind` (§3.4) and filters against the threshold in application code.
+One threshold partitions the pending review queue between the two endpoints: groups scoring `>= N%` are resolved (keep-best, archive/trash the rest), groups scoring `< N%` are dismissed (marked "not duplicates," ungrouped, nothing deleted) — the same one-threshold-two-buckets model as burst detection's dismiss-by-threshold ([burst-detection.md §7.2](burst-detection.md#72-group-actions)), which itself mirrors the accept/reject split added for Location Suggestions in issue #126 ([location-inference.md §7](location-inference.md#7-configuration)).
 
 - **Auth:** `media:write` + per-circle `collaborator` role.
-- **Request body:** `{ "circleId": "uuid", "threshold": 25 }`. `threshold` is an integer `0`–`100`, compared against the computed `maxSim` (a `[0, 1]` value) as `maxSim < threshold / 100`.
-- **Behavior:** for each loaded pending group scoring below the threshold, ungroups all members (`duplicateGroupId = null`) and sets `status = dismissed`, exactly as `POST /api/media/duplicates/:id/dismiss` does, but only for groups meeting the threshold.
-  - A group whose `maxSim` cannot be computed — fewer than two members carry a `media_visual_embedding` row, or the embedding lookup fails — is **excluded from matching** and counted in `skipped`, the same bucket as a group that computed a similarity at or above the threshold. There is no separate "unscoreable" counter; both cases are indistinguishable from the caller's point of view.
-  - A group that is eligible but fails during its own transaction is counted in `errors` without blocking the rest.
-- **Response `200`:** `{ "data": { "dismissedGroups": 3, "ungroupedCount": 9, "skipped": 5, "errors": 0 } }`.
-- **Response `400`:** `threshold` is out of range, or more than 500 pending groups exist in the circle.
+- **Request body:** `{ "circleId": "uuid", "threshold": 25 }`. `threshold` is an integer `0`–`100`, compared against the persisted `confidence` (a `[0, 1]` value) as `confidence < threshold / 100`.
+- **Behavior:** creates a `ReviewRun` (`subjectType = 'duplicate_group'`, `action = 'dismiss'`) and enqueues a `review_run_evaluate` job. Once evaluated and executed, every matched group is dismissed — ungrouping all members (`duplicateGroupId = null`) and setting `status = dismissed`, exactly as `POST /api/media/duplicates/:id/dismiss` does, each still applied via `DuplicateService.dismissOneDuplicateGroup` in its own transaction.
+  - A group whose `confidence IS NULL` is **excluded from matching**, matching the pre-existing behavior.
+  - A group at or above the threshold is skipped (counted in the run's `skippedCount`).
+  - A group that is eligible but fails during its own transaction is counted in the run's `failedCount` and does not block the rest of the run.
+- **Response `200`:** `{ "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }`.
+- **Response `409`:** a duplicate review run is already active for this circle.
+- **Response `400`:** `threshold` is out of range.
+
+See [review-runs.md](review-runs.md) for the full run lifecycle (evaluate → chunked execute-batch → progress polling → cancel), the shared data model, and RBAC. There is no longer a pending-group count cap on either endpoint.
+
+### 9.4c `POST /api/admin/duplicates/confidence/backfill`
+
+One-pass backfill of `duplicate_groups.confidence` for pre-existing `NULL` rows — see §3.5 and [review-runs.md §4](review-runs.md#4-duplicate-group-confidence-becomes-persisted).
+
+- **Auth:** Admin role + `system_settings:write`. **Not** gated on `features.duplicateDetection` — this repairs already-existing data regardless of whether the feature is currently toggled on.
+- **Request body:** `{ "limit"?: number }` (optional).
+- **Response `201`:** `{ "data": { "jobId": "uuid", "status": "pending" } }` — enqueues a global `duplicate_confidence_backfill` job; poll `/admin/settings/jobs` for completion.
 
 ### 9.5 `POST /api/media/duplicates/:id/dismiss`
 
@@ -544,10 +566,14 @@ Visual-embedding model availability.
 | `GET /api/media/duplicates/:id` | `media:read` | `viewer` | |
 | `POST /api/media/duplicates/:id/resolve` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | |
 | `POST /api/media/duplicates/bulk/resolve` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | 1–100 group IDs |
-| `POST /api/media/duplicates/bulk/resolve-by-threshold` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | score threshold 0–100, capped at 500 pending groups |
+| `POST /api/media/duplicates/bulk/resolve-by-threshold` | `media:write` (+ `media:delete` if `action: 'trash'`) | `collaborator` | Starts an async review run (§9.4a); no longer capped |
+| `POST /api/media/duplicates/bulk/dismiss-by-threshold` | `media:write` | `collaborator` | Starts an async review run (§9.4b); no longer capped |
 | `POST /api/media/duplicates/:id/dismiss` | `media:write` | `collaborator` | |
 | `POST /api/media/:id/duplicates/rerun` | `media:write` | `collaborator` | |
 | `POST /api/admin/duplicates/backfill` | `system_settings:write` | — (Admin, app-wide) | 400 if feature disabled |
+| `POST /api/admin/duplicates/confidence/backfill` | `system_settings:write` | — (Admin, app-wide) | §9.4c; not feature-gated |
+| `GET /api/review-runs/:id` \| `/items` | `media:read` | `viewer` | Shared review-run inspection API — see [review-runs.md §12](review-runs.md#12-api-endpoints) |
+| `POST /api/review-runs/:id/cancel` | `media:write` | `collaborator` | |
 | `GET /api/admin/duplicates/status` | `system_settings:read` | — (Admin) | |
 | `GET /api/media/review-insights` | `media:read` | `viewer` | Covers both bursts and duplicates; see §9.10 |
 
@@ -559,7 +585,7 @@ No new permission scopes were introduced. All endpoints reuse `media:read`/`medi
 
 The frontend review-queue page (`/duplicates`, `/duplicates/:id`) now exists, following the same `services/<domain>.ts` + `hooks/use<Domain>.ts` pattern used by `pages/Bursts/*`. Like the burst review queue, group cards carry a multi-select checkbox (enlarged for mobile touch targets) and a confidence meter (§3.5); a bulk toolbar appears once one or more groups are selected, offering "Resolve & Archive" and "Resolve & Delete" (the latter, and any selection over 25 groups, prompts a confirmation before firing `POST /api/media/duplicates/bulk/resolve`, §9.4).
 
-Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `dedup.autoResolveThreshold` (§8.1) and adjustable before firing, which call `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a). The group detail page (`/duplicates/:id`) presents two distinctly-colored actions — "Archive" and "Delete" — in place of an archive-vs-trash toggle, each firing `POST /api/media/duplicates/:id/resolve` with the corresponding `action`. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/duplicates`, which now also exposes the auto-resolve threshold alongside the existing global toggle, threshold sliders, backfill panel, and CLIP model status.
+Alongside the multi-select toolbar, the page offers "Archive above N" and "Delete above N" score-threshold buttons, pre-filled with `dedup.autoResolveThreshold` (§8.1) and adjustable before firing, which call `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a). As of issue #190, confirming either button starts an asynchronous review run and navigates immediately to `/review-runs/:runId` — the shared run-progress page described in [review-runs.md §14](review-runs.md#14-frontend) — rather than resolving groups in-place; the old client-side auto-loop against the `hasMore` flag is gone. The group detail page (`/duplicates/:id`) presents two distinctly-colored actions — "Archive" and "Delete" — in place of an archive-vs-trash toggle, each firing `POST /api/media/duplicates/:id/resolve` with the corresponding `action`. For Admins, the page header also carries a gear icon linking directly to `/admin/settings/duplicates`, which now also exposes the auto-resolve threshold alongside the existing global toggle, threshold sliders, backfill panel, and CLIP model status.
 
 The kind-filter chip row is paired with a `ReviewSortSelect` control (shared with the Bursts and Location Suggestions pages) offering Captured (oldest/newest), Similarity (highest/lowest — `confidence`), and group size, backed by the `sortBy`/`sortOrder` params from §9.1. The selection is mirrored into the URL query string, falls back to the page default on an unrecognized URL value, resets to page 1 and clears the current selection on change, and is sent to the API only when non-default.
 
@@ -654,3 +680,4 @@ The scenarios below describe the full coverage this module should have; items al
 | 1.2 | July 2026 | AI Assistant | Added the read-time `confidence` score (§3.5, `maxSim`); added `POST /api/media/duplicates/bulk/resolve` (§9.4); added `resolutionAction`/`keptCount`/`removedCount` columns on `duplicate_groups` (migration `20260713120000_add_burst_dup_resolution_tracking`, §5.1); added `GET /api/media/review-insights` (§9.10, full detail in `burst-detection.md` §7.5); documented the now-implemented duplicate review-queue frontend, its multi-select bulk toolbar, and confidence meter (§11) |
 | 1.3 | July 2026 | AI Assistant | Closed the residual upload-time TOCTOU race between burst and duplicate detection (§3.2): `DuplicateDetectionService.processMediaItem` now re-checks `burstGroupId` under a `SELECT ... FOR UPDATE` row lock immediately before writing `duplicateGroupId`, inside the same transaction, skipping the write if the item is now in a pending burst group; also lowered `burst_detection`'s upload-time enqueue priority from 10 to 5 (`duplicate_detection` unchanged at 10) so burst is claimed first in the common case (§6.1) |
 | 1.4 | July 2026 | AI Assistant | Added `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a) and the `dedup.autoResolveThreshold` system setting (§8.1) powering the duplicate review page's "Archive above N" / "Delete above N" buttons; unlike the equivalent burst endpoint, confidence is computed at read time so the threshold filter runs in application code over a capped set of loaded pending groups (§3.5, §9.4a); groups with no computable `maxSim` are counted in `skipped`, same as below-threshold groups; documented the review page's admin-only settings gear icon and the group detail page's Archive/Delete button pair (§11) |
+| 1.5 | July 2026 | AI Assistant | Issue #190: `duplicate_groups.confidence` is now a persisted, indexed column instead of a read-time computation (§3.5, §5.1, migration `20260726000000_duplicate_group_confidence`) — this is what removed the `MAX_THRESHOLD_RESOLVE` 500-group cap and closed a latent bug where a circle with >500 pending groups could have the old two-phase, unordered candidate scan re-scan the same below-threshold 500 forever. `bulk/resolve-by-threshold` and `bulk/dismiss-by-threshold` (§9.4a/§9.4b) now start an asynchronous shared review run instead of resolving synchronously; the `hasMore` response field is gone. Added `POST /api/admin/duplicates/confidence/backfill` (§9.4c) and the `duplicate_confidence_backfill` job type. Updated §8.1 UI to describe navigation to the shared `/review-runs/:runId` progress page. See [review-runs.md](review-runs.md) for the full shared run architecture. |
