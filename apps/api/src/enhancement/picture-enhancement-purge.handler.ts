@@ -33,10 +33,11 @@ export class PictureEnhancementPurgeHandler implements EnrichmentHandler, OnModu
   }
 
   async process(_job: EnrichmentJob): Promise<void> {
+    // Fallback mirrors settings.schema.ts / DEFAULT_SYSTEM_SETTINGS (168h = 7d).
     const retentionHours =
       (await this.systemSettings.getSettingValue<number>(
         'pictureEnhancement.retentionHours',
-      )) ?? 72;
+      )) ?? 168;
 
     const cutoff = new Date(Date.now() - retentionHours * 3_600_000);
 

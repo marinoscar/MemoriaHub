@@ -523,7 +523,7 @@ export class SystemSettingsService {
         retentionHours:
           (dto as any).pictureEnhancement?.retentionHours ??
           (current as any).pictureEnhancement?.retentionHours ??
-          72,
+          168,
       },
       workflows: {
         maxItemsPerRun:
