@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 (Implemented) |
+| **Version** | 1.2 (Implemented) |
 | **Last Updated** | July 2026 |
-| **Status** | Implemented (v1.1) — see [Implementation status (v1)](#implementation-status-v1) below for scope shipped vs. deferred |
+| **Status** | Implemented (v1.2) — see [Implementation status (v1)](#implementation-status-v1) below for scope shipped vs. deferred |
 | **Owner** | oscar@marin.cr |
 | **Scope** | Photos only. Single-item, human-reviewed, non-destructive by default. |
 
@@ -23,6 +23,7 @@ GitHub issue #98 shipped in two passes. The first pass landed DB migration, back
 - **Drawer rebuilt** (§9.3) around the new presets, a distinguished queued-vs-enhancing progress state with elapsed time, a draggable before/after slider with side-by-side toggle and full-screen zoom, and client-side replace-policy gating.
 - **§8.6 endpoints shipped as designed**: `PUT /api/ai/features/enhance` and `GET /api/ai/models?provider=openai&capability=image` (curated `['gpt-image-1']` list) both landed unchanged from the original draft.
 - Two decisions from the original draft remain genuinely unshipped and are still open: the two-tier analyze-then-edit flag (`pictureEnhancement.analyzeFirst`, §4.3/§14 #4) and the first-class `aiEnhancedAt` column (§5.3/§14 #6). Everything else in this document (data model, endpoints, RBAC, config keys, Doctor check, retention cron) matches what was built; see [§14](#14-open-decisions-summary) for the resolved-decisions summary.
+- **A second follow-up — issue #201 PR1, "the AI Enhancements hub" — landed after phase G** and shipped a cross-item landing spot for the feature, which until now was reachable only per-item (gallery selection bar / lightbox). New: a `GET /api/media/enhancements` endpoint (§8.9) listing every enhancement in a circle regardless of which media item it belongs to; a `/enhancements` hub page (§9.7) with three tabs — **Pending review is live** (list, expiry countdown, review/keep-both/discard actions), **Enhanced photos** and **History** are placeholders, both deferred to PR3; a new "AI Enhancements" entry in the sidebar's Utilities section carrying the app's first sidebar nav-badge; a `pendingEnhancements` count on `GET /api/media/dashboard`, landed in the same commit as a fix for a pre-existing contract drift (`pendingBurstGroups`/`pendingDuplicateGroups`/`pendingLocationSuggestions` were returned top-level while the web client read them under `counts.*`, leaving those three Home review-queue banners permanently dead); and `pictureEnhancement.retentionHours`'s default raised **72h → 168h (7 days)**, since a hub users work through over time — rather than a use-immediately dialog — was being undercut by a retention window that reaped unreviewed, already-billed enhancements before anyone got to them. Bulk actions on the hub (multi-select, threshold-based bulk resolve) are explicitly **not** part of PR1 — see §15.
 
 ---
 
@@ -320,7 +321,7 @@ Validated via the shared Zod schema (`apps/api/src/settings/dto/update-system-se
 | `pictureEnhancement.allowReplace` | boolean | — | `true` | If `false`, only "keep both" is offered (never overwrite originals). |
 | `pictureEnhancement.blockReplaceOnDownscale` | boolean | — | `false` | If `true`, disable "replace" when enhanced dims < original (§2 note 2, decision c/b). |
 | `pictureEnhancement.maxInputMegapixels` | number | 1–100 | `50` | Skip/guard absurdly large inputs. |
-| `pictureEnhancement.retentionHours` | int | 1–720 | `72` | How long unapplied staging previews live before the purge cron reaps them. |
+| `pictureEnhancement.retentionHours` | int | 1–720 | `168` | How long unapplied staging previews live before the purge cron reaps them. Raised from `72` in issue #201: the Enhancements hub (§9.7) is an inbox users work through over time, not a use-immediately dialog, and the shorter window was reaping unreviewed staged enhancements — each one a spent, paid `gpt-image-1` call — before a user got around to them. |
 
 ### 7.2 Environment Variables
 
@@ -402,6 +403,35 @@ Least-privilege carrier added in the follow-up pass to fix the button-never-rend
 - Backed by `SystemSettingsService.getPublicFeatures()`, which reads through the same cached `getSettings()` (5 s TTL) as every other settings caller — no extra DB read path.
 - **Web usage:** `useFeatureFlags()` (`apps/web/src/hooks/useFeatureFlags.ts`) wraps this with a module-level, 60 s-TTL in-flight-promise cache, so concurrent `MediaGallery` + `MediaLightbox` mounts share one request instead of each firing their own; failures are never cached (a fetch outage can only hide a gated affordance, never break the surface hosting it).
 
+### 8.9 `GET /api/media/enhancements` *(the Enhancements hub, issue #201)*
+Cross-item, paginated listing of every AI picture enhancement in a circle — the first cross-item enhancement listing in the codebase (every endpoint above is scoped to one `:id`). Backs the `/enhancements` hub's Pending review tab (§9.7).
+- **Auth:** `media:read` + per-circle `viewer`. Declared in `MediaEnhancementController`'s static-routes block, ahead of any `:id` route, so the literal `enhancements` path segment is never captured as an `:id` param (same convention as `media.controller.ts`).
+- **Query params:** `circleId` (required, uuid). `status` (optional) — a concrete `MediaEnhancementStatus` (`pending`\|`processing`\|`ready`\|`failed`\|`applied`\|`discarded`\|`expired`) **or** one of three convenience aliases (`ENHANCEMENT_STATUS_ALIASES`) the hub UI actually thinks in: `in_progress` → [`pending`, `processing`], `awaiting_decision` → [`ready`], `terminal` → [`applied`, `discarded`, `expired`]. `page` (default `1`), `pageSize` (default `24`, max `50`), `sortBy` (`createdAt`\|`updatedAt`, default `createdAt`), `sortOrder` (`asc`\|`desc`, default `desc`).
+- **Response `200`:** `{ items: [...], meta: { page, pageSize, totalItems, totalPages } }`. Each item:
+  ```json
+  {
+    "id": "…", "mediaItemId": "…", "status": "ready", "decision": null,
+    "model": "gpt-image-1", "params": { "preset": "low_light" },
+    "original": { "thumbnailUrl": "<signed>", "width": 4032, "height": 3024, "size": "3145728" },
+    "enhanced": { "thumbnailUrl": "<signed>", "width": 1536, "height": 1152, "size": "812345" },
+    "downscaled": true,
+    "expiresAt": "2026-08-03T12:00:00.000Z",
+    "lastError": null,
+    "resultMediaItemId": null,
+    "sourceFilename": "IMG_1234.jpg",
+    "capturedAt": "2024-12-25T09:00:00.000Z",
+    "createdBy": { "id": "…", "name": "…" },
+    "createdAt": "2026-07-27T12:00:00.000Z",
+    "updatedAt": "2026-07-27T12:00:00.000Z"
+  }
+  ```
+- **Contract points worth calling out explicitly:**
+  1. **Byte-size fields are STRINGS.** `original.size` and `enhanced.size` are decimal strings, not numbers — the same BigInt-JSON-safety pattern used everywhere else in the codebase (the underlying `enhancedSize`/storage-object `size` columns are Prisma `BigInt`).
+  2. **`expiresAt` is computed server-side**, once per request (not per row), as `updatedAt + pictureEnhancement.retentionHours` — and is **non-null only for the `ready` and `failed` statuses**, the two the `picture_enhancement_purge` retention job (§6.4) actually reaps. The client never has to know the retention setting to render a countdown; it just watches the deadline the server already resolved.
+  3. **`enhanced.*` is populated only while the row is `ready`.** A row that is `applied`/`discarded`/`expired`/`pending`/`processing`/`failed` gets `enhanced: { thumbnailUrl: null, width: null, height: null, size: null }`, because staged bytes exist only for a `ready` row (every other status has had them promoted, discarded, or reaped). `enhanced.thumbnailUrl` is a signed URL to the staged **full-resolution** object itself, not a thumbnail derivative — staged objects have no thumbnail derivative to sign.
+  4. **Batched signing, no N+1.** One `mediaItem.findMany` loads every source item on the page; one `signThumbsBatched` call signs every source thumbnail key; a per-`provider|bucket` cache resolves staged-bytes signing so a page of N rows touches at most one provider client per distinct destination, not N. A single unsignable staged object logs a warning and degrades to `null` rather than failing the whole page.
+- **Response `400`:** invalid query params. **Response `403`:** caller is not a viewer of the circle.
+
 ---
 
 ## 9. Frontend / UI
@@ -434,6 +464,20 @@ Optionally add an "Enhance with AI" button + "AI Enhanced" badge in `MediaDetail
 3. **Defaults & policy** — the seven `pictureEnhancement.*` settings (§7.1): `defaultQuality`, `defaultStrength`, `stampExif` (default reflected as **on**, matching the shipped server default), `allowReplace`, `blockReplaceOnDownscale`, `maxInputMegapixels`, `retentionHours`.
 
 Reachable from `/admin/settings` (Settings hub) and linked from `pages/Admin/AiSettingsPage.tsx`, which previously pointed users at a "Picture Enhancement feature toggle in System Settings" that did not exist.
+
+### 9.7 The Enhancements hub — `/enhancements` (issue #201)
+
+Before this, the only way to reach an enhancement was per-item — from the gallery selection bar (§9.1) or the lightbox (§9.2) — with no cross-item place to come back to. `pages/Enhancements/EnhancementsPage.tsx` adds that landing spot: three tabs, URL-addressable via `?tab=pending|enhanced|history` (default `pending`, omitted from the URL when default — the tab keys are part of the page's URL contract, so renaming one breaks bookmarks).
+
+1. **Pending review — live in PR1** (`PendingEnhancementsTab.tsx`). A status/sort-filterable list, backed by `GET /api/media/enhancements` (§8.9), of everything sent through the enhancer that is still queued, running, awaiting a decision, or failed. Each card shows: a queued/enhancing/ready/failed chip with elapsed time while in flight; a "Lower resolution" badge when `downscaled`; an expiry countdown driven **entirely** by the server's `expiresAt` (§8.9 point 2) — the client never derives it from its own copy of `pictureEnhancement.retentionHours`, since the setting can change after a row was created and only the server's resolved deadline is authoritative. Countdown severity: `info` normally, `warning` under 24h remaining, `error` under 6h remaining. Per-card actions on a `ready` row: **Review** (reopens `MediaEnhancementDrawer` on that specific enhancement, §9.3/below), **Keep both**, and **Discard**; **Replace** appears/disables per the same admin replace-policy gating the drawer already applies (`allowReplace`/`blockReplaceOnDownscale` from `GET /api/features`, §8.8). Multi-select and bulk actions are deliberately absent — see §15.
+2. **Enhanced photos — placeholder in PR1.** Renders "Enhanced photos — a gallery of every enhancement you kept — is coming soon." The real implementation (a gallery over the "AI Enhanced" system tag, §5.3) is deferred to PR3.
+3. **History — placeholder in PR1.** Renders "History — the full audit trail of past enhancements — is coming soon." Deferred to PR3.
+
+**Gating:** the page (and its sidebar entry, below) reads `features.pictureEnhancement` via `useFeatureFlags()` → `GET /api/features` (§8.8) — the same least-privilege source §9.1/§9.2 already use, deliberately **not** the Admin-only `GET /api/system-settings` — so non-admin circle collaborators reach the hub too.
+
+**Sidebar entry.** `components/navigation/Sidebar.tsx` adds an "AI Enhancements" item (`AutoFixHigh` icon) to the **Utilities** section (alongside Review Bursts / Review Duplicates / Review Insights / Location Suggestions / Workflows) — not a primary nav item. Rendered only when `pictureEnhancement?.enabled === true` (strict equality, not a truthy check, so the entry doesn't flash in while the flag is still loading — `pictureEnhancement` is `null` until `useFeatureFlags()` resolves). It carries a badge showing the dashboard's `pendingEnhancements` count (rendered only when > 0) — the app's **first** sidebar nav-item badge; the shared `NavItemDef` interface gained a new optional `badgeCount?: number` field to support it, so this is now a reusable pattern rather than a one-off for this feature.
+
+**Drawer change.** `MediaEnhancementDrawer` (§9.3) can now open directly on a **named, existing** enhancement via a new `enhancementId` prop, instead of only ever starting a fresh one — this is what lets the hub's "Review" action reopen the compare/decide flow for the specific card the user clicked, rather than kicking off a new (billable) request.
 
 ---
 
@@ -509,7 +553,7 @@ Collected here for the review pass — each is flagged **⟐** in context above.
 3. **contentHash rotation on replace** (§3): **resolved as null-and-recompute** — `replace` nulls `MediaItem.contentHash` before `reprocessObjectNow`, matching the P2002-fallback handling already in `media-metadata-sync.service.ts`.
 4. **Two-tier analyze-then-edit** (§4.3): **resolved as single-call v1** — `picture_enhancement` makes exactly one `images.edit` call per enhancement; no `pictureEnhancement.analyzeFirst` flag exists. Remains genuinely absent and future work.
 5. **EXIF writer** (§5.1): **resolved as (A) — file-level carryover shipped, in the follow-up pass.** `exiftool-vendored` was added to `apps/api` (with `perl` in the Dockerfile base stage); `ExifCarryoverService` copies the original's EXIF/GPS/IPTC/XMP/ICC onto the enhanced file and stamps an AI marker; `pictureEnhancement.stampExif` now defaults to `true`. Originally resolved as (C) (in-app marker only) in the first pass — see [Implementation status (v1)](#implementation-status-v1).
-6. **First-class `aiEnhancedAt` column** (§5.3): **not added, still genuinely open** — v1.1 uses `metadata._aiEnhanced` + the "AI Enhanced" system tag only; no new `media_items` column. Still open as future work if a dedicated search facet is wanted.
+6. **First-class `aiEnhancedAt` column** (§5.3): **leaning resolved in favor of NOT adding it** — the tag-based approach (`metadata._aiEnhanced` breadcrumb + the "AI Enhanced" system tag) is the direction issue #201 continues to build on rather than introducing a new column: the "Enhanced photos" tab of the hub (§9.7) is planned as a gallery over the existing system tag, not a query against a new column. That gallery is **not** built yet — it's a PR3 placeholder in the shipped PR1 (§9.7) — so this decision is directional, not fully proven out in a shipping surface yet. Treat as "leaning resolved, implementation pending in PR3," not "done."
 7. **One live enhancement per item** (§6.1): **resolved as supersede semantics** — a new `POST …/enhance` request discards any existing `pending`/`processing`/`ready` row's staging bytes for that item.
 8. **`allowReplace` default** (§7): **resolved as `true`** — replace is allowed by default; admins can set `pictureEnhancement.allowReplace=false` to force keep-both-only.
 
@@ -519,7 +563,7 @@ Collected here for the review pass — each is flagged **⟐** in context above.
 
 | Capability | Notes |
 |-----------|-------|
-| Bulk enhancement | Queue already supports it; needs a review-queue UX (like bursts/duplicates) rather than a per-item drawer. |
+| Bulk enhancement | **In progress.** Issue #201 PR1 shipped the missing landing spot — the `/enhancements` hub (§9.7) — but its Pending review tab is single-item actions only (no multi-select). PR2 adds the bulk actions themselves, built on the shared review-run engine (`review_runs`/`review_run_items`, the same engine already serving bursts/duplicates/location-suggestions bulk review — see [Review Runs spec](review-runs.md)) rather than a bespoke mechanism. |
 | Two-tier analyze-then-edit | Vision-model diagnosis feeding the edit prompt for sharper targeting; `pictureEnhancement.analyzeFirst` flag (§4.3/§14 #4). |
 | Additional providers | Registry supports it; e.g. a local ESRGAN/Real-ESRGAN upscaler or Stability edit endpoint for true enhancement/super-resolution. |
 | C2PA content credentials | Cryptographic provenance marking (the industry standard for "AI-edited") instead of/alongside the EXIF marker (§5.1/§5.4 already ship an IPTC `DigitalSourceType` marker, but not full C2PA). |
@@ -537,3 +581,4 @@ Collected here for the review pass — each is flagged **⟐** in context above.
 | 0.1 | July 2026 | AI Assistant | Initial draft for review. |
 | 1.0 | July 2026 | AI Assistant | Marked Implemented (v1); documented deviations from the draft (EXIF writer deferred to option C, `stampExif` default flipped to `false`, `enhanceImage` failures use normal retry not rate-limit deferral, Doctor check has no live `testModel` probe); resolved all eight §14 open decisions. |
 | 1.1 | July 2026 | AI Assistant | Phase G follow-up (issue #98). Fixed the two root causes making the feature unreachable: `GET /api/features` (§8.8) least-privilege endpoint + `/admin/settings/enhancer` admin page (§9.6), since `features.pictureEnhancement` was the only one of eight feature flags with no UI toggle. EXIF writer SHIPPED (§5.1/§5.4, option A — `exiftool-vendored`, `stampExif` now defaults `true`), reversing v1.0's deferral; §14 #5 updated accordingly. Rate-limit classification FIXED (`OpenAiProvider.enhanceImage` preserves provider status; handler catch is now a retry/defer/fail state machine) — no longer a known limitation. Added enhancement presets + per-run `quality` override (§4.1). Fixed keep_both to inherit source item metadata via `inheritableMetadata()` (§5.2). Fixed enhanced dims to read from actual output bytes, not the requested canvas (§4.2/§6.1). Rebuilt the drawer around presets, queued-vs-enhancing progress with elapsed time, and a before/after slider with replace-policy gating (§9.3). §14 #6 (`aiEnhancedAt` column) and the two-tier `analyzeFirst` flag (§14 #4) remain genuinely unshipped. |
+| 1.2 | July 2026 | AI Assistant | Issue #201 PR1, "the AI Enhancements hub" — the first cross-item surface for the feature. Added `GET /api/media/enhancements` (§8.9), a paginated cross-item enhancement listing with three status aliases, server-computed `expiresAt`, and staged-bytes-only-when-`ready` semantics. Added the `/enhancements` hub page (§9.7): Pending review tab live (list, expiry countdown, per-card review/keep-both/replace/discard), Enhanced photos and History tabs are PR3 placeholders. Added a sidebar "AI Enhancements" entry (Utilities section) carrying the app's first sidebar nav-badge (`NavItemDef.badgeCount`). Added `pendingEnhancements` to `GET /api/media/dashboard`, in the same commit as a fix for a pre-existing bug where `pendingBurstGroups`/`pendingDuplicateGroups`/`pendingLocationSuggestions` were returned top-level while the web client read them from `counts.*`, leaving three Home review-queue banners permanently dead. Raised `pictureEnhancement.retentionHours`'s default `72h → 168h` (7 days) — the hub is an inbox worked through over time, and 72h was reaping unreviewed, already-billed enhancements. `MediaEnhancementDrawer` gained an `enhancementId` prop to open directly on a named existing enhancement (what the hub's "Review" action uses). §14 #6 (`aiEnhancedAt` column) updated from "open" to "leaning resolved" (tag-based, no new column) since the tag-driven gallery it would back is still PR3, not shipped. §15's "Bulk enhancement" row updated from not-started to in-progress, landing in PR2 on the shared review-run engine. |

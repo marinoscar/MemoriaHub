@@ -82,6 +82,89 @@ export interface StartEnhanceResult {
   status: string;
 }
 
+// ---------------------------------------------------------------------------
+// Types — cross-item hub listing (issue #201)
+// GET /api/media/enhancements
+// ---------------------------------------------------------------------------
+
+/**
+ * `status` values the list endpoint accepts. On top of the seven concrete
+ * `EnhancementStatus` values it takes three server-side aliases that expand to
+ * a group (see `list-enhancements-query.dto.ts`), so the client can ask for
+ * "everything still working" without hard-coding which statuses that means.
+ */
+export type EnhancementStatusFilter =
+  | EnhancementStatus
+  | 'in_progress'
+  | 'awaiting_decision'
+  | 'terminal';
+
+/** Columns the list endpoint can order by (server default: `createdAt`). */
+export type EnhancementSortBy = 'createdAt' | 'updatedAt';
+export type EnhancementSortOrder = 'asc' | 'desc';
+
+/**
+ * Image descriptor in a LIST row. Deliberately NOT `EnhanceImageInfo`: the list
+ * endpoint returns a signed *thumbnail* URL (`thumbnailUrl`) suited to a grid,
+ * where the single-item compare payload returns a full-resolution `url`. Same
+ * BigInt-as-string caveat applies to `size`.
+ */
+export interface EnhancementThumbInfo {
+  thumbnailUrl: string | null;
+  width: number | null;
+  height: number | null;
+  size: string | null;
+}
+
+export interface EnhancementListItem {
+  id: string;
+  mediaItemId: string;
+  status: EnhancementStatus;
+  decision: ApplyDecision | null;
+  model: string | null;
+  params: EnhanceParams | null;
+  original: EnhancementThumbInfo;
+  /** All-null unless `status === 'ready'` — only a ready row still owns staged bytes. */
+  enhanced: EnhancementThumbInfo;
+  downscaled: boolean;
+  /**
+   * Server-computed reap deadline (ISO 8601). Non-null ONLY for `ready` and
+   * `failed` — the two statuses the purge job actually collects. The client
+   * renders its countdown from this and never from its own knowledge of the
+   * `pictureEnhancement.retentionHours` setting.
+   */
+  expiresAt: string | null;
+  lastError: string | null;
+  resultMediaItemId: string | null;
+  sourceFilename: string | null;
+  capturedAt: string | null;
+  createdBy: { id: string; name: string | null } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EnhancementListMeta {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+export interface EnhancementListResponse {
+  items: EnhancementListItem[];
+  meta: EnhancementListMeta;
+}
+
+export interface ListEnhancementsParams {
+  circleId: string;
+  status?: EnhancementStatusFilter;
+  page?: number;
+  /** Server caps this at 50 (default 24). */
+  pageSize?: number;
+  sortBy?: EnhancementSortBy;
+  sortOrder?: EnhancementSortOrder;
+}
+
 /**
  * Response of the apply endpoint. `replace` returns `{ status, width, height }`;
  * `keep_both` returns the newly-created media item (id/mediaItemId). Kept loose
@@ -116,6 +199,26 @@ export interface EnhancerAdminStatus {
 /** Admin: feature/provider readiness for the AI Picture Enhancer. */
 export async function getEnhancerAdminStatus(): Promise<EnhancerAdminStatus> {
   return api.get<EnhancerAdminStatus>('/admin/ai/enhance/status');
+}
+
+/**
+ * Paginated, cross-item listing of a circle's enhancements — the data behind
+ * the AI Enhancements hub. Only non-default params go on the wire so the
+ * default view's request stays minimal.
+ */
+export async function listEnhancements(
+  params: ListEnhancementsParams,
+): Promise<EnhancementListResponse> {
+  const p = new URLSearchParams({ circleId: params.circleId });
+  if (params.status) p.set('status', params.status);
+  if (params.page) p.set('page', String(params.page));
+  if (params.pageSize) p.set('pageSize', String(params.pageSize));
+  if (params.sortBy) p.set('sortBy', params.sortBy);
+  if (params.sortOrder) p.set('sortOrder', params.sortOrder);
+  const result = await api.get<EnhancementListResponse>(
+    `/media/enhancements?${p.toString()}`,
+  );
+  return { items: result.items ?? [], meta: result.meta };
 }
 
 /** Start an enhancement job. An empty params object requests full auto defaults. */

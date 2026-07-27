@@ -6,7 +6,7 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaTagSource } from '@prisma/client';
+import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaEnhancementStatus, MediaTagSource } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
@@ -1750,6 +1750,7 @@ export class MediaService {
       pendingBurstGroupsCount,
       pendingDuplicateGroupsCount,
       pendingLocationSuggestionsCount,
+      pendingEnhancementsCount,
     ] =
       await Promise.all([
         onThisDayIds.length > 0
@@ -1791,6 +1792,16 @@ export class MediaService {
             status: LocationSuggestionStatus.pending,
           },
         }),
+        // "Pending review" for an enhancement means STAGED and awaiting a human
+        // keep-both/replace/discard decision — i.e. `ready`. The `pending` status
+        // means "queued for the model" and is not user-actionable, so it is
+        // deliberately excluded. Served by the existing @@index([circleId, status]).
+        this.prisma.mediaEnhancement.count({
+          where: {
+            circleId,
+            status: MediaEnhancementStatus.ready,
+          },
+        }),
       ]);
 
     const [onThisDay, recent, favorites] = await Promise.all([
@@ -1803,13 +1814,19 @@ export class MediaService {
       onThisDay,
       recent,
       favorites,
+      // The pending* review-queue counts live INSIDE `counts` because that is the
+      // client contract: the web app types them under `counts` and reads
+      // `data.counts.pendingBurstGroups` (see apps/web/src/types/media.ts and
+      // HomePage.tsx). Emitting them at the top level left every Home
+      // review-queue banner permanently hidden.
       counts: {
         total: totalCount,
         missingGeo: missingGeoCount,
+        pendingBurstGroups: pendingBurstGroupsCount,
+        pendingDuplicateGroups: pendingDuplicateGroupsCount,
+        pendingLocationSuggestions: pendingLocationSuggestionsCount,
+        pendingEnhancements: pendingEnhancementsCount,
       },
-      pendingBurstGroups: pendingBurstGroupsCount,
-      pendingDuplicateGroups: pendingDuplicateGroupsCount,
-      pendingLocationSuggestions: pendingLocationSuggestionsCount,
     };
   }
 

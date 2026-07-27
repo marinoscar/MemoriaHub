@@ -41,7 +41,58 @@ vi.mock('../../../components/album/CreateAlbumDialog', () => ({
   CreateAlbumDialog: () => null,
 }));
 
+// The sidebar gates its "AI Enhancements" entry on GET /api/features and reads
+// the badge count from the dashboard. Both are mocked so navigation tests make
+// no network calls; the default below leaves the flag OFF, which is what keeps
+// every pre-existing menu-item count in this file correct.
+vi.mock('../../../hooks/useFeatureFlags', () => ({
+  useFeatureFlags: vi.fn(),
+}));
+
+vi.mock('../../../hooks/useDashboard', () => ({
+  useDashboard: vi.fn(),
+}));
+
 import { usePermissions } from '../../../hooks/usePermissions';
+import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
+import { useDashboard } from '../../../hooks/useDashboard';
+
+/** Default: enhancer flag off, no dashboard data. */
+function mockEnhancer(
+  enabled: boolean | null,
+  pendingEnhancements?: number,
+): void {
+  vi.mocked(useFeatureFlags).mockReturnValue({
+    features: enabled === null ? null : { pictureEnhancement: enabled },
+    pictureEnhancement:
+      enabled === null
+        ? null
+        : {
+            enabled,
+            allowReplace: true,
+            blockReplaceOnDownscale: false,
+            model: 'gpt-image-1',
+          },
+    isLoading: false,
+    error: null,
+    refresh: vi.fn().mockResolvedValue(undefined),
+  });
+
+  vi.mocked(useDashboard).mockReturnValue({
+    data:
+      pendingEnhancements === undefined
+        ? null
+        : {
+            onThisDay: [],
+            recent: [],
+            favorites: [],
+            counts: { total: 0, missingGeo: 0, pendingEnhancements },
+          },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+}
 
 describe('Sidebar', () => {
   const mockOnClose = vi.fn();
@@ -49,6 +100,7 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLocation.pathname = '/';
+    mockEnhancer(null);
   });
 
   describe('Rendering', () => {
@@ -216,9 +268,11 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       // Only items with visible: true should be rendered
-      // Non-admin: Photos, Explore, Map, Circles, Albums, People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash, User Settings
+      // Non-admin: Photos, Explore, Map, Circles, Albums, People, Archive, Trash,
+      //   Review Bursts, Review Duplicates, Review Insights, Location Suggestions,
+      //   User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(12);
+      expect(menuButtons).toHaveLength(13);
     });
 
     it('should show all menu items when user is admin', () => {
@@ -241,12 +295,13 @@ describe('Sidebar', () => {
       // to a single "Settings" hub entry (plus permission-gated items when hasPermission
       // is unconfigured/false, as in this test).
       // Admin layout: Photos, Explore, Map, Circles, Albums,
-      //               People, Review Bursts, Review Duplicates, Location Suggestions,
-      //               Archive, Trash,
+      //               People, Archive, Trash,
+      //               Review Bursts, Review Duplicates, Review Insights,
+      //               Location Suggestions,
       //               Settings (admin hub),
       //               User Settings
       const menuButtons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(menuButtons).toHaveLength(13);
+      expect(menuButtons).toHaveLength(14);
     });
 
     it('should dynamically update menu items when isAdmin changes', () => {
@@ -582,9 +637,10 @@ describe('Sidebar', () => {
       expect(container.textContent).toContain('Storage Insights');
       expect(container.textContent).toContain('Public Sharing');
 
-      // Settings(0) hub + 3 gated items + User Settings pinned at bottom
+      // 13 non-admin entries + Settings hub + 4 permission-gated admin entries
+      // (jobs:read gates BOTH "Job Queue" and "Worker Nodes") = 18.
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(buttons).toHaveLength(16);
+      expect(buttons).toHaveLength(18);
     });
   });
 
@@ -726,11 +782,11 @@ describe('Sidebar', () => {
       });
 
       // After the settings refactor, admin sees: Photos, Explore, Map, Circles, Albums,
-      //   People, Review Bursts, Review Duplicates, Location Suggestions, Archive, Trash,
-      //   Settings (admin hub), User Settings — 13 total
+      //   People, Archive, Trash, Review Bursts, Review Duplicates, Review Insights,
+      //   Location Suggestions, Settings (admin hub), User Settings — 14 total
       // (hasPermission is unconfigured/false here, so no extra gated items render).
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(13);
+      expect(icons).toHaveLength(14);
     });
 
     it('should highlight icon for selected menu item', () => {
@@ -1004,6 +1060,119 @@ describe('Sidebar', () => {
       expect(libraryList!.textContent).not.toContain('Review Bursts');
       expect(libraryList!.textContent).not.toContain('Review Duplicates');
       expect(libraryList!.textContent).not.toContain('Location Suggestions');
+    });
+  });
+
+  describe('AI Enhancements Entry (issue #201)', () => {
+    const nonAdmin = () => ({
+      permissions: new Set<string>(),
+      roles: new Set<string>(),
+      hasPermission: vi.fn(),
+      hasAnyPermission: vi.fn(),
+      hasAllPermissions: vi.fn(),
+      hasRole: vi.fn(),
+      hasAnyRole: vi.fn(),
+      isAdmin: false,
+    });
+
+    it('is hidden while the feature flag is still loading (null)', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(null);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
+    });
+
+    it('is hidden when picture enhancement is disabled', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(false, 4);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
+    });
+
+    it('renders under Utilities when picture enhancement is enabled', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
+
+      const utilitiesList = screen.getByText('Utilities').closest('.MuiList-root');
+      expect(utilitiesList).not.toBeNull();
+      expect(utilitiesList!.textContent).toContain('AI Enhancements');
+    });
+
+    it('navigates to /enhancements when clicked', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const button = screen
+        .getByText('AI Enhancements')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/enhancements');
+      });
+    });
+
+    it('stays highlighted on a nested /enhancements/... route (prefix match)', () => {
+      mockLocation.pathname = '/enhancements/some-id';
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const button = screen
+        .getByText('AI Enhancements')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      expect(button.classList.contains('Mui-selected')).toBe(true);
+    });
+
+    it('renders the pending count as a badge', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 7);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const badge = container.querySelector('.MuiBadge-badge');
+      expect(badge).not.toBeNull();
+      expect(badge!.textContent).toBe('7');
+    });
+
+    it('caps the badge at 999+', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 1500);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(container.querySelector('.MuiBadge-badge')!.textContent).toBe('999+');
+    });
+
+    it('renders no badge when the count is zero', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 0);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
+      expect(container.querySelector('.MuiBadge-badge')).toBeNull();
+    });
+
+    it('renders no badge when the dashboard count is unknown', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
+      expect(container.querySelector('.MuiBadge-badge')).toBeNull();
     });
   });
 

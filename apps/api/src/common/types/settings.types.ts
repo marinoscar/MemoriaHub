@@ -176,7 +176,11 @@ export interface SystemSettingsValue {
     blockReplaceOnDownscale: boolean;
     /** Skip/guard absurdly large inputs. */
     maxInputMegapixels: number;
-    /** How long unapplied staging previews live before the purge cron reaps them. */
+    /**
+     * How long unapplied staging previews live before the purge cron reaps them.
+     * Defaults to 168h (7 days) — the enhancements hub is an inbox users work
+     * through over time, so a shorter window silently destroys unreviewed work.
+     */
     retentionHours: number;
   };
   /**
@@ -413,7 +417,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     allowReplace: true,
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,
-    retentionHours: 72,
+    retentionHours: 168,
   },
   workflows: {
     maxItemsPerRun: 10000,

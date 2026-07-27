@@ -3727,8 +3727,11 @@ describe('MediaService', () => {
       mockPrisma.mediaItem.count
         .mockResolvedValueOnce(100)
         .mockResolvedValueOnce(10);
-      // burstGroup count
+      // review-queue counts
       mockPrisma.burstGroup.count.mockResolvedValue(0);
+      mockPrisma.duplicateGroup.count.mockResolvedValue(0);
+      mockPrisma.locationSuggestion.count.mockResolvedValue(0);
+      mockPrisma.mediaEnhancement.count.mockResolvedValue(0);
 
       const result = await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
 
@@ -3740,6 +3743,62 @@ describe('MediaService', () => {
         total: 100,
         missingGeo: 10,
       });
+    });
+
+    it('nests every pending* review-queue count under counts (client contract)', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([])  // recent
+        .mockResolvedValueOnce([]); // favorites
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(100) // total
+        .mockResolvedValueOnce(10); // missingGeo
+      mockPrisma.burstGroup.count.mockResolvedValue(2);
+      mockPrisma.duplicateGroup.count.mockResolvedValue(3);
+      mockPrisma.locationSuggestion.count.mockResolvedValue(4);
+      mockPrisma.mediaEnhancement.count.mockResolvedValue(5);
+
+      const result = await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
+
+      expect(result.counts).toMatchObject({
+        total: 100,
+        missingGeo: 10,
+        pendingBurstGroups: 2,
+        pendingDuplicateGroups: 3,
+        pendingLocationSuggestions: 4,
+        pendingEnhancements: 5,
+      });
+
+      // The web client reads data.counts.pending* — these must NOT be emitted at
+      // the top level (regression guard for the dead review-queue banners).
+      expect(result).not.toHaveProperty('pendingBurstGroups');
+      expect(result).not.toHaveProperty('pendingDuplicateGroups');
+      expect(result).not.toHaveProperty('pendingLocationSuggestions');
+      expect(result).not.toHaveProperty('pendingEnhancements');
+    });
+
+    it('counts only enhancements awaiting review (status ready) for the circle', async () => {
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+      mockPrisma.mediaItem.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      mockPrisma.mediaItem.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+      mockPrisma.burstGroup.count.mockResolvedValue(0);
+      mockPrisma.duplicateGroup.count.mockResolvedValue(0);
+      mockPrisma.locationSuggestion.count.mockResolvedValue(0);
+      mockPrisma.mediaEnhancement.count.mockResolvedValue(9);
+
+      const result = await service.getDashboard(dashboardQuery, 'user-1', ownPerms);
+
+      expect(mockPrisma.mediaEnhancement.count).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mediaEnhancement.count).toHaveBeenCalledWith({
+        where: { circleId: CIRCLE_ID, status: 'ready' },
+      });
+      expect(result.counts.pendingEnhancements).toBe(9);
     });
 
     it('getDashboard passes correct where to count queries', async () => {

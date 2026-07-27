@@ -3,7 +3,7 @@
  *
  * Mirrors trash-purge.handler.spec.ts: fully mocked collaborators, no
  * database required. Verifies the handler reads
- * pictureEnhancement.retentionHours (with a 72h fallback), only targets
+ * pictureEnhancement.retentionHours (with a 168h fallback), only targets
  * ready/failed rows past the cutoff, best-effort deletes staged bytes, and
  * always transitions matched rows to `expired` regardless of whether the
  * staging delete succeeded.
@@ -74,7 +74,7 @@ describe('PictureEnhancementPurgeHandler', () => {
       getProviderFor: jest.fn().mockResolvedValue({ delete: mockDeleteFn }),
     };
     mockSettings = {
-      getSettingValue: jest.fn().mockResolvedValue(72),
+      getSettingValue: jest.fn().mockResolvedValue(72),  // explicit setting overrides the default
     };
 
     (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([]);
@@ -118,14 +118,14 @@ describe('PictureEnhancementPurgeHandler', () => {
     });
   });
 
-  it('falls back to a 72h retention window when the setting is unset', async () => {
+  it('falls back to a 168h retention window when the setting is unset', async () => {
     mockSettings.getSettingValue.mockResolvedValue(undefined as any);
     const before = Date.now();
 
     await handler.process(makeJob());
 
     const cutoff: Date = (mockPrisma.mediaEnhancement.findMany as jest.Mock).mock.calls[0][0].where.updatedAt.lt;
-    const expectedCutoffMs = before - 72 * 3_600_000;
+    const expectedCutoffMs = before - 168 * 3_600_000;
     // Allow a small tolerance for test execution time.
     expect(Math.abs(cutoff.getTime() - expectedCutoffMs)).toBeLessThan(5000);
   });

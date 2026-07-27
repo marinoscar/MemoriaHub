@@ -115,12 +115,21 @@ export function useMediaEnhance(mediaId: string) {
   );
 
   /**
-   * Load the latest existing enhancement (used to resume a review after a
-   * reload). If it is still in-flight, resume polling; otherwise surface it.
+   * Load an existing enhancement (used to resume a review after a reload). If
+   * it is still in-flight, resume polling; otherwise surface it.
+   *
+   * Called with no argument — the per-item drawer's behaviour — it resolves
+   * the item's LATEST enhancement. The AI Enhancements hub (issue #201) passes
+   * an explicit `enhancementId` so it can open the drawer straight onto the
+   * exact row the user clicked, which need not be the latest one. Everything
+   * after the fetch is identical for both callers by design: one resume path,
+   * two ways of naming the row.
    */
-  const resumeLatest = useCallback(async () => {
+  const resumeLatest = useCallback(async (enhancementId?: string) => {
     try {
-      const latest = await getLatestEnhancement(mediaId);
+      const latest = enhancementId
+        ? await getEnhancement(mediaId, enhancementId)
+        : await getLatestEnhancement(mediaId);
       if (!latest) return;
       // Only resume enhancements that are still actionable in the drawer.
       if (['pending', 'processing', 'ready', 'failed'].includes(latest.status)) {

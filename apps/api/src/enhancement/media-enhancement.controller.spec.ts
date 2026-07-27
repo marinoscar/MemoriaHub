@@ -29,6 +29,7 @@ import { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interfa
 
 const MEDIA_ID = randomUUID();
 const ENH_ID = randomUUID();
+const CIRCLE_ID = randomUUID();
 
 /** Builds a minimal AuthenticatedUser-shaped fixture with the given roles/permissions. */
 function fakeAuthenticatedUser(
@@ -76,6 +77,10 @@ function makeMockService() {
       data: { id: 'new-media-1', status: 'applied', decision: 'keep_both' },
     }),
     discardEnhancement: jest.fn().mockResolvedValue(undefined),
+    listEnhancements: jest.fn().mockResolvedValue({
+      items: [],
+      meta: { page: 1, pageSize: 24, totalItems: 0, totalPages: 0 },
+    }),
   };
 }
 
@@ -117,6 +122,98 @@ describe('MediaEnhancementController — route dispatch + RBAC + validation (sup
   afterEach(async () => {
     if (app) await app.close();
     jest.clearAllMocks();
+  });
+
+  // ===========================================================================
+  // GET /media/enhancements — cross-item listing hub (issue #201)
+  // ===========================================================================
+
+  describe('GET /media/enhancements', () => {
+    it('200s for a caller with media:read and delegates to listEnhancements()', async () => {
+      app = await buildApp(READER);
+
+      const res = await request(app.getHttpServer())
+        .get('/media/enhancements')
+        .query({ circleId: CIRCLE_ID })
+        .expect(200);
+
+      expect(mockService.listEnhancements).toHaveBeenCalledTimes(1);
+      expect(mockService.listEnhancements.mock.calls[0][0]).toMatchObject({ circleId: CIRCLE_ID });
+      expect(res.body).toEqual({
+        items: [],
+        meta: { page: 1, pageSize: 24, totalItems: 0, totalPages: 0 },
+      });
+    });
+
+    it('403s for a caller missing media:read', async () => {
+      const NO_PERMS = fakeAuthenticatedUser(['viewer'], []);
+      app = await buildApp(NO_PERMS);
+
+      await request(app.getHttpServer())
+        .get('/media/enhancements')
+        .query({ circleId: CIRCLE_ID })
+        .expect(403);
+
+      expect(mockService.listEnhancements).not.toHaveBeenCalled();
+    });
+
+    it('400s when circleId is missing', async () => {
+      app = await buildApp(READER);
+
+      await request(app.getHttpServer()).get('/media/enhancements').expect(400);
+
+      expect(mockService.listEnhancements).not.toHaveBeenCalled();
+    });
+
+    it('400s when circleId is not a valid UUID', async () => {
+      app = await buildApp(READER);
+
+      await request(app.getHttpServer())
+        .get('/media/enhancements')
+        .query({ circleId: 'not-a-uuid' })
+        .expect(400);
+
+      expect(mockService.listEnhancements).not.toHaveBeenCalled();
+    });
+
+    it('400s when pageSize exceeds the max of 50', async () => {
+      app = await buildApp(READER);
+
+      await request(app.getHttpServer())
+        .get('/media/enhancements')
+        .query({ circleId: CIRCLE_ID, pageSize: 51 })
+        .expect(400);
+
+      expect(mockService.listEnhancements).not.toHaveBeenCalled();
+    });
+
+    it('400s for an unknown status value (not a concrete status or an alias)', async () => {
+      app = await buildApp(READER);
+
+      await request(app.getHttpServer())
+        .get('/media/enhancements')
+        .query({ circleId: CIRCLE_ID, status: 'not_a_real_status' })
+        .expect(400);
+
+      expect(mockService.listEnhancements).not.toHaveBeenCalled();
+    });
+
+    it('applies defaults (page=1, pageSize=24, sortBy=createdAt, sortOrder=desc) when only circleId is provided', async () => {
+      app = await buildApp(READER);
+
+      await request(app.getHttpServer())
+        .get('/media/enhancements')
+        .query({ circleId: CIRCLE_ID })
+        .expect(200);
+
+      expect(mockService.listEnhancements.mock.calls[0][0]).toEqual({
+        circleId: CIRCLE_ID,
+        page: 1,
+        pageSize: 24,
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+      });
+    });
   });
 
   // ===========================================================================

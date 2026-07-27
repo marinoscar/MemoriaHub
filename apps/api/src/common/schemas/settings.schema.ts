@@ -189,7 +189,9 @@ export const systemSettingsSchema = z.object({
     allowReplace: z.boolean().default(true),
     blockReplaceOnDownscale: z.boolean().default(false),
     maxInputMegapixels: z.number().min(1).max(100).default(50),
-    retentionHours: z.number().int().min(1).max(720).default(72),
+    // 168h (7 days). The enhancements hub is an inbox users work through over
+    // time; a 3-day window destroyed staged previews before they were reviewed.
+    retentionHours: z.number().int().min(1).max(720).default(168),
   }).optional().default({
     defaultQuality: 'high',
     defaultStrength: 'balanced',
@@ -197,7 +199,7 @@ export const systemSettingsSchema = z.object({
     allowReplace: true,
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,
-    retentionHours: 72,
+    retentionHours: 168,
   }),
   // Media Workflow Automation (issue #139 / epic #138). The full namespace ships
   // here in Phase 1; later phases read these values via getSettings() without a
