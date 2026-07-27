@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import {
   BurstGroupStatus,
   Prisma,
@@ -49,6 +49,10 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy {
 
   constructor(
     private readonly prisma: PrismaService,
+    // Circular by nature: BurstService injects ReviewRunService (wrapped in its own
+    // forwardRef), and ReviewRunService pulls in this strategy via the subject registry —
+    // this is the reverse edge of that same cycle, so it needs forwardRef too.
+    @Inject(forwardRef(() => BurstService))
     private readonly burstService: BurstService,
   ) {}
 
