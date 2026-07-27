@@ -43,6 +43,7 @@ import { SystemSettingsService } from '../settings/system-settings/system-settin
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
+import { ListEnhancementsQuery } from './dto/list-enhancements-query.dto';
 
 const USER: RequestUser = {
   id: 'user-1',
@@ -928,6 +929,412 @@ describe('MediaEnhancementService', () => {
       mockMembership.assertCircleAccess.mockRejectedValue(new ForbiddenException('viewer cannot write'));
 
       await expect(service.discardEnhancement(MEDIA_ID, ENH_ID, USER)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ===========================================================================
+  // listEnhancements (GET /api/media/enhancements — issue #201)
+  // ===========================================================================
+
+  describe('listEnhancements', () => {
+    function makeListQuery(overrides: Partial<ListEnhancementsQuery> = {}): ListEnhancementsQuery {
+      return {
+        circleId: CIRCLE_ID,
+        page: 1,
+        pageSize: 24,
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+        ...overrides,
+      };
+    }
+
+    /** Same shape as makeEnhancementRow, plus the `createdBy` relation the `include` pulls in. */
+    function makeEnhancementListRow(overrides: Record<string, any> = {}) {
+      return {
+        ...makeEnhancementRow(),
+        createdBy: null,
+        ...overrides,
+      };
+    }
+
+    function makeSourceItem(overrides: Record<string, any> = {}) {
+      return {
+        id: MEDIA_ID,
+        metadata: null,
+        originalFilename: 'IMG_0001.jpg',
+        capturedAt: new Date('2026-01-01T00:00:00Z'),
+        width: 1200,
+        height: 900,
+        storageObject: { size: BigInt(500_000) },
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mediaEnhancement.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+      mockThumbnails.signThumbsBatched.mockResolvedValue(new Map());
+      mockThumbnails.extractThumbKey.mockReturnValue(null);
+      mockSystemSettings.getSettingValue.mockResolvedValue(168);
+    });
+
+    // -------------------------------------------------------------------------
+    // 1. Circle access
+    // -------------------------------------------------------------------------
+
+    it('asserts circle access at the viewer level before touching the database', async () => {
+      await service.listEnhancements(makeListQuery(), USER);
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER.id,
+        CIRCLE_ID,
+        USER.permissions,
+        CircleRole.viewer,
+      );
+    });
+
+    it('propagates a ForbiddenException from RBAC without ever calling mediaEnhancement.findMany', async () => {
+      mockMembership.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('not a member'));
+
+      await expect(service.listEnhancements(makeListQuery(), USER)).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.mediaEnhancement.findMany).not.toHaveBeenCalled();
+    });
+
+    // -------------------------------------------------------------------------
+    // 2. Status alias expansion
+    // -------------------------------------------------------------------------
+
+    describe('status filtering', () => {
+      it.each<[string, MediaEnhancementStatus[]]>([
+        ['in_progress', [MediaEnhancementStatus.pending, MediaEnhancementStatus.processing]],
+        ['awaiting_decision', [MediaEnhancementStatus.ready]],
+        [
+          'terminal',
+          [
+            MediaEnhancementStatus.applied,
+            MediaEnhancementStatus.discarded,
+            MediaEnhancementStatus.expired,
+          ],
+        ],
+        ['ready', [MediaEnhancementStatus.ready]],
+      ])(
+        'expands status=%s into where.status.in for both findMany and count',
+        async (status, expectedStatuses) => {
+          await service.listEnhancements(
+            makeListQuery({ status: status as ListEnhancementsQuery['status'] }),
+            USER,
+          );
+
+          const expectedWhere = { circleId: CIRCLE_ID, status: { in: expectedStatuses } };
+          expect(mockPrisma.mediaEnhancement.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({ where: expectedWhere }),
+          );
+          expect(mockPrisma.mediaEnhancement.count).toHaveBeenCalledWith({ where: expectedWhere });
+        },
+      );
+
+      it('omits the status key entirely from where when status is not provided', async () => {
+        await service.listEnhancements(makeListQuery(), USER);
+
+        expect(mockPrisma.mediaEnhancement.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { circleId: CIRCLE_ID } }),
+        );
+        expect(mockPrisma.mediaEnhancement.count).toHaveBeenCalledWith({
+          where: { circleId: CIRCLE_ID },
+        });
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // 3. Pagination + sort
+    // -------------------------------------------------------------------------
+
+    describe('pagination and sort', () => {
+      it('derives skip/take from a non-default page/pageSize', async () => {
+        await service.listEnhancements(makeListQuery({ page: 3, pageSize: 10 }), USER);
+
+        expect(mockPrisma.mediaEnhancement.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ skip: 20, take: 10 }),
+        );
+      });
+
+      it('orderBy is [{ createdAt: desc }, { id: desc }] for the default sort', async () => {
+        await service.listEnhancements(makeListQuery(), USER);
+
+        expect(mockPrisma.mediaEnhancement.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
+        );
+      });
+
+      it('orderBy reflects a non-default sortBy/sortOrder, still with the id tiebreaker', async () => {
+        await service.listEnhancements(makeListQuery({ sortBy: 'updatedAt', sortOrder: 'asc' }), USER);
+
+        expect(mockPrisma.mediaEnhancement.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ orderBy: [{ updatedAt: 'asc' }, { id: 'desc' }] }),
+        );
+      });
+
+      it('ceils totalPages for a non-exact division of totalItems by pageSize', async () => {
+        (mockPrisma.mediaEnhancement.count as jest.Mock).mockResolvedValue(25);
+
+        const result = await service.listEnhancements(makeListQuery({ page: 1, pageSize: 10 }), USER);
+
+        expect(result.meta).toEqual({ page: 1, pageSize: 10, totalItems: 25, totalPages: 3 });
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // 4. BigInt -> string, JSON.stringify survival
+    // -------------------------------------------------------------------------
+
+    it('serializes both size fields as strings and the whole payload survives JSON.stringify', async () => {
+      const row = makeEnhancementListRow({
+        id: 'enh-1',
+        mediaItemId: 'media-a',
+        enhancedSize: BigInt(123_456_789_012),
+      });
+      (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+        makeSourceItem({ id: 'media-a', storageObject: { size: BigInt(987_654_321_098) } }),
+      ]);
+
+      const result = await service.listEnhancements(makeListQuery(), USER);
+      const item = result.items[0] as any;
+
+      expect(typeof item.original.size).toBe('string');
+      expect(item.original.size).toBe('987654321098');
+      expect(typeof item.enhanced.size).toBe('string');
+      expect(item.enhanced.size).toBe('123456789012');
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
+    // -------------------------------------------------------------------------
+    // 5. No N+1: one mediaItem.findMany + one signThumbsBatched per page
+    // -------------------------------------------------------------------------
+
+    describe('batched loading (no N+1)', () => {
+      it('calls mediaItem.findMany and signThumbsBatched exactly once for a page spanning multiple distinct items', async () => {
+        const rowA = makeEnhancementListRow({ id: 'enh-a', mediaItemId: 'media-a' });
+        const rowB = makeEnhancementListRow({ id: 'enh-b', mediaItemId: 'media-b' });
+        const rowC = makeEnhancementListRow({ id: 'enh-c', mediaItemId: 'media-a' }); // shares media-a with rowA
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([rowA, rowB, rowC]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a' }),
+          makeSourceItem({ id: 'media-b' }),
+        ]);
+
+        await service.listEnhancements(makeListQuery(), USER);
+
+        expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: { in: ['media-a', 'media-b'] } } }),
+        );
+        expect(mockThumbnails.signThumbsBatched).toHaveBeenCalledTimes(1);
+      });
+
+      it('never calls mediaItem.findMany for an empty page', async () => {
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([]);
+
+        await service.listEnhancements(makeListQuery(), USER);
+
+        expect(mockPrisma.mediaItem.findMany).not.toHaveBeenCalled();
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // 6. expiresAt + single getSettingValue read per call
+    // -------------------------------------------------------------------------
+
+    describe('expiresAt / retention', () => {
+      it('sets expiresAt from updatedAt + retentionHours for ready/failed rows, null for every other status, reading the setting exactly once', async () => {
+        mockSystemSettings.getSettingValue.mockResolvedValue(48);
+        const updatedAt = new Date('2026-01-10T00:00:00Z');
+
+        const rowReady = makeEnhancementListRow({
+          id: 'enh-ready',
+          mediaItemId: 'm1',
+          status: MediaEnhancementStatus.ready,
+          updatedAt,
+        });
+        const rowFailed = makeEnhancementListRow({
+          id: 'enh-failed',
+          mediaItemId: 'm2',
+          status: MediaEnhancementStatus.failed,
+          stagingStorageKey: null,
+          stagingProvider: null,
+          updatedAt,
+        });
+        const rowPending = makeEnhancementListRow({
+          id: 'enh-pending',
+          mediaItemId: 'm3',
+          status: MediaEnhancementStatus.pending,
+          stagingStorageKey: null,
+          stagingProvider: null,
+          updatedAt,
+        });
+        const rowApplied = makeEnhancementListRow({
+          id: 'enh-applied',
+          mediaItemId: 'm4',
+          status: MediaEnhancementStatus.applied,
+          stagingStorageKey: null,
+          stagingProvider: null,
+          updatedAt,
+        });
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([
+          rowReady,
+          rowFailed,
+          rowPending,
+          rowApplied,
+        ]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        const byId = new Map(result.items.map((i: any) => [i.id, i]));
+
+        expect(mockSystemSettings.getSettingValue).toHaveBeenCalledTimes(1);
+        expect(mockSystemSettings.getSettingValue).toHaveBeenCalledWith(
+          'pictureEnhancement.retentionHours',
+        );
+
+        const expected = new Date(updatedAt.getTime() + 48 * 3_600_000);
+        expect((byId.get('enh-ready') as any).expiresAt).toEqual(expected);
+        expect((byId.get('enh-failed') as any).expiresAt).toEqual(expected);
+        expect((byId.get('enh-pending') as any).expiresAt).toBeNull();
+        expect((byId.get('enh-applied') as any).expiresAt).toBeNull();
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // 7. `enhanced` section population rules
+    // -------------------------------------------------------------------------
+
+    describe('enhanced section', () => {
+      it('populates enhanced.* from staged bytes only when status is ready with staging present', async () => {
+        const row = makeEnhancementListRow({ id: 'enh-1', mediaItemId: 'media-a' }); // default: ready + staged
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a' }),
+        ]);
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        const item = result.items[0] as any;
+
+        expect(item.enhanced.thumbnailUrl).toBe('https://cdn.example.com/active-signed');
+        expect(item.enhanced.width).toBe(1536);
+        expect(item.enhanced.height).toBe(1024);
+        expect(item.enhanced.size).toBe('999999');
+      });
+
+      it('suppresses enhanced.* to null for a non-ready row even when the row still carries stale enhancedWidth/Height/enhancedSize', async () => {
+        const row = makeEnhancementListRow({
+          id: 'enh-1',
+          mediaItemId: 'media-a',
+          status: MediaEnhancementStatus.applied,
+          stagingStorageKey: null,
+          stagingProvider: null,
+          // Stale leftovers from before apply cleared staging — must NOT leak through.
+          enhancedWidth: 1536,
+          enhancedHeight: 1024,
+          enhancedSize: BigInt(999_999),
+        });
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a' }),
+        ]);
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        const item = result.items[0] as any;
+
+        expect(item.enhanced).toEqual({
+          thumbnailUrl: null,
+          width: null,
+          height: null,
+          size: null,
+        });
+      });
+
+      it('degrades enhanced.thumbnailUrl to null (without throwing) when signing the staged URL fails, leaving the rest of the page intact', async () => {
+        const rowA = makeEnhancementListRow({
+          id: 'enh-a',
+          mediaItemId: 'media-a',
+          stagingStorageKey: 'enhancements/enh-a/result.jpg',
+        });
+        const rowB = makeEnhancementListRow({
+          id: 'enh-b',
+          mediaItemId: 'media-b',
+          stagingStorageKey: 'enhancements/enh-b/result.jpg',
+        });
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([rowA, rowB]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a' }),
+          makeSourceItem({ id: 'media-b' }),
+        ]);
+        mockActiveProvider.getSignedDownloadUrl.mockRejectedValueOnce(new Error('signing exploded'));
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        const byId = new Map(result.items.map((i: any) => [i.id, i]));
+
+        expect((byId.get('enh-a') as any).enhanced.thumbnailUrl).toBeNull();
+        expect((byId.get('enh-b') as any).enhanced.thumbnailUrl).toBe(
+          'https://cdn.example.com/active-signed',
+        );
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // 8. `downscaled`
+    // -------------------------------------------------------------------------
+
+    describe('downscaled', () => {
+      it('is true when the enhanced pixel area is smaller than the (live) item dims', async () => {
+        const row = makeEnhancementListRow({
+          id: 'enh-1',
+          mediaItemId: 'media-a',
+          enhancedWidth: 512,
+          enhancedHeight: 384,
+        });
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a', width: 1200, height: 900 }),
+        ]);
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        expect((result.items[0] as any).downscaled).toBe(true);
+      });
+
+      it('is false when the enhanced pixel area is not smaller than the (live) item dims', async () => {
+        const row = makeEnhancementListRow({ id: 'enh-1', mediaItemId: 'media-a' }); // default 1536x1024 > 1200x900
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a', width: 1200, height: 900 }),
+        ]);
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        expect((result.items[0] as any).downscaled).toBe(false);
+      });
+
+      it('falls back to the row snapshot originalWidth/Height when the source item no longer exists', async () => {
+        const row = makeEnhancementListRow({
+          id: 'enh-1',
+          mediaItemId: 'missing-item',
+          originalWidth: 1200,
+          originalHeight: 900,
+          enhancedWidth: 512,
+          enhancedHeight: 384,
+        });
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]); // item deleted/missing
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        const item = result.items[0] as any;
+
+        expect(item.downscaled).toBe(true);
+        expect(item.original.width).toBe(1200);
+        expect(item.original.height).toBe(900);
+        expect(item.original.size).toBeNull();
+      });
     });
   });
 });
