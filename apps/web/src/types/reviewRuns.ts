@@ -46,7 +46,10 @@ export interface ReviewRun extends BaseRun {
 /** Run detail adds the per-item status tally. */
 export interface ReviewRunDetail extends ReviewRun, BaseRunDetail {}
 
-/** Response of the five threshold endpoints that start a review run. */
+/**
+ * Response of the six threshold endpoints that start a review run: burst
+ * resolve/dismiss, duplicate resolve/dismiss, location accept/reject.
+ */
 export interface CreateReviewRunResponse {
   runId: string;
   status: ReviewRunStatus;
