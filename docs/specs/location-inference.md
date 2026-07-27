@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
+| **Version** | 1.2 |
 | **Last Updated** | July 2026 |
 | **Status** | Specification (backend + UI both implemented) |
 
@@ -266,7 +266,9 @@ One sweep job per circle regardless of size — there is no chunk count to repor
 
 ### 5.5 Bulk accept/reject job types
 
-Two further `enrichment_jobs` types, added by issue #125, drive the Location Suggestions review page's bulk actions (see §9 for the full run architecture): `location_suggestion_run_evaluate` (`circleId` set, `mediaItemId: null`, priority 20, payload `{runId}`) materializes a run's matched-suggestion set via keyset pagination, and `location_suggestion_run_execute_batch` (priority 100, payload `{runId, suggestionIds}`, `skipDedup: true`) applies the accept/reject outcome per suggestion in chunks of 200. Both are **server-only** (no `nodeResultSchema`/`persistNodeResult` node pair — same precedent as the `location_inference` sweep and `trash_empty_evaluate`/`trash_empty_execute_batch`) and are auto-eligible for `ENRICHMENT_WORKER_MODE=system`. Unlike the sweep (§5.3), this pair chunks its execute step into 200-suggestion batches rather than running as a single job — not because the per-item work is compute-bound (it is pure DB writes, same profile as the sweep), but because it mirrors the Empty Trash at Scale precedent (`docs/specs/archive-trash.md` §10) for progress-polling granularity: a run with tens of thousands of matched suggestions reports incremental `processedCount` progress to the UI batch-by-batch rather than jumping from 0 to 100% on a single job's completion.
+**As of issue #190, the Location Suggestions bulk-accept/bulk-reject actions run on the shared `review_run_evaluate` / `review_run_execute_batch` job pair** — the two location-suggestion-specific job types originally added by issue #125 (`location_suggestion_run_evaluate` / `location_suggestion_run_execute_batch`) were absorbed into the generic pair used by all three review queues (bursts, duplicates, location suggestions). See [review-runs.md §5](review-runs.md#5-job-types) for the full job-type reference and [review-runs.md §6](review-runs.md#6-subject-strategy-split) for `LocationSuggestionReviewStrategy`, which carries forward the accept/reject transaction body and its deferred `geocode` enqueue unchanged from the original handler.
+
+The two old type names still exist in the codebase as thin, deprecated shim handler classes — kept only so a job already enqueued under the old type at the moment of deploy still executes correctly — but nothing enqueues new jobs under them; every new bulk-accept/bulk-reject run enqueues `review_run_evaluate`/`review_run_execute_batch` directly. Both the current and the deprecated types remain **server-only** (no `nodeResultSchema`/`persistNodeResult` node pair) and auto-eligible for `ENRICHMENT_WORKER_MODE=system`. The chunking rationale from the original design is unchanged: unlike the sweep (§5.3), this pair chunks its execute step into 200-item batches — not because the per-item work is compute-bound (it is pure DB writes, same profile as the sweep), but to mirror the Empty Trash at Scale precedent (`docs/specs/archive-trash.md` §10) for progress-polling granularity, so a run with tens of thousands of matched suggestions reports incremental `processedCount` progress batch-by-batch rather than jumping from 0 to 100% on a single job's completion.
 
 ---
 
@@ -317,39 +319,11 @@ Serves three purposes simultaneously: the sweep's initial ordered load (§4.1), 
 
 `features.locationInference` (Boolean, default `false`) in the `system_settings` JSONB — read via `SystemSettingsService.isFeatureEnabled(FEATURE_KEYS.LOCATION_INFERENCE)`.
 
-### 6.5 New tables: `location_suggestion_runs` and `location_suggestion_run_items`
+### 6.5 Run tables: absorbed into `review_runs` / `review_run_items` (issue #190)
 
-Added by migration `20260725000000_location_suggestion_runs` (issue #125). Full architecture in §9; schema reference here for completeness, mirroring `trash_empty_runs`/`trash_empty_run_items` (`docs/specs/archive-trash.md` §10.2).
+Issue #125 originally added dedicated `location_suggestion_runs` / `location_suggestion_run_items` tables (migration `20260725000000_location_suggestion_runs`) for the bulk accept/reject run architecture. **Issue #190 folded both tables into the shared `review_runs` / `review_run_items` model** used by all three review queues (bursts, duplicates, location suggestions) and dropped the two location-suggestion-specific tables along with their three enums (`LocationSuggestionRunAction`, `LocationSuggestionRunStatus`, `LocationSuggestionRunItemStatus`). Run UUIDs were preserved during the migration, so every previously-issued `/api/location-suggestion-runs/:id` link still resolves via a deprecated alias controller.
 
-**`location_suggestion_runs`** — one row per bulk accept/reject run for a circle.
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID PK | |
-| `circleId` | UUID | FK → `circles`, cascade delete |
-| `action` | `LocationSuggestionRunAction` | `accept` \| `reject` |
-| `threshold` | Int | Snapshot of the confidence floor (0–100) used when the run was evaluated — later changes to `locationInference.bulkAcceptThreshold` never affect an already-created run |
-| `status` | `LocationSuggestionRunStatus` | `evaluating` \| `running` \| `completed` \| `completed_with_errors` \| `failed` \| `cancelled` |
-| `matchedCount` | Int, default 0 | Pending suggestions matched by the confidence filter at evaluation time |
-| `processedCount` / `succeededCount` / `failedCount` / `skippedCount` | Int, default 0 | Progress counters, incremented atomically by execute-batch jobs |
-| `startedById` | UUID? | FK → `users`, `SetNull` |
-| `lastError` | String? | Set when the run transitions to `failed` |
-| `createdAt` / `updatedAt` / `startedAt` / `finishedAt` | Timestamptz | |
-
-Indexes: `(circleId, status)` (per-circle 409 concurrency guard) and `(status, updatedAt)`.
-
-**`location_suggestion_run_items`** — one row per matched `LocationSuggestion` within a run.
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID PK | |
-| `runId` | UUID | FK → `location_suggestion_runs`, cascade delete |
-| `suggestionId` | UUID | FK → `location_suggestions`, cascade delete — a deleted `LocationSuggestion` removes its run-item rows too |
-| `status` | `LocationSuggestionRunItemStatus` | `matched` \| `processing` \| `applied` \| `failed` \| `skipped` |
-| `error` | String? | Set when `status='failed'` |
-| `createdAt` / `updatedAt` | Timestamptz | |
-
-`@@unique([runId, suggestionId])` is the idempotency anchor for batch retries, the same pattern as `trash_empty_run_items`/`workflow_run_items`. Unlike `trash_empty_run_items` — where a successful hard-delete cascades the `MediaItem` row away and takes the run-item row with it, so `deleted` doubles as both claim-marker and terminal success — an accept or reject never deletes the underlying `LocationSuggestion`, so the row stays in place through to a terminal status. `processing` exists specifically as the transient, crash-safe claim marker between `matched` and a terminal outcome (§9.3). Index: `(runId, status)`.
+The full shared schema — `review_runs`, the exclusive-arc `review_run_items` (with its `locationSuggestionId` column and matching CHECK constraints), the integrity guarantees, and the migration's data-copy mechanics — is documented in **[review-runs.md §3](review-runs.md#3-data-model)** and **[review-runs.md §11](review-runs.md#11-migration-from-location_suggestion_runs)**. What carried forward unchanged for this feature specifically: a location-suggestion run item's `status` still passes through the same `matched → processing → applied|failed|skipped` states, and `processing` still exists as the crash-safe claim marker it always was — accept/reject never deletes the underlying `LocationSuggestion` row the way a trash-empty purge deletes its `MediaItem`, so the row stays in place through to a terminal status rather than doubling deletion as the claim signal.
 
 ---
 
@@ -452,51 +426,51 @@ Undo an auto-applied inference.
 
 ### 8.5 `POST /api/media/location-suggestions/bulk-accept`
 
-**Rewritten by issue #125.** Starts an **asynchronous run** (§9) that accepts every `pending` suggestion in a circle at or above a confidence floor — no longer a single synchronous request that iterates and applies suggestions in-line.
+**Rewritten by issue #125; runs on the shared review-run engine as of issue #190.** Starts an **asynchronous run** (§9, and [review-runs.md](review-runs.md) for the shared architecture) that accepts every `pending` suggestion in a circle at or above a confidence floor — no longer a single synchronous request that iterates and applies suggestions in-line.
 
 - **Auth:** `media:write` + per-circle `collaborator` role.
 - **Request body:** `{ "circleId": "uuid", "threshold": number (0-100 integer) }`. Note the scale change from the old `minConfidence` (0–1 float) to `threshold` (0–100 integer, matching `burst.autoResolveThreshold`/`dedup.autoResolveThreshold`'s convention) — the run service converts it to a `0-1` confidence floor (`threshold / 100`) at evaluation time.
-- **Behavior:** creates a `location_suggestion_runs` row (`action = 'accept'`) and enqueues a `location_suggestion_run_evaluate` job; returns immediately without waiting for evaluation or execution. Every accepted suggestion is applied **unmodified** (no per-item lat/lng override is possible in bulk), so every accepted item gets `coordSource = 'inferred'`, and a `geocode` job is enqueued per item (deferred, not synchronous — §13).
-- **Response `200`:** `{ "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }` — `matchedCount` is always `0` at creation; poll `GET /api/location-suggestion-runs/:id` (§9.5) for the real total once evaluation completes.
-- **Response `409`:** a `location_suggestion_runs` row is already `evaluating` or `running` for this circle (§9.4's per-circle concurrency guard).
-- Writes an `audit_events` row (`location_suggestion_run:started`) with the circle, action, and threshold.
+- **Behavior:** creates a `ReviewRun` (`subjectType = 'location_suggestion'`, `action = 'accept'`) and enqueues a `review_run_evaluate` job; returns immediately without waiting for evaluation or execution. Every accepted suggestion is applied **unmodified** (no per-item lat/lng override is possible in bulk), so every accepted item gets `coordSource = 'inferred'`, and a `geocode` job is enqueued per item (deferred, not synchronous — §13).
+- **Response `200`:** `{ "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }` — `matchedCount` is always `0` at creation; poll `GET /api/review-runs/:id` (§8.7) for the real total once evaluation completes.
+- **Response `409`:** a `location_suggestion` review run is already `evaluating` or `running` for this circle ([review-runs.md §8](review-runs.md#8-concurrency-guard)).
+- Writes an `audit_events` row (`review_run:started`) with the circle, subject type, action, and threshold.
 
 ### 8.6 `POST /api/media/location-suggestions/bulk-reject`
 
-New in issue #125 — the mirror-image bulk action: starts an asynchronous run that rejects every `pending` suggestion **below** a confidence floor (the low-confidence noise a reviewer wants to clear in bulk without touching anything above the line).
+New in issue #125; runs on the shared review-run engine as of issue #190 — the mirror-image bulk action: starts an asynchronous run that rejects every `pending` suggestion **below** a confidence floor (the low-confidence noise a reviewer wants to clear in bulk without touching anything above the line).
 
 - **Auth:** `media:write` + per-circle `collaborator` role.
 - **Request body:** `{ "circleId": "uuid", "threshold": number (0-100 integer) }` — identical shape to bulk-accept.
-- **Behavior:** creates a `location_suggestion_runs` row (`action = 'reject'`) and enqueues a `location_suggestion_run_evaluate` job with the same evaluate/execute-batch machinery as bulk-accept, but the confidence filter and per-item outcome are inverted: matches `pending` suggestions with `confidence < threshold / 100`, and each matched suggestion is simply marked `rejected` — no coordinate write, no `geocode` job.
+- **Behavior:** creates a `ReviewRun` (`subjectType = 'location_suggestion'`, `action = 'reject'`) and enqueues a `review_run_evaluate` job with the same evaluate/execute-batch machinery as bulk-accept, but the confidence filter and per-item outcome are inverted: matches `pending` suggestions with `confidence < threshold / 100`, and each matched suggestion is simply marked `rejected` — no coordinate write, no `geocode` job.
 - **Response `200`:** `{ "data": { "runId": "uuid", "status": "evaluating", "matchedCount": 0 } }`.
-- **Response `409`:** a run is already in progress for this circle — same per-circle guard as bulk-accept; accept and reject runs for the same circle cannot run concurrently, since both count against the same `(circleId, status)` in-flight check.
-- Writes an `audit_events` row (`location_suggestion_run:started`).
+- **Response `409`:** a run is already in progress for this circle — same per-circle guard as bulk-accept; accept and reject runs for the same circle cannot run concurrently, since both count against the same `(circleId, subjectType, status)` in-flight check.
+- Writes an `audit_events` row (`review_run:started`).
 
-### 8.7 `GET /api/location-suggestion-runs/:id`
+### 8.7 `GET /api/review-runs/:id` (deprecated alias: `GET /api/location-suggestion-runs/:id`)
 
-Run detail: counters plus a live per-status item tally. See §9.5 for the full response shape and semantics.
+Run detail: counters plus a live per-status item tally. Full response shape and semantics in [review-runs.md §12.2](review-runs.md#122-inspecting-and-cancelling-a-run). The `/api/location-suggestion-runs/:id` path still works — it is a deprecated alias controller that delegates straight into the same service, kept so links issued before issue #190 keep resolving (§9.2) — but new integrations should call `/api/review-runs/:id` directly.
 
 - **Auth:** `media:read` + per-circle `viewer` role.
-- **Response `200`:** `{ "id", "circleId", "action", "threshold", "status", "matchedCount", "processedCount", "succeededCount", "failedCount", "skippedCount", "startedById", "createdAt", "updatedAt", "startedAt", "finishedAt", "lastError", "itemStatusCounts": { "matched"?: n, "processing"?: n, "applied"?: n, "failed"?: n, "skipped"?: n } }`.
+- **Response `200`:** `{ "id", "circleId", "subjectType", "action", "threshold", "status", "matchedCount", "processedCount", "succeededCount", "failedCount", "skippedCount", "startedById", "createdAt", "updatedAt", "startedAt", "finishedAt", "lastError", "itemStatusCounts": { "matched"?: n, "processing"?: n, "applied"?: n, "failed"?: n, "skipped"?: n } }`.
 - **Response `404`:** run not found.
 
-### 8.8 `GET /api/location-suggestion-runs/:id/items`
+### 8.8 `GET /api/review-runs/:id/items` (deprecated alias: `GET /api/location-suggestion-runs/:id/items`)
 
-Paginated run items with batched signed thumbnails. See §9.5.
+Paginated run items with batched signed thumbnails. See [review-runs.md §12.2](review-runs.md#122-inspecting-and-cancelling-a-run).
 
 - **Auth:** `media:read` + per-circle `viewer` role.
 - **Query params:** `status` (`matched`\|`processing`\|`applied`\|`failed`\|`skipped`, optional), `page` (default 1), `pageSize` (default 50, max 100).
-- **Response `200`:** `{ "items": [{ "id", "suggestionId", "mediaItemId", "status", "error", "updatedAt", "lat", "lng", "confidence", "media": { "type", "capturedAt", "filename", "width", "height" } | null, "thumbnailUrl": string | null }], "meta": { "page", "pageSize", "totalItems", "totalPages" } }`.
+- **Response `200`:** `{ "items": [{ "id", "subjectId", "subjectType", "status", "error", "updatedAt", "media": { "type", "capturedAt", "filename", "width", "height" } | null, "thumbnailUrl": string | null }], "meta": { "page", "pageSize", "totalItems", "totalPages" } }`. `subjectId` is the item's `locationSuggestionId` for this queue, flattened out of the shared model's exclusive-arc column set — the response no longer names it `suggestionId`/`mediaItemId`/`lat`/`lng`/`confidence` directly the way the pre-#190 endpoint did; those per-suggestion fields are not part of the generic shape.
 
-### 8.9 `POST /api/location-suggestion-runs/:id/cancel`
+### 8.9 `POST /api/review-runs/:id/cancel` (deprecated alias: `POST /api/location-suggestion-runs/:id/cancel`)
 
-Cancel a non-terminal run. See §9.6 for the cooperative-cancellation semantics.
+Cancel a non-terminal run. See [review-runs.md §9](review-runs.md#9-cancellation-semantics) for the cooperative-cancellation semantics.
 
 - **Auth:** `media:write` + per-circle `collaborator` role.
 - **Response `200`:** `{ "runId": "uuid", "status": "cancelled" }`.
 - **Response `400`:** run has already reached a terminal status.
 - **Response `404`:** run not found.
-- Writes an `audit_events` row (`location_suggestion_run:cancelled`).
+- Writes an `audit_events` row (`review_run:cancelled`).
 
 ### 8.10 `POST /api/media/:id/infer-location`
 
@@ -525,64 +499,29 @@ Bulk-enqueue one sweep job per eligible circle, across **all circles**.
 
 ## 9. Bulk Accept/Reject at Scale
 
-### 9.1 Why this changed (issue #125)
+### 9.1 Why this changed (issue #125), and what changed again (issue #190)
 
 The original `bulk-accept` endpoint (§8.5 as originally written) was a single synchronous request: it loaded every matching `pending` suggestion and accepted them one at a time in-request, each accept performing its own synchronous reverse-geocode call via `applyLocation()`. That is fine for a handful of suggestions but does not scale — a circle with a large backlog of pending suggestions (e.g. right after a bulk import with `features.locationInference` newly turned on) could see the request hold open for a long time, with no progress feedback and no way to cancel mid-flight. This is the same failure mode Empty Trash at Scale (issue #165) fixed for the "Empty trash" button — see `docs/specs/archive-trash.md` §10.1.
 
-The fix rebuilds bulk-accept — and adds its mirror-image, bulk-reject — on the same **run-record + chunked-job + progress-polling** pattern already proven twice in this codebase: Media Workflow Automation's `workflow_runs`/`workflow_run_items` (`docs/specs/workflows.md`) and Empty Trash at Scale's `trash_empty_runs`/`trash_empty_run_items` (`docs/specs/archive-trash.md` §10). Like empty-trash and unlike a full workflow, this feature has no conditions and no approval gate — the single "condition" is the confidence threshold baked into the request, and the "action" is always exactly one of accept or reject, decided by which endpoint the caller called.
+Issue #125's fix rebuilt bulk-accept — and added its mirror-image, bulk-reject — on the same **run-record + chunked-job + progress-polling** pattern already proven by Media Workflow Automation's `workflow_runs`/`workflow_run_items` (`docs/specs/workflows.md`) and Empty Trash at Scale's `trash_empty_runs`/`trash_empty_run_items` (`docs/specs/archive-trash.md` §10), backed by feature-specific `location_suggestion_runs`/`location_suggestion_run_items` tables and `location_suggestion_run_evaluate`/`location_suggestion_run_execute_batch` job types.
 
-### 9.2 Data model
+**Issue #190 then generalized that exact pattern into a model shared by all three review queues** (bursts, duplicates, location suggestions) — see [review-runs.md](review-runs.md) for the full shared architecture, including the data model, integrity constraints, job types, lifecycle state machine, and the migration that folded `location_suggestion_runs`/`location_suggestion_run_items` into the new `review_runs`/`review_run_items` tables with run UUIDs preserved. This section now documents only what remains genuinely specific to this feature.
 
-See §6.5 for the full column-by-column reference. Two tables, migration `20260725000000_location_suggestion_runs`:
+### 9.2 What stayed location-specific
 
-- **`location_suggestion_runs`** — one row per run; `action` (`accept` | `reject`) and `threshold` (0–100 snapshot) determine which pending suggestions match and what happens to them; `status` (`evaluating` | `running` | `completed` | `completed_with_errors` | `failed` | `cancelled`) and the five counters track lifecycle and progress, mirroring `trash_empty_runs` field-for-field except for the `action`/`threshold` pair, which `trash_empty_runs` has no equivalent of (empty-trash has no threshold — it's all-or-nothing).
-- **`location_suggestion_run_items`** — one row per matched `LocationSuggestion`. The key structural difference from `trash_empty_run_items`: a trash-empty item's terminal `deleted` status is reached by *deleting the row's own subject* (the `MediaItem`, cascading the run-item row away with it), so the run-item table only ever needs a `matched` claim state before deletion removes the row from consideration entirely. An accept/reject item's subject (the `LocationSuggestion`) is never deleted — it just changes `status`. That leaves the run-item row in the table after processing, which is exactly why `LocationSuggestionRunItemStatus` has an explicit `processing` state that `TrashEmptyRunItemStatus` does not need: without it, a crashed-and-retried execute-batch job would have no way to distinguish "a suggestion I already finished accepting" from "a suggestion still waiting its turn" just by looking at the run-item's status, since neither state deletes anything.
+Location suggestions are the one review queue with no `resolve_archive`/`resolve_trash`/`dismiss` action set — only `accept` and `reject` (§8.5/§8.6), and `LocationSuggestion.confidence` is the one **non-nullable** confidence column among the three subjects (burst/duplicate group confidence are both nullable), so — unlike bursts and duplicates — there is no null-confidence exclusion branch in `LocationSuggestionReviewStrategy.evaluatePage`; every `pending` row participates in the threshold filter.
 
-### 9.3 Job types (both server-only)
+`LocationSuggestionReviewStrategy.executeItem` (see [review-runs.md §6](review-runs.md#6-subject-strategy-split)) carries forward the accept/reject transaction body unchanged from the original `location_suggestion_run_execute_batch` handler: if the suggestion is no longer `pending` by the time its batch runs (resolved individually since evaluation), the run-item is marked `skipped` without touching the suggestion; otherwise **accept** writes `takenLat`/`takenLng` + `coordSource='inferred'` on the `MediaItem` and marks the suggestion `accepted`, while **reject** marks the suggestion `rejected` with no coordinate write — both inside one `$transaction`. The strategy's `deferredEffects` enqueues one dedup-safe `geocode` job (priority 100, `reason: 'backfill'`) per accepted item, **after** every transaction in the batch has committed — never inside the accept transaction itself, for the same reason the sweep defers its geocode enqueue past each write transaction (§4.4): a rolled-back coordinate write must never leave an orphaned geocode job referencing coordinates that don't exist. A reject enqueues nothing.
 
-See §5.5 for the throughput/chunking rationale. Two `enrichment_jobs` types, mirroring the workflow/trash-empty evaluate → execute-batch split:
+The per-circle concurrency guard (§9.4 in [review-runs.md §8](review-runs.md#8-concurrency-guard)) is scoped per `(circleId, subjectType)`, so — as before — an accept run and a reject run for the same circle still cannot be in flight simultaneously (both are `subjectType = 'location_suggestion'`), the same way two concurrent empty-trash runs for one circle cannot; a reviewer who fires off "Accept all ≥ 80%" and then immediately clicks "Reject all < 80%" before the first run finishes gets a clear `409` rather than two runs quietly fighting over the same pending queue.
 
-- **`location_suggestion_run_evaluate`** (`circleId` set, `mediaItemId: null`, priority 20, payload `{ runId }`) — keyset-paginates the circle's `pending` `LocationSuggestion` rows (1,000 rows/page, ordered `(createdAt DESC, id DESC)`) filtered by the run's action/threshold, into `location_suggestion_run_items` at `status='matched'`. `LocationSuggestion.confidence` is a non-nullable `Float`, unlike `burst_groups.confidence`/duplicate-group confidence (both nullable) — so, unlike those two threshold-resolve paths, there is no null-confidence exclusion to reason about here; every pending row participates in the filter. Sets `matchedCount`, then transitions the run: `matchedCount === 0` → `completed` immediately; otherwise → `running` and fans out `location_suggestion_run_execute_batch` jobs via `LocationSuggestionRunService.enqueueExecuteBatches`.
-- **`location_suggestion_run_execute_batch`** (priority 100, payload `{ runId, suggestionIds[] }`, `skipDedup: true`) — one job per 200-suggestion chunk (`BATCH_SIZE`, a local constant, same value as the trash-empty and workflow defaults). Each job: (1) bails immediately if the run was cancelled (cooperative cancellation), (2) atomically claims its still-`matched` items to `processing` via one `updateMany`, (3) reads back every row now `processing` for this batch — which includes rows a prior crashed attempt already claimed but never finished, so a retry re-processes them rather than skipping them — as the attempt's work set, (4) per suggestion: if it is no longer `pending` (a human resolved it individually, or a race with another action, since it happened since evaluation), the run-item is marked `skipped` without touching the suggestion; otherwise an **accept** run writes `takenLat`/`takenLng` + `coordSource='inferred'` on the `MediaItem`, marks the suggestion `accepted`, and marks the run-item `applied` — all inside one `$transaction` — while a **reject** run marks the suggestion `rejected` and the run-item `applied` in its own `$transaction` (no coordinate write); (5) **after** every transaction in the batch has committed, enqueues one dedup-safe `geocode` job (priority 100, `reason: 'backfill'`) per accepted item — never inside the accept transaction, for the same reason the sweep defers its geocode enqueue past each write transaction (§4.4): a rolled-back coordinate write must never leave an orphaned geocode job referencing coordinates that don't exist; (6) increments the run's atomic counters (`processedCount`/`succeededCount`/`skippedCount`/`failedCount`) for exactly the rows processed this attempt, then (7) attempts to finalize the run.
+### 9.3 Frontend — progress page
 
-Both types are **server-only** — no `nodeResultSchema`/`persistNodeResult` node pair, same precedent as `trash_empty_evaluate`/`trash_empty_execute_batch`/`location_inference`/`face_auto_archive_sweep` — so `EnrichmentHandlerRegistry` auto-classifies them server-only and auto-includes them in `ENRICHMENT_WORKER_MODE=system`'s claim set with no `enrichment-job.worker.ts` edit required.
+Starting a run from the Location Suggestions page (`LocationSuggestionsPage.tsx`) navigates to `/review-runs/:runId` — the shared `ReviewRunPage` described in [review-runs.md §14](review-runs.md#14-frontend) — rather than the feature-specific `LocationSuggestionRunPage.tsx` it used to. The old `/location-suggestion-runs/:runId` route still works: it now renders a redirect component (`LocationSuggestionRunRedirect`) that immediately navigates to `/review-runs/:runId`. `ReviewRunPage` reads `subjectType` off the run to label counts and copy appropriately for accept/reject (e.g. "Applied"/"Rejected" tile labels), and links failed items back to the Location Suggestions page.
 
-### 9.4 Per-circle concurrency guard
+### 9.4 Failure handling
 
-`LocationSuggestionRunService.createRun` counts existing `location_suggestion_runs` rows for the circle in `evaluating` or `running` status; if one is already active, the request is rejected with `409 Conflict`. This is a single shared guard across **both** actions — an accept run and a reject run for the same circle cannot be in flight simultaneously, the same way two concurrent empty-trash runs for one circle cannot. This prevents two runs from racing to claim (and double-process) the same `LocationSuggestion` rows, and also means a reviewer who fires off "Accept all ≥ 80%" and then immediately clicks "Reject all < 80%" before the first run finishes gets a clear 409 rather than two runs quietly fighting over the same pending queue.
-
-### 9.5 API — run inspection and cancellation
-
-See §8.7–§8.9 for full request/response detail.
-
-| Method | Path | Response | Min per-circle role |
-|---|---|---|---|
-| `GET` | `/api/location-suggestion-runs/:id` | Run detail: counters (`matchedCount`, `processedCount`, `succeededCount`, `failedCount`, `skippedCount`) plus `itemStatusCounts` (a live tally grouped by `location_suggestion_run_items.status`) | viewer (`media:read`) |
-| `GET` | `/api/location-suggestion-runs/:id/items` | `?status=&page=&pageSize=` — paginated run items with batched signed thumbnails; `status` filters `matched`\|`processing`\|`applied`\|`failed`\|`skipped` | viewer (`media:read`) |
-| `POST` | `/api/location-suggestion-runs/:id/cancel` | Cancel a non-terminal run; `400` if the run has already reached a terminal status | collaborator (`media:write`) |
-
-Unlike Empty Trash at Scale — where starting/cancelling a run requires `circle_admin` because permanently deleting media is higher-stakes than the rest of the trash flow — bulk accept/reject keeps the same **collaborator** bar the per-item accept/reject/revert endpoints and the original synchronous `bulk-accept` already used (§10). Accepting or rejecting a suggestion is reversible in spirit (a rejected suggestion can be regenerated by a rerun; an accepted item's coordinates can be manually cleared), unlike a hard-delete, so there was no reason to raise the bar for the async rebuild.
-
-### 9.6 Cancellation semantics
-
-Cancelling sets `status='cancelled'` immediately. This is *cooperative*, identical to Empty Trash at Scale (§10.6 there): a `location_suggestion_run_execute_batch` job already claimed by the worker checks the run's status before doing any work and bails out if it sees `cancelled`, but cannot recall a batch already mid-processing. Suggestions already accepted or rejected before the cancel took effect keep that resolution; suggestions not yet claimed by a batch are simply never processed and remain `pending` (their run-item rows stay at `matched`, not cleaned up, since the run itself is now terminal).
-
-### 9.7 Frontend — progress page
-
-Starting a run from the Location Suggestions page (`LocationSuggestionsPage.tsx`) navigates to `/location-suggestion-runs/:runId` (`LocationSuggestionRunPage.tsx`), which polls `GET /api/location-suggestion-runs/:id` every 2 seconds while the run is non-terminal (`evaluating` or `running`) and stops once it reaches a terminal status — the same polling shape as `TrashEmptyRunPage`. The page shows:
-
-- A page title that reflects which action the run is ("Bulk accept locations" vs. "Bulk reject locations") plus a status chip and the snapshotted `≥ N%` threshold chip.
-- A prominent total (`matchedCount`) card.
-- An indeterminate progress bar while `evaluating` ("Preparing…"), and a determinate bar (`processedCount / matchedCount`) while `running`, with action-aware copy ("Applying locations…" for accept, "Rejecting suggestions…" for reject).
-- A terminal summary banner (success/warning/error/info, action-aware copy for `completed` and `cancelled`) plus a count-tile row (Total/Processed/Applied/Failed/Skipped).
-- A paginated table of failed items (`GET /api/location-suggestion-runs/:id/items?status=failed`) once the run finishes with `failedCount > 0`, each row showing the filename, capture date, and error.
-- A "Cancel run" button, shown only while the run is non-terminal and the caller has `collaborator` or `circle_admin` circle role (§9.5).
-
-### 9.8 Failure handling
-
-If `location_suggestion_run_evaluate` itself throws partway through paginating, the run is left in `evaluating` and the job retries through the normal enrichment backoff path — `createMany({ skipDuplicates: true })` makes re-materializing the matched set idempotent on retry. Only once the job has exhausted `ENRICHMENT_MAX_ATTEMPTS` does the handler mark the run terminally `failed` (with `lastError` set) before rethrowing so the job itself also fails — identical failure-handling shape to `location_suggestion_run_evaluate`'s sibling `trash_empty_evaluate` and `workflow_evaluate`.
-
-If a `location_suggestion_run_execute_batch` job crashes mid-batch after claiming rows to `processing` but before finishing the per-suggestion loop, a retry re-reads every row still `processing` for its `suggestionIds` (not just rows it newly claimed this attempt) and re-attempts them — safe because each suggestion's own `status !== 'pending'` check (step 4 in §9.3) makes re-processing an already-accepted/rejected suggestion a no-op that lands in `skipped` rather than double-applying anything.
+Failure handling is identical to every other subject on the shared engine — see [review-runs.md §7](review-runs.md#7-run-lifecycle-state-machine) for the evaluate-retry-then-terminal-fail and the claim/read-back-work-set-on-retry mechanics that make a crashed `review_run_execute_batch` job safe to retry mid-batch.
 
 ---
 
@@ -594,11 +533,11 @@ If a `location_suggestion_run_execute_batch` job crashes mid-batch after claimin
 | `POST /api/media/location-suggestions/:id/accept` | `media:write` | `collaborator` | |
 | `POST /api/media/location-suggestions/:id/reject` | `media:write` | `collaborator` | |
 | `POST /api/media/location-suggestions/:id/revert` | `media:write` | `collaborator` | |
-| `POST /api/media/location-suggestions/bulk-accept` | `media:write` | `collaborator` | Starts an async run (§9); no longer a synchronous bulk apply |
-| `POST /api/media/location-suggestions/bulk-reject` | `media:write` | `collaborator` | New in issue #125; starts an async run (§9) |
-| `GET /api/location-suggestion-runs/:id` | `media:read` | `viewer` | |
-| `GET /api/location-suggestion-runs/:id/items` | `media:read` | `viewer` | |
-| `POST /api/location-suggestion-runs/:id/cancel` | `media:write` | `collaborator` | |
+| `POST /api/media/location-suggestions/bulk-accept` | `media:write` | `collaborator` | Starts an async review run (§9); no longer a synchronous bulk apply |
+| `POST /api/media/location-suggestions/bulk-reject` | `media:write` | `collaborator` | New in issue #125; starts an async review run (§9) |
+| `GET /api/review-runs/:id` (alias: `GET /api/location-suggestion-runs/:id`) | `media:read` | `viewer` | Shared review-run API — see [review-runs.md §13](review-runs.md#13-rbac) |
+| `GET /api/review-runs/:id/items` (alias: `GET /api/location-suggestion-runs/:id/items`) | `media:read` | `viewer` | |
+| `POST /api/review-runs/:id/cancel` (alias: `POST /api/location-suggestion-runs/:id/cancel`) | `media:write` | `collaborator` | |
 | `POST /api/media/:id/infer-location` | `media:write` | `collaborator` | |
 | `POST /api/admin/location-inference/backfill` | `system_settings:write` | — (Admin, app-wide) | 400 if feature disabled |
 
@@ -617,14 +556,14 @@ No new permission scopes were introduced — all endpoints reuse `media:read`/`m
 - A small `LocationMiniMap` preview at the suggested coordinates.
 - Three actions: **Confirm** (accept unmodified), **Adjust** (opens `AdjustLocationDialog`, which reuses the `LocationPickerMap`/reverse-geocode-preview pattern from `BulkLocationDialog`, seeded at the suggested coordinates, and calls accept with the adjusted lat/lng), and **Reject**.
 
-**Header controls (rebuilt for issue #125/#126):** an admin-only gear icon (`isAdmin`-gated, `SettingsIcon`, links to `/admin/settings/location-inference`) sits next to the page title. Alongside it, an inline **"Threshold %"** number field lets any reviewer adjust the confidence cutoff on the fly for this session without leaving the page — it initializes from the persisted `locationInference.bulkAcceptThreshold` system setting (§7.1, default 80) and is clamped `0–100` client-side, but changing it here does **not** write back to the system setting; it only affects the two buttons' behavior for the current page view. Those two buttons read the live threshold value directly in their labels — **"Accept all ≥ N%"** and **"Reject all < N%"** — both disabled while `items.length === 0` or a run is already being started. Clicking either opens a confirmation dialog; on confirm, the page calls `POST /api/media/location-suggestions/bulk-accept` or `bulk-reject` (§8.5/§8.6) with `{ circleId, threshold: thresholdPct }` and, on success, **navigates immediately** to `/location-suggestion-runs/:runId` (§9.7) rather than waiting in place — the old synchronous flow's "stay on this page and watch a spinner" UX no longer applies since the request itself returns before any suggestion has actually been processed.
+**Header controls (rebuilt for issue #125/#126):** an admin-only gear icon (`isAdmin`-gated, `SettingsIcon`, links to `/admin/settings/location-inference`) sits next to the page title. Alongside it, an inline **"Threshold %"** number field lets any reviewer adjust the confidence cutoff on the fly for this session without leaving the page — it initializes from the persisted `locationInference.bulkAcceptThreshold` system setting (§7.1, default 80) and is clamped `0–100` client-side, but changing it here does **not** write back to the system setting; it only affects the two buttons' behavior for the current page view. Those two buttons read the live threshold value directly in their labels — **"Accept all ≥ N%"** and **"Reject all < N%"** — both disabled while `items.length === 0` or a run is already being started. Clicking either opens a confirmation dialog; on confirm, the page calls `POST /api/media/location-suggestions/bulk-accept` or `bulk-reject` (§8.5/§8.6) with `{ circleId, threshold: thresholdPct }` and, on success, **navigates immediately** to `/review-runs/:runId` (§9.3, formerly `/location-suggestion-runs/:runId`) rather than waiting in place — the old synchronous flow's "stay on this page and watch a spinner" UX no longer applies since the request itself returns before any suggestion has actually been processed.
 
 Elsewhere in the app:
 
 - `MediaDetailDrawer` shows a "Location (inferred)" provenance indicator with a **Revert** action when `coordSource === 'inferred'`, and a **"Suggest location"** button (enqueue + poll) when the item has no coordinates at all.
 - `Sidebar` has a "Location Suggestions" nav entry; `HomePage` shows a review-queue banner driven by `pendingLocationSuggestions`.
 - `pages/Admin/LocationInferenceSettingsPage.tsx` exposes the global toggle, all six original `locationInference.*` algorithm parameters (with helper text explaining `requireSameDevice`'s WhatsApp/no-EXIF consequence, what `autoApplyMaxGapMinutes: 0` means, and the speed-gate rationale), a `Slider`-based control for `locationInference.bulkAcceptThreshold` (0–100, default 80, labeled "Bulk-accept confidence threshold" with helper text explaining it seeds both the review page's "Accept all ≥ N%" and "Reject all < N%" default), and a backfill panel with `from`/`to` date pickers and a `force` checkbox, mirroring `TaggingSettingsPage`.
-- `LocationSuggestionRunPage.tsx` (`/location-suggestion-runs/:runId`) — the progress-polling page a bulk-accept/bulk-reject run navigates to; see §9.7 for its full behavior.
+- `ReviewRunPage.tsx` (`/review-runs/:runId`) — the shared progress-polling page a bulk-accept/bulk-reject run navigates to (§9.3); `LocationSuggestionRunPage.tsx` was deleted, and `/location-suggestion-runs/:runId` now redirects here via `LocationSuggestionRunRedirect`. See [review-runs.md §14](review-runs.md#14-frontend) for the shared component's full behavior.
 
 ---
 
@@ -662,11 +601,10 @@ Unit test coverage lives alongside each module:
 - `location-inference.service.spec.ts` — the pure `computeLocationSuggestion`/`haversineKm`/`interpolateLng` functions: anchor selection (before/after/both/none), interpolation math, the antimeridian wrap, the disagreement fallback, the confidence formula (including the zero-gap speed guard), the auto-apply gate matrix (device-match requirement, gap ceilings, agreement, speed), and the sweep's `walkGroup` two-pointer logic (device grouping, snapshot-no-chaining invariant).
 - `location-inference.handler.spec.ts` — dispatch on `mediaItemId` presence, `forceRerun` derivation from `job.reason`, the no-`circleId` warn-and-return path.
 - `location-inference-backfill.service.spec.ts` — circle enumeration via `groupBy`, the per-circle in-flight guard, `estimatedItems`/`enqueued`/`circles` accounting.
-- `location-suggestion.service.spec.ts` — accept (unmodified vs. adjusted → `coordSource`), reject, revert (status-gating to `auto_applied` only), and the per-circle collaborator check on the rerun path. The former synchronous `bulkAcceptSuggestions` test block was removed when that method was replaced by the async run-based engine (§9) — bulk accept/reject coverage now lives in the three specs below.
+- `location-suggestion.service.spec.ts` — accept (unmodified vs. adjusted → `coordSource`), reject, revert (status-gating to `auto_applied` only), and the per-circle collaborator check on the rerun path. The former synchronous `bulkAcceptSuggestions` test block was removed when that method was replaced by the async run-based engine (§9).
 - `admin-location-inference.controller.spec.ts` — the 400-when-disabled branch and successful backfill delegation.
-- `runs/location-suggestion-run.service.spec.ts` — `createRun`'s per-circle collaborator check and 409 concurrency guard (§9.4), `cancelRun`'s terminal-status 400, `getRunDetail`'s `itemStatusCounts` groupBy, `listRunItems`'s batched thumbnail signing, and `enqueueExecuteBatches`'s chunking at `BATCH_SIZE`.
-- `runs/location-suggestion-run-evaluate.handler.spec.ts` — the accept-vs-reject confidence-filter direction (`gte` vs. `lt`), keyset pagination termination, the `matchedCount === 0 → completed` short-circuit, and the run-terminally-`failed` transition gated on `job.attempts >= maxAttempts` (§9.8).
-- `runs/location-suggestion-run-execute-batch.handler.spec.ts` — the claim→work-set read-back pattern (including re-claiming rows left `processing` by a crashed prior attempt), the accept/reject branch's per-item transaction and deferred `geocode` enqueue, the no-longer-`pending` → `skipped` path, cooperative cancellation, and the race-safe `maybeFinalizeRun` conditional update.
+
+As of issue #190, the run engine itself (`createRun`, the concurrency guard, evaluate/execute-batch, cancel) is generic and tested once, alongside the other two review queues, under `apps/api/src/review-runs/` rather than per-feature here — see `review-run.service.spec.ts`, `review-run-evaluate.handler.spec.ts`, `review-run-execute-batch.handler.spec.ts`, and `strategies/location-suggestion.strategy.spec.ts` (the location-specific accept/reject transaction and its deferred `geocode` enqueue). The location-suggestion-specific `runs/location-suggestion-run*.spec.ts` files this section used to reference no longer exist; the deprecated shim handlers (`runs/location-suggestion-run-evaluate.handler.ts`, `runs/location-suggestion-run-execute-batch.handler.ts`) are thin enough (pure delegation) that they are not separately unit-tested.
 
 ### End-to-end manual verification (per `/verify`)
 
@@ -676,7 +614,7 @@ Unit test coverage lives alongside each module:
 4. Click **Revert** and confirm coordinates and provenance clear.
 5. Repeat the upload with a gap or device mismatch large enough to only produce a `pending` suggestion; confirm it appears in `/location-suggestions` with the correct confidence tier, method label, and (if applicable) speed warning.
 6. Run `POST /api/admin/location-inference/backfill` with a date range and watch `/admin/settings/jobs` for the `location_inference` job (type filter) drain to `succeeded`.
-7. With several `pending` suggestions at varying confidence, adjust the inline "Threshold %" field on `/location-suggestions` and click **"Accept all ≥ N%"**; confirm the browser navigates to `/location-suggestion-runs/:runId`, the page shows `evaluating` → `running` → `completed`, `matchedCount`/`processedCount`/`succeededCount` update on poll, and the accepted items' coordinates and `coordSource: 'inferred'` are visible once you return to the media items. Repeat with **"Reject all < N%"** and confirm the below-threshold suggestions move to `rejected` with no coordinate writes.
+7. With several `pending` suggestions at varying confidence, adjust the inline "Threshold %" field on `/location-suggestions` and click **"Accept all ≥ N%"**; confirm the browser navigates to `/review-runs/:runId`, the page shows `evaluating` → `running` → `completed`, `matchedCount`/`processedCount`/`succeededCount` update on poll, and the accepted items' coordinates and `coordSource: 'inferred'` are visible once you return to the media items. Repeat with **"Reject all < N%"** and confirm the below-threshold suggestions move to `rejected` with no coordinate writes.
 8. Start a bulk run against a large pending backlog and click **"Cancel run"** mid-flight; confirm the run reaches `cancelled`, items already processed keep their outcome, and remaining suggestions stay `pending`.
 
 ---
@@ -699,3 +637,4 @@ Unit test coverage lives alongside each module:
 |---------|------|--------|---------|
 | 1.0 | July 2026 | AI Assistant | Initial specification, documenting the full implementation: `coordSource` provenance model and its three writers, the antimeridian-safe interpolation/extrapolation algorithm with its exact confidence formula and auto-apply gate, the single-sweep-job-per-circle backfill architecture with its snapshot invariant and force semantics, the full review/admin API surface, and the review UI |
 | 1.1 | July 2026 | AI Assistant | Document the configurable `locationInference.bulkAcceptThreshold` setting (§7.1, issue #126) and the async run-based "Bulk Accept/Reject at Scale" rebuild (§9, issue #125): `location_suggestion_runs`/`location_suggestion_run_items` data model (§6.5), `location_suggestion_run_evaluate`/`location_suggestion_run_execute_batch` server-only job types (§5.5), the rewritten `bulk-accept` and new `bulk-reject` endpoints plus the three run-inspection/cancel endpoints (§8.5–§8.9), the updated RBAC table (§10), and the review page's gear icon / inline threshold / run-progress page (§11) |
+| 1.2 | July 2026 | AI Assistant | Issue #190: `location_suggestion_runs`/`location_suggestion_run_items` were folded into the shared `review_runs`/`review_run_items` model (run UUIDs preserved), and the location-suggestion-specific job types were replaced by the generic `review_run_evaluate`/`review_run_execute_batch` pair (kept as deprecated shims for in-flight jobs) — §6.5 and §5.5 now defer to the new [review-runs.md](review-runs.md) spec for the shared architecture. Rewrote §9 to document only what remains location-specific (the non-nullable confidence column, the accept/reject transaction, the deferred `geocode` enqueue). Updated §8.5–§8.9 to reflect the canonical `/api/review-runs/*` paths with `/api/location-suggestion-runs/*` as a deprecated alias, §10's RBAC table, §11's UI (the `ReviewRunPage` redirect replacing the deleted `LocationSuggestionRunPage.tsx`), and §14's testing notes. |
