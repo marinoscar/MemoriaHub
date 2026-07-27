@@ -21,12 +21,17 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
+import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isPictureEnhancementEnabled } from '../common/types/settings.types';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
+import {
+  ListEnhancementsQuery,
+  resolveStatusFilter,
+} from './dto/list-enhancements-query.dto';
 import {
   buildEnhancePrompt,
   closestSupportedSize,
@@ -55,6 +60,7 @@ export class MediaEnhancementService {
     private readonly recoveryService: StorageProcessingRecoveryService,
     private readonly metadataSync: MediaMetadataSyncService,
     private readonly mediaEnrichment: MediaEnrichmentService,
+    private readonly thumbnails: MediaThumbnailService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: SystemSettingsService,
   ) {}
@@ -219,6 +225,215 @@ export class MediaEnhancementService {
       });
       this.logger.log(`Superseded live enhancement ${row.id} for MediaItem ${mediaItemId}`);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/media/enhancements — cross-item hub listing (issue #201)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Paginated, cross-item listing of a circle's enhancements — the data behind
+   * the AI Enhancements hub.
+   *
+   * Three things this method is deliberately careful about:
+   *
+   *  1. **BigInt never reaches the serializer.** `enhancedSize` and the source
+   *     object's `size` are Prisma `BigInt` columns and `JSON.stringify` throws
+   *     on a JS BigInt (see the repo-wide gotcha in CLAUDE.md), so both are
+   *     emitted as decimal STRINGS — matching signOriginal/signStaging.
+   *
+   *  2. **No N+1 signing.** Every source item for the page is loaded in ONE
+   *     `mediaItem.findMany`, and every thumbnail key on the page is signed by
+   *     exactly ONE `signThumbsBatched` call. Staged (enhanced) bytes have no
+   *     thumbnail derivative, so they must be signed directly — those go
+   *     through a per-`provider|bucket` provider cache so a page of N rows
+   *     resolves at most one provider per distinct destination, not N.
+   *
+   *  3. **`expiresAt` is computed server-side** from `updatedAt` +
+   *     `pictureEnhancement.retentionHours`, read ONCE per request, and is
+   *     returned only for the two statuses the purge job actually reaps
+   *     (`ready` / `failed`) — so the client never has to know the retention
+   *     setting to render a countdown.
+   */
+  async listEnhancements(query: ListEnhancementsQuery, user: RequestUser) {
+    const { circleId, page, pageSize, sortBy, sortOrder } = query;
+
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    const statuses = resolveStatusFilter(query.status);
+    // Served by the existing @@index([circleId, status]) on media_enhancements.
+    const where: Prisma.MediaEnhancementWhereInput = {
+      circleId,
+      ...(statuses ? { status: { in: statuses } } : {}),
+    };
+
+    const [rows, totalItems] = await this.prisma.$transaction([
+      this.prisma.mediaEnhancement.findMany({
+        where,
+        // `id` tiebreak keeps paging deterministic when two rows share the
+        // same createdAt/updatedAt (a bulk enqueue can produce ties).
+        orderBy: [{ [sortBy]: sortOrder }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          createdBy: {
+            select: { id: true, displayName: true, providerDisplayName: true },
+          },
+        },
+      }),
+      this.prisma.mediaEnhancement.count({ where }),
+    ]);
+
+    // Read the retention setting ONCE for the whole page, not per row.
+    const retentionHours =
+      (await this.systemSettings.getSettingValue<number>(
+        'pictureEnhancement.retentionHours',
+      )) ?? 168;
+
+    // ONE query for every source item on the page.
+    const mediaItemIds = [...new Set(rows.map((r) => r.mediaItemId))];
+    const items = mediaItemIds.length
+      ? await this.prisma.mediaItem.findMany({
+          where: { id: { in: mediaItemIds } },
+          select: {
+            id: true,
+            metadata: true,
+            originalFilename: true,
+            capturedAt: true,
+            width: true,
+            height: true,
+            storageObject: { select: { size: true } },
+          },
+        })
+      : [];
+    const itemById = new Map(items.map((i) => [i.id, i]));
+
+    // ONE batched signing call for every thumbnail key on the page.
+    const keyToUrl = await this.thumbnails.signThumbsBatched(
+      items
+        .map((i) => this.thumbnails.extractThumbKey(i.metadata))
+        .filter((k): k is string => k !== null),
+    );
+
+    // Staged bytes: resolve each distinct provider|bucket once for the page.
+    const providerCache = new Map<
+      string,
+      Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>
+    >();
+    const signStaged = async (
+      provider: string,
+      bucket: string | null,
+      key: string,
+    ): Promise<string | null> => {
+      const cacheKey = `${provider}|${bucket ?? ''}`;
+      try {
+        let resolved = providerCache.get(cacheKey);
+        if (!resolved) {
+          resolved = await this.resolver.getProviderFor(provider, bucket);
+          providerCache.set(cacheKey, resolved);
+        }
+        return await resolved.getSignedDownloadUrl(key);
+      } catch (err) {
+        // A single unsignable staged object must not fail the whole page.
+        this.logger.warn(
+          `listEnhancements: failed to sign staged key ${key} (non-fatal): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        return null;
+      }
+    };
+
+    const data = [];
+    for (const row of rows) {
+      const item = itemById.get(row.mediaItemId) ?? null;
+      const thumbKey = item ? this.thumbnails.extractThumbKey(item.metadata) : null;
+
+      // Prefer the live item dims (what buildComparePayload compares against),
+      // falling back to the snapshot taken when the enhancement was created —
+      // which is the only source left once a `replace` has mutated the item.
+      const originalWidth = item?.width ?? row.originalWidth;
+      const originalHeight = item?.height ?? row.originalHeight;
+
+      // Only a `ready` row still owns staged bytes; every other status has had
+      // them promoted, discarded, or reaped (mirrors buildComparePayload).
+      const hasStaged =
+        row.status === MediaEnhancementStatus.ready &&
+        !!row.stagingStorageKey &&
+        !!row.stagingProvider;
+
+      data.push({
+        id: row.id,
+        mediaItemId: row.mediaItemId,
+        status: row.status,
+        decision: row.decision,
+        model: row.model,
+        params: row.params ?? {},
+        original: {
+          thumbnailUrl: thumbKey ? keyToUrl.get(thumbKey) ?? null : null,
+          width: originalWidth,
+          height: originalHeight,
+          // BigInt -> string (JSON.stringify throws on BigInt).
+          size:
+            item?.storageObject?.size != null
+              ? item.storageObject.size.toString()
+              : null,
+        },
+        enhanced: {
+          thumbnailUrl: hasStaged
+            ? await signStaged(
+                row.stagingProvider!,
+                row.stagingBucket,
+                row.stagingStorageKey!,
+              )
+            : null,
+          width: hasStaged ? row.enhancedWidth : null,
+          height: hasStaged ? row.enhancedHeight : null,
+          // BigInt -> string (JSON.stringify throws on BigInt).
+          size: hasStaged && row.enhancedSize != null ? row.enhancedSize.toString() : null,
+        },
+        downscaled:
+          !!originalWidth &&
+          !!originalHeight &&
+          !!row.enhancedWidth &&
+          !!row.enhancedHeight &&
+          row.enhancedWidth * row.enhancedHeight < originalWidth * originalHeight,
+        // Only ready/failed rows are purge candidates, so only they expire.
+        expiresAt:
+          row.status === MediaEnhancementStatus.ready ||
+          row.status === MediaEnhancementStatus.failed
+            ? new Date(row.updatedAt.getTime() + retentionHours * 3_600_000)
+            : null,
+        lastError: row.lastError ?? null,
+        resultMediaItemId: row.resultMediaItemId,
+        sourceFilename: item?.originalFilename ?? null,
+        capturedAt: item?.capturedAt ?? null,
+        createdBy: row.createdBy
+          ? {
+              id: row.createdBy.id,
+              name:
+                row.createdBy.displayName ?? row.createdBy.providerDisplayName ?? null,
+            }
+          : null,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      });
+    }
+
+    return {
+      items: data,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
   }
 
   // ---------------------------------------------------------------------------
