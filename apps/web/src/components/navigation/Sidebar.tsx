@@ -10,6 +10,7 @@ import {
   Toolbar,
   Divider,
   Box,
+  Badge,
   useTheme,
   useMediaQuery,
 } from '@mui/material';
@@ -32,10 +33,13 @@ import {
   Insights as InsightsIcon,
   Public as PublicIcon,
   AccountTree as AccountTreeIcon,
+  AutoFixHigh as AutoFixHighIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
+import { useDashboard } from '../../hooks/useDashboard';
 
 interface SidebarProps {
   open: boolean;
@@ -46,6 +50,8 @@ interface NavItemDef {
   label: string;
   icon: React.ReactElement;
   path: string;
+  /** Optional pending-work count. Rendered as a badge only when > 0. */
+  badgeCount?: number;
 }
 
 const DRAWER_WIDTH = 240;
@@ -62,6 +68,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const location = useLocation();
   const { isAdmin, hasPermission } = usePermissions();
   const workflowsEnabled = useWorkflowsEnabled();
+  const { pictureEnhancement } = useFeatureFlags();
+  // Sole consumer of the dashboard here is the AI Enhancements badge. The
+  // response is small and already fetched by HomePage; `useDashboard` is
+  // keyed on the active circle, so this is one extra request per circle
+  // switch, not per navigation.
+  const { data: dashboard } = useDashboard();
+  const pendingEnhancements = dashboard?.counts?.pendingEnhancements ?? 0;
 
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
@@ -84,6 +97,19 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Location Suggestions', icon: <MyLocationIcon />, path: '/location-suggestions' },
     ...(workflowsEnabled === true
       ? [{ label: 'Workflows', icon: <AccountTreeIcon />, path: '/workflows' }]
+      : []),
+    // `=== true` (not a truthy check) so the entry does not flash in while the
+    // flag is still loading — `pictureEnhancement` is null until then, and
+    // useFeatureFlags degrades to null on failure rather than throwing.
+    ...(pictureEnhancement?.enabled === true
+      ? [
+          {
+            label: 'AI Enhancements',
+            icon: <AutoFixHighIcon />,
+            path: '/enhancements',
+            badgeCount: pendingEnhancements,
+          },
+        ]
       : []),
   ];
 
@@ -152,7 +178,22 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           >
             {item.icon}
           </ListItemIcon>
-          <ListItemText primary={item.label} />
+          <ListItemText
+            primary={
+              item.badgeCount && item.badgeCount > 0 ? (
+                <Badge
+                  badgeContent={item.badgeCount}
+                  color="primary"
+                  max={999}
+                  sx={{ '& .MuiBadge-badge': { right: -10 } }}
+                >
+                  {item.label}
+                </Badge>
+              ) : (
+                item.label
+              )
+            }
+          />
         </ListItemButton>
       </ListItem>
     );

@@ -67,6 +67,7 @@ const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
 const WorkflowListPage = lazy(() => import('./pages/Workflows/WorkflowListPage'));
 const WorkflowBuilderPage = lazy(() => import('./pages/Workflows/WorkflowBuilderPage'));
 const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
+const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -150,6 +151,7 @@ function AppRoutes() {
                 <Route path="/workflows/new" element={<WorkflowBuilderPage />} />
                 <Route path="/workflows/:id" element={<WorkflowBuilderPage />} />
                 <Route path="/workflows/:id/runs/:runId" element={<WorkflowRunPage />} />
+                <Route path="/enhancements" element={<EnhancementsPage />} />
                 <Route path="/bursts" element={<BurstsPage />} />
                 <Route path="/bursts/:id" element={<BurstGroupPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />

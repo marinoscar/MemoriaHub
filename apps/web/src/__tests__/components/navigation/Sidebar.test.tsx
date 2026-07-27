@@ -41,7 +41,58 @@ vi.mock('../../../components/album/CreateAlbumDialog', () => ({
   CreateAlbumDialog: () => null,
 }));
 
+// The sidebar gates its "AI Enhancements" entry on GET /api/features and reads
+// the badge count from the dashboard. Both are mocked so navigation tests make
+// no network calls; the default below leaves the flag OFF, which is what keeps
+// every pre-existing menu-item count in this file correct.
+vi.mock('../../../hooks/useFeatureFlags', () => ({
+  useFeatureFlags: vi.fn(),
+}));
+
+vi.mock('../../../hooks/useDashboard', () => ({
+  useDashboard: vi.fn(),
+}));
+
 import { usePermissions } from '../../../hooks/usePermissions';
+import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
+import { useDashboard } from '../../../hooks/useDashboard';
+
+/** Default: enhancer flag off, no dashboard data. */
+function mockEnhancer(
+  enabled: boolean | null,
+  pendingEnhancements?: number,
+): void {
+  vi.mocked(useFeatureFlags).mockReturnValue({
+    features: enabled === null ? null : { pictureEnhancement: enabled },
+    pictureEnhancement:
+      enabled === null
+        ? null
+        : {
+            enabled,
+            allowReplace: true,
+            blockReplaceOnDownscale: false,
+            model: 'gpt-image-1',
+          },
+    isLoading: false,
+    error: null,
+    refresh: vi.fn().mockResolvedValue(undefined),
+  });
+
+  vi.mocked(useDashboard).mockReturnValue({
+    data:
+      pendingEnhancements === undefined
+        ? null
+        : {
+            onThisDay: [],
+            recent: [],
+            favorites: [],
+            counts: { total: 0, missingGeo: 0, pendingEnhancements },
+          },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+}
 
 describe('Sidebar', () => {
   const mockOnClose = vi.fn();
@@ -49,6 +100,7 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLocation.pathname = '/';
+    mockEnhancer(null);
   });
 
   describe('Rendering', () => {
@@ -1008,6 +1060,119 @@ describe('Sidebar', () => {
       expect(libraryList!.textContent).not.toContain('Review Bursts');
       expect(libraryList!.textContent).not.toContain('Review Duplicates');
       expect(libraryList!.textContent).not.toContain('Location Suggestions');
+    });
+  });
+
+  describe('AI Enhancements Entry (issue #201)', () => {
+    const nonAdmin = () => ({
+      permissions: new Set<string>(),
+      roles: new Set<string>(),
+      hasPermission: vi.fn(),
+      hasAnyPermission: vi.fn(),
+      hasAllPermissions: vi.fn(),
+      hasRole: vi.fn(),
+      hasAnyRole: vi.fn(),
+      isAdmin: false,
+    });
+
+    it('is hidden while the feature flag is still loading (null)', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(null);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
+    });
+
+    it('is hidden when picture enhancement is disabled', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(false, 4);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
+    });
+
+    it('renders under Utilities when picture enhancement is enabled', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
+
+      const utilitiesList = screen.getByText('Utilities').closest('.MuiList-root');
+      expect(utilitiesList).not.toBeNull();
+      expect(utilitiesList!.textContent).toContain('AI Enhancements');
+    });
+
+    it('navigates to /enhancements when clicked', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const button = screen
+        .getByText('AI Enhancements')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/enhancements');
+      });
+    });
+
+    it('stays highlighted on a nested /enhancements/... route (prefix match)', () => {
+      mockLocation.pathname = '/enhancements/some-id';
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const button = screen
+        .getByText('AI Enhancements')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      expect(button.classList.contains('Mui-selected')).toBe(true);
+    });
+
+    it('renders the pending count as a badge', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 7);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const badge = container.querySelector('.MuiBadge-badge');
+      expect(badge).not.toBeNull();
+      expect(badge!.textContent).toBe('7');
+    });
+
+    it('caps the badge at 999+', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 1500);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(container.querySelector('.MuiBadge-badge')!.textContent).toBe('999+');
+    });
+
+    it('renders no badge when the count is zero', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true, 0);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
+      expect(container.querySelector('.MuiBadge-badge')).toBeNull();
+    });
+
+    it('renders no badge when the dashboard count is unknown', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockEnhancer(true);
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('AI Enhancements')).toBeInTheDocument();
+      expect(container.querySelector('.MuiBadge-badge')).toBeNull();
     });
   });
 
