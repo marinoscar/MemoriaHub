@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ApiError } from '../services/api';
 import { getFeatures } from '../services/features';
+import { useIsMounted } from './useIsMounted';
 import type { FeatureFlags, PictureEnhancementPolicy } from '../services/features';
 
 // ---------------------------------------------------------------------------
@@ -63,22 +64,25 @@ export function useFeatureFlags(): UseFeatureFlagsReturn {
   const [flags, setFlags] = useState<FeatureFlags | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const load = useCallback(async (force: boolean) => {
     setIsLoading(true);
     setError(null);
     try {
       const data = await loadFeatures(force);
+      if (!isMounted()) return;
       setFlags(data);
     } catch (err) {
+      if (!isMounted()) return;
       const message =
         err instanceof ApiError ? err.message : 'Failed to load feature flags';
       setFlags(null);
       setError(message);
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   useEffect(() => {
     let active = true;

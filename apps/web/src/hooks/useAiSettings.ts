@@ -13,25 +13,29 @@ import {
   putAiEnhanceFeature,
   getAiImageModels,
 } from '../services/ai';
+import { useIsMounted } from './useIsMounted';
 import type { AiSettingsResponse, AiTestResult, AiEmbeddingTestResult } from '../services/ai';
 
 export function useAiSettings() {
   const [settings, setSettings] = useState<AiSettingsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await getAiSettings();
+      if (!isMounted()) return;
       setSettings(data);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load AI settings');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const saveCredentials = useCallback(
     async (

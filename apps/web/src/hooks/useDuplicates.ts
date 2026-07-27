@@ -9,6 +9,7 @@ import {
   fetchAllPendingDuplicateGroupIds,
   dismissDuplicateGroup,
 } from '../services/duplicates';
+import { useIsMounted } from './useIsMounted';
 import type { SortOrder } from '../types/media';
 import type {
   DuplicateGroupStatus,
@@ -59,6 +60,7 @@ export function useDuplicateGroups(): UseDuplicateGroupsResult {
 
   // Remember the last fetch params so bulkResolve can refresh the same view.
   const lastParamsRef = useRef<FetchDuplicateGroupsParams | null>(null);
+  const isMounted = useIsMounted();
 
   const fetchGroups = useCallback(async (params: FetchDuplicateGroupsParams) => {
     lastParamsRef.current = params;
@@ -66,14 +68,16 @@ export function useDuplicateGroups(): UseDuplicateGroupsResult {
     setError(null);
     try {
       const result = await listDuplicateGroups(params);
+      if (!isMounted()) return;
       setItems(result.items);
       setMeta(result.meta);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load duplicate groups');
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const bulkResolve = useCallback(
     async (ids: string[], action: DuplicateResolveAction) => {
@@ -150,19 +154,22 @@ export function useDuplicateGroupDetail(groupId: string): UseDuplicateGroupDetai
   const [error, setError] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [dismissing, setDismissing] = useState(false);
+  const isMounted = useIsMounted();
 
   const fetchGroup = useCallback(async (id: string) => {
     setIsLoading(true);
     setError(null);
     try {
       const result = await getDuplicateGroup(id);
+      if (!isMounted()) return;
       setGroup(result);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load duplicate group');
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
-  }, []);
+  }, [isMounted]);
 
   const resolve = useCallback(
     async (keepIds: string[], action: DuplicateResolveAction) => {
@@ -170,10 +177,10 @@ export function useDuplicateGroupDetail(groupId: string): UseDuplicateGroupDetai
       try {
         return await resolveDuplicateGroup(groupId, keepIds, action);
       } finally {
-        setResolving(false);
+        if (isMounted()) setResolving(false);
       }
     },
-    [groupId],
+    [groupId, isMounted],
   );
 
   const dismiss = useCallback(async () => {
@@ -181,9 +188,9 @@ export function useDuplicateGroupDetail(groupId: string): UseDuplicateGroupDetai
     try {
       return await dismissDuplicateGroup(groupId);
     } finally {
-      setDismissing(false);
+      if (isMounted()) setDismissing(false);
     }
-  }, [groupId]);
+  }, [groupId, isMounted]);
 
   return { group, isLoading, error, fetchGroup, resolve, dismiss, resolving, dismissing };
 }

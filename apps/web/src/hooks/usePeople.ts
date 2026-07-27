@@ -11,6 +11,7 @@ import {
   bulkUnhidePeople,
   purgePeople,
 } from '../services/face';
+import { useIsMounted } from './useIsMounted';
 import type { PersonListResponse, PersonDetail, ClusterResult } from '../services/face';
 
 // Hook for listing people in a circle
@@ -21,6 +22,7 @@ export function usePeople(
   const [data, setData] = useState<PersonListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const refresh = useCallback(async () => {
     if (!circleId) return;
@@ -32,13 +34,15 @@ export function usePeople(
         hidden: opts?.hidden,
         pageSize: 100,
       });
+      if (!isMounted()) return;
       setData(result);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load people');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [circleId, opts?.includeUnlabeled, opts?.hidden]);
+  }, [circleId, opts?.includeUnlabeled, opts?.hidden, isMounted]);
 
   useEffect(() => {
     void refresh();
@@ -136,6 +140,7 @@ export function usePerson(personId: string | null) {
   const [person, setPerson] = useState<PersonDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const refresh = useCallback(async () => {
     if (!personId) return;
@@ -143,13 +148,15 @@ export function usePerson(personId: string | null) {
     setError(null);
     try {
       const result = await getPerson(personId);
+      if (!isMounted()) return;
       setPerson(result);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load person');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [personId]);
+  }, [personId, isMounted]);
 
   useEffect(() => {
     void refresh();

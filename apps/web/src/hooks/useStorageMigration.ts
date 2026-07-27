@@ -5,6 +5,7 @@ import {
   getMigrationRun,
   cancelMigration,
 } from '../services/storage-providers';
+import { useIsMounted } from './useIsMounted';
 import type { MigrationRun, MigrationStatus } from '../services/storage-providers';
 
 const POLL_INTERVAL_MS = 5000;
@@ -28,24 +29,28 @@ export function useStorageMigration() {
   const activeRunIdRef = useRef<string | null>(null);
   activeRunIdRef.current = activeRun?.id ?? null;
 
+  const isMounted = useIsMounted();
+
   const fetchRuns = useCallback(async () => {
     try {
       const data = await listMigrationRuns();
+      if (!isMounted()) return;
       setRuns(data.items);
       setRunsError(null);
     } catch (err) {
+      if (!isMounted()) return;
       setRunsError(err instanceof Error ? err.message : 'Failed to load migration runs');
     }
-  }, []);
+  }, [isMounted]);
 
   const refresh = useCallback(async () => {
     setRunsLoading(true);
     try {
       await fetchRuns();
     } finally {
-      setRunsLoading(false);
+      if (isMounted()) setRunsLoading(false);
     }
-  }, [fetchRuns]);
+  }, [fetchRuns, isMounted]);
 
   // Silent background poll for active run status
   const silentPollActiveRun = useCallback(async () => {
@@ -53,17 +58,18 @@ export function useStorageMigration() {
     if (!runId) return;
     try {
       const updated = await getMigrationRun(runId);
+      if (!isMounted()) return;
       setActiveRun(updated);
       // Also refresh the runs list so history stays up to date
       await fetchRuns();
       // If terminal, clear active run
-      if (isTerminal(updated.status)) {
+      if (isTerminal(updated.status) && isMounted()) {
         setActiveRun(null);
       }
     } catch {
       // ignore poll errors
     }
-  }, [fetchRuns]);
+  }, [fetchRuns, isMounted]);
 
   // Initial load
   useEffect(() => {
@@ -93,25 +99,27 @@ export function useStorageMigration() {
         const result = await triggerMigration({ sourceProvider, targetProvider });
         // Immediately fetch the full run object so we have status/counts
         const run = await getMigrationRun(result.runId);
+        if (!isMounted()) return;
         setActiveRun(run);
         await fetchRuns();
       } finally {
-        setStarting(false);
+        if (isMounted()) setStarting(false);
       }
     },
-    [fetchRuns],
+    [fetchRuns, isMounted],
   );
 
   const cancel = useCallback(async (): Promise<void> => {
     if (!activeRun) return;
     try {
       const updated = await cancelMigration(activeRun.id);
+      if (!isMounted()) return;
       setActiveRun(updated);
       await fetchRuns();
     } catch (err) {
       throw err;
     }
-  }, [activeRun, fetchRuns]);
+  }, [activeRun, fetchRuns, isMounted]);
 
   return {
     runs,

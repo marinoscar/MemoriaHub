@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getMediaMetadataStatus, rerunMediaMetadata } from '../services/metadata';
+import { useIsMounted } from './useIsMounted';
 import type { MediaMetadataStatusDto, MediaMetadataStatusType } from '../services/metadata';
 
 const TERMINAL_STATUSES: MediaMetadataStatusType[] = ['processed', 'failed'];
@@ -13,6 +14,7 @@ export function useMediaMetadata(mediaId: string, onRefresh: () => void) {
   const [rerunLoading, setRerunLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
+  const isMounted = useIsMounted();
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) {
@@ -28,13 +30,15 @@ export function useMediaMetadata(mediaId: string, onRefresh: () => void) {
     setError(null);
     try {
       const statusData = await getMediaMetadataStatus(mediaId);
+      if (!isMounted()) return;
       setStatus(statusData);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load metadata status');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [mediaId]);
+  }, [mediaId, isMounted]);
 
   useEffect(() => {
     void loadData();
@@ -47,6 +51,7 @@ export function useMediaMetadata(mediaId: string, onRefresh: () => void) {
     stopPolling();
     try {
       await rerunMediaMetadata(mediaId);
+      if (!isMounted()) return;
       // Optimistically update status to pending
       setStatus((prev) =>
         prev
@@ -59,6 +64,10 @@ export function useMediaMetadata(mediaId: string, onRefresh: () => void) {
         pollCountRef.current += 1;
         getMediaMetadataStatus(mediaId)
           .then((s) => {
+            if (!isMounted()) {
+              stopPolling();
+              return;
+            }
             setStatus(s);
             if (TERMINAL_STATUSES.includes(s.status) || pollCountRef.current >= MAX_POLLS) {
               stopPolling();
@@ -68,14 +77,15 @@ export function useMediaMetadata(mediaId: string, onRefresh: () => void) {
           })
           .catch(() => {
             stopPolling();
-            setRerunLoading(false);
+            if (isMounted()) setRerunLoading(false);
           });
       }, POLL_INTERVAL_MS);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to rerun metadata extraction');
       setRerunLoading(false);
     }
-  }, [mediaId, stopPolling, onRefresh]);
+  }, [mediaId, stopPolling, onRefresh, isMounted]);
 
   return { status, loading, error, rerun, rerunLoading };
 }

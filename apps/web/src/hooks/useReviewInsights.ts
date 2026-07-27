@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { getReviewInsights } from '../services/reviewInsights';
+import { useIsMounted } from './useIsMounted';
 import type { ReviewInsights } from '../services/reviewInsights';
 
 export interface UseReviewInsightsResult {
@@ -17,6 +18,7 @@ export function useReviewInsights(circleId: string | null): UseReviewInsightsRes
   const [data, setData] = useState<ReviewInsights | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const reload = useCallback(async () => {
     if (!circleId) return;
@@ -24,13 +26,15 @@ export function useReviewInsights(circleId: string | null): UseReviewInsightsRes
     setError(null);
     try {
       const result = await getReviewInsights(circleId);
+      if (!isMounted()) return;
       setData(result);
     } catch (err) {
+      if (!isMounted()) return;
       setError(err instanceof Error ? err.message : 'Failed to load review insights');
     } finally {
-      setLoading(false);
+      if (isMounted()) setLoading(false);
     }
-  }, [circleId]);
+  }, [circleId, isMounted]);
 
   useEffect(() => {
     void reload();

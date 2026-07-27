@@ -4,6 +4,7 @@ import type {
   WorkflowPreviewResponse,
 } from '../types/workflows';
 import { previewWorkflow as previewWorkflowApi } from '../services/workflows';
+import { useIsMounted } from './useIsMounted';
 
 interface UseWorkflowPreviewResult {
   preview: (body: WorkflowPreviewRequest) => Promise<WorkflowPreviewResponse | null>;
@@ -24,6 +25,7 @@ export function useWorkflowPreview(): UseWorkflowPreviewResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const latestRequestId = useRef(0);
+  const isMounted = useIsMounted();
 
   const preview = useCallback(
     async (body: WorkflowPreviewRequest): Promise<WorkflowPreviewResponse | null> => {
@@ -33,13 +35,13 @@ export function useWorkflowPreview(): UseWorkflowPreviewResult {
       try {
         const response = await previewWorkflowApi(body);
         // Only apply if this is still the most recent request.
-        if (requestId === latestRequestId.current) {
+        if (requestId === latestRequestId.current && isMounted()) {
           setData(response);
           setIsLoading(false);
         }
         return response;
       } catch (err) {
-        if (requestId === latestRequestId.current) {
+        if (requestId === latestRequestId.current && isMounted()) {
           const message = err instanceof Error ? err.message : 'Failed to preview workflow';
           setError(message);
           setIsLoading(false);
@@ -47,7 +49,7 @@ export function useWorkflowPreview(): UseWorkflowPreviewResult {
         return null;
       }
     },
-    [],
+    [isMounted],
   );
 
   const reset = useCallback(() => {

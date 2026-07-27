@@ -15,6 +15,7 @@ import {
   bulkShares as bulkSharesApi,
   type ShareListMeta,
 } from '../services/shareService';
+import { useIsMounted } from './useIsMounted';
 
 // ---------------------------------------------------------------------------
 // Hook params and return shape
@@ -49,21 +50,24 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
   const [meta, setMeta] = useState<ShareListMeta | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useIsMounted();
 
   const refetch = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const result = await listShares(params);
+      if (!isMounted()) return;
       setShares(result.items);
       setMeta(result.meta);
     } catch (err) {
+      if (!isMounted()) return;
       const message = err instanceof Error ? err.message : 'Failed to fetch shares';
       setError(message);
       setShares([]);
       setMeta(null);
     } finally {
-      setIsLoading(false);
+      if (isMounted()) setIsLoading(false);
     }
   }, [
     params?.scope,
@@ -71,6 +75,7 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
     params?.targetType,
     params?.page,
     params?.pageSize,
+    isMounted,
   ]);
 
   const createShare = useCallback(
@@ -82,11 +87,11 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
         return share;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create share';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [refetch],
+    [refetch, isMounted],
   );
 
   const updateShare = useCallback(
@@ -98,11 +103,11 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
         return updated;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to update share';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [refetch],
+    [refetch, isMounted],
   );
 
   const revokeShare = useCallback(
@@ -113,11 +118,11 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
         await refetch();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to revoke share';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [refetch],
+    [refetch, isMounted],
   );
 
   const bulkAction = useCallback(
@@ -129,11 +134,11 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to perform bulk action';
-        setError(message);
+        if (isMounted()) setError(message);
         throw err;
       }
     },
-    [refetch],
+    [refetch, isMounted],
   );
 
   useEffect(() => {
