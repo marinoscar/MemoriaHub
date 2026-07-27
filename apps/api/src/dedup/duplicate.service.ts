@@ -263,9 +263,10 @@ export class DuplicateService {
 
     await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
 
-    // `capturedAt` is nullable (object form OK); `mediaCount` is non-null (plain
-    // direction only). Confidence is computed per group AFTER the query, so it
-    // keeps today's base order here and is sorted in memory further below.
+    // `capturedAt`/`confidence` are nullable (object form OK); `mediaCount` is
+    // non-null (plain direction only). `confidence` is now a real, persisted,
+    // indexed column (issue #190) and is ordered here at the SQL level,
+    // mirroring BurstService.listBurstGroups — nulls last in both directions.
     const baseOrder: Prisma.DuplicateGroupOrderByWithRelationInput[] = [
       { capturedAt: { sort: 'asc', nulls: 'last' } },
       { createdAt: 'asc' },
@@ -274,9 +275,15 @@ export class DuplicateService {
     const orderBy: Prisma.DuplicateGroupOrderByWithRelationInput[] =
       by === 'capturedAt'
         ? [{ capturedAt: { sort: dir, nulls: 'last' } }, { createdAt: 'asc' }, { id: 'asc' }]
-        : by === 'mediaCount'
-          ? [{ mediaCount: dir }, { capturedAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }]
-          : baseOrder;
+        : by === 'confidence'
+          ? [
+              { confidence: { sort: dir, nulls: 'last' } },
+              { capturedAt: { sort: 'asc', nulls: 'last' } },
+              { id: 'asc' },
+            ]
+          : by === 'mediaCount'
+            ? [{ mediaCount: dir }, { capturedAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }]
+            : baseOrder;
 
     const groups = await this.prisma.duplicateGroup.findMany({
       where: { circleId, status: status as DuplicateGroupStatus },
@@ -310,30 +317,12 @@ export class DuplicateService {
           ...group,
           kind: kindClass,
           confidence: maxSim ?? 0,
-          // Raw (possibly null) similarity, used only for in-memory sorting
-          // below — never emitted. The wire field stays `confidence`.
-          rawConfidence: maxSim,
           suggestedBestItemId: bestId ?? group.suggestedBestItemId,
         };
       }),
     );
 
     const filtered = kind ? enriched.filter((g) => g.kind === kind) : enriched;
-
-    // Confidence is computed per group at read time, so it cannot be ordered in
-    // SQL — sort here instead. Groups with an uncomputable (null) similarity go
-    // LAST in both directions. Array#sort is stable, so the DB base order above
-    // is the natural tiebreaker; no explicit tiebreaker comparator is needed.
-    if (by === 'confidence') {
-      filtered.sort((a, b) => {
-        if (a.rawConfidence === null && b.rawConfidence === null) return 0;
-        if (a.rawConfidence === null) return 1;
-        if (b.rawConfidence === null) return -1;
-        return dir === 'asc'
-          ? a.rawConfidence - b.rawConfidence
-          : b.rawConfidence - a.rawConfidence;
-      });
-    }
 
     const total = filtered.length;
     const start = (page - 1) * pageSize;
