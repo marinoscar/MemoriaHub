@@ -38,6 +38,18 @@ module.exports = {
     // make a real network call. Force every 'openai' import to the single
     // copy this app resolves so one mock covers both call sites.
     '^openai$': require.resolve('openai'),
+    // Same nesting problem, same fix, different package: the root
+    // package.json pins `overrides.sharp` (exact, for server/worker compute
+    // parity) while apps/api, apps/cli and packages/enrichment-compute each
+    // declare their own sharp spec. npm resolves that by giving each
+    // workspace its OWN nested copy instead of one hoisted one, so
+    // jest.mock('sharp') in a spec only mocked the copy apps/api resolves —
+    // the shared package's dhash compute (`await import('sharp')` inside
+    // packages/enrichment-compute) picked up its own nested copy, ran REAL
+    // sharp against a fake test buffer, threw "unsupported image format",
+    // and computeVisualHash swallowed it into null. Pin every 'sharp'
+    // specifier to one copy so a single mock covers both call sites.
+    '^sharp$': require.resolve('sharp'),
   },
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   globalTeardown: '<rootDir>/test/teardown.ts',
