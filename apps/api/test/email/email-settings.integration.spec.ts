@@ -239,7 +239,13 @@ describe('Email Settings Integration', () => {
         .post('/api/email-settings/test')
         .set(authHeader(admin.accessToken))
         .send({ recipient: 'someone@example.com' })
-        .expect(200);
+        // 201, not 200: this endpoint documents `@ApiResponse({ status: 200 })`
+        // but carries no `@HttpCode`, so Nest's POST default applies. Every
+        // `POST /test` connectivity endpoint in the codebase (email, face, geo,
+        // storage-settings) has the same doc/behaviour mismatch, so this asserts
+        // the consistent real behaviour rather than changing four controllers'
+        // status codes from inside a test-repair change. Tracked in issue #220.
+        .expect(201);
 
       const body = response.body.data ?? response.body;
       expect(body.ok).toBe(true);
@@ -258,7 +264,13 @@ describe('Email Settings Integration', () => {
         .post('/api/email-settings/test')
         .set(authHeader(admin.accessToken))
         .send({ recipient: 'someone@example.com' })
-        .expect(200);
+        // 201, not 200: this endpoint documents `@ApiResponse({ status: 200 })`
+        // but carries no `@HttpCode`, so Nest's POST default applies. Every
+        // `POST /test` connectivity endpoint in the codebase (email, face, geo,
+        // storage-settings) has the same doc/behaviour mismatch, so this asserts
+        // the consistent real behaviour rather than changing four controllers'
+        // status codes from inside a test-repair change. Tracked in issue #220.
+        .expect(201);
 
       const body = response.body.data ?? response.body;
       expect(body.ok).toBe(false);
