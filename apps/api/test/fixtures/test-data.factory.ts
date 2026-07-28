@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
 
 /**
  * Test data factories for creating mock entities
@@ -308,10 +309,13 @@ export function createMockSystemSettings(
   const {
     id = randomUUID(),
     key = 'default',
-    value = {
-      ui: { allowUserThemeOverride: true },
-      features: {},
-    },
+    // Mirror a real seeded row rather than a hand-written subset.
+    // SystemSettingsService.getSettings() returns `value.*` verbatim — it does
+    // NOT merge DEFAULT_SYSTEM_SETTINGS on read — so a partial fixture here
+    // makes the API appear to return `features: {}`. Deriving from the real
+    // defaults keeps this fixture correct as new settings namespaces and
+    // feature flags are added, instead of drifting every time (issue #220).
+    value = DEFAULT_SYSTEM_SETTINGS,
     version = 1,
     updatedByUserId = null,
     updatedAt = new Date(),

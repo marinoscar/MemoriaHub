@@ -6,15 +6,49 @@ These suites are excluded from `test:ci` in each app. Each exclusion is intentio
 
 ---
 
-## API — Integration Suites (excluded group)
+## API — Integration Suites (RESOLVED, issue #220 — one file still excluded)
 
-**Pattern excluded:** `integration\.spec\.ts$`
+**Pattern excluded:** `media\.integration\.spec\.ts$` (was: `integration\.spec\.ts$`)
 
-All files matching `*.integration.spec.ts` under `apps/api/src/` and `apps/api/test/` are excluded.
+25 of the 26 `*.integration.spec.ts` suites now run in `test:ci`. Only `apps/api/test/media/media.integration.spec.ts` remains excluded — see below.
 
-**Root cause:** Integration specs require a live PostgreSQL database (via `createTestApp` helper). The helper attempts to connect on startup, causing each suite to time out after 30 s in CI where no DB is provisioned. Fixing this requires either a PostgreSQL service container in the CI workflow or a dedicated test-DB setup step.
+> ### ⚠️ The root cause previously recorded here was wrong
+>
+> This section used to state that integration specs *"require a live PostgreSQL database… the helper attempts to connect on startup"*, and prescribed adding a `postgres` service container to the CI job. **That was incorrect in every particular**, and following it would have burned a day on infrastructure that could not have helped:
+>
+> - `createTestApp` defaults to `useMockDatabase: true` and calls `.overrideProvider(PrismaService).useValue(prismaMock)`. It **never opens a database connection.**
+> - All 26 integration specs explicitly pass `useMockDatabase: true`. Not one uses a real database.
+>
+> Recorded here as a worked example of the lesson at the top of this file: an exclusion note is a claim, and claims rot. Re-run the suite before trusting one.
 
-**Fix:** Add a `postgres` service to the GitHub Actions job and set `DATABASE_URL` / individual `POSTGRES_*` env vars before running integration tests. Once wired, re-enable via a separate `test:integration` step.
+**Actual root cause (fixed):** every integration spec boots the full `AppModule`, which includes `OfflineGeoLocationProvider`. Its `onModuleInit` initializes `local-reverse-geocoder`, which (a) dynamically `import()`s ESM `node-fetch@3` — rejected by Jest's CJS VM with *"A dynamic import callback was invoked without `--experimental-vm-modules`"* — and (b) downloads the GeoNames dataset over the network before resolving. That alone accounted for 22 of the 26 suites failing.
+
+`createTestApp` now replaces that provider with an inert stub for both the mocked-DB and real-DB paths, since the problem is a property of running under Jest, not of how Prisma is wired.
+
+Four further suites were repaired alongside it:
+
+| Suite | What had rotted |
+|---|---|
+| `settings/system-settings` | `createMockSystemSettings` hardcoded `features: {}`; `getSettings()` returns `value.*` verbatim without merging defaults, so the API appeared to return no feature flags. The fixture now derives from `DEFAULT_SYSTEM_SETTINGS` so it cannot drift again. |
+| `media/media-bulk-dashboard` | Asserted a flat `where` object; media filters are now AND-composed into `where.AND[]` (see `docs/audits/search-audit.md`). Now flattened before asserting, so the check no longer depends on descriptor count or order. |
+| `storage/storage` | Mocked the injected `STORAGE_PROVIDER` token, which `ObjectsService` stopped consulting when multi-provider routing landed — it resolves via `StorageProviderResolver`. The spec was making **real AWS S3 calls**. Now stubs the resolver. |
+| `integration/share` | Asserted `response.body.*` before the global response envelope (`{ data, meta }`) was introduced. |
+
+**Two real (if minor) product bugs were found by these specs once they could run**, both a `@Post` bulk mutation documenting `@ApiResponse({ status: 200 })` with no `@HttpCode`, so Nest's POST default returned 201: `POST /api/media/bulk/tags` (its four sibling `bulk/*` endpoints all had `@HttpCode(HttpStatus.OK)`) and `POST /api/shares/bulk`. Both fixed in the controllers.
+
+**Known, deliberately unfixed:** every `POST /test` connectivity endpoint (`email-settings`, `face`, `geo`, `storage-settings`) has the same doc/behaviour mismatch — all document 200, none sets `@HttpCode`, all return 201. Because they are *consistent* with each other, the email spec was updated to assert 201 rather than change four controllers' status codes from inside a test-repair change. Worth resolving one way or the other in its own PR.
+
+---
+
+## API — `media.integration.spec.ts` (1 file)
+
+**Pattern excluded:** `media\.integration\.spec\.ts$`
+
+**Root cause:** this spec predates the Family Circles feature entirely — it contains **zero** references to `circleId` across 1071 lines, and its factories still build media items with an `ownerId` field against a schema that now uses `added_by_id` + `circle_id`. `GET`/`POST /api/media` require `circleId` and per-circle membership, so 35 of its 54 tests fail with 400.
+
+This is not assertion drift; it is a spec written against a superseded data model. Repairing it means threading `circleId` through ~20 requests, adding circle-membership mocks per test, and rewriting the factories — a rewrite that did not belong in the same change that fixed the harness.
+
+**Fix:** rewrite against the current circle-scoped API, using `media-bulk-dashboard.integration.spec.ts` as the reference (it has the `setupCircleMocks` helper and correct factories). Remove this exclusion in the same PR, per the rule above.
 
 ---
 

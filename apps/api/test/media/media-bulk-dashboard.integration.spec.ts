@@ -366,6 +366,22 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
   // GET /api/media — new filters
   // =========================================================================
 
+  /**
+   * Media list filters are AND-composed: each filter descriptor contributes its
+   * own entry to a shared `where.AND` array rather than merging into one flat
+   * object (see docs/audits/search-audit.md — the old flat merge silently
+   * dropped criteria whenever two descriptors wrote the same key).
+   *
+   * Flattening lets these specs assert "this predicate was applied" without
+   * depending on how many descriptors ran or in what order they were appended,
+   * which is what made the original flat-shape assertions rot (issue #220).
+   */
+  function flattenWhere(where: Record<string, any>): Record<string, any> {
+    const { AND, ...rest } = where ?? {};
+    const clauses: Array<Record<string, any>> = Array.isArray(AND) ? AND : [];
+    return clauses.reduce((acc, clause) => ({ ...acc, ...clause }), { ...rest });
+  }
+
   describe('GET /api/media — new filters', () => {
     it('cameraMake filter: where includes cameraMake: { contains, mode: insensitive }', async () => {
       const contributor = await createMockContributorUser(context);
@@ -380,7 +396,7 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
         .expect(200);
 
       const [findManyCall] = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(findManyCall[0].where).toMatchObject({
+      expect(flattenWhere(findManyCall[0].where)).toMatchObject({
         cameraMake: { contains: 'Canon', mode: 'insensitive' },
       });
     });
@@ -398,7 +414,7 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
         .expect(200);
 
       const [findManyCall] = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(findManyCall[0].where).toMatchObject({
+      expect(flattenWhere(findManyCall[0].where)).toMatchObject({
         takenLat: null,
         takenLng: null,
       });

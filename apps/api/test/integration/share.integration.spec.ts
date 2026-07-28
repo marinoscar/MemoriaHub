@@ -261,10 +261,10 @@ describe('Share Feature Integration', () => {
         })
         .expect(201);
 
-      expect(response.body).toHaveProperty('id', SHARE_ID);
-      expect(response.body).toHaveProperty('token', SHARE_TOKEN);
-      expect(response.body).toHaveProperty('status', 'active');
-      expect(response.body).toHaveProperty('publicUrl');
+      expect(response.body.data).toHaveProperty('id', SHARE_ID);
+      expect(response.body.data).toHaveProperty('token', SHARE_TOKEN);
+      expect(response.body.data).toHaveProperty('status', 'active');
+      expect(response.body.data).toHaveProperty('publicUrl');
     });
   });
 
@@ -293,8 +293,8 @@ describe('Share Feature Integration', () => {
         .set(authHeader(admin.accessToken))
         .expect(200);
 
-      expect(response.body).toHaveProperty('items');
-      expect(response.body).toHaveProperty('meta');
+      expect(response.body.data).toHaveProperty('items');
+      expect(response.body.data).toHaveProperty('meta');
     });
   });
 
@@ -317,9 +317,9 @@ describe('Share Feature Integration', () => {
         .send({ expiresAt: futureDate })
         .expect(200);
 
-      expect(response.body).toHaveProperty('id', SHARE_ID);
+      expect(response.body.data).toHaveProperty('id', SHARE_ID);
       // expiresAt should be present and the computed status should not be 'expired'
-      expect(['active', 'expired', 'revoked']).toContain(response.body.status);
+      expect(['active', 'expired', 'revoked']).toContain(response.body.data.status);
     });
 
     it('returns 403 when caller does not own the share and lacks manage_any', async () => {
@@ -406,7 +406,7 @@ describe('Share Feature Integration', () => {
         })
         .expect(200);
 
-      expect(response.body).toHaveProperty('affected', 2);
+      expect(response.body.data).toHaveProperty('affected', 2);
     });
 
     it('returns affected count for delete action', async () => {
@@ -423,7 +423,7 @@ describe('Share Feature Integration', () => {
         })
         .expect(200);
 
-      expect(response.body).toHaveProperty('affected', 1);
+      expect(response.body.data).toHaveProperty('affected', 1);
     });
 
     it('returns 400 for invalid action', async () => {
@@ -724,12 +724,12 @@ describe('Share Feature Integration', () => {
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
-      expect(response.body).toHaveProperty('items');
-      expect(response.body).toHaveProperty('meta');
-      expect(response.body.meta).toHaveProperty('totalItems', 1);
-      expect(response.body.items).toHaveLength(1);
-      expect(response.body.items[0]).toHaveProperty('id', SHARE_ID);
-      expect(response.body.items[0]).toHaveProperty('status', 'active');
+      expect(response.body.data).toHaveProperty('items');
+      expect(response.body.data).toHaveProperty('meta');
+      expect(response.body.data.meta).toHaveProperty('totalItems', 1);
+      expect(response.body.data.items).toHaveLength(1);
+      expect(response.body.data.items[0]).toHaveProperty('id', SHARE_ID);
+      expect(response.body.data.items[0]).toHaveProperty('status', 'active');
     });
 
     it('status filter — active shares only', async () => {
@@ -743,7 +743,7 @@ describe('Share Feature Integration', () => {
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
-      expect(response.body.items).toHaveLength(0);
+      expect(response.body.data.items).toHaveLength(0);
     });
   });
 });

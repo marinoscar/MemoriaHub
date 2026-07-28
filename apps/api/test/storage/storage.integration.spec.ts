@@ -11,8 +11,8 @@ import {
   createMockAdminUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
-import { STORAGE_PROVIDER } from '../../src/storage/providers/storage-provider.interface';
 import { createMockStorageProvider } from '../mocks/storage-provider.mock';
+import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
 
 describe('Storage Integration', () => {
   let context: TestContext;
@@ -39,12 +39,6 @@ describe('Storage Integration', () => {
   beforeAll(async () => {
     mockStorageProvider = createMockStorageProvider();
     context = await createTestApp({ useMockDatabase: true });
-
-    // Override storage provider with mock
-    const storageProviderToken = context.module.get(STORAGE_PROVIDER, { strict: false });
-    if (storageProviderToken) {
-      Object.assign(storageProviderToken, mockStorageProvider);
-    }
   });
 
   afterAll(async () => {
@@ -55,6 +49,25 @@ describe('Storage Integration', () => {
     resetPrismaMock();
     setupBaseMocks();
     jest.clearAllMocks();
+
+    // ObjectsService still *injects* STORAGE_PROVIDER, but every upload path
+    // now obtains its provider from StorageProviderResolver instead — a
+    // consequence of multi-provider storage (per-object routing, see
+    // docs/specs/storage-providers.md). This spec used to mock the injected
+    // token with Object.assign, which those paths stopped consulting, so real
+    // S3StorageProvider instances were constructed and issued real AWS calls
+    // ("No value provided for input HTTP label: Bucket"). Stub the resolver
+    // instead, which is what the service actually calls (issue #220).
+    //
+    // Re-applied per test, after jest.clearAllMocks(), so the stubs can never
+    // be cleared out from under a later test in the file.
+    const resolver = context.module.get(StorageProviderResolver, { strict: false });
+    jest
+      .spyOn(resolver, 'getActiveProvider')
+      .mockResolvedValue({ id: 's3', provider: mockStorageProvider as any });
+    jest
+      .spyOn(resolver, 'getProviderFor')
+      .mockResolvedValue(mockStorageProvider as any);
   });
 
   describe('POST /api/storage/objects/upload/init', () => {
