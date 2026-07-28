@@ -501,6 +501,7 @@ export class MediaController {
    */
   @Post('bulk/tags')
   @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk add/remove tags on media items' })
   @ApiResponse({ status: 200, description: 'Tags updated' })
   async bulkTags(

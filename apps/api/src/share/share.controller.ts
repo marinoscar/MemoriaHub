@@ -121,6 +121,7 @@ export class ShareController {
    */
   @Post('bulk')
   @Auth({ permissions: [PERMISSIONS.SHARES_MANAGE] })
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk action on shares (revoke, set_expiration, delete)' })
   @ApiResponse({ status: 200, description: 'Bulk action result' })
   async bulk(
