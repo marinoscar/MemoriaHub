@@ -9,14 +9,25 @@ module.exports = {
   // The shared parity package resolves through a workspace symlink to a real
   // path OUTSIDE node_modules, so the default /node_modules/ ignore pattern
   // misses it. Its dist output is plain prebuilt CommonJS - never transform it.
-  // cookie@2 is exception to the node_modules rule: it ships ESM-only
-  // ("type": "module", bare `export` statements, no CJS entry point), so every
-  // suite that boots a real Nest/Fastify app - i.e. all of test/**/*.integration
-  // .spec.ts - died at module load with "Unexpected token 'export'" before
-  // reaching a single assertion. Transforming it makes those suites loadable.
-  // They still need a Postgres instance to actually pass, which is why they
-  // remain excluded from test:ci (see docs/ci-known-failing-tests.md).
-  transformIgnorePatterns: ['/node_modules/(?!cookie/)', '/packages/enrichment-compute/dist/'],
+  // cookie@2 and @fastify/cookie are exceptions to the node_modules rule.
+  //
+  // cookie@2 ships ESM-only ("type": "module", bare `export` statements, no CJS
+  // entry point), so every suite that boots a real Nest/Fastify app - i.e. all
+  // of test/**/*.integration.spec.ts - died at module load with "Unexpected
+  // token 'export'" before reaching a single assertion.
+  //
+  // @fastify/cookie@11.1.2 then followed cookie into ESM by switching to a
+  // dynamic `await import('cookie')` (its `dynamicLoadCookie`), which fails
+  // differently: "A dynamic import callback was invoked without
+  // --experimental-vm-modules". Transforming it too lets ts-jest downlevel that
+  // import to a require under this project's "module": "commonjs" target, so
+  // the suites load without needing an experimental Node flag. This is what
+  // allows apps/api to track @fastify/cookie normally instead of pinning it
+  // back to 11.1.1 (see #220/#224).
+  transformIgnorePatterns: [
+    '/node_modules/(?!(cookie|@fastify/cookie)/)',
+    '/packages/enrichment-compute/dist/',
+  ],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.module.ts',
