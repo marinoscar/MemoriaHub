@@ -72,7 +72,7 @@
     "nestjs-zod": "^5.4.0",
     "nodemailer": "^9.0.3",
     "onnxruntime-node": "^1.27.0",
-    "openai": "^6.42.0",
+    "openai": "^7.2.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",
