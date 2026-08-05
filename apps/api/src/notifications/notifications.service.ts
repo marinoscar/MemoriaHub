@@ -453,6 +453,111 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Resolve (dismiss) specific LIVE rows by id — the producer-side counterpart
+   * to upsertState(), used by the #246 review-queue reconcile when a queue has
+   * drained to zero and its row should stop nagging.
+   *
+   * Takes `{ id, userId }` pairs rather than a filter because the reconcile has
+   * already read exactly the rows it means to resolve (it needs them for its
+   * re-unread decision anyway), so a second, wider predicate would only add a
+   * way for the two to disagree. `userId` is carried purely to invalidate that
+   * user's badge cache.
+   *
+   * Raw SQL for the same reason dismiss()/dismissAll() use it: `read_at =
+   * COALESCE(read_at, now())` is a column-referencing expression Prisma's typed
+   * `updateMany` cannot express. `updated_at` is set explicitly — raw SQL
+   * bypasses Prisma-side `@updatedAt`, and #248's retention purge keys off it.
+   *
+   * Best-effort like emit()/upsertState(): a failure logs and returns 0.
+   */
+  async resolveStatesByIds(
+    rows: ReadonlyArray<{ id: string; userId: string }>,
+  ): Promise<number> {
+    if (rows.length === 0) return 0;
+
+    try {
+      const resolved = await this.prisma.$executeRaw(Prisma.sql`
+        UPDATE notifications
+        SET dismissed_at = now(),
+            read_at = COALESCE(read_at, now()),
+            updated_at = now()
+        WHERE id = ANY(${rows.map((r) => r.id)}::uuid[])
+          AND dismissed_at IS NULL
+      `);
+
+      for (const row of rows) this.invalidateUnreadCount(row.userId);
+      return resolved;
+    } catch (err) {
+      this.logger.warn(`resolveStatesByIds failed: ${this.errorMessage(err)}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Resolve (dismiss) every LIVE row of the given types, across all users and
+   * circles. Used by the #246 reconcile for a review queue whose feature flag
+   * has been turned OFF: the queue can no longer be produced, so leaving a live
+   * row pointing at a now-hidden surface would nag forever with no way for the
+   * reconcile to ever drain it.
+   *
+   * Per-user badge caches are NOT invalidated here — the affected user set is
+   * unbounded and unknown, and the cache TTL is 2 s, so it self-heals within
+   * one poll.
+   */
+  async resolveStatesByType(types: readonly NotificationType[]): Promise<number> {
+    if (types.length === 0) return 0;
+
+    try {
+      return await this.prisma.$executeRaw(Prisma.sql`
+        UPDATE notifications
+        SET dismissed_at = now(),
+            read_at = COALESCE(read_at, now()),
+            updated_at = now()
+        WHERE type::text = ANY(${types.map((t) => String(t))}::text[])
+          AND dismissed_at IS NULL
+      `);
+    } catch (err) {
+      this.logger.warn(`resolveStatesByType failed: ${this.errorMessage(err)}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Re-mark specific rows unread by clearing `read_at`.
+   *
+   * The ONLY caller is the #246 reconcile, and the ONLY case it applies is a
+   * queue that has grown past what the user last saw (`data.count` >
+   * `data.countAtRead`). The growth test itself lives in the reconcile, not
+   * here — this method just performs the write, exactly as upsertState()
+   * deliberately leaves `read_at` alone rather than guessing.
+   *
+   * `dismissed_at IS NULL` is re-asserted so a row dismissed between the
+   * reconcile's read and this write is never resurrected into the badge count.
+   */
+  async markStatesUnreadByIds(
+    rows: ReadonlyArray<{ id: string; userId: string }>,
+  ): Promise<number> {
+    if (rows.length === 0) return 0;
+
+    try {
+      const updated = await this.prisma.$executeRaw(Prisma.sql`
+        UPDATE notifications
+        SET read_at = NULL,
+            updated_at = now()
+        WHERE id = ANY(${rows.map((r) => r.id)}::uuid[])
+          AND dismissed_at IS NULL
+          AND read_at IS NOT NULL
+      `);
+
+      for (const row of rows) this.invalidateUnreadCount(row.userId);
+      return updated;
+    } catch (err) {
+      this.logger.warn(`markStatesUnreadByIds failed: ${this.errorMessage(err)}`);
+      return 0;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
