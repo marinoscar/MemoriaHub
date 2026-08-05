@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { screen, waitFor, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockUser, mockAdminUser } from '../../utils/test-utils';
 import { Sidebar } from '../../../components/navigation/Sidebar';
@@ -61,12 +61,32 @@ vi.mock('../../../services/media', async (importOriginal) => ({
   getDashboard: vi.fn(),
 }));
 
+// The Notifications entry's badge (issue #250) reads the SAME module-level
+// `useNotifications` store as the AppBar bell (issue #249). Mock only the
+// store's network seam — `useNotifications` itself is left REAL — so the
+// "one shared poller" tests below exercise the actual refcounting code, not a
+// stand-in for it.
+vi.mock('../../../services/notifications', () => ({
+  getUnreadCount: vi.fn(),
+  listNotifications: vi.fn(),
+  markNotificationRead: vi.fn(),
+  dismissNotification: vi.fn(),
+  markAllNotificationsRead: vi.fn(),
+  dismissAllNotifications: vi.fn(),
+  deleteNotification: vi.fn(),
+}));
+
 import { usePermissions } from '../../../hooks/usePermissions';
 import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
 import { getReviewCounts, getDashboard } from '../../../services/media';
+import { getUnreadCount, listNotifications } from '../../../services/notifications';
+import { __resetNotificationsStoreForTests } from '../../../hooks/useNotifications';
+import { NotificationBell } from '../../../components/notifications/NotificationBell';
 
 const mockGetReviewCounts = vi.mocked(getReviewCounts);
 const mockGetDashboard = vi.mocked(getDashboard);
+const mockGetUnreadCount = vi.mocked(getUnreadCount);
+const mockListNotifications = vi.mocked(listNotifications);
 
 /**
  * Configure the enhancer feature flag and the review-counts response.
@@ -152,6 +172,17 @@ describe('Sidebar', () => {
     vi.clearAllMocks();
     mockLocation.pathname = '/';
     mockEnhancer(null);
+    __resetNotificationsStoreForTests();
+    mockGetUnreadCount.mockResolvedValue(0);
+    mockListNotifications.mockResolvedValue({
+      items: [],
+      meta: { page: 1, pageSize: 10, totalItems: 0, totalPages: 0 },
+    });
+  });
+
+  afterEach(() => {
+    __resetNotificationsStoreForTests();
+    vi.useRealTimers();
   });
 
   describe('Rendering', () => {
@@ -1370,6 +1401,149 @@ describe('Sidebar', () => {
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith('/albums');
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Notifications entry (issue #250) — badge + shared-poller regression guard
+  // ---------------------------------------------------------------------------
+  describe('Notifications entry (issue #250)', () => {
+    const nonAdmin = () => ({
+      permissions: new Set<string>(),
+      roles: new Set<string>(),
+      hasPermission: vi.fn(),
+      hasAnyPermission: vi.fn(),
+      hasAllPermissions: vi.fn(),
+      hasRole: vi.fn(),
+      hasAnyRole: vi.fn(),
+      isAdmin: false,
+    });
+
+    it('renders the Notifications nav entry', () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('Notifications')).toBeInTheDocument();
+    });
+
+    it('navigates to /notifications when clicked', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const button = screen
+        .getByText('Notifications')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/notifications');
+      });
+    });
+
+    it('renders the unread count from the shared store as a badge', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockGetUnreadCount.mockResolvedValue(4);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        const button = screen
+          .getByText('Notifications')
+          .closest('.MuiListItemButton-root') as HTMLElement;
+        const badge = button.querySelector('.MuiBadge-badge');
+        expect(badge).not.toBeNull();
+        expect(badge!.textContent).toBe('4');
+      });
+    });
+
+    it('renders no badge when the unread count is zero', async () => {
+      vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+      mockGetUnreadCount.mockResolvedValue(0);
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        expect(mockGetUnreadCount).toHaveBeenCalled();
+      });
+      const button = screen
+        .getByText('Notifications')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      expect(button.querySelector('.MuiBadge-badge')).toBeNull();
+    });
+
+    // The regression this guards against: the sidebar entry starting its own
+    // independent poll timer instead of sharing the bell's single one — see
+    // `useNotifications.ts`'s "ONE poller, three surfaces" doc and the
+    // equivalent assertions in `useNotifications.test.ts` /
+    // `NotificationBell.test.tsx`, mirrored here across the two REAL surfaces
+    // together for the first time.
+    describe('shares the bell\'s single poller — no second poller sneaks in', () => {
+      it('mounting the sidebar AND the bell together issues only ONE unread-count request, not two', async () => {
+        vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+        mockGetUnreadCount.mockResolvedValue(2);
+
+        render(
+          <>
+            <Sidebar open={true} onClose={mockOnClose} />
+            <NotificationBell />
+          </>,
+        );
+
+        await waitFor(() => {
+          expect(mockGetUnreadCount).toHaveBeenCalledTimes(1);
+        });
+      });
+
+      it('the ONE shared poller ticks once per interval regardless of both surfaces being mounted', async () => {
+        vi.useFakeTimers();
+        vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+        mockGetUnreadCount.mockResolvedValue(2);
+
+        render(
+          <>
+            <Sidebar open={true} onClose={mockOnClose} />
+            <NotificationBell />
+          </>,
+        );
+
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(mockGetUnreadCount).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          vi.advanceTimersByTime(60_000);
+          await Promise.resolve();
+        });
+
+        // ONE additional tick from the ONE shared interval — not two (which a
+        // second independent poller in the sidebar would produce).
+        expect(mockGetUnreadCount).toHaveBeenCalledTimes(2);
+      });
+
+      it('polling continues (from the bell) after the sidebar unmounts — proving the sidebar is a subscriber, not the owner, of the poller', async () => {
+        vi.useFakeTimers();
+        vi.mocked(usePermissions).mockReturnValue(nonAdmin());
+        mockGetUnreadCount.mockResolvedValue(2);
+
+        const { unmount } = render(<Sidebar open={true} onClose={mockOnClose} />);
+        render(<NotificationBell />);
+
+        await act(async () => {
+          await Promise.resolve();
+        });
+
+        unmount(); // sidebar goes away; the bell is still mounted
+
+        await act(async () => {
+          vi.advanceTimersByTime(60_000);
+          await Promise.resolve();
+        });
+
+        expect(mockGetUnreadCount).toHaveBeenCalledTimes(2);
       });
     });
   });
