@@ -1,8 +1,10 @@
 # DataTable — Shared Column Contract & Renderers
 
 **Status:** foundation shipped (issue #252); mobile + tablet layouts shipped
-(issue #253); filtering + quick search shipped (issue #254) — all of epic #238
-**Location:** `apps/web/src/components/datatable/`
+(issue #253); filtering + quick search shipped (issue #254); layout persistence
+**API half** shipped (issue #255, §14 — web half pending) — all of epic #238
+**Location:** `apps/web/src/components/datatable/`,
+`apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
 **Spec owner:** frontend
 
 ---
@@ -37,6 +39,10 @@ consume them, so column authors can declare them today without churn later:
 | ---------------------------- | -------------------------------------- |
 | `hideable`                   | #255 — column visibility / saved views |
 | `exportable`                 | #256 — CSV/export + virtualization     |
+
+§14 documents the **persistence half of #255**, which is shipped: the API can
+store a per-user, per-table layout today. The UI that reads and writes it (the
+visibility menu, the density switch) is the remaining half.
 
 Everything else on this page is live behaviour today. `priority` is fully
 consumed: it drives column visibility on the grid *and* the card's
@@ -1214,3 +1220,143 @@ without a second pass, and should declare `filterable` / `filterType` /
 `searchable` for the fields its endpoint can actually filter and search on —
 replacing that page's bespoke filter controls (JobsPage's Status/Type/Processed
 selects, Public Sharing's status tabs) as part of the same migration.
+
+---
+
+## 14. Persistence — `user_settings.dataTables` (#255)
+
+A user's table layout (which columns are shown, how dense the rows are, how they
+are sorted, how many rows per page) is **persisted per user, per table**.
+
+### 14.1 Where it lives, and what it deliberately is not
+
+It is a small blob inside the **existing** `user_settings` JSONB row, under a new
+`dataTables` namespace. That is the whole storage design:
+
+- **no new endpoint** — it is read by `GET /api/user-settings` and written by
+  `PATCH` / `PUT /api/user-settings`, exactly like `theme` and `profile`;
+- **no new table** and **no migration** — the namespace is optional, and absent
+  is the correct state for every existing user, so there is nothing to backfill;
+- **no new RBAC permission** — the existing `user_settings:read` /
+  `user_settings:write` already scope it, and a layout preference is by
+  definition only ever about the calling user.
+
+A layout preference is not domain data. It has no cross-user query, no
+aggregation, no audit requirement and no lifecycle of its own — it is read once
+when a page mounts and written when the user flips a switch. A dedicated table
+would buy nothing and cost a migration, a service, and a second write path.
+
+### 14.2 Shape
+
+```ts
+dataTables?: {
+  [tableId: string]: {
+    visibleColumns?: string[];
+    density?: 'compact' | 'standard' | 'comfortable';
+    sort?: { field: string; direction: 'asc' | 'desc' };
+    pageSize?: number;
+  };
+}
+```
+
+`tableId` is the stable id of the table instance (`'jobs'`,
+`'admin-shares'`, …), chosen by the page and never derived from a route or a
+label. `visibleColumns` and `sort.field` hold **column ids** — the same `id`
+from `DataTableColumn` (§4), which is already the DataGrid field, the server
+sort key, and the visibility-model key.
+
+The canonical Zod definition is `dataTablesSchema` in
+`apps/api/src/common/schemas/settings.schema.ts`, imported by the PUT, PATCH and
+response DTOs rather than copied into each — the bounds in §14.4 are a security
+control and four hand-maintained copies of them would drift.
+
+### 14.3 The absent-key rule — and why it is load-bearing
+
+**Every key is optional, and the API never fills one in.** An absent
+`dataTables`, an absent entry, or an absent field inside an entry all mean the
+same thing: *fall back to the contract-derived default* — the
+`buildColumnVisibilityModel(columns, …)` baseline for `visibleColumns` (§3), the
+component defaults for the rest. Persisted state **layers on top of** that
+baseline; it never replaces it.
+
+This is the difference between a feature and a bug:
+
+> If `visibleColumns` defaulted to `[]` (or an entry defaulted to `{}` with a
+> materialized column list), then the first time a user so much as opened the
+> density menu on a table, that table's column set would be **frozen at the
+> columns that existed on that day**. Every column added later would be
+> silently hidden — from that user only, forever, with no error and nothing in
+> the UI to explain it. The bug would surface months later as "the new
+> `lastError` column doesn't show up for me".
+
+So the schema has **no `.default()` anywhere in this namespace**, and the
+service returns stored entries verbatim, absences included. `visibleColumns: []`
+sent explicitly by a client is still legal and still means "hide everything" —
+the rule is only that the *server* must never invent it. This is regression-
+tested directly (`update-user-settings.dto.spec.ts` →
+`"should NOT materialize visibleColumns as [] for an entry that omits it"`).
+
+The corollary for the web half: resolve a stored `visibleColumns` against the
+**current** column list at render time. A stored id for a column that no longer
+exists is ignored, not an error.
+
+### 14.4 Bounds
+
+The namespace is user-controlled, unvalidated-key JSON inside a row the user can
+write freely — i.e. exactly the shape of an accidental free storage service.
+Every axis is therefore capped:
+
+| Bound | Value | Rationale |
+| ----- | ----- | --------- |
+| Table ids per user (`DATA_TABLE_MAX_TABLES`) | **40** | Comfortably above the ~10 tables the app has, and above any plausible near-term growth. |
+| `tableId` pattern (`DATA_TABLE_ID_PATTERN`) | `/^[a-z0-9][a-z0-9_-]*$/` | Lowercase alphanumeric plus `-`/`_`, starting alphanumeric. Keeps keys id-shaped, not free text. |
+| `tableId` length (`DATA_TABLE_MAX_ID_LENGTH`) | **64** | Same cap applied to every column id and to `sort.field`. |
+| `visibleColumns` entries (`DATA_TABLE_MAX_VISIBLE_COLUMNS`) | **60** | The widest table in the app declares well under 20 columns. |
+| `pageSize` | integer **1–500** | Covers the `[10, 25, 50, 100]` default options (§5.1) with headroom, and stays inside the range the list endpoints themselves accept. |
+| Unknown keys inside an entry | **rejected** (`.strict()`) | An entry is a closed contract, not a scratch pad. A typo (`desnity`) fails loudly with a 400 instead of being silently persisted or silently dropped. |
+
+Worst case per user is therefore ~160 KB of JSON, and every dimension is a hard
+`400` rather than a truncation.
+
+### 14.5 PATCH semantics — merge granularity
+
+`PATCH /api/user-settings` merges `dataTables` **per table id, one level deep**
+(`UserSettingsService.mergeDataTables`):
+
+| Patch payload | Effect |
+| ------------- | ------ |
+| table id absent from the patch | stored entry untouched — **patching one table never clobbers another** |
+| `{ jobs: { pageSize: 100 } }` | the `jobs` entry is **replaced wholesale** (its previous `density`/`sort`/`visibleColumns` are gone) |
+| `{ jobs: {} }` | `jobs` resets to defaults — every sub-key becomes absent again |
+| `{ jobs: null }` | the `jobs` entry is **deleted** (JSON Merge Patch), freeing its slot against the 40-table cap |
+| `dataTables` omitted entirely | the whole stored namespace is untouched |
+
+Entry-level replace (rather than a deep per-field merge) is the deliberate
+choice, and it matches the whole-object semantics `search` already has. A deep
+merge would make "reset this table" inexpressible: with no way to *un*-set a
+field, a user who once pinned `visibleColumns` could never get back to the
+contract defaults, which is precisely the state §14.3 exists to protect. The
+cost — a client must send the entry it wants, not a delta — is trivial, since
+the client holds the full resolved layout in state anyway.
+
+Two further notes:
+
+- When the merge empties the namespace, it collapses back to **absent** rather
+  than storing `{}`. Absent is the canonical "nothing persisted" state.
+- The 40-table cap is re-checked **after** the merge, in the service, and raises
+  a `BadRequestException`. A single-entry patch is under the payload cap but can
+  still push a full namespace over the real one; enforcing it only in Zod would
+  surface that as a raw `ZodError` → 500.
+
+`PUT` is a full replacement as usual: omitting `dataTables` clears it.
+
+### 14.6 Tests
+
+- `apps/api/src/settings/dto/update-user-settings.dto.spec.ts` — schema: the
+  absent-key rule, every bound in §14.4, the `tableId` pattern, `null` accepted
+  on PATCH and rejected on PUT.
+- `apps/api/src/settings/user-settings/user-settings.service.spec.ts` — merge
+  semantics in §14.5, including the post-merge cap.
+- `apps/api/test/settings/user-settings.integration.spec.ts` — the same through
+  real HTTP: round-trip via PUT and PATCH, non-clobbering, and each rejection as
+  a `400`.
