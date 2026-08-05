@@ -542,6 +542,63 @@ describe('MediaGallery', () => {
   });
 
   // -------------------------------------------------------------------------
+  // (e) Favorite badge is static — guards against reintroducing the
+  // hover-revealed favorite toggle removed by issue #243 (invisible yet
+  // fully tappable on touch devices, silently starring photos).
+  // -------------------------------------------------------------------------
+  describe('favorite badge (issue #243 regression guard)', () => {
+    it('shows a static favorite badge and no favorite toggle button for a favorited item', () => {
+      const items = [
+        makeItem('fav-1', { favorite: true, originalFilename: 'starred-photo.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      // Exact-match the accessible name — the tile's own alt text
+      // ("starred-photo.jpg") must never accidentally satisfy this query.
+      expect(screen.getByRole('img', { name: /^favorite$/i })).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /add to favorites|remove from favorites/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows no favorite badge and no favorite toggle button for a non-favorited item', () => {
+      const items = [
+        makeItem('fav-2', { favorite: false, originalFilename: 'unstarred-photo.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.queryByRole('img', { name: /^favorite$/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /add to favorites|remove from favorites/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('clicking a non-favorited tile still opens the lightbox (click is not swallowed)', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeItem('fav-3', { favorite: false, originalFilename: 'clickable.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const tile = screen.getByAltText('clickable.jpg');
+      await user.click(tile);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('media-lightbox')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // (d) Feed mode — infinite scroll
   // -------------------------------------------------------------------------
   describe('feed mode', () => {

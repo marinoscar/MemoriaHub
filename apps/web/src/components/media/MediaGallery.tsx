@@ -1,6 +1,9 @@
 /**
  * MediaGallery — canonical day-grouped infinite grid with multi-select,
- * lightbox, properties drawer, favorite toggle, and bulk actions.
+ * lightbox, properties drawer, and bulk actions.
+ *
+ * Tiles carry a static favorite badge only; favoriting is done through
+ * selection + BulkActionToolbar (or the lightbox), never from the tile itself.
  *
  * Two data-source modes:
  *   FEED mode   (queryParams provided): calls useInfiniteMedia internally,
@@ -21,7 +24,6 @@ import {
   IconButton,
   Tooltip,
   ImageListItem,
-  ImageListItemBar,
   CircularProgress,
   Stack,
   Snackbar,
@@ -33,7 +35,6 @@ import {
   BrokenImage as BrokenImageIcon,
   PlayCircleOutlined as PlayCircleOutlinedIcon,
   Star as StarIcon,
-  StarBorder as StarBorderIcon,
   BurstMode as BurstModeIcon,
   ContentCopy as ContentCopyIcon,
 } from '@mui/icons-material';
@@ -60,7 +61,7 @@ import { BulkDateDialog } from './BulkDateDialog';
 import { BulkTagsDialog } from './BulkTagsDialog';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { TimelineScrubber } from './TimelineScrubber';
-import { patchMedia as patchMediaApi, removeAlbumItem } from '../../services/media';
+import { removeAlbumItem } from '../../services/media';
 import type { MediaItem, MediaQueryParams } from '../../types/media';
 import type { CircleRole } from '../../types/circles';
 
@@ -77,7 +78,6 @@ const APP_BAR_HEIGHT = 64;
 interface GalleryTileProps {
   item: MediaItem;
   onSelect: (item: MediaItem) => void;
-  onToggleFavorite: (item: MediaItem) => void;
   isSelected: boolean;
   anySelected: boolean;
   onToggleSelect: (id: string) => void;
@@ -95,7 +95,6 @@ interface GalleryTileProps {
 const GalleryTile = memo(function GalleryTile({
   item,
   onSelect,
-  onToggleFavorite,
   isSelected,
   anySelected,
   onToggleSelect,
@@ -104,6 +103,9 @@ const GalleryTile = memo(function GalleryTile({
 }: GalleryTileProps) {
   const theme = useTheme();
   const isMobileDevice = useMediaQuery(theme.breakpoints.down('sm'));
+  // Any pointer without hover (phones, tablets) never fires :hover, so
+  // hover-revealed controls must be shown outright there instead.
+  const isTouchDevice = useMediaQuery('(hover: none)');
   const [imgError, setImgError] = useState(false);
   const { getPreview } = useMediaPreview();
   const navigate = useNavigate();
@@ -116,6 +118,12 @@ const GalleryTile = memo(function GalleryTile({
       ? 'duplicate'
       : null;
   const showBadge = showOriginBadge && originType !== null;
+
+  // The selection checkbox is hover-revealed on pointers that have hover, and
+  // permanently visible everywhere else — a hover-only reveal would otherwise
+  // leave an invisible tap target on touch devices.
+  const checkboxAlwaysVisible =
+    isMobileDevice || isTouchDevice || selectionMode || anySelected || isSelected;
 
   // Instant local upload preview (object URL) shown while the server thumbnail
   // is still being generated. Only consulted when there is no server thumbnail
@@ -144,7 +152,6 @@ const GalleryTile = memo(function GalleryTile({
         opacity: isSelected ? 0.85 : 1,
         transition: 'outline 0.1s, opacity 0.1s',
         '&:hover .gallery-tile-overlay': { opacity: 1 },
-        '&:hover .gallery-tile-fav': { opacity: 1 },
       }}
     >
       {item.thumbnailUrl && !imgError ? (
@@ -246,9 +253,14 @@ const GalleryTile = memo(function GalleryTile({
           top: 4,
           left: 4,
           zIndex: 2,
-          opacity: isMobileDevice || selectionMode || anySelected || isSelected ? 1 : 0,
+          opacity: checkboxAlwaysVisible ? 1 : 0,
           transition: 'opacity 0.15s',
-          '.MuiImageListItem-root:hover &': { opacity: 1 },
+          // Reveal on hover only where hover genuinely exists (issue #243) —
+          // a bare :hover rule would leave this invisible yet tappable on any
+          // hover-less pointer; those get the always-visible branch above.
+          '@media (hover: hover)': {
+            '.MuiImageListItem-root:hover &': { opacity: 1 },
+          },
         }}
       >
         <MediaSelectionCheckbox
@@ -271,34 +283,28 @@ const GalleryTile = memo(function GalleryTile({
         }}
       />
 
-      {/* Favorite toggle */}
-      <ImageListItemBar
-        className="gallery-tile-fav"
-        sx={{
-          background: 'transparent',
-          opacity: item.favorite ? 1 : 0,
-          transition: 'opacity 0.2s',
-          '& .MuiImageListItemBar-titleWrap': { display: 'none' },
-          '.MuiImageListItem-root:hover &': { opacity: 1 },
-        }}
-        actionIcon={
-          <Tooltip title={item.favorite ? 'Remove from favorites' : 'Add to favorites'}>
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleFavorite(item);
-              }}
-              aria-label={item.favorite ? 'Remove from favorites' : 'Add to favorites'}
-              sx={{ color: item.favorite ? 'warning.main' : 'white', p: { xs: 1, sm: 0.5 } }}
-            >
-              {item.favorite ? <StarIcon /> : <StarBorderIcon />}
-            </IconButton>
-          </Tooltip>
-        }
-        position="top"
-        actionPosition="right"
-      />
+      {/* Favorite badge — static status indicator, NOT a control (issue #243).
+          A hover-revealed toggle here was invisible yet fully tappable on touch
+          devices, silently starring photos. Favoriting is done from selection +
+          BulkActionToolbar, or from the lightbox. */}
+      {item.favorite && (
+        <Box
+          role="img"
+          aria-label="Favorite"
+          sx={{
+            position: 'absolute',
+            top: 6,
+            right: 6,
+            zIndex: 2,
+            display: 'flex',
+            pointerEvents: 'none',
+            color: 'warning.main',
+            filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))',
+          }}
+        >
+          <StarIcon fontSize="small" />
+        </Box>
+      )}
 
       {/* Origin badge — Archive/Trash only; links to the resolved burst or
           duplicate review group this item's non-kept copy came from. */}
@@ -468,7 +474,7 @@ export function MediaGallery({
   const error: string | null = isFeedMode ? feedError : null;
 
   // -------------------------------------------------------------------------
-  // Optimistic patches for favorite toggles
+  // Optimistic patches (thumbnail reconcile, lightbox/drawer item updates)
   // -------------------------------------------------------------------------
 
   const [localPatches, setLocalPatches] = useState<Record<string, Partial<MediaItem>>>({});
@@ -544,25 +550,6 @@ export function MediaGallery({
     },
     [indexById],
   );
-
-  // -------------------------------------------------------------------------
-  // Favorite toggle (optimistic)
-  // -------------------------------------------------------------------------
-
-  const handleToggleFavorite = useCallback(async (item: MediaItem) => {
-    const next = !item.favorite;
-    setLocalPatches((prev) => ({ ...prev, [item.id]: { favorite: next } }));
-    try {
-      await patchMediaApi(item.id, { favorite: next });
-    } catch {
-      // Rollback
-      setLocalPatches((prev) => {
-        const copy = { ...prev };
-        delete copy[item.id];
-        return copy;
-      });
-    }
-  }, []);
 
   // -------------------------------------------------------------------------
   // Selection
@@ -882,7 +869,6 @@ export function MediaGallery({
                     key={item.id}
                     item={item}
                     onSelect={handleSelectTile}
-                    onToggleFavorite={handleToggleFavorite}
                     isSelected={selected.has(item.id)}
                     anySelected={selected.size > 0}
                     onToggleSelect={handleToggleSelect}
