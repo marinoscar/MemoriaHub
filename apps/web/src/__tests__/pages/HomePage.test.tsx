@@ -1,13 +1,20 @@
 /**
- * Component tests — HomePage (topbar-search refactor)
+ * Component tests — HomePage
  *
- * After the topbar-search refactor, HomePage is a minimal page that:
+ * HomePage is a minimal page that:
  *   - Shows a "Select or create a circle" alert when no circle is active
  *   - Renders <MediaGallery> in feed mode when a circle is active
  *
  * The Upload button moved to the AppBar (global); HomePage no longer owns
  * an Upload FAB or MediaUploadDialog.  Tests that previously asserted on
  * those elements have been removed.
+ *
+ * The three review-queue banners (pending bursts / duplicates / location
+ * suggestions) and their `useDashboard` mock were removed in issue #250, the
+ * Notification Center cutover: those counts are now delivered as notifications
+ * (bell + `/notifications`), and HomePage no longer calls `useDashboard` at
+ * all. The banner tests are gone rather than inverted — there is nothing left
+ * on this page for them to assert against.
  *
  * MediaGallery is mocked to isolate HomePage chrome tests from gallery
  * internals.
@@ -25,16 +32,22 @@ vi.mock('../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-// useDashboard drives the pending burst/duplicate review-queue banners.
-vi.mock('../../hooks/useDashboard', () => ({
-  useDashboard: vi.fn(),
-}));
-
 // Mock MediaGallery so its internal useInfiniteMedia / listMedia calls never fire.
 vi.mock('../../components/media/MediaGallery', () => ({
   MediaGallery: vi.fn(({ emptyState }: { emptyState?: React.ReactNode }) => (
     <div data-testid="media-gallery">{emptyState}</div>
   )),
+}));
+
+// REGRESSION GUARD (issue #250): `useDashboard` is mocked here even though
+// HomePage no longer imports it. The mock resolves with counts that WOULD
+// render all three review-queue banners if the removed JSX were ever
+// reintroduced — so this is a real trap, not just "the banners aren't here
+// today because nothing fetches them". If a future change re-adds the
+// `useDashboard()` call and the banner JSX, this mock feeds it non-zero
+// counts and the "banners removed" assertions below start failing.
+vi.mock('../../hooks/useDashboard', () => ({
+  useDashboard: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -105,10 +118,23 @@ function setupCircleLoading() {
 describe('HomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: no dashboard data, so no review-queue banners render unless a
-    // test explicitly overrides this.
+    // Non-zero on every count, and on every level (0/1/plural), so that a
+    // reintroduced banner would render regardless of which count triggered it
+    // or which singular/plural label branch it hit. See the module mock above.
     mockUseDashboard.mockReturnValue({
-      data: null,
+      data: {
+        onThisDay: [],
+        recent: [],
+        favorites: [],
+        counts: {
+          total: 10,
+          missingGeo: 0,
+          pendingBurstGroups: 2,
+          pendingDuplicateGroups: 4,
+          pendingLocationSuggestions: 7,
+          pendingEnhancements: 3,
+        },
+      },
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -202,255 +228,69 @@ describe('HomePage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // e) Pending duplicate groups banner (driven by counts.pendingDuplicateGroups)
+  // e) Review-queue banners removed (issue #250, epic #240) — REGRESSION GUARD
+  //
+  // The point of this block is not "the banners aren't on the page" (trivially
+  // true of any page that renders nothing extra) — it's that reintroducing the
+  // deleted `useDashboard()` call and banner JSX would be CAUGHT here. The
+  // `useDashboard` mock (see module mocks above) is wired to resolve with
+  // non-zero pendingBurstGroups/pendingDuplicateGroups/pendingLocationSuggestions
+  // on every render in this file, precisely so that IF the removed code came
+  // back, these assertions would start failing instead of staying vacuously
+  // green. All cases run with an ACTIVE circle — the banners' rendering
+  // condition (per the deleted code) never depended on `showNoCircle`.
   // -------------------------------------------------------------------------
-  describe('Pending duplicate groups banner', () => {
-    it('does not render the banner when pendingDuplicateGroups is 0', () => {
+  describe('Review-queue banners removed (issue #250)', () => {
+    it('does not call useDashboard at all', () => {
       setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.queryByText(/ready to review/i)).not.toBeInTheDocument();
+      expect(mockUseDashboard).not.toHaveBeenCalled();
     });
 
-    it('does not render the banner when pendingDuplicateGroups is absent', () => {
+    it('does not render the pending burst groups banner', () => {
       setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
+      expect(screen.queryByText(/burst group.*ready to review/i)).not.toBeInTheDocument();
+    });
+
+    it('does not render the pending duplicate groups banner', () => {
+      setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(screen.queryByText(/duplicate group.*ready to review/i)).not.toBeInTheDocument();
     });
 
-    it('renders the banner with a singular label when pendingDuplicateGroups is 1', () => {
+    it('does not render the pending location suggestions banner', () => {
       setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 1 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.getByText(/1 duplicate group ready to review/i)).toBeInTheDocument();
+      expect(
+        screen.queryByText(/location suggestion.*ready to review/i),
+      ).not.toBeInTheDocument();
     });
 
-    it('renders the banner with a plural label when pendingDuplicateGroups > 1', () => {
+    it('does not render the banners\' shared "Review" call-to-action button', () => {
       setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 5 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.getByText(/5 duplicate groups ready to review/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^review$/i })).not.toBeInTheDocument();
     });
 
-    it('renders a "Review" link pointing to /duplicates', () => {
+    it('renders only the gallery and the empty-state copy — no banner Alert beside it', () => {
       setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingDuplicateGroups: 3 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
+      const { container } = render(<HomePage />, {
+        wrapperOptions: { authenticated: true, user: mockUser },
       });
 
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      const reviewLink = screen.getByRole('link', { name: /review/i });
-      expect(reviewLink).toHaveAttribute('href', '/duplicates');
-    });
-
-    it('renders both the burst and duplicate banners together without collision', () => {
-      setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingBurstGroups: 2, pendingDuplicateGroups: 4 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/2 burst groups ready to review/i)).toBeInTheDocument();
-      expect(screen.getByText(/4 duplicate groups ready to review/i)).toBeInTheDocument();
+      // Exactly the gallery mock's own wrapper; the deleted banners each
+      // rendered their own MUI <Alert severity="info">, which would add
+      // `.MuiAlert-root` siblings here (the no-circle alert is not present
+      // because a circle is active in this scenario).
+      expect(container.querySelectorAll('.MuiAlert-root')).toHaveLength(0);
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
     });
   });
 
-  // -------------------------------------------------------------------------
-  // f) Pending location suggestions banner (driven by counts.pendingLocationSuggestions)
-  // -------------------------------------------------------------------------
-  describe('Pending location suggestions banner', () => {
-    it('does not render the banner when pendingLocationSuggestions is 0', () => {
-      setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.queryByText(/location suggestion.*ready to review/i)).not.toBeInTheDocument();
-    });
-
-    it('does not render the banner when pendingLocationSuggestions is absent', () => {
-      setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.queryByText(/location suggestion.*ready to review/i)).not.toBeInTheDocument();
-    });
-
-    it('renders the banner with a singular label when pendingLocationSuggestions is 1', () => {
-      setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 1 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/1 location suggestion ready to review/i)).toBeInTheDocument();
-    });
-
-    it('renders the banner with a plural label when pendingLocationSuggestions > 1', () => {
-      setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 6 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/6 location suggestions ready to review/i)).toBeInTheDocument();
-    });
-
-    it('renders a "Review" link pointing to /location-suggestions', () => {
-      setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: { total: 10, missingGeo: 0, pendingLocationSuggestions: 3 },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      const reviewLink = screen.getByRole('link', { name: /review/i });
-      expect(reviewLink).toHaveAttribute('href', '/location-suggestions');
-    });
-
-    it('renders the burst, duplicate, and location-suggestion banners together without collision', () => {
-      setupActiveCircle();
-      mockUseDashboard.mockReturnValue({
-        data: {
-          onThisDay: [],
-          recent: [],
-          favorites: [],
-          counts: {
-            total: 10,
-            missingGeo: 0,
-            pendingBurstGroups: 2,
-            pendingDuplicateGroups: 4,
-            pendingLocationSuggestions: 7,
-          },
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(screen.getByText(/2 burst groups ready to review/i)).toBeInTheDocument();
-      expect(screen.getByText(/4 duplicate groups ready to review/i)).toBeInTheDocument();
-      expect(screen.getByText(/7 location suggestions ready to review/i)).toBeInTheDocument();
-
-      const reviewLinks = screen.getAllByRole('link', { name: /review/i });
-      const hrefs = reviewLinks.map((link) => link.getAttribute('href'));
-      expect(hrefs).toEqual(expect.arrayContaining(['/bursts', '/duplicates', '/location-suggestions']));
-    });
-  });
 });

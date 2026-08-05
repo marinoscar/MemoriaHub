@@ -34,12 +34,14 @@ import {
   Public as PublicIcon,
   AccountTree as AccountTreeIcon,
   AutoFixHigh as AutoFixHighIcon,
+  NotificationsNone as NotificationsNoneIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useReviewCounts } from '../../hooks/useReviewCounts';
+import { useNotifications } from '../../hooks/useNotifications';
 
 interface SidebarProps {
   open: boolean;
@@ -79,6 +81,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     enabled: pictureEnhancement?.enabled === true,
   });
   const pendingEnhancements = reviewCounts?.pendingEnhancements ?? 0;
+  // The SAME module-level store the AppBar bell reads (issue #249). It is
+  // reference-counted: `acquire()` only starts the 60s timer when the FIRST
+  // enabled subscriber mounts, and `startTimer()` additionally no-ops while a
+  // timer already exists — so this second consumer adds a subscriber, never a
+  // second poller, and the sidebar badge can never drift from the bell's.
+  const { unreadCount } = useNotifications();
 
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
@@ -86,6 +94,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Map', icon: <MapIcon />, path: '/map' },
     { label: 'Circles', icon: <GroupWorkIcon />, path: '/circles' },
     { label: 'Albums', icon: <AlbumIcon />, path: '/albums' },
+    {
+      label: 'Notifications',
+      icon: <NotificationsNoneIcon />,
+      path: '/notifications',
+      badgeCount: unreadCount,
+    },
   ];
 
   const libraryItems: NavItemDef[] = [
