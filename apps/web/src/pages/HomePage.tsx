@@ -1,25 +1,30 @@
+/**
+ * Home — the gallery, and nothing else.
+ *
+ * The three review-queue banners (pending bursts / duplicates / location
+ * suggestions) were deleted here in issue #250, the Notification Center
+ * cutover. They were the app's only push surface for pending review work, and
+ * epic #240 replaced them with real notifications: the producer (#246) emits a
+ * `review_queue_*` row per circle, the AppBar bell (#249) shows the count, and
+ * `/notifications` (#250) is the inbox. Leaving the banners in place would have
+ * meant two independent surfaces racing to report the same numbers.
+ *
+ * `useDashboard()` went with them. Those three counts were its ONLY consumer on
+ * this page, so keeping the call would have left the app's busiest route paying
+ * for a dashboard payload (On This Day + recent + favorites, each with signed
+ * thumbnails) that nothing rendered. The endpoint and the hook both stay — they
+ * are simply not what Home needs.
+ */
+
 import { useMemo } from 'react';
-import {
-  Box,
-  Alert,
-  Link,
-  Typography,
-  Button,
-} from '@mui/material';
-import {
-  PhotoLibrary as PhotoLibraryIcon,
-  BurstMode as BurstModeIcon,
-  ContentCopy as ContentCopyIcon,
-  MyLocation as MyLocationIcon,
-} from '@mui/icons-material';
+import { Box, Alert, Link, Typography } from '@mui/material';
+import { PhotoLibrary as PhotoLibraryIcon } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../hooks/useCircle';
 import { MediaGallery } from '../components/media/MediaGallery';
-import { useDashboard } from '../hooks/useDashboard';
 
 export default function HomePage() {
   const { activeCircle, activeCircleId, activeCircleRole, loading: circleLoading } = useCircle();
-  const { data } = useDashboard();
 
   // Memoized query params — stable reference when circleId unchanged
   const mediaParams = useMemo(
@@ -61,56 +66,6 @@ export default function HomePage() {
             </Link>
           </Alert>
         </Box>
-      )}
-
-      {/* Pending burst groups banner */}
-      {data?.counts?.pendingBurstGroups != null && data.counts.pendingBurstGroups > 0 && (
-        <Alert
-          severity="info"
-          icon={<BurstModeIcon />}
-          action={
-            <Button size="small" component={RouterLink} to="/bursts">
-              Review
-            </Button>
-          }
-          sx={{ mx: { xs: 2, md: 3 }, mt: 2 }}
-        >
-          {data.counts.pendingBurstGroups} burst group{data.counts.pendingBurstGroups !== 1 ? 's' : ''} ready to review
-        </Alert>
-      )}
-
-      {/* Pending duplicate groups banner */}
-      {data?.counts?.pendingDuplicateGroups != null && data.counts.pendingDuplicateGroups > 0 && (
-        <Alert
-          severity="info"
-          icon={<ContentCopyIcon />}
-          action={
-            <Button size="small" component={RouterLink} to="/duplicates">
-              Review
-            </Button>
-          }
-          sx={{ mx: { xs: 2, md: 3 }, mt: 2 }}
-        >
-          {data.counts.pendingDuplicateGroups} duplicate group
-          {data.counts.pendingDuplicateGroups !== 1 ? 's' : ''} ready to review
-        </Alert>
-      )}
-
-      {/* Pending location suggestions banner */}
-      {data?.counts?.pendingLocationSuggestions != null && data.counts.pendingLocationSuggestions > 0 && (
-        <Alert
-          severity="info"
-          icon={<MyLocationIcon />}
-          action={
-            <Button size="small" component={RouterLink} to="/location-suggestions">
-              Review
-            </Button>
-          }
-          sx={{ mx: { xs: 2, md: 3 }, mt: 2 }}
-        >
-          {data.counts.pendingLocationSuggestions} location suggestion
-          {data.counts.pendingLocationSuggestions !== 1 ? 's' : ''} ready to review
-        </Alert>
       )}
 
       {/* Gallery — only rendered when a circle is active */}

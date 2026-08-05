@@ -120,6 +120,9 @@ const BASE_ENTRIES = [
   'Map',
   'Circles',
   'Albums',
+  // Notification Center entry (issue #250). Its badge reads the SAME
+  // `useNotifications` module store as the AppBar bell — one poller, not two.
+  'Notifications',
   'People',
   'Archive',
   'Trash',
