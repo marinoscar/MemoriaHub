@@ -740,4 +740,317 @@ describe('NotificationsService', () => {
       expect(data).not.toHaveProperty('readAt');
     });
   });
+
+  // =========================================================================
+  // upsertCountedEvent() — the #247 COUNTED EVENT producer primitive
+  //
+  // NOTE ON WHAT THIS PROVES vs. DOESN'T: $queryRaw/$executeRaw are mocked, so
+  // these tests inspect the SHAPE of the SQL this method builds (which columns
+  // it filters/compares on, which parameters it binds) — they prove the method
+  // asks Postgres the right question. They do NOT execute real SQL, so they
+  // cannot prove Postgres answers correctly (e.g. that `pg_advisory_xact_lock`
+  // actually serializes two concurrent transactions, or that `updated_at >
+  // now() - interval` evaluates as expected at a real boundary). That requires
+  // a live database — see the DB_GATED integration suite this task's ground
+  // rules point at (test/notifications/notification-dedup.integration.spec.ts)
+  // for the pattern used elsewhere in this module when that distinction
+  // matters enough to justify a second, DB-gated suite.
+  // =========================================================================
+
+  describe('upsertCountedEvent()', () => {
+    const baseInput = {
+      userId: USER_ID,
+      circleId: CIRCLE_ID,
+      type: 'upload_completed' as const,
+      buildTitle: (count: number) => `${count} uploaded`,
+    };
+
+    beforeEach(() => {
+      wireTransactionPassthrough(mockPrisma);
+    });
+
+    function lastQueryRawSql(): Prisma.Sql {
+      return (mockPrisma.$queryRaw as jest.Mock).mock.calls.at(-1)![0] as Prisma.Sql;
+    }
+
+    function lastAdvisoryLockSql(): Prisma.Sql {
+      // The advisory lock is always the FIRST $executeRaw call of the
+      // transaction; a subsequent increment-path UPDATE is a later call.
+      return (mockPrisma.$executeRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+    }
+
+    // -----------------------------------------------------------------------
+    // Advisory lock — serializes the find-or-create per aggregation key
+    // -----------------------------------------------------------------------
+
+    describe('advisory lock', () => {
+      it('takes pg_advisory_xact_lock(hashtext(key)) as the FIRST statement of the transaction', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent(baseInput);
+
+        const lockSql = lastAdvisoryLockSql();
+        expect(lockSql.text).toContain('pg_advisory_xact_lock(hashtext(');
+        expect(lockSql.values).toEqual([`${USER_ID}|upload_completed|${CIRCLE_ID}|-`]);
+      });
+
+      it('the lock key incorporates matchData (JSON-stringified) so different job types never share a lock', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({
+          ...baseInput,
+          circleId: null,
+          matchData: { jobType: 'auto_tagging' },
+        });
+
+        const lockSql = lastAdvisoryLockSql();
+        expect(lockSql.values).toEqual([
+          `${USER_ID}|upload_completed|-|${JSON.stringify({ jobType: 'auto_tagging' })}`,
+        ]);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Window arithmetic — anchor field, comparison operator, unit conversion
+    // -----------------------------------------------------------------------
+
+    describe('rolling window clause', () => {
+      it('when windowMs is set, the lookup filters on updated_at (NOT created_at) with a strict ">" against now() minus the interval', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({ ...baseInput, windowMs: 15 * 60 * 1000 });
+
+        const sql = lastQueryRawSql();
+        expect(sql.text).toContain('updated_at >');
+        expect(sql.text).not.toContain('created_at >');
+        expect(sql.text).toContain('make_interval(secs =>');
+      });
+
+      it('converts windowMs to seconds (divides by 1000) for make_interval', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({ ...baseInput, windowMs: 15 * 60 * 1000 });
+
+        const sql = lastQueryRawSql();
+        expect(sql.values).toContain(900); // 15*60*1000 / 1000 = 900 seconds
+      });
+
+      it('omits the window clause entirely when windowMs is null (accumulate until dismissed)', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({ ...baseInput, windowMs: null });
+
+        const sql = lastQueryRawSql();
+        expect(sql.text).not.toContain('updated_at >');
+        expect(sql.text).not.toContain('make_interval');
+      });
+
+      it('omits the window clause when windowMs is undefined (same as null)', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        const { windowMs, ...withoutWindow } = { ...baseInput, windowMs: undefined as unknown };
+        await service.upsertCountedEvent(withoutWindow as typeof baseInput);
+
+        const sql = lastQueryRawSql();
+        expect(sql.text).not.toContain('updated_at >');
+      });
+
+      it('omits the window clause when windowMs is 0 (falsy, treated as "no window" per the > 0 guard)', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({ ...baseInput, windowMs: 0 });
+
+        const sql = lastQueryRawSql();
+        expect(sql.text).not.toContain('updated_at >');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // matchData JSONB containment partition
+    // -----------------------------------------------------------------------
+
+    describe('matchData partition', () => {
+      it('adds a jsonb containment predicate when matchData is supplied', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({
+          ...baseInput,
+          matchData: { jobType: 'geocode' },
+        });
+
+        const sql = lastQueryRawSql();
+        expect(sql.text).toContain('data @>');
+        expect(sql.values).toContain(JSON.stringify({ jobType: 'geocode' }));
+      });
+
+      it('omits the containment predicate entirely when matchData is not supplied', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent(baseInput);
+
+        const sql = lastQueryRawSql();
+        expect(sql.text).not.toContain('data @>');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Global (circleId: null) rows — NULL-safe comparison
+    // -----------------------------------------------------------------------
+
+    describe('circleId null-safety', () => {
+      it('uses IS NOT DISTINCT FROM (not plain "=") so a global row (circle_id IS NULL) can be found again', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({ ...baseInput, circleId: null });
+
+        const sql = lastQueryRawSql();
+        expect(sql.text).toContain('IS NOT DISTINCT FROM');
+        expect(sql.text).not.toMatch(/circle_id\s*=\s*\$/);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Create vs. increment branch, count arithmetic, title rebuild
+    // -----------------------------------------------------------------------
+
+    describe('create-vs-increment branching', () => {
+      it('creates a new row with count = increment (default 1) when no live row is found', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent(baseInput);
+
+        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            userId: USER_ID,
+            circleId: CIRCLE_ID,
+            type: 'upload_completed',
+            title: '1 uploaded',
+            data: { count: 1 },
+          }),
+        });
+        expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(1); // lock only, no UPDATE
+      });
+
+      it('increments an existing live row via raw UPDATE (no create) and rebuilds the title from the NEW total', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'row-existing', count: 5 }]);
+
+        await service.upsertCountedEvent({ ...baseInput, increment: 3 });
+
+        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+        // Two $executeRaw calls: the advisory lock, then the increment UPDATE.
+        expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(2);
+        const updateSql = (mockPrisma.$executeRaw as jest.Mock).mock.calls[1][0] as Prisma.Sql;
+        expect(updateSql.text).toContain('SET title =');
+        expect(updateSql.values).toContain('8 uploaded'); // 5 + 3
+        expect(updateSql.values).toContain('row-existing');
+      });
+
+      it('a custom increment other than 1 is honored on the CREATE path too', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({ ...baseInput, increment: 5 });
+
+        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ data: { count: 5 } }),
+        });
+      });
+
+      it('merges extra `data` payload fields alongside `count`', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent({
+          ...baseInput,
+          data: { jobType: 'geocode', lastError: null },
+        });
+
+        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            data: { jobType: 'geocode', lastError: null, count: 1 },
+          }),
+        });
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // reunreadOnIncrement
+    // -----------------------------------------------------------------------
+
+    describe('reunreadOnIncrement', () => {
+      it('clears read_at on the increment UPDATE when reunreadOnIncrement is true', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'row-existing', count: 1 }]);
+
+        await service.upsertCountedEvent({ ...baseInput, reunreadOnIncrement: true });
+
+        const updateSql = (mockPrisma.$executeRaw as jest.Mock).mock.calls[1][0] as Prisma.Sql;
+        expect(updateSql.text).toContain('read_at = NULL');
+      });
+
+      it('does NOT clear read_at when reunreadOnIncrement is false/omitted', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'row-existing', count: 1 }]);
+
+        await service.upsertCountedEvent(baseInput);
+
+        const updateSql = (mockPrisma.$executeRaw as jest.Mock).mock.calls[1][0] as Prisma.Sql;
+        expect(updateSql.text).not.toContain('read_at = NULL');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Best-effort — never throws
+    // -----------------------------------------------------------------------
+
+    describe('best-effort contract', () => {
+      it('never throws when the transaction rejects outright', async () => {
+        const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+        (mockPrisma.$transaction as jest.Mock).mockRejectedValue(new Error('db down'));
+
+        await expect(service.upsertCountedEvent(baseInput)).resolves.toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('upload_completed'));
+      });
+
+      it('never throws when $queryRaw rejects inside the transaction', async () => {
+        const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+        (mockPrisma.$queryRaw as jest.Mock).mockRejectedValue(new Error('query failed'));
+
+        await expect(service.upsertCountedEvent(baseInput)).resolves.toBeUndefined();
+        expect(warnSpy).toHaveBeenCalled();
+      });
+
+      it('never throws when notification.create rejects', async () => {
+        const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockRejectedValue(new Error('constraint'));
+
+        await expect(service.upsertCountedEvent(baseInput)).resolves.toBeUndefined();
+        expect(warnSpy).toHaveBeenCalled();
+      });
+
+      it('invalidates the caller unread-count cache on success', async () => {
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.notification.count as jest.Mock)
+          .mockResolvedValueOnce(1)
+          .mockResolvedValueOnce(2);
+
+        await service.getUnreadCount(USER_ID); // primes cache
+        await service.upsertCountedEvent(baseInput);
+        const after = await service.getUnreadCount(USER_ID);
+
+        expect(after).toEqual({ count: 2 });
+      });
+    });
+  });
 });

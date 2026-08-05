@@ -212,6 +212,7 @@ describe('MediaService', () => {
     enqueueFaceRerun: jest.Mock;
     enqueueThumbnailRerun: jest.Mock;
   };
+  let mockUploadNotificationService: { recordUploadAsync: jest.Mock; recordUpload: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -254,6 +255,16 @@ describe('MediaService', () => {
       enqueueFaceRerun: jest.fn().mockResolvedValue(undefined),
       enqueueThumbnailRerun: jest.fn().mockResolvedValue(undefined),
     };
+    // #247 upload_completed producer — fire-and-forget. Captured in a variable
+    // (rather than an inline useValue object) so tests can assert whether it
+    // was called: the acceptance contract is "dedup emits nothing / a fresh
+    // create notifies", and that decision is made here in MediaService, not
+    // inside UploadNotificationService itself (see its own spec for the
+    // producer-internal behavior).
+    mockUploadNotificationService = {
+      recordUploadAsync: jest.fn(),
+      recordUpload: jest.fn(),
+    };
     // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched) always
     // issues one storageObject.findMany call. The deep prisma mock returns
     // undefined for unconfigured methods, which would throw inside a `for...of`
@@ -279,9 +290,8 @@ describe('MediaService', () => {
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
         { provide: StorageProviderResolver, useValue: mockResolver },
         {
-          // #247 upload_completed producer — fire-and-forget, not asserted here.
           provide: UploadNotificationService,
-          useValue: { recordUploadAsync: jest.fn(), recordUpload: jest.fn() },
+          useValue: mockUploadNotificationService,
         },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
       ],
@@ -326,6 +336,12 @@ describe('MediaService', () => {
       expect(result.mediaItemId).toBe(createdItem.id);
       expect(mockPrisma.storageObject.findUnique).toHaveBeenCalledWith({
         where: { id: dto.storageObjectId },
+      });
+      // #247 acceptance: a fresh (non-deduplicated) registration DOES notify,
+      // with the circle and the uploader who registered it.
+      expect(mockUploadNotificationService.recordUploadAsync).toHaveBeenCalledWith({
+        circleId: CIRCLE_ID,
+        uploaderId: 'user-1',
       });
       expect(mockPrisma.mediaItem.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -516,6 +532,9 @@ describe('MediaService', () => {
       expect(mockPrisma.storageObject.delete).toHaveBeenCalledWith({
         where: { id: storageObject.id },
       });
+      // #247 acceptance: a `deduplicated: true` registration emits NOTHING —
+      // nothing new landed in the circle, so there is nothing to notify about.
+      expect(mockUploadNotificationService.recordUploadAsync).not.toHaveBeenCalled();
     });
 
     it('returns the existing item (deduplicated: true) when P2002 fires on concurrent create', async () => {
@@ -551,6 +570,8 @@ describe('MediaService', () => {
       expect(result.mediaItemId).toBe(winnerItem.id);
       // Redundant blob should be cleaned up
       expect(mockStorageProvider.delete).toHaveBeenCalledWith(storageObject.storageKey);
+      // #247 acceptance: dedup via the P2002 race also emits nothing.
+      expect(mockUploadNotificationService.recordUploadAsync).not.toHaveBeenCalled();
     });
 
     it('rethrows P2002 when post-race re-query finds nothing (winner was hard-deleted)', async () => {
@@ -605,6 +626,8 @@ describe('MediaService', () => {
       // Despite both cleanup failures, the dedup result is still returned
       expect(result.deduplicated).toBe(true);
       expect(result.id).toBe(existingItem.id);
+      // #247 acceptance: still nothing to notify about on this dedup path.
+      expect(mockUploadNotificationService.recordUploadAsync).not.toHaveBeenCalled();
     });
   });
 
