@@ -27,9 +27,16 @@
  * real network.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { act, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../../components/datatable/__tests__/testUtils/layoutStubs';
+import { api } from '../../../services/api';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks
@@ -147,11 +154,21 @@ function makeItemsHook(overrides: Partial<ItemsHookReturn> = {}): ItemsHookRetur
   } as ItemsHookReturn;
 }
 
+beforeAll(() => {
+  // The failed-items table is a DataTable (#261); jsdom performs no layout, so
+  // both the container-width hook and MUI X measure 0×0 without these.
+  installLayoutStubs();
+});
+
 describe('ReviewRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400); // desktop layout unless a test says otherwise
     mockUseCircle.mockReturnValue(makeCircleContext());
     mockUseReviewRunItems.mockReturnValue(makeItemsHook());
+    // The table's layout-persistence hook reads/writes `/user-settings` (§15).
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   afterEach(() => {
@@ -482,7 +499,7 @@ describe('ReviewRunPage', () => {
       expect(screen.getByText('Geocode failed')).toBeInTheDocument();
     });
 
-    it('links a failed burst item back to its own group page', () => {
+    it('links a failed burst item back to its own group page', async () => {
       mockUseReviewRun.mockReturnValue(
         makeRunHook({
           run: makeRun({
@@ -516,8 +533,9 @@ describe('ReviewRunPage', () => {
       render(<ReviewRunPage />);
 
       // With no media row, the subject id is the label (truncated).
-      expect(screen.getByText('bg-42')).toBeInTheDocument();
-      screen.getByRole('button', { name: 'View' }).click();
+      expect(await screen.findByText('bg-42')).toBeInTheDocument();
+      // One row action, so it is a bare icon button named after its row (§17.6).
+      await userEvent.setup().click(screen.getByRole('button', { name: 'View for bg-42' }));
       expect(mockNavigate).toHaveBeenCalledWith('/bursts/bg-42');
     });
 
@@ -638,6 +656,115 @@ describe('ReviewRunPage', () => {
         vi.advanceTimersByTime(10000);
       });
       expect(fetchRun).toHaveBeenCalledTimes(callsAfterMount);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Live updates must not disturb the user (issue #261)
+  // -------------------------------------------------------------------------
+  //
+  // Every run page polls its detail endpoint, so `run` — and, on a refetch,
+  // `items` — are BRAND NEW OBJECTS on every tick. The failure mode this guards
+  // is the one docs/specs/datatable.md §18.4 names: gating the table on
+  // `loading` (`{!loading && <TableContainer>…}`, which is exactly what these
+  // three pages did before #261) remounts the renderer on every tick and takes
+  // card/row expansion state and the page's scroll offset with it.
+  describe('live updates do not disturb the failed-items table', () => {
+    function terminalRunWithFailures() {
+      return makeRun({
+        subjectType: 'burst_group',
+        action: 'resolve_archive',
+        status: 'completed_with_errors',
+        matchedCount: 10,
+        processedCount: 10,
+        succeededCount: 8,
+        failedCount: 2,
+      });
+    }
+
+    /** Fresh objects with the SAME ids — what one poll tick actually produces. */
+    function failedItems() {
+      return [
+        {
+          id: 'ri-1',
+          subjectType: 'burst_group' as const,
+          subjectId: 'bg-11111',
+          status: 'failed' as const,
+          error: 'Resolve failed',
+          updatedAt: new Date().toISOString(),
+          media: {
+            type: 'photo',
+            capturedAt: null,
+            filename: 'broken-one.jpg',
+            width: 10,
+            height: 10,
+          },
+          thumbnailUrl: null,
+        },
+        {
+          id: 'ri-2',
+          subjectType: 'burst_group' as const,
+          subjectId: 'bg-22222',
+          status: 'failed' as const,
+          error: 'Resolve failed',
+          updatedAt: new Date().toISOString(),
+          media: {
+            type: 'photo',
+            capturedAt: null,
+            filename: 'broken-two.jpg',
+            width: 10,
+            height: 10,
+          },
+          thumbnailUrl: null,
+        },
+      ];
+    }
+
+    it('preserves an expanded card and the table itself across a poll tick', async () => {
+      const user = userEvent.setup();
+      // A phone-width CONTAINER, so the card layout (and therefore its
+      // "More details" region) is what is on screen.
+      setInitialContainerWidth(400);
+      mockUseReviewRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseReviewRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+
+      const { rerender } = render(<ReviewRunPage />);
+
+      const table = await screen.findByTestId('datatable');
+      await user.click(
+        await screen.findByRole('button', { name: 'More details for broken-one.jpg' }),
+      );
+      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+
+      // One poll tick: a new run object and new item objects, same ids.
+      mockUseReviewRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseReviewRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+      rerender(<ReviewRunPage />);
+
+      // The renderer was never unmounted…
+      expect(screen.getByTestId('datatable')).toBe(table);
+      // …so the expansion the user opened is still open…
+      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Hide details for broken-one.jpg' }),
+      ).toBeInTheDocument();
+      // …and both rows are still on screen.
+      expect(screen.getByText('broken-one.jpg')).toBeInTheDocument();
+      expect(screen.getByText('broken-two.jpg')).toBeInTheDocument();
+    });
+
+    it('keeps the rows rendered while a refetch is in flight', async () => {
+      mockUseReviewRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseReviewRunItems.mockReturnValue(
+        makeItemsHook({ items: failedItems(), isLoading: true }),
+      );
+
+      render(<ReviewRunPage />);
+
+      // `loading` is a PROP — an overlay over live rows, never a replacement
+      // for the table.
+      expect(await screen.findByText('broken-one.jpg')).toBeInTheDocument();
+      expect(screen.getByTestId('datatable-loading-overlay')).toBeInTheDocument();
     });
   });
 });

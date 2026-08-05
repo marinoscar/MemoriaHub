@@ -1,26 +1,48 @@
 /**
- * RTL tests for WorkflowRunsDrawer (issue #143 — Workflows Phase 5 admin UI).
+ * RTL tests for WorkflowRunsDrawer — post-#261 (the shared-DataTable migration,
+ * epic #238).
  *
- * Purely presentational and props-driven — the parent owns fetching runs for
- * the selected workflow and the cancel-confirm flow — so these tests
- * exercise it directly with no mocked hooks or network layer.
+ * ## This file carries the epic's container-query acceptance case
  *
- * Covers:
- *   - Closed state renders nothing meaningful; open state shows the heading
- *     and workflow name.
- *   - Loading / error / empty states.
- *   - Row rendering: status chip, matched/succeeded/failed counts.
- *   - Admin-cancel action: the Cancel button is offered only for non-terminal
- *     runs, calls onCancel with the run, is disabled while canCancel is
- *     false or while that specific run is mid-cancel (cancellingRunId).
- *   - Close button calls onClose.
+ * `docs/specs/datatable.md` §7.2 states the rule this drawer exists to prove:
+ * the renderer switch measures the table's OWN CONTAINER, never the viewport.
+ * The drawer is ~570px of content on a 1440px desktop, so the correct rendering
+ * is the CARD layout — a viewport media query would hand it the full desktop
+ * grid and reintroduce horizontal scrolling on a desktop, which is the exact
+ * defect epic #238 exists to remove.
+ *
+ * `installLayoutStubs()` pins `window.matchMedia` to a FIXED 1440px viewport,
+ * so every viewport media query in the tree answers "desktop". A `mobile`
+ * result therefore CANNOT have come from an accidental viewport match — it can
+ * only have come from the container measurement. That is what makes the
+ * assertion below meaningful rather than incidental.
+ *
+ * Scope note (§17.8 / §18.5): table mechanics live in
+ * `runDataTableConformanceSuite` and are not re-tested here.
  */
-import { describe, it, expect, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  VIEWPORT_WIDTH,
+} from '../../../../components/datatable/__tests__/testUtils/layoutStubs';
 import { WorkflowRunsDrawer } from '../../../../components/workflows/admin/WorkflowRunsDrawer';
+import {
+  buildWorkflowRunColumns,
+  shortRunId,
+} from '../../../../components/workflows/admin/workflowRunsColumns';
 import type { AdminWorkflowRun } from '../../../../services/adminWorkflows';
+import { api } from '../../../../services/api';
+
+/**
+ * The drawer's real content width on a desktop: a 620px paper minus `p: 3`
+ * (24px) on each side. Comfortably under the component's 600px container
+ * threshold, which is why this table draws cards.
+ */
+const DRAWER_CONTENT_WIDTH = 620 - 48;
 
 function makeRun(overrides: Partial<AdminWorkflowRun> = {}): AdminWorkflowRun {
   return {
@@ -60,7 +82,88 @@ const baseProps = {
   onClose: vi.fn(),
 };
 
+beforeAll(() => {
+  installLayoutStubs();
+});
+
 describe('WorkflowRunsDrawer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Every test in this file renders at the drawer's REAL content width.
+    resetContainerWidth(DRAWER_CONTENT_WIDTH);
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
+  });
+
+  // =========================================================================
+  // Container-driven layout — issue #261's named acceptance case
+  // =========================================================================
+
+  describe('narrow container on a wide viewport (issue #261)', () => {
+    it('renders CARDS in the drawer even though the viewport is a 1440px desktop', async () => {
+      render(<WorkflowRunsDrawer {...baseProps} runs={[makeRun()]} />);
+
+      // The viewport really is a desktop — this is what makes the assertion
+      // below about the CONTAINER rather than about the window.
+      expect(VIEWPORT_WIDTH).toBe(1440);
+      expect(window.matchMedia('(min-width:1200px)').matches).toBe(true);
+
+      const table = await screen.findByTestId('datatable');
+      expect(table).toHaveAttribute('data-layout', 'mobile');
+      expect(table).toHaveAttribute('data-renderer', 'mobile');
+
+      // …and the card list, not a grid, is what was actually drawn.
+      expect(screen.getByRole('list', { name: /workflow run history/i })).toBeInTheDocument();
+      expect(screen.queryByRole('grid')).not.toBeInTheDocument();
+    });
+
+    it('never lets the drawer scroll sideways: the table is width-contained', async () => {
+      render(<WorkflowRunsDrawer {...baseProps} runs={[makeRun()]} />);
+
+      const table = await screen.findByTestId('datatable');
+      const styles = window.getComputedStyle(table);
+      expect(styles.maxWidth).toBe('100%');
+      expect(styles.minWidth).toBe('0px');
+    });
+
+    it('switches to the GRID when the same table is given a desktop-width container', async () => {
+      // The mirror image of the first case: nothing about this component pins a
+      // layout — only the measured width decides.
+      resetContainerWidth(1400);
+      render(<WorkflowRunsDrawer {...baseProps} runs={[makeRun()]} />);
+
+      const table = await screen.findByTestId('datatable');
+      expect(table).toHaveAttribute('data-layout', 'desktop');
+      expect(screen.getByRole('grid', { name: /workflow run history/i })).toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
+  // Column definitions (pure)
+  // =========================================================================
+
+  describe('column definitions', () => {
+    const columns = buildWorkflowRunColumns();
+
+    it('leads with the row-unique run id so per-row controls are nameable', () => {
+      const firstPrimary = columns.find((column) => column.priority === 'primary')!;
+      expect(firstPrimary.id).toBe('id');
+      expect(firstPrimary.value!(makeRun({ id: 'abcdefgh-1234' }))).toBe('abcdefgh');
+    });
+
+    it('makes status a PRIMARY column so it lands in the card headline', () => {
+      expect(columns.find((column) => column.id === 'status')!.priority).toBe('primary');
+    });
+
+    it('declares no sortable column — the endpoint accepts no sortBy', () => {
+      expect(columns.some((column) => column.sortable)).toBe(false);
+    });
+  });
+
+  // =========================================================================
+  // Header / states
+  // =========================================================================
+
   describe('open/closed and header', () => {
     it('shows the "Run history" heading and workflow name when open', () => {
       render(<WorkflowRunsDrawer {...baseProps} runs={[]} />);
@@ -87,10 +190,18 @@ describe('WorkflowRunsDrawer', () => {
   });
 
   describe('loading / error / empty states', () => {
-    it('shows a loading spinner when loading with no runs yet', () => {
+    it('shows a loading overlay when loading with no runs yet', async () => {
       render(<WorkflowRunsDrawer {...baseProps} runs={[]} loading />);
 
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      expect(await screen.findByTestId('datatable-loading-overlay')).toBeInTheDocument();
+    });
+
+    it('keeps the runs on screen during a background refresh', async () => {
+      // The #261 loading contract: `loading` is a prop, never a gate.
+      render(<WorkflowRunsDrawer {...baseProps} runs={[makeRun({ id: 'run-keepme' })]} loading />);
+
+      expect(await screen.findByText(shortRunId('run-keepme'))).toBeInTheDocument();
+      expect(screen.getByTestId('datatable-loading-overlay')).toBeInTheDocument();
     });
 
     it('shows the error message in an Alert', () => {
@@ -99,58 +210,92 @@ describe('WorkflowRunsDrawer', () => {
       expect(screen.getByText('Failed to load runs')).toBeInTheDocument();
     });
 
-    it('shows "No runs for this workflow yet." when runs is empty and not loading', () => {
+    it('shows "No runs for this workflow yet." when runs is empty and not loading', async () => {
       render(<WorkflowRunsDrawer {...baseProps} runs={[]} />);
 
-      expect(screen.getByText(/no runs for this workflow yet/i)).toBeInTheDocument();
+      expect(await screen.findByText(/no runs for this workflow yet/i)).toBeInTheDocument();
     });
   });
 
   describe('row rendering', () => {
-    it('renders the status chip and matched/succeeded/failed counts', () => {
+    it('renders the status chip and matched/succeeded/failed counts', async () => {
       const run = makeRun({ matchedCount: 100, succeededCount: 30, failedCount: 10 });
       render(<WorkflowRunsDrawer {...baseProps} runs={[run]} />);
 
-      expect(screen.getByText('Running')).toBeInTheDocument();
-      expect(screen.getByText('100')).toBeInTheDocument();
-      expect(screen.getByText('30')).toBeInTheDocument();
-      expect(screen.getByText('10')).toBeInTheDocument();
+      const card = await screen.findByTestId('datatable-card');
+      expect(within(card).getByText('Running')).toBeInTheDocument();
+      expect(within(card).getByText('100')).toBeInTheDocument();
+      expect(within(card).getByText('30')).toBeInTheDocument();
+      expect(within(card).getByText('10')).toBeInTheDocument();
     });
   });
 
+  // =========================================================================
+  // Admin-cancel action
+  // =========================================================================
+
   describe('admin-cancel action', () => {
-    it('offers a Cancel button for a non-terminal (running) run', () => {
+    async function openRowMenu(user: ReturnType<typeof userEvent.setup>, id = 'run-1') {
+      await user.click(
+        await screen.findByRole('button', { name: `Row actions for ${shortRunId(id)}` }),
+      );
+    }
+
+    it('offers an enabled Cancel action for a non-terminal (running) run', async () => {
+      const user = userEvent.setup();
       render(<WorkflowRunsDrawer {...baseProps} runs={[makeRun({ status: 'running' })]} />);
 
-      expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
+      await openRowMenu(user);
+
+      expect(screen.getByRole('menuitem', { name: /cancel run/i })).not.toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
     });
 
-    it('does not offer a Cancel button for a terminal (completed) run — shows "—" instead', () => {
+    it('disables Cancel for a terminal (completed) run', async () => {
+      // #259's rule: a per-row `disabled` replaces "render nothing", so the
+      // control stays discoverable instead of silently becoming an em dash.
+      const user = userEvent.setup();
       render(<WorkflowRunsDrawer {...baseProps} runs={[makeRun({ status: 'completed' })]} />);
 
-      expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument();
-      expect(screen.getByText('—')).toBeInTheDocument();
+      await openRowMenu(user);
+
+      expect(screen.getByRole('menuitem', { name: /cancel run/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
     });
 
-    it('does not offer a Cancel button for an awaiting_approval run — treated as non-terminal, still cancellable', () => {
-      render(<WorkflowRunsDrawer {...baseProps} runs={[makeRun({ status: 'awaiting_approval' })]} />);
+    it('keeps Cancel enabled for an awaiting_approval run — not a terminal status', async () => {
+      const user = userEvent.setup();
+      render(
+        <WorkflowRunsDrawer {...baseProps} runs={[makeRun({ status: 'awaiting_approval' })]} />,
+      );
 
-      // awaiting_approval is NOT in the terminal set, so Cancel is still offered.
-      expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
+      await openRowMenu(user);
+
+      expect(screen.getByRole('menuitem', { name: /cancel run/i })).not.toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
     });
 
-    it('calls onCancel with the run when Cancel is clicked', async () => {
+    it('calls onCancel with the run when Cancel is chosen', async () => {
       const user = userEvent.setup();
       const onCancel = vi.fn();
       const run = makeRun({ status: 'running' });
       render(<WorkflowRunsDrawer {...baseProps} runs={[run]} onCancel={onCancel} />);
 
-      await user.click(screen.getByRole('button', { name: /cancel/i }));
+      await openRowMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /cancel run/i }));
 
       expect(onCancel).toHaveBeenCalledWith(run);
     });
 
-    it('disables Cancel when canCancel is false (missing jobs:write)', () => {
+    it('omits the Cancel action entirely without jobs:write', async () => {
+      // The permission gate is on the action ARRAY (§13.1), so it is absent
+      // from the DOM rather than present-but-inert — in every renderer.
       render(
         <WorkflowRunsDrawer
           {...baseProps}
@@ -159,29 +304,49 @@ describe('WorkflowRunsDrawer', () => {
         />,
       );
 
-      expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
+      expect(await screen.findByTestId('datatable-card')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: `Row actions for ${shortRunId('run-1')}` }),
+      ).not.toBeInTheDocument();
     });
 
-    it('disables Cancel for the specific run currently being cancelled', () => {
-      const run = makeRun({ id: 'run-target', status: 'running' });
+    it('disables Cancel for the specific run currently being cancelled', async () => {
+      const user = userEvent.setup();
       render(
-        <WorkflowRunsDrawer {...baseProps} runs={[run]} cancellingRunId="run-target" />,
+        <WorkflowRunsDrawer
+          {...baseProps}
+          runs={[makeRun({ id: 'run-target', status: 'running' })]}
+          cancellingRunId="run-target"
+        />,
       );
 
-      expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
+      await openRowMenu(user, 'run-target');
+
+      expect(screen.getByRole('menuitem', { name: /cancel run/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
     });
 
-    it('does not disable Cancel for a different run while another run is mid-cancel', () => {
-      const runA = makeRun({ id: 'run-a', status: 'running' });
-      const runB = makeRun({ id: 'run-b', status: 'running' });
+    it('does not disable Cancel for a different run while another run is mid-cancel', async () => {
+      const user = userEvent.setup();
       render(
-        <WorkflowRunsDrawer {...baseProps} runs={[runA, runB]} cancellingRunId="run-a" />,
+        <WorkflowRunsDrawer
+          {...baseProps}
+          runs={[
+            makeRun({ id: 'run-aaaa', status: 'running' }),
+            makeRun({ id: 'run-bbbb', status: 'running' }),
+          ]}
+          cancellingRunId="run-aaaa"
+        />,
       );
 
-      const buttons = screen.getAllByRole('button', { name: /cancel/i });
-      expect(buttons).toHaveLength(2);
-      expect(buttons[0]).toBeDisabled(); // run-a: mid-cancel
-      expect(buttons[1]).toBeEnabled(); // run-b: unaffected
+      await openRowMenu(user, 'run-bbbb');
+
+      expect(screen.getByRole('menuitem', { name: /cancel run/i })).not.toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
     });
   });
 });
