@@ -1,6 +1,97 @@
 import { z } from 'zod';
 
 // =============================================================================
+// DataTable per-user layout persistence (issue #255, epic #238)
+// =============================================================================
+//
+// Per-user, per-table layout for the shared DataTable component
+// (docs/specs/datatable.md §14). Stored inside the existing `user_settings`
+// JSONB blob — no new table, no new endpoint, no migration.
+//
+// This sub-schema is defined ONCE here and imported by the PUT/PATCH/response
+// DTOs, deliberately breaking the copy-per-DTO convention used by the rest of
+// this file: the bounds below are a security control, and four hand-maintained
+// copies of them would drift.
+//
+// ABSENT-KEY RULE (load-bearing — see the spec):
+//   Every field is `.optional()` with NO `.default()`, and `dataTables` itself
+//   is optional. An absent key means "fall back to the column contract's
+//   priority-derived defaults", NOT "empty". If `visibleColumns` defaulted to
+//   `[]` here, a stored entry would pin the table to zero columns and a newly
+//   added column would be silently hidden from every user who had ever touched
+//   that table's layout. Do not add `.default()` to anything in this block.
+
+/** Max distinct table ids one user may persist layout for. */
+export const DATA_TABLE_MAX_TABLES = 40;
+/** Max length of a table id key, and of any column id / sort field string. */
+export const DATA_TABLE_MAX_ID_LENGTH = 64;
+/** Max entries in a `visibleColumns` list. */
+export const DATA_TABLE_MAX_VISIBLE_COLUMNS = 60;
+/** Inclusive `pageSize` bounds. */
+export const DATA_TABLE_MIN_PAGE_SIZE = 1;
+export const DATA_TABLE_MAX_PAGE_SIZE = 500;
+
+/** Table ids are lowercase alphanumeric plus `-`/`_`, starting alphanumeric. */
+export const DATA_TABLE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+
+const dataTableIdentifierSchema = z
+  .string()
+  .min(1)
+  .max(DATA_TABLE_MAX_ID_LENGTH);
+
+const dataTableIdKeySchema = dataTableIdentifierSchema.regex(
+  DATA_TABLE_ID_PATTERN,
+  'tableId must be lowercase alphanumeric, "-" or "_", starting with a letter or digit',
+);
+
+/** One table's persisted layout. `.strict()` — unknown keys are rejected, not stored. */
+export const dataTableLayoutSchema = z
+  .object({
+    visibleColumns: z
+      .array(dataTableIdentifierSchema)
+      .max(DATA_TABLE_MAX_VISIBLE_COLUMNS)
+      .optional(),
+    density: z.enum(['compact', 'standard', 'comfortable']).optional(),
+    sort: z
+      .object({
+        field: dataTableIdentifierSchema,
+        direction: z.enum(['asc', 'desc']),
+      })
+      .strict()
+      .optional(),
+    pageSize: z
+      .number()
+      .int()
+      .min(DATA_TABLE_MIN_PAGE_SIZE)
+      .max(DATA_TABLE_MAX_PAGE_SIZE)
+      .optional(),
+  })
+  .strict();
+
+/** The `dataTables` namespace as accepted by PUT and stored at rest. */
+export const dataTablesSchema = z
+  .record(dataTableIdKeySchema, dataTableLayoutSchema)
+  .refine((v) => Object.keys(v).length <= DATA_TABLE_MAX_TABLES, {
+    message: `dataTables may hold at most ${DATA_TABLE_MAX_TABLES} table ids`,
+  });
+
+/**
+ * The `dataTables` namespace as accepted by PATCH. Identical, except a table id
+ * may be set to `null` to DELETE that entry (JSON Merge Patch semantics), which
+ * is how a client evicts a table it no longer renders without burning a slot
+ * against DATA_TABLE_MAX_TABLES.
+ */
+export const dataTablesPatchSchema = z
+  .record(dataTableIdKeySchema, dataTableLayoutSchema.nullable())
+  .refine((v) => Object.keys(v).length <= DATA_TABLE_MAX_TABLES, {
+    message: `dataTables may hold at most ${DATA_TABLE_MAX_TABLES} table ids`,
+  });
+
+export type DataTableLayout = z.infer<typeof dataTableLayoutSchema>;
+export type DataTablesSettings = z.infer<typeof dataTablesSchema>;
+export type DataTablesPatch = z.infer<typeof dataTablesPatchSchema>;
+
+// =============================================================================
 // User Settings Schema
 // =============================================================================
 
@@ -14,6 +105,7 @@ export const userSettingsSchema = z.object({
   search: z.object({
     visibleFields: z.array(z.string()).default([]),
   }).optional(),
+  dataTables: dataTablesSchema.optional(),
 });
 
 export type UserSettingsDto = z.infer<typeof userSettingsSchema>;
@@ -29,6 +121,7 @@ export const userSettingsPatchSchema = z.object({
   search: z.object({
     visibleFields: z.array(z.string()).default([]),
   }).optional(),
+  dataTables: dataTablesPatchSchema.optional(),
 });
 
 // =============================================================================

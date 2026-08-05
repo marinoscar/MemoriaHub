@@ -1,5 +1,9 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import {
+  dataTablesSchema,
+  dataTablesPatchSchema,
+} from '../../common/schemas/settings.schema';
 
 // Full replacement (PUT)
 export const updateUserSettingsSchema = z.object({
@@ -12,6 +16,10 @@ export const updateUserSettingsSchema = z.object({
   search: z.object({
     visibleFields: z.array(z.string()).default([]),
   }).optional(),
+  // Per-user, per-table DataTable layout (issue #255). Optional with NO
+  // default: an absent namespace / entry / field means "use the column
+  // contract's defaults". See settings.schema.ts for the absent-key rule.
+  dataTables: dataTablesSchema.optional(),
 });
 
 export class UpdateUserSettingsDto extends createZodDto(
@@ -33,6 +41,9 @@ export const patchUserSettingsSchema = z.object({
       visibleFields: z.array(z.string()).default([]),
     })
     .optional(),
+  // Merged per table id (see UserSettingsService.mergeDataTables): patching one
+  // table's entry never clobbers another's; `null` deletes an entry.
+  dataTables: dataTablesPatchSchema.optional(),
 });
 
 export class PatchUserSettingsDto extends createZodDto(

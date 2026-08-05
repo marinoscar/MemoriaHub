@@ -5,6 +5,24 @@
 import { encryptSecret } from '../crypto/secret-cipher';
 
 /**
+ * One table's persisted DataTable layout (issue #255).
+ *
+ * EVERY field is optional and is NEVER filled in server-side. An absent field
+ * means "fall back to the column contract's priority-derived default", so a
+ * newly added column appears for users who already persisted a layout instead
+ * of being silently hidden. See docs/specs/datatable.md §14.
+ */
+export interface DataTableLayoutValue {
+  visibleColumns?: string[];
+  density?: 'compact' | 'standard' | 'comfortable';
+  sort?: {
+    field: string;
+    direction: 'asc' | 'desc';
+  };
+  pageSize?: number;
+}
+
+/**
  * User settings schema - stored in user_settings.value JSONB
  */
 export interface UserSettingsValue {
@@ -17,6 +35,12 @@ export interface UserSettingsValue {
   search?: {
     visibleFields: string[];
   };
+  /**
+   * Per-table DataTable layout, keyed by stable table id. Absent for any user
+   * who has never persisted a layout — which is the normal state, and why this
+   * namespace needed no data migration.
+   */
+  dataTables?: Record<string, DataTableLayoutValue>;
 }
 
 /**
