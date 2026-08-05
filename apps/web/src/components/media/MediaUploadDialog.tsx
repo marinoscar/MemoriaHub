@@ -182,8 +182,11 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
   }, []);
 
   // The dialog is permanently mounted (see AppBar) and only toggled via `open`,
-  // so its state survives between runs. Reset on every false -> true transition
-  // to make a clean queue an invariant of opening, however the last run ended.
+  // so its state survives between runs. This effect is the SINGLE owner of queue
+  // clearing: it resets on every false -> true transition, making a clean queue an
+  // invariant of opening however the last run ended. Closing intentionally leaves
+  // the queue intact so the last run's result stays rendered until the dialog is
+  // actually hidden (nothing is user-visible between close and the next open).
   useEffect(() => {
     if (open) {
       resetQueue();
@@ -234,11 +237,14 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
     [],
   );
 
+  // Deliberately does NOT reset the queue: clearing `fileStates` here would land in
+  // the same React commit as the final `updateFileState(..., 'success')` of a
+  // successful run, so the completion summary and Close button would never render.
+  // The reset-on-open effect above is the single owner of queue clearing.
   const handleClose = useCallback(() => {
     if (isUploadingRef.current) return;
-    resetQueue();
     onClose();
-  }, [onClose, resetQueue]);
+  }, [onClose]);
 
   const handleUploadAll = useCallback(async () => {
     const pending = fileStates.filter((fs) => fs.status === 'pending');

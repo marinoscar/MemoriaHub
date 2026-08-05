@@ -716,4 +716,112 @@ describe('MediaUploadDialog', () => {
       });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Reopen reset (issue #241)
+  //
+  // The dialog is permanently mounted in AppBar and only toggled via `open`,
+  // so its fileStates survive between runs unless explicitly reset on the
+  // next false -> true transition.
+  // -------------------------------------------------------------------------
+
+  describe('reopen reset (issue #241)', () => {
+    it('should call onSuccess and request close once every file succeeds', async () => {
+      const onSuccess = vi.fn();
+      const onClose = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <MediaUploadDialog {...defaultProps} onSuccess={onSuccess} onClose={onClose} />,
+      );
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('done.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+      // The success path routes through handleClose, so the parent is asked
+      // to close the dialog exactly like the Cancel/X paths do.
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not show a leftover completed file when the dialog is reopened', async () => {
+      // NOTE: a run where every file ends success/duplicate makes handleUploadAll
+      // call handleClose() (-> resetQueue()) synchronously, so a fully-successful
+      // run's file list never actually persists in the DOM even without a
+      // reopen. To exercise the reopen-reset mechanism itself (rather than that
+      // auto-close side effect), use a mixed run: one file succeeds, one fails,
+      // so `allTerminal` is false, the run does NOT auto-close, and the
+      // succeeded file's list entry stays on screen — exactly the shape of
+      // leftover state issue #241 was about.
+      // uploadFileWithRetry retries a failed part up to MAX_RETRIES (3) times
+      // internally, so bad.jpg's part must reject on every attempt — not just
+      // once — or the internal retry silently recovers it into 'success' too.
+      mockUploadPart
+        .mockResolvedValueOnce('"etag-001"')
+        .mockRejectedValue(new Error('network drop'));
+
+      const user = userEvent.setup();
+      const { rerender } = render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, {
+        target: { files: [makeImageFile('ok.jpg'), makeImageFile('bad.jpg')] },
+      });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload 2 file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload 2 file/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /retry uploading bad.jpg/i }),
+        ).toBeInTheDocument();
+      });
+      // ok.jpg reached the success state and is still visible because the run
+      // as a whole didn't fully terminate (bad.jpg errored, so no auto-close).
+      expect(screen.getByText('ok.jpg')).toBeInTheDocument();
+      expect(screen.getByTestId('CheckCircleIcon')).toBeInTheDocument();
+
+      // Parent closes then reopens the (permanently mounted) dialog.
+      rerender(<MediaUploadDialog {...defaultProps} open={false} />);
+      rerender(<MediaUploadDialog {...defaultProps} open={true} />);
+
+      expect(screen.queryByText('ok.jpg')).not.toBeInTheDocument();
+      expect(screen.queryByText('bad.jpg')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('CheckCircleIcon')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /retry uploading bad.jpg/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('should not show a leftover errored file when the dialog is reopened', async () => {
+      mockUploadPart.mockRejectedValue(new Error('boom'));
+      const user = userEvent.setup();
+      const { rerender } = render(<MediaUploadDialog {...defaultProps} />);
+      const input = getFileInput();
+      fireEvent.change(input, { target: { files: [makeImageFile('failed.jpg')] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: /retry uploading failed.jpg/i }),
+        ).toBeInTheDocument();
+      });
+
+      rerender(<MediaUploadDialog {...defaultProps} open={false} />);
+      rerender(<MediaUploadDialog {...defaultProps} open={true} />);
+
+      expect(screen.queryByText('failed.jpg')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /retry uploading failed.jpg/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
 });
