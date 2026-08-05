@@ -85,6 +85,8 @@ describe('ReviewQueueReconcileService', () => {
     resolveStatesByIds: jest.Mock;
     resolveStatesByType: jest.Mock;
     markStatesUnreadByIds: jest.Mock;
+    /** #251: batched preference warm-up before the per-member fan-out. */
+    primePreferences: jest.Mock;
   };
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockMediaService: { computeReviewCounts: jest.Mock };
@@ -101,6 +103,7 @@ describe('ReviewQueueReconcileService', () => {
       resolveStatesByIds: jest.fn().mockResolvedValue(0),
       resolveStatesByType: jest.fn().mockResolvedValue(0),
       markStatesUnreadByIds: jest.fn().mockResolvedValue(0),
+      primePreferences: jest.fn().mockResolvedValue(undefined),
     };
     mockSystemSettings = { getSettings: jest.fn().mockResolvedValue(allFeaturesEnabled()) };
     mockMediaService = { computeReviewCounts: jest.fn().mockResolvedValue(zeroCounts()) };

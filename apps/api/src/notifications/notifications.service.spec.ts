@@ -22,6 +22,7 @@ import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationsService } from './notifications.service';
 
 // ---------------------------------------------------------------------------
@@ -76,14 +77,29 @@ function wireTransactionPassthrough(mockPrisma: MockPrismaService): void {
 describe('NotificationsService', () => {
   let service: NotificationsService;
   let mockPrisma: MockPrismaService;
+  /**
+   * #251 preference gate. Defaults to "everything enabled", which is the state
+   * every pre-#251 assertion in this file was written against.
+   */
+  let mockPreferences: {
+    isEnabled: jest.Mock;
+    prime: jest.Mock;
+    invalidate: jest.Mock;
+  };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    mockPreferences = {
+      isEnabled: jest.fn().mockResolvedValue(true),
+      prime: jest.fn().mockResolvedValue(undefined),
+      invalidate: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationPreferencesService, useValue: mockPreferences },
       ],
     }).compile();
 

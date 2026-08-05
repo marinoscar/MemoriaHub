@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { DATA_TABLE_MAX_TABLES } from '../../common/schemas/settings.schema';
 import { UserSettingsService } from './user-settings.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   createMockPrismaService,
@@ -15,6 +16,15 @@ import {
 describe('UserSettingsService', () => {
   let service: UserSettingsService;
   let mockPrisma: MockPrismaService;
+  /**
+   * #251: the settings write path dismisses live rows of any notification type
+   * the resulting settings suppress, and invalidates the user's cached
+   * preferences afterwards.
+   */
+  let mockNotifications: {
+    dismissTypesForUser: jest.Mock;
+    invalidatePreferences: jest.Mock;
+  };
 
   const mockUserId = 'user-123';
 
@@ -28,11 +38,16 @@ describe('UserSettingsService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    mockNotifications = {
+      dismissTypesForUser: jest.fn().mockResolvedValue(0),
+      invalidatePreferences: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   dataTablesSchema,
   dataTablesPatchSchema,
+  notificationPreferencesSchema,
+  notificationPreferencesPatchSchema,
 } from '../../common/schemas/settings.schema';
 
 // Full replacement (PUT)
@@ -20,6 +22,10 @@ export const updateUserSettingsSchema = z.object({
   // default: an absent namespace / entry / field means "use the column
   // contract's defaults". See settings.schema.ts for the absent-key rule.
   dataTables: dataTablesSchema.optional(),
+  // Per-user notification preferences (issue #251). Optional with NO default:
+  // an absent namespace / field / type key means ENABLED. See
+  // settings.schema.ts for the absent-key rule.
+  notifications: notificationPreferencesSchema.optional(),
 });
 
 export class UpdateUserSettingsDto extends createZodDto(
@@ -44,6 +50,11 @@ export const patchUserSettingsSchema = z.object({
   // Merged per table id (see UserSettingsService.mergeDataTables): patching one
   // table's entry never clobbers another's; `null` deletes an entry.
   dataTables: dataTablesPatchSchema.optional(),
+  // Merged field-wise, and per type key inside `types` (see
+  // UserSettingsService.mergeNotifications): toggling one type never clobbers
+  // another's stored value; a `null` type entry resets that type to its
+  // default, and `notifications: null` clears the whole namespace.
+  notifications: notificationPreferencesPatchSchema.nullable().optional(),
 });
 
 export class PatchUserSettingsDto extends createZodDto(

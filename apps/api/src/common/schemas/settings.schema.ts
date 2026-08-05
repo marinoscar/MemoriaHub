@@ -1,3 +1,4 @@
+import { NotificationType } from '@prisma/client';
 import { z } from 'zod';
 
 // =============================================================================
@@ -92,6 +93,68 @@ export type DataTablesSettings = z.infer<typeof dataTablesSchema>;
 export type DataTablesPatch = z.infer<typeof dataTablesPatchSchema>;
 
 // =============================================================================
+// Per-user notification preferences (issue #251, epic #240)
+// =============================================================================
+//
+// Stored inside the existing `user_settings` JSONB blob — no new table, no new
+// endpoint, no migration, no new RBAC permission. Read/written exclusively
+// through GET/PATCH/PUT /api/user-settings.
+//
+// ABSENT-KEY RULE (load-bearing — same contract as `dataTables` above):
+//   Every field is `.optional()` with NO `.default()`, and `notifications`
+//   itself is optional. An absent key means ENABLED. That is what lets the
+//   namespace ship without a data migration (every existing user keeps
+//   receiving everything) and makes a newly added NotificationType opt-OUT
+//   rather than silently opt-in for anyone who ever saved a preference.
+//   Do NOT add `.default()` to anything in this block — a `.default(false)`
+//   anywhere here would invert the semantics and mute existing users.
+//
+// The single deliberate inversion — `workflowMicroRuns` defaulting to FALSE
+// when absent — lives in resolveNotificationPreferences() (the notifications
+// module), NOT here, precisely so this schema keeps one uniform rule.
+//
+// WHY z.partialRecord AND NOT z.record. In zod v4, `z.record(z.enum([...]), v)`
+// is EXHAUSTIVE: it requires every enum key to be present, so `{ upload_completed:
+// false }` would fail validation. `z.partialRecord` is the partial form and
+// still rejects unknown keys, which is exactly what is wanted here.
+
+/** Every `NotificationType` value, as a zod enum. */
+const notificationTypeKeySchema = z.enum(
+  Object.values(NotificationType) as [NotificationType, ...NotificationType[]],
+);
+
+/** The `notifications` namespace as accepted by PUT and stored at rest. */
+export const notificationPreferencesSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    types: z.partialRecord(notificationTypeKeySchema, z.boolean()).optional(),
+    workflowMicroRuns: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * The `notifications` namespace as accepted by PATCH. Identical, except a
+ * per-type entry may be set to `null` to DELETE it (JSON Merge Patch), which
+ * resets that type to its default (enabled) rather than pinning it to `true`.
+ */
+export const notificationPreferencesPatchSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    types: z
+      .partialRecord(notificationTypeKeySchema, z.boolean().nullable())
+      .optional(),
+    workflowMicroRuns: z.boolean().optional(),
+  })
+  .strict();
+
+export type NotificationPreferencesSettings = z.infer<
+  typeof notificationPreferencesSchema
+>;
+export type NotificationPreferencesPatch = z.infer<
+  typeof notificationPreferencesPatchSchema
+>;
+
+// =============================================================================
 // User Settings Schema
 // =============================================================================
 
@@ -106,6 +169,7 @@ export const userSettingsSchema = z.object({
     visibleFields: z.array(z.string()).default([]),
   }).optional(),
   dataTables: dataTablesSchema.optional(),
+  notifications: notificationPreferencesSchema.optional(),
 });
 
 export type UserSettingsDto = z.infer<typeof userSettingsSchema>;
@@ -122,6 +186,9 @@ export const userSettingsPatchSchema = z.object({
     visibleFields: z.array(z.string()).default([]),
   }).optional(),
   dataTables: dataTablesPatchSchema.optional(),
+  // `null` clears the whole namespace back to defaults (everything enabled,
+  // micro-runs off) — JSON Merge Patch, mirroring dataTables' per-entry null.
+  notifications: notificationPreferencesPatchSchema.nullable().optional(),
 });
 
 // =============================================================================

@@ -1,7 +1,10 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { isoDateTime } from '../../common/schemas/iso-date';
-import { dataTablesSchema } from '../../common/schemas/settings.schema';
+import {
+  dataTablesSchema,
+  notificationPreferencesSchema,
+} from '../../common/schemas/settings.schema';
 
 export const userSettingsResponseSchema = z.object({
   theme: z.enum(['light', 'dark', 'system']),
@@ -17,6 +20,11 @@ export const userSettingsResponseSchema = z.object({
   // normal state. Absent entries/fields mean "use the column contract's
   // defaults"; the API never materializes them.
   dataTables: dataTablesSchema.optional(),
+  // Absent when the user has never changed a notification toggle — the normal
+  // state. Absent namespace / field / type key means ENABLED (except
+  // `workflowMicroRuns`, whose absent default is false); the API never
+  // materializes them, so the client applies the same defaults.
+  notifications: notificationPreferencesSchema.optional(),
   updatedAt: isoDateTime,
   version: z.number(),
 });

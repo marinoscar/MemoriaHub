@@ -23,6 +23,29 @@ export interface DataTableLayoutValue {
 }
 
 /**
+ * Per-user notification preferences (issue #251, epic #240).
+ *
+ * EVERY field is optional and is NEVER filled in server-side. An absent key
+ * means ENABLED — which is what lets this namespace ship with no migration
+ * (existing users keep receiving everything) and makes a newly added
+ * NotificationType opt-OUT rather than opt-in. Same absent-key contract as
+ * `dataTables` above; see the schema for the "do not add .default()" warning.
+ *
+ * The one deliberate exception is `workflowMicroRuns`, whose ABSENT default is
+ * FALSE — `on_media_enriched` workflow micro-runs are suppressed unless a user
+ * explicitly opts in, because they fire continuously during an import. That
+ * inversion lives in resolveNotificationPreferences(), not in the schema.
+ */
+export interface NotificationPreferencesValue {
+  /** Master switch. Absent = true. */
+  enabled?: boolean;
+  /** Per-`NotificationType` switch, keyed by the enum value. Absent = true. */
+  types?: Record<string, boolean>;
+  /** Re-enable `on_media_enriched` workflow-run rows. Absent = FALSE. */
+  workflowMicroRuns?: boolean;
+}
+
+/**
  * User settings schema - stored in user_settings.value JSONB
  */
 export interface UserSettingsValue {
@@ -41,6 +64,12 @@ export interface UserSettingsValue {
    * namespace needed no data migration.
    */
   dataTables?: Record<string, DataTableLayoutValue>;
+  /**
+   * Per-type notification preferences. Absent for any user who has never
+   * changed a notification toggle — which is the normal state, and why this
+   * namespace needed no data migration. Absent ⇒ everything enabled.
+   */
+  notifications?: NotificationPreferencesValue;
 }
 
 /**
