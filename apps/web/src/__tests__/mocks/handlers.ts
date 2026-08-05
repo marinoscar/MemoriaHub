@@ -393,6 +393,42 @@ export const handlers = [
     return HttpResponse.json({ items: [], total: 0 });
   }),
 
+  // Notifications (epic #240 / issue #249) — the AppBar bell polls these on
+  // every render of the app shell, so they need a default handler or every
+  // AppBar/Layout test logs an unhandled-request warning.
+  http.get(`${API_BASE}/notifications/unread-count`, () => {
+    return HttpResponse.json({ data: { count: 0 } });
+  }),
+
+  http.get(`${API_BASE}/notifications`, () => {
+    return HttpResponse.json({
+      data: {
+        items: [],
+        meta: { page: 1, pageSize: 10, totalItems: 0, totalPages: 0 },
+      },
+    });
+  }),
+
+  http.post(`${API_BASE}/notifications/read-all`, () => {
+    return HttpResponse.json({ data: { updated: 0 } });
+  }),
+
+  http.post(`${API_BASE}/notifications/dismiss-all`, () => {
+    return HttpResponse.json({ data: { updated: 0 } });
+  }),
+
+  http.post(`${API_BASE}/notifications/:id/read`, () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post(`${API_BASE}/notifications/:id/dismiss`, () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete(`${API_BASE}/notifications/:id`, () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.post(`${API_BASE}/circles`, async ({ request }) => {
     const body = (await request.json()) as { name: string; description?: string };
     return HttpResponse.json(
