@@ -20,24 +20,55 @@ import type { ReactNode } from 'react';
 /**
  * Comparison operators a filterable column can advertise.
  *
- * Defined here (rather than in the filtering issue, #254) so column authors can
- * declare `filterable: ['equals', 'contains']` today and have it become live
- * the moment the filter UI ships. Nothing in #252 reads these values.
+ * ONE union covering every value type. Which subset a given column offers is
+ * decided by its {@link DataTableFilterType} (see `filter/operators.ts`), or
+ * pinned explicitly by declaring `filterable: ['equals', 'contains']`.
+ *
+ * The `endsWith` / `gte` / `lte` / `in` / `isNotEmpty` members are not in any
+ * type's DEFAULT set but remain part of the union: a column may pin them, and
+ * they were published by #252 before this issue narrowed the defaults.
  */
 export type FilterOperator =
+  // text
   | 'equals'
   | 'contains'
   | 'startsWith'
   | 'endsWith'
+  // number
   | 'gt'
   | 'gte'
   | 'lt'
   | 'lte'
+  | 'between'
+  // date
   | 'before'
   | 'after'
+  // enum / boolean
+  | 'is'
+  | 'isNot'
+  | 'isAnyOf'
   | 'in'
+  // emptiness (any type)
   | 'isEmpty'
   | 'isNotEmpty';
+
+/**
+ * The kind of value behind a column, which decides BOTH the operator set the
+ * filter UI offers and the input control it draws for the operand.
+ *
+ * Deliberately a declared field rather than something inferred from the first
+ * row: inference would flip a column's operator set when a page happens to be
+ * empty, or when a nullable column's first page is all nulls.
+ *
+ * Default `'text'`.
+ */
+export type DataTableFilterType = 'text' | 'number' | 'date' | 'enum' | 'boolean';
+
+/** One selectable option for an `enum` filter column. */
+export interface DataTableEnumValue {
+  value: string;
+  label: string;
+}
 
 /**
  * The pivot that drives BOTH renderers from one declaration.
@@ -105,10 +136,40 @@ export interface DataTableColumn<Row> {
   sortable?: boolean;
 
   /**
-   * Reserved for #254 (filtering). `true` enables the default operator set for
-   * the column's inferred type; an explicit array narrows it.
+   * Whether the column can be filtered. Default `false`.
+   *
+   * `true` enables the default operator set for the column's
+   * {@link DataTableFilterType}; an explicit array pins exactly which operators
+   * are offered, in the order given.
+   *
+   * Like sorting, filtering is ALWAYS server-side: the table emits a normalized
+   * filter model and NEVER filters `rows` itself. The owning page maps that
+   * model onto its endpoint's query params and refetches.
    */
   filterable?: boolean | FilterOperator[];
+
+  /**
+   * The value type behind this column, for filtering purposes. Decides which
+   * operators are offered and which input control collects the operand.
+   * Default `'text'`. Ignored unless `filterable` is set.
+   */
+  filterType?: DataTableFilterType;
+
+  /**
+   * Options for a `filterType: 'enum'` column. Required for enum filtering —
+   * an enum column with no `enumValues` has nothing to pick from and is treated
+   * as un-filterable by the filter UI.
+   */
+  enumValues?: DataTableEnumValue[];
+
+  /**
+   * Whether this column participates in the global quick search.
+   *
+   * Purely declarative: the search term is a single free-text value sent to the
+   * server, so this field documents (and lets the UI describe) which columns the
+   * endpoint's free-text param actually covers. The table does not search rows.
+   */
+  searchable?: boolean;
 
   /** Reserved for #256 (export). Default `true` when a `value` extractor exists. */
   exportable?: boolean;
@@ -204,6 +265,63 @@ export interface DataTableSortConfig {
 }
 
 /**
+ * The operand of a filter.
+ *
+ * Deliberately a small, JSON-and-URL-serializable set:
+ *   - `string` / `number` / `boolean` — a single operand (most operators).
+ *   - `(string | number)[]` — a two-element `[from, to]` tuple for `between`,
+ *     or the candidate set for `isAnyOf` / `in`.
+ *   - `null` — no operand at all (`isEmpty` / `isNotEmpty`), or "not filled in
+ *     yet" for a draft the user is still composing.
+ *
+ * Dates are carried as `YYYY-MM-DD` strings rather than `Date` objects, so a
+ * filter model survives `JSON.stringify`, a URL round-trip, and a page reload
+ * without a revive step.
+ */
+export type DataTableFilterValue = string | number | boolean | (string | number)[] | null;
+
+/**
+ * One entry in the normalized filter model.
+ *
+ * `columnId` is a column `id` — the same identifier used as the sort field and
+ * the DataGrid `field` — so a page maps it onto its endpoint's query param with
+ * a lookup table it writes once.
+ */
+export interface DataTableFilter {
+  columnId: string;
+  operator: FilterOperator;
+  value: DataTableFilterValue;
+}
+
+/**
+ * The complete, normalized filter model: an ordered list of filters, AND-ed
+ * together by convention. The table treats this as opaque controlled state and
+ * hands it straight back out on every change; interpreting it is the page's job.
+ */
+export type DataTableFilterModel = DataTableFilter[];
+
+/**
+ * Controlled global quick search.
+ *
+ * The DEBOUNCE APPLIES TO THE EMISSION, NOT THE INPUT: the box updates on every
+ * keystroke (so typing never feels laggy) while `onChange` fires once the user
+ * has paused for `debounceMs`. A page can therefore refetch directly from
+ * `onChange` without its own debounce.
+ */
+export interface DataTableQuickSearchConfig {
+  /** The committed search term. */
+  value: string;
+  /** Called with the new term after the debounce window elapses. */
+  onChange: (next: string) => void;
+  /** Input placeholder. Defaults to a term naming the `searchable` columns. */
+  placeholder?: string;
+  /** Debounce window in ms. Default {@link DEFAULT_QUICK_SEARCH_DEBOUNCE_MS} (300). */
+  debounceMs?: number;
+  /** Accessible name for the field. Default `'Search'`. */
+  ariaLabel?: string;
+}
+
+/**
  * Controlled selection.
  *
  * The value is a `Set<string>` of row ids. Selection is page-scoped: because
@@ -260,6 +378,21 @@ export interface DataTableProps<Row> {
   sort?: DataTableSortConfig;
   selection?: DataTableSelectionConfig;
 
+  /**
+   * The active filter model — controlled, exactly like `pagination` and `sort`.
+   *
+   * Supplying `filters` + `onFiltersChange` turns the filter surface on for
+   * every layout (a row on desktop, a collapsible panel on tablet, a full-screen
+   * sheet on a phone). The table NEVER filters `rows`: it emits a new model and
+   * the page refetches.
+   */
+  filters?: DataTableFilterModel;
+  /** Emits the whole next model on every add / edit / remove / clear. */
+  onFiltersChange?: (next: DataTableFilterModel) => void;
+
+  /** Controlled, debounced global quick search. Omit to hide the search box. */
+  quickSearch?: DataTableQuickSearchConfig;
+
   rowActions?: DataTableRowAction<Row>[];
   bulkActions?: DataTableBulkAction[];
 
@@ -300,9 +433,21 @@ export interface DataTableProps<Row> {
 
 /**
  * Props handed to a concrete renderer. {@link DataTableProps} minus the layout
- * switch itself — every renderer consumes the same contract.
+ * switch itself and minus the filter surface — every renderer consumes the same
+ * contract.
+ *
+ * Filtering is deliberately NOT a renderer concern. The filter bar is drawn
+ * once by `DataTable`, above whichever renderer is active, because it is the
+ * one control whose shape is decided by the layout rather than by the row
+ * presentation — and because a renderer that owned filter state would lose it
+ * on every layout switch (§7.4).
  */
 export type DataTableRendererProps<Row> = Omit<
   DataTableProps<Row>,
-  'renderer' | 'mobileBreakpoint' | 'tabletBreakpoint'
+  | 'renderer'
+  | 'mobileBreakpoint'
+  | 'tabletBreakpoint'
+  | 'filters'
+  | 'onFiltersChange'
+  | 'quickSearch'
 >;

@@ -51,6 +51,52 @@ export { CardField, ExpandableValue, columnContent, columnText } from './mobile/
 export { CompactPagination } from './mobile/CompactPagination';
 export { CardSortControl } from './mobile/CardSortControl';
 
+// --- Filtering + quick search (#254) ----------------------------------------
+export { DataTableFilterBar, FILTER_COUNT_CLASS } from './filter/DataTableFilterBar';
+export type { DataTableFilterBarProps } from './filter/DataTableFilterBar';
+export { FilterEditor } from './filter/FilterEditor';
+export type { FilterEditorProps } from './filter/FilterEditor';
+export { FilterChips } from './filter/FilterChips';
+export type { FilterChipsProps } from './filter/FilterChips';
+export { QuickSearchField, DEFAULT_QUICK_SEARCH_DEBOUNCE_MS } from './filter/QuickSearchField';
+export type { QuickSearchFieldProps } from './filter/QuickSearchField';
+export {
+  OPERATORS_BY_FILTER_TYPE,
+  DEFAULT_FILTER_TYPE,
+  operatorLabel,
+  operatorArity,
+  operatorsForColumn,
+  defaultOperatorForColumn,
+  filterTypeOf,
+  isFilterableColumn,
+  filterableColumns,
+  searchableColumns,
+} from './filter/operators';
+export type { OperatorArity } from './filter/operators';
+export {
+  addFilter,
+  removeFilterAt,
+  replaceFilterAt,
+  containsFilter,
+  sameFilter,
+  filterKey,
+  filterChipLabel,
+  describeFilterValue,
+  isFilterComplete,
+  draftFilterFor,
+  blankValueFor,
+  columnForFilter,
+} from './filter/filterModel';
+export {
+  readDataTableUrlState,
+  writeDataTableUrlState,
+  encodeFilter,
+  decodeFilter,
+  DATATABLE_FILTER_PARAM,
+  DATATABLE_SEARCH_PARAM,
+} from './filter/filterUrl';
+export type { DataTableUrlState, DataTableUrlOptions } from './filter/filterUrl';
+
 // --- Shared ------------------------------------------------------------------
 export { useRowActionConfirm, confirmCopy } from './shared/rowActionConfirm';
 
@@ -72,4 +118,10 @@ export type {
   DataTableLayout,
   DataTableRendererKind,
   FilterOperator,
+  DataTableFilterType,
+  DataTableEnumValue,
+  DataTableFilter,
+  DataTableFilterModel,
+  DataTableFilterValue,
+  DataTableQuickSearchConfig,
 } from './types';
