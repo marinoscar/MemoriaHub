@@ -6,16 +6,27 @@
  *   - src / poster / title props are forwarded to the player
  *   - Both seek Gesture zones render with the correct action attributes
  *   - The layout component renders
+ *   - The centered play/pause control (issue #236) renders, is labelled for
+ *     the current playback state, fades out while playing, and is clickable
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 
 // ---------------------------------------------------------------------------
 // Mock @vidstack/react — replace heavy browser-media implementation with
 // lightweight stubs that emit testable markup.
+//
+// `paused` drives the mocked `useMediaState('paused')` so tests can render the
+// player in either playback state. Hoisted so the vi.mock factory can see it.
 // ---------------------------------------------------------------------------
+
+const vds = vi.hoisted(() => ({
+  paused: true,
+  playButtonClick: vi.fn(),
+}));
 
 vi.mock('@vidstack/react', () => {
   const MediaPlayer = ({ src, poster, title, children, ...rest }: any) => (
@@ -41,12 +52,24 @@ vi.mock('@vidstack/react', () => {
     />
   );
 
-  return { MediaPlayer, MediaProvider, Gesture };
+  // Vidstack's PlayButton renders a real <button> and toggles playback
+  // internally. The stub keeps the <button> (so role/label/keyboard queries
+  // behave the same) and records clicks, which is what lets us assert that our
+  // centered element really is the hit target.
+  const PlayButton = ({ children, ...rest }: any) => (
+    <button type="button" onClick={vds.playButtonClick} {...rest}>
+      {children}
+    </button>
+  );
+
+  const useMediaState = (prop: string) => (prop === 'paused' ? vds.paused : undefined);
+
+  return { MediaPlayer, MediaProvider, Gesture, PlayButton, useMediaState };
 });
 
 // Mock the layout + icons sub-package (separate deep import path)
 vi.mock('@vidstack/react/player/layouts/default', () => {
-  const DefaultVideoLayout = ({ icons: _icons }: any) => (
+  const DefaultVideoLayout = ({ icons: _icons, slots: _slots }: any) => (
     <div data-testid="default-video-layout" />
   );
   const defaultLayoutIcons = {};
@@ -66,6 +89,7 @@ import { VideoPlayer } from '../../../components/media/VideoPlayer';
 describe('VideoPlayer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vds.paused = true;
   });
 
   describe('prop forwarding', () => {
@@ -152,6 +176,89 @@ describe('VideoPlayer', () => {
       gestures.forEach((g) => {
         expect(g.classList.contains('vds-gesture')).toBe(true);
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Centered play/pause control (issue #236)
+  // -------------------------------------------------------------------------
+
+  describe('centered play button', () => {
+    it('renders a labelled Play button while paused', () => {
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      const button = screen.getByRole('button', { name: 'Play video' });
+      expect(button).toBeInTheDocument();
+      expect(button.tagName).toBe('BUTTON');
+    });
+
+    it('switches the accessible label to Pause while playing', () => {
+      vds.paused = false;
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      expect(screen.getByRole('button', { name: 'Pause video' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Play video' })).not.toBeInTheDocument();
+    });
+
+    it('marks the overlay as paused so the control is shown', () => {
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      expect(screen.getByTestId('center-play-overlay')).toHaveAttribute('data-paused', 'true');
+    });
+
+    it('marks the overlay as playing so the control is faded out', () => {
+      vds.paused = false;
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      expect(screen.getByTestId('center-play-overlay')).toHaveAttribute('data-paused', 'false');
+    });
+
+    it('renders the control inside the player, not as a detached overlay', () => {
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      const player = screen.getByTestId('media-player');
+      expect(player).toContainElement(screen.getByTestId('center-play-overlay'));
+    });
+
+    it('toggles playback when clicked', async () => {
+      const user = userEvent.setup();
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      await user.click(screen.getByRole('button', { name: 'Play video' }));
+      expect(vds.playButtonClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('is reachable with the keyboard', async () => {
+      const user = userEvent.setup();
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      const button = screen.getByRole('button', { name: 'Play video' });
+      await user.tab();
+      expect(button).toHaveFocus();
+    });
+
+    it('does not replace the double-tap seek zones', () => {
+      render(<VideoPlayer src="https://example.com/video.mp4" />);
+      // The centered target and both ±10 s zones coexist.
+      expect(screen.getByRole('button', { name: 'Play video' })).toBeInTheDocument();
+      const actions = screen
+        .getAllByTestId('gesture')
+        .map((g) => g.getAttribute('data-action'));
+      expect(actions).toEqual(expect.arrayContaining(['seek:-10', 'seek:10']));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Sizing
+  // -------------------------------------------------------------------------
+
+  describe('wrapper sizing', () => {
+    // jsdom normalises `aspect-ratio` to an unspaced ratio, so these read the
+    // computed value rather than going through toHaveStyle.
+    it('defaults to a 16:9 wrapper', () => {
+      const { container } = render(<VideoPlayer src="https://example.com/video.mp4" />);
+      const wrapper = container.firstElementChild as HTMLElement;
+      expect(getComputedStyle(wrapper).aspectRatio).toBe('16/9');
+    });
+
+    it('fills the container instead of forcing 16:9 when `fill` is set', () => {
+      const { container } = render(<VideoPlayer src="https://example.com/video.mp4" fill />);
+      const wrapper = container.firstElementChild as HTMLElement;
+      expect(getComputedStyle(wrapper).height).toBe('100%');
+      expect(getComputedStyle(wrapper).aspectRatio).not.toBe('16/9');
     });
   });
 });
