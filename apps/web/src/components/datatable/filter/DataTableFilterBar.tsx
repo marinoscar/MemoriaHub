@@ -39,6 +39,7 @@ import {
   FilterList as FilterListIcon,
   Close as CloseIcon,
 } from '@mui/icons-material';
+import visuallyHidden from '@mui/utils/visuallyHidden';
 import type {
   DataTableColumn,
   DataTableFilter,
@@ -61,6 +62,14 @@ export interface DataTableFilterBarProps<Row> {
   filters: DataTableFilterModel;
   onFiltersChange?: (next: DataTableFilterModel) => void;
   quickSearch?: DataTableQuickSearchConfig;
+  /**
+   * Total matching rows across all pages, when the page knows it —
+   * `pagination.total`. Drives the "Filtered to N results" live-region
+   * announcement (issue #257); omit and the region simply stays silent, since
+   * there is nothing truthful to say about a query the page never reports a
+   * total for.
+   */
+  resultCount?: number;
 }
 
 export function DataTableFilterBar<Row>({
@@ -69,6 +78,7 @@ export function DataTableFilterBar<Row>({
   filters,
   onFiltersChange,
   quickSearch,
+  resultCount,
 }: DataTableFilterBarProps<Row>) {
   const filterable = useMemo(() => filterableColumns(columns), [columns]);
   const filteringEnabled = filterable.length > 0 && Boolean(onFiltersChange);
@@ -86,6 +96,17 @@ export function DataTableFilterBar<Row>({
   }, [draft, filterable]);
 
   if (!filteringEnabled && !quickSearch) return null;
+
+  // "Filtered to 12 results" (issue #257) — only spoken when there is an
+  // active filter or search term AND the page told us a real result count.
+  // Silent otherwise: a table with nothing applied has nothing to announce,
+  // and a count we do not actually know would be a lie a screen reader user
+  // has no way to double-check.
+  const hasActiveQuery = filters.length > 0 || Boolean(quickSearch?.value);
+  const resultAnnouncement =
+    hasActiveQuery && resultCount != null
+      ? `Filtered to ${resultCount.toLocaleString()} ${resultCount === 1 ? 'result' : 'results'}`
+      : '';
 
   const emit = (next: DataTableFilterModel) => onFiltersChange?.(next);
 
@@ -144,6 +165,19 @@ export function DataTableFilterBar<Row>({
       data-filter-surface={layout}
       sx={{ width: '100%', maxWidth: '100%', minWidth: 0, mb: 1.5 }}
     >
+      {/* Off-screen but present at every layout, so the announcement fires
+          regardless of which filter surface (row / collapsed panel / sheet)
+          is currently drawn — the surface is a presentation choice, the
+          result count is not. */}
+      <Box
+        aria-live="polite"
+        role="status"
+        data-testid="datatable-filter-live-region"
+        sx={visuallyHidden}
+      >
+        {resultAnnouncement}
+      </Box>
+
       <Stack
         direction={layout === 'mobile' ? 'column' : 'row'}
         spacing={1}

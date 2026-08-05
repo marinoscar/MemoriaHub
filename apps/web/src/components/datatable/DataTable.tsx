@@ -181,6 +181,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         filters={filters ?? NO_FILTERS}
         onFiltersChange={onFiltersChange}
         quickSearch={quickSearch}
+        resultCount={props.pagination?.total}
       />
 
       {mode === 'mobile' ? (

@@ -30,6 +30,7 @@ export {
   extractColumnValue,
   formatColumnValue,
   buildColumnVisibilityModel,
+  rowAccessibleName,
   DEFAULT_COLUMN_MIN_WIDTH,
 } from './desktop/columnAdapter';
 export { TruncatedCell, DataTableEmptyOverlay, DataTableLoadingOverlay } from './desktop/cells';
