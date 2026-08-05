@@ -15,6 +15,7 @@ import { WorkflowActionExecutor } from '../actions/workflow-action.executor';
 import { WorkflowAction, WorkflowActionContext } from '../actions/action-executor.types';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { revalidateItemMatches } from '../execution/item-revalidation.util';
+import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
 
 /** Payload shape for a `workflow_execute_batch` job. */
 interface WorkflowExecuteBatchPayload {
@@ -85,6 +86,7 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
     private readonly prisma: PrismaService,
     private readonly compiler: WorkflowConditionCompiler,
     private readonly executor: WorkflowActionExecutor,
+    private readonly runNotifications: WorkflowRunNotificationService,
   ) {}
 
   onModuleInit(): void {
@@ -407,6 +409,13 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
         errorItems,
       });
       this.executor.clearRunCache(runId);
+
+      // Terminal — fire-and-forget notification (epic #240, issue #247).
+      // Inside the `fin.count > 0` guard, so ONLY the batch that won the
+      // conditional finalize notifies; a loser produces nothing. The producer
+      // additionally skips on_media_enriched micro-runs, which also terminate
+      // through this exact path.
+      this.runNotifications.notifyRunFinishedAsync(runId);
     }
   }
 

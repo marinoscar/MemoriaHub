@@ -34,6 +34,7 @@ import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
+import { UploadNotificationService } from '../../src/notifications/producers/upload-notification.service';
 import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
 import { randomUUID } from 'crypto';
 
@@ -195,6 +196,11 @@ describe('MediaService.streamExport', () => {
         { provide: GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
         { provide: ForwardGeocodeService, useValue: { searchPlaces: jest.fn() } },
         { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
+        {
+          // #247 upload_completed producer — fire-and-forget, not asserted here.
+          provide: UploadNotificationService,
+          useValue: { recordUploadAsync: jest.fn(), recordUpload: jest.fn() },
+        },
         { provide: MediaEnrichmentService, useValue: { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();

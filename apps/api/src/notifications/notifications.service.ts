@@ -7,9 +7,15 @@
 // than touching Prisma directly, so the state-vs-event dedup semantics live in
 // exactly one place and cannot drift between callers.
 //
-//   emit()        — EVENT types (upload_completed, enrichment_failed,
-//                   workflow_run_completed, share_expiring): one row per
-//                   occurrence, appended freely, never deduplicated.
+//   emit()        — EVENT types (workflow_run_completed, share_expiring): one
+//                   row per occurrence, appended freely, never deduplicated.
+//   upsertCountedEvent()
+//                 — EVENT types that must NOT fan out (upload_completed,
+//                   enrichment_failed): repeated occurrences fold into one row
+//                   whose data.count grows, optionally inside a rolling time
+//                   window. Event types have no partial unique index behind
+//                   them, so the find-or-create is serialized with a
+//                   transaction-scoped Postgres advisory lock.
 //   upsertState() — STATE types (the four review_queue_*): at most ONE LIVE
 //                   row per (userId, circleId, type), refreshed in place. A
 //                   circle with 929 pending duplicate groups produces exactly
@@ -85,6 +91,65 @@ export interface UpsertStateNotificationInput {
   body?: string | null;
   link?: string | null;
   data?: Prisma.InputJsonValue | null;
+}
+
+/**
+ * Input for a COUNTED EVENT notification (#247) — the third producer primitive.
+ *
+ * `emit()` appends one row per occurrence, which is right for a workflow run
+ * finishing but catastrophic for a 4 000-file import (4 000 rows) or a
+ * poison-pill batch (400 rows). This primitive instead folds repeated
+ * occurrences into ONE row whose `data.count` grows.
+ *
+ * It is NOT `upsertState()`: state rows are keyed on (userId, circleId, type)
+ * and protected by a partial unique index that covers only the four
+ * `review_queue_*` types. Event types have no such index, so the find-or-create
+ * here is serialized with a transaction-scoped Postgres ADVISORY LOCK on the
+ * aggregation key — see upsertCountedEvent() for the full rationale.
+ *
+ * Two aggregation shapes are expressed by the same primitive:
+ *   - `windowMs` set    → a ROLLING window (upload_completed: 15 min). A live
+ *                         row older than the window is left alone and a NEW row
+ *                         is started, so an import next week is its own row.
+ *   - `windowMs` unset  → accumulate until dismissed (enrichment_failed).
+ *   - `matchData`       → an extra JSONB equality predicate that further
+ *                         partitions live rows beyond (userId, circleId, type);
+ *                         enrichment_failed uses `{ jobType }` to keep one row
+ *                         per failing job type.
+ */
+export interface UpsertCountedEventInput {
+  userId: string;
+  circleId?: string | null;
+  type: NotificationType;
+  /**
+   * Extra JSONB containment predicate partitioning live rows, e.g.
+   * `{ jobType: 'auto_tagging' }`. Every key here MUST also appear in `data`,
+   * or the row this call creates will not be found by the next one.
+   */
+  matchData?: Record<string, string>;
+  /** Rolling-window width in ms. Omit/null = accumulate until dismissed. */
+  windowMs?: number | null;
+  /** Amount added to `data.count` (default 1). */
+  increment?: number;
+  /** Builds the title from the RESULTING total, so pluralization is caller-side. */
+  buildTitle: (count: number) => string;
+  body?: string | null;
+  link?: string | null;
+  /**
+   * Extra payload merged alongside `count`. `null` is allowed (and serializes
+   * to a JSON null) — an absent `lastError` is meaningful context, not a reason
+   * to omit the key.
+   */
+  data?: Record<string, Prisma.InputJsonValue | null>;
+  /**
+   * Clear `read_at` when an EXISTING row is incremented, so continued activity
+   * re-badges the bell. The event-type analog of #246's re-unread rule: there,
+   * a read STATE row is re-unread when its queue grows past the acknowledged
+   * `countAtRead`; here, any increment IS new activity by construction (the row
+   * only grows when something new happened), so no snapshot comparison is
+   * needed. Off by default — the caller opts in.
+   */
+  reunreadOnIncrement?: boolean;
 }
 
 export interface NotificationListResult {
@@ -448,6 +513,134 @@ export class NotificationsService {
     } catch (err) {
       this.logger.warn(
         `upsertState(${input.type}) for user ${input.userId} circle ${input.circleId} failed: ` +
+          this.errorMessage(err),
+      );
+    }
+  }
+
+  /**
+   * Create-or-increment a COUNTED EVENT notification (#247).
+   *
+   * WHY AN ADVISORY LOCK. `upsertState()` can afford an optimistic
+   * update-then-create-then-catch-P2002 because a DB partial unique index is
+   * standing behind it. Event types have NO such index (by design — #244's
+   * index predicate lists only the four `review_queue_*` values), so two
+   * concurrent uploads to the same circle could both observe "no live row in
+   * window" and both INSERT, producing exactly the duplicate rows this
+   * primitive exists to prevent. `pg_advisory_xact_lock(hashtext(key))`
+   * serializes the find-or-create per aggregation key for the life of the
+   * transaction and is released on commit/rollback — no row needs to exist for
+   * it to work, which is precisely the case a row lock cannot cover.
+   *
+   * A hash collision between two different keys costs a little needless
+   * serialization and nothing else; the lock is only ever held for the three
+   * tiny statements below.
+   *
+   * The read-then-write is deliberate rather than one clever UPDATE: the title
+   * is a function of the RESULTING count (with caller-side pluralization and a
+   * circle/uploader name), which would otherwise have to be assembled in SQL.
+   * Under the lock, read-then-write is exactly as safe.
+   *
+   * `updated_at = now()` is set EXPLICITLY in the raw UPDATE — raw SQL bypasses
+   * Prisma-side `@updatedAt`, the rolling window compares against `updated_at`,
+   * and #248's retention purge keys off it.
+   *
+   * Best-effort like emit()/upsertState(): a failure logs and resolves.
+   */
+  async upsertCountedEvent(input: UpsertCountedEventInput): Promise<void> {
+    const increment = input.increment ?? 1;
+    const circleId = input.circleId ?? null;
+    const matchData = input.matchData ?? null;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Aggregation key — must contain everything the lookup predicate below
+        // filters on, so two different keys can never share a lock by accident
+        // (only by hash collision, which is harmless).
+        const lockKey = [
+          input.userId,
+          String(input.type),
+          circleId ?? '-',
+          matchData ? JSON.stringify(matchData) : '-',
+        ].join('|');
+        await tx.$executeRaw(
+          Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`,
+        );
+
+        const matchClause = matchData
+          ? Prisma.sql`AND data @> ${JSON.stringify(matchData)}::jsonb`
+          : Prisma.empty;
+
+        // Rolling window, when requested. `updated_at` (not `created_at`) is the
+        // right anchor: a row that is still being incremented is still current,
+        // so a steady import keeps ONE row alive rather than starting a new one
+        // every 15 minutes.
+        const windowClause =
+          input.windowMs != null && input.windowMs > 0
+            ? Prisma.sql`AND updated_at > now() - make_interval(secs => ${
+                input.windowMs / 1000
+              }::double precision)`
+            : Prisma.empty;
+
+        const rows = await tx.$queryRaw<Array<{ id: string; count: number }>>(Prisma.sql`
+          SELECT
+            id,
+            CASE
+              WHEN data->>'count' ~ '^[0-9]+$' THEN (data->>'count')::int
+              ELSE 0
+            END AS count
+          FROM notifications
+          WHERE user_id = ${input.userId}::uuid
+            AND type::text = ${String(input.type)}
+            -- IS NOT DISTINCT FROM, not plain equality: enrichment_failed rows
+            -- are global (circle_id IS NULL), and NULL = NULL is NULL, not true.
+            AND circle_id IS NOT DISTINCT FROM ${circleId}::uuid
+            AND dismissed_at IS NULL
+            ${matchClause}
+            ${windowClause}
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `);
+
+        const existing = rows[0];
+        const count = (existing?.count ?? 0) + increment;
+        const payload = { ...(input.data ?? {}), count };
+        const title = input.buildTitle(count);
+
+        if (existing) {
+          const reunread = input.reunreadOnIncrement
+            ? Prisma.sql`, read_at = NULL`
+            : Prisma.empty;
+
+          await tx.$executeRaw(Prisma.sql`
+            UPDATE notifications
+            SET title = ${title},
+                body = ${input.body ?? null},
+                link = ${input.link ?? null},
+                data = ${JSON.stringify(payload)}::jsonb,
+                updated_at = now()
+                ${reunread}
+            WHERE id = ${existing.id}::uuid
+          `);
+        } else {
+          await tx.notification.create({
+            data: {
+              userId: input.userId,
+              circleId,
+              type: input.type,
+              title,
+              body: input.body ?? null,
+              link: input.link ?? null,
+              data: payload as Prisma.InputJsonValue,
+            },
+          });
+        }
+      });
+
+      this.invalidateUnreadCount(input.userId);
+    } catch (err) {
+      this.logger.warn(
+        `upsertCountedEvent(${input.type}) for user ${input.userId} failed: ` +
           this.errorMessage(err),
       );
     }
