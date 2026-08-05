@@ -19,6 +19,14 @@
  * When `variant` is omitted the renderer falls back to its historical
  * viewport-based behaviour, so using it directly (outside `DataTable`) still
  * works.
+ *
+ * ## Row virtualization (#256)
+ *
+ * DataGrid virtualizes rows for free — but not while `autoHeight` is on, which
+ * is this table's default sizing. `virtualization/gridVirtualization.ts` decides
+ * per render whether to trade auto-height for a bounded viewport (past a
+ * loaded-row threshold, or whenever the caller passed an explicit `height`), and
+ * the decision is published as `data-virtualized` on the scroll container.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -43,6 +51,7 @@ import { DataTableEmptyOverlay, DataTableLoadingOverlay } from './cells';
 import { RowActionsCell } from './RowActionsCell';
 import { BulkActionBar } from '../BulkActionBar';
 import { useRowActionConfirm } from '../shared/rowActionConfirm';
+import { planGridVirtualization } from '../virtualization/gridVirtualization';
 import {
   DETAIL_ROW_CLASS,
   DETAIL_ROW_SOURCE,
@@ -346,6 +355,19 @@ export function DesktopGridRenderer<Row>({
 
   const selectedIdList = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
+  // --- Row virtualization ---------------------------------------------------
+
+  // MUI X disables row virtualization whenever `autoHeight` is on
+  // (`enabledForRows: !disableVirtualization && !autoHeight && HAS_LAYOUT`), and
+  // auto-height is this table's documented default. So past a threshold the grid
+  // takes a bounded viewport instead — the only condition under which the
+  // built-in virtualizer can actually run. `disableVirtualization` is left at
+  // its default (false) throughout; see `virtualization/gridVirtualization.ts`.
+  const virtualization = useMemo(
+    () => planGridVirtualization({ rowCount: gridRows.length, height, density }),
+    [gridRows.length, height, density],
+  );
+
   // --- Overlays -------------------------------------------------------------
 
   const slots = useMemo(
@@ -376,12 +398,16 @@ export function DesktopGridRenderer<Row>({
       */}
       <Box
         data-testid="datatable-scroll-container"
+        // Whether the grid's own row virtualization is live for this render.
+        // jsdom never lays out, so MUI X keeps it off in tests regardless —
+        // this attribute is how the DECISION stays assertable.
+        data-virtualized={virtualization.virtualized ? 'true' : 'false'}
         sx={{
           width: '100%',
           maxWidth: '100%',
           minWidth: 0,
           overflowX: 'auto',
-          ...(height != null ? { height } : {}),
+          ...(virtualization.height != null ? { height: virtualization.height } : {}),
         }}
       >
         <DataGrid
@@ -391,7 +417,7 @@ export function DesktopGridRenderer<Row>({
           loading={loading}
           density={density}
           aria-label={ariaLabel}
-          autoHeight={height == null}
+          autoHeight={virtualization.autoHeight}
           columnVisibilityModel={columnVisibilityModel}
           disableColumnFilter
           disableColumnMenu

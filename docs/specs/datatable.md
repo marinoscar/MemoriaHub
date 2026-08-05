@@ -2,8 +2,8 @@
 
 **Status:** foundation shipped (issue #252); mobile + tablet layouts shipped
 (issue #253); filtering + quick search shipped (issue #254); column visibility,
-density and per-user layout persistence shipped (issue #255, §14–§15) — all of
-epic #238
+density and per-user layout persistence shipped (issue #255, §14–§15); row
+virtualization + CSV export shipped (issue #256, §16) — all of epic #238
 **Location:** `apps/web/src/components/datatable/`,
 `apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
 **Spec owner:** frontend
@@ -32,23 +32,20 @@ The contract lives in `types.ts` and is intentionally free of any DataGrid type.
 
 ### Scope of this document
 
-This spec documents the contract as of #254. Fields that exist in the contract
-but are **not yet consumed** are marked *reserved* and name the issue that will
-consume them, so column authors can declare them today without churn later:
-
-| Field / concept              | Consumed by                            |
-| ---------------------------- | -------------------------------------- |
-| `exportable`                 | #256 — CSV/export + virtualization     |
+This spec documents the contract as of #256. **Every field in the contract is
+now live** — nothing is reserved any more.
 
 §14 documents the storage contract for #255 (what the API accepts and how it
 merges); §15 documents the client half (the `tableId` prop, the picker and
-density surfaces, the resolution rules, and the write discipline).
+density surfaces, the resolution rules, and the write discipline); §16 documents
+virtualization and CSV export (#256), including what was deliberately *not*
+built.
 
-Everything else on this page is live behaviour today. `priority` is fully
-consumed: it drives column visibility on the grid *and* the card's
-headline/body/detail split (§3). `filterable` is now live too, together with
-its three companions `filterType`, `enumValues` and `searchable` (§10), and
-`hideable` is now consumed by the column picker (§15.2).
+`priority` drives column visibility on the grid *and* the card's
+headline/body/detail split (§3). `filterable` is live together with its three
+companions `filterType`, `enumValues` and `searchable` (§10), `hideable` is
+consumed by the column picker (§15.2), and `exportable` is consumed by the CSV
+writer (§16.4).
 
 ---
 
@@ -72,7 +69,14 @@ apps/web/src/components/datatable/
   layout/
     layoutModel.ts                # stored shape, encoding, resolution (pure)
     useDataTableLayoutPrefs.ts    # load / debounced fire-and-forget write
-    DataTableViewBar.tsx          # column picker + density — one shape per layout
+    DataTableViewBar.tsx          # column picker + density (+ export slot)
+  export/
+    csv.ts                        # escaping, formula neutralization, BOM (pure)
+    exportModel.ts                # columns -> matrix -> file; the all-rows walk
+    DataTableExportControl.tsx    # the control — one shape per layout
+  virtualization/
+    gridVirtualization.ts         # autoHeight-vs-viewport decision (pure)
+    cardVirtualization.ts         # content-visibility + measured placeholders
   shared/
     rowActionConfirm.tsx          # one confirm dialog, shared by both renderers
   desktop/
@@ -91,6 +95,7 @@ apps/web/src/components/datatable/
   __tests__/ResponsiveDataTable.test.tsx  # #253 layouts
   __tests__/DataTableFilters.test.tsx     # #254 filtering + quick search
   __tests__/DataTableLayoutPrefs.test.tsx # #255 visibility / density / persistence
+  __tests__/DataTableExport.test.tsx      # #256 CSV export + virtualization
 ```
 
 Consumers import from `components/datatable` only. `desktop/`, `mobile/`,
@@ -270,10 +275,13 @@ this field documents *which* columns the endpoint's free-text param actually
 searches, and is what the default placeholder is built from
 (`"Search Type, Status or Last error"`). The table never searches rows.
 
-### `exportable` — *reserved (#256)*
+### `exportable`
 
-Defaults to `true` for any column with a usable scalar. Set `false` to keep a
-column out of CSV/export (e.g. a pure-affordance column).
+Default `true`. `false` keeps the column out of every CSV export — a
+pure-affordance column, or one carrying material that must never leave the app
+(a share token, PAT material). Export always writes the `value` scalar, never
+the rendered node, so a `render`-only column exports empty cells. Full contract:
+§16.4.
 
 ### `hideable`
 
@@ -323,6 +331,9 @@ interface DataTableProps<Row> {
   rowActions?: DataTableRowAction<Row>[];
   bulkActions?: DataTableBulkAction[];
 
+  csvExport?: DataTableExportConfig<Row>;  // filename / all-rows fetch (§16)
+  disableExport?: boolean;                 // removes the export control (§16.4)
+
   tableId?: string;            // turns on per-user layout persistence (§15)
   density?: DataTableDensity;  // 'compact' | 'standard' | 'comfortable'
   ariaLabel?: string;
@@ -343,6 +354,8 @@ interface DataTableProps<Row> {
 | `loading`    | Shows the loading overlay. Rows already present stay visible underneath, so a refetch doesn't blank the table. |
 | `error`      | Rendered as an `Alert severity="error"` **above** the table; the table still renders beneath it, so a stale page remains readable while the error is shown. |
 | `emptyState` | Any node; rendered by the no-rows overlay. Defaults to a plain "No results". |
+| `csvExport`  | Optional. Every table exports its current page without configuration; this names the file and/or adds the "all matching rows" option by handing the table the page's own fetch callback (§16.5). |
+| `disableExport` | Removes the export control from every layout. For a table that owns a bespoke export of its own — the Tags page's CSV vocabulary round trip (#259). |
 | `tableId`    | Stable id of this table instance. Supplying it persists the layout per user (§15); omitting it keeps every control working but session-scoped. |
 | `density`    | The page's **default** row-density preset, not a lock — a user's own choice overrides it. Maps onto DataGrid row density in the grid and onto card padding in the card list (§15.4). |
 | `ariaLabel`  | Accessible name of the grid. Strongly recommended — a table with no name is an unnavigable blob to a screen reader. |
@@ -1622,3 +1635,269 @@ multi-view model, no "save this view as…", and no sharing of a layout between
 users — a table stores exactly one layout per user, and "Reset to defaults" is
 the only other state it can be in. Adding named views later would be a new
 namespace beside `dataTables`, not a reinterpretation of it.
+
+---
+
+## 16. Row virtualization and CSV export (#256)
+
+Two features that share one property: both are about a table that has *more*
+than fits — more rows than a frame can paint, or more rows than a screen can be
+read from.
+
+### 16.1 The honest framing
+
+Every target table in this app is **server-paginated**, and the MIT DataGrid
+throws above a 100-row page (`pageSize` cannot exceed 100). So the realistic
+worst case a renderer ever holds is ~100 rows plus a handful of synthetic tablet
+detail rows (§9.1).
+
+Virtualization here is therefore **robustness for large page sizes, not the
+performance strategy.** The performance strategy is server-side pagination and
+it shipped in #252. This section says what is on per renderer, and — as
+importantly — what was deliberately not built.
+
+### 16.2 Desktop / tablet: DataGrid's own virtualizer, actually turned on
+
+MUI X virtualizes rows out of the box. It also silently stops doing so under one
+condition:
+
+```js
+// @mui/x-data-grid/hooks/features/virtualization/useGridVirtualization.js
+enabledForRows: !disableVirtualization && !autoHeight && HAS_LAYOUT
+```
+
+`autoHeight` **disables row virtualization** — and `autoHeight` is exactly what
+this renderer uses whenever the caller omits `height`, which is the documented
+default (§5: the table grows with its rows and the *page* scrolls). From #252
+until this issue, the default table therefore rendered every loaded row with the
+virtualizer inert.
+
+The fix is a threshold rather than a blanket "always take a fixed height", since
+auto-height is the right behaviour for a 10- or 25-row page and turning every
+table into an internally scrolling box would be a worse regression than the one
+being fixed. `virtualization/gridVirtualization.ts` decides per render:
+
+| Condition                          | `autoHeight` | Height                         | Virtualized |
+| ---------------------------------- | ------------ | ------------------------------ | ----------- |
+| explicit `height` prop             | `false`      | the caller's                   | yes         |
+| `rows.length > 50`                 | `false`      | computed viewport (12 rows)    | yes         |
+| anything else                      | `true`       | none — grows with its rows     | no          |
+
+The computed viewport is `min(rowCount, 12) × rowHeight(density) + 109px` of
+header/footer chrome, so a virtualized table is bounded but still shows a
+screenful. `disableVirtualization` is never passed (it stays `false`); this
+module only decides whether the grid is *allowed* to use what it already has.
+The decision is published as `data-virtualized` on
+`[data-testid="datatable-scroll-container"]`.
+
+Three things that had to keep working, and do:
+
+- **Server pagination.** `paginationMode="server"` still means the grid never
+  slices `rows`; virtualization changes which rows are *painted*, never which
+  rows exist.
+- **Synthetic detail rows (§9.1).** They are ordinary rows with a computed
+  height, so windowing treats them like any other; `isRowSelectable` still
+  rejects them, and a select-all over a virtualized tablet grid still yields
+  only real ids.
+- **Select-all.** It never reads the DOM. The renderer materialises MUI X's
+  *exclude* model against `rowIds` derived from the `rows` prop (§5.3), which is
+  precisely why windowing cannot corrupt it. There is a test asserting a 60-row
+  page selects 60 ids while `data-virtualized` is `true`.
+
+### 16.3 Mobile: render skipping, and NOT a virtualizer
+
+Cards are variable height — the body grows with the `secondary` column count and
+the detail region expands in place. A windowing virtualizer needs a height
+estimate per item, and a **wrong** estimate is not a small inefficiency; it is a
+scroll position that jumps under the user's thumb. Issue #237 is that bug,
+shipped: a gallery placeholder computed for the wrong column count made
+scrolling jump. An incorrect virtualizer is worse than none.
+
+So the card list does not virtualize. It uses the browser's own render
+skipping, which needs no correct estimate to be correct:
+
+- **`content-visibility: auto`** on each card past the 20-row mark lets the
+  engine skip style, layout and paint for off-screen cards. Unlike
+  `display: none`, the subtree stays focusable and find-in-page-able — the
+  browser force-renders it when focus or Ctrl-F lands inside — so keyboard
+  navigation is unaffected.
+- **`contain-intrinsic-size: auto <measured>px`** supplies the placeholder while
+  a card is skipped. Two deliberate details: the `auto` keyword makes the browser
+  prefer each card's own *last rendered* size, so the number only has to be right
+  for cards never yet seen; and the number is **measured from a real card in this
+  very list** (a callback ref plus a `ResizeObserver`), never computed from a
+  column count — which is the exact thing #237 got wrong.
+- **`loading="lazy"` / `decoding="async"`** are applied to `<img>` elements a
+  column's `render` produced. A column's render is used verbatim (§3) and belongs
+  to the calling page, so the card annotates rather than rewrites it, and an
+  explicit `loading` the page already wrote is never overridden.
+
+Two cards deliberately opt out: the **first** card (it is the one being measured,
+and it is on screen anyway) and any card whose **detail region is open** (a card
+whose height is changing under the user's finger must stay fully rendered).
+
+**Explicitly not built:** a true dynamic-height card virtualizer. It remains
+available as a follow-up if a card list ever holds thousands of rows — which,
+given server-side pagination, it currently cannot.
+
+### 16.4 CSV export — scope and contract
+
+**Ships here: "current page".** The rows the table is holding, with the columns
+the user currently has visible, respecting `exportable`, written from each
+column's `value` accessor. Available in **all three layouts**, and implemented
+against the column contract — *not* DataGrid's `GridToolbarExport`, which
+serializes the grid's own rows and therefore exists in one renderer out of two.
+One code path, one file, whatever width the window happens to be.
+
+Three rules decide what lands in the file:
+
+1. **`value`, never `render`.** A column whose cell is a `<Chip label="FAILED">`
+   exports `failed`. Serializing a `ReactNode` is either impossible or, worse,
+   accidentally lossy. This is what `render` and `value` being two fields (§4) is
+   *for*.
+2. **Only what is on screen.** The column set is the user's resolved visibility
+   (#255) minus `exportable: false`. Note this is the **user's** choice, which is
+   layout-independent — deliberately *not* the tablet's `detail` fold. A column
+   tucked into the row expander is still shown to the user, just elsewhere, and a
+   CSV that changed shape because the window is 900px wide today would be a
+   surprise, not a feature.
+3. **Only what the API already returned.** See §16.6.
+
+"Active filters" need no machinery: the table never filters `rows` (§10.1), so
+the loaded page already *is* the filtered result and exporting it is exporting
+the filtered set. The all-rows path (§16.5) inherits the same property by
+replaying the page's own query.
+
+`disableExport` removes the control from every layout. It exists for a table
+that already owns a bespoke export — the Tags page keeps its own CSV vocabulary
+import/export (#259), and two export buttons producing different files is worse
+than one.
+
+#### The surface, per layout
+
+| Layout    | Surface                                                              |
+| --------- | -------------------------------------------------------------------- |
+| `desktop` | An **"Export" button** in the view bar. One click, one file, when no all-rows callback is supplied — a one-item menu is a click nobody needs. |
+| `tablet`  | Identical.                                                            |
+| `mobile`  | A `MoreVert` **overflow menu** ("Table actions") beside "View". A fourth labelled control at 360px is what pushes the chrome row into a horizontal scroller. |
+
+It lives in `DataTableViewBar`'s trailing slot for the same reason the picker and
+the filter bar live there (§7.4): its *shape* is a layout decision, not a
+row-presentation one. Touch rules (§8.5) hold — ≥44px everywhere, nothing
+hover-revealed, and the menu and progress dialog are mounted only while open.
+
+#### Escaping rules
+
+`export/csv.ts`, pure and unit-tested:
+
+| Input                       | Output                    | Why |
+| --------------------------- | ------------------------- | --- |
+| `San José, Costa Rica`      | `"San José, Costa Rica"`  | RFC 4180 quoting |
+| `say "hi"`                  | `"say ""hi"""`            | internal quotes doubled |
+| `line one\nline two`        | `"line one\nline two"`    | embedded newline / CR |
+| `  padded  `                | `"  padded  "`            | several parsers trim unquoted fields |
+| `null` / `undefined`        | *(empty)*                 | never `—`; that em dash is a *display* convention (`formatColumnValue`) |
+| `=cmd\|'/c calc'!A1`        | `'=cmd\|'/c calc'!A1`     | formula injection |
+| `+1+1`, `-2+3+cmd`, `@SUM(…)` | `'…`                    | the other three prefixes |
+| `\t=1+1`, `\r=1+1`          | `'…`                      | some spreadsheets strip leading whitespace *before* deciding |
+| `-5` (number **or** string) | `-5`                      | see below |
+
+Records are joined with **CRLF** and the file is prefixed with a **UTF-8 BOM**
+(`U+FEFF`, `EF BB BF`) — without it, Excel on Windows reads UTF-8 as the local ANSI code
+page and `José` opens as `JosÃ©`. The BOM is a property of the *file*
+(`toCsvFile`), not of a field, so `toCsv` stays composable.
+
+**Why numbers are exempt from neutralization.** Prefixing blindly turns `-5`
+into the text `'-5` and breaks every numeric column that can go negative — a
+real regression traded for a non-attack, since `-5` is not a formula. The
+apostrophe is applied only to text that is not a well-formed number, so
+`-1+cmd|calc` is still neutralized while `-5` and `+1.5e3` are not.
+
+*(A test-harness note worth keeping: `Blob.text()` decodes UTF-8, and a UTF-8
+decode **strips** a leading BOM. The BOM has to be asserted on the bytes
+(`arrayBuffer()`), never on the decoded string.)*
+
+Files are named `<slug>-<YYYY-MM-DD>.csv` from `csvExport.filename`, else
+`tableId`, else `ariaLabel`, else `export`. An export is a snapshot; two of them
+a week apart must not collide in a Downloads folder.
+
+### 16.5 "All matching rows" — the page's query, replayed
+
+Shipped, as the issue's stretch goal, and **opt-in**: it appears only when the
+page hands the table a fetch callback, because the component cannot know the
+endpoint, the auth scheme, or how this page maps a filter model onto params.
+
+```tsx
+<DataTable
+  {...props}
+  csvExport={{
+    filename: 'jobs',
+    // page is ZERO-BASED, matching DataTablePaginationConfig.
+    fetchAllRows: ({ page, pageSize, signal }) =>
+      fetchJobs({ page: page + 1, pageSize, signal, ...toJobQuery(filters), q: search }),
+  }}
+/>
+```
+
+The walk is deliberately dull: request page 0, 1, 2… and stop at the first short
+or empty page. Termination is defensive on three axes — a short page, the row
+ceiling, and a 200-request hard stop — because a callback that ignores `page`
+and keeps returning a full page would otherwise loop until the tab dies.
+
+- **Bounded at 10 000 rows** (`csvExport.maxRows`). Not a preference: without it
+  one click against a 150 000-item library issues 1 500 requests and builds a
+  ~100 MB string. Hitting the ceiling is *reported* — a warning alert naming the
+  limit — rather than silently truncating, because a CSV that is quietly a prefix
+  is a wrong answer the user believes.
+- **250 rows per request** by default (`csvExport.fetchPageSize`). The fetch is
+  headless, so the DataGrid's 100-row page cap does not apply.
+- **A progress dialog with a Cancel**, determinate when `pagination.total` is
+  known and indeterminate when it is not — a fake percentage that jumps backwards
+  is worse than a spinner. Cancel aborts via `AbortSignal` and produces **no**
+  file; a clean, complete export shows no dialog at the end, because the file
+  is the feedback.
+- **A failed page produces no file at all**, with the error surfaced in the
+  dialog. Half an export that looks like a whole one is the worst outcome
+  available here.
+
+### 16.6 Security
+
+**Export never re-queries with elevated access.** It can only ever serialize what
+the API has already returned to this authenticated user:
+
+- current-page export reads the `rows` prop — data already on screen;
+- all-rows export replays the **page's own** callback, so it goes through the
+  same endpoint, the same token, the same RBAC checks and the same active filters
+  as the table itself. It is the first one's request, run more times.
+
+There is no privileged export path, no server-side "export everything" endpoint,
+and no field the table can reach that the list response did not contain.
+Sensitive columns are excluded declaratively with `exportable: false`; the
+migration issues (#259, #260) will set it on share tokens and PAT material. A
+column author who forgets it exports what the API already sent to the browser —
+which is why the flag is a *narrowing* control rather than the only barrier.
+
+### 16.7 Tests
+
+`__tests__/DataTableExport.test.tsx` (75 cases), on the #253 stub recipe
+(container-driven width, `matchMedia` pinned to 1440px). Four things worth
+copying rather than reinventing:
+
+1. **The download is stubbed at the browser boundary**, not behind an injected
+   seam: `URL.createObjectURL` captures the real `Blob` the component built and
+   `HTMLAnchorElement.click` is spied so jsdom does not log a navigation. Every
+   assertion about "what the user got" reads those bytes.
+2. **The escaping rules are tested twice** — as pure functions (each of the four
+   formula prefixes, quotes, commas, newlines, the numeric exemption) and through
+   a rendered table (a chip column exports its scalar; an `exportable: false`
+   column never appears; unchecking a column in the picker changes the header
+   row).
+3. **jsdom disables MUI X virtualization outright** (`HAS_LAYOUT =
+   !platform.env.jsdom`), so the grid tests assert the *decision*
+   (`data-virtualized`, the computed viewport height, the threshold boundary) and
+   assert the property that makes windowing safe: a 60-row page still select-alls
+   to 60 ids, and a virtualized tablet grid with an expanded row still selects no
+   synthetic detail row.
+4. **The #243 guard is re-run** against the export menu and the phone overflow
+   menu, with `[role="menuitem"]` added to the sweep's selector — the export
+   menu's controls are menu items rather than buttons or checkboxes.

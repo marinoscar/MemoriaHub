@@ -181,7 +181,15 @@ export interface DataTableColumn<Row> {
    */
   searchable?: boolean;
 
-  /** Reserved for #256 (export). Default `true` when a `value` extractor exists. */
+  /**
+   * Whether this column appears in a CSV export (#256). Default `true`.
+   *
+   * Export always writes the `value` scalar, never the rendered node, so a
+   * column with no usable scalar exports empty cells — declare `value`, or set
+   * this to `false`. `false` is also how a column carrying material that must
+   * never leave the app (a share token, personal-access-token material) is kept
+   * out of the file entirely.
+   */
   exportable?: boolean;
 
   /**
@@ -333,6 +341,50 @@ export interface DataTableQuickSearchConfig {
   ariaLabel?: string;
 }
 
+// ---------------------------------------------------------------------------
+// CSV export (#256)
+// ---------------------------------------------------------------------------
+
+/**
+ * The page's own fetch callback, replayed by the "all matching rows" export.
+ *
+ * The table cannot know the endpoint, the auth scheme, or how this page maps a
+ * filter model onto query params — so the WHOLE query is the page's. That is
+ * also the security property: an export can only ever return what this user's
+ * own list request already returns, with the active filters applied.
+ *
+ * `page` is ZERO-BASED, matching {@link DataTablePaginationConfig}. Return fewer
+ * rows than `pageSize` (or an empty array) to signal the end of the result set.
+ */
+export type DataTableExportFetchPage<Row> = (params: {
+  page: number;
+  pageSize: number;
+  signal?: AbortSignal;
+}) => Promise<Row[]>;
+
+/**
+ * Optional export configuration. Export itself needs no configuration: every
+ * table can export its current page out of the box (turn it off entirely with
+ * {@link DataTableProps.disableExport}).
+ */
+export interface DataTableExportConfig<Row> {
+  /**
+   * Filename stem, slugified and dated (`jobs` → `jobs-2026-08-05.csv`).
+   * Defaults to `tableId`, then `ariaLabel`, then `export`.
+   */
+  filename?: string;
+  /**
+   * Supplying this adds an "Export all matching rows" option that re-queries
+   * page by page with the active filters and sort. Omit it and the table offers
+   * current-page export only.
+   */
+  fetchAllRows?: DataTableExportFetchPage<Row>;
+  /** Hard row ceiling for an all-rows export. Default 10 000. */
+  maxRows?: number;
+  /** Rows per request while walking `fetchAllRows`. Default 250. */
+  fetchPageSize?: number;
+}
+
 /**
  * Controlled selection.
  *
@@ -409,6 +461,22 @@ export interface DataTableProps<Row> {
   bulkActions?: DataTableBulkAction[];
 
   /**
+   * CSV export options (#256). Optional: every table can already export its
+   * current page. Supply this to name the file, or to add the "all matching
+   * rows" option by handing the table the page's own fetch callback.
+   */
+  csvExport?: DataTableExportConfig<Row>;
+
+  /**
+   * Removes the export control from every layout.
+   *
+   * For a table that owns a bespoke export/import of its own (the Tags page's
+   * CSV vocabulary round trip, #259) — two export buttons offering different
+   * files is worse than one.
+   */
+  disableExport?: boolean;
+
+  /**
    * Stable identity of THIS table instance, e.g. `'jobs'`, `'admin-shares'`.
    *
    * Supplying it turns on per-user layout persistence: column visibility,
@@ -482,6 +550,11 @@ export type DataTableRendererProps<Row> = Omit<
   | 'onFiltersChange'
   | 'quickSearch'
   | 'tableId'
+  // Export is drawn once by `DataTable`, in the view bar, for the same reason
+  // the filter bar is: its shape is a layout decision, not a row-presentation
+  // one, and one code path must serve every renderer (#256).
+  | 'csvExport'
+  | 'disableExport'
 > & {
   /**
    * The USER's resolved column-visibility choice (#255) — layout-independent,

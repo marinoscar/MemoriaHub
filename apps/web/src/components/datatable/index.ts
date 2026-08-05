@@ -135,6 +135,63 @@ export type {
   DecodedVisibility,
 } from './layout/layoutModel';
 
+// --- CSV export (#256) -------------------------------------------------------
+export { DataTableExportControl } from './export/DataTableExportControl';
+export type { DataTableExportControlProps } from './export/DataTableExportControl';
+export {
+  CSV_BOM,
+  CSV_FIELD_SEPARATOR,
+  CSV_FORMULA_ESCAPE,
+  CSV_FORMULA_PREFIXES,
+  CSV_ROW_SEPARATOR,
+  escapeCsvField,
+  isFormulaText,
+  neutralizeFormula,
+  toCsv,
+  toCsvFile,
+  toCsvRow,
+} from './export/csv';
+export {
+  DATA_TABLE_EXPORT_FETCH_PAGE_SIZE,
+  DATA_TABLE_EXPORT_MAX_ROWS,
+  ExportCancelledError,
+  buildCsvForRows,
+  buildExportMatrix,
+  collectAllRows,
+  downloadCsv,
+  exportColumns,
+  exportFilename,
+  isExportableColumn,
+  slugifyExportName,
+} from './export/exportModel';
+export type {
+  CollectAllRowsOptions,
+  CollectAllRowsResult,
+  ExportMatrix,
+} from './export/exportModel';
+
+// --- Virtualization (#256) ---------------------------------------------------
+export {
+  GRID_CHROME_HEIGHT,
+  GRID_ROW_HEIGHT,
+  GRID_VIRTUALIZATION_ROW_THRESHOLD,
+  GRID_VIRTUALIZED_VISIBLE_ROWS,
+  planGridVirtualization,
+  virtualizedViewportHeight,
+} from './virtualization/gridVirtualization';
+export type {
+  GridVirtualizationInput,
+  GridVirtualizationPlan,
+} from './virtualization/gridVirtualization';
+export {
+  CARD_FALLBACK_INTRINSIC_HEIGHT,
+  CARD_VIRTUALIZATION_MIN_ROWS,
+  containIntrinsicSize,
+  shouldVirtualizeCards,
+  useLazyImages,
+  useMeasuredCardHeight,
+} from './virtualization/cardVirtualization';
+
 // --- Shared ------------------------------------------------------------------
 export { useRowActionConfirm, confirmCopy } from './shared/rowActionConfirm';
 
@@ -163,4 +220,6 @@ export type {
   DataTableFilterModel,
   DataTableFilterValue,
   DataTableQuickSearchConfig,
+  DataTableExportConfig,
+  DataTableExportFetchPage,
 } from './types';

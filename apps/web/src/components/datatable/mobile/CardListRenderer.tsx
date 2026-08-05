@@ -32,6 +32,10 @@ import { DataCard } from './DataCard';
 import { CompactPagination } from './CompactPagination';
 import { CardSortControl } from './CardSortControl';
 import { cardDensityMetrics } from '../layout/layoutModel';
+import {
+  shouldVirtualizeCards,
+  useMeasuredCardHeight,
+} from '../virtualization/cardVirtualization';
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
 
@@ -112,6 +116,15 @@ export function CardListRenderer<Row>({
 
   const selectedIdList = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
+  // --- Render skipping (#256) -----------------------------------------------
+
+  // NOT a virtualizer: cards are variable-height and a wrong height estimate
+  // makes scrolling jump (issue #237), which is worse than rendering every card.
+  // Instead the browser is allowed to skip layout/paint for off-screen cards,
+  // with a placeholder height MEASURED from a real card in this very table.
+  const skipOffscreenCards = shouldVirtualizeCards(rows.length);
+  const { measureRef, height: measuredCardHeight } = useMeasuredCardHeight(skipOffscreenCards);
+
   // --- Render ---------------------------------------------------------------
 
   const showEmpty = !loading && rows.length === 0;
@@ -191,6 +204,12 @@ export function CardListRenderer<Row>({
                   rowActions={rowActions}
                   onRunAction={runAction}
                   density={density}
+                  // The first card is the one being measured, so it never skips
+                  // its own layout — and it is on screen by definition, so it
+                  // would gain nothing by doing so.
+                  measureRef={index === 0 ? measureRef : undefined}
+                  skipOffscreen={skipOffscreenCards && index > 0}
+                  intrinsicHeight={measuredCardHeight}
                 />
               );
             })}
