@@ -61,6 +61,33 @@ export function formatColumnValue(value: string | number | null): string {
 const displayText = formatColumnValue;
 
 /**
+ * The accessible name for ONE row, shared by both renderers wherever a
+ * control needs to disambiguate itself ("Select {row}", "Row actions for
+ * {row}") — issue #257's accessibility pass.
+ *
+ * Derived from the first `primary` column still on screen (i.e. respecting
+ * the user's #255 visibility choice, when supplied), mirroring exactly what a
+ * user actually reads as "the row" in both the grid and the card headline
+ * (`mobile/DataCard.tsx`'s `headlineText`). Falls back to the row id when
+ * there is no primary column, or its scalar is null/empty — a bare em dash is
+ * not a usable name.
+ */
+export function rowAccessibleName<Row>(
+  columns: DataTableColumn<Row>[],
+  row: Row,
+  fallbackId: string,
+  visibleColumnIds?: ReadonlySet<string>,
+): string {
+  const primary = columns.find(
+    (column) =>
+      column.priority === 'primary' && (!visibleColumnIds || visibleColumnIds.has(column.id)),
+  );
+  if (!primary) return fallbackId;
+  const text = formatColumnValue(extractColumnValue(primary, row));
+  return text === '—' || text === '' ? fallbackId : text;
+}
+
+/**
  * Map one {@link DataTableColumn} to a `GridColDef`.
  *
  * Notable mapping decisions:

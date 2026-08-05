@@ -23,11 +23,12 @@
  */
 
 import { useCallback, useMemo } from 'react';
-import { Alert, Box, Checkbox, FormControlLabel, Stack } from '@mui/material';
+import { Alert, Box, FormControlLabel, Stack } from '@mui/material';
 import type { DataTableRendererProps } from '../types';
 import { BulkActionBar } from '../BulkActionBar';
 import { DataTableEmptyOverlay, DataTableLoadingOverlay } from '../desktop/cells';
 import { useRowActionConfirm } from '../shared/rowActionConfirm';
+import { IndeterminateCheckbox } from '../shared/IndeterminateCheckbox';
 import { DataCard } from './DataCard';
 import { CompactPagination } from './CompactPagination';
 import { CardSortControl } from './CardSortControl';
@@ -150,11 +151,16 @@ export function CardListRenderer<Row>({
 
       {selectable && (
         <>
-          <BulkActionBar ids={selectedIdList} actions={bulkActions} onClear={clearSelection} />
+          <BulkActionBar
+            ids={selectedIdList}
+            actions={bulkActions}
+            onClear={clearSelection}
+            total={rowIds.length}
+          />
           <FormControlLabel
             sx={{ ml: 0, mb: 0.5, minHeight: 44 }}
             control={
-              <Checkbox
+              <IndeterminateCheckbox
                 checked={allSelected}
                 indeterminate={someSelected}
                 disabled={rowIds.length === 0}

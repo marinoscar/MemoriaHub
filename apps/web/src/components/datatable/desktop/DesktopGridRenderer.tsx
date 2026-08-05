@@ -34,23 +34,26 @@ import {
   DataGrid,
   type GridColDef,
   type GridPaginationModel,
+  type GridRenderCellParams,
   type GridRowId,
   type GridRowSelectionModel,
   type GridSortModel,
   type GridValidRowModel,
 } from '@mui/x-data-grid';
 import { GRID_CHECKBOX_SELECTION_FIELD } from '@mui/x-data-grid';
-import { Alert, Box, IconButton, useMediaQuery, useTheme } from '@mui/material';
+import { Alert, Box, Checkbox, IconButton, useMediaQuery, useTheme } from '@mui/material';
+import visuallyHidden from '@mui/utils/visuallyHidden';
 import {
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowRight as KeyboardArrowRightIcon,
 } from '@mui/icons-material';
 import type { DataTableRendererProps } from '../types';
-import { buildColumnVisibilityModel, toGridColumns } from './columnAdapter';
+import { buildColumnVisibilityModel, rowAccessibleName, toGridColumns } from './columnAdapter';
 import { DataTableEmptyOverlay, DataTableLoadingOverlay } from './cells';
 import { RowActionsCell } from './RowActionsCell';
 import { BulkActionBar } from '../BulkActionBar';
 import { useRowActionConfirm } from '../shared/rowActionConfirm';
+import { IndeterminateCheckbox } from '../shared/IndeterminateCheckbox';
 import { planGridVirtualization } from '../virtualization/gridVirtualization';
 import {
   DETAIL_ROW_CLASS,
@@ -205,7 +208,16 @@ export function DesktopGridRenderer<Row>({
         width: rowActions.length === 1 ? 72 : 64,
         renderCell: (params) =>
           isDetailRow<Row>(params.row) ? null : (
-            <RowActionsCell row={params.row as Row} actions={rowActions} onRun={runAction} />
+            <RowActionsCell
+              row={params.row as Row}
+              actions={rowActions}
+              // Disambiguates the button/menu name across rows — "Retry for
+              // auto_tagging" rather than a bare "Retry" repeated on every row
+              // (issue #257). Mirrors the card renderer, which has always
+              // passed this.
+              rowLabel={rowAccessibleName(columns, params.row as Row, String(params.id), visibleColumnIds)}
+              onRun={runAction}
+            />
           ),
       });
     }
@@ -219,6 +231,15 @@ export function DesktopGridRenderer<Row>({
     const expanderColumn: GridColDef = {
       field: EXPANDER_FIELD,
       headerName: '',
+      // A column with no visible header text still needs a discernible name
+      // (axe's `empty-table-header`, issue #257) — text that is visually
+      // hidden but present for assistive tech, the same technique as the
+      // filter bar's result-count live region.
+      renderHeader: () => (
+        <Box component="span" sx={visuallyHidden}>
+          Row details
+        </Box>
+      ),
       sortable: false,
       filterable: false,
       hideable: false,
@@ -239,10 +260,15 @@ export function DesktopGridRenderer<Row>({
         }
         const id = String(params.id);
         const open = expandedIds.has(id);
+        // Disambiguated per row for the same reason the row-actions button is
+        // (issue #257): several rows' expander buttons with the identical bare
+        // name "Show details" are indistinguishable to a screen reader tabbing
+        // through them.
+        const rowLabel = rowAccessibleName(columns, params.row as Row, id, visibleColumnIds);
         return (
           <IconButton
             size="small"
-            aria-label={open ? 'Hide details' : 'Show details'}
+            aria-label={`${open ? 'Hide' : 'Show'} details for ${rowLabel}`}
             aria-expanded={open}
             data-testid="datatable-row-expander"
             // A tablet is a touch device, and this is the ONLY route to the
@@ -374,8 +400,61 @@ export function DesktopGridRenderer<Row>({
     () => ({
       noRowsOverlay: () => <DataTableEmptyOverlay>{emptyState}</DataTableEmptyOverlay>,
       loadingOverlay: () => <DataTableLoadingOverlay />,
+      // Fixes a real axe violation (`aria-conditional-attr`, issue #257): the
+      // grid's own header "select all" checkbox goes indeterminate but never
+      // sets the native DOM property behind its `aria-checked="mixed"` — see
+      // `shared/IndeterminateCheckbox.tsx`. `baseCheckbox` is DataGrid's own
+      // public slot for this, not an internal reach-around.
+      baseCheckbox: IndeterminateCheckbox,
     }),
     [emptyState],
+  );
+
+  // --- Selection checkbox column ---------------------------------------------
+
+  /**
+   * Overrides DataGrid's own per-row checkbox cell, whose built-in locale text
+   * is the single static string "Select row" for EVERY row on the grid (see
+   * `@mui/x-data-grid`'s `checkboxSelectionSelectRow`) — indistinguishable to a
+   * screen reader tabbing through them, and the exact bug this issue (#257)
+   * requires fixing. `checkboxColDef` is DataGrid's public, documented
+   * extension point for this (merged into `GRID_CHECKBOX_SELECTION_COL_DEF`
+   * rather than replacing it), so this stays forward-compatible rather than
+   * reaching into an internal component.
+   *
+   * `params.value` is already the selection boolean (the built-in column's own
+   * `valueGetter` calls `apiRef.current.isRowSelected`), so no extra selector
+   * plumbing is needed. The `onKeyDown` guard mirrors the built-in renderer:
+   * without it, a Space press bubbles to the grid's own cell keydown handler
+   * and can trigger a second, redundant toggle/scroll.
+   */
+  const checkboxColDef = useMemo(
+    () =>
+      selectable
+        ? {
+            renderCell: (params: GridRenderCellParams) => {
+              if (isDetailRow<Row>(params.row)) return null;
+              const row = params.row as Row;
+              const label = rowAccessibleName(columns, row, String(params.id), visibleColumnIds);
+              return (
+                <Checkbox
+                  size={density === 'compact' ? 'small' : 'medium'}
+                  checked={Boolean(params.value)}
+                  tabIndex={params.tabIndex}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ') event.stopPropagation();
+                  }}
+                  onChange={(event) => {
+                    params.api.selectRow(params.id, event.target.checked, false);
+                  }}
+                  slotProps={{ input: { 'aria-label': `Select ${label}`, name: 'select_row' } }}
+                />
+              );
+            },
+          }
+        : undefined,
+    [selectable, columns, visibleColumnIds, density],
   );
 
   return (
@@ -387,7 +466,14 @@ export function DesktopGridRenderer<Row>({
       )}
 
       {selectable && (
-        <BulkActionBar ids={selectedIdList} actions={bulkActions} onClear={clearSelection} />
+        <BulkActionBar
+          ids={selectedIdList}
+          actions={bulkActions}
+          onClear={clearSelection}
+          // Page-scoped, like the selection itself (§5.3): "3 of 47 selected"
+          // means 3 of the 47 rows loaded on THIS page, not the server total.
+          total={rowIds.length}
+        />
       )}
 
       {/*
@@ -438,6 +524,7 @@ export function DesktopGridRenderer<Row>({
           onSortModelChange={handleSortModelChange}
           // Selection.
           checkboxSelection={selectable}
+          checkboxColDef={checkboxColDef}
           rowSelectionModel={rowSelectionModel}
           onRowSelectionModelChange={handleRowSelectionModelChange}
           slots={slots}

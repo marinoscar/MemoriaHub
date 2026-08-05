@@ -7,6 +7,9 @@
  *
  * Accessibility: the bar is a live region so the selection count is announced
  * as it changes, and it is labelled as a toolbar so its buttons are grouped.
+ * The announcement is "N of M selected" (issue #257) whenever the caller
+ * knows the denominator — the number of selectABLE rows currently loaded —
+ * rather than a bare count with no sense of scale.
  */
 
 import { Paper, Stack, Button, Typography, Box } from '@mui/material';
@@ -18,6 +21,13 @@ export interface BulkActionBarProps {
   ids: string[];
   actions?: DataTableBulkAction[];
   onClear: () => void;
+  /**
+   * Rows available to select on THIS page — selection is page-scoped (§5.3),
+   * so this is `rowIds.length`, never `pagination.total`. Drives the "N of M
+   * selected" phrasing; omit for a bare "N selected" (e.g. a caller that uses
+   * this bar outside a DataTable renderer without a known denominator).
+   */
+  total?: number;
 }
 
 function isActionDisabled(action: DataTableBulkAction, ids: string[]): boolean {
@@ -25,9 +35,11 @@ function isActionDisabled(action: DataTableBulkAction, ids: string[]): boolean {
   return action.disabled ?? false;
 }
 
-export function BulkActionBar({ ids, actions, onClear }: BulkActionBarProps) {
+export function BulkActionBar({ ids, actions, onClear, total }: BulkActionBarProps) {
   const count = ids.length;
   if (count === 0) return null;
+
+  const countText = total != null ? `${count} of ${total} selected` : `${count} selected`;
 
   return (
     <Paper
@@ -53,7 +65,7 @@ export function BulkActionBar({ ids, actions, onClear }: BulkActionBarProps) {
       }}
     >
       <Typography variant="body2" sx={{ fontWeight: 600 }} aria-live="polite" role="status">
-        {count} selected
+        {countText}
       </Typography>
 
       <Button size="small" startIcon={<CloseIcon />} onClick={onClear} aria-label="Clear selection">

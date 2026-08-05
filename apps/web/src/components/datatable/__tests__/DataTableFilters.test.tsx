@@ -56,6 +56,7 @@ import {
   writeDataTableUrlState,
 } from '../filter/filterUrl';
 import type { DataTableColumn, DataTableFilterModel } from '../types';
+import { assertNoInvisibleHitTargets, describeControl } from './testUtils/a11yGuards';
 
 // ---------------------------------------------------------------------------
 // Layout stubs (same recipe as the #253 suite)
@@ -1139,29 +1140,9 @@ describe('filter URL helper', () => {
 // 10. Issue #243 guard, extended to the filter controls
 // ---------------------------------------------------------------------------
 
-const VISIBLE_CONTROL_SELECTOR = 'button, [role="button"], .MuiCheckbox-root, a[href]';
-const THIRD_PARTY_CHROME = '.MuiDataGrid-columnHeaders, .MuiDataGrid-columnHeader';
-
-function describeControl(control: HTMLElement) {
-  const label = control.getAttribute('aria-label') ?? control.textContent?.slice(0, 24) ?? '';
-  return `${control.tagName.toLowerCase()}[${label}]`;
-}
-
-function assertNoInvisibleHitTargets(root: HTMLElement) {
-  const controls = Array.from(
-    root.querySelectorAll<HTMLElement>(VISIBLE_CONTROL_SELECTOR),
-  ).filter((control) => !control.closest(THIRD_PARTY_CHROME));
-  expect(controls.length).toBeGreaterThan(0);
-
-  const offenders = controls
-    .filter((control) => {
-      const style = getComputedStyle(control);
-      return style.opacity === '0' && style.pointerEvents !== 'none';
-    })
-    .map(describeControl);
-
-  expect(offenders).toEqual([]);
-}
+// `assertNoInvisibleHitTargets` is imported from `./testUtils/a11yGuards`
+// (issue #257 consolidated the four near-identical copies of this guard into
+// one shared module — see that file's docblock).
 
 describe('DataTable filter surface — no invisible-but-tappable controls (#243 guard)', () => {
   const FILTERS: DataTableFilterModel = [

@@ -249,8 +249,9 @@ describe('DataTable — selection and bulk actions', () => {
     const onSelectionChange = vi.fn();
     renderTable({ selection: { selectedIds: new Set<string>(), onSelectionChange } });
 
-    const rowCheckboxes = screen.getAllByRole('checkbox', { name: /select row/i });
-    fireEvent.click(rowCheckboxes[0]);
+    // Row checkboxes are named after their row (issue #257) — job-1's `type`
+    // is `face_detection` — never a bare "Select row".
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select face_detection' }));
 
     expect(onSelectionChange).toHaveBeenCalledTimes(1);
     expect(Array.from(onSelectionChange.mock.calls[0][0] as Set<string>)).toEqual(['job-1']);
@@ -277,7 +278,8 @@ describe('DataTable — selection and bulk actions', () => {
     });
 
     const bar = screen.getByTestId('datatable-bulk-action-bar');
-    expect(within(bar).getByText('2 selected')).toBeInTheDocument();
+    // "N of M selected" (issue #257): 2 of the 3 loaded rows.
+    expect(within(bar).getByText('2 of 3 selected')).toBeInTheDocument();
     expect(bar).toHaveAttribute('role', 'toolbar');
 
     fireEvent.click(within(bar).getByRole('button', { name: 'Archive' }));
@@ -315,7 +317,9 @@ describe('DataTable — row actions', () => {
     const retry = vi.fn();
     renderTable({ rowActions: [{ id: 'retry', label: 'Retry', onClick: retry }] });
 
-    const buttons = screen.getAllByRole('button', { name: 'Retry' });
+    // Disambiguated per row (issue #257): "Retry for face_detection", never a
+    // bare "Retry" repeated identically on every row.
+    const buttons = screen.getAllByRole('button', { name: /^retry for /i });
     fireEvent.click(buttons[0]);
     expect(retry).toHaveBeenCalledWith(JOBS[0]);
   });
@@ -326,7 +330,7 @@ describe('DataTable — row actions', () => {
         { id: 'retry', label: 'Retry', onClick: vi.fn(), disabled: (row) => row.status === 'pending' },
       ],
     });
-    const buttons = screen.getAllByRole('button', { name: 'Retry' });
+    const buttons = screen.getAllByRole('button', { name: /^retry for /i });
     expect(buttons[0]).toBeEnabled();
     expect(buttons[2]).toBeDisabled();
   });
@@ -359,7 +363,10 @@ describe('DataTable — row actions', () => {
       ],
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    // Single-action buttons are disambiguated per row (issue #257): job-1's
+    // `type` is `face_detection`, so the button reads "Delete for
+    // face_detection", never a bare "Delete" repeated on every row.
+    fireEvent.click(screen.getAllByRole('button', { name: /^delete for /i })[0]);
     expect(destroy).not.toHaveBeenCalled();
 
     const dialog = screen.getByRole('dialog');
@@ -376,7 +383,7 @@ describe('DataTable — row actions', () => {
       rowActions: [{ id: 'delete', label: 'Delete', destructive: true, confirm: true, onClick: destroy }],
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /^delete for /i })[0]);
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     expect(destroy).not.toHaveBeenCalled();
   });
