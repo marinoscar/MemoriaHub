@@ -1,58 +1,105 @@
 /**
  * DataTable — public component.
  *
- * A thin renderer-switch shell over one shared column contract. Today the only
- * registered renderer is the DataGrid-backed desktop one; issue #253 registers
- * `mobile/CardListRenderer` beside it and the switch below starts resolving to
- * two different layouts from the *same* `DataTableColumn[]`.
+ * A thin layout-switch shell over one shared column contract. It resolves ONE
+ * of three layouts from the table's own container width and hands the same
+ * `DataTableRendererProps` to whichever renderer serves it:
  *
- * Nothing about a table's declaration changes when that happens — which is the
- * whole point of the contract living in `types.ts` rather than in either
- * renderer.
+ *   | layout    | renderer module              | `detail` columns          |
+ *   | --------- | ---------------------------- | ------------------------- |
+ *   | `mobile`  | `mobile/CardListRenderer`    | collapsed "More details"  |
+ *   | `tablet`  | `desktop/DesktopGridRenderer`| hidden; row expansion     |
+ *   | `desktop` | `desktop/DesktopGridRenderer`| visible                   |
+ *
+ * ## Container width, not viewport width
+ *
+ * The switch measures THIS table's wrapper. A DataTable in a 400px drawer on a
+ * 1440px desktop gets cards; a viewport media query would give it the desktop
+ * grid and it would be unusable. See `useContainerLayout.ts` for the mechanics
+ * and the pre-measurement fallback.
+ *
+ * ## State lives above the renderers
+ *
+ * Selection, pagination and sort are all controlled props owned by the calling
+ * page. Nothing a user chose is stored inside a renderer, so rotating a device,
+ * dragging a drawer wider, or resizing a window swaps the layout without
+ * losing a single selected id, the current page, or the active sort. The only
+ * state a renderer owns is which rows/cards happen to be expanded right now —
+ * pure presentation, and meaningless in the layout being switched to.
  */
 
-import { Box, useMediaQuery, useTheme } from '@mui/material';
-import type { DataTableProps, DataTableRendererMode } from './types';
+import { useRef } from 'react';
+import { Box } from '@mui/material';
+import type {
+  DataTableLayout,
+  DataTableProps,
+  DataTableRendererKind,
+  DataTableRendererMode,
+} from './types';
 import { DesktopGridRenderer } from './desktop/DesktopGridRenderer';
+import { CardListRenderer } from './mobile/CardListRenderer';
+import { useDataTableLayout, useViewportLayout } from './useContainerLayout';
 
 /**
- * Placeholder registration for the card-list renderer.
- *
- * TODO(#253): replace with `mobile/CardListRenderer`. Until then `'mobile'`
- * resolves to the desktop grid so the switch is exercised end to end (the
- * `data-renderer` attribute below reports the *resolved* mode either way) and
- * narrow viewports still get a working table.
+ * The card-list registration. This is the seam #252 left behind; it now points
+ * at the real renderer.
  */
-const MOBILE_RENDERER = DesktopGridRenderer;
+const MOBILE_RENDERER = CardListRenderer;
+
+/** Which renderer module serves a given layout. */
+export function rendererForLayout(layout: DataTableLayout): DataTableRendererKind {
+  return layout === 'mobile' ? 'mobile' : 'desktop';
+}
 
 /**
- * Resolve which renderer to use.
+ * Viewport-based renderer resolution.
  *
- * `'auto'` breaks at the `md` boundary — below it a table cannot show more than
- * about two columns without horizontal scrolling, which is exactly where cards
- * beat rows.
+ * Retained as the public, ref-free helper (and used as the layout hook's
+ * pre-measurement fallback). Prefer `DataTable`'s own container-driven switch:
+ * this one cannot see that its table is inside a narrow drawer.
  */
-export function useDataTableRenderer(mode: DataTableRendererMode = 'auto'): 'desktop' | 'mobile' {
-  const theme = useTheme();
-  const isNarrow = useMediaQuery(theme.breakpoints.down('md'));
-  if (mode !== 'auto') return mode;
-  return isNarrow ? 'mobile' : 'desktop';
+export function useDataTableRenderer(
+  mode: DataTableRendererMode = 'auto',
+): DataTableRendererKind {
+  const viewportLayout = useViewportLayout();
+  if (mode !== 'auto') return rendererForLayout(mode);
+  return rendererForLayout(viewportLayout);
 }
 
 export function DataTable<Row>(props: DataTableProps<Row>) {
-  const { renderer = 'auto', 'data-testid': testId, ...rendererProps } = props;
-  const mode = useDataTableRenderer(renderer);
-  const Renderer = mode === 'mobile' ? MOBILE_RENDERER : DesktopGridRenderer;
+  const {
+    renderer = 'auto',
+    mobileBreakpoint,
+    tabletBreakpoint,
+    'data-testid': testId,
+    ...rendererProps
+  } = props;
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const layout = useDataTableLayout(containerRef, renderer, {
+    mobile: mobileBreakpoint,
+    tablet: tabletBreakpoint,
+  });
+  const mode = rendererForLayout(layout);
 
   return (
     <Box
+      ref={containerRef}
       data-testid={testId ?? 'datatable'}
+      // `data-renderer` is which module drew this (two values); `data-layout`
+      // is which of the three layouts it drew. Both are test hooks and
+      // debugging aids.
       data-renderer={mode}
+      data-layout={layout}
       // The horizontal-containment contract starts here: no DataTable may ever
       // make the document body scroll sideways, at any viewport width.
       sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}
     >
-      <Renderer {...rendererProps} />
+      {mode === 'mobile' ? (
+        <MOBILE_RENDERER {...rendererProps} />
+      ) : (
+        <DesktopGridRenderer {...rendererProps} variant={layout === 'tablet' ? 'tablet' : 'desktop'} />
+      )}
     </Box>
   );
 }
