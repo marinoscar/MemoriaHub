@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, ApiError } from '../services/api';
-import { UserSettings } from '../types';
+import { UserSettings, UserSettingsUpdate } from '../types';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useIsMounted } from './useIsMounted';
 
@@ -9,7 +9,12 @@ interface UseUserSettingsReturn {
   isLoading: boolean;
   error: string | null;
   isSaving: boolean;
-  updateSettings: (updates: Partial<UserSettings>) => Promise<void>;
+  /**
+   * PATCH a subset of settings. Takes `UserSettingsUpdate` rather than
+   * `Partial<UserSettings>` so a `notifications.types` entry can be sent as
+   * `null` to DELETE the override (JSON Merge Patch) — see issue #251.
+   */
+  updateSettings: (updates: UserSettingsUpdate) => Promise<void>;
   updateTheme: (theme: 'light' | 'dark' | 'system') => Promise<void>;
   updateProfile: (profile: UserSettings['profile']) => Promise<void>;
   refresh: () => Promise<void>;
@@ -46,7 +51,7 @@ export function useUserSettings(): UseUserSettingsReturn {
   }, [fetchSettings]);
 
   const updateSettings = useCallback(
-    async (updates: Partial<UserSettings>) => {
+    async (updates: UserSettingsUpdate) => {
       if (!settings) return;
 
       try {
