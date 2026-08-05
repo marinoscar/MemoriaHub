@@ -173,6 +173,29 @@ export interface DataTableColumn<Row> {
   enumValues?: DataTableEnumValue[];
 
   /**
+   * A filter that has no cell. The column contributes to the filter surface
+   * (and to the URL helper's coercion) and to NOTHING else: it is never drawn
+   * as a grid column or a card field, never offered in the column picker, and
+   * never written to a CSV export.
+   *
+   * This exists because a real endpoint's query parameters are not always a
+   * subset of its response's columns. `GET /api/admin/jobs` accepts
+   * `processedWithin=4h|24h|7d|30d` — a window over `COALESCE(finishedAt,
+   * createdAt)` that is not any single field a row carries — and `scheduled`,
+   * a queue-slice flag. Both are first-class, documented filters; neither has a
+   * scalar worth printing once per row. Before this flag the only ways to
+   * express them were a bespoke control beside the table (which is what the
+   * shared filter bar exists to delete) or a decorative column whose cells say
+   * nothing (`4h`, on all 25 rows).
+   *
+   * `priority`, `align`, `truncate` and the sizing hints are ignored on a
+   * `filterOnly` column — declare `priority: 'detail'` and move on.
+   *
+   * Discovered by the #258 pilot migration; see docs/specs/datatable.md §18.1.
+   */
+  filterOnly?: boolean;
+
+  /**
    * Whether this column participates in the global quick search.
    *
    * Purely declarative: the search term is a single free-text value sent to the

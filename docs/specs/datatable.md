@@ -4,8 +4,9 @@
 (issue #253); filtering + quick search shipped (issue #254); column visibility,
 density and per-user layout persistence shipped (issue #255, §14–§15); row
 virtualization + CSV export shipped (issue #256, §16); accessibility contract,
-keyboard model and the shared conformance suite shipped (issue #257, §17) —
-all of epic #238
+keyboard model and the shared conformance suite shipped (issue #257, §17);
+pilot migration — Job Queue — shipped, adding `filterOnly` to the contract
+(issue #258, §18) — all of epic #238
 **Location:** `apps/web/src/components/datatable/`,
 `apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
 **Spec owner:** frontend
@@ -169,6 +170,7 @@ interface DataTableColumn<Row> {
   filterable?: boolean | FilterOperator[];
   filterType?: 'text' | 'number' | 'date' | 'enum' | 'boolean';
   enumValues?: { value: string; label: string }[];
+  filterOnly?: boolean;          // a filter with no cell — §18.1
   searchable?: boolean;
   exportable?: boolean;
   hideable?: boolean;
@@ -281,6 +283,18 @@ value for is the same dead affordance `sortable` refuses.
   ],
 }
 ```
+
+### `filterOnly`
+
+A filter that has no cell. The column feeds the filter surface and **nothing
+else** — it is never drawn as a grid column or a card field, never offered in
+the column picker, and never written to a CSV export. `priority` (still
+required), `align`, `truncate` and the sizing hints are ignored.
+
+This exists because an endpoint's query parameters are not always a subset of
+its response's fields: `GET /api/admin/jobs` accepts `processedWithin`, a window
+over `COALESCE(finishedAt, createdAt)` that is no single field a row carries.
+Full rationale, and the one-seam implementation, in §18.1.
 
 ### `searchable`
 
@@ -1242,12 +1256,16 @@ MUI selects are driven through `getByRole('combobox', { name })` +
 ## 13. Migration path
 
 The foundation is additive — no existing table changed in #252. Tables migrate
-one at a time, roughly in ascending order of weirdness:
+one at a time.
+
+The **pilot is `JobsPage`** (#258, §18) — deliberately not the easiest table but
+the worst-affected one, so the contract met its hardest case before fifteen
+pages depended on it. It found one real gap (`filterOnly`, §18.1) and produced
+three rules every later migration should follow (§18.2–§18.4). The rest follow:
 
 1. `AllowlistTable` — plain columns, pagination, one row action.
 2. `UserList` — adds rich cells (avatar, role chips) and a multi-action menu.
-3. `JobsPage` — adds server sorting, selection, bulk retry, `detail` columns.
-4. The storage-migration, shares, and node tables.
+3. The storage-migration, shares, and node tables.
 
 Each migration should delete the hand-rolled `Table`/`TablePagination`/`Menu`
 block wholesale rather than wrapping it, and should declare `value` on every
@@ -2183,3 +2201,159 @@ this suite in fact renders against MUI's zero-config default theme, not the
 app's real palette. `runDataTableConformanceSuite`'s `renderWithTheme` wraps
 directly with `<ThemeProvider theme={lightTheme|darkTheme}><CssBaseline/>…`
 instead, since the both-themes checks need the REAL palette to mean anything.
+
+---
+
+## 18. The pilot migration — Job Queue (#258)
+
+`JobsPage` (`/admin/settings/jobs`) is the first table migrated onto this
+component, and it was chosen because it was the worst-affected one: 13 columns,
+four bespoke fixed-width filter controls, a five-second auto-refresh poll, and
+a `lastError` column carrying multi-line stack traces. Everything below is what
+the migration actually found. §18.1 is a contract change; the rest are rules a
+migrating page follows.
+
+**Files:** `apps/web/src/pages/Admin/JobsPage.tsx` (the page) and
+`apps/web/src/pages/Admin/jobsTable.tsx` (the column set + the pure
+model → query-param mapping, split out so both halves are directly testable).
+`tableId` is `admin-jobs`.
+
+### 18.1 `filterOnly` — the contract gap the pilot exposed
+
+**The gap.** The filter model is column-scoped: `DataTableFilter.columnId` names
+a declared column, and `filterableColumns(columns)` is what the editor lists. So
+a filter can only exist if a *column* exists. That silently assumes a table's
+query parameters are a subset of its response's fields — and for this endpoint
+two of the four are not:
+
+| Param | Why it has no column |
+| ----- | -------------------- |
+| `processedWithin` (`4h`/`24h`/`7d`/`30d`) | A window over `COALESCE(finishedAt, createdAt)`. It is not `createdAt`, not `finishedAt`, and not a range over either — `filterType: 'date'`'s `before`/`after`/`between` would compile to a query the endpoint cannot answer. |
+| `scheduled=true` | A queue-slice flag ("pending jobs currently in retry backoff"), not a field. |
+
+Neither has a scalar worth printing once per row: a "Processed within" cell
+would read `4h` on all 25 rows.
+
+Before the flag there were only two ways out, and the pilot rejected both. Keep
+a bespoke control beside the table — which is precisely the thing the shared
+filter bar exists to delete, and would have left this page with two filter
+surfaces. Or declare a decorative column and hide it in the picker — which
+spends a `visibleColumns` slot, a CSV column and a card field on a cell that
+says nothing, and puts a checkbox in the picker for a column no user asked for.
+
+**The resolution.** `DataTableColumn.filterOnly?: boolean` — the column feeds
+the filter surface (and the URL helper's type coercion) and nothing else.
+
+```ts
+{
+  id: 'processedWithin',
+  label: 'Processed within',
+  priority: 'detail',          // required by the type; ignored when filterOnly
+  filterOnly: true,
+  filterable: ['is'],
+  filterType: 'enum',
+  enumValues: [
+    { value: '4h',  label: 'Last 4 hours' },
+    { value: '24h', label: 'Last 24 hours' },
+    /* … */
+  ],
+}
+```
+
+The whole implementation is one split at one seam. `DataTable` computes
+`drawableColumns(columns)` once and hands the **full** list to
+`DataTableFilterBar` and the **drawable** list to `DataTableViewBar`,
+`DataTableExportControl`, `useDataTableLayoutPrefs` and both renderers. No
+renderer, adapter, picker or exporter learned a new field —
+`drawableColumns` returns its input array unchanged when nothing opts out, so
+the identity every downstream `useMemo` keys on is preserved for every other
+table in the app.
+
+`priority`, `align`, `truncate` and the sizing hints are ignored on a
+`filterOnly` column. `priority` stays required rather than becoming optional:
+making it nullable would push an `undefined` check into every consumer that
+reads it, to save one line in the two declarations that need it.
+
+**This generalizes.** Almost every remaining table in epic #238 has at least one
+query-shaped filter that is not a column: the shares admin page's
+`scope=mine|all`, `GET /api/media`'s `noFaces` / `missingCapturedAt` /
+`missingCamera` booleans, the workflow-runs `windowDays`. They now all have a
+home.
+
+### 18.2 Mutually exclusive filters are the page's job, and that is correct
+
+`scheduled=true` **forces `status=pending`** server-side, so "failed AND backing
+off" is not a query the endpoint can answer. The normalized model is a flat,
+AND-ed list with no notion of exclusion — and it should stay that way: exclusion
+is an endpoint fact, not a table fact, and encoding it in the column contract
+would mean teaching the component a per-endpoint constraint language.
+
+The page reconciles instead, in `onFiltersChange`
+(`normalizeJobFilters` in `jobsTable.tsx`): last-wins per column, and last-wins
+per *exclusive group*, where `status` and `backingOff` share one group. This
+works — and is the recommended pattern for the remaining migrations — because
+of two existing properties of the contract:
+
+- `onFiltersChange` receives the **whole next model**, never a delta (§10.2), so
+  a page can rewrite it wholesale rather than reasoning about what changed;
+- `filters` is **controlled** (§5.4), so the normalized model is what the chip
+  strip renders. The superseded filter's chip visibly disappears instead of
+  lingering as a chip with no effect on the query — which is exactly what the
+  old page's two controls did to each other by hand.
+
+`toJobQuery` then re-applies the invariant on the way out (a `scheduled` query
+never carries a `status`), so a model that arrived some other way — a
+hand-edited URL, a future caller — cannot produce a contradictory request.
+
+### 18.3 Pin the operators to what the endpoint can answer
+
+The `enum` default set is `is` / `isNot` / `isAnyOf`. `GET /api/admin/jobs`
+takes a single `status=` and a single `type=`; it can express neither of the
+other two. Every filterable column here therefore declares
+`filterable: ['is']`.
+
+The same reasoning made `scheduled` a **single-option enum** rather than
+`filterType: 'boolean'`: the boolean editor offers Yes/No, and "No" has no
+server semantics (there is no `scheduled=false`). One expressible state, one
+option — rather than a control that looks live and, half the time, does nothing.
+
+And nothing on this table is `sortable`: the endpoint accepts no `sortBy`, so
+the page passes no `sort` config at all. This is the `sortable`-defaults-to-false
+rule (§4) doing its job on a real table.
+
+### 18.4 Surviving the five-second poll
+
+The issue named this the single most likely regression, and it is worth stating
+as a rule for every migration, because the failure is silent and easy to
+reintroduce:
+
+**Render the table unconditionally and pass `loading` as a prop.** The old page
+did `{!jobsLoading && <TableContainer>…}`. Under a 5s poll that remounts the
+renderer twelve times a minute, and a renderer's own state — which rows/cards
+are expanded (§7.4) — dies with it, along with the page's scroll offset. The
+`loading` overlay exists precisely so a refetch does not blank the table.
+
+Two page-level rules complete it:
+
+- **Every piece of user state lives above the table** — selection, the filter
+  model and pagination are all page state, so a poll replacing `rows` cannot
+  touch them. Selection is additionally pruned to ids still present, with a
+  same-reference early return so a poll that changes nothing does not re-render.
+- **Memoize `columns` on the data it derives from, not on the response.** The
+  Type filter's `enumValues` come from `stats.byType`, and `stats` is a fresh
+  object every poll. Keying the `useMemo` on the job-type *set* (a joined
+  string) instead of on `stats` keeps the column array stable across ticks.
+
+`__tests__/pages/JobsPage.test.tsx` asserts all three at once: apply a filter,
+select a row, expand a row, then re-render with brand-new job objects carrying
+the same ids — the chip, the checked checkbox and the expanded row all survive.
+
+### 18.5 What a migrating page should NOT test
+
+Table mechanics are a property of the component, so `JobsPage.test.tsx` tests
+none of them — no pagination round-trip, no select-all, no CSV escaping, no
+column picker, no axe pass. Those are `runDataTableConformanceSuite`'s, and
+re-running the full battery per page would multiply the suite's runtime by 16
+for no new signal (§17.8). The page tests only what the migration could break:
+its own filter mapping, its mutations, the poll contract above, and permission
+gating.

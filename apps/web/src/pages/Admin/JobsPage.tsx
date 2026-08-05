@@ -1,4 +1,46 @@
-import { useState } from 'react';
+/**
+ * Admin → Job Queue (`/admin/settings/jobs`).
+ *
+ * Migrated onto the shared DataTable in issue #258 (epic #238) — the pilot
+ * migration. What that replaced, and why it mattered here first:
+ *
+ *   - a hand-rolled 13-column `<Table>` that could only be read by scrolling
+ *     the document sideways on anything narrower than a laptop;
+ *   - four bespoke fixed-width filter controls (`minWidth: 160/200/160` plus a
+ *     switch) that overflowed the row well before a phone;
+ *   - a `TablePagination` footer with ~420px of intrinsic width;
+ *   - a `Menu` + confirm dialog reimplemented per page.
+ *
+ * All four are now the component's, from one `DataTableColumn[]`
+ * (`./jobsTable.tsx`). The page keeps only what is genuinely its own: the stats
+ * strip, the queue-wide operations, and the mapping from the normalized filter
+ * model onto this endpoint's params.
+ *
+ * ## The auto-refresh contract (the regression this migration had to not cause)
+ *
+ * `useJobs` polls every 5 seconds. A poll must not disturb selection, an
+ * expanded card / expanded tablet row, scroll position, or the filter state.
+ * Three things make that true, and all three are easy to lose:
+ *
+ * 1. **The table is rendered unconditionally.** The old code swapped the whole
+ *    `<TableContainer>` for a spinner while loading; doing that here would
+ *    unmount the renderer on every fetch and take its expansion state and the
+ *    page's scroll offset with it. `loading` is a prop — the overlay draws over
+ *    rows that stay mounted.
+ * 2. **Every piece of user state lives above the table.** Selection, the filter
+ *    model and pagination are page state; the poll only ever replaces `jobs`.
+ * 3. **`columns` is memoized on the job-type SET, not on `stats`.** `stats` is
+ *    a fresh object every poll, so a naive dependency would rebuild the column
+ *    array (and the Type filter's `enumValues`) 12 times a minute.
+ *
+ * ## What is deliberately absent
+ *
+ * No `sort` config: `GET /api/admin/jobs` accepts no sort param, and a sortable
+ * header the server cannot honour is the affordance the contract refuses. No
+ * `quickSearch`: the endpoint has no free-text param either.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
@@ -8,33 +50,13 @@ import {
   Chip,
   Stack,
   Button,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   CircularProgress,
   Alert,
   Snackbar,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TablePagination,
   Tooltip,
-  IconButton,
   FormControlLabel,
   Switch,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogContentText,
-  DialogActions,
   Badge,
-  Menu,
-  ListItemIcon,
-  ListItemText,
   Link,
 } from '@mui/material';
 import {
@@ -43,7 +65,6 @@ import {
   Replay as RetryIcon,
   Delete as DeleteIcon,
   Warning as WarningIcon,
-  MoreVert as MoreVertIcon,
   Download as DownloadIcon,
   Schedule as ScheduleIcon,
   QueryStats as QueryStatsIcon,
@@ -51,99 +72,28 @@ import {
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
-import type { EnrichmentJobDto, JobStatus, JobProcessedWindow } from '../../services/jobs';
+import { listJobs } from '../../services/jobs';
+import type { EnrichmentJobDto } from '../../services/jobs';
+import {
+  DataTable,
+  type DataTableBulkAction,
+  type DataTableFilterModel,
+  type DataTableRowAction,
+} from '../../components/datatable';
+import {
+  JOB_TABLE_ID,
+  buildJobColumns,
+  downloadJobJson,
+  normalizeJobFilters,
+  shortId,
+  toJobQuery,
+} from './jobsTable';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const DEFAULT_PAGE_SIZE = 20;
 
-const STATUS_COLORS: Record<JobStatus, 'default' | 'info' | 'success' | 'error' | 'warning'> = {
-  pending: 'default',
-  running: 'info',
-  succeeded: 'success',
-  failed: 'error',
-};
-
-function StatusChip({ status }: { status: JobStatus }) {
-  return (
-    <Chip
-      label={status}
-      color={STATUS_COLORS[status] ?? 'default'}
-      size="small"
-      variant="outlined"
-    />
-  );
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString();
-}
-
-function shortId(id: string | null | undefined): string {
-  return id ? id.slice(0, 8) : '—';
-}
-
-/** Returns true when a pending job is actively backing off (scheduledFor is in the future). */
-function isBackingOff(job: EnrichmentJobDto): boolean {
-  return (
-    job.status === 'pending' &&
-    job.scheduledFor != null &&
-    new Date(job.scheduledFor) > new Date()
-  );
-}
-
-/** Human-readable relative time label, e.g. "in 2 min" or "in 45 sec". */
-function relativeTime(iso: string): string {
-  const diffMs = new Date(iso).getTime() - Date.now();
-  if (diffMs <= 0) return 'soon';
-  const secs = Math.round(diffMs / 1000);
-  if (secs < 60) return `in ${secs}s`;
-  const mins = Math.round(secs / 60);
-  return `in ${mins}m`;
-}
-
-function downloadJobJson(job: EnrichmentJobDto): void {
-  const blob = new Blob([JSON.stringify(job, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `enrichment-job-${job.id}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-// ---------------------------------------------------------------------------
-// Confirm delete dialog
-// ---------------------------------------------------------------------------
-
-interface ConfirmDeleteDialogProps {
-  open: boolean;
-  jobId: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-function ConfirmDeleteDialog({ open, jobId, onConfirm, onCancel }: ConfirmDeleteDialogProps) {
-  return (
-    <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth>
-      <DialogTitle>Delete job?</DialogTitle>
-      <DialogContent>
-        <DialogContentText>
-          Job <strong>{shortId(jobId)}&hellip;</strong> will be permanently removed. This cannot be
-          undone.
-        </DialogContentText>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button onClick={onConfirm} color="error" variant="contained">
-          Delete
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+/** Only a settled job can be reset to pending. */
+function isRetryable(job: EnrichmentJobDto | undefined): boolean {
+  return job?.status === 'failed' || job?.status === 'succeeded';
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +110,7 @@ function JobsPageContent() {
     statsError,
     jobsError,
     mutating,
-    filters,
+    filters: jobQuery,
     setFilters,
     autoRefresh,
     setAutoRefresh,
@@ -174,77 +124,81 @@ function JobsPageContent() {
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [deleteDialog, setDeleteDialog] = useState<string | null>(null); // job id or null
-  const [menuState, setMenuState] = useState<{ anchorEl: HTMLElement; job: EnrichmentJobDto } | null>(null);
 
-  // Filter state (controlled locally, applied to hook via setFilters)
-  const [statusFilter, setStatusFilter] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<string>('');
-  const [scheduledFilter, setScheduledFilter] = useState<boolean>(false);
-  const [processedFilter, setProcessedFilter] = useState<JobProcessedWindow>('all');
+  // --- Controlled table state (all of it lives HERE, above the table) --------
 
-  const applyFilters = (
-    newStatus: string,
-    newType: string,
-    newScheduled: boolean,
-    page = 1,
-    processed: JobProcessedWindow = processedFilter,
-  ) => {
-    setFilters({
-      // When scheduled=true the API forces status=pending; don't also send status
-      status: newScheduled ? undefined : ((newStatus as JobStatus) || undefined),
-      type: newType || undefined,
-      scheduled: newScheduled || undefined,
-      processedWithin: processed === 'all' ? undefined : processed,
-      page,
-      pageSize: filters.pageSize ?? 20,
+  const [filterModel, setFilterModel] = useState<DataTableFilterModel>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+
+  const page = (jobQuery.page ?? 1) - 1; // the API is 1-based, the table 0-based
+  const pageSize = jobQuery.pageSize ?? DEFAULT_PAGE_SIZE;
+
+  const applyQuery = useCallback(
+    (model: DataTableFilterModel, nextPage: number, nextPageSize: number) => {
+      setFilters({ ...toJobQuery(model), page: nextPage, pageSize: nextPageSize });
+    },
+    [setFilters],
+  );
+
+  const handleFiltersChange = useCallback(
+    (next: DataTableFilterModel) => {
+      const normalized = normalizeJobFilters(next);
+      setFilterModel(normalized);
+      // A new filter invalidates the current offset.
+      applyQuery(normalized, 1, pageSize);
+    },
+    [applyQuery, pageSize],
+  );
+
+  const handlePaginationChange = useCallback(
+    ({ page: nextPage, pageSize: nextPageSize }: { page: number; pageSize: number }) => {
+      applyQuery(filterModel, nextPage + 1, nextPageSize);
+    },
+    [applyQuery, filterModel],
+  );
+
+  // A poll can retire a job that is currently selected. Drop ids that no longer
+  // exist — and ONLY those: the same-reference early return means a poll that
+  // changes nothing does not re-render, which is what keeps a selection alive
+  // across ticks rather than merely looking like it does.
+  useEffect(() => {
+    setSelectedIds((current) => {
+      if (current.size === 0) return current;
+      const live = new Set(jobs.map((job) => job.id));
+      let dropped = false;
+      const next = new Set<string>();
+      for (const id of current) {
+        if (live.has(id)) next.add(id);
+        else dropped = true;
+      }
+      return dropped ? next : current;
     });
-  };
+  }, [jobs]);
 
-  const handleStatusChange = (value: string) => {
-    // Switching the status dropdown clears the scheduled toggle
-    setStatusFilter(value);
-    setScheduledFilter(false);
-    applyFilters(value, typeFilter, false, 1, processedFilter);
-  };
+  // --- Columns ---------------------------------------------------------------
 
-  const handleTypeChange = (value: string) => {
-    setTypeFilter(value);
-    applyFilters(statusFilter, value, scheduledFilter, 1, processedFilter);
-  };
+  // Keyed on the job-type SET rather than on `stats`, which is a new object on
+  // every 5s poll — see the module docblock.
+  const typeOptionsKey = useMemo(
+    () =>
+      (stats?.byType ?? [])
+        .map((entry) => entry.type)
+        .sort()
+        .join(','),
+    [stats],
+  );
+  const columns = useMemo(
+    () => buildJobColumns(typeOptionsKey === '' ? [] : typeOptionsKey.split(',')),
+    [typeOptionsKey],
+  );
 
-  const handleScheduledToggle = (checked: boolean) => {
-    setScheduledFilter(checked);
-    // When activating scheduled filter, clear the status dropdown (API will lock to pending)
-    if (checked) setStatusFilter('');
-    applyFilters(checked ? '' : statusFilter, typeFilter, checked, 1, processedFilter);
-  };
+  // --- Queue-wide operations -------------------------------------------------
 
-  const handleProcessedChange = (value: JobProcessedWindow) => {
-    setProcessedFilter(value);
-    applyFilters(statusFilter, typeFilter, scheduledFilter, 1, value);
-  };
+  const activeTypeFilter = toJobQuery(filterModel).type;
 
-  const handlePageChange = (_: unknown, newPage: number) => {
-    applyFilters(statusFilter, typeFilter, scheduledFilter, newPage + 1, processedFilter); // MUI is 0-based
-  };
-
-  const handleRowsPerPageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilters({
-      ...filters,
-      // When scheduled filter is active, don't send a conflicting status
-      status: scheduledFilter ? undefined : filters.status,
-      scheduled: scheduledFilter || undefined,
-      processedWithin: processedFilter === 'all' ? undefined : processedFilter,
-      pageSize: Number(e.target.value),
-      page: 1,
-    });
-  };
-
-  // Bulk actions
   const handleRetryAllFailed = async () => {
     try {
-      const result = await retryAllFailed(typeFilter || undefined);
+      const result = await retryAllFailed(activeTypeFilter);
       setSuccessMessage(`${result.retried} job(s) reset to pending`);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to retry failed jobs');
@@ -269,29 +223,127 @@ function JobsPageContent() {
     }
   };
 
-  // Per-row actions
-  const handleRetryJob = async (job: EnrichmentJobDto) => {
-    try {
-      await retryJob(job.id);
-      setSuccessMessage(`Job ${shortId(job.id)}… reset to pending`);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to retry job');
-    }
-  };
+  // --- Row + bulk actions ----------------------------------------------------
 
-  const handleDeleteJob = async () => {
-    if (!deleteDialog) return;
-    const id = deleteDialog;
-    setDeleteDialog(null);
-    try {
-      await deleteJob(id);
-      setSuccessMessage(`Job ${shortId(id)}… deleted`);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to delete job');
-    }
-  };
+  const handleRetryJob = useCallback(
+    async (job: EnrichmentJobDto) => {
+      try {
+        await retryJob(job.id);
+        setSuccessMessage(`Job ${shortId(job.id)}… reset to pending`);
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to retry job');
+      }
+    },
+    [retryJob],
+  );
 
-  const typeOptions = stats?.byType.map((bt) => bt.type) ?? [];
+  const handleDeleteJob = useCallback(
+    async (job: EnrichmentJobDto) => {
+      try {
+        await deleteJob(job.id);
+        setSuccessMessage(`Job ${shortId(job.id)}… deleted`);
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to delete job');
+      }
+    },
+    [deleteJob],
+  );
+
+  const jobsById = useMemo(
+    () => new Map(jobs.map((job) => [job.id, job])),
+    [jobs],
+  );
+
+  const handleRetrySelected = useCallback(
+    async (ids: string[]) => {
+      const targets = ids.filter((id) => isRetryable(jobsById.get(id)));
+      if (targets.length === 0) {
+        setErrorMessage('None of the selected jobs can be re-run (only failed or succeeded jobs can).');
+        return;
+      }
+      try {
+        // Sequential: the queue is the thing being repaired, and N parallel
+        // retries against a struggling worker is not a kindness.
+        for (const id of targets) await retryJob(id);
+        setSuccessMessage(`${targets.length} job(s) reset to pending`);
+        setSelectedIds(new Set());
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to re-run selected jobs');
+      }
+    },
+    [jobsById, retryJob],
+  );
+
+  const rowActions = useMemo<DataTableRowAction<EnrichmentJobDto>[]>(
+    () => [
+      {
+        id: 'download',
+        label: 'Download JSON',
+        icon: <DownloadIcon fontSize="small" />,
+        onClick: downloadJobJson,
+      },
+      {
+        id: 'retry',
+        label: 'Re-run',
+        icon: <RetryIcon fontSize="small" color="primary" />,
+        disabled: (job) => mutating || !isRetryable(job),
+        onClick: (job) => void handleRetryJob(job),
+      },
+      {
+        id: 'delete',
+        label: 'Delete',
+        icon: <DeleteIcon fontSize="small" />,
+        destructive: true,
+        disabled: (job) => mutating || job.status === 'running',
+        confirm: {
+          title: 'Delete job?',
+          description: (job) =>
+            `Job ${shortId(job.id)}… will be permanently removed. This cannot be undone.`,
+          confirmLabel: 'Delete',
+        },
+        onClick: (job) => void handleDeleteJob(job),
+      },
+    ],
+    [mutating, handleRetryJob, handleDeleteJob],
+  );
+
+  const bulkActions = useMemo<DataTableBulkAction[]>(
+    () => [
+      {
+        id: 'retry-selected',
+        label: 'Re-run selected',
+        icon: <RetryIcon fontSize="small" />,
+        disabled: (ids) => mutating || !ids.some((id) => isRetryable(jobsById.get(id))),
+        onClick: (ids) => void handleRetrySelected(ids),
+      },
+    ],
+    [mutating, jobsById, handleRetrySelected],
+  );
+
+  // --- Export ----------------------------------------------------------------
+
+  // "All matching rows" replays THIS page's own query, so the CSV can only ever
+  // contain what the operator's own list request already returns (§16.6).
+  const csvExport = useMemo(
+    () => ({
+      filename: 'enrichment-jobs',
+      fetchAllRows: async ({
+        page: exportPage,
+        pageSize: exportPageSize,
+      }: {
+        page: number;
+        pageSize: number;
+      }) => {
+        const response = await listJobs({
+          ...toJobQuery(filterModel),
+          page: exportPage + 1,
+          pageSize: exportPageSize,
+        });
+        return response.items;
+      },
+    }),
+    [filterModel],
+  );
 
   return (
     <Container maxWidth="xl">
@@ -318,7 +370,7 @@ function JobsPageContent() {
             mb: 1,
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
             <WorkHistoryIcon color="primary" />
             <Typography variant="h4" component="h1">
               Job Queue
@@ -427,7 +479,10 @@ function JobsPageContent() {
           </Box>
         )}
 
-        {/* Bulk action bar */}
+        {/* Queue-wide operations. These are NOT selection-scoped — they act on
+            the whole queue — so they stay page chrome rather than becoming
+            DataTable bulk actions (which are, by contract, about the current
+            selection). */}
         <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
@@ -440,7 +495,7 @@ function JobsPageContent() {
               disabled={mutating || !stats || stats.byStatus.failed === 0}
               onClick={() => void handleRetryAllFailed()}
             >
-              Retry all failed{typeFilter ? ` (${typeFilter})` : ''}
+              Retry all failed{activeTypeFilter ? ` (${activeTypeFilter})` : ''}
             </Button>
 
             <Button
@@ -485,350 +540,36 @@ function JobsPageContent() {
           </Stack>
         </Paper>
 
-        {/* Filters */}
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel>Status</InputLabel>
-            <Select
-              label="Status"
-              value={statusFilter}
-              onChange={(e) => handleStatusChange(e.target.value)}
-            >
-              <MenuItem value="">All</MenuItem>
-              <MenuItem value="pending">Pending</MenuItem>
-              <MenuItem value="running">Running</MenuItem>
-              <MenuItem value="succeeded">Succeeded</MenuItem>
-              <MenuItem value="failed">Failed</MenuItem>
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Type</InputLabel>
-            <Select
-              label="Type"
-              value={typeFilter}
-              onChange={(e) => handleTypeChange(e.target.value)}
-            >
-              <MenuItem value="">All types</MenuItem>
-              {typeOptions.map((t) => (
-                <MenuItem key={t} value={t}>
-                  {t}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel>Processed</InputLabel>
-            <Select
-              label="Processed"
-              value={processedFilter}
-              onChange={(e) => handleProcessedChange(e.target.value as JobProcessedWindow)}
-            >
-              <MenuItem value="all">All time</MenuItem>
-              <MenuItem value="4h">Last 4 hours</MenuItem>
-              <MenuItem value="24h">Last 24 hours</MenuItem>
-              <MenuItem value="7d">Last 7 days</MenuItem>
-              <MenuItem value="30d">Last 30 days</MenuItem>
-            </Select>
-          </FormControl>
-
-          <Tooltip title="Show only pending jobs currently waiting on backoff (rate-limited retry delay)" arrow>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={scheduledFilter}
-                  onChange={(e) => handleScheduledToggle(e.target.checked)}
-                  size="small"
-                  color="info"
-                />
-              }
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <ScheduleIcon fontSize="small" color={scheduledFilter ? 'info' : 'disabled'} />
-                  <Typography variant="body2" color={scheduledFilter ? 'info.main' : 'text.secondary'}>
-                    Backing off
-                  </Typography>
-                </Box>
-              }
-              sx={{ ml: 0.5 }}
-            />
-          </Tooltip>
-        </Stack>
-
-        {/* Jobs error */}
-        {jobsError && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {jobsError}
-          </Alert>
-        )}
-
-        {/* Jobs table */}
-        <Paper variant="outlined">
-          {jobsLoading && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-              <CircularProgress size={28} />
-            </Box>
-          )}
-
-          {!jobsLoading && (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Type</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Reason</TableCell>
-                    <TableCell>Node</TableCell>
-                    <TableCell>Model</TableCell>
-                    <TableCell align="center">Priority</TableCell>
-                    <TableCell align="center">Attempts</TableCell>
-                    <TableCell>Last Error</TableCell>
-                    <TableCell>Media Item</TableCell>
-                    <TableCell>Created</TableCell>
-                    <TableCell>Started</TableCell>
-                    <TableCell>Finished</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {jobs.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={13} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                        No jobs found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    jobs.map((job) => (
-                      <TableRow key={job.id} hover>
-                        <TableCell>
-                          <Typography variant="body2" noWrap sx={{ maxWidth: 160 }}>
-                            {job.type}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, alignItems: 'flex-start' }}>
-                            <StatusChip status={job.status} />
-                            {isBackingOff(job) && (
-                              <Tooltip
-                                title={`Retries ${relativeTime(job.scheduledFor!)}${job.rateLimitHits > 0 ? ` · ${job.rateLimitHits} rate-limit hit${job.rateLimitHits !== 1 ? 's' : ''}` : ''}`}
-                                arrow
-                              >
-                                <Chip
-                                  icon={<ScheduleIcon />}
-                                  label="backing off"
-                                  color="info"
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ cursor: 'help' }}
-                                />
-                              </Tooltip>
-                            )}
-                          </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary">
-                            {job.reason}
-                          </Typography>
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 160 }}>
-                          {job.executor === 'node' && job.claimedByNode ? (
-                            <Tooltip title={`Node ${job.claimedByNode.id}`} arrow>
-                              <Box sx={{ cursor: 'help' }}>
-                                <Typography variant="body2" noWrap>
-                                  {job.claimedByNode.name}
-                                </Typography>
-                                <Typography
-                                  variant="caption"
-                                  sx={{ color: 'text.secondary', display: 'block' }}
-                                  noWrap
-                                >
-                                  {job.claimedByNode.hostname}
-                                </Typography>
-                              </Box>
-                            </Tooltip>
-                          ) : job.executor === 'server' ? (
-                            <Typography variant="body2" color="text.secondary">
-                              server
-                            </Typography>
-                          ) : (
-                            <Typography variant="body2" color="text.disabled">
-                              —
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 180 }}>
-                          {job.modelVersion ? (
-                            <>
-                              <Typography variant="body2" noWrap>
-                                {job.modelVersion}
-                              </Typography>
-                              {job.providerKey && (
-                                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }} noWrap>
-                                  {job.providerKey}
-                                </Typography>
-                              )}
-                            </>
-                          ) : (
-                            <Typography variant="body2" color="text.disabled">
-                              —
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2">{job.priority}</Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2">{job.attempts}</Typography>
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 200 }}>
-                          {job.lastError ? (
-                            <Tooltip title={job.lastError} arrow>
-                              <Typography
-                                variant="body2"
-                                color="error.main"
-                                noWrap
-                                sx={{ cursor: 'help' }}
-                              >
-                                {job.lastError}
-                              </Typography>
-                            </Tooltip>
-                          ) : (
-                            <Typography variant="body2" color="text.disabled">
-                              —
-                            </Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {job.mediaItemId ? (
-                            <Tooltip title={job.mediaItemId} arrow>
-                              <Typography
-                                variant="body2"
-                                color="text.secondary"
-                                sx={{ fontFamily: 'monospace', cursor: 'help' }}
-                              >
-                                {shortId(job.mediaItemId)}&hellip;
-                              </Typography>
-                            </Tooltip>
-                          ) : (
-                            <Tooltip title="System job — not scoped to a media item" arrow>
-                              <Typography variant="body2" color="text.disabled" sx={{ cursor: 'help' }}>
-                                Global
-                              </Typography>
-                            </Tooltip>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {formatDate(job.createdAt)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {formatDate(job.startedAt)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {formatDate(job.finishedAt)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Tooltip title="Actions">
-                            <IconButton
-                              size="small"
-                              aria-label="Job actions"
-                              onClick={(e) => setMenuState({ anchorEl: e.currentTarget, job })}
-                            >
-                              <MoreVertIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-
-          <Menu
-            anchorEl={menuState?.anchorEl}
-            open={Boolean(menuState)}
-            onClose={() => setMenuState(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-          >
-            {/* Download JSON — always enabled */}
-            <MenuItem
-              onClick={() => {
-                if (menuState) downloadJobJson(menuState.job);
-                setMenuState(null);
-              }}
-            >
-              <ListItemIcon>
-                <DownloadIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Download JSON</ListItemText>
-            </MenuItem>
-
-            {/* Re-run — only for failed/succeeded; disabled while mutating */}
-            <MenuItem
-              disabled={
-                !menuState ||
-                !(menuState.job.status === 'failed' || menuState.job.status === 'succeeded') ||
-                mutating
-              }
-              onClick={() => {
-                if (menuState) void handleRetryJob(menuState.job);
-                setMenuState(null);
-              }}
-            >
-              <ListItemIcon>
-                <RetryIcon fontSize="small" color="primary" />
-              </ListItemIcon>
-              <ListItemText>Re-run</ListItemText>
-            </MenuItem>
-
-            {/* Delete — disabled for running; disabled while mutating */}
-            <MenuItem
-              disabled={!menuState || menuState.job.status === 'running' || mutating}
-              onClick={() => {
-                if (menuState) setDeleteDialog(menuState.job.id);
-                setMenuState(null);
-              }}
-              sx={{ color: 'error.main' }}
-            >
-              <ListItemIcon>
-                <DeleteIcon fontSize="small" sx={{ color: 'error.main' }} />
-              </ListItemIcon>
-              <ListItemText>Delete</ListItemText>
-            </MenuItem>
-          </Menu>
-
-          {meta && (
-            <TablePagination
-              component="div"
-              count={meta.totalItems}
-              page={(meta.page ?? 1) - 1} // MUI is 0-based
-              rowsPerPage={meta.pageSize ?? 20}
-              rowsPerPageOptions={[10, 20, 50, 100]}
-              onPageChange={handlePageChange}
-              onRowsPerPageChange={handleRowsPerPageChange}
-            />
-          )}
-        </Paper>
-      </Box>
-
-      {/* Confirm delete dialog */}
-      {deleteDialog && (
-        <ConfirmDeleteDialog
-          open
-          jobId={deleteDialog}
-          onConfirm={() => void handleDeleteJob()}
-          onCancel={() => setDeleteDialog(null)}
+        {/*
+          Rendered unconditionally, always. Gating this on `!jobsLoading` — as
+          the pre-#258 page did — remounts the renderer on every fetch and takes
+          expansion state and scroll position with it. See the module docblock.
+        */}
+        <DataTable<EnrichmentJobDto>
+          columns={columns}
+          rows={jobs}
+          rowId={(job) => job.id}
+          tableId={JOB_TABLE_ID}
+          ariaLabel="Enrichment jobs"
+          density="compact"
+          loading={jobsLoading}
+          error={jobsError}
+          emptyState={<span>No jobs found</span>}
+          pagination={{
+            page,
+            pageSize,
+            total: meta?.totalItems ?? jobs.length,
+            onPaginationChange: handlePaginationChange,
+            pageSizeOptions: [10, 20, 50, 100],
+          }}
+          filters={filterModel}
+          onFiltersChange={handleFiltersChange}
+          selection={{ selectedIds, onSelectionChange: setSelectedIds }}
+          rowActions={rowActions}
+          bulkActions={bulkActions}
+          csvExport={csvExport}
         />
-      )}
+      </Box>
 
       {/* Success snackbar */}
       <Snackbar

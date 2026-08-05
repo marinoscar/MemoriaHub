@@ -46,6 +46,16 @@
  * desktop download byte-identical files, and the control's SHAPE (a button, or
  * an overflow menu at 360px) is the only thing the layout decides.
  *
+ * ## `filterOnly` columns (#258)
+ *
+ * This is also the ONE seam where the filter surface and everything else see a
+ * different column list. A `filterOnly` column is a query parameter with no
+ * cell — `processedWithin` on the job queue is a window over
+ * `COALESCE(finishedAt, createdAt)`, not a field — so the filter bar gets the
+ * full declaration while the view bar, the export control, the layout-prefs
+ * hook and both renderers get the drawable subset. Splitting here rather than
+ * in five consumers is what keeps `filterOnly` a one-line contract addition.
+ *
  * ## Layout persistence
  *
  * Supplying `tableId` stores the resolved layout under
@@ -55,9 +65,10 @@
  * is on screen. See `layout/useDataTableLayoutPrefs.ts`.
  */
 
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { Box } from '@mui/material';
 import type {
+  DataTableColumn,
   DataTableFilterModel,
   DataTableLayout,
   DataTableProps,
@@ -74,6 +85,21 @@ import { useDataTableLayout, useViewportLayout } from './useContainerLayout';
 
 /** Stable identity so an unfiltered table never re-renders the bar needlessly. */
 const NO_FILTERS: DataTableFilterModel = [];
+
+/**
+ * The columns that are actually DRAWN — everything except `filterOnly` ones.
+ *
+ * Returns the input array unchanged when no column opts out, so the common case
+ * costs one `some()` and keeps its referential identity (a fresh array here
+ * would invalidate every downstream `useMemo` keyed on `columns`).
+ */
+export function drawableColumns<Row>(
+  columns: DataTableColumn<Row>[],
+): DataTableColumn<Row>[] {
+  return columns.some((column) => column.filterOnly)
+    ? columns.filter((column) => !column.filterOnly)
+    : columns;
+}
 
 /**
  * The card-list registration. This is the seam #252 left behind; it now points
@@ -124,9 +150,13 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   });
   const mode = rendererForLayout(layout);
 
+  // The filter bar sees every declared column; everything that paints, picks or
+  // exports a column sees only the drawable ones (#258).
+  const painted = useMemo(() => drawableColumns(props.columns), [props.columns]);
+
   const prefs = useDataTableLayoutPrefs({
     tableId,
-    columns: props.columns,
+    columns: painted,
     layout,
     densityProp,
     sort: props.sort,
@@ -150,7 +180,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}
     >
       <DataTableViewBar
-        columns={props.columns}
+        columns={painted}
         layout={layout}
         visibleColumnIds={prefs.userVisibleColumnIds}
         density={prefs.density}
@@ -161,7 +191,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
           disableExport ? undefined : (
             <DataTableExportControl
               layout={layout}
-              columns={props.columns}
+              columns={painted}
               rows={props.rows}
               // The USER's choice, not the layout's fold: a `detail` column the
               // tablet tucks into its row expander is still on screen, so a CSV
@@ -187,12 +217,14 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       {mode === 'mobile' ? (
         <MOBILE_RENDERER
           {...rendererProps}
+          columns={painted}
           density={prefs.density}
           visibleColumnIds={prefs.userVisibleColumnIds}
         />
       ) : (
         <DesktopGridRenderer
           {...rendererProps}
+          columns={painted}
           density={prefs.density}
           visibleColumnIds={prefs.userVisibleColumnIds}
           variant={layout === 'tablet' ? 'tablet' : 'desktop'}
