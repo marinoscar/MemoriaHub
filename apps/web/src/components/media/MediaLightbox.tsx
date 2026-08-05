@@ -722,11 +722,15 @@ export function MediaLightbox({
             {item.type === 'video' ? (
               /* Video branch: show spinner while downloading URL, then VideoPlayer */
               downloadUrl ? (
-                <Box sx={{ width: '100%', backgroundColor: 'black' }}>
+                /* `fill` lets a portrait clip use the full viewer height
+                   instead of being pillarboxed inside a short 16:9 box; it
+                   needs a definite height on this wrapper to resolve. */
+                <Box sx={{ width: '100%', height: '100%', backgroundColor: 'black' }}>
                   <VideoPlayer
                     src={downloadUrl}
                     poster={thumbnailUrl}
                     title={item.originalFilename}
+                    fill
                   />
                 </Box>
               ) : (
