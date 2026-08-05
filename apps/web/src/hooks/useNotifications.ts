@@ -97,12 +97,42 @@ function errorMessage(err: unknown, fallback: string): string {
 
 // --- network ---------------------------------------------------------------
 
+/**
+ * Refetch the badge count *for its own sake* (mount, poll tick, focus, explicit
+ * `refreshCount`, and the success path of a mutation).
+ *
+ * A success here clears `error`, because a working read is genuine evidence the
+ * previously-reported problem is over.
+ */
 async function fetchCount(): Promise<void> {
   try {
     const count = await getUnreadCount();
     setState({ unreadCount: count, error: null });
   } catch (err) {
     setState({ error: errorMessage(err, 'Failed to load notifications') });
+  }
+}
+
+/**
+ * Refetch the badge count purely to RECONCILE it, leaving `error` untouched.
+ *
+ * Used by `rollback()` only. The difference from `fetchCount` is the whole
+ * point: after a failed mutation the store has just set an error the user still
+ * needs to see, and a successful count read says nothing about whether the
+ * *write* that failed would now succeed — so clearing the error here would
+ * revert the badge correctly while silently swallowing the reason (the panel's
+ * error `Alert` would flash, or more likely never render at all).
+ *
+ * A failure is swallowed rather than overwriting `error`: the mutation failure
+ * is the more actionable message of the two, and a persistent outage will be
+ * reported by the next ordinary poll through `fetchCount` anyway.
+ */
+async function reconcileCount(): Promise<void> {
+  try {
+    const count = await getUnreadCount();
+    setState({ unreadCount: count });
+  } catch {
+    // Intentionally ignored — see above.
   }
 }
 
@@ -219,11 +249,17 @@ function subscribe(listener: () => void): () => void {
  * merges) so nothing from the failed optimistic write survives, then kicks off
  * a count refetch: the snapshot's `unreadCount` may itself be stale if a poll
  * landed while the mutation was in flight, and the server is the tiebreaker.
+ *
+ * That reconciling refetch deliberately goes through `reconcileCount` and NOT
+ * `fetchCount`, so it cannot clear the error being set on the line above. With
+ * `fetchCount` the rollback was only half-working: the badge reverted, but the
+ * cheap count read almost always won the race and reset `error` to null, so the
+ * user was never told the write had failed.
  */
 function rollback(previous: NotificationsState, err: unknown, fallback: string): void {
   state = { ...previous, error: errorMessage(err, fallback) };
   listeners.forEach((l) => l());
-  void fetchCount();
+  void reconcileCount();
 }
 
 /**
@@ -275,24 +311,58 @@ async function dismissAction(id: string): Promise<void> {
   void fetchCount();
 }
 
-/** Mark everything read (optionally scoped to a circle). */
+/**
+ * Mark everything read (optionally scoped to a circle).
+ *
+ * OPTIMISTIC DECREMENT — exact when unscoped, an ESTIMATE when scoped.
+ *
+ * Unscoped, every unread row is being read, so the badge is exactly 0.
+ *
+ * Scoped to a circle (the form issue #250's `/notifications` page uses when a
+ * circle filter is active) the store CANNOT know the true number: it only holds
+ * the rows it has loaded — at most `NOTIFICATION_PANEL_PAGE_SIZE` of them — so
+ * the user may well have unread rows in that circle the store has never seen.
+ * We therefore decrement by the count of *loaded* unread rows in that circle,
+ * which is a lower bound: the badge can only ever be momentarily too HIGH, never
+ * too low. That direction is chosen on purpose — an over-reporting badge is
+ * merely stale, an under-reporting one hides work the user still has to do.
+ *
+ * The estimate is then replaced twice over: first by the server's exact
+ * `updated` row count as soon as the response lands, then by the reconciling
+ * `fetchCount()`, which is the final authority. So the badge always converges on
+ * the server value regardless of how far off the optimistic step was.
+ */
 async function markAllReadAction(circleId?: string): Promise<void> {
   const previous = state;
   const now = new Date().toISOString();
+
+  const loadedUnreadInScope = circleId
+    ? state.items.filter((n) => !n.readAt && n.circleId === circleId).length
+    : 0;
 
   setState({
     items: state.items.map((n) =>
       n.readAt || (circleId && n.circleId !== circleId) ? n : { ...n, readAt: now },
     ),
-    unreadCount: circleId ? state.unreadCount : 0,
+    unreadCount: circleId ? Math.max(0, state.unreadCount - loadedUnreadInScope) : 0,
   });
 
+  let updated: number | undefined;
   try {
-    await markAllNotificationsRead(circleId);
+    const result = await markAllNotificationsRead(circleId);
+    updated = result?.updated;
   } catch (err) {
     rollback(previous, err, 'Failed to mark all as read');
     return;
   }
+
+  // Swap the estimate for the server's exact count of rows it actually flipped.
+  // Only for the scoped path — unscoped already landed on an exact 0, and
+  // re-deriving it from `previous` would just reintroduce staleness.
+  if (circleId && typeof updated === 'number') {
+    setState({ unreadCount: Math.max(0, previous.unreadCount - updated) });
+  }
+
   void fetchCount();
   void fetchList();
 }
