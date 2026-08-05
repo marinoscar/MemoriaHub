@@ -1,4 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
+/**
+ * Circle detail — Members and Invites.
+ *
+ * Both tables were migrated onto the shared DataTable in issue #260
+ * (epic #238). What that deleted: two hand-rolled `<Table>` blocks whose
+ * "Actions" column vanished entirely for a caller without `circle_admin`, and
+ * two bare `IconButton`s that removed a member / revoked an invite on a single
+ * unconfirmed click.
+ *
+ * The permission model is UNCHANGED — `canManage` is still
+ * `isAdmin || activeCircleRole === 'circle_admin'`, and it still decides
+ * exactly the same three things (the role editor, the member/invite row
+ * actions, and the "Invite by Email" button). What changed is WHERE it is
+ * applied: the role editor is gated inside the column's `render`
+ * (`circleMembersTable.tsx`) and the row actions by building the action array
+ * from `canManage` here. Because a column's `render` and a table's
+ * `rowActions` are used verbatim by every renderer, a viewer gets read-only
+ * text and no destructive control on the grid, in the tablet row expander AND
+ * on a phone card — one gate, three layouts, rather than a grid-only gate a
+ * card renderer could quietly drop.
+ */
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -7,16 +29,10 @@ import {
   Tabs,
   Tab,
   Paper,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
   Button,
   IconButton,
   Select,
   MenuItem,
-  Chip,
   CircularProgress,
   Alert,
   Dialog,
@@ -26,7 +42,6 @@ import {
   TextField,
   FormControl,
   InputLabel,
-  Avatar,
   Snackbar,
 } from '@mui/material';
 import {
@@ -40,7 +55,15 @@ import { useCircleInvites } from '../../hooks/useCircleInvites';
 import { useCircleContext } from '../../contexts/CircleContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import { getCircle, updateCircle } from '../../services/circles';
-import type { Circle, CircleRole } from '../../types/circles';
+import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import {
+  CIRCLE_INVITES_TABLE_ID,
+  CIRCLE_MEMBERS_TABLE_ID,
+  buildCircleInviteColumns,
+  buildCircleMemberColumns,
+  isInviteClaimed,
+} from './circleMembersTable';
+import type { Circle, CircleInvite, CircleMember, CircleRole } from '../../types/circles';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -55,12 +78,6 @@ function TabPanel({ children, value, index }: TabPanelProps) {
     </div>
   );
 }
-
-const ROLE_LABELS: Record<CircleRole, string> = {
-  circle_admin: 'Admin',
-  collaborator: 'Collaborator',
-  viewer: 'Viewer',
-};
 
 export default function CircleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -84,6 +101,7 @@ export default function CircleDetailPage() {
     useCircleInvites(circleId);
 
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -167,6 +185,95 @@ export default function CircleDetailPage() {
     }
   }, [inviteEmail, inviteRole, inviteNotes, sendInvite]);
 
+  // --- Members table ---------------------------------------------------------
+
+  const handleChangeRole = useCallback(
+    (userId: string, role: CircleRole) => {
+      void changeRole(userId, role).catch((err: unknown) => {
+        setActionError(err instanceof Error ? err.message : 'Failed to change role');
+      });
+    },
+    [changeRole],
+  );
+
+  const memberColumns = useMemo(
+    () => buildCircleMemberColumns({ canManage, onChangeRole: handleChangeRole }),
+    [canManage, handleChangeRole],
+  );
+
+  const handleRemoveMember = useCallback(
+    async (member: CircleMember) => {
+      setActionError(null);
+      try {
+        await removeMemberById(member.userId);
+        setSuccessMsg(`${member.user.email} removed from this circle.`);
+      } catch (err: unknown) {
+        setActionError(err instanceof Error ? err.message : 'Failed to remove member');
+      }
+    },
+    [removeMemberById],
+  );
+
+  // Built from `canManage`, so a viewer has no destructive control in ANY
+  // renderer — not merely one that is off-screen on a narrow layout.
+  const memberActions = useMemo<DataTableRowAction<CircleMember>[]>(() => {
+    if (!canManage) return [];
+    return [
+      {
+        id: 'remove-member',
+        label: 'Remove from circle',
+        icon: <DeleteIcon fontSize="small" />,
+        destructive: true,
+        confirm: {
+          title: 'Remove member?',
+          description: (member) =>
+            `${member.user.email} will lose access to this circle and everything in it.`,
+          confirmLabel: 'Remove',
+        },
+        onClick: (member) => void handleRemoveMember(member),
+      },
+    ];
+  }, [canManage, handleRemoveMember]);
+
+  // --- Invites table ---------------------------------------------------------
+
+  const inviteColumns = useMemo(() => buildCircleInviteColumns(), []);
+
+  const handleCancelInvite = useCallback(
+    async (invite: CircleInvite) => {
+      setActionError(null);
+      try {
+        await cancelInvite(invite.id);
+        setSuccessMsg(`Invite for ${invite.email} revoked.`);
+      } catch (err: unknown) {
+        setActionError(err instanceof Error ? err.message : 'Failed to revoke invite');
+      }
+    },
+    [cancelInvite],
+  );
+
+  const inviteActions = useMemo<DataTableRowAction<CircleInvite>[]>(() => {
+    if (!canManage) return [];
+    return [
+      {
+        id: 'revoke-invite',
+        label: 'Revoke invite',
+        icon: <DeleteIcon fontSize="small" />,
+        destructive: true,
+        // A claimed invite is history — revoking it would do nothing, so the
+        // control is disabled rather than silently no-op.
+        disabled: (invite) => isInviteClaimed(invite),
+        confirm: {
+          title: 'Revoke invite?',
+          description: (invite) =>
+            `The invitation for ${invite.email} will be cancelled. They will not be able to join with it.`,
+          confirmLabel: 'Revoke',
+        },
+        onClick: (invite) => void handleCancelInvite(invite),
+      },
+    ];
+  }, [canManage, handleCancelInvite]);
+
   if (circleLoading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
@@ -215,88 +322,29 @@ export default function CircleDetailPage() {
 
         {/* Members tab */}
         <TabPanel value={tab} index={0}>
-          <Box sx={{ px: 2, pb: 2 }}>
-            {membersError && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {membersError}
+          <Box sx={{ px: 2, pb: 2, minWidth: 0 }}>
+            {actionError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
+                {actionError}
               </Alert>
             )}
-            {membersLoading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Member</TableCell>
-                    <TableCell>Email</TableCell>
-                    <TableCell>Role</TableCell>
-                    {canManage && <TableCell align="right">Actions</TableCell>}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {members.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={canManage ? 4 : 3} align="center">
-                        <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-                          No members yet
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {members.map((member) => (
-                    <TableRow key={member.id}>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Avatar
-                            src={member.user.profileImageUrl ?? undefined}
-                            sx={{ width: 32, height: 32, fontSize: 14 }}
-                          >
-                            {(member.user.displayName ?? member.user.email).charAt(0).toUpperCase()}
-                          </Avatar>
-                          <Typography variant="body2">
-                            {member.user.displayName ?? '—'}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{member.user.email}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        {canManage ? (
-                          <FormControl size="small" sx={{ minWidth: 130 }}>
-                            <Select
-                              value={member.role}
-                              onChange={(e) =>
-                                void changeRole(member.userId, e.target.value as CircleRole)
-                              }
-                            >
-                              <MenuItem value="circle_admin">Admin</MenuItem>
-                              <MenuItem value="collaborator">Collaborator</MenuItem>
-                              <MenuItem value="viewer">Viewer</MenuItem>
-                            </Select>
-                          </FormControl>
-                        ) : (
-                          <Typography variant="body2">{ROLE_LABELS[member.role]}</Typography>
-                        )}
-                      </TableCell>
-                      {canManage && (
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            onClick={() => void removeMemberById(member.userId)}
-                            aria-label={`Remove ${member.user.email}`}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+            {/* Rendered unconditionally; `loading` is a prop, never a branch. */}
+            <DataTable<CircleMember>
+              columns={memberColumns}
+              rows={members}
+              rowId={(member) => member.id}
+              tableId={CIRCLE_MEMBERS_TABLE_ID}
+              ariaLabel="Circle members"
+              loading={membersLoading}
+              error={membersError}
+              emptyState={
+                <Typography variant="body2" color="text.secondary">
+                  No members yet
+                </Typography>
+              }
+              rowActions={memberActions}
+              csvExport={{ filename: 'circle-members' }}
+            />
           </Box>
         </TabPanel>
 
@@ -314,75 +362,22 @@ export default function CircleDetailPage() {
                 </Button>
               </Box>
             )}
-            {invitesError && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {invitesError}
-              </Alert>
-            )}
-            {invitesLoading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Email</TableCell>
-                    <TableCell>Role</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Date</TableCell>
-                    {canManage && <TableCell align="right">Actions</TableCell>}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {invites.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={canManage ? 5 : 4} align="center">
-                        <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-                          No invites yet
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {invites.map((invite) => (
-                    <TableRow key={invite.id}>
-                      <TableCell>
-                        <Typography variant="body2">{invite.email}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{ROLE_LABELS[invite.role]}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={invite.claimedAt ? 'Claimed' : 'Pending'}
-                          size="small"
-                          color={invite.claimedAt ? 'success' : 'default'}
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {new Date(invite.addedAt).toLocaleDateString()}
-                        </Typography>
-                      </TableCell>
-                      {canManage && (
-                        <TableCell align="right">
-                          {!invite.claimedAt && (
-                            <IconButton
-                              size="small"
-                              onClick={() => void cancelInvite(invite.id)}
-                              aria-label={`Revoke invite for ${invite.email}`}
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          )}
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+            <DataTable<CircleInvite>
+              columns={inviteColumns}
+              rows={invites}
+              rowId={(invite) => invite.id}
+              tableId={CIRCLE_INVITES_TABLE_ID}
+              ariaLabel="Circle invites"
+              loading={invitesLoading}
+              error={invitesError}
+              emptyState={
+                <Typography variant="body2" color="text.secondary">
+                  No invites yet
+                </Typography>
+              }
+              rowActions={inviteActions}
+              csvExport={{ filename: 'circle-invites' }}
+            />
           </Box>
         </TabPanel>
 

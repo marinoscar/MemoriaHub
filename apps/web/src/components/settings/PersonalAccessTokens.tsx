@@ -1,55 +1,98 @@
-import { useState } from 'react';
+/**
+ * User Settings → Personal Access Tokens.
+ *
+ * Migrated onto the shared DataTable in issue #260 (epic #238). What that
+ * deleted: a hand-rolled 7-column `<Table size="small">` wrapped in an
+ * `overflowX: auto` box — the "scroll sideways and hope" pattern the shared
+ * component exists to remove — and a bare `Revoke` button that destroyed a
+ * live credential on one click with no confirmation at all.
+ *
+ * Two things this migration is specifically responsible for (issue #260):
+ *
+ * 1. **Revoking confirms, and the confirmation names the token.** "Revoke
+ *    token CI deploy?" — a card's overflow menu puts Revoke one tap from a
+ *    thumb, and a revoked token cannot be un-revoked: whatever was
+ *    authenticating with it stops working immediately.
+ * 2. **Token material is not exportable.** The `tokenPrefix` column declares
+ *    `exportable: false` (`patTable.tsx`), so a CSV export of this table
+ *    carries names, dates and statuses and no token material of any kind.
+ *
+ * Reveal-once is unchanged: `PatTokenRevealDialog` is still the only place a
+ * raw token is ever shown, still only at creation, and the table still only
+ * ever receives the prefix from the API.
+ */
+
+import { useCallback, useMemo, useState } from 'react';
 import {
   Card,
   CardContent,
   Typography,
   Button,
   Box,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  Chip,
   Alert,
-  CircularProgress,
+  Snackbar,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { usePersonalAccessTokens } from '../../hooks/usePersonalAccessTokens';
 import { CreatePatDialog } from './CreatePatDialog';
 import { PatTokenRevealDialog } from './PatTokenRevealDialog';
-import type { PatCreatedResponse } from '../../types';
-
-function getTokenStatus(token: {
-  expiresAt: string;
-  revokedAt: string | null;
-}): 'active' | 'expired' | 'revoked' {
-  if (token.revokedAt) return 'revoked';
-  if (new Date(token.expiresAt) < new Date()) return 'expired';
-  return 'active';
-}
+import { DataTable, type DataTableRowAction } from '../datatable';
+import { PAT_TABLE_ID, buildPatColumns, getTokenStatus } from './patTable';
+import type { PatCreatedResponse, PersonalAccessToken } from '../../types';
 
 export function PersonalAccessTokens() {
-  const { tokens, isLoading, error, createToken, revokeToken } = usePersonalAccessTokens();
+  const { tokens, isLoading, error, createToken, revokeToken } =
+    usePersonalAccessTokens();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [revealDialogOpen, setRevealDialogOpen] = useState(false);
   const [createdTokenValue, setCreatedTokenValue] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleCreated = (response: PatCreatedResponse) => {
     setCreatedTokenValue(response.token);
     setRevealDialogOpen(true);
   };
 
-  const handleRevoke = async (id: string) => {
-    setRevoking(id);
-    try {
-      await revokeToken(id);
-    } finally {
-      setRevoking(null);
-    }
-  };
+  const handleRevoke = useCallback(
+    async (token: PersonalAccessToken) => {
+      setRevoking(token.id);
+      try {
+        await revokeToken(token.id);
+        setSuccessMessage(`Token "${token.name}" revoked`);
+      } finally {
+        setRevoking(null);
+      }
+    },
+    [revokeToken],
+  );
+
+  const columns = useMemo(() => buildPatColumns(), []);
+
+  const rowActions = useMemo<DataTableRowAction<PersonalAccessToken>[]>(
+    () => [
+      {
+        id: 'revoke',
+        label: 'Revoke',
+        icon: <DeleteForeverIcon fontSize="small" />,
+        destructive: true,
+        // Only a live token can be revoked, and never twice concurrently.
+        disabled: (token) => getTokenStatus(token) !== 'active' || revoking === token.id,
+        confirm: {
+          title: 'Revoke token?',
+          // Names the token: this menu item is one tap away on a phone, and
+          // there is no undo.
+          description: (token) =>
+            `Token "${token.name}" will stop working immediately. Anything authenticating with it will start failing. This cannot be undone.`,
+          confirmLabel: 'Revoke',
+        },
+        onClick: (token) => void handleRevoke(token),
+      },
+    ],
+    [revoking, handleRevoke],
+  );
 
   return (
     <>
@@ -87,87 +130,23 @@ export function PersonalAccessTokens() {
             </Alert>
           )}
 
-          {isLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress size={32} />
-            </Box>
-          ) : tokens.length === 0 ? (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ textAlign: 'center', py: 4 }}
-            >
-              No personal access tokens yet. Create one to get started.
-            </Typography>
-          ) : (
-            <Box sx={{ overflowX: 'auto' }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Token Prefix</TableCell>
-                    <TableCell>Created</TableCell>
-                    <TableCell>Expires</TableCell>
-                    <TableCell>Last Used</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {tokens.map((token) => {
-                    const status = getTokenStatus(token);
-                    const isDisabled = status !== 'active' || revoking === token.id;
-                    return (
-                      <TableRow key={token.id}>
-                        <TableCell>{token.name}</TableCell>
-                        <TableCell>
-                          <Typography
-                            variant="body2"
-                            sx={{ fontFamily: 'monospace' }}
-                          >
-                            {token.tokenPrefix}...
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          {new Date(token.createdAt).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          {new Date(token.expiresAt).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          {token.lastUsedAt
-                            ? new Date(token.lastUsedAt).toLocaleDateString()
-                            : 'Never'}
-                        </TableCell>
-                        <TableCell>
-                          {status === 'active' && (
-                            <Chip label="Active" color="success" size="small" />
-                          )}
-                          {status === 'expired' && (
-                            <Chip label="Expired" size="small" />
-                          )}
-                          {status === 'revoked' && (
-                            <Chip label="Revoked" color="error" size="small" />
-                          )}
-                        </TableCell>
-                        <TableCell align="right">
-                          <Button
-                            size="small"
-                            color="error"
-                            variant="outlined"
-                            disabled={isDisabled}
-                            onClick={() => handleRevoke(token.id)}
-                          >
-                            {revoking === token.id ? 'Revoking...' : 'Revoke'}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </Box>
-          )}
+          {/* Rendered unconditionally; `loading` is a prop, never a branch. */}
+          <DataTable<PersonalAccessToken>
+            columns={columns}
+            rows={tokens}
+            rowId={(token) => token.id}
+            tableId={PAT_TABLE_ID}
+            ariaLabel="Personal access tokens"
+            density="compact"
+            loading={isLoading}
+            emptyState={
+              <Typography variant="body2" color="text.secondary">
+                No personal access tokens yet. Create one to get started.
+              </Typography>
+            }
+            rowActions={rowActions}
+            csvExport={{ filename: 'personal-access-tokens' }}
+          />
         </CardContent>
       </Card>
 
@@ -185,6 +164,13 @@ export function PersonalAccessTokens() {
           setCreatedTokenValue(null);
         }}
         token={createdTokenValue}
+      />
+
+      <Snackbar
+        open={Boolean(successMessage)}
+        autoHideDuration={3000}
+        onClose={() => setSuccessMessage(null)}
+        message={successMessage ?? undefined}
       />
     </>
   );
