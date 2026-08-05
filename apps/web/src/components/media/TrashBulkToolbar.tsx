@@ -29,6 +29,7 @@ import {
   RestoreFromTrash as RestoreIcon,
 } from '@mui/icons-material';
 import type { CircleRole } from '../../types/circles';
+import type { BulkSuccessOptions } from './BulkActionToolbar';
 import { restoreFromTrash, deleteForever } from '../../services/media';
 
 interface TrashBulkToolbarProps {
@@ -37,7 +38,12 @@ interface TrashBulkToolbarProps {
   activeCircleRole: CircleRole | null;
   onClear: () => void;
   onSelectAll: () => void;
-  onSuccess: (message: string) => void;
+  /**
+   * Called after a successful bulk action. Every action here is
+   * membership-changing, so the gallery removes the selected ids in place —
+   * except any reported back in `options.retainedIds` (issue #242).
+   */
+  onSuccess: (message: string, options?: BulkSuccessOptions) => void;
   onError: (message: string) => void;
 }
 
@@ -68,7 +74,10 @@ export function TrashBulkToolbar({
       const msg = result.conflicts.length > 0
         ? `Restored ${result.restored} item${result.restored !== 1 ? 's' : ''}. ${result.conflicts.length} item${result.conflicts.length !== 1 ? 's' : ''} could not be restored (duplicate already exists).`
         : `Restored ${result.restored} item${result.restored !== 1 ? 's' : ''}`;
-      onSuccess(msg);
+      // Conflicted items were NOT restored and are still in Trash, so they must
+      // stay in the list — otherwise the message says "could not be restored"
+      // while the row it refers to disappears (issue #242).
+      onSuccess(msg, { retainedIds: result.conflicts });
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to restore items');
     } finally {

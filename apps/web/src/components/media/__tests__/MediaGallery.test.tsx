@@ -73,6 +73,8 @@ vi.mock('../../../services/media', () => ({
   removeAlbumItem: vi.fn().mockResolvedValue(undefined),
   listMedia: vi.fn(),
   getThumbnails: vi.fn().mockResolvedValue([]),
+  // Used by the post-bulk-action in-place refresh (issue #242).
+  getMedia: vi.fn(),
 }));
 
 // Mock useIntersectionObserver so the infinite-scroll sentinel never triggers.

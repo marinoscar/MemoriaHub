@@ -327,8 +327,10 @@ describe('BulkActionToolbar', () => {
       await user.click(confirmBtn);
 
       await waitFor(() => {
+        // 'membership': the items leave the current view (issue #242).
         expect(defaultProps.onSuccess).toHaveBeenCalledWith(
           expect.stringMatching(/moved 2 items to trash/i),
+          'membership',
         );
       });
     });

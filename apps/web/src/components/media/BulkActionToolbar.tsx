@@ -54,6 +54,35 @@ import {
  */
 export type BulkActionMode = 'home' | 'archive' | 'trash';
 
+/**
+ * How a completed bulk action affects the list the user is looking at
+ * (issue #242 — MediaGallery consumes this to decide between an in-place
+ * refresh and an in-place removal, never a feed reset):
+ *
+ *   'metadata'   — the items stay in the current view, only their fields
+ *                  changed (location, date, tags, favorite, album membership,
+ *                  enrichment reruns).
+ *   'membership' — the items leave the current view (archive, unarchive,
+ *                  move to Trash, restore, delete forever).
+ */
+export type BulkEffect = 'metadata' | 'membership';
+
+/**
+ * Extra detail a bulk action can report about its own outcome.
+ *
+ * A membership action is not always all-or-nothing: `POST /api/media/trash/restore`
+ * deliberately leaves behind items whose `content_hash` collides with an active
+ * item and returns them in `conflicts[]`. Those ids must stay rendered — dropping
+ * them would tell the user the opposite of what the server did.
+ */
+export interface BulkSuccessOptions {
+  /**
+   * Selected ids that did NOT leave the view despite the action succeeding.
+   * They are excluded from the in-place removal.
+   */
+  retainedIds?: string[];
+}
+
 interface BulkActionToolbarProps {
   selected: Set<string>;
   circleId: string;
@@ -63,7 +92,12 @@ interface BulkActionToolbarProps {
   onOpenLocation: () => void;
   onOpenDate: () => void;
   onOpenTags: () => void;
-  onSuccess: (message: string) => void;
+  /**
+   * Called after a successful bulk action. `effect` tells the gallery whether
+   * the items stayed in the current view or left it; it defaults to 'metadata'
+   * so a caller that ignores it still gets the non-destructive path.
+   */
+  onSuccess: (message: string, effect?: BulkEffect) => void;
   onError: (message: string) => void;
   onOpenAlbum?: () => void;
   albumMode?: boolean;
@@ -134,7 +168,7 @@ export function BulkActionToolbar({
     setLoading(true);
     try {
       const result = await bulkDelete({ circleId, ids });
-      onSuccess(`Moved ${result.deleted} item${result.deleted !== 1 ? 's' : ''} to Trash`);
+      onSuccess(`Moved ${result.deleted} item${result.deleted !== 1 ? 's' : ''} to Trash`, 'membership');
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to move items to Trash');
     } finally {
@@ -147,7 +181,7 @@ export function BulkActionToolbar({
     setLoading(true);
     try {
       const result = await bulkArchive({ circleId, ids });
-      onSuccess(`Archived ${result.archived} item${result.archived !== 1 ? 's' : ''}`);
+      onSuccess(`Archived ${result.archived} item${result.archived !== 1 ? 's' : ''}`, 'membership');
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to archive items');
     } finally {
@@ -160,7 +194,7 @@ export function BulkActionToolbar({
     setLoading(true);
     try {
       const result = await bulkUnarchive({ circleId, ids });
-      onSuccess(`Unarchived ${result.unarchived} item${result.unarchived !== 1 ? 's' : ''}`);
+      onSuccess(`Unarchived ${result.unarchived} item${result.unarchived !== 1 ? 's' : ''}`, 'membership');
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to unarchive items');
     } finally {

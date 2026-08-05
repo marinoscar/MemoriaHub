@@ -109,8 +109,11 @@ describe('BulkActionToolbar — archive/trash actions', () => {
       await user.click(screen.getByText(/^archive$/i));
 
       await waitFor(() => {
+        // The second argument classifies the action for MediaGallery: archive
+        // takes the items out of the current view (issue #242).
         expect(baseProps.onSuccess).toHaveBeenCalledWith(
           expect.stringMatching(/archived 2 items/i),
+          'membership',
         );
       });
     });
@@ -174,6 +177,7 @@ describe('BulkActionToolbar — archive/trash actions', () => {
       await waitFor(() => {
         expect(baseProps.onSuccess).toHaveBeenCalledWith(
           expect.stringMatching(/unarchived 2 items/i),
+          'membership',
         );
       });
     });

@@ -6,13 +6,43 @@
  * selection + BulkActionToolbar (or the lightbox), never from the tile itself.
  *
  * Two data-source modes:
- *   FEED mode   (queryParams provided): calls useInfiniteMedia internally,
- *               renders an infinite-scroll sentinel, and resets on bulk success.
+ *   FEED mode   (queryParams provided): calls useInfiniteMedia internally and
+ *               renders an infinite-scroll sentinel.
  *   CONTROLLED  (items provided): renders the supplied array, no fetching;
  *               uses isLoading for a spinner; calls onChange on bulk success.
  *
  * Album mode is activated by passing albumId.  It adds "Remove from Album"
  * to the BulkActionToolbar and wires onRemoveFromAlbum accordingly.
+ *
+ * BULK SUCCESS AND THE LOADED FEED (issue #242)
+ * ---------------------------------------------
+ * `handleBulkSuccess` used to `feedReset()` after EVERY bulk action. A reset
+ * bumps useInfiniteMedia's generation counter, empties the item list and
+ * refetches page 1 — so a user who had scrolled through ten pages to edit one
+ * photo's date lost all ten and was clamped back to the top of the document.
+ *
+ * Bulk actions are therefore classified by their effect on the CURRENT view:
+ *
+ *   'metadata'   — the item stays in the feed (location, date taken, tags,
+ *                  favorite, add to album, thumbnail/face/tag reruns, and the
+ *                  AI-enhance *replace* decision, which keeps the same item id
+ *                  and only swaps its bytes). The affected ids are refetched
+ *                  with `getMedia` and merged into `localPatches`, exactly the
+ *                  targeted in-place merge the single-item drawer already used
+ *                  via `handleItemUpdated`. No reset, no scroll jump.
+ *
+ *   'membership' — the item leaves the current view (archive, unarchive,
+ *                  trash, restore, delete forever, remove from album). The ids
+ *                  are added to `removedIds` and filtered out of the rendered
+ *                  list in place. Still no reset. An action that only partly
+ *                  succeeded reports the ids it left behind as
+ *                  `options.retainedIds` (Trash restore returns `conflicts[]`
+ *                  for items whose content hash collides with an active item —
+ *                  those are NOT restored and must stay on screen).
+ *
+ * `feedReset()` now survives ONLY for genuine feed changes: a query/circle
+ * change (handled inside useInfiniteMedia via its queryKey) and the upload
+ * `triggerRefresh` path.
  */
 
 import { useState, useRef, useMemo, useCallback, useEffect, memo } from 'react';
@@ -43,6 +73,7 @@ import { useNavigate } from 'react-router-dom';
 import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';
 import type { InfiniteMediaFetcher } from '../../hooks/useInfiniteMedia';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
+import { useIsMounted } from '../../hooks/useIsMounted';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { useMediaPreview } from '../../contexts/MediaPreviewContext';
 import { usePendingThumbnails } from '../../hooks/usePendingThumbnails';
@@ -53,6 +84,7 @@ import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import type { BulkEffect, BulkSuccessOptions } from './BulkActionToolbar';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { TrashBulkToolbar } from './TrashBulkToolbar';
 import { ArchiveBulkToolbar } from './ArchiveBulkToolbar';
@@ -61,7 +93,7 @@ import { BulkDateDialog } from './BulkDateDialog';
 import { BulkTagsDialog } from './BulkTagsDialog';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { TimelineScrubber } from './TimelineScrubber';
-import { removeAlbumItem } from '../../services/media';
+import { getMedia, removeAlbumItem } from '../../services/media';
 import type { MediaItem, MediaQueryParams } from '../../types/media';
 import type { CircleRole } from '../../types/circles';
 
@@ -119,6 +151,14 @@ export function galleryPlaceholderHeight(
  * on phones (issue #237).
  */
 const DAY_HEADER_TOP = { xs: 56, sm: 64 } as const;
+
+/**
+ * How many `getMedia` refetches are issued concurrently after a metadata bulk
+ * action (issue #242). A bulk action accepts up to 500 ids; firing 500 parallel
+ * requests would be worse than the reset it replaces, so the ids are walked in
+ * chunks of this size, one chunk at a time.
+ */
+export const BULK_REFRESH_CHUNK_SIZE = 25;
 
 // ---------------------------------------------------------------------------
 // GalleryTile — internal thumbnail tile
@@ -500,6 +540,34 @@ export function MediaGallery({
     disabled: !isFeedMode || !feedHasMore || feedIsLoading || !circleId,
   });
 
+  // -------------------------------------------------------------------------
+  // Locally-removed ids (membership bulk actions — issue #242)
+  //
+  // Archive/trash/restore/… remove an item from THIS view but must not throw
+  // away the pages already loaded. The ids are filtered out of the rendered
+  // list instead, and the set is cleared whenever the feed genuinely resets.
+  // -------------------------------------------------------------------------
+
+  const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+
+  const markRemoved = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setRemovedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }, []);
+
+  // Mirror of the key useInfiniteMedia resets on, so a query/circle change
+  // drops the stale removal set along with the stale items.
+  const feedResetKey = queryKey ?? JSON.stringify(queryParams ?? {});
+  useEffect(() => {
+    // Identity-stable when already empty, so the mount-time run is a no-op
+    // rather than an extra render.
+    setRemovedIds((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [feedResetKey]);
+
   // Feed-mode refresh: reset to page 1 whenever a new upload completes.
   // The context has a safe default (refreshToken:0, triggerRefresh:noop) so
   // this is harmless when no MediaRefreshProvider is mounted.
@@ -509,6 +577,7 @@ export function MediaGallery({
     // Skip the initial mount — only react to increments.
     if (refreshToken === refreshTokenRef.current) return;
     refreshTokenRef.current = refreshToken;
+    setRemovedIds((prev) => (prev.size === 0 ? prev : new Set()));
     if (isFeedMode) {
       feedReset();
     }
@@ -530,10 +599,12 @@ export function MediaGallery({
 
   const mergedItems = useMemo(
     () =>
-      baseItems.map((item) =>
-        localPatches[item.id] ? { ...item, ...localPatches[item.id] } : item,
-      ),
-    [baseItems, localPatches],
+      baseItems
+        .filter((item) => !removedIds.has(item.id))
+        .map((item) =>
+          localPatches[item.id] ? { ...item, ...localPatches[item.id] } : item,
+        ),
+    [baseItems, localPatches, removedIds],
   );
 
   // -------------------------------------------------------------------------
@@ -661,20 +732,79 @@ export function MediaGallery({
   // Bulk success handler
   // -------------------------------------------------------------------------
 
+  const isMounted = useIsMounted();
+
+  /**
+   * Refetch the given items and merge them into `localPatches` — the same
+   * targeted in-place merge `handleItemUpdated` performs for the drawer, just
+   * for many ids at once. Requests are issued `BULK_REFRESH_CHUNK_SIZE` at a
+   * time; a single failed id is dropped so the rest of the merge still lands.
+   */
+  const refreshItemsById = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const patches: Record<string, Partial<MediaItem>> = {};
+      for (let i = 0; i < ids.length; i += BULK_REFRESH_CHUNK_SIZE) {
+        const chunk = ids.slice(i, i + BULK_REFRESH_CHUNK_SIZE);
+        const results = await Promise.all(
+          chunk.map((id) => getMedia(id).catch(() => null)),
+        );
+        for (const item of results) {
+          if (item) patches[item.id] = item;
+        }
+        if (!isMounted()) return;
+      }
+      if (!isMounted()) return;
+      if (Object.keys(patches).length === 0) return;
+      setLocalPatches((prev) => ({ ...prev, ...patches }));
+    },
+    [isMounted],
+  );
+
+  /**
+   * Shared completion handler for every bulk action. `effect` decides whether
+   * the affected items are refetched in place ('metadata', the default) or
+   * filtered out of the current view ('membership') — see the file header for
+   * why neither path may reset the feed (issue #242).
+   *
+   * A membership action may report `options.retainedIds` for selected items the
+   * server left behind (Trash restore conflicts); those keep their place in the
+   * list so it agrees with the message the user is being shown.
+   */
   const handleBulkSuccess = useCallback(
-    (message: string) => {
+    (message: string, effect: BulkEffect = 'metadata', options?: BulkSuccessOptions) => {
+      // Capture BEFORE clearing the selection — the ids are the payload.
+      const ids = Array.from(selected);
       setSnackbar({ message, severity: 'success' });
       setSelected(new Set());
       setSelectionMode(false);
-      setLocalPatches({});
-      if (isFeedMode) {
-        feedReset();
+      if (effect === 'membership') {
+        const retained = new Set(options?.retainedIds ?? []);
+        markRemoved(ids.filter((id) => !retained.has(id)));
       } else {
+        void refreshItemsById(ids);
+      }
+      if (!isFeedMode) {
+        // Controlled mode owns its item array, so the parent has to refetch.
+        // Feed mode deliberately does NOT call onChange — some callers wire it
+        // to state changes (e.g. SearchPage's clearSearch) that assume the
+        // controlled-mode contract.
         onChange?.();
       }
       onBulkSuccess?.(message);
     },
-    [isFeedMode, feedReset, onChange, onBulkSuccess],
+    [selected, markRemoved, refreshItemsById, isFeedMode, onChange, onBulkSuccess],
+  );
+
+  /**
+   * Convenience wrapper for toolbars whose every action is membership-changing.
+   * `options` is forwarded so a partial outcome (e.g. Trash restore conflicts)
+   * can keep the items it left behind on screen.
+   */
+  const handleMembershipSuccess = useCallback(
+    (message: string, options?: BulkSuccessOptions) =>
+      handleBulkSuccess(message, 'membership', options),
+    [handleBulkSuccess],
   );
 
   // -------------------------------------------------------------------------
@@ -690,10 +820,11 @@ export function MediaGallery({
       setSnackbar({ message, severity: 'success' });
       setSelected(new Set());
       setSelectionMode(false);
-      setLocalPatches({});
-      if (isFeedMode) {
-        feedReset();
-      }
+      // Membership-changing: the items leave this album's view but the rest of
+      // the loaded feed stays exactly where it is (issue #242).
+      markRemoved(ids);
+      // Unlike handleBulkSuccess, onChange fires in both modes here — album
+      // pages rely on it to refresh the header item count.
       onChange?.();
     } catch (err) {
       setSnackbar({
@@ -701,7 +832,7 @@ export function MediaGallery({
         severity: 'error',
       });
     }
-  }, [albumId, selected, isFeedMode, feedReset, onChange]);
+  }, [albumId, selected, markRemoved, onChange]);
 
   // -------------------------------------------------------------------------
   // AddToAlbum filters — strip pagination/sort from queryParams;
@@ -830,7 +961,9 @@ export function MediaGallery({
           activeCircleRole={activeCircleRole}
           onClear={handleClearSelection}
           onSelectAll={handleSelectAll}
-          onSuccess={handleBulkSuccess}
+          // Restore / delete-forever both take the item out of Trash's view —
+          // except restore conflicts, reported back via options.retainedIds.
+          onSuccess={handleMembershipSuccess}
           onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
         />
       ) : mode === 'archive' ? (
@@ -840,7 +973,8 @@ export function MediaGallery({
           activeCircleRole={activeCircleRole}
           onClear={handleClearSelection}
           onSelectAll={handleSelectAll}
-          onSuccess={handleBulkSuccess}
+          // Unarchive / move-to-Trash both take the item out of Archive's view.
+          onSuccess={handleMembershipSuccess}
           onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
         />
       ) : (
@@ -1086,10 +1220,16 @@ export function MediaGallery({
                 }
               : undefined
           }
+          // Replace keeps the same item id and only swaps its bytes, so it is a
+          // metadata refresh of the selected item — never a feed reset (#242).
           onReplaced={() => {
             setEnhanceOpen(false);
             handleBulkSuccess('Photo replaced with the enhanced version');
           }}
+          // Keep-both leaves the source item untouched and creates a second
+          // one; the source is refreshed in place and the new item appears on
+          // the next natural feed load rather than costing the user their
+          // scroll position.
           onKeptBoth={(msg) => {
             setEnhanceOpen(false);
             handleBulkSuccess(msg);
