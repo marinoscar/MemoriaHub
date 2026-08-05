@@ -65,8 +65,10 @@ function MemberCard({ member, selected, onToggle }: MemberCardProps) {
         userSelect: 'none',
         transition: 'border-color 0.15s',
         bgcolor: 'background.paper',
-        minWidth: 200,
-        flexShrink: 0,
+        // Below `md` the strip is a wrapping grid, so the card must be free to
+        // shrink to its cell; the fixed width only applies to the md+ strip.
+        minWidth: { xs: 0, md: 200 },
+        flexShrink: { xs: 1, md: 0 },
       }}
     >
       {/* Thumbnail */}
@@ -283,10 +285,14 @@ export default function BurstGroupPage() {
         pre-selected.
       </Alert>
 
-      {/* Photo grid */}
+      {/* Photo grid — 2-up / 3-up below md so the whole burst fits the viewport */}
       <Box
         sx={{
-          display: 'flex',
+          display: { xs: 'grid', md: 'flex' },
+          gridTemplateColumns: {
+            xs: 'repeat(2, minmax(0, 1fr))',
+            sm: 'repeat(3, minmax(0, 1fr))',
+          },
           flexWrap: 'wrap',
           gap: 2,
           mb: 3,

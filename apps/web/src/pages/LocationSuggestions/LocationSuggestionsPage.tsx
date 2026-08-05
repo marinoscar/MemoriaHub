@@ -133,8 +133,8 @@ function SuggestionRow({ suggestion, acting, onAccept, onReject, onAdjust }: Sug
 
   return (
     <Card variant="outlined">
-      <CardContent>
-        <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', md: 'row' } }}>
+      <CardContent sx={{ px: { xs: 1.5, sm: 2 } }}>
+        <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', md: 'row' }, minWidth: 0 }}>
           {/* Thumbnail */}
           <Box
             sx={{
@@ -187,16 +187,22 @@ function SuggestionRow({ suggestion, acting, onAccept, onReject, onAdjust }: Sug
             </Typography>
             <SpeedWarning impliedSpeedKmh={suggestion.impliedSpeedKmh} />
 
-            <Box sx={{ mt: 1.5, maxWidth: 320 }}>
+            <Box sx={{ mt: 1.5, width: '100%', maxWidth: 320 }}>
               <LocationMiniMap lat={suggestion.lat} lng={suggestion.lng} />
             </Box>
           </Box>
 
-          {/* Actions */}
+          {/* Actions — stacked full-width on phones, side by side from sm up */}
           <Stack
-            direction={{ xs: 'row', md: 'column' }}
+            direction={{ xs: 'column', sm: 'row', md: 'column' }}
             spacing={1}
-            sx={{ flexShrink: 0, justifyContent: { xs: 'flex-start', md: 'center' } }}
+            useFlexGap
+            sx={{
+              flexShrink: 0,
+              flexWrap: 'wrap',
+              width: { xs: '100%', md: 'auto' },
+              justifyContent: { xs: 'flex-start', md: 'center' },
+            }}
           >
             <Button
               variant="contained"

@@ -16,13 +16,6 @@ import {
   DialogActions,
   LinearProgress,
   Tooltip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
 } from '@mui/material';
 import {
   ArrowBack as BackIcon,
@@ -37,6 +30,11 @@ import { useDuplicateGroupDetail } from '../../hooks/useDuplicates';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
+import {
+  MemberComparison,
+  deriveComparisonRows,
+} from '../../components/review/MemberComparison';
+import type { ComparisonRowDef } from '../../components/review/MemberComparison';
 import { formatBytes } from '../../utils/formatBytes';
 import type { DuplicateGroupKind, DuplicateGroupMember, DuplicateResolveAction } from '../../services/duplicates';
 
@@ -77,8 +75,10 @@ function FilmstripItem({ member, selected, isLeft, isRight, onToggleKeep, onAssi
         userSelect: 'none',
         transition: 'border-color 0.15s',
         bgcolor: 'background.paper',
-        minWidth: 160,
-        flexShrink: 0,
+        // Below `md` the strip is a wrapping grid, so the tile must be free to
+        // shrink to its cell; the fixed width only applies to the md+ scroller.
+        minWidth: { xs: 0, md: 160 },
+        flexShrink: { xs: 1, md: 0 },
       }}
     >
       <Box sx={{ position: 'relative', width: '100%', paddingBottom: '75%', bgcolor: 'action.hover' }}>
@@ -186,11 +186,79 @@ function humanDims(m: DuplicateGroupMember): string | null {
   return `${m.width}×${m.height}`;
 }
 
-interface DiffRow {
-  label: string;
-  render: (m: DuplicateGroupMember) => string;
-  differs: boolean;
-}
+/**
+ * Attribute catalog for the member comparison. Derived ONCE (below) and fed to
+ * both the md+ matrix and the stacked mobile cards — see MemberComparison.
+ */
+const COMPARISON_ROW_DEFS: ComparisonRowDef<DuplicateGroupMember>[] = [
+  { key: 'dimensions', label: 'Dimensions', value: (m) => humanDims(m) ?? '—' },
+  {
+    key: 'fileSize',
+    label: 'File size',
+    value: (m) => (m.fileSize != null ? formatBytes(String(m.fileSize)) : '—'),
+  },
+  {
+    key: 'capturedAt',
+    label: 'Captured at',
+    value: (m) =>
+      m.capturedAt
+        ? new Date(m.capturedAt).toLocaleString(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          })
+        : '—',
+  },
+  {
+    key: 'camera',
+    label: 'Camera',
+    value: (m) => [m.cameraMake, m.cameraModel].filter(Boolean).join(' ') || '—',
+  },
+  {
+    key: 'gps',
+    label: 'GPS',
+    value: (m) => (m.hasGps ? 'Yes' : 'No'),
+    render: (m) =>
+      m.hasGps ? (
+        <CheckCircleIcon fontSize="small" color="success" />
+      ) : (
+        <CancelIcon fontSize="small" color="disabled" />
+      ),
+  },
+  { key: 'hash', label: 'Hash prefix', value: (m) => m.contentHash ?? '—' },
+  {
+    key: 'sharpness',
+    label: 'Sharpness',
+    value: (m) => (m.sharpnessScore != null ? m.sharpnessScore.toFixed(1) : '—'),
+  },
+  {
+    key: 'similarity',
+    label: 'Similarity to best',
+    value: (m) =>
+      m.similarityToBest != null ? `${Math.round(m.similarityToBest * 100)}%` : '—',
+  },
+  {
+    key: 'quality',
+    label: 'Quality score',
+    // Per-member score — never a "difference" to flag.
+    compare: false,
+    value: (m) => (m.qualityScore != null ? `${Math.round(m.qualityScore * 100)}%` : '—'),
+    render: (m) => {
+      const pct = m.qualityScore != null ? Math.round(m.qualityScore * 100) : null;
+      if (pct == null) return '—';
+      return (
+        <Box sx={{ minWidth: 80, width: '100%' }}>
+          <LinearProgress
+            variant="determinate"
+            value={pct}
+            sx={{ height: 6, borderRadius: 3, mb: 0.5 }}
+            color={pct >= 70 ? 'success' : pct >= 40 ? 'warning' : 'error'}
+          />
+          <Typography variant="caption">{pct}%</Typography>
+        </Box>
+      );
+    },
+  },
+];
 
 export default function DuplicateGroupPage() {
   const { id } = useParams<{ id: string }>();
@@ -318,36 +386,13 @@ export default function DuplicateGroupPage() {
   const leftMember = leftId ? membersById.get(leftId) ?? null : null;
   const rightMember = rightId ? membersById.get(rightId) ?? null : null;
 
-  // Build metadata diff rows
-  const diffRowDefs: Array<{
-    label: string;
-    values: (m: DuplicateGroupMember) => string;
-  }> = [
-    { label: 'Dimensions', values: (m) => humanDims(m) ?? '—' },
-    { label: 'File size', values: (m) => (m.fileSize != null ? formatBytes(String(m.fileSize)) : '—') },
-    {
-      label: 'Captured at',
-      values: (m) =>
-        m.capturedAt ? new Date(m.capturedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—',
-    },
-    {
-      label: 'Camera',
-      values: (m) => [m.cameraMake, m.cameraModel].filter(Boolean).join(' ') || '—',
-    },
-    { label: 'GPS', values: () => '' },
-    { label: 'Hash prefix', values: (m) => m.contentHash ?? '—' },
-    { label: 'Sharpness', values: (m) => (m.sharpnessScore != null ? m.sharpnessScore.toFixed(1) : '—') },
-    {
-      label: 'Similarity to best',
-      values: (m) => (m.similarityToBest != null ? `${Math.round(m.similarityToBest * 100)}%` : '—'),
-    },
-  ];
-
-  const diffRows: DiffRow[] = diffRowDefs.map((def) => {
-    const rendered = group.members.map((m) => def.values(m));
-    const differs = new Set(rendered).size > 1;
-    return { label: def.label, render: def.values, differs };
-  });
+  // Build the comparison model once; both orientations render from it.
+  const comparisonColumns = group.members.map((m, index) => ({
+    id: m.id,
+    label: `Photo ${index + 1}`,
+    isSuggestedBest: m.isSuggestedBest,
+  }));
+  const comparisonRows = deriveComparisonRows(group.members, COMPARISON_ROW_DEFS);
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -402,7 +447,21 @@ export default function DuplicateGroupPage() {
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
         All members — click to compare, checkbox to keep
       </Typography>
-      <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 1, mb: 3 }}>
+      <Box
+        sx={{
+          // Below `md` the whole group must be visible at once, so the strip
+          // wraps into a 2-up / 3-up grid instead of scrolling sideways.
+          display: { xs: 'grid', md: 'flex' },
+          gridTemplateColumns: {
+            xs: 'repeat(2, minmax(0, 1fr))',
+            sm: 'repeat(3, minmax(0, 1fr))',
+          },
+          gap: 2,
+          overflowX: { xs: 'visible', md: 'auto' },
+          pb: 1,
+          mb: 3,
+        }}
+      >
         {group.members.map((member) => (
           <FilmstripItem
             key={member.id}
@@ -416,88 +475,8 @@ export default function DuplicateGroupPage() {
         ))}
       </Box>
 
-      {/* Metadata diff table */}
-      <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, overflowX: 'auto' }}>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell sx={{ fontWeight: 600 }}>Attribute</TableCell>
-              {group.members.map((m) => (
-                <TableCell key={m.id} align="center" sx={{ fontWeight: 600, minWidth: 140 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
-                    {m.isSuggestedBest && (
-                      <Tooltip title="Suggested best copy">
-                        <StarIcon fontSize="small" sx={{ color: 'warning.main' }} />
-                      </Tooltip>
-                    )}
-                    Photo {group.members.indexOf(m) + 1}
-                  </Box>
-                </TableCell>
-              ))}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {diffRows.map((row) => (
-              <TableRow key={row.label}>
-                <TableCell sx={{ fontWeight: 500 }}>{row.label}</TableCell>
-                {group.members.map((m) => {
-                  if (row.label === 'GPS') {
-                    return (
-                      <TableCell
-                        key={m.id}
-                        align="center"
-                        sx={row.differs ? { bgcolor: 'warning.main', opacity: 0.85 } : undefined}
-                      >
-                        {m.hasGps ? (
-                          <CheckCircleIcon fontSize="small" color="success" />
-                        ) : (
-                          <CancelIcon fontSize="small" color="disabled" />
-                        )}
-                      </TableCell>
-                    );
-                  }
-                  return (
-                    <TableCell
-                      key={m.id}
-                      align="center"
-                      sx={
-                        row.differs
-                          ? { bgcolor: 'warning.main', color: 'warning.contrastText', opacity: 0.85 }
-                          : undefined
-                      }
-                    >
-                      {row.render(m)}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            ))}
-            <TableRow>
-              <TableCell sx={{ fontWeight: 500 }}>Quality score</TableCell>
-              {group.members.map((m) => {
-                const pct = m.qualityScore != null ? Math.round(m.qualityScore * 100) : null;
-                return (
-                  <TableCell key={m.id} align="center">
-                    {pct != null ? (
-                      <Box sx={{ minWidth: 80 }}>
-                        <LinearProgress
-                          variant="determinate"
-                          value={pct}
-                          sx={{ height: 6, borderRadius: 3, mb: 0.5 }}
-                          color={pct >= 70 ? 'success' : pct >= 40 ? 'warning' : 'error'}
-                        />
-                        <Typography variant="caption">{pct}%</Typography>
-                      </Box>
-                    ) : (
-                      '—'
-                    )}
-                  </TableCell>
-                );
-              })}
-            </TableRow>
-          </TableBody>
-        </Table>
-      </TableContainer>
+      {/* Member comparison — attribute matrix at md+, stacked cards below */}
+      <MemberComparison columns={comparisonColumns} rows={comparisonRows} />
 
       {/* Action bar */}
       {canAct && (
