@@ -1,7 +1,27 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+/**
+ * Unit tests for StorageProvidersPage — post-#259 (the shared-DataTable
+ * migration).
+ *
+ * Two surfaces changed and are covered here:
+ *   - the provider CARDS became a table plus a per-row "Configure…" dialog, so
+ *     every credential mutation (save / remove / test, and the pre-save secret
+ *     guard) is now reached through the row menu;
+ *   - the migration run history became a DataTable with `status` as a `primary`
+ *     column.
+ *
+ * Table MECHANICS are the component's, covered by
+ * `runDataTableConformanceSuite` (docs/specs/datatable.md §18.5) and not
+ * re-tested here.
+ */
+
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockAdminUser } from '../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+} from '../../components/datatable/__tests__/testUtils/layoutStubs';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared BEFORE the imports they affect
@@ -24,9 +44,15 @@ vi.mock('../../hooks/useStorageMigration', () => ({
 // ---------------------------------------------------------------------------
 
 import StorageProvidersPage from '../../pages/Admin/StorageProvidersPage';
+import {
+  MIGRATION_RUN_COLUMNS,
+  buildStorageProviderColumns,
+  providerState,
+} from '../../pages/Admin/storageProvidersTable';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useStorageProviders } from '../../hooks/useStorageProviders';
 import { useStorageMigration } from '../../hooks/useStorageMigration';
+import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseStorageProviders = vi.mocked(useStorageProviders);
@@ -116,14 +142,37 @@ function defaultMigrationMock() {
   };
 }
 
+function renderPage() {
+  return render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+}
+
+/** Open a provider's credential dialog through its row menu. */
+async function openConfigure(user: ReturnType<typeof userEvent.setup>, rowLabel: string) {
+  await user.click(await screen.findByRole('button', { name: `Row actions for ${rowLabel}` }));
+  await user.click(await screen.findByRole('menuitem', { name: /^configure$/i }));
+  return screen.findByRole('dialog');
+}
+
+/** Open a provider's row menu without picking anything. */
+async function openRowMenu(user: ReturnType<typeof userEvent.setup>, rowLabel: string) {
+  await user.click(await screen.findByRole('button', { name: `Row actions for ${rowLabel}` }));
+}
+
 // ---------------------------------------------------------------------------
 
 describe('StorageProvidersPage', () => {
+  beforeAll(() => {
+    installLayoutStubs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400);
     mockUsePermissions.mockReturnValue(defaultPermissionsMock() as any);
     mockUseStorageProviders.mockReturnValue(defaultStorageProvidersMock() as any);
     mockUseStorageMigration.mockReturnValue(defaultMigrationMock() as any);
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   // -------------------------------------------------------------------------
@@ -134,13 +183,13 @@ describe('StorageProvidersPage', () => {
         isAdmin: false,
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.queryByRole('heading', { name: /storage providers/i })).not.toBeInTheDocument();
     });
 
     it('renders the page heading for admin users', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.getByRole('heading', { name: /storage providers/i })).toBeInTheDocument();
     });
@@ -155,7 +204,7 @@ describe('StorageProvidersPage', () => {
         settings: null,
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
       expect(screen.queryByRole('heading', { name: /storage providers/i })).not.toBeInTheDocument();
@@ -165,10 +214,9 @@ describe('StorageProvidersPage', () => {
       mockUseStorageProviders.mockReturnValue({
         ...defaultStorageProvidersMock(),
         loading: true,
-        // settings is NOT null — previous load succeeded
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.getByRole('heading', { name: /storage providers/i })).toBeInTheDocument();
     });
@@ -184,7 +232,7 @@ describe('StorageProvidersPage', () => {
         error: 'Failed to load storage settings',
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       const alert = screen.getByRole('alert');
       expect(alert).toBeInTheDocument();
@@ -193,156 +241,336 @@ describe('StorageProvidersPage', () => {
   });
 
   // -------------------------------------------------------------------------
-  describe('Provider cards', () => {
-    it('renders a card for each provider — AWS S3, Cloudflare R2, Local Disk', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Each provider name appears at least once (in card heading + possibly radio label)
-      expect(screen.getAllByText('AWS S3').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Cloudflare R2').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Local Disk').length).toBeGreaterThan(0);
+  describe('Column definitions', () => {
+    it('leads the provider card with Provider then Status (issue #259)', () => {
+      const primaries = buildStorageProviderColumns('s3')
+        .filter((column) => column.priority === 'primary')
+        .map((column) => column.id);
+      expect(primaries).toEqual(['provider', 'state']);
     });
 
-    it('shows "Active" chip on the currently active provider', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const activeChips = screen.getAllByText('Active');
-      expect(activeChips.length).toBeGreaterThan(0);
+    it('leads the migration-run card with Route then Status', () => {
+      const primaries = MIGRATION_RUN_COLUMNS.filter(
+        (column) => column.priority === 'primary',
+      ).map((column) => column.id);
+      expect(primaries).toEqual(['route', 'status']);
     });
 
-    it('shows Enabled chip for enabled providers', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const enabledChips = screen.getAllByText('Enabled');
-      expect(enabledChips.length).toBeGreaterThan(0);
+    it('keeps the masked secret out of a CSV export', () => {
+      const secret = buildStorageProviderColumns('s3').find((column) => column.id === 'last4')!;
+      expect(secret.exportable).toBe(false);
     });
 
-    it('shows Configured chip for configured providers', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const configuredChips = screen.getAllByText('Configured');
-      expect(configuredChips.length).toBeGreaterThan(0);
-    });
-
-    it('shows masked secret key for configured S3 provider with last4', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // The masked field renders "••••••••wxyz"
-      expect(screen.getByDisplayValue(/••••.*wxyz/)).toBeInTheDocument();
-    });
-
-    it('shows no-credentials alert for the Local Disk provider', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByText(/no credentials required/i)).toBeInTheDocument();
-    });
-
-    it('shows Test connection buttons', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
-      expect(testButtons.length).toBeGreaterThan(0);
-    });
-
-    it('shows Save button for credentialed providers', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const saveButtons = screen.getAllByRole('button', { name: /^save$/i });
-      expect(saveButtons.length).toBeGreaterThan(0);
-    });
-
-    it('shows Remove button for configured credentialed providers', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Both S3 and R2 are configured
-      const removeButtons = screen.getAllByRole('button', { name: /^remove$/i });
-      expect(removeButtons.length).toBeGreaterThan(0);
+    it('derives the four-way provider state', () => {
+      expect(providerState(makeProviderRow() as any, 's3')).toBe('Active');
+      expect(providerState(makeProviderRow({ provider: 'r2' }) as any, 's3')).toBe('Enabled');
+      expect(
+        providerState(makeProviderRow({ provider: 'r2', enabled: false }) as any, 's3'),
+      ).toBe('Disabled');
+      expect(
+        providerState(makeProviderRow({ provider: 'r2', configured: false }) as any, 's3'),
+      ).toBe('Not configured');
     });
   });
 
   // -------------------------------------------------------------------------
-  describe('Test connection per card', () => {
-    it('calls testProvider and shows success indicator on ok:true', async () => {
-      const mockTestProvider = vi.fn().mockResolvedValue({ ok: true, bucket: 'my-bucket' });
+  describe('Provider table', () => {
+    it('renders a row for each provider — AWS S3, Cloudflare R2, Local Disk', async () => {
+      renderPage();
 
-      mockUseStorageProviders.mockReturnValue({
-        ...defaultStorageProvidersMock(),
-        testProvider: mockTestProvider,
-        // Pre-populate the test result so the result indicator renders
-        testResults: { s3: { ok: true, bucket: 'my-bucket' } },
-        testLoading: { s3: false },
-      } as any);
-
-      const user = userEvent.setup();
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Find the first "Test connection" button (belongs to S3 card)
-      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
-      await user.click(testButtons[0]);
-
+      const grid = await screen.findByRole('grid', { name: /storage providers/i });
       await waitFor(() => {
-        expect(mockTestProvider).toHaveBeenCalled();
+        expect(within(grid).getByText('AWS S3')).toBeInTheDocument();
+      });
+      expect(within(grid).getByText('Cloudflare R2')).toBeInTheDocument();
+      expect(within(grid).getByText('Local Disk')).toBeInTheDocument();
+    });
+
+    it('shows the "Active" status on the currently active provider', async () => {
+      renderPage();
+
+      const grid = await screen.findByRole('grid', { name: /storage providers/i });
+      await waitFor(() => {
+        expect(within(grid).getByText('Active')).toBeInTheDocument();
       });
     });
 
-    it('shows success text when testResult is ok:true', () => {
+    it('shows a Configured chip for configured providers', async () => {
+      renderPage();
+
+      const grid = await screen.findByRole('grid', { name: /storage providers/i });
+      await waitFor(() => {
+        expect(within(grid).getAllByText('Configured').length).toBeGreaterThan(0);
+      });
+    });
+
+    it('shows the masked secret in the table, never the secret itself', async () => {
+      renderPage();
+
+      const grid = await screen.findByRole('grid', { name: /storage providers/i });
+      await waitFor(() => {
+        expect(within(grid).getByText(/••••.*wxyz/)).toBeInTheDocument();
+      });
+    });
+
+    it('renders without crashing when providers and knownProviders are both empty', async () => {
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        settings: { providers: [], knownProviders: [], activeProvider: '' },
+      } as any);
+
+      renderPage();
+
+      expect(screen.getByRole('heading', { name: /storage providers/i })).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/no storage providers available/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Configure dialog', () => {
+    it('shows the masked current secret and the credential fields', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openConfigure(user, 'AWS S3');
+
+      expect(within(dialog).getByDisplayValue(/••••.*wxyz/)).toBeInTheDocument();
+      expect(within(dialog).getByLabelText(/access key id/i)).toBeInTheDocument();
+      expect(within(dialog).getByLabelText(/new secret access key/i)).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /^save$/i })).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /test connection/i })).toBeInTheDocument();
+    });
+
+    it('shows the no-credentials alert for Local Disk, and no credential fields', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openConfigure(user, 'Local Disk');
+
+      expect(within(dialog).getByText(/no credentials required/i)).toBeInTheDocument();
+      expect(within(dialog).queryByLabelText(/access key id/i)).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+    });
+
+    it('saves credentials with the typed values', async () => {
+      const saveCredentials = vi.fn().mockResolvedValue(makeProviderRow());
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        saveCredentials,
+      } as any);
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openConfigure(user, 'AWS S3');
+      // `fireEvent.change` rather than `user.type`: every keystroke re-renders
+      // the page (and its two DataGrids), which is a needless ~10s in CI.
+      fireEvent.change(within(dialog).getByLabelText(/new secret access key/i), {
+        target: { value: 'brand-new' },
+      });
+      await user.click(within(dialog).getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => {
+        expect(saveCredentials).toHaveBeenCalledWith(
+          's3',
+          expect.objectContaining({ secretAccessKey: 'brand-new', bucket: 'my-bucket' }),
+        );
+      });
+    });
+
+    it('shows the helper text explaining a blank secret keeps the stored one', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openConfigure(user, 'AWS S3');
+
+      expect(
+        within(dialog).getByText(/leave blank to use the saved secret when testing or saving/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Test connection', () => {
+    it('calls testProvider from the row menu', async () => {
+      const testProvider = vi.fn().mockResolvedValue({ ok: true, bucket: 'my-bucket' });
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        testProvider,
+      } as any);
+      const user = userEvent.setup();
+      renderPage();
+
+      await openRowMenu(user, 'AWS S3');
+      await user.click(await screen.findByRole('menuitem', { name: /test connection/i }));
+
+      await waitFor(() => {
+        expect(testProvider).toHaveBeenCalledWith('s3', expect.any(Object));
+      });
+    });
+
+    it('shows the ok result inside the dialog', async () => {
       mockUseStorageProviders.mockReturnValue({
         ...defaultStorageProvidersMock(),
         testResults: { s3: { ok: true, bucket: 'my-bucket' } },
-        testLoading: {},
       } as any);
+      const user = userEvent.setup();
+      renderPage();
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      const dialog = await openConfigure(user, 'AWS S3');
 
-      // The page renders "Connected — bucket: my-bucket" for S3
-      expect(screen.getByText(/connected/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/connected/i)).toBeInTheDocument();
     });
 
-    it('shows error text when testResult is ok:false', () => {
+    it('shows the failure reason inside the dialog', async () => {
       mockUseStorageProviders.mockReturnValue({
         ...defaultStorageProvidersMock(),
         testResults: { s3: { ok: false, error: 'Invalid credentials' } },
-        testLoading: {},
       } as any);
+      const user = userEvent.setup();
+      renderPage();
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      const dialog = await openConfigure(user, 'AWS S3');
 
-      expect(screen.getByText(/invalid credentials/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/invalid credentials/i)).toBeInTheDocument();
     });
 
-    it('shows a spinner on the test button while loading', () => {
-      mockUseStorageProviders.mockReturnValue({
-        ...defaultStorageProvidersMock(),
-        testResults: {},
-        testLoading: { s3: true },
-      } as any);
-
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // The button's startIcon switches to CircularProgress when testLoading[provider] is true
-      // The button itself becomes disabled; check it is disabled
-      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
-      // The s3 button (first credentialed card) should be disabled while loading
-      expect(testButtons[0]).toBeDisabled();
-    });
-
-    it('shows "Accessible" for Local Disk when test ok:true', () => {
+    it('shows "Accessible" for Local Disk when the test succeeded', async () => {
       mockUseStorageProviders.mockReturnValue({
         ...defaultStorageProvidersMock(),
         testResults: { local: { ok: true } },
-        testLoading: {},
       } as any);
+      const user = userEvent.setup();
+      renderPage();
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      const dialog = await openConfigure(user, 'Local Disk');
 
-      expect(screen.getByText(/accessible/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/accessible/i)).toBeInTheDocument();
+    });
+
+    it('disables the test control while a test is in flight', async () => {
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        testLoading: { s3: true },
+      } as any);
+      const user = userEvent.setup();
+      renderPage();
+
+      await openRowMenu(user, 'AWS S3');
+
+      expect(await screen.findByRole('menuitem', { name: /test connection/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Test guard: unconfigured provider requiring credentials', () => {
+    function unconfiguredR2Settings() {
+      return {
+        providers: [],
+        knownProviders: [
+          makeProviderRow({
+            provider: 'r2',
+            label: 'Cloudflare R2',
+            configured: false,
+            enabled: false,
+            last4: null,
+            accessKeyId: null,
+            region: null,
+            bucket: null,
+          }),
+        ],
+        activeProvider: 's3',
+      };
+    }
+
+    it('disables the test action and shows the caption while the secret is empty', async () => {
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        settings: unconfiguredR2Settings(),
+      } as any);
+      const user = userEvent.setup();
+      renderPage();
+
+      await openRowMenu(user, 'Cloudflare R2');
+      expect(await screen.findByRole('menuitem', { name: /test connection/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+      await user.keyboard('{Escape}');
+
+      const dialog = await openConfigure(user, 'Cloudflare R2');
+      expect(
+        within(dialog).getByText(/enter the secret access key to test before saving/i),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /test connection/i })).toBeDisabled();
+    });
+
+    it('enables the test button and hides the caption once a secret is typed', async () => {
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        settings: unconfiguredR2Settings(),
+      } as any);
+      const user = userEvent.setup();
+      renderPage();
+
+      const dialog = await openConfigure(user, 'Cloudflare R2');
+      fireEvent.change(within(dialog).getByLabelText(/new secret access key/i), {
+        target: { value: 'my-r2-secret' },
+      });
+
+      await waitFor(() => {
+        expect(within(dialog).getByRole('button', { name: /test connection/i })).not.toBeDisabled();
+      });
+      expect(
+        within(dialog).queryByText(/enter the secret access key to test before saving/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('Remove credentials', () => {
+    it('confirms, then calls removeCredentials', async () => {
+      const removeCredentials = vi.fn().mockResolvedValue(undefined);
+      mockUseStorageProviders.mockReturnValue({
+        ...defaultStorageProvidersMock(),
+        removeCredentials,
+      } as any);
+      const user = userEvent.setup();
+      renderPage();
+
+      await openRowMenu(user, 'Cloudflare R2');
+      await user.click(await screen.findByRole('menuitem', { name: /^remove$/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/remove credentials\?/i)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: /^remove$/i }));
+
+      await waitFor(() => {
+        expect(removeCredentials).toHaveBeenCalledWith('r2');
+      });
+    });
+
+    it('is disabled for the local provider, which has no credentials to remove', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await openRowMenu(user, 'Local Disk');
+
+      expect(await screen.findByRole('menuitem', { name: /^remove$/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
     });
   });
 
   // -------------------------------------------------------------------------
   describe('Active provider selector', () => {
     it('renders a radio group with each provider', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       const radios = screen.getAllByRole('radio');
       // 3 providers → 3 radios
@@ -350,11 +578,10 @@ describe('StorageProvidersPage', () => {
     });
 
     it('has the current active provider pre-selected', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       // defaultSettings has activeProvider = 's3'
       const radios = screen.getAllByRole('radio');
-      // The s3 radio corresponds to the first radio (provider order: s3, r2, local)
       expect(radios[0]).toBeChecked();
     });
 
@@ -367,9 +594,8 @@ describe('StorageProvidersPage', () => {
       } as any);
 
       const user = userEvent.setup();
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Select r2 radio
       const radios = screen.getAllByRole('radio');
       await user.click(radios[1]); // r2 is the second radio
 
@@ -382,9 +608,8 @@ describe('StorageProvidersPage', () => {
     });
 
     it('disables Save Active Provider button when selection matches current active provider', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Active is 's3', first radio is pre-selected → Save button disabled
       const saveActiveBtn = screen.getByRole('button', { name: /save active provider/i });
       expect(saveActiveBtn).toBeDisabled();
     });
@@ -393,16 +618,14 @@ describe('StorageProvidersPage', () => {
   // -------------------------------------------------------------------------
   describe('Migration panel', () => {
     it('renders Source and Target provider selects', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // MUI Select renders the label in a <label> and also in a <span> inside the fieldset —
-      // use getAllByText to tolerate either occurrence.
       expect(screen.getAllByText(/source provider/i).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/target provider/i).length).toBeGreaterThan(0);
     });
 
     it('Start Migration button is disabled until source and target are different', () => {
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       const startBtn = screen.getByRole('button', { name: /start migration/i });
       expect(startBtn).toBeDisabled();
@@ -410,27 +633,21 @@ describe('StorageProvidersPage', () => {
 
     it('opens confirmation dialog when Start Migration is clicked with valid source and target', async () => {
       const user = userEvent.setup();
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Open source select and pick 's3'
-      const comboboxes = screen.getAllByRole('combobox');
-      // First combobox = source, second = target
-      await user.click(comboboxes[0]);
-      const s3Option = await screen.findByRole('option', { name: /aws s3/i });
-      await user.click(s3Option);
+      const source = screen.getByRole('combobox', { name: /source provider/i });
+      await user.click(source);
+      await user.click(await screen.findByRole('option', { name: /aws s3/i }));
 
-      // Open target select and pick 'r2'
-      await user.click(comboboxes[1]);
-      const r2Option = await screen.findByRole('option', { name: /cloudflare r2/i });
-      await user.click(r2Option);
+      const target = screen.getByRole('combobox', { name: /target provider/i });
+      await user.click(target);
+      await user.click(await screen.findByRole('option', { name: /cloudflare r2/i }));
 
-      const startBtn = screen.getByRole('button', { name: /start migration/i });
-      await user.click(startBtn);
+      await user.click(screen.getByRole('button', { name: /start migration/i }));
 
       await waitFor(() => {
         expect(screen.getByRole('dialog')).toBeInTheDocument();
       });
-
       expect(screen.getByText(/start migration\?/i)).toBeInTheDocument();
     });
 
@@ -442,23 +659,16 @@ describe('StorageProvidersPage', () => {
       } as any);
 
       const user = userEvent.setup();
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Select source and target
-      const comboboxes = screen.getAllByRole('combobox');
-      await user.click(comboboxes[0]);
-      const s3Option = await screen.findByRole('option', { name: /aws s3/i });
-      await user.click(s3Option);
-
-      await user.click(comboboxes[1]);
-      const r2Option = await screen.findByRole('option', { name: /cloudflare r2/i });
-      await user.click(r2Option);
-
+      await user.click(screen.getByRole('combobox', { name: /source provider/i }));
+      await user.click(await screen.findByRole('option', { name: /aws s3/i }));
+      await user.click(screen.getByRole('combobox', { name: /target provider/i }));
+      await user.click(await screen.findByRole('option', { name: /cloudflare r2/i }));
       await user.click(screen.getByRole('button', { name: /start migration/i }));
 
-      // Confirm in dialog
-      const confirmBtn = await screen.findByRole('button', { name: /^start migration$/i });
-      await user.click(confirmBtn);
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^start migration$/i }));
 
       await waitFor(() => {
         expect(mockStartMigration).toHaveBeenCalledWith('s3', 'r2');
@@ -473,54 +683,47 @@ describe('StorageProvidersPage', () => {
       } as any);
 
       const user = userEvent.setup();
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const comboboxes = screen.getAllByRole('combobox');
-      await user.click(comboboxes[0]);
+      await user.click(screen.getByRole('combobox', { name: /source provider/i }));
       await user.click(await screen.findByRole('option', { name: /aws s3/i }));
-      await user.click(comboboxes[1]);
+      await user.click(screen.getByRole('combobox', { name: /target provider/i }));
       await user.click(await screen.findByRole('option', { name: /cloudflare r2/i }));
       await user.click(screen.getByRole('button', { name: /start migration/i }));
 
-      // Click Cancel in dialog (first button is "Cancel")
-      const dialogCancelBtn = await screen.findByRole('button', { name: /^cancel$/i });
-      await user.click(dialogCancelBtn);
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
 
       await waitFor(() => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       });
-
       expect(mockStartMigration).not.toHaveBeenCalled();
     });
 
     it('shows migration progress when activeRun is in-flight', () => {
-      const activeRun = {
-        id: 'run-1',
-        sourceProvider: 's3',
-        targetProvider: 'r2',
-        status: 'running',
-        totalCount: 100,
-        migratedCount: 45,
-        failedCount: 0,
-        skippedCount: 0,
-        startedAt: '2024-01-01T00:00:00Z',
-        finishedAt: null,
-        lastError: null,
-      };
-
       mockUseStorageMigration.mockReturnValue({
         ...defaultMigrationMock(),
-        activeRun,
+        activeRun: {
+          id: 'run-1',
+          sourceProvider: 's3',
+          targetProvider: 'r2',
+          status: 'running',
+          totalCount: 100,
+          migratedCount: 45,
+          failedCount: 0,
+          skippedCount: 0,
+          startedAt: '2024-01-01T00:00:00Z',
+          finishedAt: null,
+          lastError: null,
+        },
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.getByText(/migration in progress/i)).toBeInTheDocument();
-      // Progress counters: "Copied: 45 / 100"
       expect(screen.getByText(/copied:/i)).toBeInTheDocument();
       expect(screen.getByText(/45 \/ 100/)).toBeInTheDocument();
-      // LinearProgress should be rendered
-      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+      expect(screen.getAllByRole('progressbar').length).toBeGreaterThan(0);
     });
 
     it('shows Cancel Migration button while migration is running', () => {
@@ -541,7 +744,7 @@ describe('StorageProvidersPage', () => {
         },
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.getByRole('button', { name: /cancel migration/i })).toBeInTheDocument();
     });
@@ -568,10 +771,9 @@ describe('StorageProvidersPage', () => {
       } as any);
 
       const user = userEvent.setup();
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const cancelBtn = screen.getByRole('button', { name: /cancel migration/i });
-      await user.click(cancelBtn);
+      await user.click(screen.getByRole('button', { name: /cancel migration/i }));
 
       await waitFor(() => {
         expect(mockCancel).toHaveBeenCalledTimes(1);
@@ -596,12 +798,12 @@ describe('StorageProvidersPage', () => {
         },
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.queryByRole('button', { name: /^start migration$/i })).not.toBeInTheDocument();
     });
 
-    it('shows run history table when there are past runs', () => {
+    it('shows the run history table when there are past runs', async () => {
       mockUseStorageMigration.mockReturnValue({
         ...defaultMigrationMock(),
         runs: [
@@ -621,139 +823,15 @@ describe('StorageProvidersPage', () => {
         ],
       } as any);
 
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.getByText(/recent migration runs/i)).toBeInTheDocument();
-      // The table renders the route as a monospace Typography: "Local Disk → AWS S3"
-      // Provider names also appear in card headings/radios, so use getAllByText.
-      expect(screen.getAllByText(/local disk/i).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/aws s3/i).length).toBeGreaterThan(0);
-      // The route cell has text "Local Disk → AWS S3" — assert the arrow character exists
-      expect(screen.getByText(/local disk.*→.*aws s3/i)).toBeInTheDocument();
-    });
-  });
 
-  // -------------------------------------------------------------------------
-  describe('Test button guard: unconfigured provider requiring credentials', () => {
-    function unconfiguredR2Settings() {
-      return {
-        providers: [],
-        knownProviders: [
-          makeProviderRow({
-            provider: 'r2',
-            label: 'Cloudflare R2',
-            configured: false,
-            enabled: false,
-            last4: null,
-            accessKeyId: null,
-            region: null,
-            bucket: null,
-          }),
-        ],
-        activeProvider: 's3',
-      };
-    }
-
-    it('disables Test button and shows caption when unconfigured requiresCredentials provider has empty secret field', () => {
-      mockUseStorageProviders.mockReturnValue({
-        ...defaultStorageProvidersMock(),
-        settings: unconfiguredR2Settings(),
-      } as any);
-
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // The Test connection button for R2 must be disabled
-      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
-      // Only one provider card (R2)
-      expect(testButtons[0]).toBeDisabled();
-
-      // The instructional caption must be visible
-      expect(
-        screen.getByText(/enter the secret access key to test before saving/i),
-      ).toBeInTheDocument();
-    });
-
-    it('enables Test button and hides caption once the user types a secret', async () => {
-      mockUseStorageProviders.mockReturnValue({
-        ...defaultStorageProvidersMock(),
-        settings: unconfiguredR2Settings(),
-      } as any);
-
-      const user = userEvent.setup();
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Before typing: button is disabled
-      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
-      expect(testButtons[0]).toBeDisabled();
-
-      // Type a secret into the New Secret Access Key field
-      const secretField = screen.getByLabelText(/new secret access key/i);
-      await user.type(secretField, 'my-r2-secret');
-
-      // After typing: button should be enabled
+      const grid = await screen.findByRole('grid', { name: /migration runs/i });
       await waitFor(() => {
-        const buttons = screen.getAllByRole('button', { name: /test connection/i });
-        expect(buttons[0]).not.toBeDisabled();
+        expect(within(grid).getByText(/local disk.*→.*aws s3/i)).toBeInTheDocument();
       });
-
-      // Caption must no longer be shown
-      expect(
-        screen.queryByText(/enter the secret access key to test before saving/i),
-      ).not.toBeInTheDocument();
-    });
-
-    it('shows secret field helper text and keeps Test button enabled for a configured provider with empty secret', () => {
-      // Configured = true means a secret is already saved; empty field means "use saved"
-      mockUseStorageProviders.mockReturnValue({
-        ...defaultStorageProvidersMock(),
-        settings: {
-          providers: [
-            makeProviderRow({
-              provider: 's3',
-              label: 'AWS S3',
-              configured: true,
-              enabled: true,
-              last4: 'wxyz',
-            }),
-          ],
-          knownProviders: [],
-          activeProvider: 's3',
-        },
-      } as any);
-
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Helper text for the secret field must be present (explains blank = use saved)
-      expect(
-        screen.getByText(/leave blank to use the saved secret when testing or saving/i),
-      ).toBeInTheDocument();
-
-      // Test button must be enabled (no guard fires for configured provider)
-      const testButtons = screen.getAllByRole('button', { name: /test connection/i });
-      expect(testButtons[0]).not.toBeDisabled();
-
-      // The "enter secret to test" caption must NOT appear (guard only fires when !configured)
-      expect(
-        screen.queryByText(/enter the secret access key to test before saving/i),
-      ).not.toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('Empty providers state', () => {
-    it('renders without crashing when providers and knownProviders are both empty', () => {
-      mockUseStorageProviders.mockReturnValue({
-        ...defaultStorageProvidersMock(),
-        settings: {
-          providers: [],
-          knownProviders: [],
-          activeProvider: '',
-        },
-      } as any);
-
-      render(<StorageProvidersPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByRole('heading', { name: /storage providers/i })).toBeInTheDocument();
+      expect(within(grid).getByText('completed')).toBeInTheDocument();
     });
   });
 });
