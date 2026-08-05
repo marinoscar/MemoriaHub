@@ -1,8 +1,9 @@
 # DataTable — Shared Column Contract & Renderers
 
 **Status:** foundation shipped (issue #252); mobile + tablet layouts shipped
-(issue #253); filtering + quick search shipped (issue #254); layout persistence
-**API half** shipped (issue #255, §14 — web half pending) — all of epic #238
+(issue #253); filtering + quick search shipped (issue #254); column visibility,
+density and per-user layout persistence shipped (issue #255, §14–§15) — all of
+epic #238
 **Location:** `apps/web/src/components/datatable/`,
 `apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
 **Spec owner:** frontend
@@ -37,17 +38,17 @@ consume them, so column authors can declare them today without churn later:
 
 | Field / concept              | Consumed by                            |
 | ---------------------------- | -------------------------------------- |
-| `hideable`                   | #255 — column visibility / saved views |
 | `exportable`                 | #256 — CSV/export + virtualization     |
 
-§14 documents the **persistence half of #255**, which is shipped: the API can
-store a per-user, per-table layout today. The UI that reads and writes it (the
-visibility menu, the density switch) is the remaining half.
+§14 documents the storage contract for #255 (what the API accepts and how it
+merges); §15 documents the client half (the `tableId` prop, the picker and
+density surfaces, the resolution rules, and the write discipline).
 
 Everything else on this page is live behaviour today. `priority` is fully
 consumed: it drives column visibility on the grid *and* the card's
 headline/body/detail split (§3). `filterable` is now live too, together with
-its three companions `filterType`, `enumValues` and `searchable` (§10).
+its three companions `filterType`, `enumValues` and `searchable` (§10), and
+`hideable` is now consumed by the column picker (§15.2).
 
 ---
 
@@ -68,6 +69,10 @@ apps/web/src/components/datatable/
     operators.ts                  # the operator catalog (pure)
     filterModel.ts                # normalized-model helpers (pure)
     filterUrl.ts                  # <-> URLSearchParams helper (pure, opt-in)
+  layout/
+    layoutModel.ts                # stored shape, encoding, resolution (pure)
+    useDataTableLayoutPrefs.ts    # load / debounced fire-and-forget write
+    DataTableViewBar.tsx          # column picker + density — one shape per layout
   shared/
     rowActionConfirm.tsx          # one confirm dialog, shared by both renderers
   desktop/
@@ -85,10 +90,11 @@ apps/web/src/components/datatable/
   __tests__/DataTable.test.tsx            # #252 foundation
   __tests__/ResponsiveDataTable.test.tsx  # #253 layouts
   __tests__/DataTableFilters.test.tsx     # #254 filtering + quick search
+  __tests__/DataTableLayoutPrefs.test.tsx # #255 visibility / density / persistence
 ```
 
-Consumers import from `components/datatable` only. `desktop/`, `mobile/` and
-`shared/` are implementation detail.
+Consumers import from `components/datatable` only. `desktop/`, `mobile/`,
+`layout/` and `shared/` are implementation detail.
 
 ---
 
@@ -117,11 +123,11 @@ Three consequences worth stating explicitly:
   then `detail`. Column order within a priority band is preserved.
 
 The grid's own visibility baseline is computed by
-`buildColumnVisibilityModel(columns, { hideDetailColumns })`, where
-`hideDetailColumns` is now the resolved layout being `tablet` (§7), not a
-viewport media query. Issue #255 layers explicit user overrides and saved views
-*on top of* this baseline rather than replacing it, so a fresh table always
-opens in a sane state.
+`buildColumnVisibilityModel(columns, { hideDetailColumns, visibleColumns })`,
+where `hideDetailColumns` is the resolved layout being `tablet` (§7), not a
+viewport media query. The user's persisted choice (#255) is AND-ed with that
+baseline rather than replacing it (§15.3), so a fresh table always opens in a
+sane state and the tablet fold survives a layout stored on a desktop.
 
 **Rule of thumb:** one or two `primary` columns (the thing you scan for), the
 rest `secondary`, and anything diagnostic (ids, error text, timestamps nobody
@@ -269,11 +275,11 @@ searches, and is what the default placeholder is built from
 Defaults to `true` for any column with a usable scalar. Set `false` to keep a
 column out of CSV/export (e.g. a pure-affordance column).
 
-### `hideable` — *reserved (#255)*
+### `hideable`
 
-`false` pins the column permanently visible in the visibility UI. Default
-`true`. Already wired into the `GridColDef` today, so it takes effect the moment
-#255 exposes the control.
+`false` pins the column permanently visible and keeps it **out of the column
+picker entirely** — a checkbox that cannot change anything is worse than no
+checkbox. Default `true`. Also wired into the `GridColDef`. See §15.2.
 
 ### `truncate`
 
@@ -317,7 +323,8 @@ interface DataTableProps<Row> {
   rowActions?: DataTableRowAction<Row>[];
   bulkActions?: DataTableBulkAction[];
 
-  density?: 'compact' | 'standard' | 'comfortable';
+  tableId?: string;            // turns on per-user layout persistence (§15)
+  density?: DataTableDensity;  // 'compact' | 'standard' | 'comfortable'
   ariaLabel?: string;
   height?: number | string;
 
@@ -336,7 +343,8 @@ interface DataTableProps<Row> {
 | `loading`    | Shows the loading overlay. Rows already present stay visible underneath, so a refetch doesn't blank the table. |
 | `error`      | Rendered as an `Alert severity="error"` **above** the table; the table still renders beneath it, so a stale page remains readable while the error is shown. |
 | `emptyState` | Any node; rendered by the no-rows overlay. Defaults to a plain "No results". |
-| `density`    | Maps straight to DataGrid row density. |
+| `tableId`    | Stable id of this table instance. Supplying it persists the layout per user (§15); omitting it keeps every control working but session-scoped. |
+| `density`    | The page's **default** row-density preset, not a lock — a user's own choice overrides it. Maps onto DataGrid row density in the grid and onto card padding in the card list (§15.4). |
 | `ariaLabel`  | Accessible name of the grid. Strongly recommended — a table with no name is an unnavigable blob to a screen reader. |
 | `height`     | Omit for **auto-height**: the table grows with its rows and the page scrolls vertically. Supply a value to get a fixed-height, internally scrolling table body. |
 | `renderer`   | `'auto'` (default) picks by **container** width; `'desktop'`/`'tablet'`/`'mobile'` force one layout at every width. |
@@ -1298,7 +1306,9 @@ tested directly (`update-user-settings.dto.spec.ts` →
 
 The corollary for the web half: resolve a stored `visibleColumns` against the
 **current** column list at render time. A stored id for a column that no longer
-exists is ignored, not an error.
+exists is ignored, not an error — and a column added *after* the layout was
+stored resolves to its default rather than to hidden. §15.3 documents how the
+client encodes the extra bit that second rule needs.
 
 ### 14.4 Bounds
 
@@ -1360,3 +1370,255 @@ Two further notes:
 - `apps/api/test/settings/user-settings.integration.spec.ts` — the same through
   real HTTP: round-trip via PUT and PATCH, non-clobbering, and each rejection as
   a `400`.
+
+---
+
+## 15. Column visibility, density, and the client half of persistence (#255)
+
+§14 is what the server stores. This section is what the browser does with it:
+the `tableId` prop, the two controls, the rules that turn a stored blob plus the
+current column list into pixels, and the write discipline.
+
+Everything here lives in `apps/web/src/components/datatable/layout/`:
+`layoutModel.ts` (pure), `useDataTableLayoutPrefs.ts` (state + network) and
+`DataTableViewBar.tsx` (the controls).
+
+### 15.1 `tableId` — the whole opt-in
+
+```tsx
+<DataTable {...props} tableId="jobs" />
+```
+
+One new prop. Supplying it turns on persistence; **omitting it makes
+persistence inert** — no `GET`, no `PATCH` — while the picker and the density
+toggle keep working for the session. The controls are a UI feature; only the
+*backup* is opt-in.
+
+`tableId` is chosen by the page and never derived from a route or a heading. It
+is the storage key, so it has to survive a rename, a URL change and a
+re-mount. It must match the API's `/^[a-z0-9][a-z0-9_-]*$/` (§14.4).
+
+Nothing else changes for a calling page: sort and pagination stay controlled
+props, and the table restores a stored value by handing it back through the
+page's own `onSortChange` / `onPaginationChange` rather than keeping a second
+copy of state the page already owns.
+
+### 15.2 The surfaces, per layout
+
+Drawn by `DataTable` itself, above the filter bar, for the same reason the
+filter bar is (§7.4 / §10.3): the *shape* of these controls is decided by the
+layout, and a renderer owning the menu's open state would discard it on every
+resize.
+
+| Layout    | Surface                                                                 |
+| --------- | ----------------------------------------------------------------------- |
+| `desktop` | An inline density toggle (3 icon buttons) + a **"Columns" button opening a menu** of checkboxes, ending in "Reset to defaults". |
+| `tablet`  | Identical. A menu still fits and still reads well at 800px; only the phone genuinely cannot hold one. |
+| `mobile`  | One **"View" button opening a full-screen sheet** (MUI `Dialog fullScreen`) holding the density toggle, the checkbox list and Reset. |
+
+The bar reports its resolved shape as `data-view-surface` on
+`[data-testid="datatable-view-bar"]`, mirroring `data-layout` on the wrapper and
+`data-filter-surface` on the filter bar.
+
+Four deliberate decisions:
+
+- **The phone gets a sheet, not a menu.** A checkbox list inside a `Menu` on a
+  360px screen is a scrolling popover with 32px rows and no focus trap. The
+  sheet mirrors the filter sheet exactly, and MUI's `Dialog` supplies the trap,
+  the Escape handling and the `aria-modal` semantics.
+- **The picker does not close when a column is toggled.** Hiding three columns
+  is one trip, not three. (Consequence for tests: while the menu is open the
+  rest of the app carries `aria-hidden`, so a role query against the grid
+  underneath finds nothing until the menu is closed.)
+- **The picker lists only columns it can actually change.** `hideable: false`
+  columns are omitted (they are pinned), and so are `detail` columns *on a
+  tablet* — those are already folded into the row expander (§9), so a checkbox
+  for them would claim an effect it does not have.
+- **"Reset to defaults" is always offered**, even when nothing has been
+  customized. It is the only route back from a layout stored in an earlier
+  session, or on another device, that the user cannot otherwise account for.
+- **The hidden-column count is spoken, not just painted.** The button carries a
+  `Badge` (class `datatable-hidden-column-count`) and an accessible name of
+  `"Columns (2 hidden)"` — the same treatment, for the same reason, as the
+  filter bar's active-filter count (§10.3). Putting the count in the *visible*
+  label instead would make the accessible name no longer contain the visible
+  text (WCAG 2.5.3).
+
+Every control clears the 44px touch floor and none is hover-revealed; the menu
+and the sheet are mounted only while open, so the issue #243 failure mode
+(invisible but hit-testable) cannot arise. The #243 sweep is re-run against both
+surfaces in `__tests__/DataTableLayoutPrefs.test.tsx`.
+
+### 15.3 Resolving a stored layout against the CURRENT columns
+
+Three rules, applied in this order.
+
+**(a) Absent means "use the contract default", never "empty".** An absent
+`dataTables`, an absent entry, or an absent `visibleColumns` inside one all
+resolve to the priority-derived baseline (§3). This is §14.3's rule, enforced a
+second time on the client because the client is where it would actually bite.
+
+**(b) A stored list names columns; the current column list decides which of them
+exist.** A stored id matching no current column is ignored, never an error.
+
+**(c) A column added *after* the layout was stored is visible, not hidden.**
+
+Rule (c) is the one that needs machinery. `visibleColumns` is a `string[]`,
+which can say "these ids are visible" but not "…and these other ids existed and
+were deliberately hidden". Without that second bit, a column added to a table
+next month is indistinguishable from one the user unchecked last month — and
+would be silently hidden, from that user only, forever. That is exactly the
+failure §14.3 exists to prevent, merely relocated from the server to the client.
+
+So the list carries **every column known at write time**: visible ones as bare
+ids, hidden ones prefixed with `-`.
+
+```jsonc
+// user hid `attempts`; `type`, `status`, `lastError` are visible
+"visibleColumns": ["type", "status", "lastError", "-attempts"]
+```
+
+Resolution then has three answers instead of two:
+
+| Stored state for a current column | Result |
+| --------------------------------- | ------ |
+| no `visibleColumns` at all        | default — visible |
+| listed bare (`type`)              | visible |
+| listed with the marker (`-type`)  | hidden |
+| **not listed at all** (added later) | default — visible |
+| `hideable: false`                 | visible, whatever the list says |
+
+The encoding is chosen so that it **degrades correctly under the naive
+reading**: a consumer that treats the field as a plain list of visible ids sees
+`-attempts` match no column id, ignores it, and is left with exactly the visible
+set. The marker entries carry only the extra "we knew about this one" bit. Both
+bounds from §14.4 are respected on write — entries are capped at 60 (visible ids
+first, since losing a marker only costs the new-column protection while losing a
+visible id would hide a column) and no entry exceeds 64 characters.
+
+**Layout folding is AND-ed with the user's choice, never overridden by it.** The
+user's choice is layout-independent; the tablet's `detail` fold is a
+presentation decision. A user's "hide this" must win at every width, and the
+tablet fold must survive a layout stored on a desktop — otherwise a `detail`
+column marked visible there would reintroduce at 800px precisely the horizontal
+scroll the fold exists to remove. A column the user hid is also kept out of the
+tablet expander panel: hidden means hidden at every width.
+
+`sort` is resolved the same way and rejected unless its field still names a
+`sortable` column — restoring a sort the server would reject, or the header
+cannot display, is worse than opening in the page's own default order.
+
+### 15.4 Density reaches both renderers
+
+The grid gets density for free (DataGrid's own `density` prop drives row
+height). A card list has no such contract, so `layoutModel.ts` maps the same
+setting onto card metrics — region padding, the gap between stacked fields, and
+the gap between cards:
+
+| Density       | Card padding (`px` / `py`) | Field gap | Card gap |
+| ------------- | -------------------------- | --------- | -------- |
+| `compact`     | 1 / 0.75                   | 0.75      | 0.75     |
+| `standard`    | 1.5 / 1.25                 | 1.25      | 1.5      |
+| `comfortable` | 2 / 1.75                   | 1.75      | 2.25     |
+
+(MUI spacing units.) Density that only worked on the grid would silently stop
+working the moment the table went narrow — on the layout where vertical space is
+scarcest.
+
+**Touch targets are not scaled by density.** 44px is a floor, not a style. The
+one existing exception stays exactly as #253 left it: the tablet row expander
+keeps the grid's own density at `compact`, where the row is only 36px tall
+(§9.2).
+
+The effective density is published as `data-density` on the table wrapper and on
+the card list / each card, which is how both renderers' response to it is
+assertable.
+
+### 15.5 Write discipline — debounced, fire-and-forget, in-session authoritative
+
+Three properties, all following from one observation: a layout preference is UI
+state that happens to be backed up, not a form being submitted.
+
+- **In-session state is authoritative; the server copy is a cache.** The layout
+  on screen comes from React state and changes the instant the user clicks. The
+  network is told afterwards, and its response is never read back — nothing in
+  `useDataTableLayoutPrefs` calls `setState` from a response. A `GET` that lands
+  *after* the user has already touched a control is discarded rather than
+  applied, so a slow settings read can never clobber a choice already made.
+- **Fire-and-forget.** A rejected write is logged and dropped. A user who
+  unchecks a column while the network is down still gets an unchecked column;
+  making the checkbox depend on a round trip would trade a working control for a
+  spinner and, on failure, a control that snaps back for no visible reason. A
+  failed *read* is equally harmless: the table opens in contract defaults and
+  stays fully usable.
+- **Debounced (500ms).** Flipping four checkboxes is one intent, so it is one
+  request. The debounce is on the **write**, never on the state update — the
+  same rule quick search follows for its input (§10.4). A pending write is
+  *flushed*, not cancelled, on unmount, so the last change before a route change
+  still lands.
+
+#### Entry-replace, and why every write is a whole entry
+
+`PATCH /api/user-settings` merges `dataTables` per table id but replaces each
+**entry wholesale** (§14.5): a patch of `{ jobs: { pageSize: 100 } }` drops that
+entry's stored density and column list. So every write here sends the **complete
+in-session entry**, never a delta. That is cheap precisely because the hook
+already holds the full resolved layout in state — which is also why the API
+chose entry-replace over a deep merge in the first place.
+
+#### `sort` and `pageSize` are mirrored, not owned
+
+Those two stay controlled props belonging to the page (§5.1 / §5.2); the hook
+only *watches* them. It seeds a baseline at hydration — the stored value where
+there is one, the page's own value otherwise — and writes only on a later
+divergence from it. Without that baseline, mounting any paginated table would
+immediately persist its default page size as though the user had chosen it, and
+fire a `PATCH` on every mount of every table in the app.
+
+Restoring works the same way in reverse: a stored value is handed back through
+the page's own `onSortChange` / `onPaginationChange` rather than kept as a
+second copy of state the page already owns. A restored page size resets to page
+0, because a different page size makes the current offset meaningless.
+
+"Reset to defaults" is the merge-patch **delete**, `{ [tableId]: null }`, sent
+immediately rather than debounced (a single deliberate gesture has nothing to
+coalesce). It removes the entry entirely and frees its slot against the 40-table
+cap, rather than storing `{}` — which would be a second way to spell "absent".
+The same rule applies incidentally: if a change ever leaves the in-session entry
+empty, the write goes out as `null`, not `{}`.
+
+### 15.6 Tests
+
+`__tests__/DataTableLayoutPrefs.test.tsx` (40 cases), on the #253 stub recipe
+(container-driven width, `matchMedia` pinned to 1440px). It stubs the network by
+spying on the real `api` singleton rather than mocking the module, so the
+component under test goes through exactly the client every page uses.
+
+Worth copying rather than reinventing:
+
+1. **The resolution rules are tested twice** — once as pure functions over a
+   fixture column set, once through the rendered table. The pure tests pin the
+   contract (including the encode/decode round trip and its naive-reader
+   degradation); the rendered tests prove it is wired to the control a user
+   touches.
+2. **The three named acceptance cases are explicit tests**: defaults apply when
+   keys are absent, a newly-added column is visible rather than silently hidden,
+   and a failed settings write does not disturb in-session state.
+3. **The debounce is driven with fake timers.** Three toggles, then
+   `advanceTimersByTime(499)` → nothing on the wire, then one more millisecond →
+   exactly one `PATCH` carrying the final state.
+4. **Density is asserted as geometry, not as a prop.** Grid row height comes
+   from the `.MuiDataGrid-row` inline `min-height` (36 / 52 / 67px in jsdom);
+   card density from the computed `padding-left` of the card header. A test that
+   only asserted `data-density` would pass against a renderer that ignored it.
+5. **The #243 guard is re-run** against the opened desktop menu and the opened
+   phone sheet — both live in portals, so the sweep roots at the menu/dialog
+   rather than at `[data-testid="datatable"]`.
+
+### 15.7 Explicitly out of scope
+
+Per-user layout persistence, **not** named or shareable views. There is no
+multi-view model, no "save this view as…", and no sharing of a layout between
+users — a table stores exactly one layout per user, and "Reset to defaults" is
+the only other state it can be in. Adding named views later would be a new
+namespace beside `dataTables`, not a reinterpretation of it.
