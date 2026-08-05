@@ -17,9 +17,15 @@
  * is hidden with `opacity: 0` while staying clickable. There are no
  * hover-revealed affordances on a card at all — a card list is a touch surface
  * first, and an invisible-but-tappable control is the exact bug #243 filed.
+ *
+ * Render skipping (#256): a long list lets the browser skip layout and paint for
+ * off-screen cards (`content-visibility: auto`) against a MEASURED placeholder
+ * height — deliberately not a windowing virtualizer, since a wrong height
+ * estimate makes scrolling jump (issue #237). See
+ * `virtualization/cardVirtualization.ts`.
  */
 
-import { useId, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import {
   Box,
   Card,
@@ -38,6 +44,7 @@ import type { DataTableColumn, DataTableDensity, DataTableRowAction } from '../t
 import { RowActionsCell } from '../desktop/RowActionsCell';
 import { CardField, columnContent, columnText } from './CardField';
 import { cardDensityMetrics } from '../layout/layoutModel';
+import { containIntrinsicSize, useLazyImages } from '../virtualization/cardVirtualization';
 
 export interface DataCardProps<Row> {
   row: Row;
@@ -56,6 +63,20 @@ export interface DataCardProps<Row> {
    * it: 44px is a floor, not a style.
    */
   density?: DataTableDensity;
+  /**
+   * Let the browser skip layout/paint for this card while it is off screen
+   * (`content-visibility: auto`, #256). Never set on the measured card, and
+   * automatically suspended while the card's detail region is open — a card
+   * whose height is changing under the user's finger must stay fully rendered.
+   */
+  skipOffscreen?: boolean;
+  /**
+   * Placeholder height, in px, for a skipped card — MEASURED from a real card
+   * in this list rather than estimated from a column count (issue #237).
+   */
+  intrinsicHeight?: number | null;
+  /** Callback ref used by the card list to measure one representative card. */
+  measureRef?: (node: HTMLElement | null) => void;
 }
 
 export function DataCard<Row>({
@@ -70,10 +91,29 @@ export function DataCard<Row>({
   rowActions,
   onRunAction,
   density,
+  skipOffscreen = false,
+  intrinsicHeight,
+  measureRef,
 }: DataCardProps<Row>) {
   const [expanded, setExpanded] = useState(false);
   const detailRegionId = useId();
   const metrics = cardDensityMetrics(density);
+
+  // One ref, two jobs: annotating whatever a column's `render` produced with
+  // `loading="lazy"`, and (for the one card the list measures) reporting height.
+  const cardRef = useRef<HTMLElement | null>(null);
+  const setCardRef = useCallback(
+    (node: HTMLElement | null) => {
+      cardRef.current = node;
+      measureRef?.(node);
+    },
+    [measureRef],
+  );
+  useLazyImages(cardRef);
+
+  // An expanding card is changing height right now; skipping its layout is how
+  // a scroll position ends up somewhere the user did not put it.
+  const skipping = skipOffscreen && !expanded;
 
   const hasDetail = detailColumns.length > 0;
   const hasActions = Boolean(rowActions && rowActions.length > 0);
@@ -84,17 +124,29 @@ export function DataCard<Row>({
 
   return (
     <Card
+      ref={setCardRef}
       variant="outlined"
       component="li"
       data-testid="datatable-card"
       data-row-id={id}
       data-density={density ?? 'standard'}
       data-selected={selected ? 'true' : 'false'}
+      // Published as data attributes because jsdom's CSS parser drops
+      // `content-visibility` outright, so a computed-style assertion could not
+      // see it. These are the test hooks for the decision, not the styling.
+      data-skip-offscreen={skipping ? 'true' : 'false'}
+      data-intrinsic-height={skipping ? containIntrinsicSize(intrinsicHeight) : undefined}
       sx={{
         listStyle: 'none',
         minWidth: 0,
         maxWidth: '100%',
         overflow: 'hidden',
+        ...(skipping
+          ? {
+              contentVisibility: 'auto',
+              containIntrinsicSize: containIntrinsicSize(intrinsicHeight),
+            }
+          : {}),
         ...(selected
           ? {
               borderColor: 'primary.main',

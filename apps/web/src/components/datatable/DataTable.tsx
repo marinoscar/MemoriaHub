@@ -41,6 +41,11 @@
  * once, from the layout baseline and the user's stored choice together, so the
  * two renderers can never disagree about which columns exist.
  *
+ * `DataTableExportControl` (CSV export, #256) rides in that bar's trailing slot
+ * on the same logic: one code path serves every renderer, so a phone and a
+ * desktop download byte-identical files, and the control's SHAPE (a button, or
+ * an overflow menu at 360px) is the only thing the layout decides.
+ *
  * ## Layout persistence
  *
  * Supplying `tableId` stores the resolved layout under
@@ -63,6 +68,7 @@ import { DesktopGridRenderer } from './desktop/DesktopGridRenderer';
 import { CardListRenderer } from './mobile/CardListRenderer';
 import { DataTableFilterBar } from './filter/DataTableFilterBar';
 import { DataTableViewBar } from './layout/DataTableViewBar';
+import { DataTableExportControl } from './export/DataTableExportControl';
 import { useDataTableLayoutPrefs } from './layout/useDataTableLayoutPrefs';
 import { useDataTableLayout, useViewportLayout } from './useContainerLayout';
 
@@ -104,6 +110,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     onFiltersChange,
     quickSearch,
     tableId,
+    csvExport,
+    disableExport = false,
     density: densityProp,
     'data-testid': testId,
     ...rendererProps
@@ -149,6 +157,22 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         onToggleColumn={prefs.toggleColumn}
         onDensityChange={prefs.setDensity}
         onReset={prefs.reset}
+        trailing={
+          disableExport ? undefined : (
+            <DataTableExportControl
+              layout={layout}
+              columns={props.columns}
+              rows={props.rows}
+              // The USER's choice, not the layout's fold: a `detail` column the
+              // tablet tucks into its row expander is still on screen, so a CSV
+              // must not change shape because the window got narrower.
+              visibleColumnIds={prefs.userVisibleColumnIds}
+              config={csvExport}
+              filenameBase={csvExport?.filename ?? tableId ?? props.ariaLabel}
+              total={props.pagination?.total}
+            />
+          )
+        }
       />
 
       <DataTableFilterBar
