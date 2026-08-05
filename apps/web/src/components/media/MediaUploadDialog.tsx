@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -167,6 +167,28 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
   const [fileStates, setFileStates] = useState<FileState[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Mirrors `isUploading` so the close guard never reads a stale closure when
+  // it is invoked programmatically at the end of a run.
+  const isUploadingRef = useRef(false);
+
+  const resetQueue = useCallback(() => {
+    isUploadingRef.current = false;
+    setIsUploading(false);
+    setFileStates([]);
+    setValidationError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
+
+  // The dialog is permanently mounted (see AppBar) and only toggled via `open`,
+  // so its state survives between runs. Reset on every false -> true transition
+  // to make a clean queue an invariant of opening, however the last run ended.
+  useEffect(() => {
+    if (open) {
+      resetQueue();
+    }
+  }, [open, resetQueue]);
 
   const updateFileState = useCallback((index: number, patch: Partial<FileState>) => {
     setFileStates((prev) =>
@@ -212,11 +234,22 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
     [],
   );
 
+  const handleClose = useCallback(() => {
+    if (isUploadingRef.current) return;
+    resetQueue();
+    onClose();
+  }, [onClose, resetQueue]);
+
   const handleUploadAll = useCallback(async () => {
     const pending = fileStates.filter((fs) => fs.status === 'pending');
     if (pending.length === 0) return;
 
+    isUploadingRef.current = true;
     setIsUploading(true);
+
+    // Mirrors the terminal status of each file so the end-of-run check does not
+    // have to reach back into `fileStates` (which is stale inside this closure).
+    const finalStatuses: FileStatus[] = fileStates.map((fs) => fs.status);
 
     for (let i = 0; i < fileStates.length; i++) {
       if (fileStates[i].status !== 'pending') continue;
@@ -242,6 +275,7 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
           if (existing.items.length > 0) {
             // Already in the library — skip the upload entirely.
             updateFileState(i, { status: 'duplicate', progress: 100 });
+            finalStatuses[i] = 'duplicate';
             continue;
           }
         }
@@ -260,6 +294,7 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
         // Server dedup race: another session registered the same hash first.
         if (deduplicated) {
           updateFileState(i, { status: 'duplicate', progress: 100 });
+          finalStatuses[i] = 'duplicate';
         } else {
           // Capture an instant local preview from the uploaded bytes so the new
           // gallery tile renders immediately instead of a "Processing…" spinner
@@ -269,26 +304,29 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
             addPreview(mediaItemId, file);
           }
           updateFileState(i, { status: 'success', progress: 100 });
+          finalStatuses[i] = 'success';
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Upload failed';
         updateFileState(i, { status: 'error', error: message });
+        finalStatuses[i] = 'error';
       }
     }
 
+    isUploadingRef.current = false;
     setIsUploading(false);
 
-    // Notify parent if every file is either success or duplicate (no errors, no pending)
-    setFileStates((current) => {
-      const allTerminal = current.every(
-        (fs) => fs.status === 'success' || fs.status === 'duplicate',
-      );
-      if (allTerminal && current.length > 0) {
-        onSuccess();
-      }
-      return current;
-    });
-  }, [fileStates, onSuccess, updateFileState, addPreview]);
+    // Notify parent if every file is either success or duplicate (no errors, no pending),
+    // then close through handleClose so the success and cancel paths cannot diverge.
+    const allTerminal =
+      finalStatuses.length > 0 &&
+      finalStatuses.every((status) => status === 'success' || status === 'duplicate');
+
+    if (allTerminal) {
+      onSuccess();
+      handleClose();
+    }
+  }, [fileStates, onSuccess, updateFileState, addPreview, handleClose]);
 
   const handleRetry = useCallback(
     async (index: number) => {
@@ -300,13 +338,6 @@ export function MediaUploadDialog({ open, onClose, onSuccess, circleId }: MediaU
   const handleRemove = useCallback((index: number) => {
     setFileStates((prev) => prev.filter((_, i) => i !== index));
   }, []);
-
-  const handleClose = useCallback(() => {
-    if (isUploading) return;
-    setFileStates([]);
-    setValidationError(null);
-    onClose();
-  }, [isUploading, onClose]);
 
   // ---------------------------------------------------------------------------
   // Derived state
