@@ -1,16 +1,31 @@
 /**
- * Unit tests for JobsPage.
+ * Unit tests for JobsPage — post-#258 (the shared-DataTable pilot migration).
  *
- * Tests: renders summary counts + stuck badge; renders rows with status chip +
- * lastError; status/type filter dropdowns; Retry shown for failed/succeeded only,
- * Delete hidden for running; bulk "Retry all failed" / "Reset stuck" call the
- * actions and show a snackbar; non-admin is redirected.
+ * Scope note, per docs/specs/datatable.md §17.8: TABLE MECHANICS are a property
+ * of the component, not of this page's column declarations, and are covered
+ * end-to-end by `runDataTableConformanceSuite` (pagination/sort/selection
+ * round-trips, the negative "never filters rows locally" test, loading/empty/
+ * error overlays, column visibility + density, CSV escaping, the issue #243
+ * invisible-but-tappable sweep, axe in both renderers and both themes, the
+ * 360px no-horizontal-scroll guard). None of that is re-tested here.
+ *
+ * What IS here is everything the migration could plausibly break:
+ *   - the auto-refresh poll not disturbing selection / filters / expansion,
+ *   - each filter's mapping onto this endpoint's params (especially
+ *     `processedWithin` and `scheduled`, which are not plain column filters),
+ *   - the per-row and queue-wide mutations,
+ *   - permission gating.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockAdminUser } from '../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../components/datatable/__tests__/testUtils/layoutStubs';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared BEFORE imports they affect
@@ -29,9 +44,12 @@ vi.mock('../../hooks/useJobs', () => ({
 // ---------------------------------------------------------------------------
 
 import JobsPage from '../../pages/Admin/JobsPage';
+import { normalizeJobFilters, toJobQuery } from '../../pages/Admin/jobsTable';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
 import type { UseJobsResult } from '../../hooks/useJobs';
+import type { DataTableFilterModel } from '../../components/datatable';
+import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseJobs = vi.mocked(useJobs);
@@ -53,16 +71,24 @@ function makePermissions(isAdmin: boolean) {
   };
 }
 
+function makeStats(overrides: Record<string, unknown> = {}) {
+  return {
+    total: 10,
+    byStatus: { pending: 4, running: 1, succeeded: 4, failed: 1 },
+    byType: [
+      { type: 'face_detection', pending: 4, running: 1, succeeded: 4, failed: 1, total: 10 },
+      { type: 'auto_tagging', pending: 0, running: 0, succeeded: 0, failed: 0, total: 0 },
+    ],
+    stuckRunning: 0,
+    scheduled: 0,
+    stuckThresholdMinutes: 3,
+    ...overrides,
+  } as UseJobsResult['stats'];
+}
+
 function makeJobsHook(overrides: Partial<UseJobsResult> = {}): UseJobsResult {
   return {
-    stats: {
-      total: 10,
-      byStatus: { pending: 4, running: 1, succeeded: 4, failed: 1 },
-      byType: [{ type: 'face_detection', pending: 4, running: 1, succeeded: 4, failed: 1, total: 10 }],
-      stuckRunning: 0,
-      scheduled: 0,
-      stuckThresholdMinutes: 3,
-    },
+    stats: makeStats(),
     jobs: [],
     meta: null,
     statsLoading: false,
@@ -107,13 +133,56 @@ function makeJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Render the page for an admin, with the router/theme wrapper the app uses. */
+function renderPage() {
+  return render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+}
+
+// ---------------------------------------------------------------------------
+// MUI select driving (the filter editor's three controls)
+// ---------------------------------------------------------------------------
+
+async function pickOption(
+  user: ReturnType<typeof userEvent.setup>,
+  selectName: string | RegExp,
+  optionName: string | RegExp,
+) {
+  const combo = await screen.findByRole('combobox', { name: selectName });
+  await user.click(combo);
+  const option = await screen.findByRole('option', { name: optionName });
+  await user.click(option);
+}
+
+/** Add one filter through the desktop filter row: column, value, Add. */
+async function addFilter(
+  user: ReturnType<typeof userEvent.setup>,
+  columnLabel: string | RegExp,
+  valueLabel: string | RegExp,
+) {
+  await pickOption(user, 'Column', columnLabel);
+  await pickOption(user, 'Value', valueLabel);
+  await user.click(screen.getByTestId('datatable-filter-apply'));
+}
+
 // ---------------------------------------------------------------------------
 
 describe('JobsPage', () => {
+  beforeAll(() => {
+    // jsdom performs no layout, so MUI X measures a 0×0 viewport and renders
+    // zero rows without these. Same recipe every DataTable suite uses.
+    installLayoutStubs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400); // desktop layout unless a test says otherwise
     mockUsePermissions.mockReturnValue(makePermissions(true));
     mockUseJobs.mockReturnValue(makeJobsHook());
+    // The table's layout-persistence hook reads/writes `/user-settings`
+    // (docs/specs/datatable.md §15). Stub the real `api` singleton so the page
+    // goes through exactly the client it ships with, without a network call.
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   // =========================================================================
@@ -124,14 +193,13 @@ describe('JobsPage', () => {
     it('redirects non-admin users — page content not shown', () => {
       mockUsePermissions.mockReturnValue(makePermissions(false));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // The page heading should not appear
       expect(screen.queryByText(/job queue/i)).not.toBeInTheDocument();
     });
 
     it('renders the page heading for admin users', async () => {
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /job queue/i })).toBeInTheDocument();
@@ -140,12 +208,12 @@ describe('JobsPage', () => {
   });
 
   // =========================================================================
-  // Summary counts / stats
+  // Stats strip (preserved verbatim by the migration)
   // =========================================================================
 
   describe('Summary counts', () => {
     it('renders total, pending, running, succeeded, and failed chip counts', async () => {
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByText(/total: 10/i)).toBeInTheDocument();
@@ -157,20 +225,9 @@ describe('JobsPage', () => {
     });
 
     it('renders the stuck badge when stuckRunning > 0', async () => {
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          stats: {
-            total: 5,
-            byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
-            byType: [],
-            stuckRunning: 3,
-            scheduled: 0,
-            stuckThresholdMinutes: 3,
-          },
-        }),
-      );
+      mockUseJobs.mockReturnValue(makeJobsHook({ stats: makeStats({ stuckRunning: 3 }) }));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByText(/3 stuck/i)).toBeInTheDocument();
@@ -178,420 +235,836 @@ describe('JobsPage', () => {
     });
 
     it('does not render the stuck badge when stuckRunning is 0', async () => {
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByText(/total: 10/i)).toBeInTheDocument();
       });
 
-      // The "Stuck running" chip in the summary panel only appears when stuckRunning > 0.
-      // (The "Reset stuck" button always shows but has a different label.)
       expect(screen.queryByText(/stuck running/i)).not.toBeInTheDocument();
     });
 
     it('renders per-type chips in the stats panel', async () => {
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByText(/face_detection: 10/i)).toBeInTheDocument();
       });
     });
+
+    it('renders the "Scheduled (backing off)" chip when scheduled > 0', async () => {
+      mockUseJobs.mockReturnValue(makeJobsHook({ stats: makeStats({ scheduled: 2 }) }));
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText(/scheduled \(backing off\): 2/i)).toBeInTheDocument();
+      });
+    });
+
+    it('links to the Job Insights page', async () => {
+      renderPage();
+
+      const link = await screen.findByRole('link', { name: /view insights & eta/i });
+      expect(link).toHaveAttribute('href', '/admin/settings/jobs/insights');
+    });
   });
 
   // =========================================================================
-  // Jobs table — row rendering
+  // Table rendering
   // =========================================================================
 
   describe('Jobs table', () => {
-    it('renders a row for each job with type, status chip', async () => {
+    it('renders a row per job with its type and status chip', async () => {
       const jobs = [
         makeJob({ id: 'job-1', type: 'face_detection', status: 'failed' }),
-        makeJob({ id: 'job-2', type: 'ocr', status: 'succeeded' }),
+        makeJob({ id: 'job-2', type: 'auto_tagging', status: 'succeeded' }),
       ];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
+      const grid = await screen.findByRole('grid', { name: /enrichment jobs/i });
       await waitFor(() => {
-        expect(screen.getByText('face_detection')).toBeInTheDocument();
-        expect(screen.getByText('ocr')).toBeInTheDocument();
+        expect(within(grid).getByText('face_detection')).toBeInTheDocument();
+        expect(within(grid).getByText('auto_tagging')).toBeInTheDocument();
+        expect(within(grid).getByText('failed')).toBeInTheDocument();
+        expect(within(grid).getByText('succeeded')).toBeInTheDocument();
       });
-
-      // Status chips
-      expect(screen.getByText('failed')).toBeInTheDocument();
-      expect(screen.getByText('succeeded')).toBeInTheDocument();
     });
 
     it('renders lastError text when a job has one', async () => {
       const jobs = [makeJob({ status: 'failed', lastError: 'Timeout after 30s' })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByText('Timeout after 30s')).toBeInTheDocument();
       });
     });
 
-    it('shows "No jobs found" when jobs list is empty', async () => {
+    it('shows "No jobs found" when the jobs list is empty', async () => {
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs: [] }));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByText(/no jobs found/i)).toBeInTheDocument();
       });
     });
 
-    it('renders "Global" in the Media Item cell for jobs with null mediaItemId (system jobs)', async () => {
-      const jobs = [makeJob({ id: 'job-global-1', type: 'storage_insights', mediaItemId: null, circleId: null })];
+    it('renders "Global" in the Media item cell for system jobs (null mediaItemId)', async () => {
+      const jobs = [
+        makeJob({ id: 'job-global-1', type: 'storage_insights', mediaItemId: null, circleId: null }),
+      ];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByText('Global')).toBeInTheDocument();
       });
     });
-  });
 
-  // =========================================================================
-  // Action button visibility rules
-  // =========================================================================
+    it('renders modelVersion and providerKey together', async () => {
+      const jobs = [
+        makeJob({ modelVersion: 'claude-3-haiku-20240307', providerKey: 'anthropic' }),
+      ];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
 
-  describe('Action button visibility', () => {
-    // Each row now shows a single kebab IconButton (aria-label="Job actions") that
-    // opens a MUI Menu with three MenuItems: "Download JSON", "Re-run", "Delete".
-    // "Re-run" is enabled only for failed/succeeded; "Delete" is disabled for running.
-    // Disabled MUI MenuItems render with aria-disabled="true".
+      renderPage();
 
-    it('Re-run menu item is enabled for failed jobs', async () => {
-      const jobs = [makeJob({ id: 'job-1', status: 'failed' })];
+      await waitFor(() => {
+        expect(screen.getByText('claude-3-haiku-20240307')).toBeInTheDocument();
+        expect(screen.getByText('anthropic')).toBeInTheDocument();
+      });
+    });
+
+    it('renders the jobs error through the table rather than blanking it', async () => {
       mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          jobs,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
-        }),
+        makeJobsHook({ jobs: [makeJob({ id: 'job-1' })], jobsError: 'Jobs load failed' }),
       );
-      const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
-      expect(rerunItem).not.toHaveAttribute('aria-disabled', 'true');
+      await waitFor(() => {
+        expect(screen.getByText(/jobs load failed/i)).toBeInTheDocument();
+      });
+      // The stale page stays readable beneath the error (§5, `error` prop).
+      expect(screen.getByText('face_detection')).toBeInTheDocument();
     });
 
-    it('Re-run menu item is enabled for succeeded jobs', async () => {
-      const jobs = [makeJob({ id: 'job-1', status: 'succeeded' })];
+    it('renders the stats error alert', async () => {
+      mockUseJobs.mockReturnValue(makeJobsHook({ stats: null, statsError: 'Stats load failed' }));
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText(/stats load failed/i)).toBeInTheDocument();
+      });
+    });
+
+    it('shows the per-row "backing off" chip for a pending job with a future scheduledFor', async () => {
+      const futureIso = new Date(Date.now() + 60_000).toISOString();
+      const jobs = [makeJob({ status: 'pending', scheduledFor: futureIso, rateLimitHits: 1 })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
-      expect(rerunItem).not.toHaveAttribute('aria-disabled', 'true');
+      await waitFor(() => {
+        expect(screen.getByText('backing off')).toBeInTheDocument();
+      });
     });
 
-    it('Re-run menu item is disabled for pending jobs', async () => {
-      const jobs = [makeJob({ id: 'job-1', status: 'pending' })];
+    it('does not show the backing-off chip for a pending job with no scheduledFor', async () => {
+      const jobs = [makeJob({ status: 'pending', scheduledFor: null })];
       mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
-      expect(rerunItem).toHaveAttribute('aria-disabled', 'true');
-    });
-
-    it('Re-run menu item is disabled for running jobs', async () => {
-      const jobs = [makeJob({ id: 'job-1', status: 'running' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
-      expect(rerunItem).toHaveAttribute('aria-disabled', 'true');
-    });
-
-    it('Delete menu item is enabled for pending jobs', async () => {
-      const jobs = [makeJob({ id: 'job-1', status: 'pending' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
-      expect(deleteItem).not.toHaveAttribute('aria-disabled', 'true');
-    });
-
-    it('Delete menu item is disabled for running jobs', async () => {
-      const jobs = [makeJob({ id: 'job-1', status: 'running' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
-      expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
-    });
-
-    it('Re-run and Delete menu items are both enabled for failed jobs', async () => {
-      const jobs = [makeJob({ id: 'job-1', status: 'failed' })];
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          jobs,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
-        }),
-      );
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
-      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
-      expect(rerunItem).not.toHaveAttribute('aria-disabled', 'true');
-      expect(deleteItem).not.toHaveAttribute('aria-disabled', 'true');
+      await waitFor(() => {
+        expect(screen.getByText('face_detection')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('backing off')).not.toBeInTheDocument();
     });
   });
 
   // =========================================================================
-  // Bulk actions
+  // Filters — pure mapping onto the endpoint's params
   // =========================================================================
 
-  describe('Bulk actions', () => {
-    it('calls retryAllFailed action when "Retry all failed" button is clicked', async () => {
+  describe('Filter → query mapping (pure)', () => {
+    const filter = (columnId: string, value: unknown): DataTableFilterModel => [
+      { columnId, operator: 'is', value: value as never },
+    ];
+
+    it('maps a status filter to `status`', () => {
+      expect(toJobQuery(filter('status', 'failed'))).toEqual({ status: 'failed' });
+    });
+
+    it('maps a type filter to `type`', () => {
+      expect(toJobQuery(filter('type', 'face_detection'))).toEqual({ type: 'face_detection' });
+    });
+
+    it.each(['4h', '24h', '7d', '30d'])(
+      'maps a processedWithin filter of %s straight through',
+      (window) => {
+        expect(toJobQuery(filter('processedWithin', window))).toEqual({
+          processedWithin: window,
+        });
+      },
+    );
+
+    it('never emits processedWithin=all — the absence of the filter IS "all"', () => {
+      expect(toJobQuery(filter('processedWithin', 'all'))).toEqual({});
+      expect(toJobQuery([])).toEqual({});
+    });
+
+    it('maps the backing-off filter to `scheduled: true`', () => {
+      expect(toJobQuery(filter('backingOff', 'true'))).toEqual({ scheduled: true });
+    });
+
+    it('drops `status` whenever `scheduled` is set (the API forces status=pending)', () => {
+      const model: DataTableFilterModel = [
+        { columnId: 'status', operator: 'is', value: 'failed' },
+        { columnId: 'backingOff', operator: 'is', value: 'true' },
+      ];
+      const query = toJobQuery(model);
+      expect(query.scheduled).toBe(true);
+      expect(query.status).toBeUndefined();
+      expect('status' in query).toBe(false);
+    });
+
+    it('composes processedWithin with the other filters', () => {
+      const model: DataTableFilterModel = [
+        { columnId: 'status', operator: 'is', value: 'failed' },
+        { columnId: 'type', operator: 'is', value: 'auto_tagging' },
+        { columnId: 'processedWithin', operator: 'is', value: '7d' },
+      ];
+      expect(toJobQuery(model)).toEqual({
+        status: 'failed',
+        type: 'auto_tagging',
+        processedWithin: '7d',
+      });
+    });
+
+    it('ignores operators and enum values this endpoint cannot express', () => {
+      expect(
+        toJobQuery([
+          { columnId: 'status', operator: 'isNot', value: 'failed' },
+          { columnId: 'status', operator: 'is', value: 'bogus' },
+          { columnId: 'processedWithin', operator: 'is', value: '99y' },
+          { columnId: 'lastError', operator: 'is', value: 'boom' },
+        ]),
+      ).toEqual({});
+    });
+  });
+
+  describe('Filter normalization (pure)', () => {
+    it('keeps only the last filter per column — every param is single-valued', () => {
+      const model: DataTableFilterModel = [
+        { columnId: 'type', operator: 'is', value: 'face_detection' },
+        { columnId: 'type', operator: 'is', value: 'auto_tagging' },
+      ];
+      expect(normalizeJobFilters(model)).toEqual([
+        { columnId: 'type', operator: 'is', value: 'auto_tagging' },
+      ]);
+    });
+
+    it('makes status and backing-off mutually exclusive, last one wins', () => {
+      const statusThenBackoff: DataTableFilterModel = [
+        { columnId: 'status', operator: 'is', value: 'failed' },
+        { columnId: 'backingOff', operator: 'is', value: 'true' },
+      ];
+      expect(normalizeJobFilters(statusThenBackoff)).toEqual([
+        { columnId: 'backingOff', operator: 'is', value: 'true' },
+      ]);
+
+      const backoffThenStatus: DataTableFilterModel = [
+        { columnId: 'backingOff', operator: 'is', value: 'true' },
+        { columnId: 'status', operator: 'is', value: 'running' },
+      ];
+      expect(normalizeJobFilters(backoffThenStatus)).toEqual([
+        { columnId: 'status', operator: 'is', value: 'running' },
+      ]);
+    });
+
+    it('leaves an already-legal model alone, by reference', () => {
+      const model: DataTableFilterModel = [
+        { columnId: 'status', operator: 'is', value: 'failed' },
+        { columnId: 'processedWithin', operator: 'is', value: '24h' },
+      ];
+      expect(normalizeJobFilters(model)).toBe(model);
+    });
+  });
+
+  // =========================================================================
+  // Filters — through the rendered filter bar
+  // =========================================================================
+
+  describe('Filter bar', () => {
+    it('offers the filter-only columns alongside the real ones', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      const combo = await screen.findByRole('combobox', { name: 'Column' });
+      await user.click(combo);
+
+      expect(await screen.findByRole('option', { name: 'Status' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Type' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Processed within' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Backing off' })).toBeInTheDocument();
+    });
+
+    it('does not draw a Processed within / Backing off COLUMN in the grid', async () => {
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: [makeJob({ id: 'job-1' })] }));
+
+      renderPage();
+
+      const grid = await screen.findByRole('grid', { name: /enrichment jobs/i });
+      await waitFor(() => {
+        expect(within(grid).getByRole('columnheader', { name: 'Type' })).toBeInTheDocument();
+      });
+      expect(
+        within(grid).queryByRole('columnheader', { name: 'Processed within' }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(grid).queryByRole('columnheader', { name: 'Backing off' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('sends status=failed and resets to page 1 when a Status filter is applied', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({ setFilters, filters: { page: 3, pageSize: 20 } }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await addFilter(user, 'Status', 'Failed');
+
+      expect(setFilters).toHaveBeenCalledWith({ status: 'failed', page: 1, pageSize: 20 });
+    });
+
+    it('sends type= when a Type filter is applied, from the live byType breakdown', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await addFilter(user, 'Type', 'auto_tagging');
+
+      expect(setFilters).toHaveBeenCalledWith({ type: 'auto_tagging', page: 1, pageSize: 20 });
+    });
+
+    it('sends processedWithin=24h — its own window, not a date range', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await addFilter(user, 'Processed within', 'Last 24 hours');
+
+      expect(setFilters).toHaveBeenCalledWith({
+        processedWithin: '24h',
+        page: 1,
+        pageSize: 20,
+      });
+    });
+
+    it('offers only `is` on processedWithin — no before/after/between the API cannot answer', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await pickOption(user, 'Column', 'Processed within');
+      await user.click(await screen.findByRole('combobox', { name: 'Operator' }));
+
+      const options = await screen.findAllByRole('option');
+      expect(options.map((option) => option.textContent)).toEqual(['is']);
+    });
+
+    it('sends scheduled=true (and no status) when Backing off is applied', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await addFilter(user, 'Backing off', /in retry delay/i);
+
+      expect(setFilters).toHaveBeenCalledWith({ scheduled: true, page: 1, pageSize: 20 });
+      const sent = setFilters.mock.calls.at(-1)![0];
+      expect('status' in sent).toBe(false);
+    });
+
+    it('applying Backing off replaces an active Status filter (chip and query both)', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await addFilter(user, 'Status', 'Failed');
+      expect(await screen.findByText('Status is Failed')).toBeInTheDocument();
+
+      await addFilter(user, 'Backing off', /in retry delay/i);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Status is Failed')).not.toBeInTheDocument();
+      });
+      expect(setFilters).toHaveBeenLastCalledWith({ scheduled: true, page: 1, pageSize: 20 });
+    });
+
+    it('keeps processedWithin when a Status filter is added on top of it', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await addFilter(user, 'Processed within', 'Last 7 days');
+      await addFilter(user, 'Status', 'Running');
+
+      expect(setFilters).toHaveBeenLastCalledWith({
+        processedWithin: '7d',
+        status: 'running',
+        page: 1,
+        pageSize: 20,
+      });
+    });
+
+    it('removing a filter chip clears the param', async () => {
+      const setFilters = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await addFilter(user, 'Status', 'Failed');
+
+      const chip = await screen.findByText('Status is Failed');
+      const deleteIcon = chip.closest('.MuiChip-root')!.querySelector('.MuiChip-deleteIcon')!;
+      await user.click(deleteIcon);
+
+      expect(setFilters).toHaveBeenLastCalledWith({ page: 1, pageSize: 20 });
+    });
+
+    it('scopes "Retry all failed" to an active type filter', async () => {
       const retryAllFailed = vi.fn().mockResolvedValue({ retried: 2 });
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          retryAllFailed,
-          stats: {
-            total: 5,
-            byStatus: { pending: 3, running: 0, succeeded: 1, failed: 1 },
-            byType: [],
-            stuckRunning: 0,
-            scheduled: 0,
-            stuckThresholdMinutes: 3,
-          },
-        }),
-      );
+      mockUseJobs.mockReturnValue(makeJobsHook({ retryAllFailed }));
       const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
+      await addFilter(user, 'Type', 'auto_tagging');
 
-      const retryBtn = await screen.findByRole('button', { name: /retry all failed/i });
-      await user.click(retryBtn);
+      const button = await screen.findByRole('button', {
+        name: /retry all failed \(auto_tagging\)/i,
+      });
+      await user.click(button);
 
-      expect(retryAllFailed).toHaveBeenCalled();
+      expect(retryAllFailed).toHaveBeenCalledWith('auto_tagging');
+    });
+  });
+
+  // =========================================================================
+  // THE regression this migration had to not cause
+  // =========================================================================
+
+  describe('Auto-refresh does not disturb table state', () => {
+    it('keeps the auto-refresh toggle and reports it to the hook', async () => {
+      const setAutoRefresh = vi.fn();
+      mockUseJobs.mockReturnValue(makeJobsHook({ setAutoRefresh }));
+      const user = userEvent.setup();
+
+      renderPage();
+
+      // MUI's Switch input carries role="switch", not "checkbox".
+      const toggle = await screen.findByRole('switch', { name: /auto-refresh/i });
+      expect(toggle).toBeChecked();
+      await user.click(toggle);
+      expect(setAutoRefresh).toHaveBeenCalledWith(false);
     });
 
-    it('shows success snackbar after retryAllFailed', async () => {
-      const retryAllFailed = vi.fn().mockResolvedValue({ retried: 3 });
+    it('preserves selection, filters AND an expanded row across a poll tick', async () => {
+      // Tablet width: `detail` columns fold into a row expander, so all three
+      // pieces of state (selection, filter chips, expansion) are observable in
+      // one render.
+      setInitialContainerWidth(800);
+
+      const first = [
+        makeJob({ id: 'job-1', type: 'face_detection', status: 'failed', attempts: 1 }),
+        makeJob({ id: 'job-2', type: 'auto_tagging', status: 'succeeded', attempts: 1 }),
+      ];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: first }));
+      const user = userEvent.setup();
+
+      const { rerender } = renderPage();
+
+      // 1. a filter
+      await user.click(await screen.findByTestId('datatable-filter-toggle'));
+      await addFilter(user, 'Status', 'Failed');
+      expect(await screen.findByText('Status is Failed')).toBeInTheDocument();
+
+      // 2. a selection
+      const checkbox = await screen.findByRole('checkbox', { name: 'Select face_detection' });
+      await user.click(checkbox);
+      await waitFor(() => {
+        expect(screen.getByTestId('datatable-bulk-action-bar')).toBeInTheDocument();
+      });
+
+      // 3. an expanded row
+      const expander = await screen.findByRole('button', {
+        name: 'Show details for face_detection',
+      });
+      await user.click(expander);
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: 'Hide details for face_detection' }),
+        ).toBeInTheDocument();
+      });
+
+      // --- the poll: same ids, brand-new objects and a brand-new array -------
+      const polled = [
+        makeJob({ id: 'job-1', type: 'face_detection', status: 'failed', attempts: 2 }),
+        makeJob({ id: 'job-2', type: 'auto_tagging', status: 'succeeded', attempts: 2 }),
+      ];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: polled, stats: makeStats({ total: 11 }) }));
+      rerender(<JobsPage />);
+
+      // fresh data landed…
+      await waitFor(() => {
+        expect(screen.getByText(/total: 11/i)).toBeInTheDocument();
+      });
+
+      // …and nothing the operator had done was thrown away.
+      expect(screen.getByText('Status is Failed')).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: 'Select face_detection' })).toBeChecked();
+      expect(screen.getByTestId('datatable-bulk-action-bar')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Hide details for face_detection' }),
+      ).toBeInTheDocument();
+    });
+
+    it('drops a selected id that the poll retired, and keeps the ones still present', async () => {
+      const first = [
+        makeJob({ id: 'job-1', type: 'face_detection', status: 'failed' }),
+        makeJob({ id: 'job-2', type: 'auto_tagging', status: 'succeeded' }),
+      ];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: first }));
+      const user = userEvent.setup();
+
+      const { rerender } = renderPage();
+
+      await user.click(await screen.findByRole('checkbox', { name: 'Select face_detection' }));
+      await user.click(await screen.findByRole('checkbox', { name: 'Select auto_tagging' }));
+      await waitFor(() => {
+        expect(screen.getByText(/2 of 2 selected/i)).toBeInTheDocument();
+      });
+
+      // job-1 finished and fell off the page.
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({ jobs: [makeJob({ id: 'job-2', type: 'auto_tagging', status: 'succeeded' })] }),
+      );
+      rerender(<JobsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/1 of 1 selected/i)).toBeInTheDocument();
+      });
+      expect(screen.getByRole('checkbox', { name: 'Select auto_tagging' })).toBeChecked();
+    });
+
+    it('does not blank the table while a refetch is in flight', async () => {
+      const jobs = [makeJob({ id: 'job-1', type: 'face_detection' })];
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs, jobsLoading: true }));
+
+      renderPage();
+
+      // Rows stay mounted beneath the loading overlay (the pre-#258 page
+      // replaced the whole table with a spinner).
+      await waitFor(() => {
+        expect(screen.getByText('face_detection')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // =========================================================================
+  // Pagination
+  // =========================================================================
+
+  describe('Pagination', () => {
+    it('reports a 1-based page to the API when the next page is requested', async () => {
+      const setFilters = vi.fn();
       mockUseJobs.mockReturnValue(
         makeJobsHook({
-          retryAllFailed,
-          stats: {
-            total: 5,
-            byStatus: { pending: 2, running: 0, succeeded: 0, failed: 3 },
-            byType: [],
-            stuckRunning: 0,
-            scheduled: 0,
-            stuckThresholdMinutes: 3,
-          },
+          setFilters,
+          jobs: [makeJob({ id: 'job-1' })],
+          filters: { page: 1, pageSize: 20 },
+          meta: { page: 1, pageSize: 20, totalItems: 60, totalPages: 3 },
         }),
       );
       const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const retryBtn = await screen.findByRole('button', { name: /retry all failed/i });
-      await user.click(retryBtn);
+      const next = await screen.findByRole('button', { name: /go to next page/i });
+      await user.click(next);
 
+      expect(setFilters).toHaveBeenCalledWith({ page: 2, pageSize: 20 });
+    });
+  });
+
+  // =========================================================================
+  // Row actions
+  // =========================================================================
+
+  describe('Row actions', () => {
+    async function openRowMenu(user: ReturnType<typeof userEvent.setup>, rowLabel: string) {
+      const trigger = await screen.findByRole('button', { name: `Row actions for ${rowLabel}` });
+      await user.click(trigger);
+    }
+
+    it.each([
+      ['failed', false],
+      ['succeeded', false],
+      ['pending', true],
+      ['running', true],
+    ])('Re-run for a %s job is disabled=%s', async (status, disabled) => {
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({ jobs: [makeJob({ id: 'job-1', status })] }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'face_detection');
+
+      const item = await screen.findByRole('menuitem', { name: /re-run/i });
+      if (disabled) expect(item).toHaveAttribute('aria-disabled', 'true');
+      else expect(item).not.toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('Delete is disabled for a running job and enabled for a pending one', async () => {
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: [makeJob({ status: 'running' })] }));
+      const user = userEvent.setup();
+
+      const { unmount } = renderPage();
+      await openRowMenu(user, 'face_detection');
+      expect(await screen.findByRole('menuitem', { name: /delete/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+      unmount();
+
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: [makeJob({ status: 'pending' })] }));
+      renderPage();
+      await openRowMenu(user, 'face_detection');
+      expect(await screen.findByRole('menuitem', { name: /delete/i })).not.toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+    });
+
+    it('calls retryJob with the job id and reports success', async () => {
+      const retryJob = vi.fn().mockResolvedValue(undefined);
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({ jobs: [makeJob({ id: 'job-abc-1234', status: 'failed' })], retryJob }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'face_detection');
+      await user.click(await screen.findByRole('menuitem', { name: /re-run/i }));
+
+      expect(retryJob).toHaveBeenCalledWith('job-abc-1234');
+      await waitFor(() => {
+        expect(screen.getByText(/job-abc-… reset to pending/i)).toBeInTheDocument();
+      });
+    });
+
+    it('confirms before deleting, and cancels cleanly', async () => {
+      const deleteJob = vi.fn();
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({ jobs: [makeJob({ id: 'job-del-1', status: 'pending' })], deleteJob }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'face_detection');
+      await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/delete job\?/i)).toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+      expect(deleteJob).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+    });
+
+    it('calls deleteJob when the confirm dialog is accepted', async () => {
+      const deleteJob = vi.fn().mockResolvedValue(undefined);
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({ jobs: [makeJob({ id: 'job-del-abc12345', status: 'pending' })], deleteJob }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'face_detection');
+      await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+
+      expect(deleteJob).toHaveBeenCalledWith('job-del-abc12345');
+      await waitFor(() => {
+        expect(screen.getByText(/deleted/i)).toBeInTheDocument();
+      });
+    });
+
+    it('downloads the job JSON', async () => {
+      const createObjectURL = vi.fn().mockReturnValue('blob:mock');
+      const revokeObjectURL = vi.fn();
+      Object.defineProperty(global.URL, 'createObjectURL', {
+        value: createObjectURL,
+        writable: true,
+      });
+      Object.defineProperty(global.URL, 'revokeObjectURL', {
+        value: revokeObjectURL,
+        writable: true,
+      });
+      const click = vi.fn();
+      const originalCreateElement = document.createElement.bind(document);
+      const createElementSpy = vi
+        .spyOn(document, 'createElement')
+        .mockImplementation((tag: string) => {
+          const el = originalCreateElement(tag);
+          if (tag === 'a') vi.spyOn(el as HTMLAnchorElement, 'click').mockImplementation(click);
+          return el;
+        });
+
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: [makeJob({ id: 'job-dl-2' })] }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'face_detection');
+      await user.click(await screen.findByRole('menuitem', { name: /download json/i }));
+
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(click).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalled();
+
+      createElementSpy.mockRestore();
+    });
+  });
+
+  // =========================================================================
+  // Selection-scoped bulk action
+  // =========================================================================
+
+  describe('Selection bulk action', () => {
+    it('re-runs every retryable selected job and clears the selection', async () => {
+      const retryJob = vi.fn().mockResolvedValue(undefined);
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({
+          retryJob,
+          jobs: [
+            makeJob({ id: 'job-1', type: 'face_detection', status: 'failed' }),
+            makeJob({ id: 'job-2', type: 'auto_tagging', status: 'succeeded' }),
+          ],
+        }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+
+      await user.click(await screen.findByRole('checkbox', { name: 'Select face_detection' }));
+      await user.click(await screen.findByRole('checkbox', { name: 'Select auto_tagging' }));
+
+      await user.click(await screen.findByRole('button', { name: /re-run selected/i }));
+
+      await waitFor(() => {
+        expect(retryJob).toHaveBeenCalledTimes(2);
+      });
+      expect(retryJob).toHaveBeenCalledWith('job-1');
+      expect(retryJob).toHaveBeenCalledWith('job-2');
+      await waitFor(() => {
+        expect(screen.queryByTestId('datatable-bulk-action-bar')).not.toBeInTheDocument();
+      });
+    });
+
+    it('disables the bulk action when nothing selected is retryable', async () => {
+      mockUseJobs.mockReturnValue(
+        makeJobsHook({ jobs: [makeJob({ id: 'job-1', status: 'running' })] }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('checkbox', { name: 'Select face_detection' }));
+
+      expect(await screen.findByRole('button', { name: /re-run selected/i })).toBeDisabled();
+    });
+  });
+
+  // =========================================================================
+  // Queue-wide operations (unchanged by the migration)
+  // =========================================================================
+
+  describe('Queue-wide operations', () => {
+    it('calls retryAllFailed and shows a snackbar', async () => {
+      const retryAllFailed = vi.fn().mockResolvedValue({ retried: 3 });
+      mockUseJobs.mockReturnValue(makeJobsHook({ retryAllFailed }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /retry all failed/i }));
+
+      expect(retryAllFailed).toHaveBeenCalledWith(undefined);
       await waitFor(() => {
         expect(screen.getByText(/3 job\(s\) reset to pending/i)).toBeInTheDocument();
       });
     });
 
-    it('calls resetStuck action when "Reset stuck" button is clicked', async () => {
-      const resetStuck = vi.fn().mockResolvedValue({ reset: 1 });
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          resetStuck,
-          stats: {
-            total: 5,
-            byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
-            byType: [],
-            stuckRunning: 5,
-            scheduled: 0,
-            stuckThresholdMinutes: 3,
-          },
-        }),
-      );
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const resetBtn = await screen.findByRole('button', { name: /reset stuck/i });
-      await user.click(resetBtn);
-
-      // handleResetStuck calls the hook's resetStuck() with no argument — the
-      // service resolves the jobs.stuckThresholdMinutes system setting itself.
-      expect(resetStuck).toHaveBeenCalledWith();
-    });
-
-    it('shows success snackbar after resetStuck', async () => {
+    it('calls resetStuck with no argument and shows a snackbar', async () => {
       const resetStuck = vi.fn().mockResolvedValue({ reset: 2 });
       mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          resetStuck,
-          stats: {
-            total: 5,
-            byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
-            byType: [],
-            stuckRunning: 5,
-            scheduled: 0,
-            stuckThresholdMinutes: 3,
-          },
-        }),
+        makeJobsHook({ resetStuck, stats: makeStats({ stuckRunning: 5 }) }),
       );
       const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /reset stuck/i }));
 
-      const resetBtn = await screen.findByRole('button', { name: /reset stuck/i });
-      await user.click(resetBtn);
-
+      // The service resolves `jobs.stuckThresholdMinutes` itself.
+      expect(resetStuck).toHaveBeenCalledWith();
       await waitFor(() => {
         expect(screen.getByText(/2 stuck job\(s\) reset to pending/i)).toBeInTheDocument();
       });
     });
 
-    it('"Retry all failed" button is disabled when failed count is 0', async () => {
+    it('disables "Retry all failed" when nothing has failed', async () => {
       mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          stats: {
-            total: 5,
-            byStatus: { pending: 5, running: 0, succeeded: 0, failed: 0 },
-            byType: [],
-            stuckRunning: 0,
-            scheduled: 0,
-            stuckThresholdMinutes: 3,
-          },
-        }),
+        makeJobsHook({ stats: makeStats({ byStatus: { pending: 5, running: 0, succeeded: 0, failed: 0 } }) }),
       );
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
-        const btn = screen.getByRole('button', { name: /retry all failed/i });
-        expect(btn).toBeDisabled();
+        expect(screen.getByRole('button', { name: /retry all failed/i })).toBeDisabled();
       });
     });
 
-    it('"Reset stuck" button is disabled when stuckRunning is 0', async () => {
+    it('disables "Reset stuck" when nothing is stuck', async () => {
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /reset stuck/i })).toBeDisabled();
+      });
+    });
+
+    it('renders the configured stuck threshold in the button label', async () => {
       mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          stats: {
-            total: 5,
-            byStatus: { pending: 5, running: 0, succeeded: 0, failed: 0 },
-            byType: [],
-            stuckRunning: 0,
-            scheduled: 0,
-            stuckThresholdMinutes: 3,
-          },
-        }),
+        makeJobsHook({ stats: makeStats({ stuckRunning: 5, stuckThresholdMinutes: 45 }) }),
       );
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        const btn = screen.getByRole('button', { name: /reset stuck/i });
-        expect(btn).toBeDisabled();
-      });
-    });
-
-    it('calls repairThumbnails action when "Repair missing thumbnails" button is clicked', async () => {
-      const repairThumbnails = vi.fn().mockResolvedValue({ jobId: 'repair-uuid', status: 'pending' });
-      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const repairBtn = await screen.findByRole('button', { name: /repair missing thumbnails/i });
-      await user.click(repairBtn);
-
-      expect(repairThumbnails).toHaveBeenCalled();
-    });
-
-    it('shows success snackbar with the jobId after repairThumbnails', async () => {
-      const repairThumbnails = vi
-        .fn()
-        .mockResolvedValue({ jobId: 'abcd1234-ffff', status: 'pending' });
-      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const repairBtn = await screen.findByRole('button', { name: /repair missing thumbnails/i });
-      await user.click(repairBtn);
-
-      await waitFor(() => {
-        // Snackbar message includes shortId(jobId) = first 8 chars
-        expect(screen.getByText(/thumbnail repair queued \(job abcd1234…\)/i)).toBeInTheDocument();
-      });
-    });
-
-    it('shows error snackbar when repairThumbnails fails', async () => {
-      const repairThumbnails = vi.fn().mockRejectedValue(new Error('Repair boom'));
-      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const repairBtn = await screen.findByRole('button', { name: /repair missing thumbnails/i });
-      await user.click(repairBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText(/repair boom/i)).toBeInTheDocument();
-      });
-    });
-
-    it('renders the configured stuckThresholdMinutes in the "Reset stuck" button label', async () => {
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          stats: {
-            total: 5,
-            byStatus: { pending: 0, running: 5, succeeded: 0, failed: 0 },
-            byType: [],
-            stuckRunning: 5,
-            scheduled: 0,
-            stuckThresholdMinutes: 45,
-          },
-        }),
-      );
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /reset stuck \(>45 min\)/i })).toBeInTheDocument();
@@ -601,450 +1074,96 @@ describe('JobsPage', () => {
     it('falls back to a "3 min" label when stats is null', async () => {
       mockUseJobs.mockReturnValue(makeJobsHook({ stats: null }));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /reset stuck \(>3 min\)/i })).toBeInTheDocument();
       });
     });
+
+    it('queues a thumbnail repair and reports the job id', async () => {
+      const repairThumbnails = vi
+        .fn()
+        .mockResolvedValue({ jobId: 'abcd1234-ffff', status: 'pending' });
+      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /repair missing thumbnails/i }));
+
+      expect(repairThumbnails).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(screen.getByText(/thumbnail repair queued \(job abcd1234…\)/i)).toBeInTheDocument();
+      });
+    });
+
+    it('surfaces a failed repair in the error snackbar', async () => {
+      const repairThumbnails = vi.fn().mockRejectedValue(new Error('Repair boom'));
+      mockUseJobs.mockReturnValue(makeJobsHook({ repairThumbnails }));
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('button', { name: /repair missing thumbnails/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/repair boom/i)).toBeInTheDocument();
+      });
+    });
   });
 
   // =========================================================================
-  // Per-row retry action
+  // Phone
   // =========================================================================
 
-  describe('Per-row retry', () => {
-    it('calls retryJob with the job id when Re-run menu item is clicked', async () => {
-      const retryJob = vi.fn().mockResolvedValue(undefined);
-      const jobs = [makeJob({ id: 'job-abc', status: 'failed' })];
+  describe('Phone layout (360px)', () => {
+    it('renders cards, and every row action is still reachable', async () => {
+      setInitialContainerWidth(360);
       mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          jobs,
-          retryJob,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
-        }),
+        makeJobsHook({ jobs: [makeJob({ id: 'job-1', status: 'failed' })] }),
       );
       const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Open the kebab menu and click the Re-run menu item.
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
+      const table = await screen.findByTestId('datatable');
+      expect(table).toHaveAttribute('data-layout', 'mobile');
 
-      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
-      await user.click(rerunItem);
-
-      expect(retryJob).toHaveBeenCalledWith('job-abc');
+      await user.click(
+        await screen.findByRole('button', { name: 'Row actions for face_detection' }),
+      );
+      expect(await screen.findByRole('menuitem', { name: /re-run/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /download json/i })).toBeInTheDocument();
     });
 
-    it('shows success snackbar after per-row retry', async () => {
-      const retryJob = vi.fn().mockResolvedValue(undefined);
-      const jobs = [makeJob({ id: 'job-abc-1234', status: 'failed' })];
+    it('folds the detail columns behind "More details" rather than overflowing', async () => {
+      setInitialContainerWidth(360);
       mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          jobs,
-          retryJob,
-          stats: { total: 1, byStatus: { pending: 0, running: 0, succeeded: 0, failed: 1 }, byType: [], stuckRunning: 0, scheduled: 0, stuckThresholdMinutes: 3 },
-        }),
+        makeJobsHook({ jobs: [makeJob({ id: 'job-1', lastError: 'Timeout after 30s' })] }),
       );
       const user = userEvent.setup();
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
+      const toggle = await screen.findByTestId('datatable-card-detail-toggle');
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
 
-      const rerunItem = await screen.findByRole('menuitem', { name: /re-run/i });
-      await user.click(rerunItem);
-
-      await waitFor(() => {
-        // The snackbar message includes shortId(job.id)... = first 8 chars
-        expect(screen.getByText(/job-abc-…/i)).toBeInTheDocument();
-      });
-    });
-  });
-
-  // =========================================================================
-  // Delete flow
-  // =========================================================================
-
-  describe('Delete flow', () => {
-    it('shows confirm dialog when Delete menu item is clicked', async () => {
-      const jobs = [makeJob({ id: 'job-del-1', status: 'pending' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Open the kebab menu and click Delete
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
-      await user.click(deleteItem);
-
-      await waitFor(() => {
-        expect(screen.getByRole('dialog')).toBeInTheDocument();
-        expect(screen.getByText(/delete job\?/i)).toBeInTheDocument();
-      });
-    });
-
-    it('cancels delete when Cancel is clicked in dialog', async () => {
-      const deleteJob = vi.fn();
-      const jobs = [makeJob({ id: 'job-del-1', status: 'pending' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs, deleteJob }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
-      await user.click(deleteItem);
-
-      const cancelBtn = await screen.findByRole('button', { name: /cancel/i });
-      await user.click(cancelBtn);
-
-      expect(deleteJob).not.toHaveBeenCalled();
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    });
-
-    it('calls deleteJob with the correct id when confirmed', async () => {
-      const deleteJob = vi.fn().mockResolvedValue(undefined);
-      const jobs = [makeJob({ id: 'job-del-abc', status: 'pending' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs, deleteJob }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
-      await user.click(deleteItem);
-
-      const confirmBtn = await screen.findByRole('button', { name: /^delete$/i });
-      await user.click(confirmBtn);
-
-      expect(deleteJob).toHaveBeenCalledWith('job-del-abc');
-    });
-
-    it('shows success snackbar after delete is confirmed', async () => {
-      const deleteJob = vi.fn().mockResolvedValue(undefined);
-      const jobs = [makeJob({ id: 'job-del-1234abcd', status: 'pending' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs, deleteJob }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const deleteItem = await screen.findByRole('menuitem', { name: /delete/i });
-      await user.click(deleteItem);
-
-      const confirmBtn = await screen.findByRole('button', { name: /^delete$/i });
-      await user.click(confirmBtn);
-
-      await waitFor(() => {
-        expect(screen.getByText(/deleted/i)).toBeInTheDocument();
-      });
-    });
-  });
-
-  // =========================================================================
-  // Download JSON
-  // =========================================================================
-
-  describe('Download JSON', () => {
-    it('menu contains a Download JSON item that is not disabled', async () => {
-      const jobs = [makeJob({ id: 'job-dl-1', status: 'pending' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const downloadItem = screen.getByRole('menuitem', { name: /download json/i });
-      expect(downloadItem).toBeInTheDocument();
-      expect(downloadItem).not.toHaveAttribute('aria-disabled', 'true');
-    });
-
-    it('clicking Download JSON triggers a file download', async () => {
-      const mockCreateObjectURL = vi.fn().mockReturnValue('blob:mock');
-      const mockRevokeObjectURL = vi.fn();
-      Object.defineProperty(global.URL, 'createObjectURL', { value: mockCreateObjectURL, writable: true });
-      Object.defineProperty(global.URL, 'revokeObjectURL', { value: mockRevokeObjectURL, writable: true });
-
-      const mockClick = vi.fn();
-      const originalCreateElement = document.createElement.bind(document);
-      vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
-        const el = originalCreateElement(tag);
-        if (tag === 'a') {
-          vi.spyOn(el as HTMLAnchorElement, 'click').mockImplementation(mockClick);
-        }
-        return el;
-      });
-
-      const jobs = [makeJob({ id: 'job-dl-2', status: 'pending' })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const kebab = await screen.findByRole('button', { name: /job actions/i });
-      await user.click(kebab);
-
-      const downloadItem = await screen.findByRole('menuitem', { name: /download json/i });
-      await user.click(downloadItem);
-
-      expect(mockCreateObjectURL).toHaveBeenCalled();
-      expect(mockClick).toHaveBeenCalled();
-      expect(mockRevokeObjectURL).toHaveBeenCalled();
-
-      vi.restoreAllMocks();
-    });
-  });
-
-  // =========================================================================
-  // Model column
-  // =========================================================================
-
-  describe('Model column', () => {
-    it('renders modelVersion and providerKey when both are set', async () => {
-      const jobs = [
-        makeJob({
-          id: 'job-1',
-          modelVersion: 'claude-3-haiku-20240307',
-          providerKey: 'anthropic',
-        }),
-      ];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText('claude-3-haiku-20240307')).toBeInTheDocument();
-        expect(screen.getByText('anthropic')).toBeInTheDocument();
-      });
-    });
-
-    it('renders only modelVersion when providerKey is null', async () => {
-      const jobs = [
-        makeJob({
-          id: 'job-1',
-          modelVersion: 'mobilenet-v2',
-          providerKey: null,
-        }),
-      ];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText('mobilenet-v2')).toBeInTheDocument();
-      });
-    });
-
-    it('renders an em dash when both modelVersion and providerKey are null', async () => {
-      const jobs = [
-        makeJob({
-          id: 'job-1',
-          modelVersion: null,
-          providerKey: null,
-        }),
-      ];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText('face_detection')).toBeInTheDocument();
-      });
-
-      // The muted em dash placeholder — may appear in multiple cells (e.g. lastError, Model).
-      const dashes = screen.getAllByText('—');
-      expect(dashes.length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  // =========================================================================
-  // Error states
-  // =========================================================================
-
-  describe('Error states', () => {
-    it('renders statsError alert when stats fetch fails', async () => {
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({ stats: null, statsError: 'Stats load failed' }),
-      );
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText(/stats load failed/i)).toBeInTheDocument();
-      });
-    });
-
-    it('renders jobsError alert when jobs fetch fails', async () => {
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({ jobsError: 'Jobs load failed' }),
-      );
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText(/jobs load failed/i)).toBeInTheDocument();
-      });
-    });
-  });
-
-  // =========================================================================
-  // Scheduled (backing off) stats chip
-  // =========================================================================
-
-  describe('Scheduled (backing off) stat chip', () => {
-    it('renders the "Scheduled (backing off)" chip when scheduled > 0', async () => {
-      mockUseJobs.mockReturnValue(
-        makeJobsHook({
-          stats: {
-            total: 5,
-            byStatus: { pending: 3, running: 0, succeeded: 2, failed: 0 },
-            byType: [],
-            stuckRunning: 0,
-            scheduled: 2,
-            stuckThresholdMinutes: 3,
-          },
-        }),
-      );
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText(/scheduled \(backing off\): 2/i)).toBeInTheDocument();
-      });
-    });
-
-    it('does not render the "Scheduled (backing off)" chip when scheduled is 0', async () => {
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText(/total: 10/i)).toBeInTheDocument();
-      });
-
-      expect(screen.queryByText(/scheduled \(backing off\)/i)).not.toBeInTheDocument();
-    });
-  });
-
-  // =========================================================================
-  // Per-row backoff badge
-  // =========================================================================
-
-  describe('Per-row backoff badge', () => {
-    it('shows "backing off" chip for a pending job with a future scheduledFor', async () => {
-      const futureIso = new Date(Date.now() + 60_000).toISOString();
-      const jobs = [makeJob({ status: 'pending', scheduledFor: futureIso, rateLimitHits: 1 })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // The per-row status Chip label is exactly "backing off" (lowercase),
-      // while the "Backing off" filter toggle label always renders in the
-      // filters bar above the table — match the exact lowercase chip text so
-      // the two elements don't collide.
-      await waitFor(() => {
-        expect(screen.getByText('backing off')).toBeInTheDocument();
-      });
-    });
-
-    it('does not show the backoff chip for a pending job with null scheduledFor', async () => {
-      const jobs = [makeJob({ status: 'pending', scheduledFor: null, rateLimitHits: 0 })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText('face_detection')).toBeInTheDocument();
-      });
-
-      // Exact lowercase match targets only the per-row Chip — the "Backing
-      // off" filter toggle label (capitalized) always renders regardless.
-      expect(screen.queryByText('backing off')).not.toBeInTheDocument();
-    });
-
-    it('does not show the backoff chip for a failed job even if scheduledFor is set', async () => {
-      const futureIso = new Date(Date.now() + 60_000).toISOString();
-      const jobs = [makeJob({ status: 'failed', scheduledFor: futureIso, rateLimitHits: 2 })];
-      mockUseJobs.mockReturnValue(makeJobsHook({ jobs }));
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText('face_detection')).toBeInTheDocument();
-      });
-
-      // Exact lowercase match targets only the per-row Chip — the "Backing
-      // off" filter toggle label (capitalized) always renders regardless.
-      expect(screen.queryByText('backing off')).not.toBeInTheDocument();
-    });
-  });
-
-  // =========================================================================
-  // Scheduled filter toggle
-  // =========================================================================
-
-  describe('Scheduled filter toggle', () => {
-    it('renders the "Backing off" toggle in the filters area', async () => {
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      await waitFor(() => {
-        expect(screen.getByText(/backing off/i)).toBeInTheDocument();
-      });
-    });
-
-    it('calls setFilters with scheduled=true when the backing-off toggle is enabled', async () => {
-      const setFilters = vi.fn();
-      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
-      const user = userEvent.setup();
-
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // MUI's Switch input renders with role="switch" (not the native
-      // "checkbox" role) since the current MUI version. Its accessible name
-      // comes from the wrapping Tooltip's `title` text ("Show only pending
-      // jobs currently waiting on backoff…"), not the visible "Backing off"
-      // label, so match on a substring of the tooltip text instead.
-      const toggle = await screen.findByRole('switch', { name: /waiting on backoff/i });
       await user.click(toggle);
-
-      expect(setFilters).toHaveBeenCalledWith(
-        expect.objectContaining({ scheduled: true }),
-      );
+      await waitFor(() => {
+        expect(screen.getByText('Timeout after 30s')).toBeInTheDocument();
+      });
     });
 
-    it('calls setFilters without scheduled when the backing-off toggle is disabled again', async () => {
-      const setFilters = vi.fn();
-      mockUseJobs.mockReturnValue(makeJobsHook({ setFilters }));
-      const user = userEvent.setup();
+    it('contains its own width — nothing forces the document sideways', async () => {
+      setInitialContainerWidth(360);
+      mockUseJobs.mockReturnValue(makeJobsHook({ jobs: [makeJob({ id: 'job-1' })] }));
 
-      render(<JobsPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Enable then disable
-      // MUI's Switch input renders with role="switch" (not the native
-      // "checkbox" role) since the current MUI version. Its accessible name
-      // comes from the wrapping Tooltip's `title` text ("Show only pending
-      // jobs currently waiting on backoff…"), not the visible "Backing off"
-      // label, so match on a substring of the tooltip text instead.
-      const toggle = await screen.findByRole('switch', { name: /waiting on backoff/i });
-      await user.click(toggle); // on
-      await user.click(toggle); // off
-
-      // Second call should not include scheduled (or pass undefined/falsy)
-      const secondCall = setFilters.mock.calls[1]?.[0] ?? {};
-      expect(secondCall.scheduled).toBeFalsy();
+      const table = await screen.findByTestId('datatable');
+      const styles = window.getComputedStyle(table);
+      expect(styles.maxWidth).toBe('100%');
+      expect(styles.minWidth).toBe('0px');
     });
   });
 });
