@@ -15,6 +15,11 @@ import {
   DEFAULT_USER_SETTINGS,
   UserSettingsValue,
 } from '../../src/common/types/settings.types';
+import {
+  DATA_TABLE_MAX_TABLES,
+  DATA_TABLE_MAX_VISIBLE_COLUMNS,
+  DATA_TABLE_MAX_PAGE_SIZE,
+} from '../../src/common/schemas/settings.schema';
 
 describe('User Settings Integration', () => {
   let context: TestContext;
@@ -508,6 +513,390 @@ describe('User Settings Integration', () => {
       expect(response.body.data.profile.customImageUrl).toBe(
         'https://example.com/custom.jpg',
       );
+    });
+  });
+
+  // ===========================================================================
+  // dataTables — per-user DataTable layout persistence (issue #255)
+  // ===========================================================================
+
+  describe('dataTables persistence', () => {
+    const settingsRow = (value: UserSettingsValue, version = 1) => ({
+      id: 'settings-1',
+      userId: 'user-1',
+      value: value as any,
+      version,
+      updatedAt: new Date(),
+    });
+
+    /** Mocks the stored row and makes PATCH's update a pass-through. */
+    const seedStored = (dataTables?: Record<string, any>) => {
+      const stored: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        ...(dataTables ? { dataTables } : {}),
+      };
+
+      context.prismaMock.userSettings.findUnique.mockResolvedValue(
+        settingsRow(stored),
+      );
+      context.prismaMock.userSettings.update.mockImplementation(
+        async ({ data }: any) => settingsRow(data.value, 2),
+      );
+      context.prismaMock.userSettings.upsert.mockImplementation(
+        async ({ create, update }: any) =>
+          settingsRow((update?.value ?? create?.value) as UserSettingsValue, 2),
+      );
+      context.prismaMock.user.update.mockResolvedValue({} as any);
+    };
+
+    describe('GET /api/user-settings', () => {
+      it('should omit dataTables entirely when nothing is stored', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        const response = await request(context.app.getHttpServer())
+          .get('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .expect(200);
+
+        // The absent namespace is the normal state for an existing user, which
+        // is precisely why this feature needed no data migration.
+        expect(response.body.data.dataTables).toBeUndefined();
+      });
+
+      it('should return stored entries verbatim, absences included', async () => {
+        const user = await createMockTestUser(context);
+        seedStored({ jobs: { density: 'compact' } });
+
+        const response = await request(context.app.getHttpServer())
+          .get('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .expect(200);
+
+        // No server-side default materialization: visibleColumns / sort /
+        // pageSize must all still be absent so the client falls back to the
+        // column contract's priority-derived defaults.
+        expect(response.body.data.dataTables).toEqual({
+          jobs: { density: 'compact' },
+        });
+      });
+    });
+
+    describe('PUT /api/user-settings', () => {
+      it('should round-trip a full entry', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        const dataTables = {
+          'admin-jobs': {
+            visibleColumns: ['type', 'status', 'lastError'],
+            density: 'comfortable',
+            sort: { field: 'createdAt', direction: 'desc' },
+            pageSize: 50,
+          },
+        };
+
+        const response = await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables,
+          })
+          .expect(200);
+
+        expect(response.body.data.dataTables).toEqual(dataTables);
+      });
+
+      it('should not materialize defaults for omitted sub-keys', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        const response = await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables: { jobs: {} },
+          })
+          .expect(200);
+
+        expect(response.body.data.dataTables).toEqual({ jobs: {} });
+      });
+
+      it('should return 400 for an invalid density', async () => {
+        const user = await createMockTestUser(context);
+
+        await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables: { jobs: { density: 'cozy' } },
+          })
+          .expect(400);
+      });
+
+      it('should return 400 for a tableId that breaks the key pattern', async () => {
+        const user = await createMockTestUser(context);
+
+        await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables: { 'Admin Jobs!': {} },
+          })
+          .expect(400);
+      });
+
+      it('should return 400 for a pageSize below the minimum', async () => {
+        const user = await createMockTestUser(context);
+
+        await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables: { jobs: { pageSize: 0 } },
+          })
+          .expect(400);
+      });
+
+      it('should return 400 for a pageSize above the maximum', async () => {
+        const user = await createMockTestUser(context);
+
+        await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables: {
+              jobs: { pageSize: DATA_TABLE_MAX_PAGE_SIZE + 1 },
+            },
+          })
+          .expect(400);
+      });
+
+      it('should return 400 for more table ids than the cap allows', async () => {
+        const user = await createMockTestUser(context);
+
+        const dataTables: Record<string, unknown> = {};
+        for (let i = 0; i <= DATA_TABLE_MAX_TABLES; i++) {
+          dataTables[`t${i}`] = {};
+        }
+
+        await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables,
+          })
+          .expect(400);
+      });
+
+      it('should return 400 for an over-cap visibleColumns list', async () => {
+        const user = await createMockTestUser(context);
+
+        await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables: {
+              jobs: {
+                visibleColumns: Array.from(
+                  { length: DATA_TABLE_MAX_VISIBLE_COLUMNS + 1 },
+                  (_, i) => `c${i}`,
+                ),
+              },
+            },
+          })
+          .expect(400);
+      });
+
+      it('should return 400 for an unknown key inside an entry', async () => {
+        const user = await createMockTestUser(context);
+
+        await request(context.app.getHttpServer())
+          .put('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            theme: 'dark',
+            profile: { useProviderImage: true },
+            dataTables: { jobs: { columnWidths: { type: 200 } } },
+          })
+          .expect(400);
+      });
+    });
+
+    describe('PATCH /api/user-settings', () => {
+      it('should round-trip a full entry', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        const entry = {
+          visibleColumns: ['type', 'status'],
+          density: 'compact',
+          sort: { field: 'createdAt', direction: 'asc' },
+          pageSize: 25,
+        };
+
+        const response = await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { jobs: entry } })
+          .expect(200);
+
+        expect(response.body.data.dataTables).toEqual({ jobs: entry });
+      });
+
+      it('should not clobber another table id', async () => {
+        const user = await createMockTestUser(context);
+        seedStored({
+          jobs: { pageSize: 25, visibleColumns: ['type'] },
+          users: { density: 'compact', pageSize: 10 },
+        });
+
+        const response = await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { jobs: { pageSize: 100 } } })
+          .expect(200);
+
+        expect(response.body.data.dataTables).toEqual({
+          jobs: { pageSize: 100 },
+          users: { density: 'compact', pageSize: 10 },
+        });
+      });
+
+      it('should preserve dataTables when patching an unrelated field', async () => {
+        const user = await createMockTestUser(context);
+        seedStored({ jobs: { pageSize: 25 } });
+
+        const response = await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ theme: 'dark' })
+          .expect(200);
+
+        expect(response.body.data.theme).toBe('dark');
+        expect(response.body.data.dataTables).toEqual({
+          jobs: { pageSize: 25 },
+        });
+      });
+
+      it('should reset one entry to defaults with {} without touching others', async () => {
+        const user = await createMockTestUser(context);
+        seedStored({
+          jobs: { pageSize: 25, visibleColumns: ['type'] },
+          users: { density: 'compact' },
+        });
+
+        const response = await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { jobs: {} } })
+          .expect(200);
+
+        expect(response.body.data.dataTables).toEqual({
+          jobs: {},
+          users: { density: 'compact' },
+        });
+      });
+
+      it('should delete an entry sent as null', async () => {
+        const user = await createMockTestUser(context);
+        seedStored({
+          jobs: { pageSize: 25 },
+          users: { density: 'compact' },
+        });
+
+        const response = await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { jobs: null } })
+          .expect(200);
+
+        expect(response.body.data.dataTables).toEqual({
+          users: { density: 'compact' },
+        });
+      });
+
+      it('should return 400 for an invalid density', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { jobs: { density: 'cozy' } } })
+          .expect(400);
+      });
+
+      it('should return 400 for a tableId that breaks the key pattern', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { 'Admin Jobs': {} } })
+          .expect(400);
+      });
+
+      it('should return 400 for a pageSize out of range', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({
+            dataTables: { jobs: { pageSize: DATA_TABLE_MAX_PAGE_SIZE + 1 } },
+          })
+          .expect(400);
+      });
+
+      it('should return 400 when the MERGED namespace exceeds the table-id cap', async () => {
+        const user = await createMockTestUser(context);
+
+        const stored: Record<string, any> = {};
+        for (let i = 0; i < DATA_TABLE_MAX_TABLES; i++) {
+          stored[`t${i}`] = {};
+        }
+        seedStored(stored);
+
+        // One entry in the payload — under the payload cap — but the merge
+        // would push the stored namespace over it.
+        await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { overflow: {} } })
+          .expect(400);
+
+        expect(context.prismaMock.userSettings.update).not.toHaveBeenCalled();
+      });
+
+      it('should return 400 for an unknown key inside an entry', async () => {
+        const user = await createMockTestUser(context);
+        seedStored();
+
+        await request(context.app.getHttpServer())
+          .patch('/api/user-settings')
+          .set(authHeader(user.accessToken))
+          .send({ dataTables: { jobs: { columnOrder: ['type'] } } })
+          .expect(400);
+      });
     });
   });
 

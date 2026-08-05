@@ -2,6 +2,18 @@ import {
   updateUserSettingsSchema,
   patchUserSettingsSchema,
 } from './update-user-settings.dto';
+import {
+  DATA_TABLE_MAX_TABLES,
+  DATA_TABLE_MAX_VISIBLE_COLUMNS,
+  DATA_TABLE_MAX_ID_LENGTH,
+  DATA_TABLE_MAX_PAGE_SIZE,
+} from '../../common/schemas/settings.schema';
+
+/** Minimal valid PUT body; spread a `dataTables` onto it per case. */
+const basePut = {
+  theme: 'light' as const,
+  profile: { useProviderImage: true },
+};
 
 describe('UpdateUserSettingsDto (PUT)', () => {
   describe('theme field', () => {
@@ -265,6 +277,272 @@ describe('UpdateUserSettingsDto (PUT)', () => {
       });
     });
   });
+
+  // ===========================================================================
+  // dataTables (issue #255)
+  // ===========================================================================
+
+  describe('dataTables field', () => {
+    describe('absent-key fallback (defaults are NEVER materialized)', () => {
+      it('should leave the whole namespace absent when not supplied', () => {
+        const result = updateUserSettingsSchema.parse(basePut);
+
+        expect(result.dataTables).toBeUndefined();
+        expect('dataTables' in result).toBe(false);
+      });
+
+      it('should NOT materialize visibleColumns as [] for an entry that omits it', () => {
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: { jobs: { density: 'compact' } },
+        });
+
+        // The load-bearing assertion: an absent visibleColumns must stay
+        // absent so the client falls back to the column contract's
+        // priority-derived defaults and newly added columns still appear.
+        expect(result.dataTables!.jobs.visibleColumns).toBeUndefined();
+        expect(result.dataTables!.jobs).toEqual({ density: 'compact' });
+      });
+
+      it('should keep an empty entry empty rather than filling in a default layout', () => {
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: { jobs: {} },
+        });
+
+        expect(result.dataTables).toEqual({ jobs: {} });
+      });
+
+      it('should leave every sub-key absent independently', () => {
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: { jobs: { pageSize: 25 } },
+        });
+
+        expect(result.dataTables!.jobs).toEqual({ pageSize: 25 });
+        expect(result.dataTables!.jobs.density).toBeUndefined();
+        expect(result.dataTables!.jobs.sort).toBeUndefined();
+        expect(result.dataTables!.jobs.visibleColumns).toBeUndefined();
+      });
+    });
+
+    describe('valid payloads', () => {
+      it('should accept a fully populated entry', () => {
+        const entry = {
+          visibleColumns: ['type', 'status', 'lastError'],
+          density: 'comfortable' as const,
+          sort: { field: 'createdAt', direction: 'desc' as const },
+          pageSize: 50,
+        };
+
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: { 'admin-jobs': entry },
+        });
+
+        expect(result.dataTables!['admin-jobs']).toEqual(entry);
+      });
+
+      it('should accept multiple table ids', () => {
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: {
+            jobs: { pageSize: 25 },
+            users: { density: 'compact' },
+            admin_shares: { visibleColumns: ['token'] },
+          },
+        });
+
+        expect(Object.keys(result.dataTables!).sort()).toEqual([
+          'admin_shares',
+          'jobs',
+          'users',
+        ]);
+      });
+
+      it.each(['compact', 'standard', 'comfortable'])(
+        'should accept density "%s"',
+        (density) => {
+          const result = updateUserSettingsSchema.parse({
+            ...basePut,
+            dataTables: { jobs: { density } },
+          });
+
+          expect(result.dataTables!.jobs.density).toBe(density);
+        },
+      );
+
+      it.each(['asc', 'desc'])(
+        'should accept sort direction "%s"',
+        (direction) => {
+          const result = updateUserSettingsSchema.parse({
+            ...basePut,
+            dataTables: { jobs: { sort: { field: 'createdAt', direction } } },
+          });
+
+          expect(result.dataTables!.jobs.sort!.direction).toBe(direction);
+        },
+      );
+
+      it('should accept table ids at the maximum length', () => {
+        const id = 'a'.repeat(DATA_TABLE_MAX_ID_LENGTH);
+
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: { [id]: {} },
+        });
+
+        expect(result.dataTables![id]).toEqual({});
+      });
+
+      it('should accept exactly DATA_TABLE_MAX_TABLES table ids', () => {
+        const dataTables: Record<string, unknown> = {};
+        for (let i = 0; i < DATA_TABLE_MAX_TABLES; i++) {
+          dataTables[`t${i}`] = {};
+        }
+
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables,
+        });
+
+        expect(Object.keys(result.dataTables!)).toHaveLength(
+          DATA_TABLE_MAX_TABLES,
+        );
+      });
+
+      it('should accept exactly DATA_TABLE_MAX_VISIBLE_COLUMNS columns', () => {
+        const visibleColumns = Array.from(
+          { length: DATA_TABLE_MAX_VISIBLE_COLUMNS },
+          (_, i) => `c${i}`,
+        );
+
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: { jobs: { visibleColumns } },
+        });
+
+        expect(result.dataTables!.jobs.visibleColumns).toHaveLength(
+          DATA_TABLE_MAX_VISIBLE_COLUMNS,
+        );
+      });
+
+      it('should accept an empty visibleColumns list when explicitly sent', () => {
+        // Explicit [] is legal and means "all columns hidden" — it is only the
+        // SCHEMA that must never invent it.
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          dataTables: { jobs: { visibleColumns: [] } },
+        });
+
+        expect(result.dataTables!.jobs.visibleColumns).toEqual([]);
+      });
+    });
+
+    describe('rejected payloads', () => {
+      const reject = (dataTables: unknown) =>
+        expect(() =>
+          updateUserSettingsSchema.parse({ ...basePut, dataTables }),
+        ).toThrow();
+
+      it('should reject an invalid density', () => {
+        reject({ jobs: { density: 'cozy' } });
+      });
+
+      it.each([
+        ['uppercase', 'Jobs'],
+        ['a space', 'admin jobs'],
+        ['punctuation', 'jobs!'],
+        ['a leading dash', '-jobs'],
+        ['a leading underscore', '_jobs'],
+        ['a dot', 'admin.jobs'],
+        ['empty', ''],
+      ])('should reject a tableId containing %s', (_label, tableId) => {
+        reject({ [tableId]: {} });
+      });
+
+      it('should reject a tableId over the length cap', () => {
+        reject({ ['a'.repeat(DATA_TABLE_MAX_ID_LENGTH + 1)]: {} });
+      });
+
+      it('should reject more than DATA_TABLE_MAX_TABLES table ids', () => {
+        const dataTables: Record<string, unknown> = {};
+        for (let i = 0; i <= DATA_TABLE_MAX_TABLES; i++) {
+          dataTables[`t${i}`] = {};
+        }
+
+        reject(dataTables);
+      });
+
+      it('should reject more than DATA_TABLE_MAX_VISIBLE_COLUMNS columns', () => {
+        reject({
+          jobs: {
+            visibleColumns: Array.from(
+              { length: DATA_TABLE_MAX_VISIBLE_COLUMNS + 1 },
+              (_, i) => `c${i}`,
+            ),
+          },
+        });
+      });
+
+      it('should reject a column id over the length cap', () => {
+        reject({
+          jobs: { visibleColumns: ['a'.repeat(DATA_TABLE_MAX_ID_LENGTH + 1)] },
+        });
+      });
+
+      it('should reject an empty column id', () => {
+        reject({ jobs: { visibleColumns: [''] } });
+      });
+
+      it('should reject a sort field over the length cap', () => {
+        reject({
+          jobs: {
+            sort: {
+              field: 'a'.repeat(DATA_TABLE_MAX_ID_LENGTH + 1),
+              direction: 'asc',
+            },
+          },
+        });
+      });
+
+      it('should reject an invalid sort direction', () => {
+        reject({ jobs: { sort: { field: 'createdAt', direction: 'sideways' } } });
+      });
+
+      it('should reject a sort without a direction', () => {
+        reject({ jobs: { sort: { field: 'createdAt' } } });
+      });
+
+      it('should reject pageSize below the minimum', () => {
+        reject({ jobs: { pageSize: 0 } });
+      });
+
+      it('should reject a negative pageSize', () => {
+        reject({ jobs: { pageSize: -1 } });
+      });
+
+      it('should reject pageSize above the maximum', () => {
+        reject({ jobs: { pageSize: DATA_TABLE_MAX_PAGE_SIZE + 1 } });
+      });
+
+      it('should reject a non-integer pageSize', () => {
+        reject({ jobs: { pageSize: 25.5 } });
+      });
+
+      it('should reject unknown keys inside an entry (strict)', () => {
+        reject({ jobs: { columnWidths: { type: 200 } } });
+      });
+
+      it('should reject a null entry on PUT (null-delete is PATCH-only)', () => {
+        reject({ jobs: null });
+      });
+
+      it('should reject a non-object entry', () => {
+        reject({ jobs: 'compact' });
+      });
+    });
+  });
 });
 
 describe('PatchUserSettingsDto (PATCH)', () => {
@@ -450,6 +728,83 @@ describe('PatchUserSettingsDto (PATCH)', () => {
           customImageUrl: 'https://example.com/avatar.png',
         },
       });
+    });
+  });
+
+  describe('dataTables field', () => {
+    it('should make dataTables optional', () => {
+      const result = patchUserSettingsSchema.parse({});
+
+      expect(result.dataTables).toBeUndefined();
+    });
+
+    it('should accept a single table entry', () => {
+      const result = patchUserSettingsSchema.parse({
+        dataTables: { jobs: { pageSize: 100 } },
+      });
+
+      expect(result.dataTables).toEqual({ jobs: { pageSize: 100 } });
+    });
+
+    it('should NOT materialize omitted sub-keys', () => {
+      const result = patchUserSettingsSchema.parse({
+        dataTables: { jobs: { density: 'standard' } },
+      });
+
+      expect(result.dataTables!.jobs).toEqual({ density: 'standard' });
+    });
+
+    it('should accept null as a delete marker for a table id', () => {
+      const result = patchUserSettingsSchema.parse({
+        dataTables: { jobs: null },
+      });
+
+      expect(result.dataTables).toEqual({ jobs: null });
+    });
+
+    it('should accept an empty entry as a reset-to-defaults marker', () => {
+      const result = patchUserSettingsSchema.parse({
+        dataTables: { jobs: {} },
+      });
+
+      expect(result.dataTables).toEqual({ jobs: {} });
+    });
+
+    it('should apply the same bounds as PUT - invalid density', () => {
+      expect(() =>
+        patchUserSettingsSchema.parse({ dataTables: { jobs: { density: 'x' } } }),
+      ).toThrow();
+    });
+
+    it('should apply the same bounds as PUT - invalid tableId', () => {
+      expect(() =>
+        patchUserSettingsSchema.parse({ dataTables: { 'Bad Id': {} } }),
+      ).toThrow();
+    });
+
+    it('should apply the same bounds as PUT - pageSize out of range', () => {
+      expect(() =>
+        patchUserSettingsSchema.parse({
+          dataTables: { jobs: { pageSize: DATA_TABLE_MAX_PAGE_SIZE + 1 } },
+        }),
+      ).toThrow();
+    });
+
+    it('should apply the same bounds as PUT - too many table ids', () => {
+      const dataTables: Record<string, unknown> = {};
+      for (let i = 0; i <= DATA_TABLE_MAX_TABLES; i++) {
+        dataTables[`t${i}`] = {};
+      }
+
+      expect(() => patchUserSettingsSchema.parse({ dataTables })).toThrow();
+    });
+
+    it('should apply the same bounds as PUT - unknown key inside an entry', () => {
+      expect(() =>
+        patchUserSettingsSchema.parse({
+          dataTables: { jobs: { columnOrder: ['a'] } },
+        }),
+      ).toThrow();
     });
   });
 });
