@@ -186,6 +186,21 @@ export interface SystemSettingsValue {
     /** Days a terminal review/trash-empty run is kept before deletion. */
     runHistoryRetentionDays: number;
   };
+  /**
+   * Notification Center retention (epic #240, issue #248). Governs the nightly
+   * `notification_purge` sweep over the `notifications` table.
+   */
+  notifications?: {
+    /**
+     * Days a RESOLVED notification is kept before deletion, measured from
+     * `dismissed_at` / `read_at`. Unread rows are never deleted by age — see
+     * NotificationPurgeHandler for why that asymmetry with jobs.history is
+     * deliberate.
+     */
+    retentionDays: number;
+    /** Forensic escape hatch: when false the nightly cron never enqueues. */
+    purgeEnabled: boolean;
+  };
   pictureEnhancement?: {
     defaultQuality: 'low' | 'medium' | 'high';
     defaultStrength: 'subtle' | 'balanced' | 'strong';
@@ -433,6 +448,10 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   },
   reviewRuns: {
     runHistoryRetentionDays: 30,
+  },
+  notifications: {
+    retentionDays: 30,
+    purgeEnabled: true,
   },
   pictureEnhancement: {
     defaultQuality: 'high',

@@ -60,6 +60,15 @@ export interface SystemSettings {
     };
     stuckThresholdMinutes?: number;
   };
+  /**
+   * Notification Center retention (issue #248). `retentionDays` ages out only
+   * notifications the user has already read or dismissed — unread rows are
+   * never deleted by age.
+   */
+  notifications?: {
+    retentionDays?: number;
+    purgeEnabled?: boolean;
+  };
   burst?: {
     timeGapSeconds?: number;
     hashDistance?: number;

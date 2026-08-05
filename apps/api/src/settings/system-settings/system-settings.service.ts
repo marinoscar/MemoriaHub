@@ -36,6 +36,7 @@ export interface ResolvedSettings {
   email: SystemSettingsValue['email'];
   jobs: SystemSettingsValue['jobs'];
   reviewRuns: SystemSettingsValue['reviewRuns'];
+  notifications: SystemSettingsValue['notifications'];
   pictureEnhancement: SystemSettingsValue['pictureEnhancement'];
   workflows: SystemSettingsValue['workflows'];
   updatedAt: Date;
@@ -136,6 +137,7 @@ export class SystemSettingsService {
       email: value.email,
       jobs: value.jobs,
       reviewRuns: value.reviewRuns,
+      notifications: value.notifications,
       pictureEnhancement: value.pictureEnhancement,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,
@@ -231,6 +233,7 @@ export class SystemSettingsService {
       email: value.email,
       jobs: value.jobs,
       reviewRuns: value.reviewRuns,
+      notifications: value.notifications,
       pictureEnhancement: value.pictureEnhancement,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,
@@ -495,6 +498,16 @@ export class SystemSettingsService {
           (current as any).reviewRuns?.runHistoryRetentionDays ??
           30,
       },
+      notifications: {
+        retentionDays:
+          (dto as any).notifications?.retentionDays ??
+          (current as any).notifications?.retentionDays ??
+          30,
+        purgeEnabled:
+          (dto as any).notifications?.purgeEnabled ??
+          (current as any).notifications?.purgeEnabled ??
+          true,
+      },
       pictureEnhancement: {
         defaultQuality:
           (dto as any).pictureEnhancement?.defaultQuality ??
@@ -619,6 +632,7 @@ export class SystemSettingsService {
       email: value.email,
       jobs: value.jobs,
       reviewRuns: value.reviewRuns,
+      notifications: value.notifications,
       pictureEnhancement: value.pictureEnhancement,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,

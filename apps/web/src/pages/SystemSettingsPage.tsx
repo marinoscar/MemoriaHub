@@ -125,8 +125,12 @@ export default function SystemSettingsPage() {
                 <StorageSettings
                   settings={settings.storage}
                   jobsSettings={settings.jobs}
+                  notificationsSettings={settings.notifications}
                   onSave={(storage) => handleSave('storage', storage)}
                   onSaveJobs={(jobs) => handleSave('jobs', jobs)}
+                  onSaveNotifications={(notifications) =>
+                    handleSave('notifications', notifications)
+                  }
                   onResetHistory={canWrite ? () => resetJobHistory().then(() => undefined) : undefined}
                   disabled={!canWrite || isSaving}
                 />

@@ -37,6 +37,7 @@ import { AutoTaggingHandler } from '../tagging/auto-tagging.handler';
 import { ThumbnailRegenHandler } from '../media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../media/thumbnail-repair.handler';
 import { TrashPurgeHandler } from '../media/trash-purge.handler';
+import { NotificationPurgeHandler } from '../notifications/notification-purge.handler';
 import { TrashEmptyEvaluateHandler } from '../media/trash-empty/trash-empty-evaluate.handler';
 import { TrashEmptyExecuteBatchHandler } from '../media/trash-empty/trash-empty-execute-batch.handler';
 import { LocationSuggestionRunEvaluateHandler } from '../location-inference/runs/location-suggestion-run-evaluate.handler';
@@ -69,6 +70,7 @@ const ALL_HANDLER_CLASSES = [
   ThumbnailRegenHandler,
   ThumbnailRepairHandler,
   TrashPurgeHandler,
+  NotificationPurgeHandler,
   TrashEmptyEvaluateHandler,
   TrashEmptyExecuteBatchHandler,
   LocationSuggestionRunEvaluateHandler,
@@ -95,6 +97,7 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'location_inference',
   'location_suggestion_run_evaluate',
   'location_suggestion_run_execute_batch',
+  'notification_purge',
   'review_run_evaluate',
   'review_run_execute_batch',
   'review_run_history_purge',

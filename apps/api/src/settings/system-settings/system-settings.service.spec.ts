@@ -139,6 +139,7 @@ describe('SystemSettingsService', () => {
         pictureEnhancement: DEFAULT_SYSTEM_SETTINGS.pictureEnhancement,
         workflows: DEFAULT_SYSTEM_SETTINGS.workflows,
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
+        notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -241,6 +242,7 @@ describe('SystemSettingsService', () => {
         pictureEnhancement: DEFAULT_SYSTEM_SETTINGS.pictureEnhancement,
         workflows: DEFAULT_SYSTEM_SETTINGS.workflows,
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
+        notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
