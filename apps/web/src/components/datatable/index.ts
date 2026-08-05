@@ -97,6 +97,44 @@ export {
 } from './filter/filterUrl';
 export type { DataTableUrlState, DataTableUrlOptions } from './filter/filterUrl';
 
+// --- Layout persistence: visibility + density (#255) -------------------------
+export { DataTableViewBar, HIDDEN_COLUMN_COUNT_CLASS } from './layout/DataTableViewBar';
+export type { DataTableViewBarProps } from './layout/DataTableViewBar';
+export { useDataTableLayoutPrefs } from './layout/useDataTableLayoutPrefs';
+export type {
+  DataTableLayoutPrefs,
+  UseDataTableLayoutPrefsOptions,
+} from './layout/useDataTableLayoutPrefs';
+export {
+  CARD_DENSITY,
+  DATA_TABLE_MAX_ID_LENGTH,
+  DATA_TABLE_MAX_VISIBLE_COLUMNS,
+  DATA_TABLE_PERSIST_DEBOUNCE_MS,
+  DEFAULT_DENSITY,
+  DENSITY_LABELS,
+  DENSITY_OPTIONS,
+  HIDDEN_COLUMN_PREFIX,
+  cardDensityMetrics,
+  decodeVisibility,
+  encodeVisibility,
+  isDensity,
+  isEmptyStoredLayout,
+  isHideable,
+  layoutHidesColumn,
+  pickerColumns,
+  resolveStoredSort,
+  resolveUserVisibleColumnIds,
+  resolveVisibleColumnIds,
+  sanitizeStoredLayout,
+} from './layout/layoutModel';
+export type {
+  CardDensityMetrics,
+  DataTablesSettings,
+  DataTableStoredLayout,
+  DataTableStoredSort,
+  DecodedVisibility,
+} from './layout/layoutModel';
+
 // --- Shared ------------------------------------------------------------------
 export { useRowActionConfirm, confirmCopy } from './shared/rowActionConfirm';
 
@@ -104,6 +142,7 @@ export type {
   DataTableColumn,
   DataTableColumnPriority,
   DataTableAlign,
+  DataTableDensity,
   DataTableSortDirection,
   DataTableSortState,
   DataTableSortConfig,

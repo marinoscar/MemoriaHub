@@ -89,6 +89,16 @@ export type DataTableAlign = 'left' | 'center' | 'right';
 export type DataTableSortDirection = 'asc' | 'desc';
 
 /**
+ * Row-height / padding preset.
+ *
+ * Applies to BOTH renderers: the grid maps it onto DataGrid's own density, the
+ * card list onto its padding and inter-card gap (`layout/layoutModel.ts`).
+ * A density that only worked on the grid would silently stop working exactly
+ * where vertical space is scarcest.
+ */
+export type DataTableDensity = 'compact' | 'standard' | 'comfortable';
+
+/**
  * One column of a DataTable.
  *
  * `render` and `value` are intentionally separate concerns:
@@ -175,8 +185,10 @@ export interface DataTableColumn<Row> {
   exportable?: boolean;
 
   /**
-   * Reserved for #255 (column visibility / saved views). `false` pins the
-   * column permanently visible. Default `true`.
+   * Whether the user may hide this column from the column picker (#255).
+   * `false` pins it permanently visible and keeps it out of the picker
+   * entirely — an unchangeable checkbox is worse than no checkbox.
+   * Default `true`.
    */
   hideable?: boolean;
 
@@ -396,8 +408,27 @@ export interface DataTableProps<Row> {
   rowActions?: DataTableRowAction<Row>[];
   bulkActions?: DataTableBulkAction[];
 
-  /** Row height preset. Default `'standard'`. */
-  density?: 'compact' | 'standard' | 'comfortable';
+  /**
+   * Stable identity of THIS table instance, e.g. `'jobs'`, `'admin-shares'`.
+   *
+   * Supplying it turns on per-user layout persistence: column visibility,
+   * density, sort and page size are stored under
+   * `user_settings.dataTables[tableId]` and restored on the next mount
+   * (docs/specs/datatable.md §14 / §15). Omit it and every layout control still
+   * works — the choices simply live for the session only.
+   *
+   * Chosen by the page and never derived from a route or a label: the id is the
+   * storage key, so it must survive a rename or a URL change.
+   */
+  tableId?: string;
+
+  /**
+   * Row height / padding preset. Default `'standard'`.
+   *
+   * This is the page's DEFAULT, not a lock: a user's own choice (persisted when
+   * `tableId` is set, in-session otherwise) takes precedence over it.
+   */
+  density?: DataTableDensity;
   /** Accessible name for the grid. Strongly recommended. */
   ariaLabel?: string;
   /**
@@ -450,4 +481,17 @@ export type DataTableRendererProps<Row> = Omit<
   | 'filters'
   | 'onFiltersChange'
   | 'quickSearch'
->;
+  | 'tableId'
+> & {
+  /**
+   * The USER's resolved column-visibility choice (#255) — layout-independent,
+   * and already reconciled against the current column list by
+   * `layout/layoutModel.ts`, so a renderer never re-derives it and the two
+   * renderers can never disagree about it.
+   *
+   * A renderer AND-s this with its own layout rules (the tablet grid still
+   * folds `detail` columns into the row expander). Omit for "the user has
+   * hidden nothing" — what a renderer used directly, outside `DataTable`, gets.
+   */
+  visibleColumnIds?: ReadonlySet<string>;
+};

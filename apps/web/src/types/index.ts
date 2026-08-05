@@ -1,3 +1,5 @@
+import type { DataTableStoredLayout } from '../components/datatable/layout/layoutModel';
+
 export interface Role {
   name: string;
 }
@@ -23,6 +25,15 @@ export interface UserSettings {
   search?: {
     visibleFields: string[];
   };
+  /**
+   * Per-user, per-table DataTable layout (issue #255) — column visibility,
+   * density, sort and page size, keyed by the table's `tableId`.
+   *
+   * Every key is optional and the API never materializes one: an absent entry,
+   * or an absent field inside an entry, means "use the column contract's
+   * defaults". See docs/specs/datatable.md §14–§15.
+   */
+  dataTables?: Record<string, DataTableStoredLayout>;
   activeCircleId?: string | null;
   updatedAt: string;
   version: number;

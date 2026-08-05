@@ -31,6 +31,7 @@ import { useRowActionConfirm } from '../shared/rowActionConfirm';
 import { DataCard } from './DataCard';
 import { CompactPagination } from './CompactPagination';
 import { CardSortControl } from './CardSortControl';
+import { cardDensityMetrics } from '../layout/layoutModel';
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
 
@@ -46,9 +47,16 @@ export function CardListRenderer<Row>({
   selection,
   rowActions,
   bulkActions,
+  density,
   ariaLabel,
   height,
+  visibleColumnIds,
 }: DataTableRendererProps<Row>) {
+  // A card list has no DataGrid to inherit density from, so it maps the same
+  // setting onto its own metrics (padding, field gap, gap between cards).
+  // Density that only worked on the grid would silently stop working on the
+  // layout where vertical space is scarcest.
+  const metrics = cardDensityMetrics(density);
   const selectable = selection ? (selection.selectable ?? true) : false;
   const selectedIds = selection?.selectedIds ?? EMPTY_SELECTION;
 
@@ -56,14 +64,21 @@ export function CardListRenderer<Row>({
 
   // --- Columns, split by priority -------------------------------------------
 
-  const { primaryColumns, secondaryColumns, detailColumns } = useMemo(
-    () => ({
-      primaryColumns: columns.filter((column) => column.priority === 'primary'),
-      secondaryColumns: columns.filter((column) => column.priority === 'secondary'),
-      detailColumns: columns.filter((column) => column.priority === 'detail'),
-    }),
-    [columns],
-  );
+  const { primaryColumns, secondaryColumns, detailColumns } = useMemo(() => {
+    // The user's #255 choice is applied BEFORE the priority split, so a hidden
+    // column disappears from a card exactly as it disappears from a grid — the
+    // card layout folds `detail` columns away, it does not resurrect hidden
+    // ones. No layout folding is AND-ed in here: a card already shows every
+    // priority band, just in three different places.
+    const shown = visibleColumnIds
+      ? columns.filter((column) => visibleColumnIds.has(column.id))
+      : columns;
+    return {
+      primaryColumns: shown.filter((column) => column.priority === 'primary'),
+      secondaryColumns: shown.filter((column) => column.priority === 'secondary'),
+      detailColumns: shown.filter((column) => column.priority === 'detail'),
+    };
+  }, [columns, visibleColumnIds]);
 
   // --- Selection ------------------------------------------------------------
 
@@ -104,6 +119,7 @@ export function CardListRenderer<Row>({
   return (
     <Box
       data-testid="datatable-card-list"
+      data-density={density ?? 'standard'}
       sx={{
         width: '100%',
         maxWidth: '100%',
@@ -156,7 +172,7 @@ export function CardListRenderer<Row>({
             component="ul"
             role="list"
             aria-label={ariaLabel}
-            spacing={1.5}
+            spacing={metrics.cardGap}
             sx={{ listStyle: 'none', m: 0, p: 0, minWidth: 0 }}
           >
             {rows.map((row, index) => {
@@ -174,6 +190,7 @@ export function CardListRenderer<Row>({
                   onToggleSelect={toggleRow}
                   rowActions={rowActions}
                   onRunAction={runAction}
+                  density={density}
                 />
               );
             })}
