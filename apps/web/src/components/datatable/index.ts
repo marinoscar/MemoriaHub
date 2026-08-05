@@ -5,7 +5,12 @@
  * `mobile/` and `shared/` subfolders are implementation detail.
  */
 
-export { DataTable, useDataTableRenderer, rendererForLayout } from './DataTable';
+export {
+  DataTable,
+  useDataTableRenderer,
+  rendererForLayout,
+  drawableColumns,
+} from './DataTable';
 export { BulkActionBar } from './BulkActionBar';
 export type { BulkActionBarProps } from './BulkActionBar';
 
