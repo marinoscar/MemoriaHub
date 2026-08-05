@@ -34,9 +34,10 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
-import type { DataTableColumn, DataTableRowAction } from '../types';
+import type { DataTableColumn, DataTableDensity, DataTableRowAction } from '../types';
 import { RowActionsCell } from '../desktop/RowActionsCell';
 import { CardField, columnContent, columnText } from './CardField';
+import { cardDensityMetrics } from '../layout/layoutModel';
 
 export interface DataCardProps<Row> {
   row: Row;
@@ -49,6 +50,12 @@ export interface DataCardProps<Row> {
   onToggleSelect: (id: string) => void;
   rowActions?: DataTableRowAction<Row>[];
   onRunAction: (action: DataTableRowAction<Row>, row: Row) => void;
+  /**
+   * Row-density preset (#255). Drives the card's padding and field gap — the
+   * card equivalent of DataGrid's row height. Touch targets are NOT scaled by
+   * it: 44px is a floor, not a style.
+   */
+  density?: DataTableDensity;
 }
 
 export function DataCard<Row>({
@@ -62,9 +69,11 @@ export function DataCard<Row>({
   onToggleSelect,
   rowActions,
   onRunAction,
+  density,
 }: DataCardProps<Row>) {
   const [expanded, setExpanded] = useState(false);
   const detailRegionId = useId();
+  const metrics = cardDensityMetrics(density);
 
   const hasDetail = detailColumns.length > 0;
   const hasActions = Boolean(rowActions && rowActions.length > 0);
@@ -79,6 +88,7 @@ export function DataCard<Row>({
       component="li"
       data-testid="datatable-card"
       data-row-id={id}
+      data-density={density ?? 'standard'}
       data-selected={selected ? 'true' : 'false'}
       sx={{
         listStyle: 'none',
@@ -98,12 +108,13 @@ export function DataCard<Row>({
     >
       {/* --- Header: selection, headline, actions ---------------------------- */}
       <Box
+        data-testid="datatable-card-header"
         sx={{
           display: 'flex',
           alignItems: 'flex-start',
           gap: 1,
-          px: 1.5,
-          py: 1.25,
+          px: metrics.px,
+          py: metrics.py,
           minWidth: 0,
         }}
       >
@@ -151,7 +162,11 @@ export function DataCard<Row>({
       {secondaryColumns.length > 0 && (
         <>
           <Divider />
-          <Stack spacing={1.25} sx={{ px: 1.5, py: 1.25, minWidth: 0 }}>
+          <Stack
+            data-testid="datatable-card-body"
+            spacing={metrics.fieldGap}
+            sx={{ px: metrics.px, py: metrics.py, minWidth: 0 }}
+          >
             {secondaryColumns.map((column) => (
               <CardField key={column.id} column={column} row={row} />
             ))}
@@ -173,8 +188,8 @@ export function DataCard<Row>({
               display: 'flex',
               width: '100%',
               minHeight: 44,
-              px: 1.5,
-              py: 1,
+              px: metrics.px,
+              py: metrics.py,
               gap: 0.5,
               justifyContent: 'flex-start',
               alignItems: 'center',
@@ -196,8 +211,8 @@ export function DataCard<Row>({
               id={detailRegionId}
               data-testid="datatable-card-detail-region"
               sx={{
-                px: 1.5,
-                pb: 1.5,
+                px: metrics.px,
+                pb: metrics.px,
                 minWidth: 0,
                 bgcolor: (theme) =>
                   theme.palette.mode === 'dark'
@@ -205,7 +220,7 @@ export function DataCard<Row>({
                     : 'rgba(0, 0, 0, 0.02)',
               }}
             >
-              <Stack spacing={1.25} sx={{ pt: 1.25, minWidth: 0 }}>
+              <Stack spacing={metrics.fieldGap} sx={{ pt: metrics.py, minWidth: 0 }}>
                 {detailColumns.map((column) => (
                   <CardField key={column.id} column={column} row={row} />
                 ))}

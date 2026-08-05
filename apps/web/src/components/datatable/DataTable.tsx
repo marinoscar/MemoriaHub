@@ -35,6 +35,19 @@
  * layout (a row / a collapsed panel / a full-screen sheet) rather than by how
  * rows are presented — and because a renderer owning the panel's open state
  * would discard it on every resize.
+ *
+ * `DataTableViewBar` (column visibility + density, #255) sits here for exactly
+ * the same two reasons — and one more: the visible column SET must be resolved
+ * once, from the layout baseline and the user's stored choice together, so the
+ * two renderers can never disagree about which columns exist.
+ *
+ * ## Layout persistence
+ *
+ * Supplying `tableId` stores the resolved layout under
+ * `user_settings.dataTables[tableId]`; omitting it keeps every control working
+ * but session-scoped. In-session state is authoritative either way — the write
+ * is debounced and fire-and-forget, and its outcome never feeds back into what
+ * is on screen. See `layout/useDataTableLayoutPrefs.ts`.
  */
 
 import { useRef } from 'react';
@@ -49,6 +62,8 @@ import type {
 import { DesktopGridRenderer } from './desktop/DesktopGridRenderer';
 import { CardListRenderer } from './mobile/CardListRenderer';
 import { DataTableFilterBar } from './filter/DataTableFilterBar';
+import { DataTableViewBar } from './layout/DataTableViewBar';
+import { useDataTableLayoutPrefs } from './layout/useDataTableLayoutPrefs';
 import { useDataTableLayout, useViewportLayout } from './useContainerLayout';
 
 /** Stable identity so an unfiltered table never re-renders the bar needlessly. */
@@ -88,6 +103,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     filters,
     onFiltersChange,
     quickSearch,
+    tableId,
+    density: densityProp,
     'data-testid': testId,
     ...rendererProps
   } = props;
@@ -99,6 +116,15 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   });
   const mode = rendererForLayout(layout);
 
+  const prefs = useDataTableLayoutPrefs({
+    tableId,
+    columns: props.columns,
+    layout,
+    densityProp,
+    sort: props.sort,
+    pagination: props.pagination,
+  });
+
   return (
     <Box
       ref={containerRef}
@@ -108,10 +134,23 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       // debugging aids.
       data-renderer={mode}
       data-layout={layout}
+      // The effective density, after the user's own choice has overridden the
+      // page's default — the one place both renderers' density is observable.
+      data-density={prefs.density}
       // The horizontal-containment contract starts here: no DataTable may ever
       // make the document body scroll sideways, at any viewport width.
       sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}
     >
+      <DataTableViewBar
+        columns={props.columns}
+        layout={layout}
+        visibleColumnIds={prefs.userVisibleColumnIds}
+        density={prefs.density}
+        onToggleColumn={prefs.toggleColumn}
+        onDensityChange={prefs.setDensity}
+        onReset={prefs.reset}
+      />
+
       <DataTableFilterBar
         columns={props.columns}
         layout={layout}
@@ -121,9 +160,18 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       />
 
       {mode === 'mobile' ? (
-        <MOBILE_RENDERER {...rendererProps} />
+        <MOBILE_RENDERER
+          {...rendererProps}
+          density={prefs.density}
+          visibleColumnIds={prefs.userVisibleColumnIds}
+        />
       ) : (
-        <DesktopGridRenderer {...rendererProps} variant={layout === 'tablet' ? 'tablet' : 'desktop'} />
+        <DesktopGridRenderer
+          {...rendererProps}
+          density={prefs.density}
+          visibleColumnIds={prefs.userVisibleColumnIds}
+          variant={layout === 'tablet' ? 'tablet' : 'desktop'}
+        />
       )}
     </Box>
   );

@@ -86,6 +86,7 @@ export function DesktopGridRenderer<Row>({
   ariaLabel,
   height,
   variant,
+  visibleColumnIds,
 }: DesktopGridRendererProps<Row>) {
   const theme = useTheme();
   // Fallback only: `DataTable` resolves this from the CONTAINER width and
@@ -101,9 +102,17 @@ export function DesktopGridRenderer<Row>({
 
   // --- Row expansion (tablet only) ------------------------------------------
 
+  // The `detail` columns the expander panel reveals — minus any the user has
+  // hidden (#255). A column hidden on a desktop must not silently reappear
+  // inside the tablet expander; hidden means hidden at every width.
   const detailColumns = useMemo(
-    () => columns.filter((column) => column.priority === 'detail'),
-    [columns],
+    () =>
+      columns.filter(
+        (column) =>
+          column.priority === 'detail' &&
+          (!visibleColumnIds || visibleColumnIds.has(column.id)),
+      ),
+    [columns, visibleColumnIds],
   );
   // Nothing is hidden when there are no `detail` columns, so there is nothing
   // to expand and no expander column is added.
@@ -164,9 +173,12 @@ export function DesktopGridRenderer<Row>({
 
   const gridColumns: GridColDef[] = useMemo(() => {
     const mapped = toGridColumns(columns);
-    const visibleDataColumnCount = isTablet
-      ? mapped.length - detailColumns.length
-      : mapped.length;
+    // The expander's `colSpan` must cover exactly the columns actually on
+    // screen: the layout baseline AND the user's #255 visibility choice.
+    const visibleDataColumnCount = columns.filter((column) => {
+      if (isTablet && column.priority === 'detail') return false;
+      return !visibleColumnIds || visibleColumnIds.has(column.id);
+    }).length;
 
     const withActions: GridColDef[] = [...mapped];
     if (rowActions && rowActions.length > 0) {
@@ -255,11 +267,16 @@ export function DesktopGridRenderer<Row>({
     toggleExpanded,
     isTablet,
     density,
+    visibleColumnIds,
   ]);
 
   const columnVisibilityModel = useMemo(
-    () => buildColumnVisibilityModel(columns, { hideDetailColumns: isTablet }),
-    [columns, isTablet],
+    () =>
+      buildColumnVisibilityModel(columns, {
+        hideDetailColumns: isTablet,
+        visibleColumns: visibleColumnIds,
+      }),
+    [columns, isTablet, visibleColumnIds],
   );
 
   // --- Pagination (server) --------------------------------------------------

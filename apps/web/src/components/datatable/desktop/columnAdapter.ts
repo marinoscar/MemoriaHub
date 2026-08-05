@@ -123,19 +123,32 @@ export function toGridColumns<Row>(columns: DataTableColumn<Row>[]): GridColDef[
 }
 
 /**
- * Initial column visibility derived from `priority`.
+ * Column visibility for the grid.
  *
- * `detail` columns are hidden by default once the viewport is too narrow to
- * show everything comfortably; `primary` and `secondary` always stay visible.
- * Issue #255 layers user overrides and saved views on top of this baseline.
+ * Two modes, and the difference is which question has already been answered:
+ *
+ * - `hideDetailColumns` — the LAYOUT baseline derived from `priority`: `detail`
+ *   columns fold away once the grid is too narrow to show everything
+ *   comfortably (they stay reachable through the row expander), while
+ *   `primary`/`secondary` always stay.
+ * - `visibleColumns` — the USER's persisted choice (#255), layout-independent.
+ *   Omitted means "the user has hidden nothing", which is what a renderer used
+ *   directly, outside `DataTable`, gets.
+ *
+ * The two are AND-ed, never overridden one by the other. A user's "hide this"
+ * must win at every width; the tablet fold must survive a stored layout made on
+ * a desktop, or a `detail` column marked visible there would reintroduce at
+ * 800px exactly the horizontal scroll the fold exists to remove.
  */
 export function buildColumnVisibilityModel<Row>(
   columns: DataTableColumn<Row>[],
-  options: { hideDetailColumns: boolean },
+  options: { hideDetailColumns: boolean; visibleColumns?: ReadonlySet<string> },
 ): GridColumnVisibilityModel {
   const model: GridColumnVisibilityModel = {};
   for (const column of columns) {
-    model[column.id] = !(options.hideDetailColumns && column.priority === 'detail');
+    const layoutShows = !(options.hideDetailColumns && column.priority === 'detail');
+    const userShows = options.visibleColumns ? options.visibleColumns.has(column.id) : true;
+    model[column.id] = layoutShows && userShows;
   }
   return model;
 }
