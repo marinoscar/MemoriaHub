@@ -66,10 +66,59 @@ import type { MediaItem, MediaQueryParams } from '../../types/media';
 import type { CircleRole } from '../../types/circles';
 
 // ---------------------------------------------------------------------------
-// AppBar height constant for sticky day-header offset
+// Grid geometry — ONE source of truth for the column count
 // ---------------------------------------------------------------------------
 
-const APP_BAR_HEIGHT = 64;
+/**
+ * Column count per breakpoint. Consumed by BOTH `gridTemplateColumns` and the
+ * `content-visibility` placeholder math below — they must never drift. Issue
+ * #237: the placeholder used to hard-code the desktop `/ 6`, so on a phone
+ * (3 columns) every group reserved half the height it actually needed and the
+ * document grew by roughly a group's height each time one scrolled into view.
+ */
+export const GALLERY_COLS = { xs: 3, sm: 4, md: 6 } as const;
+
+/** Inter-tile grid gap, in px. Must match the grid's `gap` value. */
+export const GALLERY_GAP_PX = 2;
+
+/**
+ * Row height assumed before the first ResizeObserver measurement lands. Tiles
+ * are `aspectRatio: '1'`, so the real row height is derived from the measured
+ * container width instead — this is only the pre-measurement estimate.
+ */
+export const GALLERY_FALLBACK_ROW_PX = 120;
+
+const GALLERY_GRID_COLUMNS = {
+  xs: `repeat(${GALLERY_COLS.xs}, 1fr)`,
+  sm: `repeat(${GALLERY_COLS.sm}, 1fr)`,
+  md: `repeat(${GALLERY_COLS.md}, 1fr)`,
+} as const;
+
+/**
+ * Height reserved by `contain-intrinsic-size` for an off-screen day group.
+ *
+ * @param itemCount items in the group
+ * @param cols      columns at the ACTIVE breakpoint (never a hard-coded 6)
+ * @param tileSize  measured square tile edge in px, or null before the first
+ *                  ResizeObserver callback (falls back to the old estimate)
+ */
+export function galleryPlaceholderHeight(
+  itemCount: number,
+  cols: number,
+  tileSize: number | null,
+): number {
+  const rows = Math.ceil(itemCount / cols);
+  const rowHeight =
+    tileSize !== null && tileSize > 0 ? tileSize + GALLERY_GAP_PX : GALLERY_FALLBACK_ROW_PX;
+  return Math.round(rows * rowHeight);
+}
+
+/**
+ * Sticky day-header offset. MUI's Toolbar is 56px below the `sm` breakpoint and
+ * 64px at `sm` and up — a flat 64 left an 8px see-through gap under the AppBar
+ * on phones (issue #237).
+ */
+const DAY_HEADER_TOP = { xs: 56, sm: 64 } as const;
 
 // ---------------------------------------------------------------------------
 // GalleryTile — internal thumbnail tile
@@ -675,6 +724,42 @@ export function MediaGallery({
   }, [queryParams, albumId, circleId]);
 
   // -------------------------------------------------------------------------
+  // Grid measurement — ONE ResizeObserver for the whole gallery (never one per
+  // day group). Feeds the content-visibility placeholder math so an off-screen
+  // group reserves the height it will actually occupy at the current width.
+  // -------------------------------------------------------------------------
+
+  const isSmUp = useMediaQuery(theme.breakpoints.up('sm'));
+  const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
+  const cols = isMdUp ? GALLERY_COLS.md : isSmUp ? GALLERY_COLS.sm : GALLERY_COLS.xs;
+
+  const [gridWidth, setGridWidth] = useState<number | null>(null);
+  const gridObserverRef = useRef<ResizeObserver | null>(null);
+
+  // Callback ref: the grid wrapper mounts/unmounts with the item list, so a
+  // mount-time useEffect would miss it. contentRect excludes the wrapper's own
+  // horizontal padding, which is exactly the width the columns divide up.
+  const gridRootRef = useCallback((el: HTMLDivElement | null) => {
+    gridObserverRef.current?.disconnect();
+    gridObserverRef.current = null;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      setGridWidth(width > 0 ? width : null);
+    });
+    observer.observe(el);
+    gridObserverRef.current = observer;
+  }, []);
+
+  useEffect(() => () => gridObserverRef.current?.disconnect(), []);
+
+  const tileSize = useMemo(() => {
+    if (gridWidth === null) return null;
+    const size = (gridWidth - (cols - 1) * GALLERY_GAP_PX) / cols;
+    return size > 0 ? size : null;
+  }, [gridWidth, cols]);
+
+  // -------------------------------------------------------------------------
   // Derived display flags
   // -------------------------------------------------------------------------
 
@@ -701,12 +786,8 @@ export function MediaGallery({
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: {
-                xs: 'repeat(3, 1fr)',
-                sm: 'repeat(4, 1fr)',
-                md: 'repeat(6, 1fr)',
-              },
-              gap: '2px',
+              gridTemplateColumns: GALLERY_GRID_COLUMNS,
+              gap: `${GALLERY_GAP_PX}px`,
             }}
           >
             {Array.from({ length: 18 }).map((_, i) => (
@@ -785,7 +866,7 @@ export function MediaGallery({
 
       {/* Day-grouped grid */}
       {!showFirstLoad && mergedItems.length > 0 && (
-        <Box sx={{ px: { xs: 1, sm: 2 }, pt: { xs: 1, sm: 2 } }}>
+        <Box ref={gridRootRef} sx={{ px: { xs: 1, sm: 2 }, pt: { xs: 1, sm: 2 } }}>
           {grouped.map((group) => (
             <Box
               key={group.key}
@@ -800,7 +881,7 @@ export function MediaGallery({
               <Box
                 sx={{
                   position: 'sticky',
-                  top: APP_BAR_HEIGHT,
+                  top: DAY_HEADER_TOP,
                   zIndex: 10,
                   py: 0.75,
                   px: 0.5,
@@ -854,14 +935,14 @@ export function MediaGallery({
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: {
-                    xs: 'repeat(3, 1fr)',
-                    sm: 'repeat(4, 1fr)',
-                    md: 'repeat(6, 1fr)',
-                  },
-                  gap: '2px',
+                  gridTemplateColumns: GALLERY_GRID_COLUMNS,
+                  gap: `${GALLERY_GAP_PX}px`,
                   contentVisibility: 'auto',
-                  containIntrinsicSize: `auto ${Math.ceil(group.items.length / 6) * 120}px`,
+                  containIntrinsicSize: `auto ${galleryPlaceholderHeight(
+                    group.items.length,
+                    cols,
+                    tileSize,
+                  )}px`,
                 }}
               >
                 {group.items.map((item) => (

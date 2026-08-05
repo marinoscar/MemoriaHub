@@ -36,7 +36,15 @@ export function Layout({ fullBleed = false }: LayoutProps) {
           sx={{
             display: 'flex',
             flexDirection: 'column',
+            // The shell is the ONLY owner of viewport height — pages must not
+            // nest their own 100vh inside it (issue #237), or the document is
+            // always at least 100vh + AppBar + padding tall and scrolls even
+            // when the content fits. `100dvh` tracks mobile browser chrome;
+            // `100vh` measures against the LARGEST viewport, so a collapsing
+            // URL bar adds jitter. The plain 100vh below is the fallback for
+            // browsers without dvh support (same lesson as MediaMapPage).
             minHeight: '100vh',
+            '@supports (min-height: 100dvh)': { minHeight: '100dvh' },
             backgroundColor: theme.palette.background.default,
           }}
         >
