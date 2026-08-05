@@ -1,11 +1,24 @@
 /**
- * DataTable — desktop renderer (MUI X DataGrid).
+ * DataTable — grid renderer (MUI X DataGrid). Serves TWO layouts.
  *
  * Everything is server-driven: pagination, sorting and the row set all come in
  * as controlled props and every user gesture is reported back out. The grid
  * itself never sorts, filters, or paginates a row — it only draws what it is
  * handed. That is what makes the same contract work against a 150k-item
  * library where client-side anything is off the table.
+ *
+ * `variant` selects between the two grid layouts:
+ *
+ *   - `'desktop'` — every column visible.
+ *   - `'tablet'`  — `detail`-priority columns hidden, and a leading expander
+ *     column that reveals them as label/value pairs in an expanded row. This
+ *     is the intermediate case: still a real grid, but nothing it hides becomes
+ *     unreachable. See `./detailRow.tsx` for why expansion is built from
+ *     synthetic rows rather than `getDetailPanelContent` (a Pro-only feature).
+ *
+ * When `variant` is omitted the renderer falls back to its historical
+ * viewport-based behaviour, so using it directly (outside `DataTable`) still
+ * works.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -18,23 +31,28 @@ import {
   type GridSortModel,
   type GridValidRowModel,
 } from '@mui/x-data-grid';
+import { GRID_CHECKBOX_SELECTION_FIELD } from '@mui/x-data-grid';
+import { Alert, Box, IconButton, useMediaQuery, useTheme } from '@mui/material';
 import {
-  Alert,
-  Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
-  useMediaQuery,
-  useTheme,
-} from '@mui/material';
-import type { DataTableRendererProps, DataTableRowAction } from '../types';
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  KeyboardArrowRight as KeyboardArrowRightIcon,
+} from '@mui/icons-material';
+import type { DataTableRendererProps } from '../types';
 import { buildColumnVisibilityModel, toGridColumns } from './columnAdapter';
 import { DataTableEmptyOverlay, DataTableLoadingOverlay } from './cells';
 import { RowActionsCell } from './RowActionsCell';
 import { BulkActionBar } from '../BulkActionBar';
+import { useRowActionConfirm } from '../shared/rowActionConfirm';
+import {
+  DETAIL_ROW_CLASS,
+  DETAIL_ROW_SOURCE,
+  DetailRowPanel,
+  EXPANDER_FIELD,
+  detailRowHeight,
+  detailRowId,
+  isDetailRow,
+  makeDetailRow,
+} from './detailRow';
 
 /** Field name of the synthetic trailing actions column. */
 export const ACTIONS_FIELD = '__datatable_actions__';
@@ -44,26 +62,12 @@ const DEFAULT_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const MAX_UNPAGINATED_ROWS = 100;
 const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
 
-interface PendingConfirm<Row> {
-  action: DataTableRowAction<Row>;
-  row: Row;
-}
-
-function confirmCopy<Row>(pending: PendingConfirm<Row>) {
-  const { action, row } = pending;
-  const options = typeof action.confirm === 'object' ? action.confirm : {};
-  const description =
-    typeof options.description === 'function' ? options.description(row) : options.description;
-  return {
-    title: options.title ?? `${action.label}?`,
-    description:
-      description ??
-      (action.destructive
-        ? 'This action cannot be undone.'
-        : `Are you sure you want to ${action.label.toLowerCase()}?`),
-    confirmLabel: options.confirmLabel ?? action.label,
-    cancelLabel: options.cancelLabel ?? 'Cancel',
-  };
+export interface DesktopGridRendererProps<Row> extends DataTableRendererProps<Row> {
+  /**
+   * Which grid layout to draw. Omit to fall back to a viewport media query
+   * (the pre-#253 behaviour) — `DataTable` always passes it explicitly.
+   */
+  variant?: 'desktop' | 'tablet';
 }
 
 export function DesktopGridRenderer<Row>({
@@ -81,62 +85,181 @@ export function DesktopGridRenderer<Row>({
   density = 'standard',
   ariaLabel,
   height,
-}: DataTableRendererProps<Row>) {
+  variant,
+}: DesktopGridRendererProps<Row>) {
   const theme = useTheme();
-  // `detail`-priority columns fold away once the desktop viewport gets tight.
-  const hideDetailColumns = useMediaQuery(theme.breakpoints.down('lg'));
+  // Fallback only: `DataTable` resolves this from the CONTAINER width and
+  // passes `variant` explicitly, so this media query never decides anything
+  // for a table rendered through the public component.
+  const viewportIsNarrow = useMediaQuery(theme.breakpoints.down('lg'));
+  const isTablet = variant ? variant === 'tablet' : viewportIsNarrow;
 
-  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm<Row> | null>(null);
+  const { run: runAction, dialog: confirmDialog } = useRowActionConfirm<Row>();
 
   const selectable = selection ? (selection.selectable ?? true) : false;
   const selectedIds = selection?.selectedIds ?? EMPTY_SELECTION;
 
+  // --- Row expansion (tablet only) ------------------------------------------
+
+  const detailColumns = useMemo(
+    () => columns.filter((column) => column.priority === 'detail'),
+    [columns],
+  );
+  // Nothing is hidden when there are no `detail` columns, so there is nothing
+  // to expand and no expander column is added.
+  const expandable = isTablet && detailColumns.length > 0;
+
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(EMPTY_SELECTION);
+
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   // --- Rows -----------------------------------------------------------------
 
   const rowIds = useMemo(() => rows.map((row) => rowId(row)), [rows, rowId]);
-  const gridRows = rows as unknown as readonly GridValidRowModel[];
-  const getRowId = useCallback((row: GridValidRowModel) => rowId(row as Row), [rowId]);
+
+  const gridRows = useMemo(() => {
+    if (!expandable || expandedIds.size === 0) {
+      return rows as unknown as readonly GridValidRowModel[];
+    }
+    const out: unknown[] = [];
+    rows.forEach((row, index) => {
+      out.push(row);
+      const id = rowIds[index];
+      if (expandedIds.has(id)) out.push(makeDetailRow(id, row));
+    });
+    return out as readonly GridValidRowModel[];
+  }, [rows, rowIds, expandable, expandedIds]);
+
+  const getRowId = useCallback(
+    (row: GridValidRowModel) =>
+      isDetailRow<Row>(row) ? detailRowId(row.__datatableDetailFor) : rowId(row as Row),
+    [rowId],
+  );
+
+  const getRowHeight = useCallback(
+    ({ model }: { model: GridValidRowModel }) =>
+      isDetailRow<Row>(model) ? detailRowHeight(detailColumns.length) : null,
+    [detailColumns.length],
+  );
+
+  // A synthetic row is a presentation artefact, never a selectable entity.
+  const isRowSelectable = useCallback(
+    ({ row }: { row: GridValidRowModel }) => !isDetailRow<Row>(row),
+    [],
+  );
+
+  const getRowClassName = useCallback(
+    ({ row }: { row: GridValidRowModel }) => (isDetailRow<Row>(row) ? DETAIL_ROW_CLASS : ''),
+    [],
+  );
 
   // --- Columns --------------------------------------------------------------
 
-  const runAction = useCallback((action: DataTableRowAction<Row>, row: Row) => {
-    if (action.confirm) {
-      setPendingConfirm({ action, row });
-      return;
-    }
-    action.onClick(row);
-  }, []);
-
   const gridColumns: GridColDef[] = useMemo(() => {
     const mapped = toGridColumns(columns);
-    if (!rowActions || rowActions.length === 0) return mapped;
+    const visibleDataColumnCount = isTablet
+      ? mapped.length - detailColumns.length
+      : mapped.length;
 
-    const actionsColumn: GridColDef = {
-      field: ACTIONS_FIELD,
-      headerName: 'Actions',
-      // Header text is visually redundant next to icon buttons but is what a
-      // screen reader announces when navigating cells, so it stays.
+    const withActions: GridColDef[] = [...mapped];
+    if (rowActions && rowActions.length > 0) {
+      withActions.push({
+        field: ACTIONS_FIELD,
+        headerName: 'Actions',
+        // Header text is visually redundant next to icon buttons but is what a
+        // screen reader announces when navigating cells, so it stays.
+        sortable: false,
+        filterable: false,
+        hideable: false,
+        disableColumnMenu: true,
+        align: 'right',
+        headerAlign: 'right',
+        width: rowActions.length === 1 ? 72 : 64,
+        renderCell: (params) =>
+          isDetailRow<Row>(params.row) ? null : (
+            <RowActionsCell row={params.row as Row} actions={rowActions} onRun={runAction} />
+          ),
+      });
+    }
+
+    if (!expandable) return withActions;
+
+    // Every column the expander's spanned cell must cover: itself, the visible
+    // data columns, and the actions column if present.
+    const spannedColumns = 1 + visibleDataColumnCount + (rowActions?.length ? 1 : 0);
+
+    const expanderColumn: GridColDef = {
+      field: EXPANDER_FIELD,
+      headerName: '',
       sortable: false,
       filterable: false,
       hideable: false,
+      resizable: false,
       disableColumnMenu: true,
-      align: 'right',
-      headerAlign: 'right',
-      width: rowActions.length === 1 ? 72 : 64,
-      renderCell: (params) => (
-        <RowActionsCell
-          row={params.row as Row}
-          actions={rowActions}
-          onRun={runAction}
-        />
-      ),
+      width: 48,
+      align: 'center',
+      headerAlign: 'center',
+      colSpan: (_value, row) => (isDetailRow<Row>(row) ? spannedColumns : 1),
+      renderCell: (params) => {
+        if (isDetailRow<Row>(params.row)) {
+          return (
+            <DetailRowPanel
+              row={params.row[DETAIL_ROW_SOURCE] as Row}
+              columns={detailColumns}
+            />
+          );
+        }
+        const id = String(params.id);
+        const open = expandedIds.has(id);
+        return (
+          <IconButton
+            size="small"
+            aria-label={open ? 'Hide details' : 'Show details'}
+            aria-expanded={open}
+            data-testid="datatable-row-expander"
+            // A tablet is a touch device, and this is the ONLY route to the
+            // hidden `detail` columns — so it gets a comfortable target
+            // wherever the row is tall enough to hold one. `compact` rows are
+            // 36px, so they keep the grid's own density instead.
+            sx={density === 'compact' ? undefined : { minWidth: 44, minHeight: 44 }}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleExpanded(id);
+            }}
+          >
+            {open ? (
+              <KeyboardArrowDownIcon fontSize="small" />
+            ) : (
+              <KeyboardArrowRightIcon fontSize="small" />
+            )}
+          </IconButton>
+        );
+      },
     };
-    return [...mapped, actionsColumn];
-  }, [columns, rowActions, runAction]);
+
+    return [expanderColumn, ...withActions];
+  }, [
+    columns,
+    detailColumns,
+    rowActions,
+    runAction,
+    expandable,
+    expandedIds,
+    toggleExpanded,
+    isTablet,
+    density,
+  ]);
 
   const columnVisibilityModel = useMemo(
-    () => buildColumnVisibilityModel(columns, { hideDetailColumns }),
-    [columns, hideDetailColumns],
+    () => buildColumnVisibilityModel(columns, { hideDetailColumns: isTablet }),
+    [columns, isTablet],
   );
 
   // --- Pagination (server) --------------------------------------------------
@@ -145,8 +268,8 @@ export function DesktopGridRenderer<Row>({
     () =>
       pagination
         ? { page: pagination.page, pageSize: pagination.pageSize }
-        : { page: 0, pageSize: Math.min(Math.max(rows.length, 1), MAX_UNPAGINATED_ROWS) },
-    [pagination, rows.length],
+        : { page: 0, pageSize: Math.min(Math.max(gridRows.length, 1), MAX_UNPAGINATED_ROWS) },
+    [pagination, gridRows.length],
   );
 
   const handlePaginationModelChange = useCallback(
@@ -216,8 +339,6 @@ export function DesktopGridRenderer<Row>({
     [emptyState],
   );
 
-  const confirm = pendingConfirm ? confirmCopy(pendingConfirm) : null;
-
   return (
     <Box sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}>
       {error && (
@@ -258,6 +379,9 @@ export function DesktopGridRenderer<Row>({
           disableColumnFilter
           disableColumnMenu
           disableRowSelectionOnClick
+          {...(expandable
+            ? { getRowHeight, isRowSelectable, getRowClassName }
+            : {})}
           // Pagination — server-side.
           paginationMode="server"
           rowCount={pagination?.total ?? rows.length}
@@ -281,35 +405,18 @@ export function DesktopGridRenderer<Row>({
             '& .MuiDataGrid-cell:focus, & .MuiDataGrid-cell:focus-within': {
               outlineOffset: -2,
             },
+            // The expanded panel owns its whole cell, with no cell padding.
+            [`& .MuiDataGrid-cell[data-field="${EXPANDER_FIELD}"]`]: { p: 0 },
+            // A detail row is not a row of data: drop the grid's own selection
+            // checkbox from it entirely (see DETAIL_ROW_CLASS for why this is
+            // `display: none` and not `opacity: 0`).
+            [`& .${DETAIL_ROW_CLASS} .MuiDataGrid-cell[data-field="${GRID_CHECKBOX_SELECTION_FIELD}"] .MuiCheckbox-root`]:
+              { display: 'none' },
           }}
         />
       </Box>
 
-      <Dialog
-        open={Boolean(pendingConfirm)}
-        onClose={() => setPendingConfirm(null)}
-        aria-labelledby="datatable-confirm-title"
-      >
-        <DialogTitle id="datatable-confirm-title">{confirm?.title}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>{confirm?.description}</DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPendingConfirm(null)}>{confirm?.cancelLabel}</Button>
-          <Button
-            variant="contained"
-            color={pendingConfirm?.action.destructive ? 'error' : 'primary'}
-            onClick={() => {
-              if (pendingConfirm) {
-                pendingConfirm.action.onClick(pendingConfirm.row);
-              }
-              setPendingConfirm(null);
-            }}
-          >
-            {confirm?.confirmLabel}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {confirmDialog}
     </Box>
   );
 }

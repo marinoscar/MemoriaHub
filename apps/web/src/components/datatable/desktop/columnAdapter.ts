@@ -46,10 +46,19 @@ export function extractColumnValue<Row>(
   return String(raw);
 }
 
-/** The scalar rendered as display text (`null` becomes an em dash). */
-function displayText(value: string | number | null): string {
+/**
+ * The scalar rendered as display text (`null`/empty becomes an em dash).
+ *
+ * Shared with the card renderer so an empty cell reads identically in both
+ * layouts — a blank card field and an em-dashed grid cell would look like two
+ * different states of the data.
+ */
+export function formatColumnValue(value: string | number | null): string {
   return value === null || value === '' ? '—' : String(value);
 }
+
+/** @deprecated internal alias kept for readability inside this module. */
+const displayText = formatColumnValue;
 
 /**
  * Map one {@link DataTableColumn} to a `GridColDef`.

@@ -1,6 +1,6 @@
 # DataTable — Shared Column Contract & Renderers
 
-**Status:** foundation shipped (issue #252 of epic #238)
+**Status:** foundation shipped (issue #252); mobile + tablet layouts shipped (issue #253) — both of epic #238
 **Location:** `apps/web/src/components/datatable/`
 **Spec owner:** frontend
 
@@ -15,11 +15,12 @@ checkboxes, a `MoreVert` menu, an empty/loading/error state) with slightly
 different behaviour, slightly different accessibility, and no mobile story at
 all beyond "scroll sideways and hope".
 
-The DataTable replaces that with **one contract and two renderers**. A page
-declares *what* its columns are and *how important* each one is; the renderers
-decide how that becomes pixels — a MUI X DataGrid on desktop, a card list on
-mobile (issue #253). A column declaration is written once and never edited when
-a new renderer, filter UI, or export path arrives.
+The DataTable replaces that with **one contract, two renderers, three
+layouts**. A page declares *what* its columns are and *how important* each one
+is; the renderers decide how that becomes pixels — a MUI X DataGrid on desktop,
+the same grid with row expansion on a tablet, a card list on a phone. A column
+declaration is written once and never edited when a new renderer, filter UI, or
+export path arrives.
 
 The contract lives in `types.ts` and is intentionally free of any DataGrid type.
 `desktop/columnAdapter.ts` is the only module in the codebase that knows
@@ -27,18 +28,19 @@ The contract lives in `types.ts` and is intentionally free of any DataGrid type.
 
 ### Scope of this document
 
-This spec documents the contract as of #252. Fields that exist in the contract
+This spec documents the contract as of #253. Fields that exist in the contract
 but are **not yet consumed** are marked *reserved* and name the issue that will
 consume them, so column authors can declare them today without churn later:
 
 | Field / concept              | Consumed by                            |
 | ---------------------------- | -------------------------------------- |
-| `priority` (card layout half)| #253 — mobile `CardListRenderer`       |
 | `filterable`                 | #254 — server-backed filter UI         |
 | `hideable`                   | #255 — column visibility / saved views |
 | `exportable`                 | #256 — CSV/export + virtualization     |
 
-Everything else on this page is live behaviour today.
+Everything else on this page is live behaviour today. `priority` is now fully
+consumed: it drives column visibility on the grid *and* the card's
+headline/body/detail split (§3).
 
 ---
 
@@ -48,18 +50,29 @@ Everything else on this page is live behaviour today.
 apps/web/src/components/datatable/
   index.ts                        # public entry point — import from here
   types.ts                        # THE contract (renderer-agnostic)
-  DataTable.tsx                   # renderer-switch shell + shared wrapper
-  BulkActionBar.tsx               # selection toolbar (shared by both renderers)
+  DataTable.tsx                   # layout-switch shell + shared wrapper
+  useContainerLayout.ts           # ResizeObserver width -> layout resolution
+  BulkActionBar.tsx               # selection toolbar (shared by all layouts)
+  shared/
+    rowActionConfirm.tsx          # one confirm dialog, shared by both renderers
   desktop/
-    DesktopGridRenderer.tsx       # MUI X DataGrid renderer
+    DesktopGridRenderer.tsx       # MUI X DataGrid renderer (desktop + tablet)
     columnAdapter.ts              # DataTableColumn -> GridColDef
     cells.tsx                     # TruncatedCell + empty/loading overlays
     RowActionsCell.tsx            # per-row icon button / overflow menu
-  __tests__/DataTable.test.tsx
+    detailRow.tsx                 # tablet row expansion (synthetic detail rows)
+  mobile/
+    CardListRenderer.tsx          # card list renderer
+    DataCard.tsx                  # one row, as a card
+    CardField.tsx                 # label/value pair + tap-to-expand value
+    CardSortControl.tsx           # sort picker (no headers to click on a card)
+    CompactPagination.tsx         # prev / range / next
+  __tests__/DataTable.test.tsx            # #252 foundation
+  __tests__/ResponsiveDataTable.test.tsx  # #253 layouts
 ```
 
-Consumers import from `components/datatable` only. `desktop/` (and, from #253,
-`mobile/`) are implementation detail.
+Consumers import from `components/datatable` only. `desktop/`, `mobile/` and
+`shared/` are implementation detail.
 
 ---
 
@@ -69,17 +82,30 @@ Consumers import from `components/datatable` only. `desktop/` (and, from #253,
 different layouts. It expresses **importance**, never geometry — a column author
 never writes "hide below 1200px" or "show on mobile".
 
-| `priority`  | Desktop (wide ≥ `lg`) | Desktop (narrow < `lg`) | Mobile card (#253)      |
-| ----------- | --------------------- | ----------------------- | ----------------------- |
-| `primary`   | visible               | visible                 | card **headline**       |
-| `secondary` | visible               | visible                 | card **body**           |
-| `detail`    | visible               | **hidden by default**   | card **expandable area**|
+| `priority`  | Desktop (≥ 1200px)  | Tablet (600–1199px)                  | Mobile card (< 600px)          |
+| ----------- | ------------------- | ------------------------------------ | ------------------------------ |
+| `primary`   | visible column      | visible column                       | card **headline**              |
+| `secondary` | visible column      | visible column                       | card **body** (label/value)    |
+| `detail`    | visible column      | **hidden**, reachable via row expand | card **"More details"**, closed |
 
-The desktop baseline is computed by `buildColumnVisibilityModel(columns, {
-hideDetailColumns })`, where `hideDetailColumns` is
-`useMediaQuery(theme.breakpoints.down('lg'))`. Issue #255 layers explicit user
-overrides and saved views *on top of* this baseline rather than replacing it, so
-a fresh table always opens in a sane state.
+Three consequences worth stating explicitly:
+
+- **A `detail` column is never lost, only folded.** On tablet it moves into an
+  expandable row; on a card it moves behind a collapsed region. Hiding a column
+  with no route back would be data loss dressed as responsive design.
+- **A column's `render` is used verbatim in every layout.** A job's `succeeded`
+  chip and a share's preview thumbnail look the same inside a card as inside a
+  grid cell. A card is a different *layout*, not a different *vocabulary*.
+- **Card order follows priority, then declaration order** — `primary` columns in
+  the header (the first one is the card's accessible name), then `secondary`,
+  then `detail`. Column order within a priority band is preserved.
+
+The grid's own visibility baseline is computed by
+`buildColumnVisibilityModel(columns, { hideDetailColumns })`, where
+`hideDetailColumns` is now the resolved layout being `tablet` (§7), not a
+viewport media query. Issue #255 layers explicit user overrides and saved views
+*on top of* this baseline rather than replacing it, so a fresh table always
+opens in a sane state.
 
 **Rule of thumb:** one or two `primary` columns (the thing you scan for), the
 rest `secondary`, and anything diagnostic (ids, error text, timestamps nobody
@@ -228,7 +254,11 @@ interface DataTableProps<Row> {
   density?: 'compact' | 'standard' | 'comfortable';
   ariaLabel?: string;
   height?: number | string;
-  renderer?: 'auto' | 'desktop' | 'mobile';
+
+  renderer?: 'auto' | 'desktop' | 'tablet' | 'mobile';
+  mobileBreakpoint?: number;   // container px, default 600
+  tabletBreakpoint?: number;   // container px, default 1200
+
   'data-testid'?: string;
 }
 ```
@@ -243,7 +273,8 @@ interface DataTableProps<Row> {
 | `density`    | Maps straight to DataGrid row density. |
 | `ariaLabel`  | Accessible name of the grid. Strongly recommended — a table with no name is an unnavigable blob to a screen reader. |
 | `height`     | Omit for **auto-height**: the table grows with its rows and the page scrolls vertically. Supply a value to get a fixed-height, internally scrolling table body. |
-| `renderer`   | `'auto'` (default) picks by viewport; `'desktop'`/`'mobile'` force one. Until #253, `'mobile'` resolves to the desktop grid. |
+| `renderer`   | `'auto'` (default) picks by **container** width; `'desktop'`/`'tablet'`/`'mobile'` force one layout at every width. |
+| `mobileBreakpoint` / `tabletBreakpoint` | Per-instance container-width thresholds, in px. See §7. |
 
 ### 5.1 Server-side pagination
 
@@ -283,6 +314,12 @@ header past `desc` emits `null`, meaning "back to the server's default order" �
 handle that case rather than treating `null` as "no change".
 
 `sort.field` is a column `id`, sent to the API verbatim.
+
+On the grid the control is the column header. A card has no header, so the card
+layout renders `CardSortControl` instead — a field picker over the `sortable`
+columns plus a direction toggle (§8.4). Both write the same
+`DataTableSortConfig`, so the active sort survives a layout switch in either
+direction.
 
 ### 5.3 Selection
 
@@ -372,8 +409,11 @@ region (so the count is announced as it changes), a **Clear** button, and one
 button per bulk action. The bar itself is `role="toolbar"` with
 `aria-label="Bulk actions"`.
 
-The bar is renderer-agnostic and is reused verbatim by the mobile card renderer
-in #253, so selection UX is identical at every width.
+The bar is renderer-agnostic and is reused **verbatim** by the mobile card
+renderer, so selection UX is identical at every width. The card layout's
+select-all checkbox carries the same accessible name as the grid's header
+checkbox (`"Select all rows"`) and the same page-scoped semantics, so a test —
+or a screen-reader user — meets the same control in both.
 
 ---
 
@@ -398,28 +438,217 @@ that flex child — the table cannot fix a parent that refuses to shrink.
 
 ---
 
-## 7. Renderer switch
+## 7. Layout switch — container width, not viewport width
+
+### 7.1 The three layouts
+
+| Layout    | Container width | Renderer module               | `data-renderer` | `data-layout` |
+| --------- | --------------- | ----------------------------- | --------------- | ------------- |
+| `mobile`  | `< 600px`       | `mobile/CardListRenderer`     | `mobile`        | `mobile`      |
+| `tablet`  | `600–1199px`    | `desktop/DesktopGridRenderer` (`variant="tablet"`) | `desktop` | `tablet` |
+| `desktop` | `≥ 1200px`      | `desktop/DesktopGridRenderer` (`variant="desktop"`) | `desktop` | `desktop` |
+
+Two attributes, not one, because they answer different questions.
+`data-renderer` is *which component module drew this* (two values — the seam
+#252 left behind); `data-layout` is *which of the three layouts it drew*. Tablet
+is a variant of the grid, not a third renderer.
+
+### 7.2 Why the container, not the viewport
+
+The switch measures the table's **own wrapper** with a `ResizeObserver`:
+
+> A DataTable inside the Workflow runs drawer is 400px wide on a 1440px
+> desktop. A viewport media query hands that drawer the full desktop grid and it
+> is unusable. Container measurement hands it cards, which is correct.
+
+This is issue #261's acceptance case, and it is why a bare `useMediaQuery` is
+not sufficient. CSS container queries can't help either: they change how an
+already-rendered tree is *styled*, and a card list versus a DataGrid are
+genuinely different trees, so the measurement has to reach JavaScript.
+
+**Before the first measurement** (SSR, first paint) the hook falls back to a
+viewport `useMediaQuery` using the same thresholds — `down('sm')` → mobile,
+`down('lg')` → tablet. On an ordinary page the container and the viewport agree,
+so the fallback is right; in a drawer it is wrong for exactly one frame, which
+beats being wrong forever or flashing an empty table.
+
+A measured width of **`0` is treated as "not measured yet"**, not as "0px wide".
+That is what a `display: none` ancestor, a not-yet-laid-out node, and jsdom's
+layout-free DOM all report, and none of them means the table is a phone.
+
+### 7.3 Why 600 and 1200
+
+- **600px (`sm`)** — below this a grid cannot show a headline plus one
+  supporting column without horizontal scrolling or unreadable truncation.
+- **1200px (`lg`)** — this is *already* the threshold at which `detail` columns
+  folded away (#252's `hideDetailColumns`). Reusing it makes the tablet band
+  exactly "the widths at which the grid is hiding something", which is exactly
+  the band that needs a row expander to make it reachable again.
+
+Both are per-instance overridable, because a host sometimes knows something the
+table cannot measure — a chrome-heavy panel, or a table whose cells are
+unusually wide:
 
 ```tsx
-export function useDataTableRenderer(mode = 'auto'): 'desktop' | 'mobile' {
-  const isNarrow = useMediaQuery(theme.breakpoints.down('md'));
-  if (mode !== 'auto') return mode;
-  return isNarrow ? 'mobile' : 'desktop';
-}
+<DataTable {...props} mobileBreakpoint={720} tabletBreakpoint={1440} />
 ```
 
-The `md` breakpoint (900px) is where a table stops being able to show more than
-about two columns without horizontal scrolling — exactly where cards beat rows.
+### 7.4 State lives above the renderers
 
-The resolved mode is exposed as `data-renderer` on the wrapper element, which is
-both a test hook and a debugging aid. Until #253 lands, `'mobile'` resolves to
-`DesktopGridRenderer` through a single named constant (`MOBILE_RENDERER`) — that
-constant is the whole seam, and #253's change to this file is one import and one
-assignment.
+Selection, pagination, sort (and, from #254, filters) are **controlled props
+owned by the calling page**. No renderer stores any of them. Rotating a device,
+dragging a drawer wider, or resizing a window therefore swaps the layout without
+losing a single selected id, the current page, or the active sort — the switch
+is a pure presentation change.
+
+The only state a renderer owns is which rows/cards are currently expanded, which
+is meaningless in the layout being switched to and is deliberately not carried
+across.
 
 ---
 
-## 8. Worked example
+## 8. Mobile layout — the card list
+
+One card per row, built entirely from `priority` (§3). Nothing about a table's
+declaration changes to get it.
+
+### 8.1 Card anatomy
+
+```
+┌─────────────────────────────────────────────┐
+│ [✓]  auto_tagging            FAILED     [⋮] │  header: selection,
+│                                             │          primary columns,
+├─────────────────────────────────────────────┤          row-actions menu
+│ Attempts                                    │
+│ 3                                           │  body: secondary columns
+├─────────────────────────────────────────────┤        as stacked pairs
+│ ⌄ More details                              │  detail: CLOSED by default
+└─────────────────────────────────────────────┘
+```
+
+Label/value pairs are **stacked**, not side by side: at 320px a two-column field
+layout leaves the value ~150px, which recreates on a card the exact truncation
+problem cards exist to solve.
+
+The visual language follows the burst/duplicate/location review queues (outlined
+`Card`, `body2` / `text.secondary` body text, leading checkbox), which are the
+surfaces in this app that already work well on a phone. Both themes are styled;
+selection tint and the detail region's background are derived from
+`theme.palette.mode`.
+
+### 8.2 Row actions
+
+Row actions collapse into an overflow menu in the **card header — always, even
+for a single action** (`RowActionsCell` gains an `alwaysMenu` prop). A header has
+room for exactly one trailing control, and an affordance that changes shape
+depending on how many actions a page happened to declare is worse than one that
+is always the same button.
+
+The menu button is named after the row: `"Row actions for auto_tagging"`, using
+the first `primary` column's scalar.
+
+Confirmation is not reimplemented — both renderers call the shared
+`useRowActionConfirm()` (`shared/rowActionConfirm.tsx`), so the copy, the
+destructive palette, and the one-dialog-per-table rule are identical in both.
+
+### 8.3 Truncation is tap-to-expand
+
+The grid reveals a `truncate` value in a hover tooltip. **A touch device has no
+hover**, so on a card the value itself becomes the control: a `ButtonBase`
+clamped to two lines that expands in place, with `aria-expanded` and real
+Enter/Space activation. The full text is always in the DOM — the clamp is purely
+visual, so a value can be folded but never lost.
+
+### 8.4 Pagination and sort
+
+`TablePagination` is the wrong control on a phone: rows-per-page select +
+"1–25 of 137" + two arrows comes to roughly 420px of intrinsic width, so on a
+360px screen it overflows or forces the table into a horizontal scroller — the
+exact failure cards exist to remove. `CompactPagination` replaces it with
+prev / range / next. Page size is not adjustable from a card list (nobody sets
+100-per-page on a phone); it stays a controlled prop the page can still change.
+
+A card has no column header to click, so sort would otherwise be *held*
+correctly across a layout switch but *unreachable* while the card layout is
+active. `CardSortControl` fixes that: a field picker listing only
+`sortable: true` columns, plus a direction toggle. "Default" emits
+`onSortChange(null)`, the contract's "back to the server's own order".
+
+### 8.5 Touch and keyboard rules (hard requirements)
+
+1. **Every interactive element is ≥44px** in both axes (WCAG 2.5.8).
+2. **Nothing is hidden with `opacity: 0` while remaining clickable.** This is the
+   exact bug filed as issue #243 — a hover-revealed control on `MediaGallery`
+   tiles was invisible yet fully tappable on touch, silently starring photos. A
+   hover-only affordance must be gated on `@media (hover: hover)` or carry
+   `pointer-events: none`. The card layout has **no** hover-revealed
+   affordances at all.
+   *(MUI's Checkbox puts a transparent native `<input>` exactly on top of a
+   painted SVG. That is the opposite pattern — the hit target coincides with a
+   visible affordance — and is fine.)*
+3. Every collapsible region is a real `button` with `aria-expanded` and
+   `aria-controls`, so Enter/Space work without a keydown handler.
+4. The card list is a `ul role="list"` labelled with `ariaLabel`; each card is
+   an `li`.
+
+---
+
+## 9. Tablet layout — the real grid, with row expansion
+
+The intermediate case, and the one most likely to be skipped. Between 600px and
+1200px the grid is still the right control — rows are scannable at 800px in a
+way cards are not — but it cannot show every column. So `detail` columns are
+hidden **and a leading expander column is added** that reveals them as
+label/value pairs in an expanded row.
+
+The switch is deliberately *not* "phone layout or desktop layout at the `sm`
+boundary". At 600px you get the grid; at 599px you get cards; at neither width do
+you get a grid that has silently dropped a column.
+
+### 9.1 Implementation: synthetic detail rows
+
+MUI X's `getDetailPanelContent` is declared on the community `DataGrid`'s prop
+types but is **not implemented** in the MIT package — grep the built package and
+its only occurrence is in `propTypes`. It is a Pro feature.
+
+So expansion is built from two primitives the MIT grid *does* implement
+(`desktop/detailRow.tsx`):
+
+1. A **synthetic row** is spliced in directly after its parent when that parent
+   is expanded, carrying the parent row under namespaced keys
+   (`__datatableDetailFor` / `__datatableDetailSource`) that no caller `Row`
+   type can collide with. Its grid id is `__datatable_detail__<parentId>`.
+2. The expander column declares **`colSpan`** covering every visible column for
+   that synthetic row, so one cell renders the whole panel.
+
+Three details make this safe:
+
+- **`paginationMode="server"` never slices `rows`** (`gridPaginationRowRangeSelector`
+  short-circuits unless client-side pagination is on), so injecting a row cannot
+  push a real row onto a phantom next page.
+- **`isRowSelectable`** rejects detail rows, and the grid's `__check__` cell —
+  which `colSpan` cannot absorb, since spanning only ever runs *forward* — has
+  its checkbox removed with `display: none`, not `opacity: 0`, so it leaves the
+  accessibility tree instead of becoming an invisible hit target (§8.5 rule 2).
+- **Row height is arithmetic** (`detailRowHeight(fieldCount)`), not
+  `getRowHeight: () => 'auto'`. Auto height depends on a measurement pass, and a
+  panel that measures 0px in a layout-free environment would clip its own
+  content; the panel scrolls internally if a value exceeds the estimate.
+
+No expander column is added when a table declares no `detail` columns — nothing
+is hidden, so there is nothing to reach.
+
+### 9.2 Touch target
+
+A tablet is a touch device, and the expander is the *only* route to the hidden
+columns, so it gets the same ≥44px target the card layout uses — except at
+`density="compact"`, where the row itself is only 36px tall and the button keeps
+the grid's own density. Every other control in the grid follows the grid's
+density contract, unchanged from #252.
+
+---
+
+## 10. Worked example
 
 A jobs table with all four states, server pagination and sorting, selection with
 a bulk retry, and per-row actions including a confirming destructive one:
@@ -562,7 +791,7 @@ export function JobsTable() {
 
 ---
 
-## 9. Testing notes
+## 11. Testing notes
 
 `apps/web/src/components/datatable/__tests__/DataTable.test.tsx` covers the
 rendered shell, the four states, pagination/sort/selection round-trips, row and
@@ -579,9 +808,34 @@ needs the same stubs — the project-wide `ResizeObserver` mock in
 Containment is asserted through computed styles (`overflow-x`, `max-width`,
 `min-width`) rather than measured geometry, since jsdom reports no real layout.
 
+*(Note that because the layout switch is now container-driven, that file's
+800px stub container puts it in the **tablet** layout. It passes unchanged,
+which is the point: tablet is a drop-in variant of the same grid.)*
+
+### 11.1 Testing the responsive layouts
+
+`__tests__/ResponsiveDataTable.test.tsx` covers #253 and needs two things the
+#252 recipe does not:
+
+1. **A re-fireable `ResizeObserver`.** `installLayoutStubs()` there drives every
+   width getter from a module-level `containerWidth`, and keeps a registry of
+   live observers so `setContainerWidth(px)` can re-invoke their callbacks
+   inside `act()`. That is what makes a *resize* — and therefore
+   state-preservation across a layout switch — observable in a test.
+2. **A `window.matchMedia` implemented against a FIXED 1440px viewport.** Every
+   viewport media query in the tree then answers "desktop", so a `mobile`
+   result can only have come from the container measurement. This is what makes
+   the drawer assertion (#261) meaningful rather than accidental.
+
+The suite also carries a **regression guard for the issue #243 class of bug**:
+it sweeps every painted control (`button`, `[role="button"]`, `.MuiCheckbox-root`,
+`a[href]`) and fails, naming the offender, if any is `opacity: 0` while its
+`pointer-events` is not `none`. Bare `<input>` and MUI X's own hover-revealed
+column-header chrome are excluded, for the reasons given in §8.5.
+
 ---
 
-## 10. Migration path
+## 12. Migration path
 
 The foundation is additive — no existing table changed in #252. Tables migrate
 one at a time, roughly in ascending order of weirdness:
