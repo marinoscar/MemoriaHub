@@ -195,8 +195,11 @@ export default function AlbumPage() {
 
   const isEmpty = albumItems.length === 0;
 
+  // No minHeight/pb on this Box — the Layout shell owns viewport height and
+  // the BottomNav clearance (issue #237); duplicating either stacks dead
+  // scroll space below the last row.
   return (
-    <Box sx={{ minHeight: '100vh', pb: { xs: 10, sm: 4 } }}>
+    <Box>
       {/* Album chrome */}
       <Box sx={{ px: { xs: 2, md: 3 }, pt: { xs: 2, md: 3 }, pb: 1 }}>
         <Button

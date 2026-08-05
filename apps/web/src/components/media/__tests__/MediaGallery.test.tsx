@@ -15,7 +15,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../__tests__/utils/test-utils';
-import { MediaGallery } from '../MediaGallery';
+import {
+  MediaGallery,
+  GALLERY_COLS,
+  GALLERY_GAP_PX,
+  GALLERY_FALLBACK_ROW_PX,
+  galleryPlaceholderHeight,
+} from '../MediaGallery';
 import type { MediaItem } from '../../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -595,6 +601,65 @@ describe('MediaGallery', () => {
       await waitFor(() => {
         expect(screen.getByTestId('media-lightbox')).toBeInTheDocument();
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (f) content-visibility placeholder height (issue #237)
+  //
+  // The reserved height for an off-screen day group must be computed with the
+  // ACTIVE breakpoint's column count. It used to hard-code the desktop `/ 6`,
+  // so a phone (3 columns) reserved half the rows it actually rendered and the
+  // document grew by roughly a group's height as each one scrolled in.
+  // -------------------------------------------------------------------------
+  describe('placeholder height (issue #237)', () => {
+    it('assumes 4 rows for a 12-item group at xs (3 columns), not 2', () => {
+      expect(GALLERY_COLS.xs).toBe(3);
+      // 12 items / 3 columns = 4 rows — NOT the 2 rows the old `/ 6` produced.
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.xs, null)).toBe(
+        4 * GALLERY_FALLBACK_ROW_PX,
+      );
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.xs, null)).not.toBe(
+        2 * GALLERY_FALLBACK_ROW_PX,
+      );
+    });
+
+    it('scales rows with the column count at each breakpoint', () => {
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.sm, null)).toBe(
+        3 * GALLERY_FALLBACK_ROW_PX,
+      );
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.md, null)).toBe(
+        2 * GALLERY_FALLBACK_ROW_PX,
+      );
+    });
+
+    it('uses the measured tile size once a container width is known', () => {
+      // 360px phone viewport, 3 columns, 2px gaps → tile edge ~118.67px
+      const tile = (360 - (GALLERY_COLS.xs - 1) * GALLERY_GAP_PX) / GALLERY_COLS.xs;
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.xs, tile)).toBe(
+        Math.round(4 * (tile + GALLERY_GAP_PX)),
+      );
+    });
+
+    it('renders the xs placeholder height into the grid style for a 12-item group', () => {
+      // jsdom's matchMedia mock always reports `matches: false`, so both
+      // breakpoint.up() queries are false → the xs (3-column) branch is active.
+      // ResizeObserver is mocked and never fires → the fallback row height.
+      const items = Array.from({ length: 12 }, (_, i) =>
+        makeItem(`ph-${i}`, { capturedAt: '2024-06-15T10:00:00.000Z' }),
+      );
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const css = Array.from(document.querySelectorAll('style'))
+        .map((s) => s.textContent ?? '')
+        .join('');
+
+      expect(css).toMatch(
+        new RegExp(`contain-intrinsic-size:\\s*auto\\s+${4 * GALLERY_FALLBACK_ROW_PX}px`),
+      );
     });
   });
 

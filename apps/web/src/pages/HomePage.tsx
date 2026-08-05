@@ -46,8 +46,11 @@ export default function HomePage() {
     </Box>
   );
 
+  // No minHeight/pb on this Box — the Layout shell owns viewport height and
+  // the BottomNav clearance (issue #237); duplicating either stacks dead
+  // scroll space below the last row.
   return (
-    <Box sx={{ minHeight: '100vh', pb: { xs: 10, sm: 4 } }}>
+    <Box>
       {/* No active circle */}
       {showNoCircle && (
         <Box sx={{ p: { xs: 2, md: 3 } }}>
