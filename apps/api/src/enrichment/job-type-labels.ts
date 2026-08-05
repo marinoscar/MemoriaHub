@@ -40,6 +40,7 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   trash_empty_evaluate: 'Empty trash evaluate',
   trash_empty_execute_batch: 'Empty trash execute batch',
   job_history_purge: 'Job history purge',
+  notification_purge: 'Notification purge',
   // Review-queue runs — bursts / duplicates / location suggestions (issue #190)
   review_run_evaluate: 'Review run evaluate',
   review_run_execute_batch: 'Review run execute batch',

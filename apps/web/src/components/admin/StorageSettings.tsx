@@ -21,6 +21,10 @@ const DEFAULT_STUCK_THRESHOLD_MINUTES = 3;
 const MIN_STUCK_THRESHOLD_MINUTES = 1;
 const MAX_STUCK_THRESHOLD_MINUTES = 120;
 
+const DEFAULT_NOTIFICATION_RETENTION_DAYS = 30;
+const MIN_NOTIFICATION_RETENTION_DAYS = 1;
+const MAX_NOTIFICATION_RETENTION_DAYS = 365;
+
 interface StorageInsightsConfig {
   refreshIntervalHours?: number;
 }
@@ -44,17 +48,34 @@ interface JobsConfig {
   stuckThresholdMinutes?: number;
 }
 
+interface NotificationsConfig {
+  retentionDays?: number;
+  purgeEnabled?: boolean;
+}
+
 interface StorageSettingsProps {
   settings: StorageConfig | undefined;
   jobsSettings?: JobsConfig;
+  notificationsSettings?: NotificationsConfig;
   onSave: (storage: StorageConfig) => Promise<void>;
   onSaveJobs?: (jobs: JobsConfig) => Promise<void>;
+  /** Notification Center retention (issue #248) — section renders only when set. */
+  onSaveNotifications?: (notifications: NotificationsConfig) => Promise<void>;
   /** Clears the lifetime job-stats rollup (all-time analytics). */
   onResetHistory?: () => Promise<void>;
   disabled?: boolean;
 }
 
-export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, onResetHistory, disabled }: StorageSettingsProps) {
+export function StorageSettings({
+  settings,
+  jobsSettings,
+  notificationsSettings,
+  onSave,
+  onSaveJobs,
+  onSaveNotifications,
+  onResetHistory,
+  disabled,
+}: StorageSettingsProps) {
   const initialHours = settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS;
 
   const [refreshHours, setRefreshHours] = useState<number>(initialHours);
@@ -78,6 +99,16 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
 
+  // Notification retention state (issue #248)
+  const [notificationRetentionDays, setNotificationRetentionDays] = useState<number>(
+    notificationsSettings?.retentionDays ?? DEFAULT_NOTIFICATION_RETENTION_DAYS,
+  );
+  const [notificationRetentionError, setNotificationRetentionError] = useState<string | null>(null);
+  const [notificationPurgeEnabled, setNotificationPurgeEnabled] = useState<boolean>(
+    notificationsSettings?.purgeEnabled ?? true,
+  );
+  const [isSavingNotifications, setIsSavingNotifications] = useState(false);
+
   useEffect(() => {
     setRefreshHours(settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS);
   }, [settings]);
@@ -87,6 +118,13 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
     setJobPurgeEnabled(jobsSettings?.history?.purgeEnabled ?? true);
     setStuckThresholdMinutes(jobsSettings?.stuckThresholdMinutes ?? DEFAULT_STUCK_THRESHOLD_MINUTES);
   }, [jobsSettings]);
+
+  useEffect(() => {
+    setNotificationRetentionDays(
+      notificationsSettings?.retentionDays ?? DEFAULT_NOTIFICATION_RETENTION_DAYS,
+    );
+    setNotificationPurgeEnabled(notificationsSettings?.purgeEnabled ?? true);
+  }, [notificationsSettings]);
 
   const hasChanges =
     refreshHours !== (settings?.insights?.refreshIntervalHours ?? DEFAULT_REFRESH_HOURS);
@@ -99,6 +137,11 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
   const hasStuckThresholdChanges =
     stuckThresholdMinutes !== (jobsSettings?.stuckThresholdMinutes ?? DEFAULT_STUCK_THRESHOLD_MINUTES);
   const hasJobChanges = hasJobRetentionChanges || hasJobPurgeChanges || hasStuckThresholdChanges;
+
+  const hasNotificationChanges =
+    notificationRetentionDays !==
+      (notificationsSettings?.retentionDays ?? DEFAULT_NOTIFICATION_RETENTION_DAYS) ||
+    notificationPurgeEnabled !== (notificationsSettings?.purgeEnabled ?? true);
 
   const handleRefreshChange = (raw: string) => {
     const val = parseInt(raw, 10);
@@ -155,6 +198,35 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
       });
     } finally {
       setIsSavingJobs(false);
+    }
+  };
+
+  const handleNotificationRetentionChange = (raw: string) => {
+    const val = parseInt(raw, 10);
+    setNotificationRetentionDays(isNaN(val) ? 0 : val);
+    if (
+      isNaN(val) ||
+      val < MIN_NOTIFICATION_RETENTION_DAYS ||
+      val > MAX_NOTIFICATION_RETENTION_DAYS
+    ) {
+      setNotificationRetentionError(
+        `Must be between ${MIN_NOTIFICATION_RETENTION_DAYS} and ${MAX_NOTIFICATION_RETENTION_DAYS}`,
+      );
+    } else {
+      setNotificationRetentionError(null);
+    }
+  };
+
+  const handleSaveNotifications = async () => {
+    if (notificationRetentionError || !hasNotificationChanges || !onSaveNotifications) return;
+    setIsSavingNotifications(true);
+    try {
+      await onSaveNotifications({
+        retentionDays: notificationRetentionDays,
+        purgeEnabled: notificationPurgeEnabled,
+      });
+    } finally {
+      setIsSavingNotifications(false);
     }
   };
 
@@ -298,6 +370,74 @@ export function StorageSettings({ settings, jobsSettings, onSave, onSaveJobs, on
             Reset clears all-time analytics totals (counts and average durations). Live job records
             are not affected.
           </Typography>
+        </>
+      )}
+
+      {/* Notifications section (issue #248) — only rendered when the callback is provided */}
+      {onSaveNotifications && (
+        <>
+          <Divider sx={{ my: 4 }} />
+
+          <Typography variant="h6" gutterBottom>
+            Notifications
+          </Typography>
+
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+            Retention
+          </Typography>
+
+          <TextField
+            label="Notification retention (days)"
+            type="number"
+            value={notificationRetentionDays}
+            onChange={(e) => handleNotificationRetentionChange(e.target.value)}
+            disabled={disabled}
+            error={!!notificationRetentionError}
+            helperText={
+              notificationRetentionError ??
+              `How long read or dismissed notifications are kept before automatic deletion. Default: ${DEFAULT_NOTIFICATION_RETENTION_DAYS} days.`
+            }
+            slotProps={{
+              htmlInput: {
+                min: MIN_NOTIFICATION_RETENTION_DAYS,
+                max: MAX_NOTIFICATION_RETENTION_DAYS,
+                step: 1,
+              },
+            }}
+            sx={{ width: 320 }}
+          />
+
+          <Box sx={{ mt: 2 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={notificationPurgeEnabled}
+                  onChange={(e) => setNotificationPurgeEnabled(e.target.checked)}
+                  disabled={disabled}
+                />
+              }
+              label="Auto-purge old notifications"
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              When enabled, notifications you have read or dismissed are deleted once they pass the
+              retention period. Unread notifications are never deleted by age.
+            </Typography>
+          </Box>
+
+          <Box sx={{ mt: 3 }}>
+            <Button
+              variant="contained"
+              onClick={() => void handleSaveNotifications()}
+              disabled={
+                disabled ||
+                !hasNotificationChanges ||
+                isSavingNotifications ||
+                !!notificationRetentionError
+              }
+            >
+              {isSavingNotifications ? 'Saving...' : 'Save Notification Settings'}
+            </Button>
+          </Box>
         </>
       )}
     </Box>

@@ -275,6 +275,15 @@ export const systemSettingsSchema = z.object({
   reviewRuns: z.object({
     runHistoryRetentionDays: z.number().int().min(1).max(365).default(30),
   }).optional().default({ runHistoryRetentionDays: 30 }),
+  // Notification Center retention (epic #240, issue #248). Drives the nightly
+  // `notification_purge` job. NOTE the deliberate asymmetry with
+  // jobs.history above: retentionDays ages out only rows the user has already
+  // RESOLVED (dismissed_at / read_at). An UNREAD notification is never deleted
+  // by age — see NotificationPurgeHandler.
+  notifications: z.object({
+    retentionDays: z.number().int().min(1).max(365).default(30),
+    purgeEnabled: z.boolean().default(true),
+  }).optional().default({ retentionDays: 30, purgeEnabled: true }),
   pictureEnhancement: z.object({
     defaultQuality: z.enum(['low', 'medium', 'high']).default('high'),
     defaultStrength: z.enum(['subtle', 'balanced', 'strong']).default('balanced'),
@@ -434,6 +443,10 @@ export const systemSettingsPatchSchema = z.object({
   }).optional(),
   reviewRuns: z.object({
     runHistoryRetentionDays: z.number().int().min(1).max(365).optional(),
+  }).optional(),
+  notifications: z.object({
+    retentionDays: z.number().int().min(1).max(365).optional(),
+    purgeEnabled: z.boolean().optional(),
   }).optional(),
   pictureEnhancement: z.object({
     defaultQuality: z.enum(['low', 'medium', 'high']).optional(),
