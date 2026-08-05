@@ -24,6 +24,7 @@
  */
 
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   AppBar,
   Badge,
@@ -79,6 +80,15 @@ export interface DataTableViewBarProps<Row> {
   onToggleColumn: (columnId: string, visible: boolean) => void;
   onDensityChange: (density: DataTableDensity) => void;
   onReset: () => void;
+  /**
+   * Trailing slot, currently the CSV export control (#256).
+   *
+   * A node rather than a config object: the bar owns *placement* (this is the
+   * table's chrome row, and export belongs beside the column picker), while what
+   * export means — which rows, which columns, which fetch — belongs to
+   * `DataTableExportControl` and is none of this component's business.
+   */
+  trailing?: ReactNode;
 }
 
 export function DataTableViewBar<Row>({
@@ -89,6 +99,7 @@ export function DataTableViewBar<Row>({
   onToggleColumn,
   onDensityChange,
   onReset,
+  trailing,
 }: DataTableViewBarProps<Row>) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -277,6 +288,10 @@ export function DataTableViewBar<Row>({
           </Menu>
         </>
       )}
+
+      {/* Trailing slot: the export control, last in the chrome row on every
+          layout (a phone gets the overflow button next to "View"). */}
+      {trailing}
 
       {/* Phone: a real sheet, mirroring the filter sheet. */}
       {layout === 'mobile' && (
