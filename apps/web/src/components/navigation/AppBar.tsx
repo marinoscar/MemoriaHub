@@ -22,6 +22,7 @@ import { useThemeContext } from '../../contexts/ThemeContext';
 import { useCircle } from '../../hooks/useCircle';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { UserMenu } from './UserMenu';
+import { NotificationBell } from '../notifications/NotificationBell';
 import { TopbarSearch } from '../search/TopbarSearch';
 import { MediaUploadDialog } from '../media/MediaUploadDialog';
 import { APP_NAME } from '../../constants/app';
@@ -62,7 +63,17 @@ export function AppBar({ onMenuClick }: AppBarProps) {
           zIndex: theme.zIndex.appBar,
         }}
       >
-        <Toolbar sx={{ gap: 1, position: 'relative' }}>
+        {/* `gap` tightens on phone. At 360px the trailing cluster is now
+            hamburger + logo + collapsed search + upload + BELL + theme +
+            avatar; with the desktop 8px gap the row measures ~354px against
+            360px of viewport — 6px of slack, which a slightly larger system
+            font or a 2-digit badge would blow through. Dropping to 4px below
+            `sm` buys back 24px (six inter-item gaps) so the row measures
+            ~330px and the flex-growing search wrapper absorbs the remainder
+            instead of the toolbar overflowing. See
+            docs/audits/mobile-topbar-audit.md for the previous regression of
+            this class. */}
+        <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, position: 'relative' }}>
           {/* Hamburger */}
           <IconButton
             color="inherit"
@@ -126,6 +137,9 @@ export function AppBar({ onMenuClick }: AppBarProps) {
               </IconButton>
             )
           )}
+
+          {/* Notifications (between upload and the theme toggle) */}
+          <NotificationBell />
 
           {/* Theme Toggle */}
           <IconButton
