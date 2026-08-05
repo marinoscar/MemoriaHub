@@ -127,6 +127,13 @@ export function DataCard<Row>({
       ref={setCardRef}
       variant="outlined"
       component="li"
+      // The card list is `role="list"` (`CardListRenderer.tsx`); each card is
+      // one list item. Naming the item after the row's own headline is what
+      // lets a screen reader user navigate the list by item name rather than
+      // by reading every field of every card to tell them apart — the same
+      // reason `RowActionsCell` disambiguates its menu ("Row actions for
+      // {headline}") instead of announcing a bare "Row actions" on every card.
+      aria-label={headlineText}
       data-testid="datatable-card"
       data-row-id={id}
       data-density={density ?? 'standard'}
@@ -174,7 +181,10 @@ export function DataCard<Row>({
           <Checkbox
             checked={selected}
             onChange={() => onToggleSelect(id)}
-            slotProps={{ input: { 'aria-label': 'Select row' } }}
+            // Named after the row it selects, never a bare "Select row" — with
+            // several cards on screen at once a generic label is indistinguishable
+            // between them to a screen reader (issue #257).
+            slotProps={{ input: { 'aria-label': `Select ${headlineText}` } }}
             sx={{ minWidth: 44, minHeight: 44, mt: -0.5, ml: -0.5 }}
           />
         )}
