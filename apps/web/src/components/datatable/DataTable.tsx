@@ -20,17 +20,27 @@
  *
  * ## State lives above the renderers
  *
- * Selection, pagination and sort are all controlled props owned by the calling
- * page. Nothing a user chose is stored inside a renderer, so rotating a device,
- * dragging a drawer wider, or resizing a window swaps the layout without
- * losing a single selected id, the current page, or the active sort. The only
- * state a renderer owns is which rows/cards happen to be expanded right now —
- * pure presentation, and meaningless in the layout being switched to.
+ * Selection, pagination, sort and filters are all controlled props owned by the
+ * calling page. Nothing a user chose is stored inside a renderer, so rotating a
+ * device, dragging a drawer wider, or resizing a window swaps the layout without
+ * losing a single selected id, the current page, the active sort, or an applied
+ * filter. The only state a renderer owns is which rows/cards happen to be
+ * expanded right now — pure presentation, and meaningless in the layout being
+ * switched to.
+ *
+ * ## The filter surface belongs here, not to a renderer
+ *
+ * `DataTableFilterBar` is drawn by this component, above whichever renderer is
+ * active, because filtering is the one control whose SHAPE is decided by the
+ * layout (a row / a collapsed panel / a full-screen sheet) rather than by how
+ * rows are presented — and because a renderer owning the panel's open state
+ * would discard it on every resize.
  */
 
 import { useRef } from 'react';
 import { Box } from '@mui/material';
 import type {
+  DataTableFilterModel,
   DataTableLayout,
   DataTableProps,
   DataTableRendererKind,
@@ -38,7 +48,11 @@ import type {
 } from './types';
 import { DesktopGridRenderer } from './desktop/DesktopGridRenderer';
 import { CardListRenderer } from './mobile/CardListRenderer';
+import { DataTableFilterBar } from './filter/DataTableFilterBar';
 import { useDataTableLayout, useViewportLayout } from './useContainerLayout';
+
+/** Stable identity so an unfiltered table never re-renders the bar needlessly. */
+const NO_FILTERS: DataTableFilterModel = [];
 
 /**
  * The card-list registration. This is the seam #252 left behind; it now points
@@ -71,6 +85,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     renderer = 'auto',
     mobileBreakpoint,
     tabletBreakpoint,
+    filters,
+    onFiltersChange,
+    quickSearch,
     'data-testid': testId,
     ...rendererProps
   } = props;
@@ -95,6 +112,14 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       // make the document body scroll sideways, at any viewport width.
       sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}
     >
+      <DataTableFilterBar
+        columns={props.columns}
+        layout={layout}
+        filters={filters ?? NO_FILTERS}
+        onFiltersChange={onFiltersChange}
+        quickSearch={quickSearch}
+      />
+
       {mode === 'mobile' ? (
         <MOBILE_RENDERER {...rendererProps} />
       ) : (
