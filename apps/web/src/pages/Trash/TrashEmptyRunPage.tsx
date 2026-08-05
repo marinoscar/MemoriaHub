@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -9,16 +9,11 @@ import {
   Card,
   CardContent,
   Snackbar,
-  Pagination,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Link,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Visibility as VisibilityIcon,
+} from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useTrashEmptyRun } from '../../hooks/useTrashEmptyRun';
@@ -28,16 +23,26 @@ import { cancelTrashEmptyRun } from '../../services/trashEmptyRuns';
 import RunProgressPanel from '../../components/runs/RunProgressPanel';
 import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
 import {
-  formatCaptureDate,
+  RUN_ITEMS_EMPTY_STATE,
+  RUN_ITEMS_PAGE_SIZE,
+  buildRunItemColumns,
+} from '../../components/runs/runItemsTable';
+import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import {
   formatCount,
   formatRelativeTime,
   isTerminalRunStatus,
   runStatusColor,
   runStatusLabel,
 } from '../../utils/runFormat';
-import type { TrashEmptyRunDetail } from '../../types/trashEmptyRuns';
+import type { TrashEmptyRunDetail, TrashEmptyRunItem } from '../../types/trashEmptyRuns';
 
-const ITEMS_PAGE_SIZE = 24;
+/**
+ * Persistence key for the failed-items table's column/density choices
+ * (`user_settings.dataTables['trash-empty-run-items']`,
+ * docs/specs/datatable.md §15).
+ */
+export const TRASH_EMPTY_RUN_ITEMS_TABLE_ID = 'trash-empty-run-items';
 
 // ---------------------------------------------------------------------------
 // Empty-trash run page.
@@ -46,6 +51,13 @@ const ITEMS_PAGE_SIZE = 24;
 // shared run pieces (issue #190) — `useRunPolling` + `RunProgressPanel` —
 // so this page only owns the empty-trash wording, its circle_admin cancel
 // gate, and the failed-item table.
+//
+// Issue #261 (epic #238) replaced that last hand-rolled `<TableContainer>` +
+// `<Pagination>` block with the shared DataTable
+// (`components/runs/runItemsTable.tsx`). Two rules matter on a page that polls:
+// the table is rendered UNCONDITIONALLY with `loading` as a prop, and the
+// effect/memos around it key on SCALARS rather than on the `run` object the
+// poll replaces each tick. See docs/specs/datatable.md §13.2 / §18.4.
 // ---------------------------------------------------------------------------
 
 /** Severity + message for a terminal run status. */
@@ -92,7 +104,9 @@ export default function TrashEmptyRunPage() {
     fetchItems,
   } = useTrashEmptyRunItems();
 
-  const [failedPage, setFailedPage] = useState(1);
+  // ZERO-based (the DataTable convention); converted at the fetch boundary.
+  const [failedPage, setFailedPage] = useState(0);
+  const [failedPageSize, setFailedPageSize] = useState(RUN_ITEMS_PAGE_SIZE);
   const [isCancelling, setIsCancelling] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -111,15 +125,48 @@ export default function TrashEmptyRunPage() {
   useRunPolling({ runId, status: run?.status, onPoll: fetchRun });
 
   // Load the failed-item table once the run is terminal and has failures.
+  //
+  // Keyed on the two SCALARS this depends on, never on `run` itself: the
+  // run-detail poll hands back a fresh object every tick, and depending on that
+  // identity would refetch the item page — and reset the table with it.
   const terminal = run ? isTerminalRunStatus(run.status) : false;
+  const failedCount = run?.failedCount ?? 0;
   useEffect(() => {
-    if (!runId || !run || !terminal || run.failedCount <= 0) return;
+    if (!runId || !terminal || failedCount <= 0) return;
     void fetchItems(runId, {
       status: 'failed',
-      page: failedPage,
-      pageSize: ITEMS_PAGE_SIZE,
+      page: failedPage + 1, // the API is 1-based, the table 0-based
+      pageSize: failedPageSize,
     });
-  }, [runId, run, terminal, failedPage, fetchItems]);
+  }, [runId, terminal, failedCount, failedPage, failedPageSize, fetchItems]);
+
+  // --- Failed-items table ----------------------------------------------------
+  //
+  // Keyed on nothing a poll can churn, so the column and action arrays keep
+  // their identity across ticks. That, plus rendering the table unconditionally
+  // with `loading` as a prop, is what keeps a refresh from disturbing the user
+  // (docs/specs/datatable.md §18.4).
+
+  const failedItemColumns = useMemo(
+    () =>
+      buildRunItemColumns<TrashEmptyRunItem>({
+        subjectLabel: 'File',
+        itemLabel: (item) => item.media?.filename ?? 'Untitled',
+      }),
+    [],
+  );
+
+  const failedItemActions = useMemo<DataTableRowAction<TrashEmptyRunItem>[]>(
+    () => [
+      {
+        id: 'view',
+        label: 'View',
+        icon: <VisibilityIcon fontSize="small" />,
+        onClick: (item) => navigate(`/media?item=${item.mediaItemId}`),
+      },
+    ],
+    [navigate],
+  );
 
   const handleCancel = useCallback(async () => {
     if (!runId) return;
@@ -209,68 +256,31 @@ export default function TrashEmptyRunPage() {
               <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
                 Failed items ({formatCount(run.failedCount)})
               </Typography>
-              {itemsLoading && items.length === 0 ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                  <CircularProgress size={28} />
-                </Box>
-              ) : (
-                <>
-                  <TableContainer sx={{ overflowX: 'auto' }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>File</TableCell>
-                          <TableCell>Error</TableCell>
-                          <TableCell align="right">Item</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {items.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell sx={{ maxWidth: 220 }}>
-                              <Typography
-                                variant="body2"
-                                noWrap
-                                title={item.media?.filename ?? undefined}
-                              >
-                                {item.media?.filename ?? 'Untitled'}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {formatCaptureDate(item.media?.capturedAt ?? null)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell sx={{ maxWidth: 360 }}>
-                              <Typography variant="body2" color="error">
-                                {item.error ?? 'Unknown error'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Link
-                                component="button"
-                                type="button"
-                                variant="body2"
-                                onClick={() => navigate(`/media?item=${item.mediaItemId}`)}
-                              >
-                                View
-                              </Link>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                  {itemsMeta && itemsMeta.totalPages > 1 && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                      <Pagination
-                        count={itemsMeta.totalPages}
-                        page={failedPage}
-                        onChange={(_, p) => setFailedPage(p)}
-                        size="small"
-                      />
-                    </Box>
-                  )}
-                </>
-              )}
+              {/*
+                Rendered UNCONDITIONALLY — `loading` is a prop, never a gate.
+                docs/specs/datatable.md §18.4.
+              */}
+              <DataTable<TrashEmptyRunItem>
+                columns={failedItemColumns}
+                rows={items}
+                rowId={(item) => item.id}
+                tableId={TRASH_EMPTY_RUN_ITEMS_TABLE_ID}
+                ariaLabel="Failed items"
+                density="compact"
+                loading={itemsLoading}
+                emptyState={RUN_ITEMS_EMPTY_STATE}
+                pagination={{
+                  page: failedPage,
+                  pageSize: failedPageSize,
+                  total: itemsMeta?.totalItems ?? items.length,
+                  onPaginationChange: ({ page: nextPage, pageSize: nextSize }) => {
+                    setFailedPage(nextPage);
+                    setFailedPageSize(nextSize);
+                  },
+                }}
+                rowActions={failedItemActions}
+                csvExport={{ filename: 'empty-trash-failed-items' }}
+              />
             </CardContent>
           </Card>
         )}

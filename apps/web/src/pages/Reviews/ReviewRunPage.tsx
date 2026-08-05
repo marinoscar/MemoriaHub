@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -9,16 +9,11 @@ import {
   Card,
   CardContent,
   Snackbar,
-  Pagination,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Link,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon } from '@mui/icons-material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Visibility as VisibilityIcon,
+} from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useReviewRun } from '../../hooks/useReviewRun';
@@ -28,16 +23,33 @@ import { cancelReviewRun } from '../../services/reviewRuns';
 import RunProgressPanel from '../../components/runs/RunProgressPanel';
 import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
 import {
-  formatCaptureDate,
+  RUN_ITEMS_EMPTY_STATE,
+  RUN_ITEMS_PAGE_SIZE,
+  buildRunItemColumns,
+} from '../../components/runs/runItemsTable';
+import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import {
   formatCount,
   formatRelativeTime,
   isTerminalRunStatus,
   runStatusColor,
   runStatusLabel,
 } from '../../utils/runFormat';
-import type { ReviewRunDetail, ReviewRunItem } from '../../types/reviewRuns';
+import type {
+  ReviewRunAction,
+  ReviewRunDetail,
+  ReviewRunItem,
+  ReviewRunSubject,
+} from '../../types/reviewRuns';
 
-const ITEMS_PAGE_SIZE = 24;
+/**
+ * Persistence key for the failed-items table's column/density choices
+ * (`user_settings.dataTables['review-run-items']`, docs/specs/datatable.md
+ * §15). ONE id across all three review queues: the table is the same table with
+ * the same columns whichever queue produced the run, so a user who widens the
+ * Error column while reviewing bursts should find it widened for duplicates.
+ */
+export const REVIEW_RUN_ITEMS_TABLE_ID = 'review-run-items';
 
 // ---------------------------------------------------------------------------
 // Generic review-run page (issue #190), shared by all three review queues.
@@ -46,6 +58,13 @@ const ITEMS_PAGE_SIZE = 24;
 // so bursts, duplicates and location suggestions render the identical panel
 // with the right nouns, the right success-tile label, and the right links back
 // into their own queue.
+//
+// Issue #261 (epic #238) replaced the hand-rolled failed-items
+// `<TableContainer>` + `<Pagination>` block with the shared DataTable
+// (`components/runs/runItemsTable.tsx`). Two rules matter on a page that polls:
+// the table is rendered UNCONDITIONALLY with `loading` as a prop, and every
+// memo/effect around it keys on SCALARS rather than on the `run` object the
+// poll replaces each tick. See docs/specs/datatable.md §13.2 / §18.4.
 // ---------------------------------------------------------------------------
 
 interface ReviewRunPresentation {
@@ -74,10 +93,21 @@ function isBelowThresholdAction(run: ReviewRunDetail): boolean {
   return run.action === 'dismiss' || run.action === 'reject';
 }
 
-function describeReviewRun(run: ReviewRunDetail): ReviewRunPresentation {
-  const dismissing = run.action === 'dismiss';
+/**
+ * Derive the per-queue wording and links.
+ *
+ * Takes the two discriminators rather than the whole run so a `useMemo` over it
+ * can depend on scalars — the run object itself is replaced on every poll tick,
+ * and keying on it would rebuild the row-action array (and every control's
+ * identity with it) twice a second.
+ */
+function describeReviewRun(
+  subjectType: ReviewRunSubject,
+  action: ReviewRunAction,
+): ReviewRunPresentation {
+  const dismissing = action === 'dismiss';
 
-  switch (run.subjectType) {
+  switch (subjectType) {
     case 'burst_group':
       return {
         title: dismissing ? 'Dismiss burst groups' : 'Resolve burst groups',
@@ -108,7 +138,7 @@ function describeReviewRun(run: ReviewRunDetail): ReviewRunPresentation {
       };
     case 'location_suggestion':
     default: {
-      const rejecting = run.action === 'reject';
+      const rejecting = action === 'reject';
       return {
         title: rejecting ? 'Bulk reject locations' : 'Bulk accept locations',
         backPath: '/location-suggestions',
@@ -190,7 +220,9 @@ export default function ReviewRunPage() {
     fetchItems,
   } = useReviewRunItems();
 
-  const [failedPage, setFailedPage] = useState(1);
+  // ZERO-based (the DataTable convention); converted at the fetch boundary.
+  const [failedPage, setFailedPage] = useState(0);
+  const [failedPageSize, setFailedPageSize] = useState(RUN_ITEMS_PAGE_SIZE);
   const [isCancelling, setIsCancelling] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -209,15 +241,20 @@ export default function ReviewRunPage() {
   useRunPolling({ runId, status: run?.status, onPoll: fetchRun });
 
   // Load the failed-item table once the run is terminal and has failures.
+  //
+  // Keyed on the two SCALARS this depends on, never on `run` itself: the
+  // run-detail poll hands back a fresh object every tick, and depending on that
+  // identity would refetch the item page — and reset the table with it.
   const terminal = run ? isTerminalRunStatus(run.status) : false;
+  const failedCount = run?.failedCount ?? 0;
   useEffect(() => {
-    if (!runId || !run || !terminal || run.failedCount <= 0) return;
+    if (!runId || !terminal || failedCount <= 0) return;
     void fetchItems(runId, {
       status: 'failed',
-      page: failedPage,
-      pageSize: ITEMS_PAGE_SIZE,
+      page: failedPage + 1, // the API is 1-based, the table 0-based
+      pageSize: failedPageSize,
     });
-  }, [runId, run, terminal, failedPage, fetchItems]);
+  }, [runId, terminal, failedCount, failedPage, failedPageSize, fetchItems]);
 
   const handleCancel = useCallback(async () => {
     if (!runId) return;
@@ -232,6 +269,42 @@ export default function ReviewRunPage() {
       setIsCancelling(false);
     }
   }, [runId, fetchRun]);
+
+  // --- Failed-items table ----------------------------------------------------
+  //
+  // Both memos live ABOVE the early returns (hooks must) and are keyed on
+  // scalars a poll cannot churn, so the column and action arrays keep their
+  // identity across ticks. That, plus rendering the table unconditionally with
+  // `loading` as a prop, is what keeps a refresh from disturbing the user
+  // (docs/specs/datatable.md §18.4).
+
+  const subjectType = run?.subjectType;
+  const action = run?.action;
+
+  const failedItemColumns = useMemo(
+    () =>
+      buildRunItemColumns<ReviewRunItem>({
+        // "Subject", not "File": a burst/duplicate row is a GROUP, and may have
+        // no media row at all — `itemLabel` falls back to the subject id.
+        subjectLabel: 'Subject',
+        itemLabel,
+      }),
+    [],
+  );
+
+  const failedItemActions = useMemo<DataTableRowAction<ReviewRunItem>[]>(() => {
+    if (!subjectType || !action) return [];
+    const { subjectLink, backPath } = describeReviewRun(subjectType, action);
+    return [
+      {
+        id: 'view',
+        label: 'View',
+        icon: <VisibilityIcon fontSize="small" />,
+        onClick: (item) =>
+          navigate((item.subjectId ? subjectLink(item.subjectId) : null) ?? backPath),
+      },
+    ];
+  }, [navigate, subjectType, action]);
 
   // First-load spinner (only when we have no run yet).
   if (!run && isLoading) {
@@ -253,7 +326,7 @@ export default function ReviewRunPage() {
     );
   }
 
-  const presentation = describeReviewRun(run);
+  const presentation = describeReviewRun(run.subjectType, run.action);
   const thresholdLabel = `${isBelowThresholdAction(run) ? '<' : '≥'} ${run.threshold}%`;
 
   return (
@@ -308,76 +381,31 @@ export default function ReviewRunPage() {
               <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
                 {presentation.failedTitle} ({formatCount(run.failedCount)})
               </Typography>
-              {itemsLoading && items.length === 0 ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                  <CircularProgress size={28} />
-                </Box>
-              ) : (
-                <>
-                  <TableContainer sx={{ overflowX: 'auto' }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Subject</TableCell>
-                          <TableCell>Error</TableCell>
-                          <TableCell align="right">Review</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {items.map((item) => {
-                          const subjectId = item.subjectId;
-                          const href = subjectId
-                            ? presentation.subjectLink(subjectId)
-                            : null;
-                          return (
-                            <TableRow key={item.id}>
-                              <TableCell sx={{ maxWidth: 220 }}>
-                                <Typography
-                                  variant="body2"
-                                  noWrap
-                                  title={item.media?.filename ?? subjectId ?? undefined}
-                                >
-                                  {itemLabel(item)}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {formatCaptureDate(item.media?.capturedAt ?? null)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell sx={{ maxWidth: 360 }}>
-                                <Typography variant="body2" color="error">
-                                  {item.error ?? 'Unknown error'}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Link
-                                  component="button"
-                                  type="button"
-                                  variant="body2"
-                                  onClick={() =>
-                                    navigate(href ?? presentation.backPath)
-                                  }
-                                >
-                                  View
-                                </Link>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                  {itemsMeta && itemsMeta.totalPages > 1 && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                      <Pagination
-                        count={itemsMeta.totalPages}
-                        page={failedPage}
-                        onChange={(_, p) => setFailedPage(p)}
-                        size="small"
-                      />
-                    </Box>
-                  )}
-                </>
-              )}
+              {/*
+                Rendered UNCONDITIONALLY — `loading` is a prop, never a gate.
+                docs/specs/datatable.md §18.4.
+              */}
+              <DataTable<ReviewRunItem>
+                columns={failedItemColumns}
+                rows={items}
+                rowId={(item) => item.id}
+                tableId={REVIEW_RUN_ITEMS_TABLE_ID}
+                ariaLabel={presentation.failedTitle}
+                density="compact"
+                loading={itemsLoading}
+                emptyState={RUN_ITEMS_EMPTY_STATE}
+                pagination={{
+                  page: failedPage,
+                  pageSize: failedPageSize,
+                  total: itemsMeta?.totalItems ?? items.length,
+                  onPaginationChange: ({ page: nextPage, pageSize: nextSize }) => {
+                    setFailedPage(nextPage);
+                    setFailedPageSize(nextSize);
+                  },
+                }}
+                rowActions={failedItemActions}
+                csvExport={{ filename: 'review-run-failed-items' }}
+              />
             </CardContent>
           </Card>
         )}
