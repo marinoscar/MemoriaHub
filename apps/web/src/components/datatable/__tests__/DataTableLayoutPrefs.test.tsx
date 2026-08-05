@@ -46,6 +46,7 @@ import {
   sanitizeStoredLayout,
   type DataTableStoredLayout,
 } from '../layout/layoutModel';
+import { assertNoInvisibleHitTargets } from './testUtils/a11yGuards';
 
 // ---------------------------------------------------------------------------
 // Layout stubs (the #253 recipe)
@@ -797,29 +798,9 @@ describe('DataTable — no tableId', () => {
 // 6. Touch-target rule / issue #243 guard, extended to the new controls
 // ---------------------------------------------------------------------------
 
-const VISIBLE_CONTROL_SELECTOR = 'button, [role="button"], .MuiCheckbox-root, a[href]';
-const THIRD_PARTY_CHROME = '.MuiDataGrid-columnHeaders, .MuiDataGrid-columnHeader';
-
-function describeControl(control: HTMLElement) {
-  const label = control.getAttribute('aria-label') ?? control.textContent?.slice(0, 24) ?? '';
-  return `${control.tagName.toLowerCase()}[${label}]`;
-}
-
-function assertNoInvisibleHitTargets(root: HTMLElement) {
-  const controls = Array.from(
-    root.querySelectorAll<HTMLElement>(VISIBLE_CONTROL_SELECTOR),
-  ).filter((control) => !control.closest(THIRD_PARTY_CHROME));
-  expect(controls.length).toBeGreaterThan(0);
-
-  const offenders = controls
-    .filter((control) => {
-      const style = getComputedStyle(control);
-      return style.opacity === '0' && style.pointerEvents !== 'none';
-    })
-    .map(describeControl);
-
-  expect(offenders).toEqual([]);
-}
+// `assertNoInvisibleHitTargets` is imported from `./testUtils/a11yGuards`
+// (issue #257 consolidated the four near-identical copies of this guard into
+// one shared module — see that file's docblock).
 
 describe('DataTable — layout controls obey the touch rules (issue #243 guard)', () => {
   it('holds for the desktop column menu, opened', async () => {

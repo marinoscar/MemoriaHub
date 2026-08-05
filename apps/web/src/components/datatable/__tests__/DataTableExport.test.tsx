@@ -43,6 +43,10 @@ import { render } from '../../../__tests__/utils/test-utils';
 import { DataTable } from '../DataTable';
 import type { DataTableColumn, DataTableFilterModel } from '../types';
 import {
+  assertNoInvisibleHitTargets,
+  DEFAULT_VISIBLE_CONTROL_SELECTOR,
+} from './testUtils/a11yGuards';
+import {
   CSV_BOM,
   escapeCsvField,
   isFormulaText,
@@ -1048,46 +1052,32 @@ describe('DataTable — card list render skipping, rendered', () => {
 // 9. Touch-target rule / issue #243 regression guard, extended to export
 // ===========================================================================
 
-// `[role="menuitem"]` is this suite's addition to the #253/#255 sweep: the
-// export menu's controls are menu items, not buttons or checkboxes.
-const VISIBLE_CONTROL_SELECTOR =
-  'button, [role="button"], [role="menuitem"], .MuiCheckbox-root, a[href]';
-const THIRD_PARTY_CHROME = '.MuiDataGrid-columnHeaders, .MuiDataGrid-columnHeader';
-
-function describeControl(control: HTMLElement) {
-  const label = control.getAttribute('aria-label') ?? control.textContent?.slice(0, 24) ?? '';
-  return `${control.tagName.toLowerCase()}[${label}]`;
-}
-
-function assertNoInvisibleHitTargets(root: HTMLElement) {
-  const controls = Array.from(
-    root.querySelectorAll<HTMLElement>(VISIBLE_CONTROL_SELECTOR),
-  ).filter((control) => !control.closest(THIRD_PARTY_CHROME));
-  expect(controls.length).toBeGreaterThan(0);
-
-  const offenders = controls
-    .filter((control) => {
-      const style = getComputedStyle(control);
-      return style.opacity === '0' && style.pointerEvents !== 'none';
-    })
-    .map(describeControl);
-
-  expect(offenders).toEqual([]);
-}
+// `assertNoInvisibleHitTargets` is imported from `./testUtils/a11yGuards`
+// (issue #257 consolidated the four near-identical copies of this guard into
+// one shared module). `[role="menuitem"]` is this suite's addition to the
+// #253/#255 sweep: the export menu's controls are menu items, not buttons or
+// checkboxes.
+const EXPORT_MENU_SELECTOR = `${DEFAULT_VISIBLE_CONTROL_SELECTOR}, [role="menuitem"]`;
 
 describe('DataTable — export controls obey the touch rules (issue #243 guard)', () => {
   it('holds for the desktop export button and its menu', () => {
     renderAtWidth(1400, { csvExport: { fetchAllRows: vi.fn(async () => []) } });
     fireEvent.click(screen.getByTestId('datatable-export-button'));
 
-    assertNoInvisibleHitTargets(screen.getByTestId('datatable-export-menu'));
-    assertNoInvisibleHitTargets(screen.getByTestId('datatable-view-bar'));
+    assertNoInvisibleHitTargets(screen.getByTestId('datatable-export-menu'), {
+      selector: EXPORT_MENU_SELECTOR,
+    });
+    assertNoInvisibleHitTargets(screen.getByTestId('datatable-view-bar'), {
+      selector: EXPORT_MENU_SELECTOR,
+    });
   });
 
   it('holds for the phone overflow menu', () => {
     renderAtWidth(400);
     fireEvent.click(screen.getByTestId('datatable-overflow-button'));
-    assertNoInvisibleHitTargets(screen.getByTestId('datatable-export-menu'));
+    assertNoInvisibleHitTargets(screen.getByTestId('datatable-export-menu'), {
+      selector: EXPORT_MENU_SELECTOR,
+    });
   });
 
   it('gives the export control a >=44px touch target in every layout', () => {

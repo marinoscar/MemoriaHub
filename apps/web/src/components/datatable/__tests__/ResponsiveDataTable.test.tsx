@@ -39,6 +39,7 @@ import { render } from '../../../__tests__/utils/test-utils';
 import { DataTable } from '../DataTable';
 import { layoutForWidth, DEFAULT_BREAKPOINTS } from '../useContainerLayout';
 import type { DataTableColumn, DataTableSortState } from '../types';
+import { assertNoInvisibleHitTargets } from './testUtils/a11yGuards';
 
 // ---------------------------------------------------------------------------
 // Layout stubs
@@ -412,7 +413,8 @@ describe('DataTable — state survives a layout switch', () => {
       .getAllByTestId('datatable-card')
       .find((card) => card.getAttribute('data-row-id') === 'job-2');
     expect(selectedCard).toHaveAttribute('data-selected', 'true');
-    expect(within(screen.getByTestId('datatable-bulk-action-bar')).getByText('1 selected'))
+    // "N of M selected" (issue #257): 1 of the 3 loaded rows.
+    expect(within(screen.getByTestId('datatable-bulk-action-bar')).getByText('1 of 3 selected'))
       .toBeInTheDocument();
 
     // Page is intact: page 1 (zero-based) of 25 => rows 26-28 of 137.
@@ -440,13 +442,17 @@ describe('DataTable — state survives a layout switch', () => {
 
     const cards = screen.getAllByTestId('datatable-card');
     const firstCard = cards.find((card) => card.getAttribute('data-row-id') === 'job-1');
-    fireEvent.click(within(firstCard as HTMLElement).getByRole('checkbox', { name: /select row/i }));
+    // Named after the row it selects, not a bare "Select row" (issue #257) —
+    // job-1's `type` is `face_detection`.
+    fireEvent.click(
+      within(firstCard as HTMLElement).getByRole('checkbox', { name: 'Select face_detection' }),
+    );
 
     expect(screen.getByTestId('probe-selection')).toHaveTextContent('job-1,job-2');
 
     setContainerWidth(1400);
     expect(screen.getByTestId('probe-selection')).toHaveTextContent('job-1,job-2');
-    expect(within(screen.getByTestId('datatable-bulk-action-bar')).getByText('2 selected'))
+    expect(within(screen.getByTestId('datatable-bulk-action-bar')).getByText('2 of 3 selected'))
       .toBeInTheDocument();
   });
 
@@ -647,7 +653,9 @@ describe('CardListRenderer — selection parity', () => {
     const onSelectionChange = vi.fn();
     renderAtWidth(400, { selection: { selectedIds: new Set<string>(), onSelectionChange } });
 
-    fireEvent.click(screen.getAllByRole('checkbox', { name: /select row/i })[0]);
+    // job-1's `type` is `face_detection`; the checkbox is named after it
+    // rather than a bare "Select row" (issue #257).
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select face_detection' }));
     expect(Array.from(onSelectionChange.mock.calls[0][0] as Set<string>)).toEqual(['job-1']);
   });
 
@@ -682,7 +690,7 @@ describe('CardListRenderer — selection parity', () => {
 
     const bar = screen.getByTestId('datatable-bulk-action-bar');
     expect(bar).toHaveAttribute('role', 'toolbar');
-    expect(within(bar).getByText('2 selected')).toBeInTheDocument();
+    expect(within(bar).getByText('2 of 3 selected')).toBeInTheDocument();
 
     fireEvent.click(within(bar).getByRole('button', { name: 'Archive' }));
     expect(archive).toHaveBeenCalledWith(['job-1', 'job-2']);
@@ -818,8 +826,12 @@ describe('DesktopGridRenderer — tablet row expansion', () => {
 
     fireEvent.click(screen.getAllByTestId('datatable-row-expander')[0]);
 
-    // The synthetic detail row must not add a selectable row.
-    const rowCheckboxes = screen.getAllByRole('checkbox', { name: /select row/i });
+    // The synthetic detail row must not add a selectable row. Row checkboxes
+    // are named after their row (issue #257), so match only those three —
+    // not the header "Select all rows" checkbox.
+    const rowCheckboxes = screen.getAllByRole('checkbox', {
+      name: /^select (face_detection|auto_tagging|geocode)$/i,
+    });
     expect(rowCheckboxes).toHaveLength(3);
 
     fireEvent.click(rowCheckboxes[0]);
@@ -874,45 +886,9 @@ describe('DesktopGridRenderer — tablet row expansion', () => {
  * never applies on a touch device).
  */
 
-/**
- * The *visible* controls, i.e. the ones whose disappearance is a bug.
- *
- * Two deliberate exclusions:
- *
- *  - Bare `<input>`: MUI's Checkbox/Radio put a transparent native input
- *    exactly on top of a painted SVG. That is the correct pattern (the
- *    hit-target coincides with a visible affordance) and is the opposite of
- *    #243, so the sweep looks at the painted `.MuiCheckbox-root` instead.
- *  - MUI X's own column-header chrome, whose sort/menu buttons are
- *    hover-revealed by the library. Not ours to assert on, and reachable by
- *    keyboard regardless.
- */
-const VISIBLE_CONTROL_SELECTOR =
-  'button, [role="button"], .MuiCheckbox-root, a[href]';
-const THIRD_PARTY_CHROME = '.MuiDataGrid-columnHeaders, .MuiDataGrid-columnHeader';
-
-function assertNoInvisibleHitTargets(root: HTMLElement) {
-  const controls = Array.from(
-    root.querySelectorAll<HTMLElement>(VISIBLE_CONTROL_SELECTOR),
-  ).filter((control) => !control.closest(THIRD_PARTY_CHROME));
-  expect(controls.length).toBeGreaterThan(0);
-
-  // Report the offenders by name rather than as a bare `false`, so a
-  // regression names the control that reintroduced the bug.
-  const offenders = controls
-    .filter((control) => {
-      const style = getComputedStyle(control);
-      return style.opacity === '0' && style.pointerEvents !== 'none';
-    })
-    .map(describeControl);
-
-  expect(offenders).toEqual([]);
-}
-
-function describeControl(control: HTMLElement) {
-  const label = control.getAttribute('aria-label') ?? control.textContent?.slice(0, 24) ?? '';
-  return `${control.tagName.toLowerCase()}[${label}]`;
-}
+// `assertNoInvisibleHitTargets` is imported from `./testUtils/a11yGuards`
+// (issue #257 consolidated the four near-identical copies of this guard into
+// one shared module — see that file's docblock).
 
 describe('DataTable — no invisible-but-tappable controls (issue #243 guard)', () => {
   it('holds for the card layout, with everything on screen', () => {
@@ -950,7 +926,7 @@ describe('DataTable — no invisible-but-tappable controls (issue #243 guard)', 
     });
 
     const mustBeTouchSized = [
-      screen.getAllByRole('checkbox', { name: /select row/i })[0],
+      screen.getByRole('checkbox', { name: 'Select face_detection' }),
       screen.getByRole('checkbox', { name: /select all rows/i }),
       screen.getByRole('button', { name: 'Row actions for face_detection' }),
       screen.getAllByTestId('datatable-card-detail-toggle')[0],
