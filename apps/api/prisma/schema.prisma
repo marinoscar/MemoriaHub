@@ -75,6 +75,8 @@ model User {
   // Review Runs relations (bursts / duplicates / location suggestions —
   // supersedes the former LocationSuggestionRun-only relation, issue #190)
   reviewRunsStarted           ReviewRun[]                 @relation("ReviewRunStartedBy")
+  // Notification Center relations (epic #240, issue #244; schema-only)
+  notifications               Notification[]              @relation("UserNotifications")
 
   @@map("users")
 }
@@ -411,6 +413,8 @@ model Circle {
   // Review Runs relations (bursts / duplicates / location suggestions —
   // supersedes the former LocationSuggestionRun-only relation, issue #190)
   reviewRuns            ReviewRun[]
+  // Notification Center relations (epic #240, issue #244; schema-only)
+  notifications         Notification[]       @relation("CircleNotifications")
 
   @@index([ownerId])
   @@map("circles")
@@ -1871,4 +1875,93 @@ model ReviewRunItem {
 
   @@index([runId, status])
   @@map("review_run_items")
+}
+
+// =============================================================================
+// Notification Center (epic #240)
+// =============================================================================
+
+// review_queue_* types are refreshed STATE rows (see Notification's comment
+// below); the remaining four are per-occurrence EVENT rows.
+enum NotificationType {
+  review_queue_bursts
+  review_queue_duplicates
+  review_queue_location_suggestions
+  review_queue_enhancements
+  upload_completed
+  enrichment_failed
+  workflow_run_completed
+  share_expiring
+}
+
+// Schema-only foundation for the in-app notification center (issue #244,
+// child of epic #240). This change adds ONLY the model/enum/migration below
+// — no producers, no API, no UI. See docs/specs/notifications.md once it
+// lands for the full feature; the retention purge implied by the
+// (dismissed_at, updated_at) and (read_at) indexes below is issue #248, not
+// implemented here.
+//
+// STATE vs. EVENT notification types:
+//   - The four `review_queue_*` types are STATE notifications: one row
+//     tracks a user's whole pending-count for a given (circle, review
+//     queue), and is refreshed in place — not appended — as the underlying
+//     count changes. A circle with 929 pending duplicate groups must
+//     produce exactly one row for that user, never 929.
+//   - The remaining four types (upload_completed, enrichment_failed,
+//     workflow_run_completed, share_expiring) are EVENT notifications: one
+//     row per occurrence, appended freely, never deduplicated against each
+//     other.
+//
+// DEDUP CONSTRAINT — raw SQL, not representable in Prisma's schema DSL:
+//   A partial unique index on (user_id, circle_id, type) WHERE
+//   dismissed_at IS NULL AND circle_id IS NOT NULL AND type IN
+//   ('review_queue_bursts', 'review_queue_duplicates',
+//   'review_queue_location_suggestions', 'review_queue_enhancements')
+//   enforces "at most one LIVE (non-dismissed) row per (user, circle, type)"
+//   for the four state types only. The partial WHERE is exactly why the
+//   event types are exempt — an upload_completed row is never matched
+//   against this index at all, so it is never deduplicated. circleId IS NOT
+//   NULL is included in the predicate even though the column is nullable
+//   because Postgres unique indexes treat every NULL as distinct from every
+//   other NULL; without that clause two different global (circle_id = NULL)
+//   notifications of the same type for the same user would NOT collide and
+//   uniqueness would be silently defeated for that case, even though in
+//   practice a review_queue_* row's circleId is always non-null (there is
+//   no "global" review queue). See migration 20260805000000_add_notifications
+//   for the actual index, named notifications_review_queue_live_uniq_idx —
+//   the same hand-authored-raw-SQL precedent as media_items_gallery_idx,
+//   media_items_map_locations_idx, people_circle_id_hidden_at_idx, and the
+//   review_run_items partial uniques above.
+model Notification {
+  id          String            @id @default(uuid()) @db.Uuid
+  userId      String            @map("user_id") @db.Uuid
+  circleId    String?           @map("circle_id") @db.Uuid
+  type        NotificationType
+  title       String
+  body        String?
+  link        String?
+  data        Json?             @db.JsonB
+  readAt      DateTime?         @map("read_at") @db.Timestamptz
+  dismissedAt DateTime?         @map("dismissed_at") @db.Timestamptz
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user   User    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  circle Circle? @relation("CircleNotifications", fields: [circleId], references: [id], onDelete: Cascade)
+
+  // unread-count query and unread filter
+  @@index([userId, readAt])
+  // paginated list, newest first
+  @@index([userId, createdAt(sort: Desc)])
+  // dismissed filtering
+  @@index([userId, dismissedAt])
+  // serves the #248 retention purge (stale dismissed rows / staleness by update time)
+  @@index([dismissedAt, updatedAt])
+  // serves the #248 retention purge (unread-forever sweep)
+  @@index([readAt])
+  // See this model's header comment: notifications_review_queue_live_uniq_idx,
+  // a raw-SQL-only partial unique index, is added in migration
+  // 20260805000000_add_notifications and is NOT representable here.
+  @@map("notifications")
 }
