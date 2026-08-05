@@ -32,6 +32,7 @@ import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.r
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowActionExecutor } from '../actions/workflow-action.executor';
+import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { ActionOutcome } from '../actions/action-executor.types';
 import { revalidateItemMatches } from '../execution/item-revalidation.util';
@@ -118,6 +119,8 @@ describe('WorkflowExecuteBatchHandler', () => {
       prisma as unknown as PrismaService,
       compiler as unknown as WorkflowConditionCompiler,
       executor as unknown as WorkflowActionExecutor,
+      // #247 producer — fire-and-forget, asserted nowhere here.
+      { notifyRunFinishedAsync: jest.fn() } as unknown as WorkflowRunNotificationService,
     );
 
     // Actor permission resolution — a single role granting media:write.

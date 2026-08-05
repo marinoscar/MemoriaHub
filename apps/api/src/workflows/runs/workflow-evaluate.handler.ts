@@ -13,6 +13,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
+import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
 import { WorkflowRunService } from './workflow-run.service';
 
 /** Payload shape for a `workflow_evaluate` job. */
@@ -51,6 +52,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
     private readonly systemSettings: SystemSettingsService,
     private readonly compiler: WorkflowConditionCompiler,
     private readonly runService: WorkflowRunService,
+    private readonly runNotifications: WorkflowRunNotificationService,
   ) {}
 
   onModuleInit(): void {
@@ -210,6 +212,8 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
           matchedCount: 0,
         });
         this.logTransition(run, WorkflowRunStatus.completed, { matchedCount: 0 });
+        // Terminal (0 matches) — fire-and-forget notification (issue #247).
+        this.runNotifications.notifyRunFinishedAsync(runId);
         return;
       }
 
@@ -250,6 +254,8 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
           })
           .catch(() => undefined);
         this.logTransition(run, WorkflowRunStatus.failed, { error: message });
+        // Terminal failure (retries exhausted) — notify (issue #247).
+        this.runNotifications.notifyRunFinishedAsync(runId);
       }
       throw err;
     }

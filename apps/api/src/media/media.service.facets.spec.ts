@@ -14,6 +14,7 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
+import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
@@ -61,6 +62,11 @@ describe('MediaService.facetsLocations', () => {
         { provide: GEO_LOCATION_PROVIDER, useValue: {} },
         { provide: ForwardGeocodeService, useValue: {} },
         { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
+        {
+          // #247 upload_completed producer — fire-and-forget, not asserted here.
+          provide: UploadNotificationService,
+          useValue: { recordUploadAsync: jest.fn(), recordUpload: jest.fn() },
+        },
         { provide: MediaEnrichmentService, useValue: {} },
       ],
     }).compile();

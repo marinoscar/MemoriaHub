@@ -25,6 +25,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowRunService } from './workflow-run.service';
+import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
@@ -124,6 +125,8 @@ describe('WorkflowEvaluateHandler', () => {
       systemSettings as unknown as SystemSettingsService,
       compiler as unknown as WorkflowConditionCompiler,
       runService as unknown as WorkflowRunService,
+      // #247 producer — fire-and-forget, asserted nowhere here.
+      { notifyRunFinishedAsync: jest.fn() } as unknown as WorkflowRunNotificationService,
     );
 
     prisma.workflowRunItem.createMany.mockResolvedValue({ count: 0 } as any);

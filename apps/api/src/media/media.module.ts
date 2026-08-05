@@ -6,6 +6,7 @@ import { CirclesModule } from '../circles/circles.module';
 import { GeoLocationModule } from './geo/geo-location.module';
 import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
@@ -66,6 +67,14 @@ import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute
  * MediaReprocessController (admin bulk recovery) and
  * MediaThumbnailRerunController (per-item retry). StorageModule does not
  * depend on MediaModule, so this does not introduce a cycle.
+ *
+ * Imports NotificationsModule so UploadNotificationService resolves inside
+ * MediaService (the `upload_completed` producer, epic #240 / issue #247).
+ * NotificationsModule imports NOTHING, so this edge cannot close a cycle —
+ * that is exactly why #246's review-queue reconcile, which needs MediaService,
+ * was put in the separate NotificationsReconcileModule rather than in
+ * NotificationsModule. Both edges point the same way:
+ *   NotificationsReconcileModule -> MediaModule -> NotificationsModule
  */
 @Module({
   imports: [
@@ -76,6 +85,7 @@ import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute
     GeoLocationModule,
     SettingsModule,
     EnrichmentModule,
+    NotificationsModule,
   ],
   controllers: [
     MediaController,

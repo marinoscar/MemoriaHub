@@ -51,6 +51,7 @@ import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
+import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -83,6 +84,7 @@ export class MediaService {
     private readonly resolver: StorageProviderResolver,
     private readonly mediaEnrichmentService: MediaEnrichmentService,
     private readonly mediaThumbnailService: MediaThumbnailService,
+    private readonly uploadNotificationService: UploadNotificationService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -282,6 +284,20 @@ export class MediaService {
       type: mediaItem.type,
       circleId: mediaItem.circleId,
       deletedAt: mediaItem.deletedAt,
+    });
+
+    // In-app `upload_completed` notification (epic #240, issue #247).
+    // Deliberately placed on the NON-DEDUPLICATED path only — the two dedup
+    // returns above exit before reaching here, and a dedup hit is not an
+    // upload: nothing new landed in the circle.
+    //
+    // Fire-and-forget (returns void, never rejects), so a 4 000-file import
+    // pays no added latency per file and a notification failure can never fail
+    // a registration. Fan-out is bounded server-side by a 15-minute rolling
+    // window — see UploadNotificationService.
+    this.uploadNotificationService.recordUploadAsync({
+      circleId: mediaItem.circleId,
+      uploaderId: userId,
     });
 
     return { ...mediaItem, deduplicated: false as const, mediaItemId: mediaItem.id };
