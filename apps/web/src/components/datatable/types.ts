@@ -222,13 +222,26 @@ export interface DataTableSelectionConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * Which renderer to use. `'auto'` (default) picks by viewport width; the
- * explicit values exist for tests, Storybook-style previews, and pages that
- * genuinely want one layout at every width.
+ * Which layout to use.
  *
- * `'mobile'` resolves to the desktop renderer until issue #253 lands.
+ * `'auto'` (default) picks by the table's own **container** width — not the
+ * viewport — so a table inside a 400px drawer on a 1440px desktop still gets
+ * cards. The explicit values exist for tests, Storybook-style previews, and
+ * pages that genuinely want one layout at every width.
+ *
+ * The three layouts map onto two renderer modules:
+ *   - `'mobile'`  → `mobile/CardListRenderer`
+ *   - `'tablet'`  → `desktop/DesktopGridRenderer` with `variant="tablet"`
+ *     (the real grid, `detail` columns folded into an expandable row)
+ *   - `'desktop'` → `desktop/DesktopGridRenderer` with `variant="desktop"`
  */
-export type DataTableRendererMode = 'auto' | 'desktop' | 'mobile';
+export type DataTableRendererMode = 'auto' | 'desktop' | 'tablet' | 'mobile';
+
+/** The resolved layout. Reported as `data-layout` on the table wrapper. */
+export type DataTableLayout = 'mobile' | 'tablet' | 'desktop';
+
+/** The resolved renderer module. Reported as `data-renderer` on the wrapper. */
+export type DataTableRendererKind = 'mobile' | 'desktop';
 
 export interface DataTableProps<Row> {
   columns: DataTableColumn<Row>[];
@@ -260,14 +273,36 @@ export interface DataTableProps<Row> {
    * scrolling table body instead.
    */
   height?: number | string;
-  /** Force a renderer. Default `'auto'`. */
+  /** Force a layout. Default `'auto'` (container-width driven). */
   renderer?: DataTableRendererMode;
+
+  /**
+   * Container width (px) below which the card list is used.
+   * Default {@link DEFAULT_MOBILE_BREAKPOINT} (600).
+   *
+   * This is a **container** measurement, not a viewport one: overriding it is
+   * how a host that knows something the table cannot measure (a chrome-heavy
+   * panel, a table of unusually wide cells) shifts the pivot for one instance
+   * without touching the global default.
+   */
+  mobileBreakpoint?: number;
+  /**
+   * Container width (px) below which the grid runs in its tablet variant
+   * (`detail` columns hidden, reachable via row expansion) and at or above
+   * which the full desktop grid is used.
+   * Default {@link DEFAULT_TABLET_BREAKPOINT} (1200).
+   */
+  tabletBreakpoint?: number;
+
   /** Forwarded to the outermost wrapper for test targeting. */
   'data-testid'?: string;
 }
 
 /**
- * Props handed to a concrete renderer. Identical to {@link DataTableProps}
- * minus the renderer switch itself — every renderer consumes the same contract.
+ * Props handed to a concrete renderer. {@link DataTableProps} minus the layout
+ * switch itself — every renderer consumes the same contract.
  */
-export type DataTableRendererProps<Row> = Omit<DataTableProps<Row>, 'renderer'>;
+export type DataTableRendererProps<Row> = Omit<
+  DataTableProps<Row>,
+  'renderer' | 'mobileBreakpoint' | 'tabletBreakpoint'
+>;
