@@ -438,6 +438,89 @@ describe('DuplicateGroupPage', () => {
     });
   });
 
+  // Issue #239: the comparison is transposed below `md` so a phone never has to
+  // scroll sideways through one column per group member. Both orientations are
+  // fed from the same derived model (deriveComparisonRows), so the labels and
+  // values must match whichever way it renders.
+  describe('responsive comparison layout (issue #239)', () => {
+    it('renders one stacked card per member, with its attributes, on narrow viewports', async () => {
+      // The jsdom matchMedia mock reports `matches: false` for every query, so
+      // the md-and-up matrix is not selected — this is the phone rendering.
+      render(<DuplicateGroupPage />);
+
+      await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
+
+      // No attribute matrix at this width — nothing to scroll sideways.
+      expect(screen.queryByRole('table')).toBeNull();
+
+      // One card per member, titled Photo 1..3.
+      const cardTitles = screen.getAllByRole('heading', { level: 3 });
+      expect(cardTitles.map((h) => h.textContent)).toEqual(['Photo 1', 'Photo 2', 'Photo 3']);
+
+      // Each card carries the full attribute list as label/value rows.
+      const attributeLabels = [
+        'Dimensions',
+        'File size',
+        'Captured at',
+        'Camera',
+        'GPS',
+        'Hash prefix',
+        'Sharpness',
+        'Similarity to best',
+        'Quality score',
+      ];
+      attributeLabels.forEach((label) => {
+        expect(screen.getAllByText(label)).toHaveLength(3);
+      });
+
+      // Values are rendered per card too (3 members share dimensions/camera).
+      expect(screen.getAllByText('4032×3024')).toHaveLength(3);
+      expect(screen.getAllByText('Apple iPhone 14')).toHaveLength(3);
+    });
+
+    it('renders the side-by-side attribute matrix on wide viewports', async () => {
+      const originalMatchMedia = window.matchMedia;
+      // Report a wide viewport so MUI's useMediaQuery selects the md+ matrix.
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: query.includes('min-width'),
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+
+      try {
+        render(<DuplicateGroupPage />);
+
+        await waitFor(() => expect(screen.getByText('Duplicate Group')).toBeInTheDocument());
+
+        const table = await screen.findByRole('table');
+        // One header per member plus the leading attribute-label column.
+        const headers = within(table).getAllByRole('columnheader');
+        expect(headers.map((th) => th.textContent?.trim())).toEqual([
+          'Attribute',
+          'Photo 1',
+          'Photo 2',
+          'Photo 3',
+        ]);
+        // Attribute labels appear once each — as row headers, not per member.
+        expect(within(table).getAllByText('Dimensions')).toHaveLength(1);
+        expect(within(table).getAllByText('Quality score')).toHaveLength(1);
+      } finally {
+        Object.defineProperty(window, 'matchMedia', {
+          writable: true,
+          value: originalMatchMedia,
+        });
+      }
+    });
+  });
+
   describe('dismiss flow', () => {
     it('opens a confirm dialog when the dismiss button is clicked', async () => {
       const user = userEvent.setup();
