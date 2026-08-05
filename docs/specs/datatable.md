@@ -3,7 +3,9 @@
 **Status:** foundation shipped (issue #252); mobile + tablet layouts shipped
 (issue #253); filtering + quick search shipped (issue #254); column visibility,
 density and per-user layout persistence shipped (issue #255, §14–§15); row
-virtualization + CSV export shipped (issue #256, §16) — all of epic #238
+virtualization + CSV export shipped (issue #256, §16); accessibility contract,
+keyboard model and the shared conformance suite shipped (issue #257, §17) —
+all of epic #238
 **Location:** `apps/web/src/components/datatable/`,
 `apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
 **Spec owner:** frontend
@@ -79,6 +81,8 @@ apps/web/src/components/datatable/
     cardVirtualization.ts         # content-visibility + measured placeholders
   shared/
     rowActionConfirm.tsx          # one confirm dialog, shared by both renderers
+    IndeterminateCheckbox.tsx     # indeterminate checkbox with the native DOM
+                                   # property actually set (#257, §17.7)
   desktop/
     DesktopGridRenderer.tsx       # MUI X DataGrid renderer (desktop + tablet)
     columnAdapter.ts              # DataTableColumn -> GridColDef
@@ -96,6 +100,17 @@ apps/web/src/components/datatable/
   __tests__/DataTableFilters.test.tsx     # #254 filtering + quick search
   __tests__/DataTableLayoutPrefs.test.tsx # #255 visibility / density / persistence
   __tests__/DataTableExport.test.tsx      # #256 CSV export + virtualization
+  __tests__/DataTableConformance.test.tsx # #257 — invokes the shared suite below
+  __tests__/DataTableContrast.test.tsx    # #257 — WCAG contrast, computed against the real theme
+  __tests__/conformance/
+    runDataTableConformanceSuite.tsx      # #257 — THE reusable suite; see §17.8
+  __tests__/testUtils/
+    layoutStubs.ts                        # #257 — the jsdom container-width/ResizeObserver
+                                           # recipe, extracted to one shared module
+    a11yGuards.ts                         # #257 — the issue #243 "invisible but
+                                           # tappable" sweep, consolidated to one module
+    contrast.ts                           # #257 — pure WCAG contrast-ratio calculator
+                                           # + its own unit tests (contrast.test.ts)
 ```
 
 Consumers import from `components/datatable` only. `desktop/`, `mobile/`,
@@ -1901,3 +1916,270 @@ copying rather than reinventing:
 4. **The #243 guard is re-run** against the export menu and the phone overflow
    menu, with `[role="menuitem"]` added to the sweep's selector — the export
    menu's controls are menu items rather than buttons or checkboxes.
+
+---
+
+## 17. Accessibility contract & keyboard model (#257)
+
+The component replaces 16 hand-rolled tables, so whatever a11y quality it has
+is inherited by every one of them at once — and whatever gap it has is
+inherited too. This section is the contract every renderer must hold to, and
+§17.8 is how a migrating page (#258 onward) gets that contract checked against
+its own columns for free instead of re-deriving it.
+
+**Target: WCAG 2.1 AA.** Every rule in this section exists to hold that line
+for both renderers, in both themes, at both this component's default 44px
+touch-target floor (§8.5) and its keyboard-only floor.
+
+### 17.1 Renderer semantics
+
+| Renderer | Announces as | Mechanism |
+| -------- | ------------- | --------- |
+| Desktop / tablet grid | a named **grid**, with real row/column context | DataGrid's own `role="grid"` / `role="row"` / `role="columnheader"` / `role="gridcell"` plus `aria-rowcount` / `aria-colcount` / `aria-rowindex` / `aria-colindex` — inherited for free, and asserted directly (not assumed) by the conformance suite's "renderer semantics" describe block |
+| Mobile card list | a named **list** | `Stack component="ul" role="list" aria-label={ariaLabel}` (`mobile/CardListRenderer.tsx`); each `DataCard` is a real `<li>` (`component="li"`) |
+
+**Every card is labelled by its primary column.** `DataCard.tsx` sets
+`aria-label={headlineText}` on the card's own root — `headlineText` is exactly
+the same value the card's visual headline and the row-actions menu's
+disambiguating suffix (§17.6) already use, so a screen reader user tabbing
+through list items hears each one named after the thing a sighted user reads
+it by, never a generic "list item". Two rows sharing the same primary-column
+value get the same accessible name — declare a primary column with row-unique
+values (an id, a name) for tables where that would be ambiguous.
+
+### 17.2 Live-region announcements
+
+Two announcements, both `aria-live="polite"`:
+
+- **Selection: "N of M selected"** — `BulkActionBar`'s `role="status"` text
+  (§5.6), now carrying an explicit denominator. `total` is the number of
+  selectABLE rows currently loaded (`rowIds.length`), never
+  `pagination.total` — selection is page-scoped (§5.3), so the announcement's
+  own scale must be too. Both renderers pass it; omitting `total` (a caller
+  using `BulkActionBar` directly, outside a `DataTable` renderer) falls back
+  to the bare "N selected" it always said.
+- **Filtering: "Filtered to N results"** — a `data-testid="datatable-filter-live-region"`
+  box in `DataTableFilterBar`, visually hidden (`@mui/utils/visuallyHidden`)
+  but always mounted, so the announcement fires regardless of which filter
+  surface (row / collapsed panel / sheet, §10.3) is currently drawn. It speaks
+  only when there is an active filter **or** search term *and* the page
+  reports `resultCount` (wired from `DataTable` as `pagination?.total`) — a
+  table with nothing applied has nothing to announce, and a count the page
+  never told it would be a lie the region has no way to double-check.
+  Singular/plural aware ("Filtered to 1 result").
+
+Neither announcement is read on initial mount with nothing applied — an empty
+live region announces nothing, by design; only a genuine state *change*
+should ever speak.
+
+### 17.3 Focus management
+
+Every overlay in this component is built on MUI's `Dialog` or `Menu`
+(both `Modal`-based), and none of them disables the defaults
+(`disableEnforceFocus` / `disableRestoreFocus` / `disableAutoFocus` are never
+set anywhere in `components/datatable/`) — so the contract below is inherited,
+not hand-rolled, and the conformance suite's "focus management" describe block
+exists specifically to keep it that way rather than assume it:
+
+- **Opening the filter sheet** (mobile, `DataTableFilterBar`), **the column
+  picker** (desktop menu / mobile sheet, `DataTableViewBar`), or **a row's
+  overflow menu** (`RowActionsCell`) moves focus inside and traps Tab there.
+- **Closing any of them** (Escape, the close button, selecting an item)
+  restores focus to the control that opened it — never to `<body>`.
+
+This is also why every trigger button in this component is a real, focusable
+element with a stable identity across the open/close cycle, never
+recreated — a trigger that gets a fresh DOM node on close cannot receive
+restored focus.
+
+### 17.4 Keyboard model
+
+#### Desktop / tablet grid
+
+Inherited from DataGrid: arrow keys move a roving cell focus; Home/End and
+Ctrl+Home/Ctrl+End jump within a row/to the grid's ends; Enter/Space activates
+whatever the focused cell contains. That inheritance is **verified, not
+assumed** (§17.8's fixture deliberately includes a `render`-only chip column
+and a `render`-only interactive `<a href>` link column): a cell's custom
+`render` content stays in the natural tab order and is reachable the same way
+plain grid content is, because nothing in `columnAdapter.ts`'s mapping
+strips or overrides `tabIndex` on rendered content.
+
+Three controls that are DataGrid built-ins, not custom cells, get the same
+guarantee for free — verified by the shared `checkboxColDef` override:
+
+- **The row checkbox column** is reachable via arrow-key cell navigation like
+  any other cell, and via a direct Tab into the cell that currently holds
+  roving focus (DataGrid's own "move DOM focus onto the tabindex=0 descendant"
+  behaviour, `GridCell.js`).
+- **The header "select all" checkbox** and **the tablet row-expander button**
+  are ordinary focusable controls (§17.6 covers their names).
+
+#### Tablet row expansion
+
+The expander (§9) is a real `IconButton` with `aria-expanded` — Enter/Space
+toggles it exactly like any other button; no bespoke key handling was written
+or is needed.
+
+#### Mobile card list
+
+A card has no column headers to click, so **every affordance the grid gets
+from DataGrid is reproduced as a real, independently-focusable control**
+rather than inherited:
+
+- **Tab order** walks header checkbox → each card's own checkbox → primary
+  content → row-actions trigger → (if expanded) detail-region content, in
+  DOM order — there is no synthetic roving-focus model to fight; ordinary
+  browser Tab semantics apply throughout.
+- **Enter/Space expand** the "More details" region and the tap-to-expand
+  truncated value (§8.3): both are a real `ButtonBase` with `aria-expanded`,
+  not a `div` with an `onClick`.
+- **Sort** is reachable via `CardSortControl` (§8.4) — a `select` plus a
+  direction-toggle `IconButton`, both ordinary focusable form controls.
+- **Pagination** (`CompactPagination`, §8.4) is two `IconButton`s with
+  `aria-label`s, no different from the grid footer's.
+
+#### The blanket rule
+
+**Every action available by pointer is reachable by keyboard**: bulk
+select-all, opening the filter sheet / column picker / row menu, changing
+density, paging, and exporting. None of this component's controls are
+`div`/`span` click handlers standing in for a real interactive element —
+every one is a `button`, a native `input`, or a `Checkbox`/`ButtonBase`.
+
+### 17.5 Sort state
+
+`aria-sort` on the desktop grid's column headers is a DataGrid built-in,
+wired automatically from the controlled `sort` prop (§5.2) — asserted
+directly by the conformance suite (`toHaveAttribute('aria-sort', 'descending')`)
+rather than re-derived. The mobile card list has no column headers to carry
+`aria-sort`; `CardSortControl`'s own `select` value and its direction
+button's `aria-label` ("Sorted descending, switch to ascending") communicate
+the same state in the only way a card layout can.
+
+### 17.6 Selection and action labelling
+
+**No control is ever named with a bare, row-agnostic label.** Both renderers
+derive a per-row accessible name — `rowAccessibleName()` in
+`desktop/columnAdapter.ts` on the grid, `DataCard`'s own `headlineText` on a
+card — from the first `primary`-priority column still on screen (respecting
+the user's #255 visibility choice), falling back to the row id only when
+there is no primary column or its value is empty/null:
+
+| Control | Bare label (before #257) | Row-labelled (after) |
+| ------- | ------------------------- | --------------------- |
+| Grid row checkbox | "Select row" (DataGrid's own locale text, identical on every row) | "Select `{row}`" |
+| Grid single row action | "`{action label}`" | "`{action label}` for `{row}`" |
+| Grid multi-action menu trigger | "Row actions" | "Row actions for `{row}`" |
+| Tablet row-expander | "Show details" / "Hide details" | "Show details for `{row}`" / "Hide details for `{row}`" |
+| Card checkbox | "Select row" | "Select `{row}`" |
+
+The card renderer's row-action button and its own checkbox already worked
+this way before #257 (they were the pattern; the grid was the gap). The grid
+row checkbox needed the most care: DataGrid's own per-row checkbox has ONE
+static locale string for every row, with no per-row override point in its
+public API — `desktop/DesktopGridRenderer.tsx` replaces it entirely via
+`checkboxColDef` (DataGrid's own, documented, forward-compatible extension
+point for the selection column; **not** a reach into an internal component),
+rendering a plain `Checkbox` whose `aria-label` is computed the same way
+every other per-row control's is.
+
+### 17.7 Two upstream gaps this component fixes, not works around
+
+The conformance suite's axe pass (§17.8) surfaced two REAL violations that
+predate #257 and are not test-environment artifacts — both fixed in the
+component, not suppressed:
+
+1. **An indeterminate checkbox's `aria-checked="mixed"` had no matching
+   native state.** MUI's `Checkbox` sets `aria-checked="mixed"` when
+   `indeterminate` is true but — by its own documented design — never sets
+   the native `HTMLInputElement.indeterminate` IDL property (which has no
+   HTML attribute form and can only be set imperatively). `axe-core`'s
+   `aria-conditional-attr` rule computes a checkbox's "real" state from that
+   native property, sees it disagree with `aria-checked="mixed"`, and flags
+   it — for both the card list's own select-all checkbox and, mediated
+   through DataGrid's own indeterminate header checkbox, the desktop grid's.
+   `shared/IndeterminateCheckbox.tsx` wraps `Checkbox`, syncs the native
+   property via a DOM query on its own root, and is used two ways: directly
+   in `CardListRenderer.tsx`, and as DataGrid's own public `slots.baseCheckbox`
+   override in `DesktopGridRenderer.tsx` — one component, both gaps.
+2. **The tablet expander column had no discernible header.** Its header is
+   visually blank by design (§9) — a single ~48px icon-button column, not
+   somewhere a visible label fits — but a `columnheader` cell with literally
+   zero accessible text is axe's `empty-table-header`. Fixed with the
+   standard technique: a visually-hidden ("Row details") text node via the
+   column's `renderHeader`, present for assistive tech, invisible on screen —
+   the same visually-hidden pattern §17.2's live regions use.
+
+### 17.8 The shared conformance suite
+
+`__tests__/conformance/runDataTableConformanceSuite.tsx` exports
+`runDataTableConformanceSuite(options?)` — call it inside a `describe` block
+and it registers the FULL mechanics + accessibility battery documented in
+this section (plus §12's pre-existing pagination/sort/selection/CSV/
+virtualization coverage) against a fixture table. `__tests__/DataTableConformance.test.tsx`
+is that call with zero arguments — it runs the suite against the module's own
+built-in fixture (`conformanceFixtureColumns` / `Rows` / `RowId`) and **is**
+this component's own regression suite for everything in §17.
+
+```tsx
+import { runDataTableConformanceSuite } from
+  '../../../components/datatable/__tests__/conformance/runDataTableConformanceSuite';
+
+describe('JobsTable', () => {
+  runDataTableConformanceSuite({
+    label: 'JobsTable',
+    columns: jobsTableColumns,   // the page's own DataTableColumn[]
+    rows: sampleJobs,
+    rowId: (job) => job.id,
+  });
+
+  // Page-specific tests only from here: business logic behind bulk actions,
+  // the page's fetch-and-map layer, anything about ITS columns the shared
+  // fixture can't stand in for. Table MECHANICS — everything above — never
+  // need re-testing per page; they don't change per column set.
+});
+```
+
+A migrating page (#258 onward) does not usually need to call this at all —
+table mechanics are a property of the component, not of a page's column
+declarations, so the zero-argument run already covers them. The one reason a
+page WOULD call it with its own `columns`/`rows`/`rowId` is a column whose
+`render` produces something the built-in fixture doesn't already exercise (a
+multi-control cell, an embedded form) — "does keyboard nav survive THIS
+specific custom content" is worth re-asking against the real thing.
+
+**What it covers**, end to end: renderer switching and state preservation
+across a resize; server-side pagination/sort/filter round-trips (including
+the negative test that `rows` is never filtered/sorted/paginated locally);
+selection and select-all, including past the virtualization threshold;
+loading/empty/error states in both renderers; column visibility, density, and
+the contract-default baseline; CSV escaping; the issue #243 "invisible but
+tappable" guard (`__tests__/testUtils/a11yGuards.ts`, consolidated here from
+four near-identical copies — see that file's docblock); "no horizontal
+document scroll at 360px"; §17.1's renderer semantics; §17.2's live regions;
+§17.3's focus management; and §17.4's keyboard model. Automated `axe-core`
+checks run in both renderers and both themes (`vitest-axe`).
+
+**`color-contrast` is deliberately disabled in the suite's axe pass.** jsdom
+performs no real layout or paint, so the rule cannot resolve an element's true
+effective background (every box measures 0×0) — a well-known false-negative
+trap under jsdom, not a real signal. Real contrast coverage lives in
+`__tests__/DataTableContrast.test.tsx` instead: a pure WCAG 2.1
+relative-luminance / contrast-ratio calculator (`__tests__/testUtils/contrast.ts`,
+with its own unit tests pinned against known references — black-on-white is
+exactly 21:1) run directly against the real `lightTheme`/`darkTheme` palette
+values for the specific pairs this component paints, including the
+**translucent** selected-row tint correctly alpha-composited over its actual
+backing surface before the ratio is computed — a case a naive two-color check
+gets wrong. This is a *stronger* check than axe could give in this
+environment, not a weaker substitute for one.
+
+**The theme-aware checks use their own render wrapper.** The other DataTable
+suites' shared `render` (`__tests__/utils/test-utils.tsx`) computes a theme
+via `ThemeContextProvider` but never actually applies it with MUI's
+`<ThemeProvider>` — only `App.tsx` does that — so every DataTable test outside
+this suite in fact renders against MUI's zero-config default theme, not the
+app's real palette. `runDataTableConformanceSuite`'s `renderWithTheme` wraps
+directly with `<ThemeProvider theme={lightTheme|darkTheme}><CssBaseline/>…`
+instead, since the both-themes checks need the REAL palette to mean anything.
