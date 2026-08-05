@@ -1727,8 +1727,14 @@ export class MediaService {
    * Single implementation of the four review-queue counts, shared by
    * getReviewCounts and getDashboard. Callers are responsible for the circle
    * access check.
+   *
+   * PUBLIC (issue #246) so the notification review-queue reconcile can consume
+   * the same four integers rather than opening a parallel counting path that
+   * could drift from the dashboard's. It stays access-check-free by design —
+   * the reconcile is a server-side sweep with no requesting user, and the two
+   * HTTP callers above run their own membership check.
    */
-  private async computeReviewCounts(circleId: string) {
+  async computeReviewCounts(circleId: string) {
     // Load burst minGroupSize from system settings for the burst count filter
     const burstSettings = await this.prisma.systemSettings.findUnique({
       where: { key: 'global' },
