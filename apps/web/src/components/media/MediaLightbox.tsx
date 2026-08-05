@@ -107,6 +107,14 @@ export function MediaLightbox({
   const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
 
   const item = index !== null ? items[index] ?? null : null;
+  const isOpen = index !== null;
+  /**
+   * Videos pin the control bar. The Vidstack player installs its own pointer /
+   * gesture handling and does not reliably propagate the events the auto-hide
+   * restore paths rely on, so once the bar hid over a video it was
+   * unrecoverable (issue #235).
+   */
+  const isVideo = item?.type === 'video';
 
   // Full item (with downloadUrl) fetched from API
   const [fullItem, setFullItem] = useState<MediaItem | null>(null);
@@ -137,6 +145,8 @@ export function MediaLightbox({
   } | null>(null);
 
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** True while this lightbox owns a pushed history entry. */
+  const historyPushedRef = useRef(false);
   const swipeRef = useRef<{
     startX: number;
     startY: number;
@@ -145,23 +155,74 @@ export function MediaLightbox({
     swiping: boolean;
   }>({ startX: 0, startY: 0, deltaX: 0, deltaY: 0, swiping: false });
 
-  // --- Mobile auto-hide controls ---
+  // --- Mobile auto-hide controls (photos only — videos keep the bar pinned) ---
   const resetHideTimer = useCallback(() => {
-    if (!isMobile) return;
+    if (!isMobile || isVideo) return;
     setControlsVisible(true);
     if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
-  }, [isMobile]);
+  }, [isMobile, isVideo]);
 
-  // Start auto-hide on mobile when lightbox opens
+  // Start auto-hide on mobile when the lightbox opens; on a video, cancel any
+  // pending hide and force the bar back on so navigating photo -> video always
+  // leaves the user a way out of the viewer.
   useEffect(() => {
-    if (isMobile && index !== null) {
-      resetHideTimer();
+    if (index !== null) {
+      if (isVideo) {
+        if (hideTimerRef.current !== null) {
+          clearTimeout(hideTimerRef.current);
+          hideTimerRef.current = null;
+        }
+        setControlsVisible(true);
+      } else if (isMobile) {
+        resetHideTimer();
+      }
     }
     return () => {
       if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
     };
-  }, [isMobile, index, resetHideTimer]);
+  }, [isMobile, isVideo, index, resetHideTimer]);
+
+  // --- Browser history integration ---
+  // The lightbox is component state rendered into a Modal, so without a history
+  // entry the browser Back button popped the underlying route and left the
+  // gallery entirely (issue #235). One entry is pushed per open; Back pops it
+  // and closes the viewer instead.
+  useEffect(() => {
+    if (!isOpen) {
+      historyPushedRef.current = false;
+      return;
+    }
+
+    // Guarded by a ref so React 18 StrictMode's double-invoked effect cannot
+    // push twice; keyed on open/closed only so item navigation never pushes.
+    if (!historyPushedRef.current) {
+      historyPushedRef.current = true;
+      window.history.pushState({ mhLightbox: true }, '');
+    }
+
+    const handlePopState = () => {
+      historyPushedRef.current = false;
+      onClose();
+    };
+    window.addEventListener('popstate', handlePopState);
+    // On unmount while open we only detach the listener — never history.back().
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isOpen, onClose]);
+
+  /**
+   * Close path for every UI affordance (Close button, Escape, backdrop, delete).
+   * When our own history entry is on top, go back and let the popstate handler
+   * do the closing, so the stack stays balanced whichever way the user exits.
+   */
+  const requestClose = useCallback(() => {
+    const state = window.history.state as { mhLightbox?: boolean } | null;
+    if (state?.mhLightbox) {
+      window.history.back();
+      return;
+    }
+    onClose();
+  }, [onClose]);
 
   // --- Favorite toggle ---
   const handleToggleFavorite = useCallback(async () => {
@@ -247,7 +308,7 @@ export function MediaLightbox({
     setDeleteLoading(true);
     try {
       await bulkDelete({ circleId: item.circleId, ids: [item.id] });
-      onClose();
+      requestClose();
     } catch (err) {
       setSnack({
         message: err instanceof Error ? err.message : 'Failed to move item to Trash',
@@ -256,7 +317,7 @@ export function MediaLightbox({
     } finally {
       setDeleteLoading(false);
     }
-  }, [item, onClose]);
+  }, [item, requestClose]);
 
   // --- Overflow: refresh faces (async job — no polling) ---
   const handleRefreshFaces = useCallback(async () => {
@@ -333,13 +394,13 @@ export function MediaLightbox({
         setPlaying(false);
         onIndexChange(index + 1);
       } else if (e.key === 'Escape') {
-        onClose();
+        requestClose();
       }
     };
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [index, items.length, onIndexChange, onClose]);
+  }, [index, items.length, onIndexChange, requestClose]);
 
   // --- Swipe handlers ---
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -450,7 +511,7 @@ export function MediaLightbox({
           display: 'flex',
           flexDirection: 'column',
         }}
-        onClick={onClose}
+        onClick={requestClose}
         onPointerMove={isMobile ? resetHideTimer : undefined}
       >
         {/* Inner content — stop propagation so clicks on controls don't close */}
@@ -479,7 +540,7 @@ export function MediaLightbox({
             <Tooltip title="Close">
               <IconButton
                 aria-label="Close lightbox"
-                onClick={onClose}
+                onClick={requestClose}
                 sx={{ color: 'white' }}
               >
                 <CloseIcon />
@@ -653,7 +714,9 @@ export function MediaLightbox({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
-            onClick={isMobile ? () => setControlsVisible((v) => !v) : undefined}
+            onClick={
+              isMobile && !isVideo ? () => setControlsVisible((v) => !v) : undefined
+            }
             onDoubleClick={() => setZoomed((z) => !z)}
           >
             {item.type === 'video' ? (
