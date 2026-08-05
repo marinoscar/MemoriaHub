@@ -121,6 +121,7 @@ describe('TrashBulkToolbar', () => {
       await waitFor(() => {
         expect(defaultProps.onSuccess).toHaveBeenCalledWith(
           expect.stringMatching(/restored 2 items/i),
+          { retainedIds: [] },
         );
       });
     });
@@ -135,6 +136,24 @@ describe('TrashBulkToolbar', () => {
       await waitFor(() => {
         expect(defaultProps.onSuccess).toHaveBeenCalledWith(
           expect.stringMatching(/1 item.* could not be restored/i),
+          { retainedIds: ['item-2'] },
+        );
+      });
+    });
+
+    it('reports conflicted ids as retainedIds so the gallery keeps them listed', async () => {
+      // Conflicted items were NOT restored — they are still in Trash and must
+      // stay in the list (issue #242).
+      mockRestoreFromTrash.mockResolvedValue({ restored: 1, conflicts: ['item-2'] });
+      const user = userEvent.setup();
+      render(<TrashBulkToolbar {...defaultProps} />);
+
+      await user.click(screen.getByRole('button', { name: /restore selected/i }));
+
+      await waitFor(() => {
+        expect(defaultProps.onSuccess).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ retainedIds: ['item-2'] }),
         );
       });
     });
