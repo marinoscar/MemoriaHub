@@ -1,37 +1,34 @@
 /**
- * Tests for apps/web/src/pages/Admin/PublicSharesPage.tsx
+ * Unit tests for PublicSharesPage — post-#259 (the shared-DataTable migration).
  *
- * Covers:
- *  Authorization:
- *   - redirects non-admin users to /
- *   - renders page content for admin users
+ * Scope note, per docs/specs/datatable.md §17.8 / §18.5: TABLE MECHANICS are a
+ * property of the component and are covered end to end by
+ * `runDataTableConformanceSuite` (pagination/sort/selection round-trips, the
+ * negative "never filters rows locally" test, loading/empty/error overlays,
+ * column visibility + density, CSV escaping, the issue #243 invisible-but-
+ * tappable sweep, axe in both renderers and both themes). None of that is
+ * re-tested here.
  *
- *  Table rendering:
- *   - shows shares from listShares({ scope: 'all' })
- *   - renders status chip for each share
- *   - shows "No shares found." when list is empty
- *   - shows "Public Sharing" heading
- *
- *  Single revoke:
- *   - clicking revoke icon opens confirmation dialog
- *   - confirming revoke calls revokeShare(id)
- *
- *  Copy link:
- *   - clicking copy icon calls navigator.clipboard.writeText with the publicUrl
- *
- *  Bulk select + revoke:
- *   - selecting all rows shows bulk action bar
- *   - clicking "Revoke" in bulk bar opens confirmation dialog
- *   - confirming bulk revoke calls bulkShares with correct ids and action
- *
- *  Status filter tabs:
- *   - renders "All", "Active", "Expired", "Revoked" tabs
+ * What IS here is everything this migration could plausibly break:
+ *   - the status TABS ↔ filter-model wiring (issue #259's headline decision),
+ *     including that the status column is absent from the generic filter picker,
+ *   - the public URL column: truncated, never in full, and NOT exportable,
+ *   - every mutation: copy, edit expiration, single revoke, bulk revoke /
+ *     set-expiration / delete,
+ *   - permission gating,
+ *   - the phone layout actually reaching the row actions that used to be off
+ *     screen (the bug the issue was filed for).
  */
 
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockAdminUser } from '../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../components/datatable/__tests__/testUtils/layoutStubs';
 import type { MediaShare } from '../../types/sharing';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +46,16 @@ vi.mock('../../hooks/useMediaShares', () => ({
 import { usePermissions } from '../../hooks/usePermissions';
 import { useMediaShares } from '../../hooks/useMediaShares';
 import PublicSharesPage from '../../pages/Admin/PublicSharesPage';
+import {
+  buildShareColumns,
+  normalizeShareFilters,
+  statusFromFilters,
+  toShareQuery,
+  truncateShareUrl,
+  withStatusFilter,
+} from '../../pages/Admin/sharesTable';
+import type { DataTableFilterModel } from '../../components/datatable';
+import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseMediaShares = vi.mocked(useMediaShares);
@@ -104,6 +111,22 @@ function makeHook(
   };
 }
 
+/** The row-scoped accessible-name suffix: the first `primary` column's value. */
+function rowLabel(id: string) {
+  return id.slice(0, 8);
+}
+
+function renderPage() {
+  return render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+}
+
+async function openRowMenu(user: ReturnType<typeof userEvent.setup>, id: string) {
+  const trigger = await screen.findByRole('button', {
+    name: `Row actions for ${rowLabel(id)}`,
+  });
+  await user.click(trigger);
+}
+
 // ---------------------------------------------------------------------------
 // Clipboard setup — done once at suite level so the same mock object is
 // referenced by both the outer beforeEach (which calls vi.clearAllMocks)
@@ -113,6 +136,9 @@ function makeHook(
 const writeTextMock = vi.fn();
 
 beforeAll(() => {
+  // jsdom performs no layout, so MUI X measures a 0×0 viewport and renders zero
+  // rows without these. Same recipe every DataTable suite uses.
+  installLayoutStubs();
   Object.defineProperty(navigator, 'clipboard', {
     value: { writeText: writeTextMock },
     writable: true,
@@ -127,20 +153,30 @@ beforeAll(() => {
 describe('PublicSharesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400); // desktop layout unless a test says otherwise
 
-    // Default: admin permissions
     mockUsePermissions.mockReturnValue(makePermissions(true));
-
-    // Default: empty share list
     mockUseMediaShares.mockReturnValue(makeHook());
 
-    // Restore clipboard mock after vi.clearAllMocks clears it
+    // Re-installed per test: `userEvent.setup()` swaps in its own
+    // `navigator.clipboard` stub and never restores it, so a suite-level
+    // definition would be gone by the time the copy tests run.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: writeTextMock },
+      writable: true,
+      configurable: true,
+    });
     writeTextMock.mockResolvedValue(undefined);
+
+    // The table's layout-persistence hook reads/writes `/user-settings`
+    // (docs/specs/datatable.md §15). Stub the real `api` singleton.
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
-  // -------------------------------------------------------------------------
+  // =========================================================================
   // Authorization
-  // -------------------------------------------------------------------------
+  // =========================================================================
 
   describe('Authorization', () => {
     it('redirects non-admin users — page content is not rendered', () => {
@@ -154,85 +190,106 @@ describe('PublicSharesPage', () => {
     });
 
     it('renders page content for admin users', () => {
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByText(/public sharing/i)).toBeInTheDocument();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Table rendering
-  // -------------------------------------------------------------------------
-
-  describe('Table rendering', () => {
-    it('shows "Public Sharing" heading', () => {
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
       expect(screen.getByRole('heading', { name: /public sharing/i })).toBeInTheDocument();
     });
+  });
 
-    it('shows "No shares found." when share list is empty', () => {
+  // =========================================================================
+  // Column definitions
+  // =========================================================================
+
+  describe('Column definitions', () => {
+    const columns = buildShareColumns({ onCopy: vi.fn() });
+    const byId = (id: string) => columns.find((column) => column.id === id)!;
+
+    it('marks the public URL column non-exportable — the token is a credential', () => {
+      expect(byId('publicUrl').exportable).toBe(false);
+    });
+
+    it('does not declare the status column as generically filterable (the tabs own it)', () => {
+      expect(byId('status').filterable).toBeUndefined();
+      // …but it still carries the enum labels the tab-produced chip reads from.
+      expect(byId('status').enumValues?.map((option) => option.value)).toEqual([
+        'active',
+        'expired',
+        'revoked',
+      ]);
+    });
+
+    it('declares targetType as filterable — no bespoke control competes for it', () => {
+      expect(byId('targetType').filterable).toEqual(['is']);
+    });
+
+    it('leads with a row-unique primary column so per-row controls are nameable', () => {
+      const firstPrimary = columns.find((column) => column.priority === 'primary')!;
+      expect(firstPrimary.id).toBe('id');
+      expect(firstPrimary.value!(makeShare({ id: 'abcdefgh-1234' }))).toBe('abcdefgh');
+    });
+
+    it('truncates a URL rather than printing it in full', () => {
+      const long = 'https://app.example.com/s/tok-abcdefghijklmnopqrstuvwxyz';
+      const shown = truncateShareUrl(long);
+      expect(shown.length).toBeLessThan(long.length);
+      expect(shown.endsWith('…')).toBe(true);
+      expect(truncateShareUrl('https://a.co/s/x')).toBe('https://a.co/s/x');
+    });
+  });
+
+  // =========================================================================
+  // Table rendering
+  // =========================================================================
+
+  describe('Table rendering', () => {
+    it('shows "No shares found." when the share list is empty', async () => {
       mockUseMediaShares.mockReturnValue(makeHook({ shares: [] }));
 
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      expect(screen.getByText(/no shares found/i)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/no shares found/i)).toBeInTheDocument();
+      });
     });
 
-    it('renders a row for each share in the list', () => {
+    it('renders a row per share with its status chip', async () => {
       mockUseMediaShares.mockReturnValue(
         makeHook({
           shares: [
-            makeShare({ id: 's1' }),
-            makeShare({ id: 's2' }),
-            makeShare({ id: 's3' }),
+            makeShare({ id: 's1-aaaaaaa', status: 'active' }),
+            makeShare({ id: 's2-bbbbbbb', status: 'expired' }),
+            makeShare({ id: 's3-ccccccc', status: 'revoked', targetType: 'album', itemCount: 4 }),
           ],
         }),
       );
 
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Each share row has a checkbox — 3 data rows + 1 header checkbox = 4 checkboxes
-      const checkboxes = screen.getAllByRole('checkbox');
-      // 1 header (select-all) + 3 rows
-      expect(checkboxes.length).toBeGreaterThanOrEqual(3);
+      const grid = await screen.findByRole('grid', { name: /public shares/i });
+      await waitFor(() => {
+        expect(within(grid).getByText('Active')).toBeInTheDocument();
+      });
+      expect(within(grid).getByText('Expired')).toBeInTheDocument();
+      expect(within(grid).getByText('Revoked')).toBeInTheDocument();
+      expect(within(grid).getByText('Album')).toBeInTheDocument();
     });
 
-    it('renders a status chip for each share', () => {
+    it('renders the public URL TRUNCATED, never in full', async () => {
+      const publicUrl = 'https://app.example.com/s/tok-abcdefghijklmnopqrstuvwxyz';
       mockUseMediaShares.mockReturnValue(
-        makeHook({
-          shares: [
-            makeShare({ id: 's1', status: 'active' }),
-            makeShare({ id: 's2', status: 'expired' }),
-            makeShare({ id: 's3', status: 'revoked' }),
-          ],
-        }),
+        makeHook({ shares: [makeShare({ id: 's1-aaaaaaa', publicUrl })] }),
       );
 
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // "Active" appears both in the tab and as a chip — use getAllByText
-      expect(screen.getAllByText('Active').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Expired').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Revoked').length).toBeGreaterThanOrEqual(1);
-
-      // Verify the MUI Chip elements specifically
-      const { container } = render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-      const chips = container.querySelectorAll('.MuiChip-root');
-      expect(chips.length).toBe(3);
+      await waitFor(() => {
+        expect(screen.getByText(truncateShareUrl(publicUrl))).toBeInTheDocument();
+      });
+      expect(screen.queryByText(publicUrl)).not.toBeInTheDocument();
     });
 
-    it('renders the public URL for each share', () => {
-      const share = makeShare({ id: 's1', publicUrl: 'https://app.example.com/s/tok-s1' });
-      mockUseMediaShares.mockReturnValue(makeHook({ shares: [share] }));
-
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByText(/tok-s1/)).toBeInTheDocument();
-    });
-
-    it('renders status filter tabs: All, Active, Expired, Revoked', () => {
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+    it('renders the status filter tabs: All, Active, Expired, Revoked', () => {
+      renderPage();
 
       expect(screen.getByRole('tab', { name: /^all$/i })).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: /^active$/i })).toBeInTheDocument();
@@ -240,50 +297,175 @@ describe('PublicSharesPage', () => {
       expect(screen.getByRole('tab', { name: /^revoked$/i })).toBeInTheDocument();
     });
 
-    it('shows loading spinner in the table body when isLoading is true and shares list is empty', () => {
-      mockUseMediaShares.mockReturnValue(makeHook({ isLoading: true, shares: [] }));
+    it('surfaces a list error without blanking the rows underneath it', async () => {
+      mockUseMediaShares.mockReturnValue(
+        makeHook({ shares: [makeShare({ id: 's1-aaaaaaa' })], error: 'Share load failed' }),
+      );
 
-      const { container } = render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Multiple spinners can appear (table cell + refresh button); at least one must exist
-      const progressbars = screen.getAllByRole('progressbar');
-      expect(progressbars.length).toBeGreaterThanOrEqual(1);
-
-      // The table body contains a cell with a spinner (24px size)
-      const tableSpinner = container.querySelector('tbody .MuiCircularProgress-root');
-      expect(tableSpinner).not.toBeNull();
-    });
-
-    it('renders column headers: Preview, Type, Items, Public URL, Expires, Status, Created', () => {
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      expect(screen.getByText('Preview')).toBeInTheDocument();
-      expect(screen.getByText('Type')).toBeInTheDocument();
-      expect(screen.getByText('Status')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText(/share load failed/i)).toBeInTheDocument();
+      });
+      expect(screen.getByText('s1-aaaaa'.slice(0, 8))).toBeInTheDocument();
     });
   });
 
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // Status tabs ⇄ filter model (issue #259's headline decision)
+  // =========================================================================
+
+  describe('Status tabs ⇄ filter model (pure)', () => {
+    it('reads the active tab back out of the model', () => {
+      expect(statusFromFilters([])).toBe('all');
+      expect(
+        statusFromFilters([{ columnId: 'status', operator: 'is', value: 'revoked' }]),
+      ).toBe('revoked');
+      // An unknown status value is not a tab.
+      expect(
+        statusFromFilters([{ columnId: 'status', operator: 'is', value: 'bogus' }]),
+      ).toBe('all');
+    });
+
+    it('writes a tab selection into the model, replacing any previous status', () => {
+      const first = withStatusFilter([], 'active');
+      expect(first).toEqual([{ columnId: 'status', operator: 'is', value: 'active' }]);
+
+      const second = withStatusFilter(first, 'revoked');
+      expect(second).toEqual([{ columnId: 'status', operator: 'is', value: 'revoked' }]);
+    });
+
+    it('"All" REMOVES the status entry — absence is what the endpoint means by all', () => {
+      const model = withStatusFilter([], 'expired');
+      expect(withStatusFilter(model, 'all')).toEqual([]);
+    });
+
+    it('leaves other filters untouched when the tab changes', () => {
+      const model: DataTableFilterModel = [
+        { columnId: 'targetType', operator: 'is', value: 'album' },
+      ];
+      expect(withStatusFilter(model, 'active')).toEqual([
+        { columnId: 'targetType', operator: 'is', value: 'album' },
+        { columnId: 'status', operator: 'is', value: 'active' },
+      ]);
+    });
+
+    it('maps the model onto the endpoint params', () => {
+      expect(toShareQuery([])).toEqual({});
+      expect(toShareQuery([{ columnId: 'status', operator: 'is', value: 'expired' }])).toEqual({
+        status: 'expired',
+      });
+      expect(
+        toShareQuery([
+          { columnId: 'status', operator: 'is', value: 'active' },
+          { columnId: 'targetType', operator: 'is', value: 'album' },
+        ]),
+      ).toEqual({ status: 'active', targetType: 'album' });
+    });
+
+    it('ignores operators and values this endpoint cannot express', () => {
+      expect(
+        toShareQuery([
+          { columnId: 'status', operator: 'isNot', value: 'active' },
+          { columnId: 'status', operator: 'is', value: 'bogus' },
+          { columnId: 'targetType', operator: 'is', value: 'nope' },
+          { columnId: 'expiresAt', operator: 'is', value: 'whenever' },
+        ]),
+      ).toEqual({});
+    });
+
+    it('keeps one filter per column, last one wins', () => {
+      const model: DataTableFilterModel = [
+        { columnId: 'targetType', operator: 'is', value: 'media_item' },
+        { columnId: 'targetType', operator: 'is', value: 'album' },
+      ];
+      expect(normalizeShareFilters(model)).toEqual([
+        { columnId: 'targetType', operator: 'is', value: 'album' },
+      ]);
+      const legal: DataTableFilterModel = [
+        { columnId: 'status', operator: 'is', value: 'active' },
+      ];
+      expect(normalizeShareFilters(legal)).toBe(legal);
+    });
+  });
+
+  describe('Status tabs ⇄ filter model (rendered)', () => {
+    it('selecting a tab sends that status to the API and shows it as a chip', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(screen.getByRole('tab', { name: /^revoked$/i }));
+
+      await waitFor(() => {
+        expect(mockUseMediaShares).toHaveBeenCalledWith(
+          expect.objectContaining({ scope: 'all', status: 'revoked', page: 1 }),
+        );
+      });
+      expect(await screen.findByText('Status is Revoked')).toBeInTheDocument();
+    });
+
+    it('removing the status chip returns the tab to "All" and drops the param', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(screen.getByRole('tab', { name: /^active$/i }));
+      const chip = await screen.findByText('Status is Active');
+
+      const deleteIcon = chip.closest('.MuiChip-root')!.querySelector('.MuiChip-deleteIcon')!;
+      await user.click(deleteIcon);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Status is Active')).not.toBeInTheDocument();
+      });
+      expect(screen.getByRole('tab', { name: /^all$/i })).toHaveAttribute('aria-selected', 'true');
+      expect(mockUseMediaShares).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: undefined }),
+      );
+    });
+
+    it('does NOT offer Status in the generic filter picker — the tabs are the only control', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      const combo = await screen.findByRole('combobox', { name: 'Column' });
+      await user.click(combo);
+
+      expect(await screen.findByRole('option', { name: 'Type' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'Status' })).not.toBeInTheDocument();
+    });
+
+    it('applies a Type filter through the generic filter bar', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('combobox', { name: 'Column' }));
+      await user.click(await screen.findByRole('option', { name: 'Type' }));
+      await user.click(await screen.findByRole('combobox', { name: 'Value' }));
+      await user.click(await screen.findByRole('option', { name: 'Album' }));
+      await user.click(screen.getByTestId('datatable-filter-apply'));
+
+      await waitFor(() => {
+        expect(mockUseMediaShares).toHaveBeenLastCalledWith(
+          expect.objectContaining({ targetType: 'album', page: 1 }),
+        );
+      });
+    });
+  });
+
+  // =========================================================================
   // Copy link
-  // -------------------------------------------------------------------------
+  // =========================================================================
 
   describe('Copy link', () => {
-    // navigator.clipboard is mocked at suite level (see writeTextMock above).
-    // vi.clearAllMocks() in the outer beforeEach clears call counts; the outer
-    // beforeEach also re-applies mockResolvedValue so the mock stays functional.
-
-    it('clicking copy icon calls navigator.clipboard.writeText with the publicUrl', async () => {
-      const share = makeShare({
-        id: 's1',
-        publicUrl: 'https://app.example.com/s/tok-s1',
-      });
+    it('clicking the in-cell copy button writes the FULL url to the clipboard', async () => {
+      const share = makeShare({ id: 's1-aaaaaaa', publicUrl: 'https://app.example.com/s/tok-s1' });
       mockUseMediaShares.mockReturnValue(makeHook({ shares: [share] }));
 
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      // Use fireEvent instead of userEvent so that user-event's own clipboard
-      // stub does not intercept the navigator.clipboard.writeText call.
-      const copyButton = screen.getByRole('button', { name: /copy link/i });
+      // fireEvent rather than userEvent so user-event's own clipboard stub does
+      // not intercept the navigator.clipboard.writeText call.
+      const copyButton = await screen.findByRole('button', { name: /copy link/i });
       fireEvent.click(copyButton);
 
       await waitFor(() => {
@@ -291,198 +473,266 @@ describe('PublicSharesPage', () => {
       });
     });
 
-    it('clicking copy icon shows a success snackbar', async () => {
-      const share = makeShare({
-        id: 's1',
-        publicUrl: 'https://app.example.com/s/tok-s1',
-      });
-      mockUseMediaShares.mockReturnValue(makeHook({ shares: [share] }));
+    it('shows a success snackbar after copying', async () => {
+      mockUseMediaShares.mockReturnValue(
+        makeHook({ shares: [makeShare({ id: 's1-aaaaaaa' })] }),
+      );
 
-      const user = userEvent.setup();
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
+      renderPage();
 
-      const copyButton = screen.getByRole('button', { name: /copy link/i });
-      await user.click(copyButton);
+      fireEvent.click(await screen.findByRole('button', { name: /copy link/i }));
 
       await waitFor(() => {
         expect(screen.getByText(/link copied to clipboard/i)).toBeInTheDocument();
       });
     });
 
-    it('copy icon button is rendered for each share', () => {
-      const shares = [makeShare({ id: 's1' }), makeShare({ id: 's2' })];
-      mockUseMediaShares.mockReturnValue(makeHook({ shares }));
+    it('renders one copy button per share', async () => {
+      mockUseMediaShares.mockReturnValue(
+        makeHook({
+          shares: [makeShare({ id: 's1-aaaaaaa' }), makeShare({ id: 's2-bbbbbbb' })],
+        }),
+      );
 
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      const copyButtons = screen.getAllByRole('button', { name: /copy link/i });
-      expect(copyButtons).toHaveLength(2);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Single revoke
-  // -------------------------------------------------------------------------
-
-  describe('Single revoke', () => {
-    function setupWithShare(id = 'share-1') {
-      const share = makeShare({ id, status: 'active' });
-      const hookResult = makeHook({ shares: [share] });
-      mockUseMediaShares.mockReturnValue(hookResult);
-      return { share, hookResult };
-    }
-
-    it('clicking the revoke icon opens a confirmation dialog', async () => {
-      setupWithShare('s1');
-
-      const user = userEvent.setup();
-      const { container } = render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // The revoke IconButton is wrapped in a <span> (for Tooltip with disabled child support),
-      // so aria-label is on the span, not the button. Query by the Block icon's data-testid.
-      const revokeIcon = container.querySelector('[data-testid="BlockIcon"]');
-      expect(revokeIcon).toBeTruthy();
-      const revokeBtn = revokeIcon!.closest('button') as HTMLButtonElement;
-      expect(revokeBtn).toBeTruthy();
-
-      await user.click(revokeBtn);
+      renderPage();
 
       await waitFor(() => {
-        expect(screen.getByText(/revoke share\?/i)).toBeInTheDocument();
-      });
-    });
-
-    it('confirming revoke calls revokeShare with the share id', async () => {
-      const { hookResult } = setupWithShare('share-abc');
-
-      const user = userEvent.setup();
-      const { container } = render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Find and click the revoke icon button
-      const revokeIcon = container.querySelector('[data-testid="BlockIcon"]');
-      const revokeBtn = revokeIcon!.closest('button') as HTMLButtonElement;
-      await user.click(revokeBtn);
-
-      await waitFor(() => screen.getByText(/revoke share\?/i));
-
-      // The dialog has a Revoke confirm button with text "Revoke"
-      const dialogRevokeBtns = screen.getAllByRole('button', { name: /^revoke$/i });
-      // Pick the last "Revoke" button (the one inside the dialog)
-      await user.click(dialogRevokeBtns[dialogRevokeBtns.length - 1]);
-
-      await waitFor(() => {
-        expect(hookResult.revokeShare).toHaveBeenCalledWith('share-abc');
+        expect(screen.getAllByRole('button', { name: /copy link/i })).toHaveLength(2);
       });
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Bulk select + revoke
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // Row actions
+  // =========================================================================
 
-  describe('Bulk select and revoke', () => {
+  describe('Row actions', () => {
+    it('revoking confirms first, then calls revokeShare with the share id', async () => {
+      const hook = makeHook({ shares: [makeShare({ id: 'share-abc12345', status: 'active' })] });
+      mockUseMediaShares.mockReturnValue(hook);
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'share-abc12345');
+      await user.click(await screen.findByRole('menuitem', { name: /^revoke$/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/revoke share\?/i)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: /^revoke$/i }));
+
+      await waitFor(() => {
+        expect(hook.revokeShare).toHaveBeenCalledWith('share-abc12345');
+      });
+    });
+
+    it('cancelling the revoke confirmation calls nothing', async () => {
+      const hook = makeHook({ shares: [makeShare({ id: 'share-abc12345', status: 'active' })] });
+      mockUseMediaShares.mockReturnValue(hook);
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'share-abc12345');
+      await user.click(await screen.findByRole('menuitem', { name: /^revoke$/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+      expect(hook.revokeShare).not.toHaveBeenCalled();
+    });
+
+    it('disables both row actions for an already-revoked share', async () => {
+      mockUseMediaShares.mockReturnValue(
+        makeHook({ shares: [makeShare({ id: 'share-dead1234', status: 'revoked' })] }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'share-dead1234');
+
+      expect(await screen.findByRole('menuitem', { name: /^revoke$/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+      expect(screen.getByRole('menuitem', { name: /edit expiration/i })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      );
+    });
+
+    it('edits an expiration through the dialog', async () => {
+      const hook = makeHook({ shares: [makeShare({ id: 'share-abc12345' })] });
+      mockUseMediaShares.mockReturnValue(hook);
+      const user = userEvent.setup();
+
+      renderPage();
+      await openRowMenu(user, 'share-abc12345');
+      await user.click(await screen.findByRole('menuitem', { name: /edit expiration/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/edit expiration/i)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => {
+        expect(hook.updateShare).toHaveBeenCalledWith('share-abc12345', { expiresAt: null });
+      });
+    });
+  });
+
+  // =========================================================================
+  // Bulk actions
+  // =========================================================================
+
+  describe('Bulk actions', () => {
     function setupWithShares() {
-      const shares = [
-        makeShare({ id: 'bulk-1', status: 'active' }),
-        makeShare({ id: 'bulk-2', status: 'active' }),
-      ];
-      const hookResult = makeHook({ shares });
-      mockUseMediaShares.mockReturnValue(hookResult);
-      return { shares, hookResult };
+      const hook = makeHook({
+        shares: [
+          makeShare({ id: 'bulk-1aaaaaa', status: 'active' }),
+          makeShare({ id: 'bulk-2bbbbbb', status: 'active' }),
+        ],
+      });
+      mockUseMediaShares.mockReturnValue(hook);
+      return hook;
     }
 
-    it('selecting all rows via header checkbox shows bulk action bar', async () => {
+    it('select-all shows the bulk bar with a count', async () => {
       setupWithShares();
-
       const user = userEvent.setup();
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      // First checkbox is the select-all header checkbox
-      await user.click(checkboxes[0]);
+      renderPage();
+      await user.click(await screen.findByRole('checkbox', { name: /select all rows/i }));
 
       await waitFor(() => {
-        expect(screen.getByText(/selected/i)).toBeInTheDocument();
+        expect(screen.getByTestId('datatable-bulk-action-bar')).toBeInTheDocument();
       });
+      expect(screen.getByText(/2 of 2 selected/i)).toBeInTheDocument();
     });
 
-    it('bulk "Revoke" opens confirmation dialog mentioning count', async () => {
-      setupWithShares();
-
+    it('bulk revoke confirms with the count, then calls bulkAction', async () => {
+      const hook = setupWithShares();
+      hook.bulkAction = vi.fn().mockResolvedValue({ affected: 2 });
       const user = userEvent.setup();
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      // Select all
-      const checkboxes = screen.getAllByRole('checkbox');
-      await user.click(checkboxes[0]);
-
-      await waitFor(() => screen.getByText(/selected/i));
-
-      // Click the Revoke button in the bulk action bar (there can be multiple "Revoke" buttons)
-      const revokeButtons = screen.getAllByRole('button', { name: /revoke/i });
-      // The bulk action bar "Revoke" is the one after the per-row ones; pick the one in the bulk bar
-      // Since select-all was clicked, per-row buttons are gone; the first "Revoke" should be the bulk one
-      await user.click(revokeButtons[0]);
+      renderPage();
+      await user.click(await screen.findByRole('checkbox', { name: /select all rows/i }));
+      await user.click(await screen.findByRole('button', { name: /^revoke$/i }));
 
       await waitFor(() => {
-        // Confirmation dialog for bulk (2 shares)
         expect(screen.getByText(/revoke 2 shares\?/i)).toBeInTheDocument();
       });
-    });
-
-    it('confirming bulk revoke calls bulkShares with correct ids and action "revoke"', async () => {
-      const { hookResult } = setupWithShares();
-      hookResult.bulkAction.mockResolvedValue({ affected: 2 });
-
-      const user = userEvent.setup();
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
-
-      // Select all rows
-      const checkboxes = screen.getAllByRole('checkbox');
-      await user.click(checkboxes[0]);
-
-      await waitFor(() => screen.getByText(/selected/i));
-
-      // Click bulk Revoke
-      const revokeButtons = screen.getAllByRole('button', { name: /revoke/i });
-      await user.click(revokeButtons[0]);
-
-      await waitFor(() => screen.getByText(/revoke 2 shares\?/i));
-
-      // Confirm in the dialog
-      const confirmBtns = screen.getAllByRole('button', { name: /^revoke$/i });
-      // The confirm button in the dialog
-      await user.click(confirmBtns[confirmBtns.length - 1]);
+      const dialog = screen.getByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^revoke$/i }));
 
       await waitFor(() => {
-        expect(hookResult.bulkAction).toHaveBeenCalledWith(
-          expect.objectContaining({
-            ids: expect.arrayContaining(['bulk-1', 'bulk-2']),
-            action: 'revoke',
-          }),
+        expect(hook.bulkAction).toHaveBeenCalledWith({
+          ids: ['bulk-1aaaaaa', 'bulk-2bbbbbb'],
+          action: 'revoke',
+        });
+      });
+    });
+
+    it('bulk set-expiration calls bulkAction with set_expiration', async () => {
+      const hook = setupWithShares();
+      hook.bulkAction = vi.fn().mockResolvedValue({ affected: 2 });
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('checkbox', { name: /select all rows/i }));
+      await user.click(await screen.findByRole('button', { name: /set expiration/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /apply/i }));
+
+      await waitFor(() => {
+        expect(hook.bulkAction).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'set_expiration', expiresAt: null }),
         );
       });
     });
 
-    it('shows count of selected items in the bulk bar', async () => {
-      const shares = [
-        makeShare({ id: 'x1', status: 'active' }),
-        makeShare({ id: 'x2', status: 'active' }),
-        makeShare({ id: 'x3', status: 'active' }),
-      ];
-      mockUseMediaShares.mockReturnValue(makeHook({ shares }));
-
+    it('bulk delete confirms, then calls bulkAction with delete', async () => {
+      const hook = setupWithShares();
+      hook.bulkAction = vi.fn().mockResolvedValue({ affected: 2 });
       const user = userEvent.setup();
-      render(<PublicSharesPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      // Select first two rows individually
-      const checkboxes = screen.getAllByRole('checkbox');
-      await user.click(checkboxes[1]); // row 1
-      await user.click(checkboxes[2]); // row 2
+      renderPage();
+      await user.click(await screen.findByRole('checkbox', { name: /select all rows/i }));
+      await user.click(await screen.findByRole('button', { name: /^delete$/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/delete 2 shares\?/i)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
 
       await waitFor(() => {
-        expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+        expect(hook.bulkAction).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'delete' }),
+        );
       });
+    });
+  });
+
+  // =========================================================================
+  // Phone — the bug this issue was filed for
+  // =========================================================================
+
+  describe('Phone layout (360px)', () => {
+    it('renders cards and still reaches every row action', async () => {
+      setInitialContainerWidth(360);
+      mockUseMediaShares.mockReturnValue(
+        makeHook({ shares: [makeShare({ id: 'share-abc12345', status: 'active' })] }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+
+      const table = await screen.findByTestId('datatable');
+      expect(table).toHaveAttribute('data-layout', 'mobile');
+
+      await openRowMenu(user, 'share-abc12345');
+      expect(await screen.findByRole('menuitem', { name: /^revoke$/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /edit expiration/i })).toBeInTheDocument();
+    });
+
+    it('keeps the copy button reachable on a card', async () => {
+      setInitialContainerWidth(360);
+      mockUseMediaShares.mockReturnValue(
+        makeHook({ shares: [makeShare({ id: 'share-abc12345' })] }),
+      );
+
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: /copy link/i })).toBeInTheDocument();
+    });
+
+    it('runs the bulk bar identically on a phone', async () => {
+      setInitialContainerWidth(360);
+      mockUseMediaShares.mockReturnValue(
+        makeHook({ shares: [makeShare({ id: 'share-abc12345', status: 'active' })] }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(await screen.findByRole('checkbox', { name: /select all rows/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('datatable-bulk-action-bar')).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: /^revoke$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /set expiration/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+    });
+
+    it('contains its own width — nothing forces the document sideways', async () => {
+      setInitialContainerWidth(360);
+      mockUseMediaShares.mockReturnValue(
+        makeHook({ shares: [makeShare({ id: 'share-abc12345' })] }),
+      );
+
+      renderPage();
+
+      const table = await screen.findByTestId('datatable');
+      const styles = window.getComputedStyle(table);
+      expect(styles.maxWidth).toBe('100%');
+      expect(styles.minWidth).toBe('0px');
     });
   });
 });

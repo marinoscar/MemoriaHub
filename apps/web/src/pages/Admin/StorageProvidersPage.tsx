@@ -1,11 +1,32 @@
-import { useEffect, useState } from 'react';
+/**
+ * Admin → Storage Providers (`/admin/settings/storage/providers`).
+ *
+ * Migrated onto the shared DataTable in issue #259 (epic #238). Two surfaces
+ * changed here:
+ *
+ *   1. **Provider rows.** The three stacked credential CARDS became one table
+ *      (`./storageProvidersTable.tsx`), with the credential form moved behind a
+ *      per-row "Configure…" dialog. The old layout made the reader scroll past
+ *      six text fields per provider to compare which one was active, which had a
+ *      bucket set, and which was even configured — the exact comparison a table
+ *      answers in one glance and a stack of forms never does. Every mutation is
+ *      unchanged: the same `saveCredentials` / `removeCredentials` /
+ *      `testProvider` calls, with the same "blank secret means keep the stored
+ *      one" semantics and the same pre-save test guard.
+ *   2. **Migration run history.** A hand-rolled seven-column `<Table>` became a
+ *      DataTable with `status` as a `primary` column (issue #259's decision).
+ *
+ * The active-provider radio group and the migration start form are NOT tables
+ * and are untouched.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
 import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Box,
   Typography,
   Paper,
-  Chip,
   TextField,
   FormControlLabel,
   Switch,
@@ -19,11 +40,6 @@ import {
   Alert,
   Snackbar,
   LinearProgress,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -37,292 +53,27 @@ import {
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
   Cloud as CloudIcon,
+  Settings as SettingsIcon,
+  NetworkCheck as TestIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useStorageProviders } from '../../hooks/useStorageProviders';
 import { useStorageMigration } from '../../hooks/useStorageMigration';
-import type { StorageProviderRow } from '../../services/storage-providers';
-
-// ---------------------------------------------------------------------------
-// Helper: human-readable provider label
-// ---------------------------------------------------------------------------
-
-function providerLabel(key: string): string {
-  switch (key) {
-    case 's3':
-      return 'AWS S3';
-    case 'r2':
-      return 'Cloudflare R2';
-    case 'local':
-      return 'Local Disk';
-    default:
-      return key.toUpperCase();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helper: migration status chip
-// ---------------------------------------------------------------------------
-
-function StatusChip({ status }: { status: string }) {
-  const colorMap: Record<string, 'default' | 'warning' | 'info' | 'success' | 'error'> = {
-    pending: 'warning',
-    running: 'info',
-    completed: 'success',
-    failed: 'error',
-    cancelled: 'default',
-  };
-  return (
-    <Chip
-      label={status}
-      color={colorMap[status] ?? 'default'}
-      size="small"
-      variant="outlined"
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Provider card
-// ---------------------------------------------------------------------------
-
-interface ProviderCardProps {
-  providerConfig: StorageProviderRow;
-  isActive: boolean;
-  formState: ProviderFormState;
-  onFormChange: (key: string, field: string, value: string | boolean) => void;
-  onSave: (provider: string) => Promise<void>;
-  onRemove: (provider: string) => Promise<void>;
-  onTest: (provider: string) => Promise<void>;
-  testResult: { ok: boolean; bucket?: string; region?: string; endpoint?: string; error?: string } | null;
-  testLoading: boolean;
-}
-
-function ProviderCard({
-  providerConfig,
-  isActive,
-  formState,
-  onFormChange,
-  onSave,
-  onRemove,
-  onTest,
-  testResult,
-  testLoading,
-}: ProviderCardProps) {
-  const key = providerConfig.provider;
-  const isLocal = key === 'local';
-  const isR2 = key === 'r2';
-
-  return (
-    <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-        <Typography variant="h6">{providerLabel(key)}</Typography>
-        {isActive && (
-          <Chip label="Active" color="primary" size="small" />
-        )}
-        <Chip
-          label={providerConfig.enabled ? 'Enabled' : 'Disabled'}
-          color={providerConfig.enabled ? 'success' : 'default'}
-          size="small"
-          variant="outlined"
-        />
-        {providerConfig.configured && (
-          <Chip label="Configured" color="info" size="small" variant="outlined" />
-        )}
-      </Box>
-
-      {isLocal ? (
-        /* Local disk — no credential fields */
-        <Box>
-          <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 2 }}>
-            No credentials required — files are stored on the server's local filesystem.
-          </Alert>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={testLoading}
-              startIcon={testLoading ? <CircularProgress size={14} /> : undefined}
-              onClick={() => void onTest(key)}
-            >
-              Test connection
-            </Button>
-          </Stack>
-          {testResult != null && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
-              {testResult.ok ? (
-                <CheckCircleIcon color="success" fontSize="small" />
-              ) : (
-                <ErrorIcon color="error" fontSize="small" />
-              )}
-              <Typography
-                variant="body2"
-                color={testResult.ok ? 'success.main' : 'error.main'}
-              >
-                {testResult.ok ? 'Accessible' : (testResult.error ?? 'Test failed')}
-              </Typography>
-            </Box>
-          )}
-        </Box>
-      ) : (
-        <>
-          {/* Masked current secret */}
-          {providerConfig.configured && providerConfig.last4 && (
-            <TextField
-              label="Current Secret Access Key"
-              value={`••••••••${providerConfig.last4}`}
-              size="small"
-              fullWidth
-              disabled
-              sx={{ mb: 2 }}
-            />
-          )}
-
-          {/* Access Key ID */}
-          <TextField
-            label="Access Key ID"
-            size="small"
-            fullWidth
-            value={formState.accessKeyId ?? ''}
-            onChange={(e) => onFormChange(key, 'accessKeyId', e.target.value)}
-            placeholder={providerConfig.configured ? 'Leave blank to keep current' : 'Enter Access Key ID'}
-            sx={{ mb: 2 }}
-          />
-
-          {/* New Secret Access Key */}
-          <TextField
-            label="New Secret Access Key"
-            type="password"
-            size="small"
-            fullWidth
-            value={formState.secretAccessKey ?? ''}
-            onChange={(e) => onFormChange(key, 'secretAccessKey', e.target.value)}
-            placeholder={providerConfig.configured ? 'Leave blank to keep current secret' : 'Enter Secret Access Key'}
-            helperText={providerConfig.configured ? 'Leave blank to use the saved secret when testing or saving.' : undefined}
-            sx={{ mb: 2 }}
-          />
-
-          {/* Bucket */}
-          <TextField
-            label="Bucket"
-            size="small"
-            fullWidth
-            value={formState.bucket ?? ''}
-            onChange={(e) => onFormChange(key, 'bucket', e.target.value)}
-            placeholder="my-bucket"
-            sx={{ mb: 2 }}
-          />
-
-          {/* Region */}
-          <TextField
-            label="Region"
-            size="small"
-            fullWidth
-            value={formState.region ?? ''}
-            onChange={(e) => onFormChange(key, 'region', e.target.value)}
-            placeholder={isR2 ? 'auto' : 'us-east-1'}
-            sx={{ mb: 2 }}
-          />
-
-          {/* Endpoint (R2 requires it; S3 optional) */}
-          <TextField
-            label="Endpoint URL"
-            size="small"
-            fullWidth
-            value={formState.endpoint ?? ''}
-            onChange={(e) => onFormChange(key, 'endpoint', e.target.value)}
-            placeholder={
-              isR2
-                ? 'https://<account-id>.r2.cloudflarestorage.com'
-                : 'Leave blank for AWS default'
-            }
-            helperText={
-              isR2
-                ? 'Required for Cloudflare R2 — find this in the R2 dashboard.'
-                : 'Optional — set only for S3-compatible endpoints.'
-            }
-            required={isR2}
-            sx={{ mb: 2 }}
-          />
-
-          {/* Enabled toggle */}
-          <FormControlLabel
-            control={
-              <Switch
-                checked={formState.enabled ?? providerConfig.enabled}
-                onChange={(e) => onFormChange(key, 'enabled', e.target.checked)}
-              />
-            }
-            label="Enabled"
-            sx={{ mb: 2, display: 'block' }}
-          />
-
-          {/* Guard: provider requires credentials, not yet saved, and secret is blank */}
-          {providerConfig.requiresCredentials && !providerConfig.configured && !formState.secretAccessKey && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Enter the Secret Access Key to test before saving.
-            </Typography>
-          )}
-
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Button
-              variant="contained"
-              size="small"
-              onClick={() => void onSave(key)}
-            >
-              Save
-            </Button>
-            {providerConfig.configured && (
-              <Button
-                variant="outlined"
-                size="small"
-                color="error"
-                onClick={() => void onRemove(key)}
-              >
-                Remove
-              </Button>
-            )}
-            <Button
-              variant="outlined"
-              size="small"
-              disabled={
-                testLoading ||
-                (providerConfig.requiresCredentials && !providerConfig.configured && !formState.secretAccessKey)
-              }
-              title={
-                providerConfig.requiresCredentials && !providerConfig.configured && !formState.secretAccessKey
-                  ? 'Enter the Secret Access Key to test before saving'
-                  : undefined
-              }
-              startIcon={testLoading ? <CircularProgress size={14} /> : undefined}
-              onClick={() => void onTest(key)}
-            >
-              Test connection
-            </Button>
-          </Stack>
-
-          {testResult != null && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
-              {testResult.ok ? (
-                <CheckCircleIcon color="success" fontSize="small" />
-              ) : (
-                <ErrorIcon color="error" fontSize="small" />
-              )}
-              <Typography
-                variant="body2"
-                color={testResult.ok ? 'success.main' : 'error.main'}
-              >
-                {testResult.ok
-                  ? `Connected${testResult.bucket ? ` — bucket: ${testResult.bucket}` : ''}`
-                  : (testResult.error ?? 'Test failed')}
-              </Typography>
-            </Box>
-          )}
-        </>
-      )}
-    </Paper>
-  );
-}
+import type {
+  MigrationRun,
+  StorageProviderRow,
+  StorageTestResult,
+} from '../../services/storage-providers';
+import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import {
+  MIGRATION_RUN_COLUMNS,
+  MigrationStatusChip,
+  STORAGE_MIGRATIONS_TABLE_ID,
+  STORAGE_PROVIDERS_TABLE_ID,
+  buildStorageProviderColumns,
+  providerLabel,
+} from './storageProvidersTable';
 
 // ---------------------------------------------------------------------------
 // Per-provider form shape
@@ -348,6 +99,218 @@ function defaultFormState(row: StorageProviderRow): ProviderFormState {
     endpoint: row.endpoint ?? '',
     enabled: row.enabled,
   };
+}
+
+/**
+ * Whether a provider still needs a secret typed in before it can be tested.
+ *
+ * Unchanged rule, lifted verbatim out of the old card: a provider that requires
+ * credentials and has never been saved has nothing on the server to test with.
+ */
+function needsSecretBeforeTest(
+  row: StorageProviderRow,
+  form: ProviderFormState | undefined,
+): boolean {
+  return row.requiresCredentials && !row.configured && !form?.secretAccessKey;
+}
+
+// ---------------------------------------------------------------------------
+// Test result line (shared by the dialog and the local-disk row)
+// ---------------------------------------------------------------------------
+
+function TestResultLine({ result, local }: { result: StorageTestResult; local?: boolean }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
+      {result.ok ? (
+        <CheckCircleIcon color="success" fontSize="small" />
+      ) : (
+        <ErrorIcon color="error" fontSize="small" />
+      )}
+      <Typography variant="body2" color={result.ok ? 'success.main' : 'error.main'}>
+        {result.ok
+          ? local
+            ? 'Accessible'
+            : `Connected${result.bucket ? ` — bucket: ${result.bucket}` : ''}`
+          : (result.error ?? 'Test failed')}
+      </Typography>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Configure dialog — the credential form that used to be a card
+// ---------------------------------------------------------------------------
+
+interface ConfigureProviderDialogProps {
+  providerConfig: StorageProviderRow | null;
+  formState: ProviderFormState | undefined;
+  onFormChange: (key: string, field: string, value: string | boolean) => void;
+  onSave: (provider: string) => Promise<void>;
+  onTest: (provider: string) => Promise<void>;
+  testResult: StorageTestResult | null;
+  testLoading: boolean;
+  onClose: () => void;
+}
+
+function ConfigureProviderDialog({
+  providerConfig,
+  formState,
+  onFormChange,
+  onSave,
+  onTest,
+  testResult,
+  testLoading,
+  onClose,
+}: ConfigureProviderDialogProps) {
+  if (!providerConfig) {
+    return <Dialog open={false} onClose={onClose} />;
+  }
+
+  const key = providerConfig.provider;
+  const isLocal = key === 'local';
+  const isR2 = key === 'r2';
+  const form = formState ?? defaultFormState(providerConfig);
+  const testBlocked = needsSecretBeforeTest(providerConfig, form);
+
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{providerLabel(key)}</DialogTitle>
+      <DialogContent>
+        {isLocal ? (
+          <Box sx={{ pt: 1 }}>
+            <Alert severity="info" icon={false} sx={{ py: 0.5, mb: 2 }}>
+              No credentials required — files are stored on the server&apos;s local filesystem.
+            </Alert>
+            {testResult != null && <TestResultLine result={testResult} local />}
+          </Box>
+        ) : (
+          <Box sx={{ pt: 1 }}>
+            {/* Masked current secret */}
+            {providerConfig.configured && providerConfig.last4 && (
+              <TextField
+                label="Current Secret Access Key"
+                value={`••••••••${providerConfig.last4}`}
+                size="small"
+                fullWidth
+                disabled
+                sx={{ mb: 2 }}
+              />
+            )}
+
+            <TextField
+              label="Access Key ID"
+              size="small"
+              fullWidth
+              value={form.accessKeyId ?? ''}
+              onChange={(e) => onFormChange(key, 'accessKeyId', e.target.value)}
+              placeholder={
+                providerConfig.configured ? 'Leave blank to keep current' : 'Enter Access Key ID'
+              }
+              sx={{ mb: 2 }}
+            />
+
+            <TextField
+              label="New Secret Access Key"
+              type="password"
+              size="small"
+              fullWidth
+              value={form.secretAccessKey ?? ''}
+              onChange={(e) => onFormChange(key, 'secretAccessKey', e.target.value)}
+              placeholder={
+                providerConfig.configured
+                  ? 'Leave blank to keep current secret'
+                  : 'Enter Secret Access Key'
+              }
+              helperText={
+                providerConfig.configured
+                  ? 'Leave blank to use the saved secret when testing or saving.'
+                  : undefined
+              }
+              sx={{ mb: 2 }}
+            />
+
+            <TextField
+              label="Bucket"
+              size="small"
+              fullWidth
+              value={form.bucket ?? ''}
+              onChange={(e) => onFormChange(key, 'bucket', e.target.value)}
+              placeholder="my-bucket"
+              sx={{ mb: 2 }}
+            />
+
+            <TextField
+              label="Region"
+              size="small"
+              fullWidth
+              value={form.region ?? ''}
+              onChange={(e) => onFormChange(key, 'region', e.target.value)}
+              placeholder={isR2 ? 'auto' : 'us-east-1'}
+              sx={{ mb: 2 }}
+            />
+
+            <TextField
+              label="Endpoint URL"
+              size="small"
+              fullWidth
+              value={form.endpoint ?? ''}
+              onChange={(e) => onFormChange(key, 'endpoint', e.target.value)}
+              placeholder={
+                isR2
+                  ? 'https://<account-id>.r2.cloudflarestorage.com'
+                  : 'Leave blank for AWS default'
+              }
+              helperText={
+                isR2
+                  ? 'Required for Cloudflare R2 — find this in the R2 dashboard.'
+                  : 'Optional — set only for S3-compatible endpoints.'
+              }
+              required={isR2}
+              sx={{ mb: 2 }}
+            />
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={form.enabled ?? providerConfig.enabled}
+                  onChange={(e) => onFormChange(key, 'enabled', e.target.checked)}
+                />
+              }
+              label="Enabled"
+              sx={{ mb: 2, display: 'block' }}
+            />
+
+            {testBlocked && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                Enter the Secret Access Key to test before saving.
+              </Typography>
+            )}
+
+            {testResult != null && <TestResultLine result={testResult} />}
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ flexWrap: 'wrap', gap: 1, px: 3, pb: 2 }}>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={testLoading || testBlocked}
+          title={testBlocked ? 'Enter the Secret Access Key to test before saving' : undefined}
+          startIcon={testLoading ? <CircularProgress size={14} /> : undefined}
+          onClick={() => void onTest(key)}
+        >
+          Test connection
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        <Button onClick={onClose}>Close</Button>
+        {!isLocal && (
+          <Button variant="contained" size="small" onClick={() => void onSave(key)}>
+            Save
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +347,9 @@ function StorageProvidersContent() {
 
   // Per-provider form state
   const [formMap, setFormMap] = useState<ProviderFormMap>({});
+
+  // The provider whose credential dialog is open
+  const [configureProvider, setConfigureProvider] = useState<string | null>(null);
 
   // Active provider radio selection
   const [activeProviderLocal, setActiveProviderLocal] = useState('');
@@ -470,12 +436,7 @@ function StorageProvidersContent() {
   };
 
   const handleRemove = async (provider: string) => {
-    if (
-      !window.confirm(
-        `Remove credentials for ${providerLabel(provider)}? This will disable this provider.`,
-      )
-    )
-      return;
+    setConfigureProvider(null);
     try {
       await removeCredentials(provider);
       setSuccessMessage(`${providerLabel(provider)} credentials removed`);
@@ -488,13 +449,20 @@ function StorageProvidersContent() {
   const handleTest = async (provider: string) => {
     const form = formMap[provider];
     try {
-      await testProvider(provider, {
+      const result = await testProvider(provider, {
         accessKeyId: form?.accessKeyId || undefined,
         secretAccessKey: form?.secretAccessKey || undefined,
         bucket: form?.bucket || undefined,
         region: form?.region || undefined,
         endpoint: form?.endpoint || undefined,
       });
+      // The dialog shows the result inline; a test launched from the row menu
+      // has nowhere to show it, so it also lands in the snackbar.
+      if (result.ok) {
+        setSuccessMessage(`${providerLabel(provider)} connection OK`);
+      } else {
+        setLocalError(result.error ?? `${providerLabel(provider)} test failed`);
+      }
     } catch {
       // result is captured inside testProvider
     }
@@ -535,6 +503,50 @@ function StorageProvidersContent() {
   };
 
   // ---------------------------------------------------------------------------
+  // Table wiring
+  // ---------------------------------------------------------------------------
+
+  const providerColumns = useMemo(
+    () => buildStorageProviderColumns(settings?.activeProvider),
+    [settings?.activeProvider],
+  );
+
+  const providerActions = useMemo<DataTableRowAction<StorageProviderRow>[]>(
+    () => [
+      {
+        id: 'configure',
+        label: 'Configure',
+        icon: <SettingsIcon fontSize="small" />,
+        onClick: (row) => setConfigureProvider(row.provider),
+      },
+      {
+        id: 'test',
+        label: 'Test connection',
+        icon: <TestIcon fontSize="small" />,
+        disabled: (row) =>
+          (testLoading[row.provider] ?? false) || needsSecretBeforeTest(row, formMap[row.provider]),
+        onClick: (row) => void handleTest(row.provider),
+      },
+      {
+        id: 'remove',
+        label: 'Remove',
+        icon: <DeleteIcon fontSize="small" />,
+        destructive: true,
+        disabled: (row) => !row.configured || row.provider === 'local',
+        confirm: {
+          title: 'Remove credentials?',
+          description: (row) =>
+            `Remove credentials for ${providerLabel(row.provider)}? This will disable this provider.`,
+          confirmLabel: 'Remove',
+        },
+        onClick: (row) => void handleRemove(row.provider),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [testLoading, formMap],
+  );
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -557,6 +569,7 @@ function StorageProvidersContent() {
   const providerKeys = providers.map((p) => p.provider);
   const migrationInProgress =
     activeRun != null && (activeRun.status === 'pending' || activeRun.status === 'running');
+  const configureRow = providers.find((p) => p.provider === configureProvider) ?? null;
 
   return (
     <Container maxWidth="lg">
@@ -584,27 +597,25 @@ function StorageProvidersContent() {
         </Typography>
 
         {/* ------------------------------------------------------------------ */}
-        {/* Provider cards                                                      */}
+        {/* Provider rows                                                       */}
         {/* ------------------------------------------------------------------ */}
-        {providers.map((p) => (
-          <ProviderCard
-            key={p.provider}
-            providerConfig={p}
-            isActive={settings?.activeProvider === p.provider}
-            formState={formMap[p.provider] ?? defaultFormState(p)}
-            onFormChange={onFormChange}
-            onSave={handleSave}
-            onRemove={handleRemove}
-            onTest={handleTest}
-            testResult={testResults[p.provider] ?? null}
-            testLoading={testLoading[p.provider] ?? false}
-          />
-        ))}
+        <DataTable<StorageProviderRow>
+          columns={providerColumns}
+          rows={providers}
+          rowId={(row) => row.provider}
+          tableId={STORAGE_PROVIDERS_TABLE_ID}
+          ariaLabel="Storage providers"
+          density="compact"
+          loading={loading}
+          emptyState={<span>No storage providers available</span>}
+          rowActions={providerActions}
+          csvExport={{ filename: 'storage-providers' }}
+        />
 
         {/* ------------------------------------------------------------------ */}
         {/* Active provider selector                                            */}
         {/* ------------------------------------------------------------------ */}
-        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+        <Paper variant="outlined" sx={{ p: 3, mt: 3, mb: 2 }}>
           <Typography variant="h6" sx={{ mb: 0.5 }}>
             Active Provider for New Uploads
           </Typography>
@@ -664,7 +675,7 @@ function StorageProvidersContent() {
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Migration in progress
                 </Typography>
-                <StatusChip status={activeRun.status} />
+                <MigrationStatusChip status={activeRun.status} />
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 {providerLabel(activeRun.sourceProvider)} → {providerLabel(activeRun.targetProvider)}
@@ -716,8 +727,9 @@ function StorageProvidersContent() {
           {!migrationInProgress && (
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: 'flex-start' }}>
               <FormControl size="small" sx={{ minWidth: 160 }}>
-                <InputLabel>Source provider</InputLabel>
+                <InputLabel id="migration-source-label">Source provider</InputLabel>
                 <Select
+                  labelId="migration-source-label"
                   label="Source provider"
                   value={migSource}
                   onChange={(e) => setMigSource(e.target.value)}
@@ -732,8 +744,9 @@ function StorageProvidersContent() {
               </FormControl>
 
               <FormControl size="small" sx={{ minWidth: 160 }}>
-                <InputLabel>Target provider</InputLabel>
+                <InputLabel id="migration-target-label">Target provider</InputLabel>
                 <Select
+                  labelId="migration-target-label"
                   label="Target provider"
                   value={migTarget}
                   onChange={(e) => setMigTarget(e.target.value)}
@@ -773,77 +786,35 @@ function StorageProvidersContent() {
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Recent Migration Runs
               </Typography>
-              <Paper variant="outlined">
-                {runsLoading ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-                    <CircularProgress size={24} />
-                  </Box>
-                ) : (
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Route</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell align="right">Copied</TableCell>
-                        <TableCell align="right">Failed</TableCell>
-                        <TableCell align="right">Skipped</TableCell>
-                        <TableCell>Started</TableCell>
-                        <TableCell>Finished</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {runs.map((run) => (
-                        <TableRow key={run.id}>
-                          <TableCell>
-                            <Typography
-                              variant="body2"
-                              sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}
-                            >
-                              {providerLabel(run.sourceProvider)} →{' '}
-                              {providerLabel(run.targetProvider)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <StatusChip status={run.status} />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography variant="body2">{run.migratedCount}</Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Chip
-                              label={run.failedCount}
-                              size="small"
-                              color={run.failedCount > 0 ? 'error' : 'default'}
-                              variant="outlined"
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography variant="body2">{run.skippedCount}</Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {run.startedAt
-                                ? new Date(run.startedAt).toLocaleString()
-                                : '—'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {run.finishedAt
-                                ? new Date(run.finishedAt).toLocaleString()
-                                : '—'}
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </Paper>
+              <DataTable<MigrationRun>
+                columns={MIGRATION_RUN_COLUMNS}
+                rows={runs}
+                rowId={(run) => run.id}
+                tableId={STORAGE_MIGRATIONS_TABLE_ID}
+                ariaLabel="Migration runs"
+                density="compact"
+                loading={runsLoading}
+                emptyState={<span>No migration runs yet</span>}
+                csvExport={{ filename: 'storage-migration-runs' }}
+              />
             </Box>
           )}
         </Paper>
       </Box>
+
+      {/* -------------------------------------------------------------------- */}
+      {/* Configure provider dialog (the old card, per row)                     */}
+      {/* -------------------------------------------------------------------- */}
+      <ConfigureProviderDialog
+        providerConfig={configureRow}
+        formState={configureProvider ? formMap[configureProvider] : undefined}
+        onFormChange={onFormChange}
+        onSave={handleSave}
+        onTest={handleTest}
+        testResult={configureProvider ? (testResults[configureProvider] ?? null) : null}
+        testLoading={configureProvider ? (testLoading[configureProvider] ?? false) : false}
+        onClose={() => setConfigureProvider(null)}
+      />
 
       {/* -------------------------------------------------------------------- */}
       {/* Confirmation dialog                                                   */}

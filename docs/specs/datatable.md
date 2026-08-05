@@ -6,7 +6,10 @@ density and per-user layout persistence shipped (issue #255, §14–§15); row
 virtualization + CSV export shipped (issue #256, §16); accessibility contract,
 keyboard model and the shared conformance suite shipped (issue #257, §17);
 pilot migration — Job Queue — shipped, adding `filterOnly` to the contract
-(issue #258, §18) — all of epic #238
+(issue #258, §18); identity-and-access tables (Users, Allowlist, Personal Access
+Tokens, Circle members/invites) migrated, establishing the `exportable: false`
+secret-material rule and the gate-the-action-array rule (issue #260, §13.1) —
+all of epic #238
 **Location:** `apps/web/src/components/datatable/`,
 `apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
 **Spec owner:** frontend
@@ -1261,11 +1264,74 @@ one at a time.
 The **pilot is `JobsPage`** (#258, §18) — deliberately not the easiest table but
 the worst-affected one, so the contract met its hardest case before fifteen
 pages depended on it. It found one real gap (`filterOnly`, §18.1) and produced
-three rules every later migration should follow (§18.2–§18.4). The rest follow:
+three rules every later migration should follow (§18.2–§18.4).
 
-1. `AllowlistTable` — plain columns, pagination, one row action.
-2. `UserList` — adds rich cells (avatar, role chips) and a multi-action menu.
-3. The storage-migration, shares, and node tables.
+**Migrated so far:**
+
+| Table | `tableId` | Columns module | Issue |
+| ----- | --------- | -------------- | ----- |
+| Job Queue | `admin-jobs` | `pages/Admin/jobsTable.tsx` | #258 (pilot) |
+| Users | `admin-users` | `components/admin/usersTable.tsx` | #260 |
+| Allowlist | `admin-allowlist` | `components/admin/allowlistColumns.tsx` | #260 |
+| Personal Access Tokens | `settings-pats` | `components/settings/patTable.tsx` | #260 |
+| Circle members / invites | `circle-members` / `circle-invites` | `pages/Circles/circleMembersTable.tsx` | #260 |
+| Public Sharing | `admin-shares` | `pages/Admin/sharesTable.tsx` | #259 |
+| Job Insights (per-type) | `admin-job-insights` | `pages/Admin/jobInsightsTable.tsx` | #259 |
+| Worker nodes / node credentials | `admin-nodes` / `admin-node-credentials` | `pages/Admin/workersTable.tsx` | #259 |
+| Storage providers / migration runs | `admin-storage-providers` / `admin-storage-migrations` | `pages/Admin/storageProvidersTable.tsx` | #259 |
+| Backup runs | `admin-backup-runs` | `pages/Admin/backupTable.tsx` | #259 |
+| Tag vocabulary | `admin-tag-labels` | `pages/Admin/tagsTable.tsx` | #259 |
+
+Still to come: the remaining media surfaces.
+
+### 13.1 Decisions from the admin-operations batch (#259)
+
+Six surfaces at once, and five of them settled a question the pilot had not:
+
+- **A quick-filter preset can BE the filter model.** Public Sharing keeps its
+  All / Active / Expired / Revoked tab strip, but the tabs now write into the
+  table's own `filters` model and read the active tab back out of it
+  (`statusFromFilters` / `withStatusFilter`). The `status` column deliberately
+  declares **no `filterable`**, so the generic "Add filter" picker never offers a
+  second control for the same param — and because `filters` is controlled, the
+  chip the tabs produce is removable, which returns the strip to "All". One
+  model, one source of truth, two entry points.
+- **`exportable: false` is for material, not just secrets.** The share
+  `publicUrl` column renders truncated with an explicit copy button and is kept
+  out of every CSV: the token in it is a bearer credential for the media behind
+  it (§16.6). The masked `••••••••last4` on Storage Providers is excluded on the
+  same reasoning even though it is already redacted.
+- **Declare a row-unique `primary` column, or every control is called the same
+  thing.** Public Sharing's natural leading column was Type — which reads
+  "Photo" on twenty consecutive rows, and therefore names twenty checkboxes
+  "Select Photo" (§17.6). It leads with a short share id instead. Worth checking
+  on any table whose obvious headline is a category rather than an identity.
+- **A per-row `disabled` replaces "render nothing".** The old node-credentials
+  table hid its revoke button on an already-revoked row. The contract has no
+  per-row hide, and does not need one: `disabled: (row) => …` keeps the control
+  (and its tooltip) discoverable instead of silently vanishing.
+- **Client-side pagination is legal; client-side FILTERING is not.** Tag labels
+  and the per-type job-insights rows arrive in one unpaginated response, so the
+  *page* slices them and hands the table one page. That respects §5.1 exactly —
+  the table still never slices `rows` — while keeping the vocabulary under the
+  MIT DataGrid's 100-row page ceiling. The §10.1 prohibition is about filtering a
+  server-paginated result, which neither of these is.
+- **`disableExport` earns its keep.** Tags keeps the bespoke
+  `GET /api/tag-labels/export` ⇄ `POST /api/tag-labels/import` round trip: the
+  exported file carries the `id` column the importer needs, so a generic
+  visibility-shaped CSV would look like the same file and silently fail to
+  re-import.
+- **An editable cell is a card-layout problem.** Tags' inline row edit (a
+  `TextField` spliced into the name cell) has no card equivalent, so it became a
+  rename dialog; its `window.confirm` delete became the row action's own
+  `confirm`. Storage Providers went further: the three stacked credential CARDS
+  became one table plus a per-row "Configure…" dialog holding the same form and
+  the same save / test / remove calls.
+- **MUI gotcha, worth one line:** `<Switch aria-label="…">` puts the label on
+  the wrapper span, not on the `role="switch"` input, leaving the control
+  nameless to assistive tech. Use
+  `slotProps={{ input: { 'aria-label': … } }}` for a switch rendered inside a
+  cell.
 
 Each migration should delete the hand-rolled `Table`/`TablePagination`/`Menu`
 block wholesale rather than wrapping it, and should declare `value` on every
@@ -1274,6 +1340,31 @@ without a second pass, and should declare `filterable` / `filterType` /
 `searchable` for the fields its endpoint can actually filter and search on —
 replacing that page's bespoke filter controls (JobsPage's Status/Type/Processed
 selects, Public Sharing's status tabs) as part of the same migration.
+
+### 13.1 Two invariants the identity-and-access group (#260) established
+
+Both apply to every later migration, not just to those four tables.
+
+**Secret material declares `exportable: false`.** CSV export writes a column's
+`value` scalar for every row on the page (§16.4), and a downloaded file outlives
+the session that produced it. A column carrying token material — a PAT prefix, a
+share token, a node credential, an API key — therefore opts out of export
+explicitly, even when the value on screen is already masked. §16.6 is why this is
+a *narrowing* control rather than the only barrier: an export can never reach a
+field the list response did not already contain, so forgetting the flag leaks
+nothing new, but the flag is what keeps material the user can see from becoming
+material the user can forward. `settings-pats` sets it on `tokenPrefix`.
+
+**A permission gate belongs on the action ARRAY, never on a rendered control.**
+The pre-migration pages hid a whole `<TableCell>` or swapped a `<Select>` for
+text when the caller lacked a permission — a grid-shaped gate that a card
+renderer would have had to reimplement, and therefore could quietly have got
+wrong. Build `rowActions` from the caller's permissions (and gate an inline
+editor inside the column's `render`, which every renderer uses verbatim, §3), and
+the gate holds in the grid, in the tablet row expander and on a phone card at
+once. An action a caller may not perform is then absent from the DOM entirely
+rather than merely off-screen. Each migrated surface's tests assert this in
+*both* renderers.
 
 ---
 

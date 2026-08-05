@@ -8,12 +8,6 @@ import {
   CardContent,
   Alert,
   Link,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   useTheme,
 } from '@mui/material';
 import {
@@ -38,13 +32,14 @@ import { KpiSkeleton } from '../../components/insights/KpiSkeleton';
 import { ProportionBar } from '../../components/insights/ProportionBar';
 import { FreshnessPill } from '../../components/insights/FreshnessPill';
 import { formatDuration } from '../../utils/formatBytes';
-import type {
-  JobInsightsLiveByType,
-  JobInsightsHistoryByType,
-  JobInsightsEtaPerType,
-  JobLifetimeByType,
-} from '../../services/jobInsights';
 import { formatCompactNumber } from '../../utils/formatBytes';
+import { DataTable } from '../../components/datatable';
+import {
+  JOB_INSIGHTS_COLUMNS,
+  JOB_INSIGHTS_TABLE_ID,
+  buildPerTypeRows,
+  type PerTypeRow,
+} from './jobInsightsTable';
 
 // ---------------------------------------------------------------------------
 // Color palette for proportion bar segments
@@ -60,61 +55,6 @@ const SEGMENT_COLORS = [
   '#84cc16',
   '#f97316',
 ];
-
-// ---------------------------------------------------------------------------
-// Per-type row data (joined from three sources)
-// ---------------------------------------------------------------------------
-
-interface PerTypeRow {
-  type: string;
-  queued: number;
-  avgMs: number | null;
-  p95Ms: number | null;
-  throughputPerMin: number | null;
-  etcMs: number | null;
-  lifetimeTotal: number;
-}
-
-function buildPerTypeRows(
-  liveByType: JobInsightsLiveByType[],
-  historyByType: JobInsightsHistoryByType[],
-  etaPerType: JobInsightsEtaPerType[],
-  lifetimeByType: JobLifetimeByType[],
-): PerTypeRow[] {
-  // Build a map of all types
-  const allTypes = new Set<string>();
-  liveByType.forEach((r) => allTypes.add(r.type));
-  historyByType.forEach((r) => allTypes.add(r.type));
-  etaPerType.forEach((r) => allTypes.add(r.type));
-  lifetimeByType.forEach((r) => allTypes.add(r.type));
-
-  const rows: PerTypeRow[] = Array.from(allTypes).map((type) => {
-    const live = liveByType.find((r) => r.type === type);
-    const hist = historyByType.find((r) => r.type === type);
-    const eta = etaPerType.find((r) => r.type === type);
-    const life = lifetimeByType.find((r) => r.type === type);
-
-    const queued = (live?.pending ?? 0) + (live?.running ?? 0);
-
-    return {
-      type,
-      queued,
-      avgMs: hist?.avgMs ?? null,
-      p95Ms: hist?.p95Ms ?? null,
-      throughputPerMin: hist?.throughputPerMin ?? null,
-      etcMs: eta?.etcMs ?? null,
-      lifetimeTotal: life?.total ?? 0,
-    };
-  });
-
-  // Sort by queued descending, then type ascending
-  rows.sort((a, b) => {
-    if (b.queued !== a.queued) return b.queued - a.queued;
-    return a.type.localeCompare(b.type);
-  });
-
-  return rows;
-}
 
 // ---------------------------------------------------------------------------
 // Main content (admin-gated wrapper below)
@@ -343,72 +283,16 @@ function JobInsightsPageContent() {
                   Duration statistics and estimated completion times by job type
                 </Typography>
 
-                <TableContainer>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Type</TableCell>
-                        <TableCell align="right">Queued</TableCell>
-                        <TableCell align="right">Avg Duration</TableCell>
-                        <TableCell align="right">p95</TableCell>
-                        <TableCell align="right">Throughput</TableCell>
-                        <TableCell align="right">ETC</TableCell>
-                        <TableCell align="right">All-time</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {perTypeRows.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={7} align="center" sx={{ py: 3, color: 'text.secondary' }}>
-                            No per-type data available
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        perTypeRows.map((row) => (
-                          <TableRow key={row.type} hover>
-                            <TableCell>
-                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                                {row.type}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {row.queued > 0 ? row.queued : '—'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {formatDuration(row.avgMs)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {formatDuration(row.p95Ms)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {row.throughputPerMin !== null && row.throughputPerMin > 0
-                                  ? `${row.throughputPerMin.toFixed(1)}/min`
-                                  : '—'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {formatDuration(row.etcMs)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                                {row.lifetimeTotal > 0 ? formatCompactNumber(row.lifetimeTotal) : '—'}
-                              </Typography>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                <DataTable<PerTypeRow>
+                  columns={JOB_INSIGHTS_COLUMNS}
+                  rows={perTypeRows}
+                  rowId={(row) => row.type}
+                  tableId={JOB_INSIGHTS_TABLE_ID}
+                  ariaLabel="Per-type job breakdown"
+                  density="compact"
+                  emptyState={<span>No per-type data available</span>}
+                  csvExport={{ filename: 'job-insights-by-type' }}
+                />
 
                 {/* Tier 3 — ProportionBar */}
                 {proportionSegments.length > 0 && (

@@ -1,17 +1,23 @@
 /**
- * Unit tests for WorkersPage — Node credentials section.
+ * Unit tests for WorkersPage — post-#259 (the shared-DataTable migration).
  *
- * Tests: the credentials table renders rows (name, prefix, owner, status);
- * "Never"/"—" placeholders; the create flow calls createCredential and reveals
- * the raw token exactly once (with the MEMORIAHUB_TOKEN warning), clearing it on
- * close; the revoke flow confirms then calls revokeCredential; non-admins are
- * redirected.
+ * Scope note, per docs/specs/datatable.md §18.5: table MECHANICS live in
+ * `runDataTableConformanceSuite`, not here. This file covers the two column
+ * sets this page declares (`./workersTable.tsx`) and its own behaviour: the
+ * fleet table's deregister flow, the credentials table's create/reveal/revoke
+ * flow, permission gating, and the phone layout reaching both destructive
+ * actions that used to sit in an off-screen last column.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockAdminUser } from '../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../components/datatable/__tests__/testUtils/layoutStubs';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared BEFORE imports they affect
@@ -34,6 +40,11 @@ vi.mock('../../hooks/useNodeCredentials', () => ({
 // ---------------------------------------------------------------------------
 
 import WorkersPage from '../../pages/Admin/WorkersPage';
+import {
+  buildNodeCredentialColumns,
+  buildWorkerNodeColumns,
+  credentialState,
+} from '../../pages/Admin/workersTable';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkers } from '../../hooks/useWorkers';
 import type { UseWorkersResult } from '../../hooks/useWorkers';
@@ -42,7 +53,9 @@ import type { UseNodeCredentialsResult } from '../../hooks/useNodeCredentials';
 import type {
   AdminNodeCredentialDto,
   CreatedNodeCredentialDto,
+  WorkerNodeDto,
 } from '../../services/workers';
+import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseWorkers = vi.mocked(useWorkers);
@@ -74,6 +87,26 @@ function makeWorkersHook(overrides: Partial<UseWorkersResult> = {}): UseWorkersR
     setAutoRefresh: vi.fn(),
     refresh: vi.fn().mockResolvedValue(undefined),
     deleteWorker: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+function makeNode(overrides: Partial<WorkerNodeDto> = {}): WorkerNodeDto {
+  return {
+    id: 'node-uuid-1',
+    name: 'gpu-box-1',
+    hostname: 'gpu1.local',
+    platform: 'linux-x64',
+    cliVersion: '1.4.2',
+    eligibleTypes: ['face_detection', 'auto_tagging'],
+    concurrency: 2,
+    status: 'online',
+    capabilities: null,
+    registeredAt: '2026-07-01T10:00:00Z',
+    lastHeartbeatAt: '2026-07-16T10:00:00Z',
+    createdById: 'user-uuid-1',
+    health: 'healthy',
+    jobCounts: { running: 1, succeeded: 42, failed: 0 },
     ...overrides,
   };
 }
@@ -122,14 +155,27 @@ function makeCreatedCredential(
   };
 }
 
+function renderPage() {
+  return render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+}
+
 // ---------------------------------------------------------------------------
 
-describe('WorkersPage — Node credentials', () => {
+describe('WorkersPage', () => {
+  beforeAll(() => {
+    // jsdom performs no layout; the shared stub recipe is what makes MUI X
+    // render rows at all (docs/specs/datatable.md §12).
+    installLayoutStubs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400);
     mockUsePermissions.mockReturnValue(makePermissions(true));
     mockUseWorkers.mockReturnValue(makeWorkersHook());
     mockUseNodeCredentials.mockReturnValue(makeCredentialsHook());
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   // =========================================================================
@@ -139,13 +185,13 @@ describe('WorkersPage — Node credentials', () => {
   it('redirects non-admin users — page content not shown', () => {
     mockUsePermissions.mockReturnValue(makePermissions(false));
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     expect(screen.queryByText(/node credentials/i)).not.toBeInTheDocument();
   });
 
   it('renders the Node credentials section heading for admins', async () => {
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /node credentials/i })).toBeInTheDocument();
@@ -153,7 +199,142 @@ describe('WorkersPage — Node credentials', () => {
   });
 
   // =========================================================================
-  // List rendering
+  // Column definitions
+  // =========================================================================
+
+  describe('Column definitions', () => {
+    it('leads the fleet card with Node then Status (issue #259: status is primary)', () => {
+      const primaries = buildWorkerNodeColumns()
+        .filter((column) => column.priority === 'primary')
+        .map((column) => column.id);
+      expect(primaries).toEqual(['name', 'status']);
+    });
+
+    it('leads the credential card with Name then Status', () => {
+      const primaries = buildNodeCredentialColumns()
+        .filter((column) => column.priority === 'primary')
+        .map((column) => column.id);
+      expect(primaries).toEqual(['name', 'state']);
+    });
+
+    it('derives the credential state from revokedAt, then expiresAt', () => {
+      expect(credentialState(makeCredential())).toBe('Active');
+      expect(credentialState(makeCredential({ expiresAt: '2000-01-01T00:00:00Z' }))).toBe(
+        'Expired',
+      );
+      expect(
+        credentialState(
+          makeCredential({ revokedAt: '2026-07-10T00:00:00Z', expiresAt: '2000-01-01T00:00:00Z' }),
+        ),
+      ).toBe('Revoked');
+    });
+  });
+
+  // =========================================================================
+  // Fleet table
+  // =========================================================================
+
+  describe('Worker node fleet', () => {
+    it('renders a row per node with its name, hostname and status', async () => {
+      mockUseWorkers.mockReturnValue(
+        makeWorkersHook({
+          nodes: [
+            makeNode({ id: 'n1', name: 'gpu-box-1', status: 'online' }),
+            makeNode({ id: 'n2', name: 'vps-2', hostname: 'vps2.local', status: 'offline' }),
+          ],
+        }),
+      );
+
+      renderPage();
+
+      const grid = await screen.findByRole('grid', { name: /worker nodes/i });
+      await waitFor(() => {
+        expect(within(grid).getByText('gpu-box-1')).toBeInTheDocument();
+      });
+      expect(within(grid).getByText('vps2.local')).toBeInTheDocument();
+      expect(within(grid).getByText('online')).toBeInTheDocument();
+      expect(within(grid).getByText('offline')).toBeInTheDocument();
+    });
+
+    it('shows an empty-state message when no nodes are registered', async () => {
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText(/no worker nodes registered/i)).toBeInTheDocument();
+      });
+    });
+
+    it('surfaces the fleet error without blanking the rows underneath it', async () => {
+      mockUseWorkers.mockReturnValue(
+        makeWorkersHook({ nodes: [makeNode()], error: 'Fleet load failed' }),
+      );
+
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByText(/fleet load failed/i)).toBeInTheDocument();
+      });
+      expect(screen.getByText('gpu-box-1')).toBeInTheDocument();
+    });
+
+    it('deregisters a node after confirming', async () => {
+      const deleteWorker = vi.fn().mockResolvedValue(undefined);
+      mockUseWorkers.mockReturnValue(
+        makeWorkersHook({ nodes: [makeNode({ id: 'node-doomed' })], deleteWorker }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(
+        await screen.findByRole('button', { name: /deregister node for gpu-box-1/i }),
+      );
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/deregister worker node\?/i)).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: /^deregister$/i }));
+
+      await waitFor(() => {
+        expect(deleteWorker).toHaveBeenCalledWith('node-doomed');
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/deregistered/i)).toBeInTheDocument();
+      });
+    });
+
+    it('does not deregister when the confirmation is cancelled', async () => {
+      const deleteWorker = vi.fn().mockResolvedValue(undefined);
+      mockUseWorkers.mockReturnValue(
+        makeWorkersHook({ nodes: [makeNode({ id: 'node-safe' })], deleteWorker }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(
+        await screen.findByRole('button', { name: /deregister node for gpu-box-1/i }),
+      );
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+      expect(deleteWorker).not.toHaveBeenCalled();
+    });
+
+    it('keeps the auto-refresh toggle and reports it to the hook', async () => {
+      const setAutoRefresh = vi.fn();
+      mockUseWorkers.mockReturnValue(makeWorkersHook({ setAutoRefresh }));
+      const user = userEvent.setup();
+
+      renderPage();
+
+      const toggle = await screen.findByRole('switch', { name: /auto-refresh/i });
+      expect(toggle).toBeChecked();
+      await user.click(toggle);
+      expect(setAutoRefresh).toHaveBeenCalledWith(false);
+    });
+  });
+
+  // =========================================================================
+  // Credentials list rendering
   // =========================================================================
 
   it('renders a row for each credential with name, prefix, owner and status', async () => {
@@ -166,7 +347,7 @@ describe('WorkersPage — Node credentials', () => {
       }),
     );
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('GPU box 1')).toBeInTheDocument();
@@ -190,7 +371,7 @@ describe('WorkersPage — Node credentials', () => {
       }),
     );
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Never')).toBeInTheDocument();
@@ -201,7 +382,7 @@ describe('WorkersPage — Node credentials', () => {
   it('shows an empty-state message when there are no credentials', async () => {
     mockUseNodeCredentials.mockReturnValue(makeCredentialsHook({ credentials: [] }));
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText(/no node credentials/i)).toBeInTheDocument();
@@ -213,7 +394,7 @@ describe('WorkersPage — Node credentials', () => {
       makeCredentialsHook({ error: 'Credential load failed' }),
     );
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText(/credential load failed/i)).toBeInTheDocument();
@@ -230,7 +411,7 @@ describe('WorkersPage — Node credentials', () => {
     mockUseNodeCredentials.mockReturnValue(makeCredentialsHook({ createCredential }));
     const user = userEvent.setup();
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     // Open the create dialog
     const createBtn = await screen.findByRole('button', { name: /create credential/i });
@@ -244,8 +425,6 @@ describe('WorkersPage — Node credentials', () => {
     const submitBtn = await screen.findByRole('button', { name: /^create$/i });
     await user.click(submitBtn);
 
-    // Hook mutation called with expiresAt null (never expires default) — this is
-    // what invalidates/refreshes the list inside the real hook.
     await waitFor(() => {
       expect(createCredential).toHaveBeenCalledWith({ name: 'New worker', expiresAt: null });
     });
@@ -254,8 +433,6 @@ describe('WorkersPage — Node credentials', () => {
     await waitFor(() => {
       expect(screen.getByDisplayValue('nod_ab12_super_secret_raw_token')).toBeInTheDocument();
     });
-    // Scope MEMORIAHUB_TOKEN to the reveal dialog — it also appears in the
-    // section caption above the table.
     const revealDialog = screen.getByRole('dialog');
     expect(within(revealDialog).getByText(/will not be shown again/i)).toBeInTheDocument();
     expect(within(revealDialog).getByText(/MEMORIAHUB_TOKEN/i)).toBeInTheDocument();
@@ -272,7 +449,7 @@ describe('WorkersPage — Node credentials', () => {
   it('disables the Create submit button until a name is entered', async () => {
     const user = userEvent.setup();
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     const createBtn = await screen.findByRole('button', { name: /create credential/i });
     await user.click(createBtn);
@@ -300,21 +477,16 @@ describe('WorkersPage — Node credentials', () => {
     );
     const user = userEvent.setup();
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
-    // Click the per-row revoke icon button
-    const revokeIcon = await screen.findByRole('button', { name: /revoke credential/i });
+    // Per-row revoke control, now named after its row (§17.6)
+    const revokeIcon = await screen.findByRole('button', { name: /revoke credential for doomed/i });
     await user.click(revokeIcon);
 
-    // Confirm dialog appears
-    await waitFor(() => {
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
-      expect(screen.getByText(/revoke credential\?/i)).toBeInTheDocument();
-    });
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/revoke credential\?/i)).toBeInTheDocument();
 
-    // Confirm
-    const confirmBtn = await screen.findByRole('button', { name: /^revoke$/i });
-    await user.click(confirmBtn);
+    await user.click(within(dialog).getByRole('button', { name: /^revoke$/i }));
 
     expect(revokeCredential).toHaveBeenCalledWith('cred-to-revoke');
   });
@@ -329,31 +501,62 @@ describe('WorkersPage — Node credentials', () => {
     );
     const user = userEvent.setup();
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     const revokeIcon = await screen.findByRole('button', { name: /revoke credential/i });
     await user.click(revokeIcon);
 
-    const cancelBtn = await screen.findByRole('button', { name: /cancel/i });
-    await user.click(cancelBtn);
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
 
     expect(revokeCredential).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 
-  it('hides the revoke action for an already-revoked credential', async () => {
+  it('DISABLES (rather than hides) the revoke action for an already-revoked credential', async () => {
     mockUseNodeCredentials.mockReturnValue(
       makeCredentialsHook({
         credentials: [makeCredential({ id: 'cred-revoked', revokedAt: '2026-07-10T00:00:00Z' })],
       }),
     );
 
-    render(<WorkersPage />, { wrapperOptions: { user: mockAdminUser } });
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('Revoked')).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole('button', { name: /revoke credential/i })).not.toBeInTheDocument();
+    // The migration swapped "render nothing" for the contract's own per-row
+    // `disabled`, which keeps the control (and its tooltip) discoverable
+    // instead of silently vanishing.
+    expect(screen.getByRole('button', { name: /revoke credential/i })).toBeDisabled();
+  });
+
+  // =========================================================================
+  // Phone
+  // =========================================================================
+
+  describe('Phone layout (360px)', () => {
+    it('reaches deregister and revoke from cards', async () => {
+      setInitialContainerWidth(360);
+      mockUseWorkers.mockReturnValue(makeWorkersHook({ nodes: [makeNode()] }));
+      mockUseNodeCredentials.mockReturnValue(
+        makeCredentialsHook({ credentials: [makeCredential({ name: 'Doomed' })] }),
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+
+      const tables = await screen.findAllByTestId('datatable');
+      tables.forEach((table) => expect(table).toHaveAttribute('data-layout', 'mobile'));
+
+      // On a card, a single row action collapses into the overflow menu.
+      await user.click(
+        await screen.findByRole('button', { name: 'Row actions for gpu-box-1' }),
+      );
+      expect(await screen.findByRole('menuitem', { name: /deregister node/i })).toBeInTheDocument();
+    });
   });
 });

@@ -4,13 +4,6 @@ import {
   Container,
   Typography,
   Box,
-  Paper,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  Chip,
   CircularProgress,
   Alert,
   FormControl,
@@ -23,6 +16,9 @@ import {
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircles } from '../../hooks/useCircles';
 import { useBackup } from '../../hooks/useBackup';
+import type { BackupRun } from '../../services/backup';
+import { DataTable } from '../../components/datatable';
+import { BACKUP_RUNS_TABLE_ID, BACKUP_RUN_COLUMNS } from './backupTable';
 
 function BackupPageContent() {
   const { isAdmin } = usePermissions();
@@ -133,76 +129,24 @@ function BackupPageContent() {
         Recent Runs
       </Typography>
 
-      {runsError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {runsError}
-        </Alert>
-      )}
-
-      {runsLoading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <Paper variant="outlined">
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Scope</TableCell>
-                <TableCell align="right">Copied</TableCell>
-                <TableCell align="right">Skipped</TableCell>
-                <TableCell align="right">Failed</TableCell>
-                <TableCell>Started At</TableCell>
-                <TableCell>Completed</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {runs.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} align="center">
-                    <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-                      No backup runs found
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                runs.map((run) => (
-                  <TableRow key={run.runId}>
-                    <TableCell>
-                      <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
-                        {run.scope}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2">{run.copied}</Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2">{run.skipped}</Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Chip
-                        label={run.failed}
-                        size="small"
-                        color={run.failed > 0 ? 'error' : 'success'}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {new Date(run.startedAt).toLocaleString()}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {run.completedAt ? new Date(run.completedAt).toLocaleString() : '—'}
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </Paper>
-      )}
+      {/*
+        Rendered unconditionally with `loading` as a prop: the overlay draws
+        over rows that stay mounted, rather than swapping the whole table for a
+        spinner and losing scroll position on every refresh
+        (docs/specs/datatable.md §18.4).
+      */}
+      <DataTable<BackupRun>
+        columns={BACKUP_RUN_COLUMNS}
+        rows={runs}
+        rowId={(run) => run.runId}
+        tableId={BACKUP_RUNS_TABLE_ID}
+        ariaLabel="Backup runs"
+        density="compact"
+        loading={runsLoading}
+        error={runsError}
+        emptyState={<span>No backup runs found</span>}
+        csvExport={{ filename: 'backup-runs' }}
+      />
     </Container>
   );
 }

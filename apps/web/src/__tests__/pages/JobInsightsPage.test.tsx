@@ -11,9 +11,14 @@
  *   - "Refresh now" button is present and clickable
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { render, mockAdminUser, mockUser } from '../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../components/datatable/__tests__/testUtils/layoutStubs';
 
 // ---------------------------------------------------------------------------
 // Module mocks (must be hoisted before component imports)
@@ -56,6 +61,12 @@ import JobInsightsPage from '../../pages/Admin/JobInsightsPage';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobInsights } from '../../hooks/useJobInsights';
 import type { JobInsights } from '../../services/jobInsights';
+import {
+  JOB_INSIGHTS_COLUMNS,
+  buildPerTypeRows,
+  formatThroughput,
+} from '../../pages/Admin/jobInsightsTable';
+import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseJobInsights = vi.mocked(useJobInsights);
@@ -171,10 +182,56 @@ function makeHookReturn(
 // ---------------------------------------------------------------------------
 
 describe('JobInsightsPage', () => {
+  beforeAll(() => {
+    // jsdom performs no layout — without the shared stub recipe MUI X measures
+    // a 0×0 viewport (docs/specs/datatable.md §12).
+    installLayoutStubs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400);
     mockUsePermissions.mockReturnValue(makeAdminPermissions());
     mockUseJobInsights.mockReturnValue(makeHookReturn());
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
+  });
+
+  // =========================================================================
+  // Column definitions (issue #259 — the per-type table on the shared DataTable)
+  // =========================================================================
+
+  describe('column definitions', () => {
+    it('leads the card with the type and its backlog', () => {
+      const primaries = JOB_INSIGHTS_COLUMNS.filter((c) => c.priority === 'primary').map(
+        (c) => c.id,
+      );
+      expect(primaries).toEqual(['type', 'queued']);
+    });
+
+    it('joins the four per-type arrays into one row, backlog first', () => {
+      const rows = buildPerTypeRows(
+        [
+          { type: 'auto_tagging', pending: 1, running: 1, succeeded: 0, failed: 0, total: 2 },
+          { type: 'face_detection', pending: 5, running: 2, succeeded: 0, failed: 0, total: 7 },
+        ] as never,
+        [{ type: 'face_detection', samples: 3, avgMs: 10, p50Ms: 9, p95Ms: 20, throughputPerMin: 2 }] as never,
+        [{ type: 'auto_tagging', remaining: 2, avgMs: 5, etcMs: 10 }] as never,
+        [{ type: 'geocode', succeeded: 4, failed: 1, total: 5, avgMs: 3, samples: 4 }] as never,
+      );
+
+      // Ordered by queued desc, then alphabetically; every type present exactly once.
+      expect(rows.map((r) => r.type)).toEqual(['face_detection', 'auto_tagging', 'geocode']);
+      expect(rows[0]).toMatchObject({ queued: 7, avgMs: 10, p95Ms: 20, etcMs: null });
+      expect(rows[1]).toMatchObject({ queued: 2, etcMs: 10, avgMs: null });
+      expect(rows[2]).toMatchObject({ queued: 0, lifetimeTotal: 5 });
+    });
+
+    it('formats throughput the way the old table did', () => {
+      expect(formatThroughput(1.5)).toBe('1.5/min');
+      expect(formatThroughput(0)).toBe('—');
+      expect(formatThroughput(null)).toBe('—');
+    });
   });
 
   // =========================================================================
@@ -484,6 +541,27 @@ describe('JobInsightsPage', () => {
       render(<JobInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       expect(screen.queryByTestId('freshness-pill')).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // Phone
+  // =========================================================================
+
+  describe('phone layout (360px)', () => {
+    it('renders the per-type breakdown as cards, folding the detail columns', async () => {
+      setInitialContainerWidth(360);
+
+      render(<JobInsightsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const table = await screen.findByTestId('datatable');
+      expect(table).toHaveAttribute('data-layout', 'mobile');
+      expect(within(table).getByText('face_detection')).toBeInTheDocument();
+      // p95 / Throughput / All-time are `detail` — behind "More details".
+      expect(screen.getByTestId('datatable-card-detail-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
     });
   });
 });

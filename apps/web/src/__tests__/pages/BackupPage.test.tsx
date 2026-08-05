@@ -1,7 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+/**
+ * BackupPage tests — the run-history table was migrated onto the shared
+ * DataTable in issue #259. Per docs/specs/datatable.md §18.5 this file covers
+ * the page's own column declarations (`./backupTable.tsx`) and its behaviour;
+ * table mechanics belong to `runDataTableConformanceSuite`.
+ */
+
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockAdminUser } from '../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../components/datatable/__tests__/testUtils/layoutStubs';
 
 // Mock hooks before importing them
 vi.mock('../../hooks/usePermissions', () => ({
@@ -20,6 +32,8 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useBackup } from '../../hooks/useBackup';
 import { useCircles } from '../../hooks/useCircles';
 import BackupPage from '../../pages/Admin/BackupPage';
+import { BACKUP_RUN_COLUMNS, backupRunStatus } from '../../pages/Admin/backupTable';
+import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseBackup = vi.mocked(useBackup);
@@ -65,13 +79,51 @@ function makeCircles(overrides: Partial<ReturnType<typeof useCircles>> = {}): Re
   };
 }
 
+function makeRun(overrides: Record<string, unknown> = {}) {
+  return {
+    runId: 'run-1',
+    scope: 'all',
+    copied: 3,
+    skipped: 0,
+    failed: 0,
+    errors: [] as string[],
+    startedAt: new Date('2024-01-15T10:00:00Z').toISOString(),
+    completedAt: new Date('2024-01-15T10:01:00Z').toISOString(),
+    ...overrides,
+  };
+}
+
 describe('BackupPage', () => {
+  beforeAll(() => {
+    // jsdom performs no layout — the shared stub recipe is what makes MUI X
+    // render rows at all (docs/specs/datatable.md §12).
+    installLayoutStubs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400);
     // Default: admin user
     mockUsePermissions.mockReturnValue(makePermissions(true));
     mockUseBackup.mockReturnValue(makeBackup());
     mockUseCircles.mockReturnValue(makeCircles());
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
+  });
+
+  describe('Column definitions', () => {
+    it('leads the card with Scope then Status (issue #259: status is primary)', () => {
+      const primaries = BACKUP_RUN_COLUMNS.filter((c) => c.priority === 'primary').map((c) => c.id);
+      expect(primaries).toEqual(['scope', 'status']);
+    });
+
+    it('derives a run status the endpoint does not return', () => {
+      expect(backupRunStatus(makeRun() as never)).toBe('Succeeded');
+      expect(backupRunStatus(makeRun({ failed: 2 }) as never)).toBe('Failed');
+      expect(backupRunStatus(makeRun({ completedAt: undefined }) as never)).toBe('Running');
+      // A failure outranks "still running".
+      expect(backupRunStatus(makeRun({ failed: 1, completedAt: undefined }) as never)).toBe('Failed');
+    });
   });
 
   describe('Authorization', () => {
@@ -329,6 +381,50 @@ describe('BackupPage', () => {
         const chips = screen.getAllByText('2');
         expect(chips.length).toBeGreaterThan(0);
       });
+    });
+  });
+
+  describe('Run status column (rendered)', () => {
+    it('shows a Succeeded chip for a clean completed run', async () => {
+      mockUseBackup.mockReturnValue(makeBackup({ runs: [makeRun()] as never }));
+
+      render(<BackupPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const grid = await screen.findByRole('grid', { name: /backup runs/i });
+      await waitFor(() => {
+        expect(within(grid).getByText('Succeeded')).toBeInTheDocument();
+      });
+    });
+
+    it('shows a Failed chip when the run had failures', async () => {
+      mockUseBackup.mockReturnValue(
+        makeBackup({ runs: [makeRun({ runId: 'run-2', failed: 2, completedAt: undefined })] as never }),
+      );
+
+      render(<BackupPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const grid = await screen.findByRole('grid', { name: /backup runs/i });
+      await waitFor(() => {
+        // Both the derived status chip and the Failed column header read
+        // "Failed"; the chip is the one inside a row.
+        const cells = within(grid).getAllByRole('gridcell');
+        expect(cells.some((cell) => cell.textContent === 'Failed')).toBe(true);
+      });
+    });
+  });
+
+  describe('Phone layout (360px)', () => {
+    it('renders cards and contains its own width', async () => {
+      setInitialContainerWidth(360);
+      mockUseBackup.mockReturnValue(makeBackup({ runs: [makeRun()] as never }));
+
+      render(<BackupPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const table = await screen.findByTestId('datatable');
+      expect(table).toHaveAttribute('data-layout', 'mobile');
+      const styles = window.getComputedStyle(table);
+      expect(styles.maxWidth).toBe('100%');
+      expect(styles.minWidth).toBe('0px');
     });
   });
 });

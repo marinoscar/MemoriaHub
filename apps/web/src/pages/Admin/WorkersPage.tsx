@@ -1,22 +1,38 @@
-import { useState, FormEvent } from 'react';
+/**
+ * Admin → Worker Nodes (`/admin/settings/nodes`).
+ *
+ * Migrated onto the shared DataTable in issue #259 (epic #238). Two hand-rolled
+ * tables went away here — an eleven-column fleet table and an eight-column node
+ * credentials table, both of which could only be read by scrolling the document
+ * sideways on anything narrower than a laptop, and both of which put their only
+ * destructive action (deregister / revoke) in the last column, i.e. the first
+ * thing to fall off a phone.
+ *
+ * Both are now `DataTableColumn[]` declarations in `./workersTable.tsx`, with
+ * `status` as a `primary` column so a card leads with "is this node up?"
+ * (issue #259's decision). Their two bespoke confirm dialogs are gone too: a
+ * row action's own `confirm` gives the same copy from one implementation.
+ *
+ * ## The auto-refresh contract
+ *
+ * `useWorkers` polls every 5 seconds, so both tables are rendered
+ * UNCONDITIONALLY with `loading` passed as a prop. Gating the render on
+ * `loading` would remount the renderer twelve times a minute and take its
+ * expansion state and the page's scroll offset with it
+ * (docs/specs/datatable.md §18.4).
+ */
+
+import { useCallback, useMemo, useState, FormEvent } from 'react';
 import { Navigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Box,
   Typography,
   Paper,
-  Chip,
   Stack,
   Button,
-  CircularProgress,
   Alert,
   Snackbar,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Tooltip,
   IconButton,
   FormControlLabel,
@@ -24,7 +40,6 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogContentText,
   DialogActions,
   Link,
   TextField,
@@ -38,9 +53,6 @@ import {
   Hub as HubIcon,
   Refresh as RefreshIcon,
   Delete as DeleteIcon,
-  CheckCircle as HealthyIcon,
-  Warning as StaleIcon,
-  Cancel as OfflineIcon,
   Add as AddIcon,
   ContentCopy as ContentCopyIcon,
   Check as CheckIcon,
@@ -48,163 +60,19 @@ import {
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkers } from '../../hooks/useWorkers';
 import { useNodeCredentials } from '../../hooks/useNodeCredentials';
-import type { WorkerNodeDto, NodeStatus, NodeHealth } from '../../services/workers';
+import type { WorkerNodeDto } from '../../services/workers';
 import type {
   AdminNodeCredentialDto,
   CreatedNodeCredentialDto,
 } from '../../services/workers';
-import { relativeTime } from '../../utils/formatBytes';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const STATUS_COLORS: Record<NodeStatus, 'default' | 'success' | 'warning' | 'error'> = {
-  online: 'success',
-  draining: 'warning',
-  offline: 'default',
-  disabled: 'error',
-};
-
-function StatusChip({ status }: { status: NodeStatus }) {
-  return (
-    <Chip
-      label={status}
-      color={STATUS_COLORS[status] ?? 'default'}
-      size="small"
-      variant="outlined"
-    />
-  );
-}
-
-const HEALTH_META: Record<
-  NodeHealth,
-  { color: 'success' | 'warning' | 'error'; label: string; Icon: typeof HealthyIcon }
-> = {
-  healthy: { color: 'success', label: 'Healthy', Icon: HealthyIcon },
-  stale: { color: 'warning', label: 'Stale', Icon: StaleIcon },
-  offline: { color: 'error', label: 'Offline', Icon: OfflineIcon },
-};
-
-/** Heartbeat-freshness pill driven by the server-derived `health` field. */
-function HeartbeatPill({ node }: { node: WorkerNodeDto }) {
-  const meta = HEALTH_META[node.health] ?? HEALTH_META.offline;
-  const rel = node.lastHeartbeatAt ? relativeTime(node.lastHeartbeatAt) : 'never';
-  return (
-    <Tooltip
-      title={
-        node.lastHeartbeatAt
-          ? `Last heartbeat ${new Date(node.lastHeartbeatAt).toLocaleString()}`
-          : 'No heartbeat recorded'
-      }
-      arrow
-    >
-      <Chip
-        icon={<meta.Icon />}
-        label={`${meta.label} · ${rel}`}
-        color={meta.color}
-        size="small"
-        variant="outlined"
-        sx={{ cursor: 'help' }}
-      />
-    </Tooltip>
-  );
-}
-
-const MAX_TYPE_CHIPS = 3;
-
-/** Renders eligible job types as small chips, truncating with a "+N" overflow chip. */
-function EligibleTypes({ types }: { types: string[] }) {
-  if (!types || types.length === 0) {
-    return (
-      <Typography variant="body2" color="text.disabled">
-        —
-      </Typography>
-    );
-  }
-  const shown = types.slice(0, MAX_TYPE_CHIPS);
-  const overflow = types.length - shown.length;
-  return (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-      {shown.map((t) => (
-        <Chip key={t} label={t} size="small" variant="outlined" />
-      ))}
-      {overflow > 0 && (
-        <Tooltip title={types.slice(MAX_TYPE_CHIPS).join(', ')} arrow>
-          <Chip label={`+${overflow}`} size="small" variant="outlined" sx={{ cursor: 'help' }} />
-        </Tooltip>
-      )}
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Confirm delete dialog
-// ---------------------------------------------------------------------------
-
-interface ConfirmDeleteDialogProps {
-  open: boolean;
-  node: WorkerNodeDto;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-function ConfirmDeleteDialog({ open, node, onConfirm, onCancel }: ConfirmDeleteDialogProps) {
-  return (
-    <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth>
-      <DialogTitle>Deregister worker node?</DialogTitle>
-      <DialogContent>
-        <DialogContentText>
-          Node <strong>{node.name}</strong> ({node.hostname}) will be removed from the fleet. Any
-          jobs it currently holds are released back to the queue. This cannot be undone.
-        </DialogContentText>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button onClick={onConfirm} color="error" variant="contained">
-          Deregister
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Confirm revoke credential dialog
-// ---------------------------------------------------------------------------
-
-interface ConfirmRevokeCredentialDialogProps {
-  open: boolean;
-  credential: AdminNodeCredentialDto;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-function ConfirmRevokeCredentialDialog({
-  open,
-  credential,
-  onConfirm,
-  onCancel,
-}: ConfirmRevokeCredentialDialogProps) {
-  return (
-    <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth>
-      <DialogTitle>Revoke credential?</DialogTitle>
-      <DialogContent>
-        <DialogContentText>
-          Revoking is immediate. The worker using token{' '}
-          <strong>{credential.tokenPrefix}…</strong> (named <strong>{credential.name}</strong>)
-          will lose access right away. This cannot be undone.
-        </DialogContentText>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button onClick={onConfirm} color="error" variant="contained">
-          Revoke
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
+import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import {
+  NODE_CREDENTIALS_TABLE_ID,
+  WORKER_NODES_TABLE_ID,
+  buildNodeCredentialColumns,
+  buildWorkerNodeColumns,
+  isCredentialRevoked,
+} from './workersTable';
 
 // ---------------------------------------------------------------------------
 // Create node credential dialog
@@ -433,49 +301,95 @@ function WorkersPageContent() {
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [deleteDialog, setDeleteDialog] = useState<WorkerNodeDto | null>(null);
   const [mutating, setMutating] = useState(false);
 
   const [credentialMutating, setCredentialMutating] = useState(false);
   const [createCredentialDialogOpen, setCreateCredentialDialogOpen] = useState(false);
-  const [revokeCredentialDialog, setRevokeCredentialDialog] =
-    useState<AdminNodeCredentialDto | null>(null);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
 
-  const handleDelete = async () => {
-    if (!deleteDialog) return;
-    const node = deleteDialog;
-    setDeleteDialog(null);
-    setMutating(true);
-    try {
-      await deleteWorker(node.id);
-      setSuccessMessage(`Node "${node.name}" deregistered`);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to deregister node');
-    } finally {
-      setMutating(false);
-    }
-  };
+  const handleDelete = useCallback(
+    async (node: WorkerNodeDto) => {
+      setMutating(true);
+      try {
+        await deleteWorker(node.id);
+        setSuccessMessage(`Node "${node.name}" deregistered`);
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to deregister node');
+      } finally {
+        setMutating(false);
+      }
+    },
+    [deleteWorker],
+  );
 
   const handleCredentialCreated = (created: CreatedNodeCredentialDto) => {
     setSuccessMessage(`Credential "${created.name}" created`);
     setRevealedToken(created.token);
   };
 
-  const handleRevokeCredential = async () => {
-    if (!revokeCredentialDialog) return;
-    const credential = revokeCredentialDialog;
-    setRevokeCredentialDialog(null);
-    setCredentialMutating(true);
-    try {
-      await revokeCredential(credential.id);
-      setSuccessMessage(`Credential "${credential.name}" revoked`);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to revoke credential');
-    } finally {
-      setCredentialMutating(false);
-    }
-  };
+  const handleRevokeCredential = useCallback(
+    async (credential: AdminNodeCredentialDto) => {
+      setCredentialMutating(true);
+      try {
+        await revokeCredential(credential.id);
+        setSuccessMessage(`Credential "${credential.name}" revoked`);
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to revoke credential');
+      } finally {
+        setCredentialMutating(false);
+      }
+    },
+    [revokeCredential],
+  );
+
+  // --- Columns + row actions -------------------------------------------------
+
+  const nodeColumns = useMemo(() => buildWorkerNodeColumns(), []);
+  const credentialColumns = useMemo(() => buildNodeCredentialColumns(), []);
+
+  const nodeActions = useMemo<DataTableRowAction<WorkerNodeDto>[]>(
+    () => [
+      {
+        id: 'deregister',
+        label: 'Deregister node',
+        icon: <DeleteIcon fontSize="small" />,
+        destructive: true,
+        disabled: () => mutating,
+        confirm: {
+          title: 'Deregister worker node?',
+          description: (node) =>
+            `Node ${node.name} (${node.hostname}) will be removed from the fleet. Any jobs it currently holds are released back to the queue. This cannot be undone.`,
+          confirmLabel: 'Deregister',
+        },
+        onClick: (node) => void handleDelete(node),
+      },
+    ],
+    [mutating, handleDelete],
+  );
+
+  const credentialActions = useMemo<DataTableRowAction<AdminNodeCredentialDto>[]>(
+    () => [
+      {
+        id: 'revoke',
+        label: 'Revoke credential',
+        icon: <DeleteIcon fontSize="small" />,
+        destructive: true,
+        // An already-revoked credential has nothing left to revoke; the old
+        // table hid the button entirely, which is unreachable-by-keyboard
+        // equivalent to disabling it — the DataTable keeps the control present
+        // with its tooltip and marks it disabled instead.
+        disabled: (credential) => credentialMutating || isCredentialRevoked(credential),
+        confirm: {
+          title: 'Revoke credential?',
+          description: (credential) =>
+            `Revoking is immediate. The worker using token ${credential.tokenPrefix}… (named ${credential.name}) will lose access right away. This cannot be undone.`,
+          confirmLabel: 'Revoke',
+        },
+        onClick: (credential) => void handleRevokeCredential(credential),
+      },
+    ],
+    [credentialMutating, handleRevokeCredential],
+  );
 
   return (
     <Container maxWidth="xl">
@@ -532,126 +446,20 @@ function WorkersPageContent() {
           </Stack>
         </Paper>
 
-        {/* Error */}
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-
         {/* Nodes table */}
-        <Paper variant="outlined">
-          {loading && nodes.length === 0 ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress size={28} />
-            </Box>
-          ) : (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Node</TableCell>
-                    <TableCell>Platform</TableCell>
-                    <TableCell>CLI Version</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Heartbeat</TableCell>
-                    <TableCell>Eligible Types</TableCell>
-                    <TableCell align="center">Concurrency</TableCell>
-                    <TableCell align="center">Running</TableCell>
-                    <TableCell align="center">Succeeded</TableCell>
-                    <TableCell align="center">Failed</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {nodes.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={11}
-                        align="center"
-                        sx={{ py: 4, color: 'text.secondary' }}
-                      >
-                        No worker nodes registered
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    nodes.map((node) => (
-                      <TableRow key={node.id} hover>
-                        <TableCell sx={{ maxWidth: 220 }}>
-                          <Typography variant="body2" noWrap>
-                            {node.name}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: 'text.secondary', display: 'block' }}
-                            noWrap
-                          >
-                            {node.hostname}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {node.platform}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {node.cliVersion}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <StatusChip status={node.status} />
-                        </TableCell>
-                        <TableCell>
-                          <HeartbeatPill node={node} />
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 240 }}>
-                          <EligibleTypes types={node.eligibleTypes} />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2">{node.concurrency}</Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2" color="info.main">
-                            {node.jobCounts.running}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography variant="body2" color="success.main">
-                            {node.jobCounts.succeeded}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Typography
-                            variant="body2"
-                            color={node.jobCounts.failed > 0 ? 'error.main' : 'text.secondary'}
-                          >
-                            {node.jobCounts.failed}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Tooltip title="Deregister node">
-                            <span>
-                              <IconButton
-                                size="small"
-                                aria-label="Deregister node"
-                                color="error"
-                                disabled={mutating}
-                                onClick={() => setDeleteDialog(node)}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </Paper>
+        <DataTable<WorkerNodeDto>
+          columns={nodeColumns}
+          rows={nodes}
+          rowId={(node) => node.id}
+          tableId={WORKER_NODES_TABLE_ID}
+          ariaLabel="Worker nodes"
+          density="compact"
+          loading={loading}
+          error={error}
+          emptyState={<span>No worker nodes registered</span>}
+          rowActions={nodeActions}
+          csvExport={{ filename: 'worker-nodes' }}
+        />
 
         {/* Node credentials section */}
         <Box sx={{ mt: 5 }}>
@@ -684,142 +492,21 @@ function WorkersPageContent() {
             </Button>
           </Box>
 
-          {credentialsError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {credentialsError}
-            </Alert>
-          )}
-
-          <Paper variant="outlined">
-            {credentialsLoading && credentials.length === 0 ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress size={28} />
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Name</TableCell>
-                      <TableCell>Prefix</TableCell>
-                      <TableCell>Owner</TableCell>
-                      <TableCell>Created</TableCell>
-                      <TableCell>Last used</TableCell>
-                      <TableCell>Expires</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell align="right">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {credentials.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                          No node credentials yet
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      credentials.map((cred) => {
-                        const isExpired =
-                          !!cred.expiresAt && new Date(cred.expiresAt) < new Date();
-                        const isRevoked = !!cred.revokedAt;
-                        return (
-                          <TableRow key={cred.id} hover>
-                            <TableCell sx={{ maxWidth: 220 }}>
-                              <Typography variant="body2" noWrap>
-                                {cred.name}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                                {cred.tokenPrefix}…
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" color="text.secondary" noWrap>
-                                {cred.ownerEmail}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" color="text.secondary" noWrap>
-                                {relativeTime(cred.createdAt)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" color="text.secondary" noWrap>
-                                {cred.lastUsedAt ? relativeTime(cred.lastUsedAt) : '—'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              {cred.expiresAt ? (
-                                <Typography
-                                  variant="body2"
-                                  color={isExpired ? 'error.main' : 'text.secondary'}
-                                  noWrap
-                                >
-                                  {new Date(cred.expiresAt).toLocaleDateString()}
-                                </Typography>
-                              ) : (
-                                <Typography variant="body2" color="text.secondary">
-                                  Never
-                                </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={isRevoked ? 'Revoked' : isExpired ? 'Expired' : 'Active'}
-                                color={isRevoked ? 'default' : isExpired ? 'warning' : 'success'}
-                                size="small"
-                                variant="outlined"
-                              />
-                            </TableCell>
-                            <TableCell align="right">
-                              {!isRevoked && (
-                                <Tooltip title="Revoke credential">
-                                  <span>
-                                    <IconButton
-                                      size="small"
-                                      aria-label="Revoke credential"
-                                      color="error"
-                                      disabled={credentialMutating}
-                                      onClick={() => setRevokeCredentialDialog(cred)}
-                                    >
-                                      <DeleteIcon fontSize="small" />
-                                    </IconButton>
-                                  </span>
-                                </Tooltip>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </Paper>
+          <DataTable<AdminNodeCredentialDto>
+            columns={credentialColumns}
+            rows={credentials}
+            rowId={(credential) => credential.id}
+            tableId={NODE_CREDENTIALS_TABLE_ID}
+            ariaLabel="Node credentials"
+            density="compact"
+            loading={credentialsLoading}
+            error={credentialsError}
+            emptyState={<span>No node credentials yet</span>}
+            rowActions={credentialActions}
+            csvExport={{ filename: 'node-credentials' }}
+          />
         </Box>
       </Box>
-
-      {/* Confirm delete dialog */}
-      {deleteDialog && (
-        <ConfirmDeleteDialog
-          open
-          node={deleteDialog}
-          onConfirm={() => void handleDelete()}
-          onCancel={() => setDeleteDialog(null)}
-        />
-      )}
-
-      {/* Confirm revoke credential dialog */}
-      {revokeCredentialDialog && (
-        <ConfirmRevokeCredentialDialog
-          open
-          credential={revokeCredentialDialog}
-          onConfirm={() => void handleRevokeCredential()}
-          onCancel={() => setRevokeCredentialDialog(null)}
-        />
-      )}
 
       {/* Create node credential dialog */}
       <CreateNodeCredentialDialog
