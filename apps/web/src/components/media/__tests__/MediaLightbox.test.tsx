@@ -19,7 +19,7 @@
  *   6. Video item — video player rendered instead of <img>
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../__tests__/utils/test-utils';
@@ -262,13 +262,15 @@ describe('close behaviour', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onClose when the Escape key is pressed', () => {
+  // Escape (like the Close button) unwinds the pushed history entry and lets
+  // the popstate handler close, so the close is asynchronous.
+  it('calls onClose when the Escape key is pressed', async () => {
     const onClose = vi.fn();
     renderLightbox({ onClose });
 
     fireEvent.keyDown(window, { key: 'Escape' });
 
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('does not call onClose for Escape when index is null', () => {
@@ -472,5 +474,153 @@ describe('video item', () => {
         (el as HTMLImageElement).src === 'https://cdn.example.com/full-vid-3.mp4',
     );
     expect(fullResImg).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Mobile control-bar auto-hide (issue #235)
+// ---------------------------------------------------------------------------
+
+describe('mobile control bar auto-hide', () => {
+  /** Force MUI's `useMediaQuery(theme.breakpoints.down('sm'))` to report mobile. */
+  function forceMobileViewport() {
+    vi.mocked(window.matchMedia).mockImplementation(
+      (query: string) =>
+        ({
+          matches: query.includes('max-width'),
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+  }
+
+  /** The control bar is the Box wrapping the Close button. */
+  function controlBar(): HTMLElement {
+    return screen.getByRole('button', { name: /close lightbox/i })
+      .parentElement as HTMLElement;
+  }
+
+  // Restore the default (desktop) matchMedia stub for the rest of the file.
+  afterEach(() => {
+    vi.mocked(window.matchMedia).mockImplementation(
+      (query: string) =>
+        ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+  });
+
+  it('hides the control bar on a photo after the idle timeout', async () => {
+    forceMobileViewport();
+    renderLightbox({ items: [makeMediaItem('mob-photo')], index: 0 });
+
+    await waitFor(
+      () => expect(window.getComputedStyle(controlBar()).opacity).toBe('0'),
+      { timeout: 5000 },
+    );
+  }, 10000);
+
+  it('keeps the control bar pinned on a video', async () => {
+    forceMobileViewport();
+    const videoItem = makeMediaItem('mob-video', {
+      type: 'video',
+      downloadUrl: null,
+    });
+    mockGetMedia.mockResolvedValue({
+      ...videoItem,
+      downloadUrl: 'https://cdn.example.com/full-mob-video.mp4',
+    });
+
+    renderLightbox({ items: [videoItem], index: 0 });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('video-player')).toBeInTheDocument(),
+    );
+
+    // Well past the 3 s photo auto-hide window — the bar must still be
+    // visible and tappable, since Vidstack swallows the restore gestures.
+    await new Promise((resolve) => setTimeout(resolve, 3200));
+
+    const style = window.getComputedStyle(controlBar());
+    expect(style.opacity).toBe('1');
+    expect(style.pointerEvents).toBe('auto');
+  }, 10000);
+});
+
+// ---------------------------------------------------------------------------
+// 8. Browser history integration (issue #235)
+// ---------------------------------------------------------------------------
+
+describe('browser history integration', () => {
+  it('pushes exactly one history entry when the lightbox opens', () => {
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    renderLightbox({ items: [makeMediaItem('hist-1')], index: 0 });
+
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+    expect(pushSpy.mock.calls[0][0]).toEqual({ mhLightbox: true });
+    pushSpy.mockRestore();
+  });
+
+  it('does not push a history entry while closed', () => {
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    renderLightbox({ items: [makeMediaItem('hist-2')], index: null });
+
+    expect(pushSpy).not.toHaveBeenCalled();
+    pushSpy.mockRestore();
+  });
+
+  it('does not push another entry when navigating between items', () => {
+    const items = [makeMediaItem('hist-3a'), makeMediaItem('hist-3b')];
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    const { rerender } = renderLightbox({ items, index: 0 });
+
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MediaLightbox
+        items={items}
+        index={1}
+        onIndexChange={vi.fn()}
+        onClose={vi.fn()}
+        onOpenProperties={vi.fn()}
+      />,
+    );
+
+    expect(pushSpy).toHaveBeenCalledTimes(1);
+    pushSpy.mockRestore();
+  });
+
+  it('closes the lightbox when the browser Back button fires popstate', () => {
+    const onClose = vi.fn();
+    renderLightbox({ items: [makeMediaItem('hist-4')], index: 0, onClose });
+
+    fireEvent.popState(window);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('unwinds its own history entry when closed from the UI', async () => {
+    const backSpy = vi.spyOn(window.history, 'back');
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderLightbox({ items: [makeMediaItem('hist-5')], index: 0, onClose });
+
+    await user.click(screen.getByRole('button', { name: /close lightbox/i }));
+
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    backSpy.mockRestore();
   });
 });
