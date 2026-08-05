@@ -8,8 +8,12 @@ keyboard model and the shared conformance suite shipped (issue #257, §17);
 pilot migration — Job Queue — shipped, adding `filterOnly` to the contract
 (issue #258, §18); identity-and-access tables (Users, Allowlist, Personal Access
 Tokens, Circle members/invites) migrated, establishing the `exportable: false`
-secret-material rule and the gate-the-action-array rule (issue #260, §13.1) —
-all of epic #238
+secret-material rule and the gate-the-action-array rule (issue #260, §13.1);
+workflow oversight, the workflow-runs drawer and the three run-item tables
+migrated — the FINAL migration, proving the container-driven layout switch
+against the drawer case and the no-remount-under-poll rule against three polling
+pages (issue #261, §13.2) — all of epic #238. **No raw page-level table
+implementation remains** (§13).
 **Location:** `apps/web/src/components/datatable/`,
 `apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
 **Spec owner:** frontend
@@ -1281,8 +1285,30 @@ three rules every later migration should follow (§18.2–§18.4).
 | Storage providers / migration runs | `admin-storage-providers` / `admin-storage-migrations` | `pages/Admin/storageProvidersTable.tsx` | #259 |
 | Backup runs | `admin-backup-runs` | `pages/Admin/backupTable.tsx` | #259 |
 | Tag vocabulary | `admin-tag-labels` | `pages/Admin/tagsTable.tsx` | #259 |
+| Workflow oversight (cross-circle) | `admin-workflows` | `components/workflows/admin/workflowsOversightColumns.tsx` | #261 |
+| Workflow runs drawer | `admin-workflow-runs` | `components/workflows/admin/workflowRunsColumns.tsx` | #261 |
+| Workflow run items (failed) | `workflow-run-items` | `components/runs/runItemsTable.tsx` | #261 |
+| Review run items (failed) | `review-run-items` | `components/runs/runItemsTable.tsx` | #261 |
+| Empty-trash run items (failed) | `trash-empty-run-items` | `components/runs/runItemsTable.tsx` | #261 |
 
-Still to come: the remaining media surfaces.
+**Nothing is still to come — the migration is complete.** #261 was the last one,
+and it closes the epic's "no raw page-level `TableContainer` remains" criterion.
+A grep for `TableContainer` across `apps/web/src` now returns exactly one
+component, and it is deliberately out of scope:
+
+| File | Why it is not a DataTable |
+| ---- | ------------------------- |
+| `components/review/MemberComparison.tsx` | A member-comparison **matrix**, not a data table. Its columns are the group's *members* (so the column count grows with the data, which is the one dimension a phone does not have) and its rows are *attributes* — the transpose of the row-per-record model this contract is built on. It already carries its own responsive story: an attribute matrix at `md` and up, one card per member below, both derived from a single model. Ruled out of scope by epic #234's issue #239 and left that way. |
+
+Every other match is prose — this spec, and the module docblocks of the pages
+that describe what they replaced.
+
+**This component is now the required pattern for any new table in this app.**
+A new list surface declares `DataTableColumn[]` and renders `DataTable`; it does
+not hand-roll a `Table` / `TablePagination` / `Menu` block. That is the epic's
+durable outcome: the class of defect it was filed for — a desktop-shaped grid
+made "responsive" by letting the document scroll sideways — cannot recur one
+page at a time, because there is no longer a per-page place for it to live.
 
 ### 13.1 Decisions from the admin-operations batch (#259)
 
@@ -1365,6 +1391,79 @@ the gate holds in the grid, in the tablet row expander and on a phone card at
 once. An action a caller may not perform is then absent from the DOM entirely
 rather than merely off-screen. Each migrated surface's tests assert this in
 *both* renderers.
+
+### 13.2 The final migration — run tables and the drawer (#261)
+
+Five surfaces, and the two things the issue was emphatic about are the two the
+component had shipped but never had proved against a real page.
+
+**The Workflow runs drawer IS the container-query acceptance case.** §7.2 has
+described the scenario since #253 — "a DataTable inside the Workflow runs drawer
+is 400px wide on a 1440px desktop" — using this exact table as its example.
+#261 is where that stopped being an illustration: the drawer's paper is 620px
+with `p: 3`, so its content is ~572px, and the correct rendering on a full
+desktop is the **card** layout. A `useMediaQuery` switch would hand it the
+desktop grid and reintroduce horizontal scrolling *on a desktop*, which is the
+defect the whole epic exists to remove.
+
+`WorkflowRunsDrawer.test.tsx` proves it the only way that means anything: the
+shared `installLayoutStubs()` pins `window.matchMedia` to a **fixed 1440px
+viewport**, so every viewport query in the tree answers "desktop" and a `mobile`
+result can only have come from the container measurement. The suite asserts the
+full chain at the drawer's real content width — `data-layout="mobile"`,
+`data-renderer="mobile"`, a `role="list"` card list, **no** `role="grid"` — plus
+the mirror image at 1400px, where the same component with the same props draws
+the grid. Nothing in the component pins a layout, and deliberately no
+`mobileBreakpoint` override is passed: hard-coding one here would be the
+viewport assumption wearing a different hat.
+
+**Every one of these tables is downstream of a poll, so §18.4 is the whole
+migration.** The three run pages poll their detail endpoint every 2s
+(`useRunPolling`), and all three did exactly what the pilot's old page did —
+`{itemsLoading && items.length === 0 ? <spinner/> : <TableContainer>…}`. Under a
+poll that remounts the renderer and takes card/row expansion and the page's
+scroll offset with it. All five tables now render **unconditionally** with
+`loading` as a prop.
+
+Two page-level rules complete it here, and both are new consequences of a poll
+that hands back whole objects rather than rows:
+
+- **Refetch effects key on SCALARS, never on `run`.** Every run page's
+  failed-items effect used to depend on the `run` object. The poll replaces that
+  object every tick even when nothing changed, so the effect refired twice a
+  second and refetched the item page — resetting the table underneath the user
+  regardless of how the table was mounted. They now depend on
+  `run?.status`-derived `terminal` and `run?.failedCount`.
+- **`describeReviewRun` takes the two discriminators, not the run.** Making it
+  `(subjectType, action)` is what lets `ReviewRunPage`'s row-action `useMemo`
+  depend on scalars, so the action array — and therefore every control's
+  identity — survives a tick. Same shape as the pilot's "memoize `columns` on
+  the job-type SET, not on `stats`".
+
+Each run page asserts this directly: expand a card, re-render with a brand-new
+run object and brand-new item objects carrying the same ids, and the table's own
+DOM node is `toBe` the same node, the expanded detail region is still open, and
+both rows are still on screen. A second test asserts rows stay rendered while
+`loading` is `true` — the overlay draws *over* live rows.
+
+Three smaller decisions worth keeping:
+
+- **A thumbnail belongs inside the leading column's `render`, not in a column of
+  its own.** The run-item tables carry signed thumbnails, and the card headline
+  is built from `primary` columns — but a thumbnail-only column has no `value`,
+  which would make it useless as the row's accessible name (§17.6) and empty in
+  a CSV. `components/runs/runItemsTable.tsx` renders an avatar + label together
+  in one `primary` column whose `value` is the label. The thumbnail lands in the
+  headline; the scalar stays real.
+- **One column module for three pages.** `BaseRunItem` (`types/runs.ts`) is
+  already the exact intersection the three run-items endpoints guarantee, so the
+  workflow, review and empty-trash tables share one `buildRunItemColumns` with
+  two parameters — what a row is *called*, and where "View" goes. Three
+  `tableId`s, one declaration. `status` is `primary` on all of them, per the
+  issue: it is the signal these surfaces exist to convey.
+- **`RunProgressPanel`'s layout is untouched.** All three tables live inside the
+  panel's `children` slot, still wrapped in the same outlined `Card` +
+  `CardContent`; only the contents of that card changed.
 
 ---
 
