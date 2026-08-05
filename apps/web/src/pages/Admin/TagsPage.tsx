@@ -1,4 +1,22 @@
-import { useState, useEffect, useRef } from 'react';
+/**
+ * Admin → Tags (`/admin/settings/tagging`, embedded as {@link TagsContent}).
+ *
+ * Migrated onto the shared DataTable in issue #259 (epic #238): the hand-rolled
+ * three-column `<Table>`, its inline row-edit mode, and its `window.confirm`
+ * delete are gone. Renaming is now a small dialog (an inline `TextField` inside
+ * a grid cell has no card-layout equivalent, and the DataTable's card renderer
+ * is the whole point of the migration), and deleting routes through the row
+ * action's own confirmation.
+ *
+ * ## The bespoke CSV round trip stays, and the generic export is disabled
+ *
+ * `GET /api/tag-labels/export` emits `id,name` — the importer needs those ids to
+ * update or delete by row. Two export buttons producing different files, one of
+ * which cannot be re-imported, is worse than one, so this table passes
+ * `disableExport` (docs/specs/datatable.md §16.4) and keeps its own buttons.
+ */
+
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   Container,
@@ -10,20 +28,15 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Switch,
   IconButton,
   Collapse,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Edit as EditIcon,
-  Save as SaveIcon,
-  Cancel as CancelIcon,
   Delete as DeleteIcon,
   Download as DownloadIcon,
   Upload as UploadIcon,
@@ -40,6 +53,12 @@ import {
   importTagLabels,
 } from '../../services/tagLabels';
 import type { TagLabel, ImportResult } from '../../services/tagLabels';
+import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import {
+  TAG_LABELS_PAGE_SIZE,
+  TAG_LABELS_TABLE_ID,
+  buildTagColumns,
+} from './tagsTable';
 
 // ---------------------------------------------------------------------------
 // Inner content (only rendered when user is admin)
@@ -55,13 +74,17 @@ export function TagsContent() {
   const [addName, setAddName] = useState('');
   const [addSaving, setAddSaving] = useState(false);
 
-  // Inline edit form
-  const [editId, setEditId] = useState<string | null>(null);
+  // Rename dialog
+  const [editLabel, setEditLabel] = useState<TagLabel | null>(null);
   const [editName, setEditName] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
   // Delete
   const [deletingSaving, setDeletingSaving] = useState<string | null>(null);
+
+  // Client-side pagination (the endpoint returns the whole vocabulary)
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(TAG_LABELS_PAGE_SIZE);
 
   // Export / import
   const [exporting, setExporting] = useState(false);
@@ -102,17 +125,17 @@ export function TagsContent() {
   };
 
   const startEdit = (label: TagLabel) => {
-    setEditId(label.id);
+    setEditLabel(label);
     setEditName(label.name);
   };
 
   const handleSaveEdit = async () => {
-    if (!editId) return;
+    if (!editLabel) return;
     setEditSaving(true);
     try {
-      const updated = await updateTagLabel(editId, { name: editName });
+      const updated = await updateTagLabel(editLabel.id, { name: editName });
       setLabels((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
-      setEditId(null);
+      setEditLabel(null);
     } catch (err) {
       setLabelsError(err instanceof Error ? err.message : 'Failed to save label');
     } finally {
@@ -130,7 +153,6 @@ export function TagsContent() {
   };
 
   const handleDeleteLabel = async (id: string) => {
-    if (!window.confirm('Delete this tag label? This cannot be undone.')) return;
     setDeletingSaving(id);
     try {
       await deleteTagLabel(id);
@@ -192,6 +214,61 @@ export function TagsContent() {
       setImporting(false);
     }
   };
+
+  // ---- Table ----
+
+  const columns = useMemo(
+    () =>
+      buildTagColumns({
+        onToggleEnabled: (label, enabled) => void handleToggleEnabled(label.id, enabled),
+      }),
+    // Built once, deliberately: `handleToggleEnabled` closes over nothing that
+    // changes — the `setLabels` / `setLabelsError` setters are stable and
+    // `updateTagLabel` is a module import — so a fresh column array per render
+    // would only churn every downstream `useMemo` keyed on `columns`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const rowActions = useMemo<DataTableRowAction<TagLabel>[]>(
+    () => [
+      {
+        id: 'rename',
+        label: 'Rename',
+        icon: <EditIcon fontSize="small" />,
+        onClick: (label) => startEdit(label),
+      },
+      {
+        id: 'delete',
+        label: 'Delete',
+        icon: <DeleteIcon fontSize="small" />,
+        destructive: true,
+        disabled: (label) => deletingSaving === label.id,
+        confirm: {
+          title: 'Delete tag label?',
+          description: (label) =>
+            `"${label.name}" will be removed from the vocabulary, along with every AI-applied instance of it. This cannot be undone.`,
+          confirmLabel: 'Delete',
+        },
+        onClick: (label) => void handleDeleteLabel(label.id),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deletingSaving],
+  );
+
+  // The endpoint returns the whole vocabulary; the PAGE slices it, so the
+  // DataTable's "never paginate `rows` yourself" contract still holds.
+  const pageRows = useMemo(
+    () => labels.slice(page * pageSize, page * pageSize + pageSize),
+    [labels, page, pageSize],
+  );
+
+  // Deleting the last row of the last page would otherwise strand the user on
+  // an empty page with no way back except the footer's own arrows.
+  useEffect(() => {
+    if (page > 0 && page * pageSize >= labels.length) setPage(0);
+  }, [labels.length, page, pageSize]);
 
   return (
     <Container maxWidth="lg">
@@ -316,107 +393,66 @@ export function TagsContent() {
             <code>id</code> empty to create a new tag; set <code>delete=true</code> to remove by id.
           </Typography>
 
-          {/* Table */}
-          {labelsLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <TableContainer sx={{ overflowX: 'auto' }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Enabled</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {labels.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={3} align="center">
-                        <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-                          No tag labels defined yet.
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {labels.map((label) =>
-                    editId === label.id ? (
-                      // Inline edit mode
-                      <TableRow key={label.id}>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            value={editName}
-                            onChange={(e) => setEditName(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') void handleSaveEdit();
-                              if (e.key === 'Escape') setEditId(null);
-                            }}
-                            autoFocus
-                          />
-                        </TableCell>
-                        <TableCell />
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            onClick={() => void handleSaveEdit()}
-                            disabled={editSaving}
-                            aria-label="Save"
-                          >
-                            {editSaving ? <CircularProgress size={14} /> : <SaveIcon />}
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => setEditId(null)}
-                            aria-label="Cancel"
-                          >
-                            <CancelIcon />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      // Read mode
-                      <TableRow key={label.id}>
-                        <TableCell>{label.name}</TableCell>
-                        <TableCell>
-                          <Switch
-                            size="small"
-                            checked={label.enabled}
-                            onChange={(e) => void handleToggleEnabled(label.id, e.target.checked)}
-                            aria-label={`Toggle ${label.name}`}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            onClick={() => startEdit(label)}
-                            aria-label={`Edit ${label.name}`}
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => void handleDeleteLabel(label.id)}
-                            disabled={deletingSaving === label.id}
-                            aria-label={`Delete ${label.name}`}
-                          >
-                            {deletingSaving === label.id ? (
-                              <CircularProgress size={14} />
-                            ) : (
-                              <DeleteIcon />
-                            )}
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ),
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
+          {/*
+            Rendered unconditionally with `loading` as a prop — see the module
+            docblock's reference to docs/specs/datatable.md §18.4.
+          */}
+          <DataTable<TagLabel>
+            columns={columns}
+            rows={pageRows}
+            rowId={(label) => label.id}
+            tableId={TAG_LABELS_TABLE_ID}
+            ariaLabel="Tag vocabulary"
+            density="compact"
+            loading={labelsLoading}
+            emptyState={<span>No tag labels defined yet.</span>}
+            pagination={{
+              page,
+              pageSize,
+              total: labels.length,
+              onPaginationChange: ({ page: nextPage, pageSize: nextPageSize }) => {
+                setPage(nextPage);
+                setPageSize(nextPageSize);
+              },
+              pageSizeOptions: [10, 25, 50, 100],
+            }}
+            rowActions={rowActions}
+            // The bespoke `id,name` CSV round trip above is this table's export.
+            disableExport
+          />
+
+          {/* Rename dialog — an inline TextField inside a grid cell has no
+              card-layout equivalent, so the edit affordance is a dialog now. */}
+          <Dialog open={!!editLabel} onClose={() => setEditLabel(null)} maxWidth="xs" fullWidth>
+            <DialogTitle>Rename tag label</DialogTitle>
+            <DialogContent>
+              <TextField
+                label="Label name"
+                size="small"
+                fullWidth
+                autoFocus
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSaveEdit();
+                }}
+                sx={{ mt: 1 }}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setEditLabel(null)} disabled={editSaving}>
+                Cancel
+              </Button>
+              <Button
+                variant="contained"
+                onClick={() => void handleSaveEdit()}
+                disabled={editSaving || !editName.trim()}
+                startIcon={editSaving ? <CircularProgress size={14} /> : undefined}
+              >
+                Save
+              </Button>
+            </DialogActions>
+          </Dialog>
         </Paper>
 
       </Box>
