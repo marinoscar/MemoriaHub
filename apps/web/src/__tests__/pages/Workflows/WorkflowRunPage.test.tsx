@@ -22,10 +22,16 @@
  * not disturb it.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { act, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../../components/datatable/__tests__/testUtils/layoutStubs';
+import { api } from '../../../services/api';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks
@@ -197,13 +203,23 @@ function makeMutationsHook(overrides: Partial<MutationsHookReturn> = {}): Mutati
   } as MutationsHookReturn;
 }
 
+beforeAll(() => {
+  // The failed-items table is a DataTable (#261); jsdom performs no layout, so
+  // both the container-width hook and MUI X measure 0×0 without these.
+  installLayoutStubs();
+});
+
 describe('WorkflowRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400); // desktop layout unless a test says otherwise
     mockUseCircle.mockReturnValue(makeCircleContext());
     mockUsePermissions.mockReturnValue(makePermissions());
     mockUseWorkflowRunItems.mockReturnValue(makeItemsHook());
     mockUseWorkflowMutations.mockReturnValue(makeMutationsHook());
+    // The table's layout-persistence hook reads/writes `/user-settings` (§15).
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   afterEach(() => {
@@ -407,6 +423,88 @@ describe('WorkflowRunPage', () => {
         vi.advanceTimersByTime(10000);
       });
       expect(fetchRun).toHaveBeenCalledTimes(callsAfterMount);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Live updates must not disturb the user (issue #261)
+  // -------------------------------------------------------------------------
+  //
+  // The page polls its run endpoint, so `run` and (on a refetch) `items` are
+  // brand-new objects on every tick. Gating the table on `loading` — which this
+  // page did before #261 — would remount the renderer each time and take card
+  // expansion state and the scroll offset with it (docs/specs/datatable.md
+  // §18.4).
+  describe('live updates do not disturb the failed-items table', () => {
+    function terminalRunWithFailures() {
+      return makeRun({
+        status: 'completed_with_errors',
+        matchedCount: 10,
+        processedCount: 10,
+        succeededCount: 8,
+        failedCount: 2,
+      });
+    }
+
+    /** Fresh objects with the SAME ids — what one poll tick actually produces. */
+    function failedItems() {
+      return [
+        makeItem('broken-one', { status: 'failed', error: 'Move to trash failed' }),
+        makeItem('broken-two', { status: 'failed', error: 'Move to trash failed' }),
+      ];
+    }
+
+    it('preserves an expanded card and the table itself across a poll tick', async () => {
+      const user = userEvent.setup();
+      setInitialContainerWidth(400); // card layout, so "More details" exists
+      mockUseWorkflowRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseWorkflowRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+
+      const { rerender } = render(<WorkflowRunPage />);
+
+      const table = await screen.findByTestId('datatable');
+      await user.click(
+        await screen.findByRole('button', { name: 'More details for broken-one.jpg' }),
+      );
+      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+
+      mockUseWorkflowRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseWorkflowRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+      rerender(<WorkflowRunPage />);
+
+      expect(screen.getByTestId('datatable')).toBe(table);
+      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Hide details for broken-one.jpg' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('broken-one.jpg')).toBeInTheDocument();
+      expect(screen.getByText('broken-two.jpg')).toBeInTheDocument();
+    });
+
+    it('keeps the rows rendered while a refetch is in flight', async () => {
+      mockUseWorkflowRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseWorkflowRunItems.mockReturnValue(
+        makeItemsHook({ items: failedItems(), isLoading: true }),
+      );
+
+      render(<WorkflowRunPage />);
+
+      expect(await screen.findByText('broken-one.jpg')).toBeInTheDocument();
+      expect(screen.getByTestId('datatable-loading-overlay')).toBeInTheDocument();
+    });
+
+    it('links a failed item to its media, from a row-named action', async () => {
+      mockUseWorkflowRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseWorkflowRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+
+      render(<WorkflowRunPage />);
+
+      // One row action → a bare icon button named after its row (§17.6).
+      await userEvent
+        .setup()
+        .click(await screen.findByRole('button', { name: 'View for broken-one.jpg' }));
+
+      expect(mockNavigate).toHaveBeenCalledWith('/media?item=broken-one');
     });
   });
 });

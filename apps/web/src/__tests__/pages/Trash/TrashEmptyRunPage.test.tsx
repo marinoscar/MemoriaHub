@@ -22,9 +22,16 @@
  * including its stricter circle_admin cancel gate.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { act, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
+import {
+  installLayoutStubs,
+  resetContainerWidth,
+  setInitialContainerWidth,
+} from '../../../components/datatable/__tests__/testUtils/layoutStubs';
+import { api } from '../../../services/api';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks
@@ -139,11 +146,21 @@ function makeItemsHook(overrides: Partial<ItemsHookReturn> = {}): ItemsHookRetur
   } as ItemsHookReturn;
 }
 
+beforeAll(() => {
+  // The failed-items table is a DataTable (#261); jsdom performs no layout, so
+  // both the container-width hook and MUI X measure 0×0 without these.
+  installLayoutStubs();
+});
+
 describe('TrashEmptyRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetContainerWidth(1400); // desktop layout unless a test says otherwise
     mockUseCircle.mockReturnValue(makeCircleContext());
     mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook());
+    // The table's layout-persistence hook reads/writes `/user-settings` (§15).
+    vi.spyOn(api, 'get').mockResolvedValue({} as never);
+    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   afterEach(() => {
@@ -380,6 +397,116 @@ describe('TrashEmptyRunPage', () => {
         vi.advanceTimersByTime(10000);
       });
       expect(fetchRun).toHaveBeenCalledTimes(callsAfterMount);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Live updates must not disturb the user (issue #261)
+  // -------------------------------------------------------------------------
+  //
+  // The page polls its run endpoint, so `run` and (on a refetch) `items` are
+  // brand-new objects on every tick. Gating the table on `loading` — which this
+  // page did before #261 — would remount the renderer each time and take card
+  // expansion state and the scroll offset with it (docs/specs/datatable.md
+  // §18.4).
+  describe('live updates do not disturb the failed-items table', () => {
+    function terminalRunWithFailures() {
+      return makeRun({
+        status: 'completed_with_errors',
+        matchedCount: 10,
+        processedCount: 10,
+        succeededCount: 8,
+        failedCount: 2,
+      });
+    }
+
+    /** Fresh objects with the SAME ids — what one poll tick actually produces. */
+    function failedItems() {
+      return [
+        {
+          id: 'ri-1',
+          mediaItemId: 'm-1',
+          status: 'failed' as const,
+          error: 'Hard-delete failed',
+          updatedAt: new Date().toISOString(),
+          media: {
+            type: 'photo',
+            capturedAt: null,
+            filename: 'broken-one.jpg',
+            width: 10,
+            height: 10,
+          },
+          thumbnailUrl: null,
+        },
+        {
+          id: 'ri-2',
+          mediaItemId: 'm-2',
+          status: 'failed' as const,
+          error: 'Hard-delete failed',
+          updatedAt: new Date().toISOString(),
+          media: {
+            type: 'photo',
+            capturedAt: null,
+            filename: 'broken-two.jpg',
+            width: 10,
+            height: 10,
+          },
+          thumbnailUrl: null,
+        },
+      ];
+    }
+
+    it('preserves an expanded card and the table itself across a poll tick', async () => {
+      const user = userEvent.setup();
+      setInitialContainerWidth(400); // card layout, so "More details" exists
+      mockUseTrashEmptyRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+
+      const { rerender } = render(<TrashEmptyRunPage />);
+
+      const table = await screen.findByTestId('datatable');
+      await user.click(
+        await screen.findByRole('button', { name: 'More details for broken-one.jpg' }),
+      );
+      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+
+      mockUseTrashEmptyRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+      rerender(<TrashEmptyRunPage />);
+
+      expect(screen.getByTestId('datatable')).toBe(table);
+      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Hide details for broken-one.jpg' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('broken-one.jpg')).toBeInTheDocument();
+      expect(screen.getByText('broken-two.jpg')).toBeInTheDocument();
+    });
+
+    it('keeps the rows rendered while a refetch is in flight', async () => {
+      mockUseTrashEmptyRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseTrashEmptyRunItems.mockReturnValue(
+        makeItemsHook({ items: failedItems(), isLoading: true }),
+      );
+
+      render(<TrashEmptyRunPage />);
+
+      expect(await screen.findByText('broken-one.jpg')).toBeInTheDocument();
+      expect(screen.getByTestId('datatable-loading-overlay')).toBeInTheDocument();
+    });
+
+    it('links a failed item to its media, from a row-named action', async () => {
+      mockUseTrashEmptyRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
+      mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
+
+      render(<TrashEmptyRunPage />);
+
+      // One row action → a bare icon button named after its row (§17.6).
+      await userEvent
+        .setup()
+        .click(await screen.findByRole('button', { name: 'View for broken-one.jpg' }));
+
+      expect(mockNavigate).toHaveBeenCalledWith('/media?item=m-1');
     });
   });
 });

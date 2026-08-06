@@ -1,3 +1,18 @@
+/**
+ * Workflow run detail — approval preview, live progress, and failed items.
+ *
+ * Issue #261 (epic #238) replaced the hand-rolled failed-items
+ * `<TableContainer>` + `<Pagination>` block with the shared DataTable
+ * (`components/runs/runItemsTable.tsx`). Two rules matter on a page that polls
+ * its run every 2s: the table is rendered UNCONDITIONALLY with `loading` as a
+ * prop, and the effect/memos around it key on SCALARS rather than on the `run`
+ * object the poll replaces each tick. See docs/specs/datatable.md §13.2 / §18.4.
+ *
+ * The `awaiting_approval` exclusion GRID is deliberately untouched: it is a
+ * thumbnail picker with per-tile checkboxes, not a data table, and it already
+ * reflows through MUI's own `Grid` breakpoints.
+ */
+
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Box,
@@ -18,18 +33,12 @@ import {
   List,
   ListItem,
   ListItemText,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Link,
   Tooltip,
 } from '@mui/material';
 import {
   BrokenImage as BrokenImageIcon,
   ArrowBack as ArrowBackIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
@@ -40,6 +49,12 @@ import { useWorkflowMutations } from '../../hooks/useWorkflowMutations';
 import { useRunPolling } from '../../hooks/useRunPolling';
 import RunProgressPanel from '../../components/runs/RunProgressPanel';
 import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
+import {
+  RUN_ITEMS_EMPTY_STATE,
+  RUN_ITEMS_PAGE_SIZE,
+  buildRunItemColumns,
+} from '../../components/runs/runItemsTable';
+import { DataTable, type DataTableRowAction } from '../../components/datatable';
 import {
   runStatusColor,
   runStatusLabel,
@@ -55,6 +70,13 @@ import type { WorkflowRunDetail, WorkflowRunItem } from '../../types/workflows';
 
 const ITEMS_PAGE_SIZE = 24;
 const MAX_EXCLUSIONS = 500;
+
+/**
+ * Persistence key for the failed-items table's column/density choices
+ * (`user_settings.dataTables['workflow-run-items']`, docs/specs/datatable.md
+ * §15). Chosen here and never derived from the route.
+ */
+export const WORKFLOW_RUN_ITEMS_TABLE_ID = 'workflow-run-items';
 
 // ---------------------------------------------------------------------------
 // Run item tile — thumbnail + filename + capture date, optional exclude checkbox
@@ -184,7 +206,10 @@ export default function WorkflowRunPage() {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [confirmText, setConfirmText] = useState('');
   const [itemsPage, setItemsPage] = useState(1);
-  const [failedPage, setFailedPage] = useState(1);
+  // The failed-items DataTable is server-paginated: `failedPage` is ZERO-based
+  // (the component's convention) and converted at the fetch boundary.
+  const [failedPage, setFailedPage] = useState(0);
+  const [failedPageSize, setFailedPageSize] = useState(RUN_ITEMS_PAGE_SIZE);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -215,15 +240,21 @@ export default function WorkflowRunPage() {
   }, [runId, run?.status, itemsPage, fetchItems]);
 
   // Load the failed-item table once the run is terminal and has failures.
+  //
+  // Keyed on the two SCALARS this depends on, never on `run` itself: the
+  // run-detail poll hands back a fresh object every tick, and depending on that
+  // identity would refetch the item page — and with it reset the table — twice
+  // a second.
   const isTerminal = run ? isTerminalRunStatus(run.status) : false;
+  const failedCount = run?.failedCount ?? 0;
   useEffect(() => {
-    if (!runId || !run || !isTerminal || run.failedCount <= 0) return;
+    if (!runId || !isTerminal || failedCount <= 0) return;
     void fetchItems(runId, {
       status: 'failed',
-      page: failedPage,
-      pageSize: ITEMS_PAGE_SIZE,
+      page: failedPage + 1, // the API is 1-based, the table 0-based
+      pageSize: failedPageSize,
     });
-  }, [runId, run, isTerminal, failedPage, fetchItems]);
+  }, [runId, isTerminal, failedCount, failedPage, failedPageSize, fetchItems]);
 
   const effectiveMatched = useMemo(
     () => (run ? Math.max(0, run.matchedCount - excluded.size) : 0),
@@ -284,6 +315,34 @@ export default function WorkflowRunPage() {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to cancel run');
     }
   }, [runId, cancelRun, fetchRun]);
+
+  // --- Failed-items table ----------------------------------------------------
+  //
+  // Both memos are keyed on nothing that a poll can change, so the column array
+  // and the action array keep their identity across ticks — the second half of
+  // the "a refresh must not disturb the user" contract (§18.4). The first half
+  // is that the table below is rendered UNCONDITIONALLY.
+
+  const failedItemColumns = useMemo(
+    () =>
+      buildRunItemColumns<WorkflowRunItem>({
+        subjectLabel: 'File',
+        itemLabel: (item) => item.media?.filename ?? 'Untitled',
+      }),
+    [],
+  );
+
+  const failedItemActions = useMemo<DataTableRowAction<WorkflowRunItem>[]>(
+    () => [
+      {
+        id: 'view',
+        label: 'View',
+        icon: <VisibilityIcon fontSize="small" />,
+        onClick: (item) => navigate(`/media?item=${item.mediaItemId}`),
+      },
+    ],
+    [navigate],
+  );
 
   // First-load spinner (only when we have no run yet).
   if (!run && isLoading) {
@@ -390,64 +449,34 @@ export default function WorkflowRunPage() {
                     </Tooltip>
                   )}
                 </Box>
-                {itemsLoading && items.length === 0 ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                    <CircularProgress size={28} />
-                  </Box>
-                ) : (
-                  <>
-                    <TableContainer sx={{ overflowX: 'auto' }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>File</TableCell>
-                            <TableCell>Error</TableCell>
-                            <TableCell align="right">Item</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {items.map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell sx={{ maxWidth: 220 }}>
-                                <Typography variant="body2" noWrap title={item.media?.filename ?? undefined}>
-                                  {item.media?.filename ?? 'Untitled'}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {formatCaptureDate(item.media?.capturedAt ?? null)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell sx={{ maxWidth: 360 }}>
-                                <Typography variant="body2" color="error">
-                                  {item.error ?? 'Unknown error'}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Link
-                                  component="button"
-                                  type="button"
-                                  variant="body2"
-                                  onClick={() => navigate(`/media?item=${item.mediaItemId}`)}
-                                >
-                                  View
-                                </Link>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                    {itemsMeta && itemsMeta.totalPages > 1 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-                        <Pagination
-                          count={itemsMeta.totalPages}
-                          page={failedPage}
-                          onChange={(_, p) => setFailedPage(p)}
-                          size="small"
-                        />
-                      </Box>
-                    )}
-                  </>
-                )}
+                {/*
+                  Rendered UNCONDITIONALLY — `loading` is a prop, never a gate.
+                  Swapping the table for a spinner (as this page did before
+                  #261) unmounts the renderer on every refetch and takes card /
+                  row expansion state and the page's scroll offset with it.
+                  docs/specs/datatable.md §18.4.
+                */}
+                <DataTable<WorkflowRunItem>
+                  columns={failedItemColumns}
+                  rows={items}
+                  rowId={(item) => item.id}
+                  tableId={WORKFLOW_RUN_ITEMS_TABLE_ID}
+                  ariaLabel="Failed workflow run items"
+                  density="compact"
+                  loading={itemsLoading}
+                  emptyState={RUN_ITEMS_EMPTY_STATE}
+                  pagination={{
+                    page: failedPage,
+                    pageSize: failedPageSize,
+                    total: itemsMeta?.totalItems ?? items.length,
+                    onPaginationChange: ({ page: nextPage, pageSize: nextSize }) => {
+                      setFailedPage(nextPage);
+                      setFailedPageSize(nextSize);
+                    },
+                  }}
+                  rowActions={failedItemActions}
+                  csvExport={{ filename: 'workflow-run-failed-items' }}
+                />
               </CardContent>
             </Card>
           )}

@@ -171,6 +171,20 @@ function makeRun(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Open a workflow row's overflow menu.
+ *
+ * Post-#261 the oversight table's row actions live in the shared DataTable's
+ * `MoreVert` menu, named after the row's first `primary` column value
+ * (docs/specs/datatable.md §17.6) — not as two bare buttons in a trailing cell.
+ */
+async function openWorkflowRowMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  rowLabel = 'Screenshot cleanup',
+) {
+  await user.click(await screen.findByRole('button', { name: `Row actions for ${rowLabel}` }));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -497,7 +511,8 @@ describe('WorkflowsSettingsPage', () => {
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
 
-      await user.click(screen.getByRole('button', { name: /^disable$/i }));
+      await openWorkflowRowMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /^disable$/i }));
 
       const dialog = await screen.findByRole('dialog');
       expect(within(dialog).getByText(/disable workflow\?/i)).toBeInTheDocument();
@@ -517,7 +532,8 @@ describe('WorkflowsSettingsPage', () => {
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
 
-      await user.click(screen.getByRole('button', { name: /^disable$/i }));
+      await openWorkflowRowMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /^disable$/i }));
       const dialog = await screen.findByRole('dialog');
       await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
 
@@ -530,7 +546,8 @@ describe('WorkflowsSettingsPage', () => {
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
 
-      await user.click(screen.getByRole('button', { name: /runs/i }));
+      await openWorkflowRowMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /^runs$/i }));
 
       await waitFor(() => {
         expect(mockListRuns).toHaveBeenCalledWith(
@@ -550,10 +567,13 @@ describe('WorkflowsSettingsPage', () => {
       render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
-      await user.click(screen.getByRole('button', { name: /runs/i }));
+      await openWorkflowRowMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: /^runs$/i }));
       await waitFor(() => expect(screen.getByRole('heading', { name: /run history/i })).toBeInTheDocument());
 
-      await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+      // Cancel is the drawer table's ONLY row action, so it renders as a bare
+      // icon button named after its row (the run's short id) — §17.6.
+      await user.click(await screen.findByRole('button', { name: 'Cancel run for run-1' }));
 
       const dialog = await screen.findByRole('dialog');
       expect(within(dialog).getByText(/cancel this run\?/i)).toBeInTheDocument();
