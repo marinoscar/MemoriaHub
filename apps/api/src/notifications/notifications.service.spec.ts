@@ -1069,4 +1069,159 @@ describe('NotificationsService', () => {
       });
     });
   });
+
+  // =========================================================================
+  // #251 preference gate — enforced in ALL THREE write paths
+  //
+  // NotificationsService never inspects settings itself: every write path
+  // asks the injected NotificationPreferencesService.isEnabled() first and
+  // writes NOTHING when it returns false. These tests replace the
+  // beforeEach's default `isEnabled: true` stub per-case to prove the gate is
+  // real for each of emit()/upsertState()/upsertCountedEvent() individually —
+  // upsertCountedEvent() is the highest-volume path (upload_completed /
+  // enrichment_failed), so a gap there would silently break preferences for
+  // exactly the types users toggle off first.
+  // =========================================================================
+
+  describe('#251 preference gate — suppression across all three write paths', () => {
+    describe('emit()', () => {
+      it('a disabled type writes NO row', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(false);
+
+        await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
+
+        expect(mockPreferences.isEnabled).toHaveBeenCalledWith(USER_ID, 'upload_completed');
+        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      });
+
+      it('does not touch the unread-count cache when suppressed (nothing was written)', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(false);
+        (mockPrisma.notification.count as jest.Mock).mockResolvedValue(3);
+
+        await service.getUnreadCount(USER_ID); // primes cache with 3
+        await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
+        const after = await service.getUnreadCount(USER_ID);
+
+        // Still served from cache (never invalidated) — proves emit() returned
+        // before reaching the create()+invalidate step.
+        expect(after).toEqual({ count: 3 });
+        expect(mockPrisma.notification.count).toHaveBeenCalledTimes(1);
+      });
+
+      it('an enabled type is unaffected — the gate is per-call, not global', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(true);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
+
+        expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('upsertState()', () => {
+      const stateInput = {
+        userId: USER_ID,
+        circleId: CIRCLE_ID,
+        type: 'review_queue_bursts' as const,
+        title: 'Bursts pending review',
+        data: { count: 12 },
+      };
+
+      it('a disabled STATE type writes no row AND refreshes none', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(false);
+
+        await service.upsertState(stateInput);
+
+        expect(mockPreferences.isEnabled).toHaveBeenCalledWith(USER_ID, 'review_queue_bursts');
+        expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      });
+
+      it('does not resurrect an existing live row for a now-suppressed type — no update, no create', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(false);
+        // Even if a live row happened to exist, the gate must short-circuit
+        // before the updateMany is ever issued.
+        (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+        await service.upsertState(stateInput);
+
+        expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('upsertCountedEvent()', () => {
+      const countedInput = {
+        userId: USER_ID,
+        circleId: CIRCLE_ID,
+        type: 'upload_completed' as const,
+        buildTitle: (count: number) => `${count} uploaded`,
+      };
+
+      it('a disabled type writes no row and never opens the transaction (never contends for the advisory lock)', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(false);
+
+        await service.upsertCountedEvent(countedInput);
+
+        expect(mockPreferences.isEnabled).toHaveBeenCalledWith(USER_ID, 'upload_completed');
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      });
+
+      it('enrichment_failed (the other counted-event type) is gated identically', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(false);
+
+        await service.upsertCountedEvent({
+          userId: USER_ID,
+          type: 'enrichment_failed',
+          matchData: { jobType: 'auto_tagging' },
+          buildTitle: (count) => `${count} failed`,
+        });
+
+        expect(mockPreferences.isEnabled).toHaveBeenCalledWith(USER_ID, 'enrichment_failed');
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('checked BEFORE $transaction opens — an enabled type still proceeds normally', async () => {
+        mockPreferences.isEnabled.mockResolvedValue(true);
+        wireTransactionPassthrough(mockPrisma);
+        (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+
+        await service.upsertCountedEvent(countedInput);
+
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('master switch (enabled: false) suppresses every type', () => {
+      it('emit(), upsertState(), and upsertCountedEvent() all no-op when isEnabled resolves false for every type — the gate is uniform regardless of WHY isEnabled said no', async () => {
+        // NotificationsService itself has no notion of a "master switch" — it
+        // only ever asks isEnabled(userId, type). Modeling the master switch's
+        // effect (every type suppressed) is exactly "isEnabled always returns
+        // false", which is what NotificationPreferencesService.isEnabled()
+        // resolves to for every type once `enabled: false` is stored (see
+        // notification-preferences.service.spec.ts for that resolution).
+        mockPreferences.isEnabled.mockResolvedValue(false);
+        wireTransactionPassthrough(mockPrisma);
+
+        await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
+        await service.upsertState({
+          userId: USER_ID,
+          circleId: CIRCLE_ID,
+          type: 'review_queue_bursts',
+          title: 'x',
+        });
+        await service.upsertCountedEvent({
+          userId: USER_ID,
+          type: 'enrichment_failed',
+          buildTitle: (c) => `${c}`,
+        });
+
+        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+        expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      });
+    });
+  });
 });
