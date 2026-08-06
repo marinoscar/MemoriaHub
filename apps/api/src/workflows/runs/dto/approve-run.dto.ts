@@ -7,6 +7,7 @@ export const approveRunSchema = z.object({
   excludedItemIds: z.array(z.string().uuid()).max(500).optional(),
   /** Required "DELETE <count>" confirmation when the run contains hard_delete. */
   confirmation: z.string().max(200).optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class ApproveRunDto extends createZodDto(approveRunSchema) {}

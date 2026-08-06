@@ -13,22 +13,24 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
+// .default({}) on all three so a bodyless POST parses as {} — see issue #289
+// (app.module.ts).
 const reprocessBodySchema = z.object({
   circleId: z.string().uuid().optional(),
   all: z.boolean().optional(),
-});
+}).default({});
 
 export class ReprocessBodyDto extends createZodDto(reprocessBodySchema) {}
 
 const reprocessStuckBodySchema = z.object({
   olderThanMinutes: z.number().int().positive().optional(),
-});
+}).default({});
 
 export class ReprocessStuckBodyDto extends createZodDto(reprocessStuckBodySchema) {}
 
 const reprocessFailedBodySchema = z.object({
   limit: z.number().int().positive().optional(),
-});
+}).default({});
 
 export class ReprocessFailedBodyDto extends createZodDto(reprocessFailedBodySchema) {}
 

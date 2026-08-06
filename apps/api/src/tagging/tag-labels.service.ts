@@ -22,7 +22,8 @@ export class CreateTagLabelDto extends createZodDto(createTagLabelSchema) {}
 export const updateTagLabelSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   enabled: z.boolean().optional(),
-});
+  // .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class UpdateTagLabelDto extends createZodDto(updateTagLabelSchema) {}
 

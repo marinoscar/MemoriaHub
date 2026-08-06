@@ -69,7 +69,12 @@ export const updatePersonSchema = z
         'profileMediaItemId and profileCrop must both be provided or both be null',
       path: ['profileMediaItemId'],
     },
-  );
+  )
+  // .default({}) LAST, after .refine(), so a bodyless request parses as {} —
+  // see issue #289 (app.module.ts). Note the refine is SKIPPED for that default
+  // value; harmless here because {} would satisfy it anyway (both absent, so
+  // hasId === hasCrop === false).
+  .default({});
 
 export class UpdatePersonDto extends createZodDto(updatePersonSchema) {}
 

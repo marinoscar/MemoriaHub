@@ -49,7 +49,8 @@ export const ClientInfoSchema = z.object({
  */
 export const DeviceCodeRequestSchema = z.object({
   clientInfo: ClientInfoSchema.optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class DeviceCodeRequestDto extends createZodDto(DeviceCodeRequestSchema) {
   @ApiProperty({

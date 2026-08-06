@@ -54,20 +54,23 @@ const heartbeatSchema = z.object({
   concurrency: z.number().int().min(1).optional(),
   // Accepted for forward-compat (current in-flight job count); service ignores it.
   inFlight: z.number().int().min(0).optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class HeartbeatDto extends createZodDto(heartbeatSchema) {}
 
 const claimSchema = z.object({
   max: z.number().int().min(1).optional(),
   types: z.array(z.string().min(1)).optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class ClaimDto extends createZodDto(claimSchema) {}
 
 const renewLeaseSchema = z.object({
   leaseMs: z.number().int().min(1000).optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class RenewLeaseDto extends createZodDto(renewLeaseSchema) {}
 

@@ -14,7 +14,9 @@ const backfillGeoSchema = z.object({
   from: flexibleDate.optional(),
   to: flexibleDate.optional(),
   force: z.boolean().optional().default(false),
-});
+  // .prefault({}) so a bodyless POST parses exactly like {} (force: false) —
+  // see issue #289 (app.module.ts) and admin-metadata.controller.ts.
+}).prefault({});
 class BackfillGeoDto extends createZodDto(backfillGeoSchema) {}
 
 @ApiTags('Admin - Geocode')

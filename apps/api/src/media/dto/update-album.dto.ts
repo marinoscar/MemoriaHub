@@ -7,6 +7,7 @@ export const updateAlbumSchema = z.object({
   // Album cover pointer: a valid member's UUID sets the cover, null clears it,
   // omitted leaves the existing cover untouched.
   coverMediaItemId: z.string().uuid().nullable().optional(),
-});
+  // .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class UpdateAlbumDto extends createZodDto(updateAlbumSchema) {}

@@ -111,6 +111,33 @@ import configuration from './config/configuration';
   ],
   providers: [
     // Global validation pipe (Zod)
+    //
+    // NOTE (issue #289) — the bodyless-POST rule for body DTOs:
+    // Fastify leaves `request.body` as `undefined` when a request carries no
+    // body at all (e.g. `fetch(url, { method: 'POST' })`, no Content-Type, no
+    // payload). Nest's `@Body()` hands that `undefined` straight to this pipe,
+    // and `z.object({...}).parse(undefined)` throws `invalid_type` no matter
+    // how optional every one of its fields is — so an endpoint documenting an
+    // empty body as "use the defaults" would still 400.
+    //
+    // The fix is per-DTO: any body schema whose fields are ALL optional carries
+    // a top-level `.default({})`, which maps that `undefined` to `{}` before
+    // the object schema ever sees it. It must come LAST in the chain (after any
+    // `.strict()` / `.refine()`), and it also surfaces as `default: {}` in the
+    // generated OpenAPI schema.
+    //
+    // Caveat 1: `.default({})` does not re-parse the default — it short-circuits
+    // and returns that `{}` as-is. When a field carries its own inner default
+    // (e.g. `force: z.boolean().optional().default(false)`), that inner default
+    // would therefore NOT be applied to a bodyless request, and `{}` would not
+    // even satisfy the schema's own output type. Those schemas use `.prefault({})`
+    // instead, which feeds `{}` through the parse so a bodyless request is exactly
+    // equivalent to `{}`; see metadata/admin-metadata.controller.ts.
+    //
+    // Caveat 2: `.default({})` BYPASSES a top-level `.refine()` for the default
+    // value — the refine never runs for a bodyless request. So it must not be
+    // added to a schema whose refine is what makes an empty body invalid; see
+    // jobs/backup/dto/trigger-backup.dto.ts for the one deliberate exclusion.
     {
       provide: APP_PIPE,
       useClass: ZodValidationPipe,

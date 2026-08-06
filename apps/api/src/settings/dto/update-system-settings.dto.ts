@@ -35,6 +35,7 @@ export class UpdateSystemSettingsDto extends createZodDto(
 ) {}
 
 // Partial update (PATCH)
+// .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
 export const patchSystemSettingsSchema = z.object({
   ui: z
     .object({
@@ -192,7 +193,7 @@ export const patchSystemSettingsSchema = z.object({
       retentionHours: z.number().int().min(1).max(720).optional(),
     })
     .optional(),
-});
+}).default({});
 
 export class PatchSystemSettingsDto extends createZodDto(
   patchSystemSettingsSchema,
