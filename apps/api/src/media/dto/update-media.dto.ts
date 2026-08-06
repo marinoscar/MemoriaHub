@@ -8,6 +8,7 @@ export const updateMediaSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
   description: z.string().max(8192).nullable().optional(),
   favorite: z.boolean().optional(),
-});
+  // .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class UpdateMediaDto extends createZodDto(updateMediaSchema) {}

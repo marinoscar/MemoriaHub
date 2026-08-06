@@ -34,7 +34,8 @@ export const enhanceParamsSchema = z.object({
   instructions: z.string().max(500).optional(),
   /** Optional per-call override of ai.features.enhance.model. */
   model: z.string().max(200).optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export type EnhanceParams = z.infer<typeof enhanceParamsSchema>;
 

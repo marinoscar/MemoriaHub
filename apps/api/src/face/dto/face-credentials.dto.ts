@@ -8,7 +8,8 @@ export const upsertFaceCredentialsSchema = z.object({
   apiKey: z.string().optional(),
   baseUrl: z.string().url().optional(),
   enabled: z.boolean().optional(),
-});
+  // .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
+}).default({});
 export class UpsertFaceCredentialsDto extends createZodDto(upsertFaceCredentialsSchema) {}
 
 // No model field — face providers have a fixed modelVersion per deployment

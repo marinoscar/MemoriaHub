@@ -38,8 +38,10 @@ export const setEnhanceFeatureSchema = z.object({
 });
 export class SetEnhanceFeatureDto extends createZodDto(setEnhanceFeatureSchema) {}
 
+// Both fields optional — an empty body tests the configured ai.features.embedding.
+// .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
 export const testEmbeddingSchema = z.object({
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
-});
+}).default({});
 export class TestEmbeddingDto extends createZodDto(testEmbeddingSchema) {}

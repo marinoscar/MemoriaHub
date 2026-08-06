@@ -58,7 +58,8 @@ export class JobInsightsQueryDto extends createZodDto(jobInsightsQuerySchema) {}
 
 const retryAllFailedSchema = z.object({
   type: z.string().min(1).optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class RetryAllFailedDto extends createZodDto(retryAllFailedSchema) {}
 
@@ -66,7 +67,8 @@ export class RetryAllFailedDto extends createZodDto(retryAllFailedSchema) {}
 // resolve the jobs.stuckThresholdMinutes system setting (default 3 minutes).
 const resetStuckSchema = z.object({
   olderThanMinutes: z.number().int().min(1).optional(),
-});
+  // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
+}).default({});
 
 export class ResetStuckDto extends createZodDto(resetStuckSchema) {}
 

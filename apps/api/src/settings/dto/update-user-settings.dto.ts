@@ -33,6 +33,7 @@ export class UpdateUserSettingsDto extends createZodDto(
 ) {}
 
 // Partial update (PATCH) - JSON Merge Patch style
+// .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
 export const patchUserSettingsSchema = z.object({
   theme: z.enum(['light', 'dark', 'system']).optional(),
   profile: z
@@ -55,7 +56,7 @@ export const patchUserSettingsSchema = z.object({
   // another's stored value; a `null` type entry resets that type to its
   // default, and `notifications: null` clears the whole namespace.
   notifications: notificationPreferencesPatchSchema.nullable().optional(),
-});
+}).default({});
 
 export class PatchUserSettingsDto extends createZodDto(
   patchUserSettingsSchema,

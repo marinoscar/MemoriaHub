@@ -18,7 +18,11 @@ const adminMetadataBackfillSchema = z.object({
   from: flexibleDate.optional(),
   to: flexibleDate.optional(),
   force: z.boolean().optional().default(false),
-});
+  // .prefault({}) — not .default({}) — because the inner force default makes
+  // `force` required in the output type, and .default() would return a bare {}
+  // without running this parse (leaving force undefined). .prefault() feeds {}
+  // THROUGH the schema, so a bodyless POST is identical to {}. See issue #289.
+}).prefault({});
 class AdminMetadataBackfillDto extends createZodDto(adminMetadataBackfillSchema) {}
 
 @ApiTags('Admin — Metadata')

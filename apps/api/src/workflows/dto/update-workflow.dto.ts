@@ -6,6 +6,9 @@ import { workflowDefinitionSchema } from '../definition/workflow-definition.sche
  * PATCH /api/workflows/:id body. All fields optional; `circleId` and
  * `subjectType` are immutable (subjectType follows `definition.subject` when a
  * new definition is supplied). Cron validity is enforced in the service.
+ *
+ * `.default({})` comes LAST, after `.strict()`, so a bodyless request parses as
+ * {} while unknown keys still throw — see issue #289 (app.module.ts).
  */
 export const updateWorkflowSchema = z
   .object({
@@ -16,6 +19,7 @@ export const updateWorkflowSchema = z
     cronExpression: z.string().max(200).nullable().optional(),
     definition: workflowDefinitionSchema.optional(),
   })
-  .strict();
+  .strict()
+  .default({});
 
 export class UpdateWorkflowDto extends createZodDto(updateWorkflowSchema) {}

@@ -12,7 +12,9 @@ const adminLocationInferenceBackfillSchema = z.object({
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
   force: z.boolean().optional().default(false),
-});
+  // .prefault({}) so a bodyless POST parses exactly like {} (force: false) —
+  // see issue #289 (app.module.ts) and admin-metadata.controller.ts.
+}).prefault({});
 class AdminLocationInferenceBackfillDto extends createZodDto(adminLocationInferenceBackfillSchema) {}
 
 @ApiTags('Admin — Location Inference')
