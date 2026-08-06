@@ -53,16 +53,24 @@ export function Layout({ fullBleed = false }: LayoutProps) {
             <Sidebar open={sidebarOpen} onClose={handleSidebarClose} />
             <Box
               component="main"
+              // `minWidth: 0` in BOTH branches is load-bearing, not cosmetic
+              // (issue #291). A flex item's `min-width` defaults to `auto` —
+              // its min-content width — so without this, any descendant that
+              // reports a large intrinsic inline size (a `content-visibility`
+              // placeholder, a wide table, a long unbroken string) cannot be
+              // shrunk and widens the whole app shell past the viewport.
               sx={
                 fullBleed
                   ? {
                       flexGrow: 1,
                       display: 'flex',
+                      minWidth: 0,
                       minHeight: 0,
                       p: 0,
                     }
                   : {
                       flexGrow: 1,
+                      minWidth: 0,
                       p: 3,
                       pb: { xs: 10, md: 3 },
                     }

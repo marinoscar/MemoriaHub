@@ -560,6 +560,36 @@ describe('Layout', () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // Issue #291 — <main> must be able to shrink below its content
+  //
+  // <main> is a flex item, and a flex item's `min-width` defaults to `auto`
+  // (its min-content width). Without an explicit `min-width: 0`, any descendant
+  // reporting a large intrinsic inline size — a `content-visibility`
+  // placeholder, a wide table, a long unbroken string — cannot be shrunk and
+  // widens the entire app shell past the viewport. This is the defence-in-depth
+  // half of the mobile gallery blow-up fix.
+  // -------------------------------------------------------------------------
+  describe('Main flex item shrinkability (issue #291)', () => {
+    it('applies min-width: 0 to <main> in the default branch', () => {
+      render(<Layout />);
+
+      const mainElement = screen.getByTestId('outlet-content').closest('main');
+
+      expect(mainElement).toBeInTheDocument();
+      expect(getComputedStyle(mainElement as HTMLElement).minWidth).toBe('0px');
+    });
+
+    it('applies min-width: 0 to <main> in the fullBleed branch', () => {
+      render(<Layout fullBleed />);
+
+      const mainElement = screen.getByTestId('outlet-content').closest('main');
+
+      expect(mainElement).toBeInTheDocument();
+      expect(getComputedStyle(mainElement as HTMLElement).minWidth).toBe('0px');
+    });
+  });
+
   describe('Edge Cases', () => {
     it('should handle missing onMenuClick gracefully', () => {
       render(<Layout />);

@@ -535,9 +535,15 @@ export function MediaGallery({
 
   // Infinite scroll sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
+  // `feedIsLoading` is deliberately NOT part of `disabled`: flipping it tears
+  // the observer down and re-creates it, and `observe()` always delivers an
+  // initial callback — so a sentinel still inside the root margin re-fires
+  // immediately, chain-loading page after page (issue #291). Concurrency is
+  // already guarded by `useInfiniteMedia`'s `inflightRef`; the sentinel must
+  // now genuinely leave and re-enter the root margin to load again.
   useIntersectionObserver(sentinelRef, feedLoadMore, {
     rootMargin: '300px',
-    disabled: !isFeedMode || !feedHasMore || feedIsLoading || !circleId,
+    disabled: !isFeedMode || !feedHasMore || !circleId,
   });
 
   // -------------------------------------------------------------------------
@@ -875,7 +881,15 @@ export function MediaGallery({
     gridObserverRef.current = null;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width ?? 0;
+      const measured = entries[0]?.contentRect.width ?? 0;
+      // Clamp to the layout viewport so the observer can never consume a width
+      // its own output produced (issue #291). The placeholder derived from this
+      // measurement is an intrinsic size the shell may honour; without the
+      // clamp, measure -> placeholder -> wider shell -> measure is a positive
+      // feedback loop that diverges whenever rows > cols.
+      const viewport =
+        typeof document !== 'undefined' ? document.documentElement.clientWidth : 0;
+      const width = viewport > 0 ? Math.min(measured, viewport) : measured;
       setGridWidth(width > 0 ? width : null);
     });
     observer.observe(el);
@@ -890,6 +904,24 @@ export function MediaGallery({
     return size > 0 ? size : null;
   }, [gridWidth, cols]);
 
+  /**
+   * Per-group `contain-intrinsic-height` strings, keyed by group key.
+   *
+   * Memoised because the value is interpolated into `sx`: computing it inline
+   * would mint a fresh Emotion class for every day group on every
+   * ResizeObserver tick (issue #291).
+   */
+  const groupPlaceholderHeights = useMemo(() => {
+    const map = new Map<string, string>();
+    grouped.forEach((group) => {
+      map.set(
+        group.key,
+        `auto ${galleryPlaceholderHeight(group.items.length, cols, tileSize)}px`,
+      );
+    });
+    return map;
+  }, [grouped, cols, tileSize]);
+
   // -------------------------------------------------------------------------
   // Derived display flags
   // -------------------------------------------------------------------------
@@ -902,7 +934,11 @@ export function MediaGallery({
   // -------------------------------------------------------------------------
 
   return (
-    <Box sx={{ minHeight: 0 }}>
+    // `minWidth: 0` so this subtree can always shrink below its content-based
+    // minimum if an ancestor ever becomes a flex container. The `minHeight: 0`
+    // it replaces was a no-op — the parent is not a flex container, and the
+    // axis that needed constraining was the inline one (issue #291).
+    <Box sx={{ minWidth: 0, minHeight: 0 }}>
       {/* Error */}
       {error && (
         <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -1000,7 +1036,11 @@ export function MediaGallery({
 
       {/* Day-grouped grid */}
       {!showFirstLoad && mergedItems.length > 0 && (
-        <Box ref={gridRootRef} sx={{ px: { xs: 1, sm: 2 }, pt: { xs: 1, sm: 2 } }}>
+        <Box
+          ref={gridRootRef}
+          data-testid="gallery-root"
+          sx={{ px: { xs: 1, sm: 2 }, pt: { xs: 1, sm: 2 } }}
+        >
           {grouped.map((group) => (
             <Box
               key={group.key}
@@ -1067,16 +1107,19 @@ export function MediaGallery({
 
               {/* Responsive 3/4/6-col square thumbnail grid */}
               <Box
+                data-testid="gallery-day-grid"
                 sx={{
                   display: 'grid',
                   gridTemplateColumns: GALLERY_GRID_COLUMNS,
                   gap: `${GALLERY_GAP_PX}px`,
                   contentVisibility: 'auto',
-                  containIntrinsicSize: `auto ${galleryPlaceholderHeight(
-                    group.items.length,
-                    cols,
-                    tileSize,
-                  )}px`,
+                  // Longhands, never the `contain-intrinsic-size` shorthand: a
+                  // single-value shorthand applies to BOTH axes, so a height
+                  // placeholder of N px also claims an intrinsic WIDTH of N px
+                  // for a never-painted group — which is what blew the mobile
+                  // gallery up on pagination (issue #291).
+                  containIntrinsicWidth: 'none',
+                  containIntrinsicHeight: groupPlaceholderHeights.get(group.key),
                 }}
               >
                 {group.items.map((item) => (
