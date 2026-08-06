@@ -659,9 +659,42 @@ describe('MediaGallery', () => {
         .map((s) => s.textContent ?? '')
         .join('');
 
+      // The placeholder must constrain the BLOCK axis only (issue #291).
       expect(css).toMatch(
-        new RegExp(`contain-intrinsic-size:\\s*auto\\s+${4 * GALLERY_FALLBACK_ROW_PX}px`),
+        new RegExp(`contain-intrinsic-height:\\s*auto\\s+${4 * GALLERY_FALLBACK_ROW_PX}px`),
       );
+    });
+
+    // -----------------------------------------------------------------------
+    // Issue #291 — the single-value shorthand sized BOTH axes
+    //
+    // `contain-intrinsic-size: auto <len>` applies <len> to width AND height.
+    // Combined with `content-visibility: auto`, a never-painted day group
+    // therefore claimed an intrinsic WIDTH of its own placeholder HEIGHT
+    // (hundreds of px), which propagated up through the shell's flex item and
+    // widened the app past the viewport — then fed back through the gallery's
+    // ResizeObserver and diverged. The emitted style must never carry an
+    // intrinsic width.
+    // -----------------------------------------------------------------------
+    it('constrains the block axis only — no intrinsic width (issue #291)', () => {
+      const items = Array.from({ length: 12 }, (_, i) =>
+        makeItem(`ph2-${i}`, { capturedAt: '2024-06-15T10:00:00.000Z' }),
+      );
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const css = Array.from(document.querySelectorAll('style'))
+        .map((s) => s.textContent ?? '')
+        .join('');
+
+      // The two-axis shorthand must be gone entirely...
+      expect(css).not.toMatch(/contain-intrinsic-size\s*:/);
+      // ...and the inline axis must be explicitly unconstrained.
+      expect(css).toMatch(/contain-intrinsic-width:\s*none/);
+      // Nothing may claim an intrinsic width in px.
+      expect(css).not.toMatch(/contain-intrinsic-width:\s*(auto\s+)?\d/);
     });
   });
 
