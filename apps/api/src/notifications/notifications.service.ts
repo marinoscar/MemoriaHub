@@ -28,6 +28,16 @@
 // triggering action. Same contract as the transactional email sends
 // (EmailService.sendEmailAsync) — a notification is never important enough to
 // fail the user-facing operation that produced it.
+//
+// PER-TYPE USER PREFERENCES (#251) ARE ENFORCED HERE, in all THREE write paths
+// above, and deliberately NOT in the producers. A suppressed type writes no row
+// at all, and no producer — present or future — has to remember to check: if it
+// goes through this service, it is gated. The lookup is the cached
+// NotificationPreferencesService (per-user, 5 s TTL, invalidated on the
+// settings write), because these methods are called per RECIPIENT in hot loops.
+// The gate is fail-open by construction: a preferences read that fails resolves
+// to all-enabled, so a broken lookup over-notifies rather than silently
+// swallowing everything.
 // =============================================================================
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -35,6 +45,7 @@ import { Notification, NotificationType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationItemDto } from './dto/notification-response.dto';
+import { NotificationPreferencesService } from './notification-preferences.service';
 
 // -----------------------------------------------------------------------------
 // Unread-count cache tuning
@@ -170,7 +181,10 @@ export class NotificationsService {
   /** Per-user TTL cache for getUnreadCount() — see UNREAD_COUNT_CACHE_TTL_MS. */
   private readonly unreadCountCache = new Map<string, { value: number; cachedAt: number }>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly preferences: NotificationPreferencesService,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // Read paths
@@ -427,6 +441,9 @@ export class NotificationsService {
    */
   async emit(input: EmitNotificationInput): Promise<void> {
     try {
+      // #251 gate — a suppressed type writes NO row (see the header).
+      if (!(await this.preferences.isEnabled(input.userId, input.type))) return;
+
       await this.prisma.notification.create({
         data: {
           userId: input.userId,
@@ -464,6 +481,11 @@ export class NotificationsService {
    */
   async upsertState(input: UpsertStateNotificationInput): Promise<void> {
     try {
+      // #251 gate. A suppressed STATE type writes no row AND refreshes none:
+      // the user's existing live rows of this type were dismissed when they
+      // disabled it, and this reconcile must not resurrect them.
+      if (!(await this.preferences.isEnabled(input.userId, input.type))) return;
+
       const payload = {
         title: input.title,
         body: input.body ?? null,
@@ -553,6 +575,10 @@ export class NotificationsService {
     const matchData = input.matchData ?? null;
 
     try {
+      // #251 gate — checked BEFORE the transaction opens, so a suppressed type
+      // never takes the advisory lock it would otherwise contend for.
+      if (!(await this.preferences.isEnabled(input.userId, input.type))) return;
+
       await this.prisma.$transaction(async (tx) => {
         // Aggregation key — must contain everything the lookup predicate below
         // filters on, so two different keys can never share a lock by accident
@@ -749,6 +775,75 @@ export class NotificationsService {
       this.logger.warn(`markStatesUnreadByIds failed: ${this.errorMessage(err)}`);
       return 0;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Preference-driven writes (#251)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Dismiss every LIVE row of the given types for ONE user — the write half of
+   * "turning a type off".
+   *
+   * DECIDED BEHAVIOR: disabling a type does not merely stop new rows, it clears
+   * the ones already on screen. The user's intent when they flip a toggle off
+   * is "stop showing me this", not "stop showing me this except for the eleven
+   * already there". Without it a disabled STATE type would be especially bad:
+   * #246's reconcile is now gated too, so it would never drain those rows to
+   * zero and they would nag forever.
+   *
+   * Runs INSIDE the caller's transaction (`tx`), so the dismissals and the
+   * settings write commit or roll back together — a settings save that fails
+   * after dismissing would otherwise leave the user with the rows gone and the
+   * type still on. Unlike the rest of the producer API this is NOT best-effort:
+   * it throws, because the caller's transaction is exactly what should be
+   * rolled back if it fails.
+   *
+   * Raw SQL for the same reason as dismiss()/dismissAll(): `read_at =
+   * COALESCE(read_at, now())` is a column-referencing expression Prisma's typed
+   * `updateMany` cannot express. `updated_at` is set explicitly — raw SQL
+   * bypasses Prisma-side `@updatedAt`, and #248's retention purge keys off it.
+   *
+   * The caller is responsible for invalidatePreferences() after commit; it is
+   * deliberately not done here, since the cache must not be cleared on the
+   * strength of a transaction that may still roll back.
+   */
+  async dismissTypesForUser(
+    userId: string,
+    types: readonly NotificationType[],
+    tx: Prisma.TransactionClient = this.prisma,
+  ): Promise<number> {
+    if (types.length === 0) return 0;
+
+    return tx.$executeRaw(Prisma.sql`
+      UPDATE notifications
+      SET dismissed_at = now(),
+          read_at = COALESCE(read_at, now()),
+          updated_at = now()
+      WHERE user_id = ${userId}::uuid
+        AND dismissed_at IS NULL
+        AND type::text = ANY(${types.map((t) => String(t))}::text[])
+    `);
+  }
+
+  /**
+   * Drop a user's cached preferences so a toggle takes effect on the very next
+   * notification instead of up to one TTL later. Called by UserSettingsService
+   * AFTER its transaction commits.
+   */
+  invalidatePreferences(userId: string): void {
+    this.preferences.invalidate(userId);
+    // Their badge count changes the moment rows are dismissed on disable.
+    this.invalidateUnreadCount(userId);
+  }
+
+  /**
+   * Batched preference warm-up for a known set of recipients — one query
+   * instead of one per user. Used by #246's reconcile, which holds a circle's
+   * whole eligible membership before fanning upsertState() across it.
+   */
+  async primePreferences(userIds: readonly string[]): Promise<void> {
+    await this.preferences.prime(userIds);
   }
 
   // ---------------------------------------------------------------------------

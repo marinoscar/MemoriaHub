@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { NotificationType } from '@prisma/client';
 import { DATA_TABLE_MAX_TABLES } from '../../common/schemas/settings.schema';
 import { UserSettingsService } from './user-settings.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   createMockPrismaService,
@@ -12,9 +14,37 @@ import {
   UserSettingsValue,
 } from '../../common/types/settings.types';
 
+const ALL_NOTIFICATION_TYPES = Object.values(NotificationType) as NotificationType[];
+
+/**
+ * Wires $transaction so `cb(tx)` runs against the same mock — mirrors
+ * production tx semantics and the identical helper in
+ * notifications.service.spec.ts / notification-preferences flows.
+ */
+function wireTransactionPassthrough(mockPrisma: MockPrismaService): void {
+  (mockPrisma.$transaction as jest.Mock).mockImplementation((arg: unknown) => {
+    if (typeof arg === 'function') {
+      return (arg as (tx: unknown) => unknown)(mockPrisma);
+    }
+    if (Array.isArray(arg)) {
+      return Promise.all(arg);
+    }
+    return arg;
+  });
+}
+
 describe('UserSettingsService', () => {
   let service: UserSettingsService;
   let mockPrisma: MockPrismaService;
+  /**
+   * #251: the settings write path dismisses live rows of any notification type
+   * the resulting settings suppress, and invalidates the user's cached
+   * preferences afterwards.
+   */
+  let mockNotifications: {
+    dismissTypesForUser: jest.Mock;
+    invalidatePreferences: jest.Mock;
+  };
 
   const mockUserId = 'user-123';
 
@@ -28,11 +58,16 @@ describe('UserSettingsService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    mockNotifications = {
+      dismissTypesForUser: jest.fn().mockResolvedValue(0),
+      invalidatePreferences: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 
@@ -836,6 +871,220 @@ describe('UserSettingsService', () => {
       } as any);
 
       expect(result.dataTables).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // Dismiss-on-disable (issue #251) — the transactional write half of per-type
+  // notification preferences.
+  // ===========================================================================
+
+  describe('writeSettings — notification dismiss-on-disable (#251)', () => {
+    /** Seeds a stored `notifications` namespace and wires the update/tx mocks. */
+    const seed = (notifications?: Record<string, unknown>) => {
+      const stored: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        ...(notifications ? { notifications: notifications as any } : {}),
+      };
+
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: stored as any,
+      } as any);
+
+      mockPrisma.userSettings.update.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.data.value,
+        version: 2,
+      })) as any);
+
+      mockPrisma.user.update.mockResolvedValue({} as any);
+      wireTransactionPassthrough(mockPrisma);
+    };
+
+    it('disabling a single type opens a transaction and dismisses ONLY that type for THIS user', async () => {
+      seed(); // namespace absent — everything currently enabled
+
+      await service.patchSettings(mockUserId, {
+        notifications: { types: { upload_completed: false } },
+      });
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockNotifications.dismissTypesForUser).toHaveBeenCalledTimes(1);
+
+      // Destructured rather than a single toHaveBeenCalledWith(...): the third
+      // arg is the (deep-mocked) transaction client, and jest's own equality/
+      // pretty-print machinery mishandles that object when it appears inside a
+      // multi-arg matcher — asserting each position separately sidesteps it.
+      const [userIdArg, disabledArg, txArg] =
+        mockNotifications.dismissTypesForUser.mock.calls[0];
+      expect(userIdArg).toBe(mockUserId);
+      expect(disabledArg).toEqual(['upload_completed']);
+      expect(txArg).toBeDefined();
+    });
+
+    it('does NOT dismiss the seven other types when only one is disabled', async () => {
+      seed();
+
+      await service.patchSettings(mockUserId, {
+        notifications: { types: { upload_completed: false } },
+      });
+
+      const [, disabledArg] = mockNotifications.dismissTypesForUser.mock.calls[0];
+      expect(disabledArg).toEqual(['upload_completed']);
+      expect(disabledArg).not.toEqual(
+        expect.arrayContaining(
+          ALL_NOTIFICATION_TYPES.filter((t) => t !== 'upload_completed'),
+        ),
+      );
+    });
+
+    it('the master switch (enabled: false) dismisses EVERY notification type', async () => {
+      seed();
+
+      await service.patchSettings(mockUserId, {
+        notifications: { enabled: false },
+      });
+
+      const [, disabledArg] = mockNotifications.dismissTypesForUser.mock.calls[0];
+      expect(new Set(disabledArg)).toEqual(new Set(ALL_NOTIFICATION_TYPES));
+    });
+
+    it('dismissTypesForUser is called with the transaction client (tx), not the bare PrismaService', async () => {
+      seed();
+
+      await service.patchSettings(mockUserId, {
+        notifications: { types: { enrichment_failed: false } },
+      });
+
+      const [, , txArg] = mockNotifications.dismissTypesForUser.mock.calls[0];
+      // Our passthrough wires tx === mockPrisma, but the point under test is
+      // that a distinct third argument was threaded through at all (the real
+      // production code passes `tx`, defaulting to `this.prisma` only when
+      // called with no transaction — see dismissTypesForUser's signature).
+      expect(txArg).toBe(mockPrisma);
+    });
+
+    it('opens NO transaction when the resulting settings suppress nothing (the common save path stays a single statement)', async () => {
+      seed(); // absent namespace
+
+      await service.patchSettings(mockUserId, { theme: 'dark' });
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockNotifications.dismissTypesForUser).not.toHaveBeenCalled();
+      // Direct (non-transactional) write went through the bare client.
+      expect(mockPrisma.userSettings.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-enabling a previously-disabled type (JSON Merge Patch null) suppresses nothing and opens no transaction', async () => {
+      seed({ types: { upload_completed: false } });
+
+      await service.patchSettings(mockUserId, {
+        notifications: { types: { upload_completed: null } },
+      });
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockNotifications.dismissTypesForUser).not.toHaveBeenCalled();
+    });
+
+    it('invalidatePreferences() is called unconditionally, even when nothing was suppressed', async () => {
+      seed();
+
+      await service.patchSettings(mockUserId, { theme: 'light' });
+
+      expect(mockNotifications.invalidatePreferences).toHaveBeenCalledWith(mockUserId);
+    });
+
+    it('invalidatePreferences() is also called after a transactional (dismiss-triggering) save', async () => {
+      seed();
+
+      await service.patchSettings(mockUserId, {
+        notifications: { types: { upload_completed: false } },
+      });
+
+      expect(mockNotifications.invalidatePreferences).toHaveBeenCalledWith(mockUserId);
+    });
+
+    it('the same behavior holds for replaceSettings (PUT), not just patchSettings (PATCH)', async () => {
+      mockPrisma.userSettings.upsert.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.update?.value ?? args.create?.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+      wireTransactionPassthrough(mockPrisma);
+
+      await service.replaceSettings(mockUserId, {
+        theme: 'system',
+        profile: { useProviderImage: true },
+        notifications: { enabled: false },
+      } as any);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      const [userIdArg, disabledArg] = mockNotifications.dismissTypesForUser.mock.calls[0];
+      expect(userIdArg).toBe(mockUserId);
+      expect(new Set(disabledArg)).toEqual(new Set(ALL_NOTIFICATION_TYPES));
+    });
+
+    // -------------------------------------------------------------------------
+    // Atomicity: the dismiss and the settings write commit or roll back
+    // together. These tests can only prove the WIRING is atomic (one
+    // transaction, ordered calls, no invalidation on failure) against a
+    // mocked $transaction that simply invokes its callback — they cannot
+    // prove Postgres actually rolls back a real settings row alongside a
+    // real notifications UPDATE. That requires a live-DB integration test.
+    // -------------------------------------------------------------------------
+
+    describe('atomicity (transaction wiring — real rollback needs a DB-backed integration test)', () => {
+      it('if the settings write itself fails, dismissTypesForUser is NEVER called, and the error propagates', async () => {
+        seed();
+        mockPrisma.userSettings.update.mockRejectedValue(new Error('write failed'));
+
+        await expect(
+          service.patchSettings(mockUserId, {
+            notifications: { types: { upload_completed: false } },
+          }),
+        ).rejects.toThrow('write failed');
+
+        expect(mockNotifications.dismissTypesForUser).not.toHaveBeenCalled();
+        expect(mockNotifications.invalidatePreferences).not.toHaveBeenCalled();
+      });
+
+      it('if dismissTypesForUser fails, the whole call rejects (the settings write must not appear to have "succeeded" on its own)', async () => {
+        seed();
+        mockNotifications.dismissTypesForUser.mockRejectedValueOnce(
+          new Error('dismiss failed'),
+        );
+
+        await expect(
+          service.patchSettings(mockUserId, {
+            notifications: { types: { upload_completed: false } },
+          }),
+        ).rejects.toThrow('dismiss failed');
+
+        // The unconditional post-write invalidation must not run either — it
+        // is gated on the transaction (write+dismiss) having resolved.
+        expect(mockNotifications.invalidatePreferences).not.toHaveBeenCalled();
+      });
+
+      it('the settings write runs BEFORE dismissTypesForUser inside the transaction (write, then dismiss — not the other order)', async () => {
+        seed();
+        const callOrder: string[] = [];
+        mockPrisma.userSettings.update.mockImplementation((async (args: any) => {
+          callOrder.push('write');
+          return { ...mockUserSettings, value: args.data.value, version: 2 };
+        }) as any);
+        mockNotifications.dismissTypesForUser.mockImplementation(async () => {
+          callOrder.push('dismiss');
+          return 0;
+        });
+
+        await service.patchSettings(mockUserId, {
+          notifications: { types: { upload_completed: false } },
+        });
+
+        expect(callOrder).toEqual(['write', 'dismiss']);
+      });
     });
   });
 });

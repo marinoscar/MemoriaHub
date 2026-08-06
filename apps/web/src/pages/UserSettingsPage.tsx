@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { ThemeSettings } from '../components/settings/ThemeSettings';
 import { ProfileSettings } from '../components/settings/ProfileSettings';
 import { SearchFieldsSettings } from '../components/settings/SearchFieldsSettings';
+import { NotificationSettings } from '../components/settings/NotificationSettings';
 import { PersonalAccessTokens } from '../components/settings/PersonalAccessTokens';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -80,6 +81,14 @@ export default function UserSettingsPage() {
             <ProfileSettings
               profile={settings.profile}
               onSave={handleProfileSave}
+              disabled={isSaving}
+            />
+
+            {/* Notification Preferences (issue #251) */}
+            <NotificationSettings
+              settings={settings}
+              updateSettings={updateSettings}
+              onSaved={setSuccessMessage}
               disabled={isSaving}
             />
 

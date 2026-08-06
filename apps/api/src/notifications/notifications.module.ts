@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { UploadNotificationService } from './producers/upload-notification.service';
@@ -30,15 +31,26 @@ import { WorkflowRunNotificationService } from './producers/workflow-run-notific
  *
  * The other two #247 producers are self-driven (a cron and an event listener),
  * so nobody injects them and they live in NotificationsReconcileModule.
+ *
+ * #251 adds NotificationPreferencesService — the per-user preference reader
+ * behind the gate in all three NotificationsService write paths. It reads the
+ * `notifications` namespace out of `user_settings` with PrismaService DIRECTLY
+ * rather than through SettingsModule's UserSettingsService, and that is
+ * deliberate: SettingsModule now imports THIS module (UserSettingsService needs
+ * NotificationsService for the dismiss-on-disable write), so importing it back
+ * here would be the very cycle the no-imports rule above exists to prevent.
+ * Net edge: SettingsModule -> NotificationsModule, one direction only.
  */
 @Module({
   controllers: [NotificationsController],
   providers: [
+    NotificationPreferencesService,
     NotificationsService,
     UploadNotificationService,
     WorkflowRunNotificationService,
   ],
   exports: [
+    NotificationPreferencesService,
     NotificationsService,
     UploadNotificationService,
     WorkflowRunNotificationService,

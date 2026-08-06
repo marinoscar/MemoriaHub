@@ -7,14 +7,22 @@
 // the ONE producer in #247 with no aggregation: a run is a discrete, deliberate
 // thing a person started (or scheduled), and each deserves its own row.
 //
-// VOLUME GUARD — the on_media_enriched skip.
+// VOLUME GUARD — the on_media_enriched skip, now OPT-IN (#251).
 //   `on_media_enriched` micro-runs fire continuously during an import (one
 //   rolling micro-run per workflow every ~5 minutes, each terminating through
 //   the same maybeFinalizeRun path as a manual run). Notifying on those would
 //   drown the bell in exactly the fan-out this feature exists to prevent, so
-//   v1 SKIPS them outright. #251 makes that re-enableable as a preference.
-//   The skip lives here, not at the call sites, so no terminal path can forget
-//   it: the producer is handed a runId and decides for itself.
+//   #247 SKIPPED them outright. #251 keeps that as the DEFAULT and makes it
+//   re-enableable per user via `user_settings.notifications.workflowMicroRuns`
+//   (absent ⇒ false, the one inverted default in that namespace — see
+//   NotificationPreferencesService). The check is therefore per RECIPIENT and
+//   moves below the recipient resolution; the skip still lives here, not at the
+//   call sites, so no terminal path can forget it: the producer is handed a
+//   runId and decides for itself.
+//
+//   Note this is a SEPARATE preference from the `workflow_run_completed` type
+//   toggle, which NotificationsService.emit() enforces on every run. Both must
+//   pass for a micro-run to notify.
 //
 // RECIPIENT
 //   The run's `startedById`. Unattended (`scheduled`) runs have no starter in
@@ -32,6 +40,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType, WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationPreferencesService } from '../notification-preferences.service';
 import { NotificationsService } from '../notifications.service';
 
 /** The three terminal statuses that produce a notification. */
@@ -48,6 +57,7 @@ export class WorkflowRunNotificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly preferences: NotificationPreferencesService,
   ) {}
 
   /** Fire-and-forget entry point for the terminal paths. Swallows everything. */
@@ -84,14 +94,22 @@ export class WorkflowRunNotificationService {
 
     if (!run) return;
     if (!NOTIFIABLE_STATUSES.has(run.status)) return;
-    // v1 volume guard — see the header.
-    if (run.triggerType === WorkflowTrigger.on_media_enriched) return;
 
     const recipient =
       run.triggerType === WorkflowTrigger.scheduled
         ? (run.workflow.createdById ?? run.startedById)
         : (run.startedById ?? run.workflow.createdById);
     if (!recipient) return;
+
+    // Volume guard — see the header. Off unless THIS recipient opted in; the
+    // check is deliberately after recipient resolution, since the preference
+    // belongs to the person who would be notified.
+    if (
+      run.triggerType === WorkflowTrigger.on_media_enriched &&
+      !(await this.preferences.allowsWorkflowMicroRuns(recipient))
+    ) {
+      return;
+    }
 
     await this.notifications.emit({
       userId: recipient,

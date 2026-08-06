@@ -226,6 +226,12 @@ export class ReviewQueueReconcileService {
     }
     const userIds = members.map((m) => m.userId);
 
+    // #251: warm every member's notification preferences in ONE query before
+    // the per-(member x queue) upsertState fan-out below, each call of which
+    // is gated on them. Without this a 200-member circle would cost up to 200
+    // extra `user_settings` reads per sweep; with it, one findMany.
+    await this.notifications.primePreferences(userIds);
+
     // ONE call per circle, fanned out to every member below.
     const counts = await this.mediaService.computeReviewCounts(circle.id);
 

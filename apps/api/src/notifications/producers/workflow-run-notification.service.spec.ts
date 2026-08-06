@@ -20,6 +20,7 @@ import { NotificationType, WorkflowRunStatus, WorkflowTrigger } from '@prisma/cl
 
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationPreferencesService } from '../notification-preferences.service';
 import { NotificationsService } from '../notifications.service';
 import { WorkflowRunNotificationService } from './workflow-run-notification.service';
 
@@ -50,16 +51,26 @@ describe('WorkflowRunNotificationService', () => {
   let service: WorkflowRunNotificationService;
   let mockPrisma: MockPrismaService;
   let mockNotifications: { emit: jest.Mock };
+  /**
+   * #251 micro-run opt-in. Defaults to FALSE — the shipped default, and the
+   * state the pre-#251 "skips on_media_enriched" assertions were written
+   * against.
+   */
+  let mockPreferences: { allowsWorkflowMicroRuns: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockNotifications = { emit: jest.fn().mockResolvedValue(undefined) };
+    mockPreferences = {
+      allowsWorkflowMicroRuns: jest.fn().mockResolvedValue(false),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkflowRunNotificationService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: NotificationPreferencesService, useValue: mockPreferences },
       ],
     }).compile();
 

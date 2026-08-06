@@ -1,4 +1,8 @@
 import type { DataTableStoredLayout } from '../components/datatable/layout/layoutModel';
+import type {
+  NotificationPreferences,
+  NotificationPreferencesPatch,
+} from './notifications';
 
 export interface Role {
   name: string;
@@ -34,10 +38,32 @@ export interface UserSettings {
    * defaults". See docs/specs/datatable.md §14–§15.
    */
   dataTables?: Record<string, DataTableStoredLayout>;
+  /**
+   * Per-type notification preferences (issue #251).
+   *
+   * Same absent-key contract as `dataTables`: the API returns this namespace
+   * verbatim and never materializes it, so `undefined` here is the normal
+   * state for a user who has never opened the Notifications section — and it
+   * means EVERYTHING IS ENABLED, not "nothing configured yet".
+   */
+  notifications?: NotificationPreferences;
   activeCircleId?: string | null;
   updatedAt: string;
   version: number;
 }
+
+/**
+ * What may be sent to `PATCH /api/user-settings`.
+ *
+ * `Partial<UserSettings>` almost describes it, but the `notifications`
+ * namespace accepts a strictly wider value on the way IN than it ever holds at
+ * rest: a per-type entry may be `null` to delete the override (JSON Merge
+ * Patch). Modelling that here keeps the delete expressible without a cast at
+ * the call site.
+ */
+export type UserSettingsUpdate = Partial<Omit<UserSettings, 'notifications'>> & {
+  notifications?: NotificationPreferencesPatch | null;
+};
 
 export interface SystemSettings {
   ui: {

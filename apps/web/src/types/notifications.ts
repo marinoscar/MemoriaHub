@@ -80,3 +80,46 @@ export interface NotificationListResponse {
 export interface NotificationBulkResult {
   updated: number;
 }
+
+// ---------------------------------------------------------------------------
+// Per-type notification preferences (issue #251)
+//
+// Mirrors the API's `notificationPreferencesSchema` /
+// `notificationPreferencesPatchSchema` (apps/api/src/common/schemas/
+// settings.schema.ts). Lives inside `user_settings` — read/written ONLY through
+// GET/PATCH/PUT /api/user-settings, there is no notifications-settings
+// endpoint.
+//
+// ABSENT MEANS ENABLED. Every field is optional and the API never materializes
+// one: an absent namespace, an absent `enabled`, or an absent per-type key all
+// resolve to "on". That is what makes a NotificationType added in a later
+// release opt-OUT rather than silently opt-in for anyone who ever saved a
+// preference, so the client must never write a fully-populated object.
+//
+// ONE inversion: `workflowMicroRuns` absent means OFF (see #247).
+// ---------------------------------------------------------------------------
+
+/** The `notifications` namespace as stored and as returned by GET. */
+export interface NotificationPreferences {
+  /** Master switch. Absent === true. */
+  enabled?: boolean;
+  /** Per-type overrides. A type absent from this map is ENABLED. */
+  types?: Partial<Record<NotificationType, boolean>>;
+  /** Opt-in for `on_media_enriched` workflow micro-runs. Absent === false. */
+  workflowMicroRuns?: boolean;
+}
+
+/**
+ * The `notifications` namespace as accepted by PATCH.
+ *
+ * Identical to the stored shape except a per-type entry may be `null`, which
+ * DELETES that key (JSON Merge Patch) and thereby resets the type to its
+ * default rather than pinning it to `true`. That distinction is what keeps the
+ * stored blob minimal: re-enabling a type removes the override instead of
+ * accumulating one.
+ */
+export interface NotificationPreferencesPatch {
+  enabled?: boolean;
+  types?: Partial<Record<NotificationType, boolean | null>>;
+  workflowMicroRuns?: boolean;
+}
