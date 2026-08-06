@@ -351,7 +351,7 @@ describe('NotificationSettings — feature-gated visibility', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows a fallback message when every type is hidden', () => {
+  it('turning off every flag-gated type still leaves the two ungated activity types (uploads finished, expiring shares) visible', () => {
     mockUseFeatureFlags.mockReturnValue(
       mockFlags({
         burstDetection: false,
@@ -365,8 +365,14 @@ describe('NotificationSettings — feature-gated visibility', () => {
     renderComponent(baseSettings());
 
     expect(
-      screen.getByText(/no notification types are available on this deployment/i),
+      screen.getByRole('switch', { name: /uploads finished notifications/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', { name: /expiring shares notifications/i }),
+    ).toBeInTheDocument();
+    // Every flag-gated type is gone.
+    expect(screen.queryByRole('switch', { name: /burst photos/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: /workflow runs/i })).not.toBeInTheDocument();
   });
 });
 
