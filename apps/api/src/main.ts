@@ -22,6 +22,11 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
+    // SECURITY: do not add `http2: true` here without reading
+    // docs/security/dependency-exceptions.md first. The pinned `find-my-way`
+    // dependency (via @nestjs/platform-fastify) carries an accepted,
+    // documented HTTP/2 DDoS advisory (GHSA-c96f-x56v-gq3h) that is only
+    // inert because HTTP/2 is off. Enabling HTTP/2 reactivates it.
     new FastifyAdapter({ logger: true }),
   );
 
