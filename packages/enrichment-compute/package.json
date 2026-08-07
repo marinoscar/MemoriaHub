@@ -101,7 +101,7 @@
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.7",
+    "@types/node": "^26.1.2",
     "typescript": "^6.0.3"
   }
 }
