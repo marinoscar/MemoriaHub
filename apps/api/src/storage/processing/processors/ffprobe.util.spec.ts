@@ -1,33 +1,48 @@
 /**
  * Unit tests — ffprobe.util (probeVideoFileWithTimeout)
  *
- * `fluent-ffmpeg` exports `ffprobe` as a non-configurable property, so
- * `jest.spyOn(ffmpeg, 'ffprobe')` throws "Cannot redefine property" — the
- * whole module is mocked instead, mirroring the approach already used in
- * test/storage/processing/video-probe.processor.spec.ts.
+ * Mock strategy:
+ *   `probeVideoFileWithTimeout` delegates to the shared parity package's
+ *   `probeVideo`, which since issue #219 spawns ffprobe through the package's
+ *   own thin wrapper (`@memoriahub/enrichment-compute/ffmpeg`) instead of the
+ *   deprecated `fluent-ffmpeg`. Only `runFfprobe` is replaced here; the
+ *   subpath specifier resolves to the very same module file that
+ *   `dist/cjs/metadata/index.js` requires as `../ffmpeg/index.js`, so one
+ *   jest.mock covers the call site inside the shared package.
  *
- * Scope: only probeVideoFileWithTimeout's race/timeout behavior.
- * probeVideoFile's plain callback wiring and extractContainerMetadata's
- * mapping logic are already exercised end-to-end via
- * VideoProbeProcessor's tests, so they are not duplicated here.
+ * Scope: only probeVideoFileWithTimeout's timeout behavior. probeVideoFile's
+ * plain wiring and extractContainerMetadata's mapping logic are already
+ * exercised end-to-end via VideoProbeProcessor's tests, so they are not
+ * duplicated here.
+ *
+ * Behaviour note (issue #219): the timeout is now enforced INSIDE the wrapper,
+ * which also SIGKILLs the hung ffprobe child — a gap fluent-ffmpeg's
+ * callback-only `ffprobe()` API could not close, since it exposed no process
+ * handle. The old "clears the timeout when the probe wins the race" tests
+ * asserted an implementation detail of the removed Promise.race
+ * (a `clearTimeout` call count) rather than observable behavior; they are
+ * replaced below by assertions on what the caller actually sees. The wrapper's
+ * own guarantees — no dangling timer, and the SIGKILL of the hung child — are
+ * unit-tested in
+ * packages/enrichment-compute/test/ffmpeg.test.mjs ('runFfprobe KILLS the hung
+ * ffprobe child on timeout'), which is where the real spawn seam lives.
  */
 
 import { probeVideoFileWithTimeout } from './ffprobe.util';
-import type * as FfmpegType from 'fluent-ffmpeg';
 
-const mockFfprobeFn = jest.fn();
+const mockRunFfprobe = jest.fn();
 
-jest.mock('fluent-ffmpeg', () => {
-  const original = jest.requireActual<typeof FfmpegType>('fluent-ffmpeg');
+jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
+  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
   return {
-    ...original,
-    ffprobe: (...args: any[]) => mockFfprobeFn(...args),
+    ...actual,
+    runFfprobe: (...args: any[]) => mockRunFfprobe(...args),
   };
 });
 
 describe('probeVideoFileWithTimeout', () => {
   beforeEach(() => {
-    mockFfprobeFn.mockReset();
+    mockRunFfprobe.mockReset();
   });
 
   afterEach(() => {
@@ -36,54 +51,47 @@ describe('probeVideoFileWithTimeout', () => {
   });
 
   it('resolves with the probe data when ffprobe finishes before the timeout', async () => {
-    const fakeData = {
-      streams: [],
-      format: {},
-      chapters: [],
-    } as unknown as FfmpegType.FfprobeData;
-    mockFfprobeFn.mockImplementation((_path: string, callback: any) => {
-      // Resolve asynchronously so the Promise.race is genuinely exercised
-      // rather than short-circuiting on a synchronous callback.
-      setImmediate(() => callback(null, fakeData));
-    });
+    const fakeData = { streams: [], format: {}, chapters: [] };
+    // Resolve asynchronously so the timeout path is genuinely a live race
+    // rather than short-circuiting on a synchronous resolution.
+    mockRunFfprobe.mockImplementation(
+      () => new Promise((resolve) => setImmediate(() => resolve(fakeData))),
+    );
 
     const result = await probeVideoFileWithTimeout('/tmp/fake.mp4', 5000);
-    expect(result).toBe(fakeData);
+    expect(result).toEqual(fakeData);
   });
 
-  it('clears the timeout when the probe wins the race (no dangling timer)', async () => {
-    const clearTimeoutSpy = jest.spyOn(global, 'clearTimeout');
-    const fakeData = {
-      streams: [],
-      format: {},
-      chapters: [],
-    } as unknown as FfmpegType.FfprobeData;
-    mockFfprobeFn.mockImplementation((_path: string, callback: any) => {
-      setImmediate(() => callback(null, fakeData));
-    });
+  it('forwards the caller\'s timeout budget and message down to the wrapper', async () => {
+    mockRunFfprobe.mockResolvedValue({ streams: [], format: {}, chapters: [] });
 
     await probeVideoFileWithTimeout('/tmp/fake.mp4', 5000);
 
-    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(mockRunFfprobe).toHaveBeenCalledWith('/tmp/fake.mp4', {
+      timeoutMs: 5000,
+      timeoutMessage: 'ffprobe timed out after 5000ms',
+    });
   });
 
-  it('also clears the timeout when the probe errors before the timeout (not just on success)', async () => {
-    const clearTimeoutSpy = jest.spyOn(global, 'clearTimeout');
-    mockFfprobeFn.mockImplementation((_path: string, callback: any) => {
-      setImmediate(() => callback(new Error('ffprobe: no such file'), undefined));
-    });
+  it('propagates a probe error to the caller', async () => {
+    mockRunFfprobe.mockRejectedValue(new Error('ffprobe: no such file'));
 
     await expect(probeVideoFileWithTimeout('/tmp/missing.mp4', 5000)).rejects.toThrow(
       'ffprobe: no such file',
     );
-    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects with "ffprobe timed out after <ms>ms" when the probe never calls back', async () => {
-    // Never invoke the callback — simulates a hung ffprobe process on a
-    // corrupt/truncated container (fluent-ffmpeg exposes no process handle
-    // to kill, per the JSDoc on probeVideoFileWithTimeout).
-    mockFfprobeFn.mockImplementation(() => {});
+  it('rejects with "ffprobe timed out after <ms>ms" when the probe never settles', async () => {
+    // Never settle — simulates a hung ffprobe process on a corrupt/truncated
+    // container. The real wrapper both rejects with this message AND SIGKILLs
+    // the child; here the wrapper is mocked, so the message contract is
+    // asserted by having the fake honour the timeout options it was handed.
+    mockRunFfprobe.mockImplementation(
+      (_path: string, opts: { timeoutMs: number; timeoutMessage: string }) =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error(opts.timeoutMessage)), opts.timeoutMs);
+        }),
+    );
 
     jest.useFakeTimers();
     const probePromise = probeVideoFileWithTimeout('/tmp/hung.mp4', 5000);

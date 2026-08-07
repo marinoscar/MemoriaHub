@@ -15,23 +15,27 @@
  * Video path mock strategy:
  *   The video path calls:
  *     - fs.writeFile / fs.readFile / fs.unlink  (temp file management)
- *     - ffmpeg(input)  (factory call — the default export is callable, not a class)
+ *     - the shared parity package's `extractPosterFrame`, which shells out via
+ *       `@memoriahub/enrichment-compute/ffmpeg`'s `runFfmpeg` — a thin
+ *       `spawn()` wrapper that replaced the deprecated `fluent-ffmpeg`
+ *       dependency in issue #219.
  *   Both are module-level mocks (jest.mock hoisting) so the processor module
  *   gets the mock version before it is imported.
  *
- *   The fluent-ffmpeg mock's default export is itself a function (the factory).
- *   Calling ffmpeg(input) returns a chainable stub.
- *   Each chain method (.seekInput, .frames, .output) returns `this`.
- *   .on('end', cb) / .on('error', cb) stores the handlers; .run() invokes them.
- *   mockFfmpegInvokeEnd() / mockFfmpegInvokeError() control which callback fires
- *   for a single, non-scripted call (legacy single-mode path used by the
- *   original tests below).
+ *   Only `runFfmpeg` is stubbed; `buildFrameExtractionArgs` stays REAL, so the
+ *   ladder's per-attempt seek/filter facts asserted below are read back out of
+ *   the genuine argv rather than out of a hand-rolled fluent chain. That makes
+ *   this spec a corroborating parity check on top of the authoritative argv
+ *   pins in packages/enrichment-compute/test/ffmpeg.test.mjs.
  *
- *   mockFfmpegQueue([...]) scripts an exact outcome per successive .run() call
- *   ('success' | 'error' | 'hang'), used by the 3-attempt ladder tests to
- *   assert precisely which attempt fails/succeeds and what seekInput/
- *   videoFilters arguments each attempt used. 'hang' never invokes 'end' or
- *   'error' at all — only the extractFrame timeout can settle that call.
+ *   mockFfmpegInvokeEnd() / mockFfmpegInvokeError() control the outcome of a
+ *   single, non-scripted call (legacy single-mode path used by the original
+ *   tests below).
+ *
+ *   mockFfmpegQueue([...]) scripts an exact outcome per successive runFfmpeg
+ *   call ('success' | 'error'), used by the 3-attempt ladder tests to assert
+ *   precisely which attempt fails/succeeds and what seek/filter arguments each
+ *   attempt used.
  *
  *   fs.promises is mocked so writeFile and unlink are no-ops and readFile
  *   returns a real JPEG buffer obtained from getPlainJpegBuffer().
@@ -46,38 +50,42 @@ import { getPlainJpegBuffer, makeGetStream } from '../../fixtures/media/image-fi
 import { Readable } from 'stream';
 
 // ---------------------------------------------------------------------------
-// fluent-ffmpeg module-level mock
+// ffmpeg runner mock (the shared package's spawn() wrapper)
 // ---------------------------------------------------------------------------
-//
-// The processor calls `new ffmpeg.FfmpegCommand(input)` and chains:
-//   .seekInput(n).frames(1).output(path).on('end'|'error', cb).run()
 //
 // Because jest.mock() is hoisted to the top of the file, we cannot reference
 // variables declared in module scope inside the factory.  Instead, the factory
 // uses a module-scoped state object (ffmpegMockState) that IS accessible from
-// inside the class because it is evaluated at call-time, not at hoist-time.
-// The object is populated immediately, before any test code runs.
+// inside the mocked function because it is evaluated at call-time, not at
+// hoist-time.  The object is populated immediately, before any test code runs.
 //
-// mockFfmpegInvokeEnd()  — next .run() fires 'end' (default).
-// mockFfmpegInvokeError() — next .run() fires 'error'; auto-resets to 'success'
-//                           afterwards so the fallback call succeeds.
+// mockFfmpegInvokeEnd()   — next runFfmpeg call succeeds (default).
+// mockFfmpegInvokeError() — next runFfmpeg call rejects; auto-resets to
+//                           'success' afterwards so the fallback call succeeds.
 
-type FfmpegStep = { kind: 'success' } | { kind: 'error'; message?: string } | { kind: 'hang' };
+type FfmpegStep = { kind: 'success' } | { kind: 'error'; message?: string };
 
 const ffmpegMockState = {
   mode: 'success' as 'success' | 'error',
   queue: [] as FfmpegStep[],
-  endCb: null as (() => void) | null,
-  errorCb: null as ((err: Error) => void) | null,
   runCallCount: 0,
-  seekInputCalls: [] as number[],
-  videoFiltersCalls: [] as string[],
+  /** Every argv the processor would have spawned, in order. */
+  runArgs: [] as string[][],
 };
 
-// Separate jest.fn() so tests can assert kill('SIGKILL') was called; declared
-// at module scope (like ffmpegMockState) so the jest.mock() factory below can
-// close over it despite jest.mock() hoisting to the top of the file.
-const killSpy = jest.fn();
+/** The `-ss` value of each attempt that used an input seek, in order. */
+function seekInputCalls(): number[] {
+  return ffmpegMockState.runArgs
+    .filter((args) => args.includes('-ss'))
+    .map((args) => Number(args[args.indexOf('-ss') + 1]));
+}
+
+/** The `-filter:v` value of each attempt that used a video filter, in order. */
+function videoFiltersCalls(): string[] {
+  return ffmpegMockState.runArgs
+    .filter((args) => args.includes('-filter:v'))
+    .map((args) => args[args.indexOf('-filter:v') + 1]);
+}
 
 function mockFfmpegInvokeEnd() {
   ffmpegMockState.mode = 'success';
@@ -89,8 +97,8 @@ function mockFfmpegInvokeError() {
 
 /**
  * Script exact per-attempt ffmpeg outcomes. Each element is consumed by one
- * .run() call, in order; once the queue is drained, run() falls back to the
- * legacy single `mode` behaviour.
+ * runFfmpeg call, in order; once the queue is drained, the runner falls back to
+ * the legacy single `mode` behaviour.
  */
 function mockFfmpegQueue(steps: FfmpegStep[]) {
   ffmpegMockState.queue = [...steps];
@@ -99,93 +107,39 @@ function mockFfmpegQueue(steps: FfmpegStep[]) {
 function resetFfmpegMock() {
   ffmpegMockState.mode = 'success';
   ffmpegMockState.queue = [];
-  ffmpegMockState.endCb = null;
-  ffmpegMockState.errorCb = null;
   ffmpegMockState.runCallCount = 0;
-  ffmpegMockState.seekInputCalls = [];
-  ffmpegMockState.videoFiltersCalls = [];
-  killSpy.mockClear();
+  ffmpegMockState.runArgs = [];
 }
 
-jest.mock('fluent-ffmpeg', () => {
+jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
   // ffmpegMockState is in the enclosing module scope and is safely accessible
   // here because this factory is called at import time (after module scope
   // initialisation), not when jest.mock() is hoisted.
-  //
-  // The processor uses `import ffmpeg from 'fluent-ffmpeg'` (default import with
-  // esModuleInterop) and then calls `ffmpeg(input)` — the default export is a
-  // callable factory, not a class.  The mock therefore returns a module whose
-  // `default` property IS the factory function, mirroring the real API shape.
-  // Jest's esModuleInterop handling means `require('fluent-ffmpeg')` returns the
-  // object below, and the default-import expression resolves to `.default`.
-
-  const stub = {
-    seekInput(n: number) {
-      ffmpegMockState.seekInputCalls.push(n);
-      return stub;
-    },
-    videoFilters(f: string) {
-      ffmpegMockState.videoFiltersCalls.push(f);
-      return stub;
-    },
-    frames(_n: number) { return stub; },
-    output(_path: string) { return stub; },
-    kill(signal: string) {
-      killSpy(signal);
-      return stub;
-    },
-    on(event: string, cb: (...args: any[]) => void) {
-      if (event === 'end') ffmpegMockState.endCb = cb as () => void;
-      if (event === 'error') ffmpegMockState.errorCb = cb as (err: Error) => void;
-      return stub;
-    },
-    run() {
+  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
+  return {
+    ...actual,
+    runFfmpeg: jest.fn(async (args: string[]) => {
       ffmpegMockState.runCallCount++;
+      ffmpegMockState.runArgs.push([...args]);
 
-      if (ffmpegMockState.queue.length > 0) {
-        const step = ffmpegMockState.queue.shift()!;
-        if (step.kind === 'hang') {
-          // Never invoke 'end' or 'error' — only the extractFrame timeout
-          // (a real setTimeout, fakeable via jest.useFakeTimers()) can settle
-          // this call.
-          return;
-        }
-        // Use setImmediate so the Promise machinery in extractFrame registers
-        // both handlers before we invoke one.
-        setImmediate(() => {
-          if (step.kind === 'error' && ffmpegMockState.errorCb) {
-            ffmpegMockState.errorCb(new Error(step.message ?? 'ffmpeg: mock error'));
-          } else if (ffmpegMockState.endCb) {
-            ffmpegMockState.endCb();
-          }
-        });
-        return;
+      const step: FfmpegStep = ffmpegMockState.queue.length
+        ? ffmpegMockState.queue.shift()!
+        : // Legacy single-mode path (auto-resets to 'success' so a fallback
+          // call succeeds), used by the original tests that call
+          // mockFfmpegInvokeEnd()/mockFfmpegInvokeError() directly.
+          (() => {
+            if (ffmpegMockState.mode === 'error') {
+              ffmpegMockState.mode = 'success';
+              return { kind: 'error', message: 'ffmpeg: clip too short' } as FfmpegStep;
+            }
+            return { kind: 'success' } as FfmpegStep;
+          })();
+
+      if (step.kind === 'error') {
+        throw new Error(step.message ?? 'ffmpeg: mock error');
       }
-
-      // Legacy single-mode path (auto-resets to 'success' so a fallback call
-      // succeeds), used by the original tests that call mockFfmpegInvokeEnd()
-      // / mockFfmpegInvokeError() directly instead of mockFfmpegQueue().
-      setImmediate(() => {
-        if (ffmpegMockState.mode === 'error' && ffmpegMockState.errorCb) {
-          ffmpegMockState.mode = 'success'; // auto-reset so fallback call succeeds
-          ffmpegMockState.errorCb(new Error('ffmpeg: clip too short'));
-        } else if (ffmpegMockState.endCb) {
-          ffmpegMockState.endCb();
-        }
-      });
-    },
+    }),
   };
-
-  // The factory function is the default export: calling ffmpeg(input) returns
-  // the chainable stub.
-  function ffmpegFactory(_input: string) {
-    return stub;
-  }
-
-  // Attach __esModule so Jest's interop layer resolves the default import
-  // correctly, matching the behaviour of the real fluent-ffmpeg package whose
-  // typings use `export =` (CJS-compatible).
-  return Object.assign(ffmpegFactory, { __esModule: true, default: ffmpegFactory });
 });
 
 // ---------------------------------------------------------------------------
@@ -738,8 +692,8 @@ describe('ThumbnailProcessor', () => {
         );
 
         expect(result.success).toBe(true);
-        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
-        expect(ffmpegMockState.videoFiltersCalls).toEqual([]);
+        expect(seekInputCalls()).toEqual([1, 0]);
+        expect(videoFiltersCalls()).toEqual([]);
       });
 
       it('should fall through to the "thumbnail" video filter (seekSecs=null) when attempts 1 and 2 both error', async () => {
@@ -755,8 +709,8 @@ describe('ThumbnailProcessor', () => {
         );
 
         expect(result.success).toBe(true);
-        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
-        expect(ffmpegMockState.videoFiltersCalls).toEqual(['thumbnail']);
+        expect(seekInputCalls()).toEqual([1, 0]);
+        expect(videoFiltersCalls()).toEqual(['thumbnail']);
       });
 
       it('should return success:false with the LAST attempt\'s error message when all three attempts error', async () => {
@@ -774,8 +728,8 @@ describe('ThumbnailProcessor', () => {
         expect(result.success).toBe(false);
         expect(result.error).toBe('attempt 3: thumbnail filter failed');
         // All three rungs of the ladder were attempted, in order.
-        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
-        expect(ffmpegMockState.videoFiltersCalls).toEqual(['thumbnail']);
+        expect(seekInputCalls()).toEqual([1, 0]);
+        expect(videoFiltersCalls()).toEqual(['thumbnail']);
       });
 
       it('should not throw — total ladder failure still resolves to a result object', async () => {
@@ -811,7 +765,7 @@ describe('ThumbnailProcessor', () => {
 
         expect(result.success).toBe(true);
         // Two ffmpeg attempts occurred: the first "succeeded" but was empty.
-        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
+        expect(seekInputCalls()).toEqual([1, 0]);
         // The empty tmpOut from attempt 1 must be unlinked before attempt 2
         // reuses the same tmpOut path (plus the two finally-block cleanups).
         expect(fsMock.unlink.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -832,8 +786,8 @@ describe('ThumbnailProcessor', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('empty output file');
-        expect(ffmpegMockState.seekInputCalls).toEqual([1, 0]);
-        expect(ffmpegMockState.videoFiltersCalls).toEqual(['thumbnail']);
+        expect(seekInputCalls()).toEqual([1, 0]);
+        expect(videoFiltersCalls()).toEqual(['thumbnail']);
       });
     });
   });
