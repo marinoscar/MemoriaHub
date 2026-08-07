@@ -11,31 +11,28 @@
  * this sandbox. This file tests `transcodeToDecodableJpeg` directly: it is
  * pure ffmpeg + fs, zero sharp involvement.
  *
- * MOCK STRATEGY — fluent-ffmpeg:
+ * MOCK STRATEGY — the ffmpeg spawn seam:
  *
- * Identical technique to test/video.test.mjs's extractPosterFrame tests (see
- * that file's header comment for the full rationale). In short:
- * `loadFfmpeg()` inside src/image/index.ts loads fluent-ffmpeg lazily via
- * `nodeRequire('fluent-ffmpeg')` (a real CJS require). This package's test
- * convention is Node's built-in test runner (no Jest, no module-mock
- * hoisting), so fluent-ffmpeg is mocked at the CJS `require.cache` level:
- * `createRequire(import.meta.url).resolve('fluent-ffmpeg')` resolves to the
- * SAME absolute path node-require.cts's `require('fluent-ffmpeg')` call
- * resolves to (single process-wide CJS module cache keyed by resolved
- * filename), so pre-seeding `require.cache[thatPath]` with a fake module
- * object means the real `require('fluent-ffmpeg')` call returns the fake
- * instead of ever touching the real package (which would try to invoke a
- * real `ffmpeg` binary). No source changes were made to support this.
+ * Identical technique to test/video.test.mjs (see that file's header for the
+ * full rationale). In short: `transcodeToDecodableJpeg` shells out through the
+ * package's own thin ffmpeg wrapper (src/ffmpeg/index.ts), which replaced the
+ * deprecated fluent-ffmpeg dependency in issue #219. The old CJS
+ * `require.cache` mock no longer applies — there is no such module, and the
+ * technique cannot be pointed at `node:child_process` (a builtin) anyway. The
+ * wrapper instead exposes an explicit `__setSpawnForTests()` seam, and this
+ * file installs a fake `spawn` returning a scripted ChildProcess-alike. Every
+ * assertion below is preserved verbatim in intent.
  *
- * transcodeToDecodableJpeg's ffmpeg call shape is simpler than
- * extractPosterFrame's: just `.frames(1).output(path).on('end'|'error',
- * cb).run()` / `.kill()` — no `.seekInput()`/`.videoFilters()`.
+ * transcodeToDecodableJpeg's ffmpeg call shape is the simplest of the four
+ * this codebase uses: `['-i', <in>, '-y', '-vframes', '1', <out>]` — no `-ss`,
+ * no `-filter:v`. That argv is pinned explicitly in test/ffmpeg.test.mjs.
  *
  * These tests import '@memoriahub/enrichment-compute/image' via the
  * package's `exports` map, so they exercise the BUILT dist/esm output — run
- * `npm run build` after editing src/image/index.ts before running `npm test`
- * (verified the current dist/esm/image/index.js already contains
- * transcodeToDecodableJpeg — no rebuild was needed for this change).
+ * `npm run build` after editing src/image/index.ts before running `npm test`.
+ * The seam is imported from the '/ffmpeg' subpath, which resolves to the SAME
+ * module instance dist/esm/image/index.js imports as '../ffmpeg/index.js'
+ * (Node's ESM cache is keyed by resolved URL).
  *
  * The final test in this file ("... decode a real HEIC fixture end-to-end")
  * is different in kind from the six above it: it decodes a real, committed
@@ -62,15 +59,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import { promises as fs } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const require = createRequire(import.meta.url);
-const FFMPEG_PATH = require.resolve('fluent-ffmpeg');
+const { __setSpawnForTests } = await import('@memoriahub/enrichment-compute/ffmpeg');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HEIC_FIXTURE_PATH = path.join(__dirname, 'fixtures', 'golden-fixture.heic');
@@ -85,83 +81,75 @@ const HEIC_FIXTURE_PATH = path.join(__dirname, 'fixtures', 'golden-fixture.heic'
 const GOLDEN_HEIC_DHASH = null;
 
 /**
- * Install a fake fluent-ffmpeg module into the shared CJS require cache for
- * the duration of one test, restoring whatever was cached before.
+ * Install a fake `spawn` for the duration of one test.
  *
  * `behavior` describes the single attempt transcodeToDecodableJpeg makes (it
  * does not retry a ladder of attempts the way extractPosterFrame does):
  *   { kind: 'success', bytes? }  — writes `bytes` (default non-empty) to the
- *                                  output path, then fires 'end'.
- *   { kind: 'empty' }            — fires 'end' but writes a zero-byte file —
+ *                                  output path, then exits 0.
+ *   { kind: 'empty' }            — exits 0 after writing a zero-byte file —
  *                                   exercises the assertNonEmptyFile guard.
- *   { kind: 'error', message? }  — fires 'error' with an Error.
- *   { kind: 'hang' }             — never settles on its own; only the
- *                                  timeout's SIGKILL moves it along.
+ *   { kind: 'error', message? }  — exits 1 with `message` on stderr.
+ *   { kind: 'hang' }             — never exits on its own; only the timeout's
+ *                                  SIGKILL moves it along.
  *
- * Returns { restore, getCall } — `getCall()` returns the recorded input path,
- * output path, and kill signals received for the (single) invocation.
+ * Returns { restore, getCall } — `getCall()` returns the input path, output
+ * path and kill signals for the (single) invocation, read back out of the real
+ * argv the wrapper built.
  */
 function installFakeFfmpeg(behavior) {
-  const previous = require.cache[FFMPEG_PATH];
-  const call = { inputPath: null, outputPath: null, killSignals: [] };
+  const call = { inputPath: null, outputPath: null, killSignals: [], args: null };
 
-  function factory(inputPath) {
-    call.inputPath = inputPath;
+  __setSpawnForTests((_command, args) => {
+    call.args = [...args];
+    call.inputPath = call.args[call.args.indexOf('-i') + 1];
+    call.outputPath = call.args[call.args.length - 1];
 
-    let endCb = null;
-    let errorCb = null;
-
-    const cmd = {
-      frames() {
-        return cmd;
-      },
-      output(path_) {
-        call.outputPath = path_;
-        return cmd;
-      },
-      on(event, cb) {
-        if (event === 'end') endCb = cb;
-        if (event === 'error') errorCb = cb;
-        return cmd;
-      },
-      kill(signal) {
-        call.killSignals.push(signal);
-      },
-      run() {
-        switch (behavior.kind) {
-          case 'success': {
-            const bytes = behavior.bytes ?? Buffer.from('fake-jpeg-bytes');
-            fs.writeFile(call.outputPath, bytes).then(() => endCb?.());
-            break;
-          }
-          case 'empty': {
-            fs.writeFile(call.outputPath, Buffer.alloc(0)).then(() => endCb?.());
-            break;
-          }
-          case 'error': {
-            setImmediate(() => errorCb?.(new Error(behavior.message ?? 'ffmpeg: mock error')));
-            break;
-          }
-          case 'hang': {
-            // Never settles on its own — only a real timeout can move this along.
-            break;
-          }
-          default:
-            throw new Error(`unknown fake ffmpeg behavior kind: ${behavior.kind}`);
-        }
-      },
+    const child = new EventEmitter();
+    child.stdout = new Readable({ read() {} });
+    child.stderr = new Readable({ read() {} });
+    child.stdin = new EventEmitter();
+    child.kill = (signal) => {
+      call.killSignals.push(signal);
+      return true;
     };
 
-    return cmd;
-  }
+    const exit = (code, stderr) => {
+      child.stdout.push(null);
+      if (stderr) child.stderr.push(stderr);
+      child.stderr.push(null);
+      child.emit('close', code, null);
+    };
 
-  require.cache[FFMPEG_PATH] = { id: FFMPEG_PATH, filename: FFMPEG_PATH, loaded: true, exports: factory };
+    switch (behavior.kind) {
+      case 'success': {
+        const bytes = behavior.bytes ?? Buffer.from('fake-jpeg-bytes');
+        fs.writeFile(call.outputPath, bytes).then(() => exit(0));
+        break;
+      }
+      case 'empty': {
+        fs.writeFile(call.outputPath, Buffer.alloc(0)).then(() => exit(0));
+        break;
+      }
+      case 'error': {
+        setImmediate(() => exit(1, behavior.message ?? 'ffmpeg: mock error'));
+        break;
+      }
+      case 'hang': {
+        // Never settles on its own — only a real timeout can move this along.
+        break;
+      }
+      default:
+        throw new Error(`unknown fake ffmpeg behavior kind: ${behavior.kind}`);
+    }
+
+    return child;
+  });
 
   return {
     getCall: () => call,
     restore() {
-      if (previous) require.cache[FFMPEG_PATH] = previous;
-      else delete require.cache[FFMPEG_PATH];
+      __setSpawnForTests(null);
     },
   };
 }
@@ -247,7 +235,11 @@ test('rejects and cleans up both temp files when ffmpeg fires an error event', a
       () => transcodeToDecodableJpeg(Buffer.from('fake-heic-input')),
       (err) => {
         assert.ok(err instanceof Error);
-        assert.equal(err.message, 'ffmpeg: unsupported codec');
+        // The wrapper reports a non-zero ffmpeg exit as
+        // `ffmpeg exited with code 1: <stderr>` — the same shape fluent-ffmpeg
+        // produced for a real failing binary. What matters is that the
+        // underlying complaint reaches the caller rather than being swallowed.
+        assert.match(err.message, /ffmpeg: unsupported codec/);
         return true;
       },
     );

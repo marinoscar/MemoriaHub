@@ -13,151 +13,138 @@
  * extractPosterFrame() surface (whole 3-attempt ladder rather than one
  * seekSecs value at a time).
  *
- * MOCK STRATEGY — fluent-ffmpeg:
+ * MOCK STRATEGY — the ffmpeg spawn seam:
  *
- * `loadFfmpeg()` inside src/video/index.ts loads fluent-ffmpeg lazily via
- * `nodeRequire('fluent-ffmpeg')` (a real CJS `require` from node-require.cts,
- * see that file's header comment). This package's test convention is Node's
- * built-in test runner (`node --test`, no Jest, no `ts-jest`/`babel-jest`
- * module-mock hoisting available), and mocking an ESM import isn't directly
- * possible without extra flags.
+ * `extractPosterFrame` shells out through the package's own thin ffmpeg
+ * wrapper (src/ffmpeg/index.ts), which replaced the deprecated fluent-ffmpeg
+ * dependency in issue #219. These tests used to pre-seed the CJS
+ * `require.cache` with a fake `fluent-ffmpeg` module — a technique that no
+ * longer applies now that no such module exists, and that could not have been
+ * pointed at `node:child_process` anyway (a builtin).
  *
- * `node:test`'s `mock.module()` API would be the modern, built-in answer, but
- * it requires the `--experimental-test-module-mocks` flag on this Node
- * version (confirmed by hand: `mock.module` is undefined without the flag),
- * and this package's `test` script (`node --test`) does not pass it — adding
- * it here would mean changing the shared script for every other test file in
- * this directory, out of scope for this change.
- *
- * Instead this file mocks fluent-ffmpeg at the CJS `require.cache` level:
- * `fluent-ffmpeg` is a plain CJS package with exactly one copy in this
- * monorepo's (hoisted) node_modules, so `createRequire(import.meta.url)
- * .resolve('fluent-ffmpeg')` resolves to the SAME absolute path that
- * node-require.cts's `require('fluent-ffmpeg')` call will resolve to (Node's
- * CJS module cache is a single process-wide registry keyed by resolved
- * filename, not per-`require`-instance) — verified by hand that both resolve
- * to `<repo>/node_modules/fluent-ffmpeg/index.js`. Pre-seeding
- * `require.cache[thatPath]` with a fake module object before `loadFfmpeg()`
- * runs means the real `require('fluent-ffmpeg')` call returns the fake
- * instead of ever touching the real package (which would try to invoke a
- * real `ffmpeg` binary). No source changes to extractPosterFrame() were made
- * to support this — no test-only injection seam was added, per the task's
- * explicit instruction not to refactor the public signature.
+ * Instead the wrapper exposes an explicit `__setSpawnForTests()` seam, and
+ * this file installs a fake `spawn` returning a scripted EventEmitter that
+ * quacks like a ChildProcess. Every assertion below is preserved verbatim in
+ * intent; the per-attempt `seekSecs` / `usedThumbnailFilter` facts previously
+ * read off `.seekInput()` / `.videoFilters()` calls are now DERIVED FROM THE
+ * REAL ARGV the wrapper builds, which makes these tests a second (indirect)
+ * parity guard on top of test/ffmpeg.test.mjs's explicit argv assertions.
  *
  * These tests import '@memoriahub/enrichment-compute/video' via the package's
  * `exports` map, so they exercise the BUILT dist/esm output — run `npm run
- * build` after editing src/video/index.ts before running `npm test`.
+ * build` after editing src/video/index.ts before running `npm test`. The seam
+ * is imported from the '/ffmpeg' subpath, which resolves to the SAME module
+ * instance dist/esm/video/index.js imports as '../ffmpeg/index.js' (Node's ESM
+ * cache is keyed by resolved URL), so installing the fake there really does
+ * intercept the extraction path.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const require = createRequire(import.meta.url);
-const FFMPEG_PATH = require.resolve('fluent-ffmpeg');
+const { __setSpawnForTests } = await import('@memoriahub/enrichment-compute/ffmpeg');
 
 /**
- * Install a fake fluent-ffmpeg module into the shared CJS require cache for
- * the duration of one test, restoring whatever was cached before (nothing,
- * in practice, since nothing else in this suite requires the real package).
+ * Parse the facts a test cares about back out of a real ffmpeg argv:
+ *   ['-ss', '<s>', '-i', <in>, '-y', '-vframes', '1', <out>]
+ *   ['-i', <in>, '-y', '-vframes', '1', '-filter:v', 'thumbnail', <out>]
+ */
+function describeArgs(args) {
+  const ssIdx = args.indexOf('-ss');
+  const filterIdx = args.indexOf('-filter:v');
+  return {
+    inputPath: args[args.indexOf('-i') + 1],
+    outputPath: args[args.length - 1],
+    seekSecs: ssIdx === -1 ? null : Number(args[ssIdx + 1]),
+    usedThumbnailFilter: filterIdx !== -1 && args[filterIdx + 1] === 'thumbnail',
+    args,
+  };
+}
+
+/**
+ * Install a fake `spawn` for the duration of one test.
  *
  * `attempts` is an array of per-call behavior descriptors, consumed in order
  * — index 0 drives the ladder's first attempt (1s seek), index 1 the second
  * (0s seek), index 2 the third (thumbnail filter, no seek). Each descriptor:
  *   { kind: 'success', bytes? }  — writes `bytes` (default non-empty) to the
- *                                  output path, then fires 'end'.
- *   { kind: 'empty' }            — fires 'end' WITHOUT writing anything (or
- *                                   writes a zero-byte file) — exercises the
- *                                   assertNonEmptyFile fallback path.
- *   { kind: 'error', message? }  — fires 'error' with an Error.
- *   { kind: 'hang', onKill? }    — never fires 'end'/'error' on its own;
- *                                  `onKill(cmd)` runs when .kill() is called
- *                                  (used to simulate a late 'error' event
- *                                  fired as a side-effect of SIGKILL).
+ *                                  output path, then exits 0.
+ *   { kind: 'empty' }            — exits 0 after writing a zero-byte file —
+ *                                   exercises the assertNonEmptyFile fallback.
+ *   { kind: 'error', message? }  — exits 1 with `message` on stderr, which the
+ *                                   wrapper turns into an Error.
+ *   { kind: 'hang', onKill? }    — never exits on its own; `onKill(child)`
+ *                                  runs when the wrapper SIGKILLs it (used to
+ *                                  simulate the late 'error'/'close' a killed
+ *                                  ffmpeg still emits).
  *
  * Returns { restore, calls } — `calls` records what each invocation actually
- * did (seek value used, kill signals received) for assertions.
+ * did (derived seek value, kill signals received) for assertions.
  */
 function installFakeFfmpeg(attempts) {
-  const previous = require.cache[FFMPEG_PATH];
   const calls = [];
   let callIndex = 0;
 
-  function factory(inputPath) {
+  __setSpawnForTests((_command, args) => {
     const idx = callIndex++;
     const behavior = attempts[idx] ?? { kind: 'error', message: 'no scripted behavior for this attempt' };
-    const call = { inputPath, seekSecs: null, usedThumbnailFilter: false, killSignals: [] };
+
+    const call = { ...describeArgs([...args]), killSignals: [] };
     calls.push(call);
 
-    let endCb = null;
-    let errorCb = null;
-    let outputPath = null;
-
-    const cmd = {
-      seekInput(seconds) {
-        call.seekSecs = seconds;
-        return cmd;
-      },
-      videoFilters(filter) {
-        if (filter === 'thumbnail') call.usedThumbnailFilter = true;
-        return cmd;
-      },
-      frames() {
-        return cmd;
-      },
-      output(path) {
-        outputPath = path;
-        return cmd;
-      },
-      on(event, cb) {
-        if (event === 'end') endCb = cb;
-        if (event === 'error') errorCb = cb;
-        return cmd;
-      },
-      kill(signal) {
-        call.killSignals.push(signal);
-        behavior.onKill?.({ errorCb: (err) => errorCb?.(err) });
-      },
-      run() {
-        switch (behavior.kind) {
-          case 'success': {
-            const bytes = behavior.bytes ?? Buffer.from(`fake-frame-${idx}`);
-            fs.writeFile(outputPath, bytes).then(() => endCb?.());
-            break;
-          }
-          case 'empty': {
-            fs.writeFile(outputPath, Buffer.alloc(0)).then(() => endCb?.());
-            break;
-          }
-          case 'error': {
-            setImmediate(() => errorCb?.(new Error(behavior.message ?? 'ffmpeg: mock error')));
-            break;
-          }
-          case 'hang': {
-            // Never settles on its own — only a real timeout (or an
-            // explicitly-scripted onKill side effect) can move this along.
-            break;
-          }
-          default:
-            throw new Error(`unknown fake ffmpeg behavior kind: ${behavior.kind}`);
-        }
-      },
+    const child = new EventEmitter();
+    child.stdout = new Readable({ read() {} });
+    child.stderr = new Readable({ read() {} });
+    child.stdin = new EventEmitter();
+    child.kill = (signal) => {
+      call.killSignals.push(signal);
+      behavior.onKill?.(child);
+      return true;
     };
 
-    return cmd;
-  }
+    const exit = (code, stderr) => {
+      child.stdout.push(null);
+      if (stderr) child.stderr.push(stderr);
+      child.stderr.push(null);
+      child.emit('close', code, null);
+    };
 
-  require.cache[FFMPEG_PATH] = { id: FFMPEG_PATH, filename: FFMPEG_PATH, loaded: true, exports: factory };
+    switch (behavior.kind) {
+      case 'success': {
+        const bytes = behavior.bytes ?? Buffer.from(`fake-frame-${idx}`);
+        fs.writeFile(call.outputPath, bytes).then(() => exit(0));
+        break;
+      }
+      case 'empty': {
+        fs.writeFile(call.outputPath, Buffer.alloc(0)).then(() => exit(0));
+        break;
+      }
+      case 'error': {
+        setImmediate(() => exit(1, behavior.message ?? 'ffmpeg: mock error'));
+        break;
+      }
+      case 'hang': {
+        // Never settles on its own — only a real timeout (or an
+        // explicitly-scripted onKill side effect) can move this along.
+        break;
+      }
+      default:
+        throw new Error(`unknown fake ffmpeg behavior kind: ${behavior.kind}`);
+    }
+
+    return child;
+  });
 
   return {
     calls,
     restore() {
-      if (previous) require.cache[FFMPEG_PATH] = previous;
-      else delete require.cache[FFMPEG_PATH];
+      __setSpawnForTests(null);
     },
   };
 }
@@ -263,7 +250,13 @@ test('rejects with the last attempt\'s error when all three attempts fail', asyn
       () => extractPosterFrame(fakeVideoPath()),
       (err) => {
         assert.ok(err instanceof Error);
-        assert.equal(err.message, 'attempt 3: thumbnail filter failed');
+        // The wrapper wraps a non-zero ffmpeg exit as
+        // `ffmpeg exited with code 1: <stderr>` — the same shape fluent-ffmpeg
+        // produced for a real failing binary (its `extractError` + "exited
+        // with code" message). What matters here is that the surfaced error is
+        // the LAST attempt's, not attempt 1's or 2's.
+        assert.match(err.message, /attempt 3: thumbnail filter failed/);
+        assert.doesNotMatch(err.message, /attempt 1|attempt 2/);
         return true;
       },
     );
@@ -311,9 +304,14 @@ test('settles only once: a late "error" event fired as a side effect of kill() d
       // harmless no-op thanks to the settled guard inside
       // extractPosterFrameAttempt — it must NOT throw, and must NOT flip the
       // outcome of the (already-timed-out) first attempt.
-      onKill: ({ errorCb }) => {
+      onKill: (child) => {
         setTimeout(() => {
-          assert.doesNotThrow(() => errorCb(new Error('late ffmpeg process error')));
+          assert.doesNotThrow(() => {
+            child.emit('error', new Error('late ffmpeg process error'));
+            child.stdout.push(null);
+            child.stderr.push(null);
+            child.emit('close', null, 'SIGKILL');
+          });
         }, 0);
       },
     },

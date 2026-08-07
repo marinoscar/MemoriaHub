@@ -83,7 +83,9 @@ JPEG fixture above.
 
 **Two consumers, two eras:**
 
-- `test/heic.test.mjs` has six tests that mock `fluent-ffmpeg` (covering
+- `test/heic.test.mjs` has six tests that stub ffmpeg via the wrapper's
+  `__setSpawnForTests()` seam (issue #219 removed the deprecated
+  `fluent-ffmpeg` dependency these previously mocked) (covering
   success, temp-file cleanup, a custom `fileExtension` option, an ffmpeg
   error, an empty-output guard, and the SIGKILL timeout) — this is the
   regression coverage for the issue #106 fallback (`transcodeToDecodableJpeg`)
