@@ -1,7 +1,7 @@
 # Dependency Vulnerability Exceptions
 
 **Record date:** 2026-08-07
-**Baseline:** measured against `npm audit --package-lock-only --json` on 2026-08-07, after issues #215/#216/#217 and dependabot PR #225 landed, and concurrently with the in-flight `brace-expansion` / `fast-uri` / `js-yaml` patch-version bumps (the `fluent-ffmpeg` removal noted below has since landed). If you are reading this later, re-run `scripts/audit-triage.mjs` (see below) before trusting the row counts — this file is a snapshot, not a live view.
+**Baseline:** measured against `npm audit --package-lock-only --json` on 2026-08-07, after issues #215/#216/#217 and dependabot PR #225 landed, and after the `brace-expansion` / `fast-uri` / `js-yaml` patch bumps and the `fluent-ffmpeg` removal in this same PR. If you are reading this later, re-run `npm run audit:triage` (see below) before trusting the row counts — this file is a snapshot, not a live view.
 
 > **The success criterion (epic #214, issue #218) is not "`npm audit` shows 0."** It is: every row in `npm audit` is either fixed or has a linked, dated justification with a named revisit trigger below. Raw `npm audit` row counts double- and triple-count the same root cause across every path it's reachable from — see `scripts/audit-triage.mjs`, which groups rows by distinct root advisory so nobody quotes "N vulnerabilities" as if each row were an independent problem.
 
@@ -18,9 +18,21 @@ Do not run it. If a future contributor wants to "clean up the audit," point them
 
 ## Baseline at time of writing
 
-- Current: **11 rows (9 high, 2 moderate) across 8 distinct root advisories.**
-- 4 of those 8 roots are being fixed by in-range patch bumps in a concurrent commit (`brace-expansion`, `fast-uri`, `js-yaml` — no `overrides` needed; upstream has since published 1.1.17 / 5.0.9 backports, so the epic's original "forced two-major jump" framing for `brace-expansion` is stale).
-- That leaves **8 rows / 4 root advisories**, listed below. All four are accept-and-document — each is either unreachable from any first-party code path, or fixable only by a major downgrade/upgrade that trades a real regression for a theoretical exposure.
+- Before this PR: **11 rows (9 high, 2 moderate) across 8 distinct root advisories.**
+- 4 of those 8 roots were cleared here by plain **in-range patch bumps** — no `overrides` entry needed:
+
+  | package | parent (declared range) | before | after | advisory |
+  |---|---|---|---|---|
+  | `brace-expansion` | `minimatch` (`^1.1.7`) | 1.1.16 | 1.1.18 | GHSA-mh99-v99m-4gvg |
+  | `brace-expansion` | `glob/minimatch` (`^5.0.8`) | 5.0.8 | 5.0.9 | GHSA-rgw5-rvv9-x895 |
+  | `fast-uri` | `fast-json-stringify` (`^4.0.0`) | 4.1.1 | 4.1.2 | GHSA-7p8r-x3mc-p8w7 |
+  | `js-yaml` | `@istanbuljs/load-nyc-config` (`^3.13.1`) | 3.15.0 | 3.15.1 | GHSA-5p4m-2wfm-xmqj |
+
+  Issue #218's framing — that `brace-expansion` required forcing `minimatch@3`/`minimatch@5` through a two-major jump, and should be abandoned if the test toolchain destabilised — was correct when written (5.0.8 was then the only patched release) but is now **stale**: upstream has since published 1.1.17 and 5.0.9 backports, so every fix lands inside the already-declared semver ranges.
+
+  ⚠️ Do **not** "simplify" these into blanket root overrides. A blanket `js-yaml` override collides with the existing nested `"@nestjs/swagger": { "js-yaml": "^5.2.2" }` entry and silently **downgrades** root `js-yaml` 5.x → 3.x; a blanket `brace-expansion` override forces `glob`'s `minimatch@5` down to the 1.x line. The copies resolving to `2.1.x` sit in **neither** advisory range and are deliberately left alone.
+
+- After this PR: **8 rows / 4 root advisories**, listed below. All four are accept-and-document — each is either unreachable from any first-party code path, or fixable only by a major downgrade/upgrade that trades a real regression for a theoretical exposure.
 
 ## Accepted exceptions
 
