@@ -33,6 +33,33 @@ const inertGeoProvider = {
   reverseGeocode: async (): Promise<null> => null,
 };
 
+/**
+ * Gives the boot-time RBAC reconcile something sane to read (issue #293).
+ *
+ * Booting AppModule runs RbacReconcileService.onModuleInit, which reads
+ * `permission`/`role`/`rolePermission`. Under `mockDeep<PrismaClient>()` those
+ * delegates exist but resolve to `undefined`, so the reconcile threw on
+ * `undefined.map(...)`. It caught and logged its own failure — by design, so a
+ * reconcile problem can never crash-loop the API — but that meant every
+ * integration suite printed an ERROR + stack at boot that looked like a real
+ * failure while the suite passed.
+ *
+ * Returning empty sets makes the reconcile a well-defined no-op: nothing exists,
+ * no roles exist, so it has nothing to create. Specs that actually care about
+ * permission rows set their own mock returns afterwards (and `resetPrismaMock()`
+ * in a `beforeEach` runs after boot, so it cannot disturb this).
+ *
+ * Same rationale as `inertGeoProvider` above: neutralise a boot-time side
+ * effect that no integration spec is asserting on.
+ */
+function stubRbacReconcileQueries(): void {
+  prismaMock.permission.findMany.mockResolvedValue([]);
+  prismaMock.permission.createMany.mockResolvedValue({ count: 0 });
+  prismaMock.role.findMany.mockResolvedValue([]);
+  prismaMock.rolePermission.findMany.mockResolvedValue([]);
+  prismaMock.rolePermission.createMany.mockResolvedValue({ count: 0 });
+}
+
 export interface TestContext {
   app: NestFastifyApplication;
   prisma: PrismaService;
@@ -70,6 +97,8 @@ export async function createTestApp(
     .useValue(inertGeoProvider);
 
   if (shouldUseMock) {
+    stubRbacReconcileQueries();
+
     // Mocked PrismaService — no real database connection is opened.
     moduleFixture = await builder
       .overrideProvider(PrismaService)
