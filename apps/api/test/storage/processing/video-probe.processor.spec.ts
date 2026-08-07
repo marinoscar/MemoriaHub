@@ -1,26 +1,35 @@
 /**
  * Unit tests — VideoProbeProcessor
  *
- * ffprobe binary is not available in this CI environment (no system ffmpeg
- * installed).  Generating a real MP4 fixture and running a real ffprobe probe
- * is therefore not feasible.  Instead, `fluent-ffmpeg` is mocked at the module
- * level so the processor's mapping logic (durationMs/width/height/codec) is
- * fully exercised without any binary dependency.
+ * An ffprobe binary is not guaranteed in CI.  Generating a real MP4 fixture and
+ * running a real probe is therefore not feasible.  Instead the shared parity
+ * package's ffprobe runner is mocked so the processor's mapping logic
+ * (durationMs/width/height/codec) is fully exercised without any binary
+ * dependency.
  *
  * `canProcess` is asserted against a real processor instance — it doesn't
  * touch ffprobe at all so the mock doesn't affect those assertions.
  *
  * NOTE on mock strategy:
- *   `fluent-ffmpeg` exports `ffprobe` as a non-configurable property, which
- *   means `jest.spyOn(ffmpeg, 'ffprobe')` throws "Cannot redefine property".
- *   The standard workaround is to mock the entire module with `jest.mock()`,
- *   which replaces the module in the require cache before any import sees it.
+ *   Since issue #219 removed the deprecated `fluent-ffmpeg` dependency, the
+ *   processor reaches ffprobe through `@memoriahub/enrichment-compute/ffmpeg`'s
+ *   `runFfprobe` — a thin `spawn()` wrapper. Only that function is replaced.
+ *   The subpath specifier resolves to the very same module file that
+ *   `dist/cjs/metadata/index.js` requires as `../ffmpeg/index.js`, so one
+ *   `jest.mock()` covers the call site inside the shared package.
+ *
+ *   `runFfprobe` returns a plain parsed object rather than invoking a callback,
+ *   so the setup helpers below resolve/reject a Promise instead of calling back.
+ *   The synthetic fixtures use the shape ffprobe's default (INI-ish) output
+ *   parses to — numeric fields as real NUMBERS, which is exactly why the
+ *   wrapper does not use `-print_format json` (its writer emits them as
+ *   strings, and these values are persisted).
  */
 
 import { Readable } from 'stream';
 import { VideoProbeProcessor } from '../../../src/storage/processing/processors/video-probe.processor';
 import { bufferToStream } from '../../fixtures/media/image-fixtures';
-import type * as FfmpegType from 'fluent-ffmpeg';
+import type { FfprobeDataLike } from '@memoriahub/enrichment-compute/metadata';
 
 // ---------------------------------------------------------------------------
 // Module-level mock — must be at the top level so Jest hoists it
@@ -28,11 +37,11 @@ import type * as FfmpegType from 'fluent-ffmpeg';
 
 const mockFfprobeFn = jest.fn();
 
-jest.mock('fluent-ffmpeg', () => {
-  const original = jest.requireActual<typeof FfmpegType>('fluent-ffmpeg');
+jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
+  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
   return {
-    ...original,
-    ffprobe: (...args: any[]) => mockFfprobeFn(...args),
+    ...actual,
+    runFfprobe: (...args: any[]) => mockFfprobeFn(...args),
   };
 });
 
@@ -63,8 +72,8 @@ function makeGetStream(buf = Buffer.from('fake-video')): () => Promise<Readable>
 }
 
 function makeSyntheticProbeData(
-  overrides: Partial<FfmpegType.FfprobeData> = {},
-): FfmpegType.FfprobeData {
+  overrides: Partial<FfprobeDataLike> & { chapters?: unknown[] } = {},
+): FfprobeDataLike {
   return {
     streams: [
       {
@@ -93,17 +102,13 @@ function makeSyntheticProbeData(
   };
 }
 
-/** Configures mockFfprobeFn to invoke its last argument (callback) with the given data. */
-function setupFfprobeSuccess(data: FfmpegType.FfprobeData) {
-  mockFfprobeFn.mockImplementation((_path: string, callback: any) => {
-    callback(null, data);
-  });
+/** Configures the mocked runFfprobe to resolve with the given parsed data. */
+function setupFfprobeSuccess(data: FfprobeDataLike) {
+  mockFfprobeFn.mockResolvedValue(data);
 }
 
 function setupFfprobeError(err: Error) {
-  mockFfprobeFn.mockImplementation((_path: string, callback: any) => {
-    callback(err, undefined);
-  });
+  mockFfprobeFn.mockRejectedValue(err);
 }
 
 // ---------------------------------------------------------------------------

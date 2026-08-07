@@ -13,6 +13,7 @@
  */
 
 export * from './logging.js';
+export * from './ffmpeg/index.js';
 export * from './image/index.js';
 export * from './clip/index.js';
 export * from './dhash/index.js';

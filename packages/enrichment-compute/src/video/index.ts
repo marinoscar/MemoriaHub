@@ -10,9 +10,11 @@
  * worker node's social-media-detection compute module) — this module never
  * downloads anything itself, it only reads a local path.
  *
- * fluent-ffmpeg is loaded lazily via nodeRequire (mirrors /metadata's
- * loadFfmpeg) so importing this subpath is always safe; the ffmpeg/ffprobe
- * binaries on PATH remain a host/deployment concern.
+ * ffmpeg is invoked through the package's own thin `spawn()` wrapper
+ * (../ffmpeg/index.js) rather than the deprecated fluent-ffmpeg package
+ * (issue #219). Importing this subpath is always safe — `node:child_process`
+ * is a builtin, and a missing binary surfaces only when a run is attempted;
+ * the ffmpeg/ffprobe binaries on PATH remain a host/deployment concern.
  *
  * Also exports `extractPosterFrame` — a single-frame "poster frame" extractor
  * used by thumbnail generation (video poster/cover images), as opposed to the
@@ -27,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { nodeRequire } from '../node-require.cjs';
+import { buildFrameExtractionArgs, runFfmpeg } from '../ffmpeg/index.js';
 import { computeLog } from '../logging.js';
 
 export interface ExtractedFrame {
@@ -47,22 +49,6 @@ export interface FrameExtractionOpts {
    * Falls back to '.mp4' when absent.
    */
   fileExtension?: string;
-}
-
-type FfmpegChain = {
-  seekInput(seconds: number): FfmpegChain;
-  videoFilters(filter: string): FfmpegChain;
-  frames(n: number): FfmpegChain;
-  output(path: string): FfmpegChain;
-  on(event: 'end' | 'error', cb: (err?: Error) => void): FfmpegChain;
-  run(): void;
-  kill(signal: string): void;
-};
-type FfmpegModule = (input: string) => FfmpegChain;
-
-function loadFfmpeg(): FfmpegModule {
-  const mod = nodeRequire('fluent-ffmpeg') as Record<string, unknown>;
-  return (typeof mod === 'function' ? mod : mod['default']) as FfmpegModule;
 }
 
 // ---------------------------------------------------------------------------
@@ -292,9 +278,15 @@ async function assertNonEmptyFile(path: string): Promise<void> {
  * applies the ffmpeg `thumbnail` video filter instead (no seek — last rung
  * of the fallback ladder).
  *
- * The command is killed with SIGKILL once `timeoutMs` elapses. The `settled`
- * guard ensures the promise settles exactly once: the timer cannot fire
- * after 'end'/'error', and a late 'error' emitted by the kill is a no-op.
+ * The command is killed with SIGKILL once `timeoutMs` elapses (the runner's
+ * `settled` guard makes the child's resulting late 'close'/'error' a no-op,
+ * so the promise still settles exactly once).
+ *
+ * Argv parity: the seek branch produces
+ * `['-ss', <s>, '-i', tmpIn, '-y', '-vframes', '1', tmpOut]` and the filter
+ * branch `['-i', tmpIn, '-y', '-vframes', '1', '-filter:v', 'thumbnail', tmpOut]`
+ * — exactly what fluent-ffmpeg emitted for the equivalent chains. `-ss` MUST
+ * stay before `-i` (input seek); see ../ffmpeg/index.ts.
  */
 function extractPosterFrameAttempt(
   tmpIn: string,
@@ -302,43 +294,18 @@ function extractPosterFrameAttempt(
   seekSecs: number | null,
   timeoutMs: number,
 ): Promise<void> {
-  const ffmpeg = loadFfmpeg();
-  return new Promise<void>((resolve, reject) => {
-    let settled = false;
-    let timer: NodeJS.Timeout | null = null;
-
-    const settle = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      if (err) reject(err);
-      else resolve();
-    };
-
-    const cmd = ffmpeg(tmpIn);
-    if (seekSecs !== null) {
-      cmd.seekInput(seekSecs);
-    } else {
-      cmd.videoFilters('thumbnail');
-    }
-    cmd
-      .frames(1)
-      .output(tmpOut)
-      .on('end', () => settle())
-      .on('error', (err?: Error) => settle(err));
-
-    timer = setTimeout(() => {
-      // SIGKILL — ffmpeg can ignore the default SIGTERM mid-decode
-      try {
-        cmd.kill('SIGKILL');
-      } catch {
-        // Process already gone
-      }
-      settle(new Error(`ffmpeg frame extraction timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    cmd.run();
-  });
+  return runFfmpeg(
+    buildFrameExtractionArgs({
+      input: tmpIn,
+      output: tmpOut,
+      seekSecs,
+      videoFilter: seekSecs === null ? 'thumbnail' : null,
+    }),
+    {
+      timeoutMs,
+      timeoutMessage: `ffmpeg frame extraction timed out after ${timeoutMs}ms`,
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -385,17 +352,17 @@ export function computeSeekTimestamps(
 
 /**
  * Extract a single JPEG frame from `tmpIn` at `seekSecs` seconds into
- * `tmpOut`. Wraps fluent-ffmpeg's event-driven API in a Promise.
+ * `tmpOut`.
+ *
+ * Argv: `['-ss', <seekSecs>, '-i', tmpIn, '-y', '-vframes', '1', tmpOut]` —
+ * identical to what fluent-ffmpeg's `.seekInput(s).frames(1).output(out)`
+ * chain produced. Deliberately UNBOUNDED by a timeout, matching the previous
+ * behaviour of this sampling path (only `extractPosterFrame` was ever
+ * timeout-bounded); each caller already treats a per-frame failure as
+ * skippable.
  */
 function extractFrame(tmpIn: string, tmpOut: string, seekSecs: number): Promise<void> {
-  const ffmpeg = loadFfmpeg();
-  return new Promise<void>((resolve, reject) => {
-    ffmpeg(tmpIn)
-      .seekInput(seekSecs)
-      .frames(1)
-      .output(tmpOut)
-      .on('end', () => resolve())
-      .on('error', (err?: Error) => reject(err))
-      .run();
-  });
+  return runFfmpeg(
+    buildFrameExtractionArgs({ input: tmpIn, output: tmpOut, seekSecs }),
+  );
 }

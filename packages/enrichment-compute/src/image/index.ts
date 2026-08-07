@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { nodeRequire } from '../node-require.cjs';
+import { buildFrameExtractionArgs, runFfmpeg } from '../ffmpeg/index.js';
 import { computeLog, setComputeLogger } from '../logging.js';
 
 export { setComputeLogger } from '../logging.js';
@@ -31,20 +31,6 @@ export type { ComputeLogger, ComputeLogFn } from '../logging.js';
 // runtime dependency, so we transcode the input to a plain JPEG that sharp can
 // then process through the normal pipeline. See issue #106.
 // ---------------------------------------------------------------------------
-
-type FfmpegChain = {
-  frames(n: number): FfmpegChain;
-  output(path: string): FfmpegChain;
-  on(event: 'end' | 'error', cb: (err?: Error) => void): FfmpegChain;
-  run(): void;
-  kill(signal: string): void;
-};
-type FfmpegModule = (input: string) => FfmpegChain;
-
-function loadFfmpeg(): FfmpegModule {
-  const mod = nodeRequire('fluent-ffmpeg') as Record<string, unknown>;
-  return (typeof mod === 'function' ? mod : mod['default']) as FfmpegModule;
-}
 
 /**
  * Reject unless `path` exists with size > 0 — ffmpeg can exit 0 without writing
@@ -99,43 +85,17 @@ export async function transcodeToDecodableJpeg(
 /**
  * Run a single ffmpeg transcode of `tmpIn` into `tmpOut` (one output frame).
  *
- * Mirrors the timeout-bounded, SIGKILL-guarded, once-settled Promise pattern of
- * `extractPosterFrameAttempt` in ../video/index.ts. The command is killed with
- * SIGKILL once `timeoutMs` elapses; the `settled` guard ensures the promise
- * settles exactly once.
+ * Mirrors the timeout-bounded, SIGKILL-guarded, once-settled behaviour of
+ * `extractPosterFrameAttempt` in ../video/index.ts — both now go through the
+ * shared `runFfmpeg` runner in ../ffmpeg/index.ts.
+ *
+ * Argv: `['-i', tmpIn, '-y', '-vframes', '1', tmpOut]` — exactly what
+ * fluent-ffmpeg's `.frames(1).output(out)` chain produced (no seek, no filter).
  */
 function transcodeAttempt(tmpIn: string, tmpOut: string, timeoutMs: number): Promise<void> {
-  const ffmpeg = loadFfmpeg();
-  return new Promise<void>((resolve, reject) => {
-    let settled = false;
-    let timer: NodeJS.Timeout | null = null;
-
-    const settle = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      if (err) reject(err);
-      else resolve();
-    };
-
-    const cmd = ffmpeg(tmpIn);
-    cmd
-      .frames(1)
-      .output(tmpOut)
-      .on('end', () => settle())
-      .on('error', (err?: Error) => settle(err));
-
-    timer = setTimeout(() => {
-      // SIGKILL — ffmpeg can ignore the default SIGTERM mid-decode
-      try {
-        cmd.kill('SIGKILL');
-      } catch {
-        // Process already gone
-      }
-      settle(new Error(`ffmpeg image transcode timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    cmd.run();
+  return runFfmpeg(buildFrameExtractionArgs({ input: tmpIn, output: tmpOut }), {
+    timeoutMs,
+    timeoutMessage: `ffmpeg image transcode timed out after ${timeoutMs}ms`,
   });
 }
 

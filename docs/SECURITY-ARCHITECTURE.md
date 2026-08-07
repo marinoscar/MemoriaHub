@@ -1956,6 +1956,12 @@ Even if a malicious or hallucinating model includes a `circleId` field in its to
 
 ---
 
+## Dependency Vulnerability Management
+
+`npm audit` findings against this repo are triaged, not ignored: every reported row is either fixed via a patch/minor bump, or carries a dated, evidence-backed exception with a named fact-based revisit trigger. The current accepted exceptions (currently `adm-zip`, `find-my-way`, `react-router`, `uuid`, plus the related `exceljs` deprecation decision) live in **[docs/security/dependency-exceptions.md](security/dependency-exceptions.md)**, along with the standing rule to never run `npm audit fix --force` on this repo (it resolves several rows by downgrading majors, including one protected by the `onnxruntime-node` CLIP-parity override). `scripts/audit-triage.mjs` groups raw `npm audit` rows by distinct root advisory so the reported count reflects real, de-duplicated root causes.
+
+---
+
 ## Conclusion
 
 This security architecture provides defense-in-depth through multiple layers:

@@ -7,7 +7,8 @@
  *
  * What is mocked:
  *  - sharp              — dynamic import inside the handler; returns a small JPEG
- *  - fluent-ffmpeg      — never reached (VideoFrameExtractionService is fully mocked)
+ *  - ffmpeg              — never reached (VideoFrameExtractionService is fully mocked,
+ *                          so the shared package's spawn() wrapper is never entered)
  *  - image-orientation  — prepareImageForProcessing returns the buffer unchanged
  *
  * Collaborators replaced with plain jest mocks (no NestJS testing module needed):
@@ -82,24 +83,6 @@ jest.mock('../storage/processing/image-orientation.util', () => ({
     height: 480,
   }),
 }));
-
-// Mock fluent-ffmpeg (required transitively by VideoFrameExtractionService
-// even though the service itself is replaced; importing the class loads the
-// module, so the mock prevents native binary lookup failures).
-jest.mock('fluent-ffmpeg', () => {
-  const chain = {
-    seekInput: jest.fn().mockReturnThis(),
-    frames: jest.fn().mockReturnThis(),
-    output: jest.fn().mockReturnThis(),
-    on: jest.fn().mockImplementation((event: string, cb: () => void) => {
-      if (event === 'end') cb();
-      return chain;
-    }),
-    run: jest.fn().mockReturnThis(),
-  };
-  const ffmpegMock = jest.fn().mockReturnValue(chain);
-  return { default: ffmpegMock, __esModule: true, ...ffmpegMock };
-});
 
 // Spy on fs.promises.unlink (delegating to the real implementation) so tests
 // can assert the downloaded temp video file is actually cleaned up, without

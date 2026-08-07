@@ -3,15 +3,22 @@
  *
  * The core public API is `computeSeekTimestamps` (module-private pure function),
  * which is exercised through `VideoFrameExtractionService.extractFrames` by
- * mocking fluent-ffmpeg so no real video decoding happens.
+ * stubbing the ffmpeg runner so no real video decoding happens.
  *
  * `extractFrames`/`extractFramesAt` take an already-materialized video file
  * path (not a Buffer) — the caller owns downloading/cleaning up the input
  * file. Tests pass a fake path string; no input file is ever read since
- * fluent-ffmpeg is mocked.
+ * ffmpeg never actually runs.
  *
  * We mock:
- *  - fluent-ffmpeg    — the ffmpeg binary call chain (seekInput/frames/output/run)
+ *  - @memoriahub/enrichment-compute/ffmpeg — only `runFfmpeg`, the shared
+ *    package's thin `spawn()` wrapper that replaced the deprecated
+ *    fluent-ffmpeg dependency (issue #219). `buildFrameExtractionArgs` is
+ *    deliberately left REAL (jest.requireActual) so this spec still exercises
+ *    — and records — the true argv, and the recorded `-ss` values below are
+ *    read back out of it. The subpath specifier resolves to the very same
+ *    module file `dist/cjs/video/index.js` requires as `../ffmpeg/index.js`,
+ *    so one jest.mock covers the call site inside the shared package.
  *  - fs/promises      — readFile / unlink so no (output frame) temp files are created
  *
  * What we test:
@@ -31,24 +38,28 @@ import { VideoFrameExtractionService } from './video-frame-extraction.service';
 // Mocks
 // ---------------------------------------------------------------------------
 
-// Mock fluent-ffmpeg before importing the service so Jest intercepts the module
-jest.mock('fluent-ffmpeg', () => {
-  // Return a jest function that, when called, returns a fluent API object.
-  // Every chained method returns "this" so the chain terminates at .run().
-  const chain = {
-    seekInput: jest.fn().mockReturnThis(),
-    frames: jest.fn().mockReturnThis(),
-    output: jest.fn().mockReturnThis(),
-    on: jest.fn().mockImplementation((event, cb) => {
-      // Immediately fire 'end' so extractFrame resolves
-      if (event === 'end') cb();
-      return chain;
+// Records the argv of every ffmpeg invocation the shared package would have
+// spawned. Declared at module scope so the hoisted jest.mock factory below can
+// close over it (the factory runs at import time, after module-scope init).
+const ffmpegRunArgs: string[][] = [];
+
+// Stub the shared package's ffmpeg runner before importing the service so Jest
+// intercepts it. Only `runFfmpeg` is replaced — the argv builder stays real.
+jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
+  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
+  return {
+    ...actual,
+    runFfmpeg: jest.fn(async (args: string[]) => {
+      ffmpegRunArgs.push([...args]);
     }),
-    run: jest.fn().mockReturnThis(),
   };
-  const ffmpegMock = jest.fn().mockReturnValue(chain);
-  return { default: ffmpegMock, __esModule: true, ...ffmpegMock };
 });
+
+/** Read the `-ss` value back out of a recorded ffmpeg argv. */
+function seekSecondsOf(args: string[]): number | null {
+  const idx = args.indexOf('-ss');
+  return idx === -1 ? null : Number(args[idx + 1]);
+}
 
 // Mock fs/promises so we never touch the real filesystem
 jest.mock('fs', () => ({
@@ -87,20 +98,7 @@ async function getTimestampsMs(
 describe('VideoFrameExtractionService — timestamp computation', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-
-    // Reset the fluent-ffmpeg chain so 'end' fires for every frame
-    const ffmpeg = require('fluent-ffmpeg');
-    const chain = {
-      seekInput: jest.fn().mockReturnThis(),
-      frames: jest.fn().mockReturnThis(),
-      output: jest.fn().mockReturnThis(),
-      on: jest.fn().mockImplementation((event, cb) => {
-        if (event === 'end') cb();
-        return chain;
-      }),
-      run: jest.fn().mockReturnThis(),
-    };
-    ffmpeg.mockReturnValue(chain);
+    ffmpegRunArgs.length = 0;
   });
 
   // -----------------------------------------------------------------------
@@ -280,6 +278,41 @@ describe('VideoFrameExtractionService — timestamp computation', () => {
       const ts = await getTimestampsMs(2000, 5, 60);
       expect(ts).toHaveLength(1);
       expect(ts[0]).toBe(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 10. ffmpeg argv — the frame sampler must use an INPUT seek (`-ss` before
+  //     `-i`). Moving it after `-i` switches ffmpeg to exact output seek and
+  //     lands on a different frame, which would break server/worker-node
+  //     parity (docs/specs/distributed-nodes.md §7). The authoritative pin
+  //     lives in packages/enrichment-compute/test/ffmpeg.test.mjs; this is
+  //     the corroborating check at the API call site.
+  // -----------------------------------------------------------------------
+  describe('ffmpeg invocation shape', () => {
+    it('spawns one input-seek single-frame extraction per computed timestamp', async () => {
+      const svc = new VideoFrameExtractionService();
+      await svc.extractFrames(FAKE_VIDEO_PATH, {
+        durationMs: 30000,
+        sampleIntervalSeconds: 5,
+        maxFrames: 60,
+      });
+
+      expect(ffmpegRunArgs).toHaveLength(6);
+      expect(ffmpegRunArgs.map(seekSecondsOf)).toEqual([2.5, 7.5, 12.5, 17.5, 22.5, 27.5]);
+
+      const [args] = ffmpegRunArgs;
+      expect(args.slice(0, 7)).toEqual([
+        '-ss',
+        '2.5',
+        '-i',
+        FAKE_VIDEO_PATH,
+        '-y',
+        '-vframes',
+        '1',
+      ]);
+      // `-ss` must precede `-i`.
+      expect(args.indexOf('-ss')).toBeLessThan(args.indexOf('-i'));
     });
   });
 });

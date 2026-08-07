@@ -11,12 +11,14 @@
  * worker node extracts EXACTLY the same values as the server for the same
  * bytes (docs/specs/distributed-nodes.md §7).
  *
- * exifr and fluent-ffmpeg are loaded lazily so importing this subpath is
- * always safe; ffprobe additionally requires the ffmpeg suite on PATH at
- * probe time (a host/deployment concern).
+ * exifr is loaded lazily and ffprobe is spawned through the package's own
+ * thin wrapper (../ffmpeg/index.js — see issue #219, which removed the
+ * deprecated fluent-ffmpeg dependency), so importing this subpath is always
+ * safe; ffprobe additionally requires the ffmpeg suite on PATH at probe time
+ * (a host/deployment concern).
  */
 
-import { nodeRequire } from '../node-require.cjs';
+import { runFfprobe } from '../ffmpeg/index.js';
 import { getOrientedDimensions } from '../image/index.js';
 
 // =============================================================================
@@ -180,9 +182,12 @@ export async function extractDimensions(
 const MAX_TAGS_SERIALIZED_BYTES = 4096;
 
 /**
- * Minimal structural view of fluent-ffmpeg's FfprobeData — declared locally so
- * the public .d.ts never forces consumers to install @types/fluent-ffmpeg.
- * The real FfprobeData is structurally assignable to this shape.
+ * Minimal structural view of ffprobe's `-show_streams -show_format` result.
+ *
+ * Declared locally — and kept deliberately loose — so the public .d.ts never
+ * exposes an ffprobe-parser type from elsewhere in the package (it historically
+ * existed so consumers never needed `@types/fluent-ffmpeg`; that property is
+ * preserved now that the parser is in-house).
  */
 export interface FfprobeStreamLike {
   codec_type?: string | undefined;
@@ -217,69 +222,42 @@ export interface ContainerMetadata {
   codec?: string;
 }
 
-type FfmpegModule = {
-  ffprobe: (filePath: string, cb: (err: unknown, data: FfprobeDataLike) => void) => void;
-};
-
-function loadFfmpeg(): FfmpegModule {
-  try {
-    const mod = nodeRequire('fluent-ffmpeg') as FfmpegModule & { default?: FfmpegModule };
-    return typeof mod.ffprobe === 'function' ? mod : (mod.default as FfmpegModule);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `Video probe compute requires the dependency fluent-ffmpeg, which could not be loaded: ${msg}`,
-    );
-  }
-}
-
 /**
  * Run ffprobe against a seekable file path.
  *
  * ffprobe requires a real file path (it seeks), so callers must have already
  * materialized the video bytes to disk (see VideoProbeProcessor's temp-file
  * handling).
+ *
+ * Unbounded — use {@link probeVideo} when a timeout is wanted.
  */
-export function probeVideoFile(filePath: string): Promise<FfprobeDataLike> {
-  const ffmpeg = loadFfmpeg();
-  return new Promise<FfprobeDataLike>((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, data) => {
-      if (err) reject(err);
-      else resolve(data);
-    });
-  });
+export async function probeVideoFile(filePath: string): Promise<FfprobeDataLike> {
+  return (await runFfprobe(filePath)) as unknown as FfprobeDataLike;
 }
 
 /**
- * Run ffprobe with an upper bound on runtime.  ffprobe has no built-in timeout
- * and can hang on corrupt/truncated containers; the race guarantees the caller
- * settles.  NOTE: the underlying ffprobe process is not killed on timeout —
- * fluent-ffmpeg's ffprobe API exposes no process handle — but an orphaned probe
- * exits on its own once it finishes reading the input.
+ * Run ffprobe with an upper bound on runtime. ffprobe has no built-in timeout
+ * and can hang on corrupt/truncated containers.
+ *
+ * The hung ffprobe process IS killed (SIGKILL) when the timeout fires. This is
+ * an improvement over the previous fluent-ffmpeg implementation, whose
+ * callback-only `ffprobe()` API exposed no process handle — that version could
+ * only race a timer and leave the probe orphaned until it finished reading the
+ * input on its own (issue #219).
  *
  * `ffprobeTimeoutMs` defaults to 30 000 ms (the API's FFPROBE_TIMEOUT_MS
  * default); pass an explicit value to override.
  */
-export function probeVideo(
+export async function probeVideo(
   filePath: string,
   opts?: { ffprobeTimeoutMs?: number },
 ): Promise<FfprobeDataLike> {
   const timeoutMs = opts?.ffprobeTimeoutMs ?? 30000;
-  return new Promise<FfprobeDataLike>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`ffprobe timed out after ${timeoutMs}ms`)),
-      timeoutMs,
-    );
-    probeVideoFile(filePath)
-      .then(data => {
-        clearTimeout(timer);
-        resolve(data);
-      })
-      .catch(err => {
-        clearTimeout(timer);
-        reject(err);
-      });
+  const data = await runFfprobe(filePath, {
+    timeoutMs,
+    timeoutMessage: `ffprobe timed out after ${timeoutMs}ms`,
   });
+  return data as unknown as FfprobeDataLike;
 }
 
 /**

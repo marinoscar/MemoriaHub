@@ -38,12 +38,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, promises as fsPromises } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import os from 'node:os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'golden-fixture.jpg');
 const GOLDEN_CLIP_PATH = path.join(__dirname, 'fixtures', 'golden-clip-512.json');
 const HEIC_FIXTURE_PATH = path.join(__dirname, 'fixtures', 'golden-fixture.heic');
@@ -176,52 +176,48 @@ test('CLIP embedding of golden-fixture.jpg matches the committed golden vector',
 // it once the global libvips has HEIF support baked in.
 //
 // installFakeFfmpeg below is a minimal inline copy of the technique in
-// heic.test.mjs (see that file's header for the full CJS require.cache
-// rationale). Only a single 'success' behavior is needed here — this test's
-// job is to detect whether the fallback is invoked AT ALL while decoding a
-// real HEIC fixture through the real computeDHash pipeline, not to exercise
-// every ffmpeg failure mode (heic.test.mjs already covers those).
+// heic.test.mjs (see that file's header for the full rationale). Only a
+// single 'success' behavior is needed here — this test's job is to detect
+// whether the fallback is invoked AT ALL while decoding a real HEIC fixture
+// through the real computeDHash pipeline, not to exercise every ffmpeg
+// failure mode (heic.test.mjs already covers those).
+//
+// Since issue #219 removed the deprecated fluent-ffmpeg dependency, the fake
+// is installed through the ffmpeg wrapper's explicit `__setSpawnForTests()`
+// seam rather than by pre-seeding the CJS require.cache.
 // ---------------------------------------------------------------------------
 
+const { __setSpawnForTests } = await import('@memoriahub/enrichment-compute/ffmpeg');
+
 function installFakeFfmpeg() {
-  const FFMPEG_PATH = require.resolve('fluent-ffmpeg');
-  const previous = require.cache[FFMPEG_PATH];
   const call = { inputPath: null, outputPath: null };
 
-  function factory(inputPath) {
-    call.inputPath = inputPath;
-    let endCb = null;
+  __setSpawnForTests((_command, args) => {
+    const argv = [...args];
+    call.inputPath = argv[argv.indexOf('-i') + 1];
+    call.outputPath = argv[argv.length - 1];
 
-    const cmd = {
-      frames() {
-        return cmd;
-      },
-      output(path_) {
-        call.outputPath = path_;
-        return cmd;
-      },
-      on(event, cb) {
-        if (event === 'end') endCb = cb;
-        return cmd;
-      },
-      kill() {},
-      run() {
-        // Settle harmlessly if ever invoked, so a fallback (which would be a
-        // finding, not an expectation) never hangs this test.
-        fsPromises.writeFile(call.outputPath, Buffer.from('fake-jpeg-bytes')).then(() => endCb?.());
-      },
-    };
+    const child = new EventEmitter();
+    child.stdout = new Readable({ read() {} });
+    child.stderr = new Readable({ read() {} });
+    child.stdin = new EventEmitter();
+    child.kill = () => true;
 
-    return cmd;
-  }
+    // Settle harmlessly if ever invoked, so a fallback (which would be a
+    // finding, not an expectation) never hangs this test.
+    fsPromises.writeFile(call.outputPath, Buffer.from('fake-jpeg-bytes')).then(() => {
+      child.stdout.push(null);
+      child.stderr.push(null);
+      child.emit('close', 0, null);
+    });
 
-  require.cache[FFMPEG_PATH] = { id: FFMPEG_PATH, filename: FFMPEG_PATH, loaded: true, exports: factory };
+    return child;
+  });
 
   return {
     getCall: () => call,
     restore() {
-      if (previous) require.cache[FFMPEG_PATH] = previous;
-      else delete require.cache[FFMPEG_PATH];
+      __setSpawnForTests(null);
     },
   };
 }

@@ -36,7 +36,7 @@ import { streamToBuffer, streamToTempFile } from './stream-utils';
  *   2. Extracts one poster frame via the shared
  *      `@memoriahub/enrichment-compute/video`'s `extractPosterFrame()`, which
  *      runs the three-attempt fallback ladder (seek 1 s → seek 0 s →
- *      `thumbnail` video filter, no seek) against fluent-ffmpeg, validating
+ *      `thumbnail` video filter, no seek) against ffmpeg, validating
  *      each attempt's output is non-empty (ffmpeg can exit 0 without writing
  *      a frame) and killing (SIGKILL) any attempt that exceeds
  *      FFMPEG_TIMEOUT_MS so a hung ffmpeg never wedges the pipeline. This is
