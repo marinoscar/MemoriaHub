@@ -260,7 +260,7 @@ For queue mechanics (worker polling, atomic claim, retry, concurrency), see **[d
 
 Shared logic (`FaceDetectionCore`, `apps/api/src/face/face-detection-core.service.ts`) is used by both the photo `face_detection` handler and this video handler for provider resolution, per-frame detection, bounding box normalization, L2 embedding normalization, face persistence, and person matching.
 
-Frame extraction is implemented in `VideoFrameExtractionService` (`apps/api/src/face/video-frame-extraction.service.ts`), which uses `fluent-ffmpeg` to seek to each computed timestamp and output a single JPEG frame per seek.
+Frame extraction is implemented in `VideoFrameExtractionService` (`apps/api/src/face/video-frame-extraction.service.ts`), which delegates to the shared parity package's `@memoriahub/enrichment-compute/video` to seek to each computed timestamp and output a single JPEG frame per seek. ffmpeg is invoked through that package's own thin `spawn()` wrapper (`@memoriahub/enrichment-compute/ffmpeg`) — issue #219 removed the deprecated `fluent-ffmpeg` dependency it previously used. The argv is unchanged (`-ss <t> -i <video> -y -vframes 1 <out>`, an INPUT seek) and pinned by `packages/enrichment-compute/test/ffmpeg.test.mjs`.
 
 ### Enqueue Routing
 

@@ -1,7 +1,7 @@
 # Dependency Vulnerability Exceptions
 
 **Record date:** 2026-08-07
-**Baseline:** measured against `npm audit --package-lock-only --json` on 2026-08-07, after issues #215/#216/#217 and dependabot PR #225 landed, and concurrently with the in-flight `brace-expansion` / `fast-uri` / `js-yaml` patch-version bumps and the `fluent-ffmpeg` removal. If you are reading this later, re-run `scripts/audit-triage.mjs` (see below) before trusting the row counts — this file is a snapshot, not a live view.
+**Baseline:** measured against `npm audit --package-lock-only --json` on 2026-08-07, after issues #215/#216/#217 and dependabot PR #225 landed, and concurrently with the in-flight `brace-expansion` / `fast-uri` / `js-yaml` patch-version bumps (the `fluent-ffmpeg` removal noted below has since landed). If you are reading this later, re-run `scripts/audit-triage.mjs` (see below) before trusting the row counts — this file is a snapshot, not a live view.
 
 > **The success criterion (epic #214, issue #218) is not "`npm audit` shows 0."** It is: every row in `npm audit` is either fixed or has a linked, dated justification with a named revisit trigger below. Raw `npm audit` row counts double- and triple-count the same root cause across every path it's reachable from — see `scripts/audit-triage.mjs`, which groups rows by distinct root advisory so nobody quotes "N vulnerabilities" as if each row were an independent problem.
 
@@ -44,11 +44,11 @@ Rationale:
 
 ## Related inventory: deprecation-warning ownership (issue #219)
 
-Epic #214's success criterion #3 is *"`npm install` emits no deprecation warning traceable to a direct first-party dependency."* After `fluent-ffmpeg` is removed (in progress, separate commit), that criterion is met — walking every dependent edge in `package-lock.json` shows no other deprecated package has a first-party workspace (`apps/api`, `apps/web`, `apps/cli`, `packages/enrichment-compute`) as a direct parent:
+Epic #214's success criterion #3 is *"`npm install` emits no deprecation warning traceable to a direct first-party dependency."* **That criterion is now met.** `fluent-ffmpeg` was the sole violator and has been removed (issue #219 Track A) — replaced by a thin in-house `spawn()` wrapper in `packages/enrichment-compute/src/ffmpeg/`, since 2.1.3 was both the latest published version and marked "no longer supported", with no maintained successor under that name. Walking every dependent edge in `package-lock.json` shows no other deprecated package has a first-party workspace (`apps/api`, `apps/web`, `apps/cli`, `packages/enrichment-compute`) as a direct parent:
 
 | deprecated package | pulled in by | first-party direct dependent? |
 |---|---|---|
-| `fluent-ffmpeg@2.1.3` | `apps/api`, `packages/enrichment-compute` | **Yes — the only one; being removed in a concurrent commit** |
+| ~~`fluent-ffmpeg@2.1.3`~~ | ~~`apps/api`, `packages/enrichment-compute`~~ | **Was the only one — REMOVED (#219 Track A); no longer in `package-lock.json`** |
 | `inflight@1.0.6` | `glob@7` under `archiver-utils`, `fstream`, `test-exclude`, `zip-stream` | No |
 | `rimraf@2.7.1` | `fstream`, `gaxios` | No |
 | `lodash.isequal@4.5.0` | `@fast-csv/format`, `jest-mock-extended` | No |
