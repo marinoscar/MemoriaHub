@@ -175,24 +175,37 @@ export class CatalogRepo {
         this.db.prepare(`DELETE FROM ${table} WHERE media_item_id = ?`).run(item.mediaItemId);
       }
 
+      // Plain INSERTs (not OR IGNORE) so a genuinely bad row — e.g. a null
+      // key value — throws and rolls the WHOLE transaction back instead of
+      // being silently skipped. Duplicates within one sidecar are deduped in
+      // JS by primary-key value first.
       const insertTag = this.db.prepare(
-        'INSERT OR IGNORE INTO item_tags (media_item_id, tag, source) VALUES (?, ?, ?)',
+        'INSERT INTO item_tags (media_item_id, tag, source) VALUES (?, ?, ?)',
       );
+      const seenTags = new Set<string>();
       for (const tag of sidecar.tags ?? []) {
+        if (seenTags.has(tag.name)) continue;
+        seenTags.add(tag.name);
         insertTag.run(item.mediaItemId, tag.name, tag.source ?? null);
       }
 
       const insertAlbum = this.db.prepare(
-        'INSERT OR IGNORE INTO item_albums (media_item_id, album_id, album_name) VALUES (?, ?, ?)',
+        'INSERT INTO item_albums (media_item_id, album_id, album_name) VALUES (?, ?, ?)',
       );
+      const seenAlbums = new Set<string>();
       for (const album of sidecar.albums ?? []) {
+        if (seenAlbums.has(album.id)) continue;
+        seenAlbums.add(album.id);
         insertAlbum.run(item.mediaItemId, album.id, album.name);
       }
 
       const insertPerson = this.db.prepare(
-        'INSERT OR IGNORE INTO item_people (media_item_id, person_id, person_name) VALUES (?, ?, ?)',
+        'INSERT INTO item_people (media_item_id, person_id, person_name) VALUES (?, ?, ?)',
       );
+      const seenPeople = new Set<string>();
       for (const person of sidecar.people ?? []) {
+        if (seenPeople.has(person.personId)) continue;
+        seenPeople.add(person.personId);
         insertPerson.run(item.mediaItemId, person.personId, person.name);
       }
     });
