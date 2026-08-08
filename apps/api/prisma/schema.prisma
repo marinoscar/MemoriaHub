@@ -1485,6 +1485,12 @@ model MediaEnhancement {
 
   // --- Staged result (pre-decision) ---
   stagingStorageKey String? @map("staging_storage_key")
+  // Thumbnail derivative of the staged bytes (issue #203), so the /enhancements
+  // hub can paint a ~148px card without downloading the full-resolution
+  // gpt-image-1 output. Lives on the SAME stagingProvider/stagingBucket (written
+  // in the same handler run) and has no StorageObject row of its own; nullable
+  // because generation is best-effort and pre-#203 rows never had one.
+  stagingThumbnailKey String? @map("staging_thumbnail_key")
   stagingProvider   String? @map("staging_provider")
   stagingBucket     String? @map("staging_bucket")
   originalWidth     Int?    @map("original_width")
