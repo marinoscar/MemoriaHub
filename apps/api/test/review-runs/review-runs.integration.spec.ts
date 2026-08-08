@@ -55,8 +55,8 @@
 
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
+import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 // ---------------------------------------------------------------------------
 // Connection string. `.env.test` sets DATABASE_URL to
@@ -79,43 +79,11 @@ function resolveDatabaseUrl(): string {
 
 const DATABASE_URL = resolveDatabaseUrl();
 
-/**
- * Synchronous TCP reachability probe, run at module load so the result is
- * known before Jest registers the tests below — `describe.skip` cannot be
- * decided from an async `beforeAll`, which runs too late.
- */
-function isDatabaseReachable(url: string): boolean {
-  let host: string;
-  let port: number;
-  try {
-    const parsed = new URL(url);
-    host = parsed.hostname;
-    port = Number(parsed.port || 5432);
-  } catch {
-    return false;
-  }
-  try {
-    execFileSync(
-      process.execPath,
-      [
-        '-e',
-        `const net=require('net');` +
-          `const s=net.connect({host:process.argv[1],port:Number(process.argv[2])});` +
-          `s.on('connect',()=>{s.destroy();process.exit(0)});` +
-          `s.on('error',()=>process.exit(1));` +
-          `setTimeout(()=>process.exit(1),2000);`,
-        host,
-        String(port),
-      ],
-      { stdio: 'ignore', timeout: 5000 },
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const DB_REACHABLE = isDatabaseReachable(DATABASE_URL);
+// Synchronous reachability probe, evaluated at module load so the result is
+// known before Jest registers the tests below — `describe.skip` cannot be
+// decided from an async `beforeAll`, which runs too late. Shared with every
+// other DB-gated spec since issue #288; see test/helpers/db-probe.helper.ts.
+const DB_REACHABLE = isDatabaseReachable();
 
 if (!DB_REACHABLE) {
   // eslint-disable-next-line no-console
@@ -128,8 +96,9 @@ if (!DB_REACHABLE) {
 const describeDb = DB_REACHABLE ? describe : describe.skip;
 
 describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
-  let prisma: PrismaClient | null = null;
-  let dbReachable = false;
+  // `describeDb` is already resolved, so inside this block the database is
+  // known to be reachable: `prisma` is non-nullable and no test needs a guard.
+  let prisma: PrismaClient;
 
   // Shared fixture ids, created once in beforeAll and torn down in afterAll.
   const userId = randomUUID();
@@ -142,7 +111,6 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
     const client = new PrismaClient({ adapter });
     await client.$connect();
     prisma = client;
-    dbReachable = true;
 
     await prisma.user.create({
       data: { id: userId, email: `review-runs-${userId}@example.test` },
@@ -175,7 +143,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   }, 30000);
 
   afterAll(async () => {
-    if (!dbReachable || !prisma) return;
+    if (!prisma) return;
     // Reverse-order teardown. Deleting every ReviewRun scoped to this test's
     // circleId cascades away its ReviewRunItem rows automatically (ON DELETE
     // CASCADE on review_run_items.run_id) — no separate reviewRunItem cleanup
@@ -192,20 +160,10 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
     await prisma.$disconnect();
   }, 30000);
 
-  function skipIfNoDb(testFn: () => Promise<void>): () => Promise<void> {
-    return async () => {
-      if (!dbReachable || !prisma) {
-        expect(true).toBe(true);
-        return;
-      }
-      await testFn();
-    };
-  }
-
   async function makeRun(subjectType: 'burst_group' | 'duplicate_group' | 'location_suggestion') {
     const action =
       subjectType === 'location_suggestion' ? ('accept' as const) : ('resolve_archive' as const);
-    return prisma!.reviewRun.create({
+    return prisma.reviewRun.create({
       data: {
         circleId,
         subjectType,
@@ -223,24 +181,24 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   describe('exactly-one-subject CHECK constraint', () => {
     it(
       'rejects a row with zero subject columns populated',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group');
         await expect(
-          prisma!.reviewRunItem.create({
+          prisma.reviewRunItem.create({
             data: { runId: run.id, subjectType: 'burst_group' },
           }),
         ).rejects.toThrow(/review_run_items_exactly_one_subject_check/);
-      }),
+      },
     );
 
     it(
       'rejects a row with two subject columns populated',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group');
-        const burst = await prisma!.burstGroup.create({ data: { circleId } });
-        const dup = await prisma!.duplicateGroup.create({ data: { circleId } });
+        const burst = await prisma.burstGroup.create({ data: { circleId } });
+        const dup = await prisma.duplicateGroup.create({ data: { circleId } });
         await expect(
-          prisma!.reviewRunItem.create({
+          prisma.reviewRunItem.create({
             data: {
               runId: run.id,
               subjectType: 'burst_group',
@@ -249,7 +207,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
             },
           }),
         ).rejects.toThrow(/review_run_items_exactly_one_subject_check/);
-      }),
+      },
     );
   });
 
@@ -260,22 +218,22 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   describe('subject_type agreement CHECK constraints', () => {
     it(
       'rejects subject_type="burst_group" with only duplicate_group_id populated',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group');
-        const dup = await prisma!.duplicateGroup.create({ data: { circleId } });
+        const dup = await prisma.duplicateGroup.create({ data: { circleId } });
         await expect(
-          prisma!.reviewRunItem.create({
+          prisma.reviewRunItem.create({
             data: { runId: run.id, subjectType: 'burst_group', duplicateGroupId: dup.id },
           }),
         ).rejects.toThrow(/review_run_items_subject_type_burst_group_check/);
-      }),
+      },
     );
 
     it(
       'rejects subject_type="duplicate_group" with only burst_group_id populated',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('duplicate_group');
-        const burst = await prisma!.burstGroup.create({ data: { circleId } });
+        const burst = await prisma.burstGroup.create({ data: { circleId } });
         // This row simultaneously violates BOTH
         // review_run_items_subject_type_burst_group_check ((subject_type =
         // 'burst_group') = (burst_group_id IS NOT NULL) -> false = true) AND
@@ -287,13 +245,13 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
         // assert on either name instead of hard-coding one and risking a
         // spurious failure if evaluation order ever differs.
         await expect(
-          prisma!.reviewRunItem.create({
+          prisma.reviewRunItem.create({
             data: { runId: run.id, subjectType: 'duplicate_group', burstGroupId: burst.id },
           }),
         ).rejects.toThrow(
           /review_run_items_subject_type_(burst_group|duplicate_group)_check/,
         );
-      }),
+      },
     );
   });
 
@@ -304,31 +262,31 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   describe('composite (run_id, subject_type) FK', () => {
     it(
       'rejects an item whose subject_type differs from its parent run, even though the item is internally well-formed',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group'); // run's subject_type is 'burst_group'
-        const dup = await prisma!.duplicateGroup.create({ data: { circleId } });
+        const dup = await prisma.duplicateGroup.create({ data: { circleId } });
         // This row is individually well-formed: subject_type='duplicate_group'
         // agrees with duplicateGroupId being the only populated column. It
         // must still be rejected because the run it points at is a
         // 'burst_group' run, not a 'duplicate_group' run.
         await expect(
-          prisma!.reviewRunItem.create({
+          prisma.reviewRunItem.create({
             data: { runId: run.id, subjectType: 'duplicate_group', duplicateGroupId: dup.id },
           }),
         ).rejects.toThrow(/review_run_items_run_id_subject_type_fkey/);
-      }),
+      },
     );
 
     it(
       'accepts an item whose subject_type matches its parent run',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group');
-        const burst = await prisma!.burstGroup.create({ data: { circleId } });
-        const item = await prisma!.reviewRunItem.create({
+        const burst = await prisma.burstGroup.create({ data: { circleId } });
+        const item = await prisma.reviewRunItem.create({
           data: { runId: run.id, subjectType: 'burst_group', burstGroupId: burst.id },
         });
         expect(item.id).toBeTruthy();
-      }),
+      },
     );
   });
 
@@ -339,48 +297,48 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   describe('cascade delete: deleting the subject removes its ReviewRunItem, run survives', () => {
     it(
       'deleting a BurstGroup cascades its ReviewRunItem away',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group');
-        const burst = await prisma!.burstGroup.create({ data: { circleId } });
-        const item = await prisma!.reviewRunItem.create({
+        const burst = await prisma.burstGroup.create({ data: { circleId } });
+        const item = await prisma.reviewRunItem.create({
           data: { runId: run.id, subjectType: 'burst_group', burstGroupId: burst.id },
         });
 
-        await prisma!.burstGroup.delete({ where: { id: burst.id } });
+        await prisma.burstGroup.delete({ where: { id: burst.id } });
 
-        const found = await prisma!.reviewRunItem.findUnique({ where: { id: item.id } });
+        const found = await prisma.reviewRunItem.findUnique({ where: { id: item.id } });
         expect(found).toBeNull();
-        const runStillThere = await prisma!.reviewRun.findUnique({ where: { id: run.id } });
+        const runStillThere = await prisma.reviewRun.findUnique({ where: { id: run.id } });
         expect(runStillThere).not.toBeNull();
-      }),
+      },
     );
 
     it(
       'deleting a DuplicateGroup cascades its ReviewRunItem away',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('duplicate_group');
-        const dup = await prisma!.duplicateGroup.create({ data: { circleId } });
-        const item = await prisma!.reviewRunItem.create({
+        const dup = await prisma.duplicateGroup.create({ data: { circleId } });
+        const item = await prisma.reviewRunItem.create({
           data: { runId: run.id, subjectType: 'duplicate_group', duplicateGroupId: dup.id },
         });
 
-        await prisma!.duplicateGroup.delete({ where: { id: dup.id } });
+        await prisma.duplicateGroup.delete({ where: { id: dup.id } });
 
-        const found = await prisma!.reviewRunItem.findUnique({ where: { id: item.id } });
+        const found = await prisma.reviewRunItem.findUnique({ where: { id: item.id } });
         expect(found).toBeNull();
-        const runStillThere = await prisma!.reviewRun.findUnique({ where: { id: run.id } });
+        const runStillThere = await prisma.reviewRun.findUnique({ where: { id: run.id } });
         expect(runStillThere).not.toBeNull();
-      }),
+      },
     );
 
     it(
       'deleting a LocationSuggestion cascades its ReviewRunItem away',
-      skipIfNoDb(async () => {
+      async () => {
         // LocationSuggestion.mediaItemId is @unique, so it needs its own
         // dedicated MediaItem (the shared fixture item is reused elsewhere).
         const localStorageId = randomUUID();
         const localMediaId = randomUUID();
-        await prisma!.storageObject.create({
+        await prisma.storageObject.create({
           data: {
             id: localStorageId,
             name: 'loc-test.jpg',
@@ -391,7 +349,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
             uploadedById: userId,
           },
         });
-        await prisma!.mediaItem.create({
+        await prisma.mediaItem.create({
           data: {
             id: localMediaId,
             storageObjectId: localStorageId,
@@ -402,7 +360,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
             originalFilename: 'loc-test.jpg',
           },
         });
-        const suggestion = await prisma!.locationSuggestion.create({
+        const suggestion = await prisma.locationSuggestion.create({
           data: {
             mediaItemId: localMediaId,
             circleId,
@@ -413,7 +371,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
           },
         });
         const run = await makeRun('location_suggestion');
-        const item = await prisma!.reviewRunItem.create({
+        const item = await prisma.reviewRunItem.create({
           data: {
             runId: run.id,
             subjectType: 'location_suggestion',
@@ -421,17 +379,17 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
           },
         });
 
-        await prisma!.locationSuggestion.delete({ where: { id: suggestion.id } });
+        await prisma.locationSuggestion.delete({ where: { id: suggestion.id } });
 
-        const found = await prisma!.reviewRunItem.findUnique({ where: { id: item.id } });
+        const found = await prisma.reviewRunItem.findUnique({ where: { id: item.id } });
         expect(found).toBeNull();
-        const runStillThere = await prisma!.reviewRun.findUnique({ where: { id: run.id } });
+        const runStillThere = await prisma.reviewRun.findUnique({ where: { id: run.id } });
         expect(runStillThere).not.toBeNull();
 
         // cleanup local-only fixtures (not covered by afterAll)
-        await prisma!.mediaItem.deleteMany({ where: { id: localMediaId } });
-        await prisma!.storageObject.deleteMany({ where: { id: localStorageId } });
-      }),
+        await prisma.mediaItem.deleteMany({ where: { id: localMediaId } });
+        await prisma.storageObject.deleteMany({ where: { id: localStorageId } });
+      },
     );
   });
 
@@ -442,24 +400,24 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   describe('cascade delete: deleting the ReviewRun removes its ReviewRunItem rows', () => {
     it(
       'deleting a ReviewRun cascades all of its ReviewRunItem rows',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group');
-        const burstA = await prisma!.burstGroup.create({ data: { circleId } });
-        const burstB = await prisma!.burstGroup.create({ data: { circleId } });
-        const itemA = await prisma!.reviewRunItem.create({
+        const burstA = await prisma.burstGroup.create({ data: { circleId } });
+        const burstB = await prisma.burstGroup.create({ data: { circleId } });
+        const itemA = await prisma.reviewRunItem.create({
           data: { runId: run.id, subjectType: 'burst_group', burstGroupId: burstA.id },
         });
-        const itemB = await prisma!.reviewRunItem.create({
+        const itemB = await prisma.reviewRunItem.create({
           data: { runId: run.id, subjectType: 'burst_group', burstGroupId: burstB.id },
         });
 
-        await prisma!.reviewRun.delete({ where: { id: run.id } });
+        await prisma.reviewRun.delete({ where: { id: run.id } });
 
-        const found = await prisma!.reviewRunItem.findMany({
+        const found = await prisma.reviewRunItem.findMany({
           where: { id: { in: [itemA.id, itemB.id] } },
         });
         expect(found).toHaveLength(0);
-      }),
+      },
     );
   });
 
@@ -470,24 +428,24 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
   describe('partial unique index on (run_id, subject_column)', () => {
     it(
       'rejects a duplicate (run_id, burst_group_id) pair',
-      skipIfNoDb(async () => {
+      async () => {
         const run = await makeRun('burst_group');
-        const burst = await prisma!.burstGroup.create({ data: { circleId } });
-        await prisma!.reviewRunItem.create({
+        const burst = await prisma.burstGroup.create({ data: { circleId } });
+        await prisma.reviewRunItem.create({
           data: { runId: run.id, subjectType: 'burst_group', burstGroupId: burst.id },
         });
 
         await expect(
-          prisma!.reviewRunItem.create({
+          prisma.reviewRunItem.create({
             data: { runId: run.id, subjectType: 'burst_group', burstGroupId: burst.id },
           }),
         ).rejects.toThrow(/run_id.*burst_group_id|burst_group_id.*run_id/);
-      }),
+      },
     );
 
     it(
       'permits two rows in the same run when they are different subject types (different partial indexes, no collision)',
-      skipIfNoDb(async () => {
+      async () => {
         // A single run is normally all one subjectType per the composite FK
         // above, but the partial-unique-index scoping itself is what's under
         // test here: two DIFFERENT runs whose items happen to reference the
@@ -495,22 +453,22 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
         // keyed on (run_id, column) — the run_id differs.
         const runA = await makeRun('burst_group');
         const runB = await makeRun('burst_group');
-        const burst = await prisma!.burstGroup.create({ data: { circleId } });
+        const burst = await prisma.burstGroup.create({ data: { circleId } });
 
-        const itemA = await prisma!.reviewRunItem.create({
+        const itemA = await prisma.reviewRunItem.create({
           data: { runId: runA.id, subjectType: 'burst_group', burstGroupId: burst.id },
         });
-        const itemB = await prisma!.reviewRunItem.create({
+        const itemB = await prisma.reviewRunItem.create({
           data: { runId: runB.id, subjectType: 'burst_group', burstGroupId: burst.id },
         });
 
         expect(itemA.id).not.toBe(itemB.id);
-      }),
+      },
     );
 
     it(
       'permits a burst_group_id row and a duplicate_group_id row to coexist in the same run without colliding on the partial index',
-      skipIfNoDb(async () => {
+      async () => {
         // Exercises that the partial index WHERE burst_group_id IS NOT NULL
         // does not apply to rows where burst_group_id is NULL (the
         // duplicate_group_id row here) — Postgres partial indexes only cover
@@ -520,19 +478,19 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
         // of its own subjectType per the composite FK tested above.
         const runBurst = await makeRun('burst_group');
         const runDup = await makeRun('duplicate_group');
-        const burst = await prisma!.burstGroup.create({ data: { circleId } });
-        const dup = await prisma!.duplicateGroup.create({ data: { circleId } });
+        const burst = await prisma.burstGroup.create({ data: { circleId } });
+        const dup = await prisma.duplicateGroup.create({ data: { circleId } });
 
-        const burstItem = await prisma!.reviewRunItem.create({
+        const burstItem = await prisma.reviewRunItem.create({
           data: { runId: runBurst.id, subjectType: 'burst_group', burstGroupId: burst.id },
         });
-        const dupItem = await prisma!.reviewRunItem.create({
+        const dupItem = await prisma.reviewRunItem.create({
           data: { runId: runDup.id, subjectType: 'duplicate_group', duplicateGroupId: dup.id },
         });
 
         expect(burstItem.id).toBeTruthy();
         expect(dupItem.id).toBeTruthy();
-      }),
+      },
     );
   });
 });

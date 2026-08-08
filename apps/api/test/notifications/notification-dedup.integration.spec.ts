@@ -4,8 +4,11 @@
 // (`.env.test` DECLARES `POSTGRES_HOST` even when no Postgres server is
 // actually running, which would make an env-only gate a false positive), the
 // skip decision here is backed by a SYNCHRONOUS TCP connectivity probe
-// (`probeDbSync` below) evaluated at module load, before `describe` is
-// registered — see that function's comment for why it must be synchronous.
+// evaluated at module load, before `describe` is registered. That probe used
+// to be inlined here; issue #288 moved it to
+// test/helpers/db-probe.helper.ts (`describeMaybeDb`) so every DB-gated spec
+// shares one implementation — see that helper's header for why it must be
+// synchronous, and for the vacuous-pass defect it exists to prevent.
 // When the probe fails, the whole suite is registered via a real
 // `describe.skip`, so Jest reports these tests as SKIPPED, never PASSED. In
 // CI (which has no live database — see docs/ci-known-failing-tests.md) this
@@ -65,7 +68,7 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
-import { execFileSync } from 'child_process';
+import { describeMaybeDb } from '../helpers/db-probe.helper';
 
 // ---------------------------------------------------------------------------
 // Build a Postgres connection string from environment variables, mirroring
@@ -84,50 +87,6 @@ function buildConnectionString(): string {
   const dbName = process.env.POSTGRES_DB ?? 'appdb';
   const encoded = encodeURIComponent(password);
   return `postgresql://${user}:${encoded}@${host}:${port}/${dbName}`;
-}
-
-// ---------------------------------------------------------------------------
-// Synchronous TCP connectivity probe — checks whether the Postgres server is
-// actually listening, evaluated at MODULE LOAD time (before `describe` is
-// registered) rather than inside `beforeAll`.
-//
-// This must be synchronous, not async. Jest fixes which `describe`/`it`
-// blocks are registered — and therefore whether a suite is reported as
-// "skipped" vs. "passed" — at module-evaluation time, which happens
-// synchronously before any `beforeAll`/`it` body ever runs. An async probe
-// awaited inside `beforeAll` is already too late to influence `describe` vs.
-// `describe.skip`: the suite has already been registered as a normal
-// `describe` by the time the probe resolves. Falling back to a per-test guard
-// (as this file used to do) doesn't fix that either — it just makes every
-// test body execute a trivial `expect(true).toBe(true)` and return, which
-// Jest reports as a genuine PASS. That is the exact vacuous-green defect this
-// probe exists to avoid: tests reporting green while exercising nothing.
-//
-// We spawn a throwaway Node subprocess that attempts a `net.connect` and
-// exits 0 on success / 1 on error-or-timeout, then inspect its exit code
-// synchronously via `execFileSync`. `stdio: 'ignore'` suppresses the child's
-// output; the try/catch treats ANY failure (non-zero exit, spawn error, the
-// outer timeout) as "database unavailable" rather than propagating.
-// ---------------------------------------------------------------------------
-
-function probeDbSync(host: string, port: number): boolean {
-  const script = `
-    const net = require('net');
-    const socket = new net.Socket();
-    const fail = () => { socket.destroy(); process.exit(1); };
-    socket.setTimeout(1500);
-    socket.once('error', fail);
-    socket.once('timeout', fail);
-    socket.connect(${port}, ${JSON.stringify(host)}, () => { socket.destroy(); process.exit(0); });
-  `;
-  try {
-    execFileSync(process.execPath, ['-e', script], { stdio: 'ignore', timeout: 2500 });
-    return true;
-  } catch {
-    // Non-zero exit code (connect failed), spawn error, or the outer
-    // execFileSync timeout all land here — treat all of them as "no DB".
-    return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -153,22 +112,6 @@ type ReviewQueueType =
   | 'review_queue_duplicates'
   | 'review_queue_location_suggestions'
   | 'review_queue_enhancements';
-
-// ---------------------------------------------------------------------------
-// Suite guard — evaluated synchronously at module load, BEFORE `describe` is
-// registered, so a missing database produces a real `describe.skip` (Jest
-// reports "skipped"), not a `describe` whose tests vacuously pass. Env vars
-// alone are not sufficient: `.env.test` declares `POSTGRES_HOST` even when no
-// Postgres server is listening, so `DB_ENV_VARS_SET` is also required to
-// short-circuit before paying for a subprocess spawn when the vars aren't
-// even set (e.g. a plain unit-test run with no DB-related env at all).
-// ---------------------------------------------------------------------------
-
-const DB_ENV_VARS_SET = !!(process.env.POSTGRES_HOST || process.env.DATABASE_URL);
-const DB_AVAILABLE =
-  DB_ENV_VARS_SET &&
-  probeDbSync(process.env.POSTGRES_HOST ?? 'localhost', parseInt(process.env.POSTGRES_PORT ?? '5432', 10));
-const describeMaybeDb = DB_AVAILABLE ? describe : describe.skip;
 
 describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaClient;
