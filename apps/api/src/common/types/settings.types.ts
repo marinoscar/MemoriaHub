@@ -252,6 +252,22 @@ export interface SystemSettingsValue {
     retentionHours: number;
   };
   /**
+   * Node backup change feed (issue #310, epic #308). Read by
+   * NodeBackupQueryService via the cached SystemSettingsService.getSettings().
+   */
+  backup?: {
+    /** Max rows a node may request per change-feed / manifest page. */
+    maxPageSize: number;
+    /**
+     * Rows with `updatedAt` within the last N seconds are withheld from the
+     * feed so in-flight same-timestamp writes cannot be skipped by the keyset
+     * cursor. 0 disables the horizon.
+     */
+    feedSafetyHorizonSeconds: number;
+    /** Minutes without an ack before a `running` backup run is marked stale. */
+    runStaleMinutes: number;
+  };
+  /**
    * Media Workflow Automation (epic #138). Full namespace ships in Phase 1 so all
    * later phases read through getSettings() with no further schema change. Phase 1
    * actively reads maxItemsPerRun / maxWorkflowsPerCircle / requirePreview /
@@ -490,6 +506,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,
     retentionHours: 168,
+  },
+  backup: {
+    maxPageSize: 200,
+    feedSafetyHorizonSeconds: 5,
+    runStaleMinutes: 15,
   },
   workflows: {
     maxItemsPerRun: 10000,
