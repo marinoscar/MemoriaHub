@@ -1,3 +1,29 @@
+/**
+ * Media Integration — circle-scoped rewrite (issue #221)
+ *
+ * This suite predated Family Circles: it had zero references to `circleId`, its
+ * factories built items with an `ownerId` field against a schema that moved to
+ * `added_by_id` + `circle_id`, and 35 of its 54 tests failed with 400 because
+ * `/api/media*` requires `circleId` plus per-circle membership. It was excluded
+ * from `test:ci` while every other integration spec was repaired in #220.
+ *
+ * Rewritten against the current API, using
+ * `media-bulk-dashboard.integration.spec.ts` as the reference for:
+ *   - `setupCircleMocks(context, userId, circleId, role)`, which mocks
+ *     `circle.findUnique` + `circleMember.findUnique` so
+ *     `CircleMembershipService.assertCircleAccess` passes at a chosen role
+ *   - factories that build `circleId` / `addedById`
+ *   - `flattenWhere`, for asserting AND-composed filter predicates without
+ *     depending on descriptor order (see docs/audits/search-audit.md)
+ *
+ * The material new coverage is authorization the old spec could not express at
+ * all: a non-member gets 403, and a `viewer` is refused every write. Those are
+ * the invariants this suite exists to protect, and until now it protected
+ * neither.
+ *
+ * Mocked Prisma throughout (`useMockDatabase: true`) — no live PostgreSQL.
+ */
+
 import request from 'supertest';
 import { randomUUID } from 'crypto';
 import {
@@ -8,22 +34,59 @@ import {
 import { resetPrismaMock } from '../mocks/prisma.mock';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 import {
-  createMockTestUser,
   createMockAdminUser,
   createMockContributorUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
 
 // ---------------------------------------------------------------------------
-// Test data factories (integration-level)
+// Constants
 // ---------------------------------------------------------------------------
 
+const CIRCLE_ID = '550e8400-e29b-41d4-a716-446655440099';
 const BASE_MEDIA_ID = '550e8400-e29b-41d4-a716-446655440001';
 const BASE_STORAGE_ID = '550e8400-e29b-41d4-a716-446655440000';
 const BASE_ALBUM_ID = '550e8400-e29b-41d4-a716-446655440002';
 const BASE_TAG_ID = '550e8400-e29b-41d4-a716-446655440003';
 
-function makeStorageObject(ownerId: string, overrides: Record<string, any> = {}) {
+// ---------------------------------------------------------------------------
+// Circle membership mocks
+// ---------------------------------------------------------------------------
+
+/**
+ * Make `assertCircleAccess` resolve at `role` for `userId` in `circleId`.
+ * Roles rank viewer < collaborator < circle_admin, so a test asserting a write
+ * is refused for a viewer sets `'viewer'` here and expects 403.
+ */
+function setupCircleMocks(
+  context: TestContext,
+  userId: string,
+  circleId: string,
+  role: 'viewer' | 'collaborator' | 'circle_admin',
+): void {
+  context.prismaMock.circle.findUnique.mockResolvedValue({ id: circleId });
+  context.prismaMock.circleMember.findUnique.mockResolvedValue({
+    circleId,
+    userId,
+    role,
+    joinedAt: new Date(),
+  });
+}
+
+/**
+ * The circle exists but the caller is not a member — `assertCircleAccess`
+ * throws Forbidden at its membership step, on reads as well as writes.
+ */
+function setupNonMemberMocks(context: TestContext, circleId: string): void {
+  context.prismaMock.circle.findUnique.mockResolvedValue({ id: circleId });
+  context.prismaMock.circleMember.findUnique.mockResolvedValue(null);
+}
+
+// ---------------------------------------------------------------------------
+// Factories
+// ---------------------------------------------------------------------------
+
+function makeStorageObject(uploaderId: string, overrides: Record<string, any> = {}) {
   return {
     id: BASE_STORAGE_ID,
     name: 'photo.jpg',
@@ -34,7 +97,7 @@ function makeStorageObject(ownerId: string, overrides: Record<string, any> = {})
     bucket: 'test-bucket',
     status: 'ready',
     s3UploadId: null,
-    uploadedById: ownerId,
+    uploadedById: uploaderId,
     metadata: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -42,11 +105,12 @@ function makeStorageObject(ownerId: string, overrides: Record<string, any> = {})
   };
 }
 
-function makeMediaItem(ownerId: string, overrides: Record<string, any> = {}) {
+function makeMediaItem(addedById: string, overrides: Record<string, any> = {}) {
   return {
     id: BASE_MEDIA_ID,
     storageObjectId: BASE_STORAGE_ID,
-    ownerId,
+    addedById,
+    circleId: CIRCLE_ID,
     type: 'photo',
     source: 'web',
     originalFilename: 'photo.jpg',
@@ -63,6 +127,7 @@ function makeMediaItem(ownerId: string, overrides: Record<string, any> = {}) {
     description: null,
     favorite: false,
     deletedAt: null,
+    archivedAt: null,
     originalCreatedAt: null,
     sourcePath: null,
     sourceDeviceId: null,
@@ -78,40 +143,70 @@ function makeMediaItem(ownerId: string, overrides: Record<string, any> = {}) {
     geoPlaceName: null,
     geoSource: null,
     geocodedAt: null,
+    coordSource: null,
     metadata: null,
+    mediaTags: [],
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
   };
 }
 
-function makeAlbum(ownerId: string, overrides: Record<string, any> = {}) {
+function makeAlbum(addedById: string, overrides: Record<string, any> = {}) {
   return {
     id: BASE_ALBUM_ID,
-    ownerId,
+    addedById,
+    circleId: CIRCLE_ID,
     name: 'My Album',
     description: null,
+    coverMediaItemId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
   };
 }
 
-function makeTag(ownerId: string, overrides: Record<string, any> = {}) {
+function makeTag(overrides: Record<string, any> = {}) {
   return {
     id: BASE_TAG_ID,
-    ownerId,
+    circleId: CIRCLE_ID,
+    addedById: 'user-1',
     name: 'nature',
     createdAt: new Date(),
     ...overrides,
   };
 }
 
+/** Valid POST /api/media body — every required field, circle included. */
+function createMediaBody(overrides: Record<string, any> = {}) {
+  return {
+    circleId: CIRCLE_ID,
+    storageObjectId: BASE_STORAGE_ID,
+    type: 'photo',
+    source: 'web',
+    originalFilename: 'photo.jpg',
+    ...overrides,
+  };
+}
+
+/**
+ * Media filters are AND-composed: each descriptor appends its own entry to
+ * `where.AND` rather than merging into one flat object (docs/audits/
+ * search-audit.md — the old flat merge silently dropped criteria when two
+ * descriptors wrote the same key). Flattening lets a test assert "this
+ * predicate was applied" without depending on descriptor count or order.
+ */
+function flattenWhere(where: Record<string, any>): Record<string, any> {
+  const { AND, ...rest } = where ?? {};
+  const clauses: Array<Record<string, any>> = Array.isArray(AND) ? AND : [];
+  return clauses.reduce((acc, clause) => ({ ...acc, ...clause }), { ...rest });
+}
+
 // ---------------------------------------------------------------------------
-// Tests
+// Suite
 // ---------------------------------------------------------------------------
 
-describe('Media Integration', () => {
+describe('Media Integration (circle-scoped)', () => {
   let context: TestContext;
 
   beforeAll(async () => {
@@ -136,17 +231,14 @@ describe('Media Integration', () => {
     it('POST /api/media returns 401 without token', async () => {
       await request(context.app.getHttpServer())
         .post('/api/media')
-        .send({
-          storageObjectId: BASE_STORAGE_ID,
-          type: 'photo',
-          source: 'web',
-          originalFilename: 'photo.jpg',
-        })
+        .send(createMediaBody())
         .expect(401);
     });
 
     it('GET /api/media returns 401 without token', async () => {
-      await request(context.app.getHttpServer()).get('/api/media').expect(401);
+      await request(context.app.getHttpServer())
+        .get(`/api/media?circleId=${CIRCLE_ID}`)
+        .expect(401);
     });
 
     it('GET /api/media/:id returns 401 without token', async () => {
@@ -167,6 +259,12 @@ describe('Media Integration', () => {
         .delete(`/api/media/${BASE_MEDIA_ID}`)
         .expect(401);
     });
+
+    it('GET /api/media/tags returns 401 without token', async () => {
+      await request(context.app.getHttpServer())
+        .get(`/api/media/tags?circleId=${CIRCLE_ID}`)
+        .expect(401);
+    });
   });
 
   // =========================================================================
@@ -174,134 +272,207 @@ describe('Media Integration', () => {
   // =========================================================================
 
   describe('POST /api/media', () => {
-    it('should create a MediaItem from owned StorageObject', async () => {
+    it('creates a MediaItem in the circle from an owned StorageObject', async () => {
       const contributor = await createMockContributorUser(context);
-      const storageObject = makeStorageObject(contributor.id);
-      const createdItem = makeMediaItem(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
-      context.prismaMock.storageObject.findUnique.mockResolvedValue(storageObject);
+      context.prismaMock.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject(contributor.id),
+      );
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(null);
-      context.prismaMock.mediaItem.create.mockResolvedValue(createdItem);
+      context.prismaMock.mediaItem.create.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
 
       const response = await request(context.app.getHttpServer())
         .post('/api/media')
         .set(authHeader(contributor.accessToken))
-        .send({
-          storageObjectId: BASE_STORAGE_ID,
-          type: 'photo',
-          source: 'web',
-          originalFilename: 'photo.jpg',
-        })
+        .send(createMediaBody())
         .expect(201);
 
       expect(response.body.data).toMatchObject({
         id: BASE_MEDIA_ID,
-        ownerId: contributor.id,
+        circleId: CIRCLE_ID,
+        addedById: contributor.id,
         type: 'photo',
         source: 'web',
+        deduplicated: false,
       });
+
+      // The row is written with the circle and the caller as adder — the two
+      // columns that replaced the old `ownerId`.
+      expect(context.prismaMock.mediaItem.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            circleId: CIRCLE_ID,
+            addedById: contributor.id,
+          }),
+        }),
+      );
     });
 
-    it('should return 404 when StorageObject does not exist', async () => {
+    it('returns 404 when the StorageObject does not exist', async () => {
       const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
       context.prismaMock.storageObject.findUnique.mockResolvedValue(null);
 
       await request(context.app.getHttpServer())
         .post('/api/media')
         .set(authHeader(contributor.accessToken))
-        .send({
-          storageObjectId: BASE_STORAGE_ID,
-          type: 'photo',
-          source: 'web',
-          originalFilename: 'photo.jpg',
-        })
+        .send(createMediaBody())
         .expect(404);
     });
 
-    it('should return 403 when StorageObject belongs to another user', async () => {
+    it('returns 403 when the StorageObject belongs to another user', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherStorageObject = makeStorageObject('other-user-id');
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
-      context.prismaMock.storageObject.findUnique.mockResolvedValue(otherStorageObject);
+      context.prismaMock.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject('other-user-id'),
+      );
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(null);
 
       await request(context.app.getHttpServer())
         .post('/api/media')
         .set(authHeader(contributor.accessToken))
-        .send({
-          storageObjectId: BASE_STORAGE_ID,
-          type: 'photo',
-          source: 'web',
-          originalFilename: 'photo.jpg',
-        })
+        .send(createMediaBody())
         .expect(403);
     });
 
-    it('should return 400 when StorageObject is already linked to a MediaItem', async () => {
+    it('returns 400 when the StorageObject is already linked to a MediaItem', async () => {
       const contributor = await createMockContributorUser(context);
-      const storageObject = makeStorageObject(contributor.id);
-      const existingItem = makeMediaItem(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
-      context.prismaMock.storageObject.findUnique.mockResolvedValue(storageObject);
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(existingItem);
+      context.prismaMock.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject(contributor.id),
+      );
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
 
       await request(context.app.getHttpServer())
         .post('/api/media')
         .set(authHeader(contributor.accessToken))
-        .send({
-          storageObjectId: BASE_STORAGE_ID,
-          type: 'photo',
-          source: 'web',
-          originalFilename: 'photo.jpg',
-        })
+        .send(createMediaBody())
         .expect(400);
     });
 
-    it('should return 400 for missing required fields', async () => {
+    it('returns 400 for missing required fields', async () => {
       const contributor = await createMockContributorUser(context);
 
       await request(context.app.getHttpServer())
         .post('/api/media')
         .set(authHeader(contributor.accessToken))
-        .send({ type: 'photo' }) // missing storageObjectId, source, originalFilename
+        .send({ type: 'photo' }) // no circleId/storageObjectId/source/filename
         .expect(400);
+    });
+
+    it('returns 400 when circleId is omitted', async () => {
+      const contributor = await createMockContributorUser(context);
+      const { circleId: _omitted, ...body } = createMediaBody();
+
+      await request(context.app.getHttpServer())
+        .post('/api/media')
+        .set(authHeader(contributor.accessToken))
+        .send(body)
+        .expect(400);
+    });
+
+    it('returns 403 when the caller is not a member of the circle', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupNonMemberMocks(context, CIRCLE_ID);
+
+      context.prismaMock.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject(contributor.id),
+      );
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(null);
+
+      await request(context.app.getHttpServer())
+        .post('/api/media')
+        .set(authHeader(contributor.accessToken))
+        .send(createMediaBody())
+        .expect(403);
+
+      expect(context.prismaMock.mediaItem.create).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 for a circle VIEWER — creating requires collaborator', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+
+      context.prismaMock.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject(contributor.id),
+      );
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(null);
+
+      await request(context.app.getHttpServer())
+        .post('/api/media')
+        .set(authHeader(contributor.accessToken))
+        .send(createMediaBody())
+        .expect(403);
+
+      expect(context.prismaMock.mediaItem.create).not.toHaveBeenCalled();
     });
   });
 
   // =========================================================================
-  // GET /api/media — list with filters
+  // GET /api/media — list
   // =========================================================================
 
   describe('GET /api/media', () => {
-    it('should return paginated results for the authenticated user', async () => {
+    it('returns 400 when circleId is omitted', async () => {
       const contributor = await createMockContributorUser(context);
-      const items = [makeMediaItem(contributor.id)];
 
-      context.prismaMock.mediaItem.findMany.mockResolvedValue(items);
-      context.prismaMock.mediaItem.count.mockResolvedValue(1);
+      await request(context.app.getHttpServer())
+        .get('/api/media')
+        .set(authHeader(contributor.accessToken))
+        .expect(400);
+    });
+
+    it('returns 403 when the caller is not a member of the circle', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupNonMemberMocks(context, CIRCLE_ID);
+
+      await request(context.app.getHttpServer())
+        .get(`/api/media?circleId=${CIRCLE_ID}`)
+        .set(authHeader(contributor.accessToken))
+        .expect(403);
+
+      expect(context.prismaMock.mediaItem.findMany).not.toHaveBeenCalled();
+    });
+
+    it('defaults to KEYSET mode (no page param): no COUNT, cursor meta', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+
+      context.prismaMock.mediaItem.findMany.mockResolvedValue([
+        makeMediaItem(contributor.id),
+      ]);
 
       const response = await request(context.app.getHttpServer())
-        .get('/api/media')
+        .get(`/api/media?circleId=${CIRCLE_ID}`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
       expect(response.body.data.items).toHaveLength(1);
       expect(response.body.data.meta).toMatchObject({
-        page: 1,
         pageSize: 20,
-        totalItems: 1,
-        totalPages: 1,
+        nextCursor: null,
+        hasMore: false,
       });
+      // Keyset mode deliberately skips the COUNT(*) (issue #104).
+      expect(context.prismaMock.mediaItem.count).not.toHaveBeenCalled();
     });
 
-    it('should support pagination query params', async () => {
+    it('uses LEGACY OFFSET mode when page is supplied, with totalItems/totalPages', async () => {
       const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
 
       context.prismaMock.mediaItem.findMany.mockResolvedValue([]);
       context.prismaMock.mediaItem.count.mockResolvedValue(50);
 
       const response = await request(context.app.getHttpServer())
-        .get('/api/media?page=2&pageSize=10')
+        .get(`/api/media?circleId=${CIRCLE_ID}&page=2&pageSize=10`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
@@ -313,25 +484,39 @@ describe('Media Integration', () => {
       });
     });
 
-    it('should pass location filter to service — ?location=California', async () => {
+    it('always scopes the query to the circle and excludes soft-deleted items', async () => {
       const contributor = await createMockContributorUser(context);
-      const californiaItem = makeMediaItem(contributor.id, {
-        geoAdmin1: 'California',
-      });
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
 
-      context.prismaMock.mediaItem.findMany.mockResolvedValue([californiaItem]);
-      context.prismaMock.mediaItem.count.mockResolvedValue(1);
+      context.prismaMock.mediaItem.findMany.mockResolvedValue([]);
 
-      const response = await request(context.app.getHttpServer())
-        .get('/api/media?location=California')
+      await request(context.app.getHttpServer())
+        .get(`/api/media?circleId=${CIRCLE_ID}`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
-      // Verify the filter was built correctly by examining the mock call
-      const [findManyCall] =
-        (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
+      const [call] = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(flattenWhere(call[0].where)).toMatchObject({
+        circleId: CIRCLE_ID,
+        deletedAt: null,
+      });
+    });
 
-      expect(findManyCall[0].where.OR).toEqual(
+    it('passes the location filter through as an OR across all geo tiers', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+
+      context.prismaMock.mediaItem.findMany.mockResolvedValue([
+        makeMediaItem(contributor.id, { geoAdmin1: 'California' }),
+      ]);
+
+      const response = await request(context.app.getHttpServer())
+        .get(`/api/media?circleId=${CIRCLE_ID}&location=California`)
+        .set(authHeader(contributor.accessToken))
+        .expect(200);
+
+      const [call] = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(flattenWhere(call[0].where).OR).toEqual(
         expect.arrayContaining([
           { geoAdmin1: { contains: 'California', mode: 'insensitive' } },
           { geoCountry: { contains: 'California', mode: 'insensitive' } },
@@ -339,95 +524,76 @@ describe('Media Integration', () => {
           { geoPlaceName: { contains: 'California', mode: 'insensitive' } },
         ]),
       );
-
       expect(response.body.data.items).toHaveLength(1);
     });
 
-    it('should pass country filter to service — ?country=CR', async () => {
+    it('passes the country filter through as name-contains OR code-equals', async () => {
       const contributor = await createMockContributorUser(context);
-      const costaRicaItem = makeMediaItem(contributor.id, {
-        geoCountryCode: 'CR',
-        geoCountry: 'Costa Rica',
-      });
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
 
-      context.prismaMock.mediaItem.findMany.mockResolvedValue([costaRicaItem]);
-      context.prismaMock.mediaItem.count.mockResolvedValue(1);
+      context.prismaMock.mediaItem.findMany.mockResolvedValue([
+        makeMediaItem(contributor.id, {
+          geoCountryCode: 'CR',
+          geoCountry: 'Costa Rica',
+        }),
+      ]);
 
-      const response = await request(context.app.getHttpServer())
-        .get('/api/media?country=CR')
+      await request(context.app.getHttpServer())
+        .get(`/api/media?circleId=${CIRCLE_ID}&country=CR`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
-      const [findManyCall] =
-        (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
-
-      expect(findManyCall[0].where.OR).toEqual(
+      const [call] = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
+      expect(flattenWhere(call[0].where).OR).toEqual(
         expect.arrayContaining([
           { geoCountry: { contains: 'CR', mode: 'insensitive' } },
           { geoCountryCode: { equals: 'CR', mode: 'insensitive' } },
         ]),
       );
-
-      expect(response.body.data.items).toHaveLength(1);
     });
 
-    it('should exclude soft-deleted items by default', async () => {
+    it('filters by type', async () => {
       const contributor = await createMockContributorUser(context);
-
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
       context.prismaMock.mediaItem.findMany.mockResolvedValue([]);
-      context.prismaMock.mediaItem.count.mockResolvedValue(0);
 
       await request(context.app.getHttpServer())
-        .get('/api/media')
-        .set(authHeader(contributor.accessToken))
-        .expect(200);
-
-      const [findManyCall] =
-        (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(findManyCall[0].where).toMatchObject({ deletedAt: null });
-    });
-
-    it('should filter by type', async () => {
-      const contributor = await createMockContributorUser(context);
-
-      context.prismaMock.mediaItem.findMany.mockResolvedValue([]);
-      context.prismaMock.mediaItem.count.mockResolvedValue(0);
-
-      await request(context.app.getHttpServer())
-        .get('/api/media?type=photo')
+        .get(`/api/media?circleId=${CIRCLE_ID}&type=photo`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
       const [call] = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ type: 'photo' });
+      expect(flattenWhere(call[0].where)).toMatchObject({ type: 'photo' });
     });
 
-    it('should filter by favorite=true', async () => {
+    it('filters by favorite=true', async () => {
       const contributor = await createMockContributorUser(context);
-
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
       context.prismaMock.mediaItem.findMany.mockResolvedValue([]);
-      context.prismaMock.mediaItem.count.mockResolvedValue(0);
 
       await request(context.app.getHttpServer())
-        .get('/api/media?favorite=true')
+        .get(`/api/media?circleId=${CIRCLE_ID}&favorite=true`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
       const [call] = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({ favorite: true });
+      expect(flattenWhere(call[0].where)).toMatchObject({ favorite: true });
     });
   });
 
   // =========================================================================
-  // GET /api/media/:id — get single
+  // GET /api/media/:id
   // =========================================================================
 
   describe('GET /api/media/:id', () => {
-    it('should return a MediaItem for the owner', async () => {
+    it('returns the item for a circle viewer', async () => {
       const contributor = await createMockContributorUser(context);
-      const item = makeMediaItem(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
 
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
+      context.prismaMock.storageObject.findUnique.mockResolvedValue(null);
 
       const response = await request(context.app.getHttpServer())
         .get(`/api/media/${BASE_MEDIA_ID}`)
@@ -436,11 +602,12 @@ describe('Media Integration', () => {
 
       expect(response.body.data).toMatchObject({
         id: BASE_MEDIA_ID,
+        circleId: CIRCLE_ID,
         type: 'photo',
       });
     });
 
-    it('should return 404 when MediaItem does not exist', async () => {
+    it('returns 404 when the item does not exist', async () => {
       const contributor = await createMockContributorUser(context);
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(null);
 
@@ -450,11 +617,25 @@ describe('Media Integration', () => {
         .expect(404);
     });
 
-    it('should return 403 when Contributor accesses another user\'s item', async () => {
+    it('returns 404 for a soft-deleted item', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherUserItem = makeMediaItem('other-user');
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id, { deletedAt: new Date() }),
+      );
 
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
+      await request(context.app.getHttpServer())
+        .get(`/api/media/${BASE_MEDIA_ID}`)
+        .set(authHeader(contributor.accessToken))
+        .expect(404);
+    });
+
+    it("returns 403 when the caller is not a member of the item's circle", async () => {
+      const contributor = await createMockContributorUser(context);
+      setupNonMemberMocks(context, CIRCLE_ID);
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem('someone-else'),
+      );
 
       await request(context.app.getHttpServer())
         .get(`/api/media/${BASE_MEDIA_ID}`)
@@ -462,11 +643,15 @@ describe('Media Integration', () => {
         .expect(403);
     });
 
-    it('should allow Admin with media:read_any to access another user\'s item', async () => {
+    it('lets an Admin holding media:read_any read an item in a circle they do not belong to', async () => {
+      // Super-admin bypass: assertCircleAccess short-circuits before the
+      // membership lookup, so no circle mocks are set up here on purpose.
       const admin = await createMockAdminUser(context);
-      const otherUserItem = makeMediaItem('other-user');
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
+      context.prismaMock.circleMember.findUnique.mockResolvedValue(null);
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem('someone-else'),
+      );
+      context.prismaMock.storageObject.findUnique.mockResolvedValue(null);
 
       const response = await request(context.app.getHttpServer())
         .get(`/api/media/${BASE_MEDIA_ID}`)
@@ -478,29 +663,26 @@ describe('Media Integration', () => {
   });
 
   // =========================================================================
-  // PATCH /api/media/:id — update
+  // PATCH /api/media/:id
   // =========================================================================
 
   describe('PATCH /api/media/:id', () => {
-    it('should update description and favorite', async () => {
+    it('updates description and favorite for a circle collaborator', async () => {
       const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
+
       const item = makeMediaItem(contributor.id);
-      const updated = {
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
+      context.prismaMock.mediaItem.update.mockResolvedValue({
         ...item,
         description: 'Beautiful sunset at the beach',
         favorite: true,
-      };
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
-      context.prismaMock.mediaItem.update.mockResolvedValue(updated);
+      });
 
       const response = await request(context.app.getHttpServer())
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
-        .send({
-          description: 'Beautiful sunset at the beach',
-          favorite: true,
-        })
+        .send({ description: 'Beautiful sunset at the beach', favorite: true })
         .expect(200);
 
       expect(response.body.data).toMatchObject({
@@ -509,20 +691,39 @@ describe('Media Integration', () => {
       });
     });
 
-    it('should return 403 when Contributor patches another user\'s item', async () => {
+    it('returns 403 for a circle VIEWER — updating requires collaborator', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherUserItem = makeMediaItem('other-user');
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
 
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
+      await request(context.app.getHttpServer())
+        .patch(`/api/media/${BASE_MEDIA_ID}`)
+        .set(authHeader(contributor.accessToken))
+        .send({ description: 'nope' })
+        .expect(403);
+
+      expect(context.prismaMock.mediaItem.update).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the caller is not a member of the circle', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupNonMemberMocks(context, CIRCLE_ID);
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem('someone-else'),
+      );
 
       await request(context.app.getHttpServer())
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
         .send({ description: 'hack' })
         .expect(403);
+
+      expect(context.prismaMock.mediaItem.update).not.toHaveBeenCalled();
     });
 
-    it('should return 404 when item does not exist', async () => {
+    it('returns 404 when the item does not exist', async () => {
       const contributor = await createMockContributorUser(context);
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(null);
 
@@ -539,10 +740,11 @@ describe('Media Integration', () => {
   // =========================================================================
 
   describe('DELETE /api/media/:id', () => {
-    it('should soft-delete the MediaItem (sets deletedAt)', async () => {
+    it('soft-deletes the item and never touches the StorageObject', async () => {
       const contributor = await createMockContributorUser(context);
-      const item = makeMediaItem(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
+      const item = makeMediaItem(contributor.id);
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
       context.prismaMock.mediaItem.update.mockResolvedValue({
         ...item,
@@ -554,23 +756,37 @@ describe('Media Integration', () => {
         .set(authHeader(contributor.accessToken))
         .expect(204);
 
-      // Verify soft-delete — update with deletedAt, NOT delete
       expect(context.prismaMock.mediaItem.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: BASE_MEDIA_ID },
           data: expect.objectContaining({ deletedAt: expect.any(Date) }),
         }),
       );
-      // StorageObject is NOT touched
       expect(context.prismaMock.storageObject.delete).not.toHaveBeenCalled();
       expect(context.prismaMock.storageObject.update).not.toHaveBeenCalled();
     });
 
-    it('should return 403 when Contributor deletes another user\'s item', async () => {
+    it('returns 403 for a circle VIEWER — deleting requires collaborator', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherUserItem = makeMediaItem('other-user');
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
 
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
+      await request(context.app.getHttpServer())
+        .delete(`/api/media/${BASE_MEDIA_ID}`)
+        .set(authHeader(contributor.accessToken))
+        .expect(403);
+
+      expect(context.prismaMock.mediaItem.update).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when the caller is not a member of the circle', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupNonMemberMocks(context, CIRCLE_ID);
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem('someone-else'),
+      );
 
       await request(context.app.getHttpServer())
         .delete(`/api/media/${BASE_MEDIA_ID}`)
@@ -578,7 +794,7 @@ describe('Media Integration', () => {
         .expect(403);
     });
 
-    it('should return 404 when item does not exist', async () => {
+    it('returns 404 when the item does not exist', async () => {
       const contributor = await createMockContributorUser(context);
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(null);
 
@@ -587,56 +803,23 @@ describe('Media Integration', () => {
         .set(authHeader(contributor.accessToken))
         .expect(404);
     });
-
-    it('soft-deleted item no longer appears in normal list results', async () => {
-      const contributor = await createMockContributorUser(context);
-      // Soft-delete succeeds
-      const item = makeMediaItem(contributor.id);
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
-      context.prismaMock.mediaItem.update.mockResolvedValue({
-        ...item,
-        deletedAt: new Date(),
-      });
-
-      await request(context.app.getHttpServer())
-        .delete(`/api/media/${BASE_MEDIA_ID}`)
-        .set(authHeader(contributor.accessToken))
-        .expect(204);
-
-      // List returns zero (simulated: soft-deleted not returned)
-      context.prismaMock.mediaItem.findMany.mockResolvedValue([]);
-      context.prismaMock.mediaItem.count.mockResolvedValue(0);
-
-      const listResponse = await request(context.app.getHttpServer())
-        .get('/api/media')
-        .set(authHeader(contributor.accessToken))
-        .expect(200);
-
-      expect(listResponse.body.data.items).toHaveLength(0);
-    });
   });
 
   // =========================================================================
-  // GET /api/media/tags — list tags
+  // GET /api/media/tags
   // =========================================================================
 
   describe('GET /api/media/tags', () => {
-    it('should return caller\'s tags with count', async () => {
+    it("returns the circle's tags with attach counts", async () => {
       const contributor = await createMockContributorUser(context);
-      const tags = [
-        {
-          id: BASE_TAG_ID,
-          name: 'nature',
-          createdAt: new Date(),
-          ownerId: contributor.id,
-          _count: { mediaTags: 3 },
-        },
-      ];
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
 
-      context.prismaMock.tag.findMany.mockResolvedValue(tags);
+      context.prismaMock.tag.findMany.mockResolvedValue([
+        { ...makeTag(), _count: { mediaTags: 3 } },
+      ]);
 
       const response = await request(context.app.getHttpServer())
-        .get('/api/media/tags')
+        .get(`/api/media/tags?circleId=${CIRCLE_ID}`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
@@ -645,33 +828,44 @@ describe('Media Integration', () => {
           expect.objectContaining({ name: 'nature', count: 3 }),
         ]),
       );
+      // Scoped to the circle, not to the caller.
+      expect(context.prismaMock.tag.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { circleId: CIRCLE_ID } }),
+      );
     });
 
-    it('should return 401 without token', async () => {
+    it('returns 403 when the caller is not a member of the circle', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupNonMemberMocks(context, CIRCLE_ID);
+
       await request(context.app.getHttpServer())
-        .get('/api/media/tags')
-        .expect(401);
+        .get(`/api/media/tags?circleId=${CIRCLE_ID}`)
+        .set(authHeader(contributor.accessToken))
+        .expect(403);
     });
   });
 
   // =========================================================================
-  // POST /api/media/:id/tags — attach tags
+  // POST /api/media/:id/tags
   // =========================================================================
 
   describe('POST /api/media/:id/tags', () => {
-    it('should attach tags idempotently', async () => {
+    it('attaches tags idempotently, upserting into the item\'s circle', async () => {
       const contributor = await createMockContributorUser(context);
-      const item = makeMediaItem(contributor.id);
-      const tag = makeTag(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
-      context.prismaMock.tag.upsert.mockResolvedValue(tag);
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
+      context.prismaMock.tag.upsert.mockResolvedValue(makeTag());
       context.prismaMock.mediaTag.upsert.mockResolvedValue({
         id: randomUUID(),
-        tagId: tag.id,
-        mediaItemId: item.id,
+        tagId: BASE_TAG_ID,
+        mediaItemId: BASE_MEDIA_ID,
+        source: 'manual',
         addedAt: new Date(),
       });
+      context.prismaMock.mediaTag.updateMany.mockResolvedValue({ count: 0 });
 
       const response = await request(context.app.getHttpServer())
         .post(`/api/media/${BASE_MEDIA_ID}/tags`)
@@ -682,22 +876,31 @@ describe('Media Integration', () => {
       expect(response.body.data).toHaveLength(2);
       expect(context.prismaMock.tag.upsert).toHaveBeenCalledTimes(2);
       expect(context.prismaMock.mediaTag.upsert).toHaveBeenCalledTimes(2);
+      // Tag uniqueness is per (circleId, name), never per user.
+      expect(context.prismaMock.tag.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { circleId_name: { circleId: CIRCLE_ID, name: 'nature' } },
+        }),
+      );
     });
 
-    it('should return 403 when Contributor attaches tags to another user\'s item', async () => {
+    it('returns 403 for a circle VIEWER — tagging requires collaborator', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherUserItem = makeMediaItem('other-user');
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
 
       await request(context.app.getHttpServer())
         .post(`/api/media/${BASE_MEDIA_ID}/tags`)
         .set(authHeader(contributor.accessToken))
         .send({ names: ['nature'] })
         .expect(403);
+
+      expect(context.prismaMock.tag.upsert).not.toHaveBeenCalled();
     });
 
-    it('should return 400 for empty names array', async () => {
+    it('returns 400 for an empty names array', async () => {
       const contributor = await createMockContributorUser(context);
 
       await request(context.app.getHttpServer())
@@ -709,21 +912,24 @@ describe('Media Integration', () => {
   });
 
   // =========================================================================
-  // DELETE /api/media/:id/tags/:tagId — remove tag
+  // DELETE /api/media/:id/tags/:tagId
   // =========================================================================
 
   describe('DELETE /api/media/:id/tags/:tagId', () => {
-    it('should remove a tag from a MediaItem', async () => {
+    it('removes the join row for a circle collaborator', async () => {
       const contributor = await createMockContributorUser(context);
-      const item = makeMediaItem(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
+
       const mediaTag = {
         id: randomUUID(),
         tagId: BASE_TAG_ID,
-        mediaItemId: item.id,
+        mediaItemId: BASE_MEDIA_ID,
+        source: 'manual',
         addedAt: new Date(),
       };
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
       context.prismaMock.mediaTag.findUnique.mockResolvedValue(mediaTag);
       context.prismaMock.mediaTag.delete.mockResolvedValue(mediaTag);
 
@@ -735,11 +941,12 @@ describe('Media Integration', () => {
       expect(context.prismaMock.mediaTag.delete).toHaveBeenCalled();
     });
 
-    it('should return 404 when tag is not attached', async () => {
+    it('returns 404 when the tag is not attached', async () => {
       const contributor = await createMockContributorUser(context);
-      const item = makeMediaItem(contributor.id);
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(item);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
       context.prismaMock.mediaTag.findUnique.mockResolvedValue(null);
 
       await request(context.app.getHttpServer())
@@ -747,131 +954,107 @@ describe('Media Integration', () => {
         .set(authHeader(contributor.accessToken))
         .expect(404);
     });
-  });
 
-  // =========================================================================
-  // RBAC / Ownership enforcement
-  // =========================================================================
-
-  describe('RBAC — Ownership enforcement', () => {
-    it('Contributor cannot read another user\'s MediaItem (403)', async () => {
+    it('returns 403 for a circle VIEWER', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherUserItem = makeMediaItem('completely-other-user');
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.mediaItem.findUnique.mockResolvedValue(
+        makeMediaItem(contributor.id),
+      );
 
       await request(context.app.getHttpServer())
-        .get(`/api/media/${BASE_MEDIA_ID}`)
+        .delete(`/api/media/${BASE_MEDIA_ID}/tags/${BASE_TAG_ID}`)
         .set(authHeader(contributor.accessToken))
         .expect(403);
-    });
 
-    it('Contributor cannot modify another user\'s MediaItem (403)', async () => {
-      const contributor = await createMockContributorUser(context);
-      const otherUserItem = makeMediaItem('completely-other-user');
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
-
-      await request(context.app.getHttpServer())
-        .patch(`/api/media/${BASE_MEDIA_ID}`)
-        .set(authHeader(contributor.accessToken))
-        .send({ description: 'hack' })
-        .expect(403);
-    });
-
-    it('Admin with media:read_any can read any user\'s MediaItem (200)', async () => {
-      const admin = await createMockAdminUser(context);
-      const otherUserItem = makeMediaItem('some-other-user');
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
-
-      await request(context.app.getHttpServer())
-        .get(`/api/media/${BASE_MEDIA_ID}`)
-        .set(authHeader(admin.accessToken))
-        .expect(200);
-    });
-
-    it('Admin with media:write_any can patch any user\'s MediaItem (200)', async () => {
-      const admin = await createMockAdminUser(context);
-      const otherUserItem = makeMediaItem('some-other-user');
-      const updated = { ...otherUserItem, description: 'Admin Updated' };
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
-      context.prismaMock.mediaItem.update.mockResolvedValue(updated);
-
-      await request(context.app.getHttpServer())
-        .patch(`/api/media/${BASE_MEDIA_ID}`)
-        .set(authHeader(admin.accessToken))
-        .send({ description: 'Admin Updated' })
-        .expect(200);
-    });
-
-    it('Admin with media:delete_any can soft-delete any user\'s MediaItem (204)', async () => {
-      const admin = await createMockAdminUser(context);
-      const otherUserItem = makeMediaItem('some-other-user');
-
-      context.prismaMock.mediaItem.findUnique.mockResolvedValue(otherUserItem);
-      context.prismaMock.mediaItem.update.mockResolvedValue({
-        ...otherUserItem,
-        deletedAt: new Date(),
-      });
-
-      await request(context.app.getHttpServer())
-        .delete(`/api/media/${BASE_MEDIA_ID}`)
-        .set(authHeader(admin.accessToken))
-        .expect(204);
+      expect(context.prismaMock.mediaTag.delete).not.toHaveBeenCalled();
     });
   });
 
   // =========================================================================
-  // Album CRUD
+  // Albums — CRUD
   // =========================================================================
 
   describe('POST /api/media/albums', () => {
-    it('should create an album for the authenticated user', async () => {
+    it('creates an album in the circle', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = makeAlbum(contributor.id);
-
-      context.prismaMock.album.create.mockResolvedValue(album);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
+      context.prismaMock.album.create.mockResolvedValue(makeAlbum(contributor.id));
 
       const response = await request(context.app.getHttpServer())
         .post('/api/media/albums')
         .set(authHeader(contributor.accessToken))
-        .send({ name: 'My Album' })
+        .send({ circleId: CIRCLE_ID, name: 'My Album' })
         .expect(201);
 
       expect(response.body.data).toMatchObject({
         id: BASE_ALBUM_ID,
         name: 'My Album',
-        ownerId: contributor.id,
+        circleId: CIRCLE_ID,
+        addedById: contributor.id,
       });
     });
 
-    it('should return 400 for missing name', async () => {
+    it('returns 400 for a missing name', async () => {
       const contributor = await createMockContributorUser(context);
 
       await request(context.app.getHttpServer())
         .post('/api/media/albums')
         .set(authHeader(contributor.accessToken))
-        .send({})
+        .send({ circleId: CIRCLE_ID })
         .expect(400);
+    });
+
+    it('returns 400 when circleId is omitted', async () => {
+      const contributor = await createMockContributorUser(context);
+
+      await request(context.app.getHttpServer())
+        .post('/api/media/albums')
+        .set(authHeader(contributor.accessToken))
+        .send({ name: 'My Album' })
+        .expect(400);
+    });
+
+    it('returns 403 for a circle VIEWER', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+
+      await request(context.app.getHttpServer())
+        .post('/api/media/albums')
+        .set(authHeader(contributor.accessToken))
+        .send({ circleId: CIRCLE_ID, name: 'My Album' })
+        .expect(403);
+
+      expect(context.prismaMock.album.create).not.toHaveBeenCalled();
     });
   });
 
   describe('GET /api/media/albums', () => {
-    it('should return paginated albums for the authenticated user', async () => {
+    it('returns a paginated album list for a circle viewer', async () => {
       const contributor = await createMockContributorUser(context);
-      const albums = [{ ...makeAlbum(contributor.id), _count: { items: 0 } }];
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
 
-      context.prismaMock.album.findMany.mockResolvedValue(albums);
+      context.prismaMock.album.findMany.mockResolvedValue([
+        makeAlbum(contributor.id),
+      ]);
       context.prismaMock.album.count.mockResolvedValue(1);
+      (context.prismaMock.mediaItem.aggregate as jest.Mock).mockResolvedValue({
+        _count: { _all: 0 },
+        _min: { capturedAt: null },
+        _max: { capturedAt: null },
+      });
+      context.prismaMock.mediaItem.findFirst.mockResolvedValue(null);
 
       const response = await request(context.app.getHttpServer())
-        .get('/api/media/albums')
+        .get(`/api/media/albums?circleId=${CIRCLE_ID}`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
       expect(response.body.data.items).toHaveLength(1);
+      expect(response.body.data.items[0]).toMatchObject({
+        itemCount: 0,
+        dateRange: null,
+      });
       expect(response.body.data.meta).toMatchObject({
         page: 1,
         pageSize: 20,
@@ -879,28 +1062,48 @@ describe('Media Integration', () => {
         totalPages: 1,
       });
     });
+
+    it('returns 403 when the caller is not a member of the circle', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupNonMemberMocks(context, CIRCLE_ID);
+
+      await request(context.app.getHttpServer())
+        .get(`/api/media/albums?circleId=${CIRCLE_ID}`)
+        .set(authHeader(contributor.accessToken))
+        .expect(403);
+    });
   });
 
   describe('GET /api/media/albums/:id', () => {
-    it('should return album with items for owner', async () => {
+    it('returns the album with its items for a circle viewer', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = { ...makeAlbum(contributor.id), items: [] };
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
 
-      context.prismaMock.album.findUnique.mockResolvedValue(album);
+      context.prismaMock.album.findUnique.mockResolvedValue({
+        ...makeAlbum(contributor.id),
+        items: [],
+      });
+      context.prismaMock.mediaItem.findFirst.mockResolvedValue(null);
 
       const response = await request(context.app.getHttpServer())
         .get(`/api/media/albums/${BASE_ALBUM_ID}`)
         .set(authHeader(contributor.accessToken))
         .expect(200);
 
-      expect(response.body.data).toMatchObject({ id: BASE_ALBUM_ID, name: 'My Album' });
+      expect(response.body.data).toMatchObject({
+        id: BASE_ALBUM_ID,
+        name: 'My Album',
+        circleId: CIRCLE_ID,
+      });
     });
 
-    it('should return 403 when Contributor accesses another user\'s album', async () => {
+    it("returns 403 when the caller is not a member of the album's circle", async () => {
       const contributor = await createMockContributorUser(context);
-      const otherAlbum = { ...makeAlbum('other-user'), items: [] };
-
-      context.prismaMock.album.findUnique.mockResolvedValue(otherAlbum);
+      setupNonMemberMocks(context, CIRCLE_ID);
+      context.prismaMock.album.findUnique.mockResolvedValue({
+        ...makeAlbum('someone-else'),
+        items: [],
+      });
 
       await request(context.app.getHttpServer())
         .get(`/api/media/albums/${BASE_ALBUM_ID}`)
@@ -908,7 +1111,7 @@ describe('Media Integration', () => {
         .expect(403);
     });
 
-    it('should return 404 when album does not exist', async () => {
+    it('returns 404 when the album does not exist', async () => {
       const contributor = await createMockContributorUser(context);
       context.prismaMock.album.findUnique.mockResolvedValue(null);
 
@@ -920,13 +1123,16 @@ describe('Media Integration', () => {
   });
 
   describe('PATCH /api/media/albums/:id', () => {
-    it('should update album name for owner', async () => {
+    it('renames the album for a circle collaborator', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = makeAlbum(contributor.id);
-      const updated = { ...album, name: 'Renamed Album' };
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
+      const album = makeAlbum(contributor.id);
       context.prismaMock.album.findUnique.mockResolvedValue(album);
-      context.prismaMock.album.update.mockResolvedValue(updated);
+      context.prismaMock.album.update.mockResolvedValue({
+        ...album,
+        name: 'Renamed Album',
+      });
 
       const response = await request(context.app.getHttpServer())
         .patch(`/api/media/albums/${BASE_ALBUM_ID}`)
@@ -937,25 +1143,29 @@ describe('Media Integration', () => {
       expect(response.body.data.name).toBe('Renamed Album');
     });
 
-    it('should return 403 for non-owner without _any permission', async () => {
+    it('returns 403 for a circle VIEWER', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherAlbum = makeAlbum('other-user');
-
-      context.prismaMock.album.findUnique.mockResolvedValue(otherAlbum);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
 
       await request(context.app.getHttpServer())
         .patch(`/api/media/albums/${BASE_ALBUM_ID}`)
         .set(authHeader(contributor.accessToken))
-        .send({ name: 'hack' })
+        .send({ name: 'nope' })
         .expect(403);
+
+      expect(context.prismaMock.album.update).not.toHaveBeenCalled();
     });
   });
 
   describe('DELETE /api/media/albums/:id', () => {
-    it('should delete album (cascade AlbumItems) but NOT delete MediaItems', async () => {
+    it('deletes the album (cascading joins) without deleting MediaItems', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = makeAlbum(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
+      const album = makeAlbum(contributor.id);
       context.prismaMock.album.findUnique.mockResolvedValue(album);
       context.prismaMock.album.delete.mockResolvedValue(album);
 
@@ -971,16 +1181,19 @@ describe('Media Integration', () => {
       expect(context.prismaMock.mediaItem.deleteMany).not.toHaveBeenCalled();
     });
 
-    it('should return 403 for non-owner', async () => {
+    it('returns 403 for a circle VIEWER', async () => {
       const contributor = await createMockContributorUser(context);
-      const otherAlbum = makeAlbum('other-user');
-
-      context.prismaMock.album.findUnique.mockResolvedValue(otherAlbum);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
 
       await request(context.app.getHttpServer())
         .delete(`/api/media/albums/${BASE_ALBUM_ID}`)
         .set(authHeader(contributor.accessToken))
         .expect(403);
+
+      expect(context.prismaMock.album.delete).not.toHaveBeenCalled();
     });
   });
 
@@ -989,21 +1202,23 @@ describe('Media Integration', () => {
   // =========================================================================
 
   describe('POST /api/media/albums/:id/items', () => {
-    it('should add MediaItems to an album', async () => {
+    it('adds MediaItems from the same circle to the album', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = makeAlbum(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
+
       const mediaItemId = randomUUID();
-      const mediaItem = makeMediaItem(contributor.id, { id: mediaItemId });
-      const albumItem = {
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
+      context.prismaMock.mediaItem.findMany.mockResolvedValue([
+        makeMediaItem(contributor.id, { id: mediaItemId }),
+      ]);
+      context.prismaMock.albumItem.upsert.mockResolvedValue({
         id: randomUUID(),
-        albumId: album.id,
+        albumId: BASE_ALBUM_ID,
         mediaItemId,
         addedAt: new Date(),
-      };
-
-      context.prismaMock.album.findUnique.mockResolvedValue(album);
-      context.prismaMock.mediaItem.findMany.mockResolvedValue([mediaItem]);
-      context.prismaMock.albumItem.upsert.mockResolvedValue(albumItem);
+      });
 
       const response = await request(context.app.getHttpServer())
         .post(`/api/media/albums/${BASE_ALBUM_ID}/items`)
@@ -1013,14 +1228,23 @@ describe('Media Integration', () => {
 
       expect(response.body.data).toHaveLength(1);
       expect(context.prismaMock.albumItem.upsert).toHaveBeenCalledTimes(1);
+      // Membership is resolved against the ALBUM's circle, so an item from
+      // another circle can never be added.
+      expect(context.prismaMock.mediaItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ circleId: CIRCLE_ID }),
+        }),
+      );
     });
 
-    it('should return 404 when a mediaItemId is not accessible', async () => {
+    it('returns 404 when a mediaItemId is not in the album\'s circle', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = makeAlbum(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
-      context.prismaMock.album.findUnique.mockResolvedValue(album);
-      context.prismaMock.mediaItem.findMany.mockResolvedValue([]); // none found
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
+      context.prismaMock.mediaItem.findMany.mockResolvedValue([]); // none matched
 
       await request(context.app.getHttpServer())
         .post(`/api/media/albums/${BASE_ALBUM_ID}/items`)
@@ -1028,21 +1252,39 @@ describe('Media Integration', () => {
         .send({ mediaItemIds: [randomUUID()] })
         .expect(404);
     });
+
+    it('returns 403 for a circle VIEWER', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
+
+      await request(context.app.getHttpServer())
+        .post(`/api/media/albums/${BASE_ALBUM_ID}/items`)
+        .set(authHeader(contributor.accessToken))
+        .send({ mediaItemIds: [randomUUID()] })
+        .expect(403);
+
+      expect(context.prismaMock.albumItem.upsert).not.toHaveBeenCalled();
+    });
   });
 
   describe('DELETE /api/media/albums/:id/items/:itemId', () => {
-    it('should remove a MediaItem from an album without deleting the MediaItem', async () => {
+    it('removes the join row without deleting the MediaItem', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = makeAlbum(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
+
       const mediaItemId = randomUUID();
       const albumItem = {
         id: randomUUID(),
-        albumId: album.id,
+        albumId: BASE_ALBUM_ID,
         mediaItemId,
         addedAt: new Date(),
       };
-
-      context.prismaMock.album.findUnique.mockResolvedValue(album);
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
       context.prismaMock.albumItem.findUnique.mockResolvedValue(albumItem);
       context.prismaMock.albumItem.delete.mockResolvedValue(albumItem);
 
@@ -1055,17 +1297,34 @@ describe('Media Integration', () => {
       expect(context.prismaMock.mediaItem.delete).not.toHaveBeenCalled();
     });
 
-    it('should return 404 when item is not in the album', async () => {
+    it('returns 404 when the item is not in the album', async () => {
       const contributor = await createMockContributorUser(context);
-      const album = makeAlbum(contributor.id);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'collaborator');
 
-      context.prismaMock.album.findUnique.mockResolvedValue(album);
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
       context.prismaMock.albumItem.findUnique.mockResolvedValue(null);
 
       await request(context.app.getHttpServer())
         .delete(`/api/media/albums/${BASE_ALBUM_ID}/items/${randomUUID()}`)
         .set(authHeader(contributor.accessToken))
         .expect(404);
+    });
+
+    it('returns 403 for a circle VIEWER', async () => {
+      const contributor = await createMockContributorUser(context);
+      setupCircleMocks(context, contributor.id, CIRCLE_ID, 'viewer');
+      context.prismaMock.album.findUnique.mockResolvedValue(
+        makeAlbum(contributor.id),
+      );
+
+      await request(context.app.getHttpServer())
+        .delete(`/api/media/albums/${BASE_ALBUM_ID}/items/${randomUUID()}`)
+        .set(authHeader(contributor.accessToken))
+        .expect(403);
+
+      expect(context.prismaMock.albumItem.delete).not.toHaveBeenCalled();
     });
   });
 });
