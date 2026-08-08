@@ -14,9 +14,11 @@
  * structured line per sample to the worker's normal log, escalating to `warn`
  * once heapUsed crosses a fraction of the V8 heap ceiling — so an operator
  * watching `memoriahub node logs` sees the climb coming, and a post-mortem can
- * read which pool was growing. It pairs with the `--heapsnapshot-near-heap-limit`
- * flag (see runtime-tuning.ts): the log says which pool, the snapshot names the
- * exact retainer.
+ * read which pool was growing. Each line also carries `heapGrowthMbPerHour`, a
+ * least-squares slope over the retained sample window, so "is it still
+ * climbing?" is a number in the log rather than an eyeball judgement across
+ * hours of lines. It pairs with `heap-snapshot.ts`: the log says which pool and
+ * how fast, the snapshot names the exact retainer.
  *
  * Cheap and side-effect-free: one `setInterval` (unref'd, so it never keeps the
  * process alive) calling a cheap syscall-free V8 stat. Disable with
@@ -36,6 +38,20 @@ export interface MemorySample {
   heapLimitMb: number;
   /** heapUsed as a fraction of the V8 heap ceiling, rounded to 2 dp. */
   heapUsedFraction: number;
+  /**
+   * Least-squares slope of `heapUsed` over the retained sample window, in
+   * MB/hour. Absent until the retained readings span `MIN_TREND_SPAN_MS`
+   * (~30 min), because a slope over a shorter window is mostly GC sawtooth.
+   *
+   * This is the number the issue-#156 bisection actually turns on (issue #156):
+   * "run a batch with `duplicate_detection` excluded and see whether the heap
+   * still climbs" is only answerable by eyeballing a log trend unless the trend
+   * itself is reported. A steady positive slope across a window that spans
+   * several GC cycles is a leak; a bounded sawtooth averages out near zero.
+   */
+  heapGrowthMbPerHour?: number;
+  /** Minutes spanned by the samples behind `heapGrowthMbPerHour`. */
+  trendWindowMinutes?: number;
 }
 
 export interface MemoryWatchdogOptions {
@@ -61,6 +77,69 @@ export interface MemoryWatchdogOptions {
 }
 
 const MB = 1024 * 1024;
+
+/** One retained (time, heapUsed) reading behind the growth trend. */
+export interface HeapTrendPoint {
+  atMs: number;
+  heapUsedMb: number;
+}
+
+/**
+ * Age at which a reading falls out of the trend window (one hour). The window
+ * is time-based rather than count-based so the slope means the same thing at
+ * the default 60 s cadence and at the untuned 15 s cadence.
+ */
+export const TREND_WINDOW_MS = 60 * 60_000;
+
+/**
+ * Minimum span the retained readings must cover before a slope is reported.
+ *
+ * This guard is load-bearing, not decoration: GC sawtooth over a SHORT window
+ * produces a large spurious rate. A ±40 MB alternation sampled every minute
+ * regresses to ~100 MB/h over 12 minutes, ~16 MB/h over 30, and ~4 MB/h over
+ * 60 — so a slope from a five-minute window would cry leak on a perfectly
+ * healthy worker. Waiting for a real window is what makes the number
+ * trustworthy enough to act on.
+ */
+export const MIN_TREND_SPAN_MS = 30 * 60_000;
+
+/** Minimum readings before a slope is reported at all. */
+export const MIN_TREND_SAMPLES = 5;
+
+/**
+ * Hard cap on retained readings — a safety bound only. The time window above
+ * governs in practice (240 points at the 15 s cadence); this exists so a
+ * pathological interval can never make the trend buffer itself the leak.
+ */
+export const MAX_TREND_POINTS = 720;
+
+/**
+ * Least-squares slope of heapUsed over time, in MB/hour. Returns `null` when
+ * the readings are too few, or span less than `MIN_TREND_SPAN_MS`, so a caller
+ * can omit the field rather than publish a number that is mostly GC noise.
+ */
+export function heapGrowthMbPerHour(points: readonly HeapTrendPoint[]): number | null {
+  if (points.length < MIN_TREND_SAMPLES) return null;
+  const n = points.length;
+  if (points[n - 1]!.atMs - points[0]!.atMs < MIN_TREND_SPAN_MS) return null;
+  const t0 = points[0]!.atMs;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXY = 0;
+  let sumXX = 0;
+  for (const p of points) {
+    // Hours since the first retained point — keeps the slope in MB/hour directly.
+    const x = (p.atMs - t0) / 3_600_000;
+    const y = p.heapUsedMb;
+    sumX += x;
+    sumY += y;
+    sumXY += x * y;
+    sumXX += x * x;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return null; // all readings at the same instant
+  return Math.round(((n * sumXY - sumX * sumY) / denom) * 10) / 10;
+}
 
 function sample(heapLimitBytes: number): MemorySample {
   const m = process.memoryUsage();
@@ -95,8 +174,24 @@ export function startMemoryWatchdog(
   const heapLimitBytes = v8.getHeapStatistics().heap_size_limit;
 
   let criticalFired = false;
+  const trend: HeapTrendPoint[] = [];
   const tick = (): void => {
     const s = sample(heapLimitBytes);
+
+    // Bounded ring: retaining the trend must never itself be a leak. Evict by
+    // age first (the window that gives the slope its meaning), then by the
+    // hard count cap as a backstop.
+    const now = Date.now();
+    trend.push({ atMs: now, heapUsedMb: s.heapUsedMb });
+    while (trend.length > 0 && now - trend[0]!.atMs > TREND_WINDOW_MS) trend.shift();
+    while (trend.length > MAX_TREND_POINTS) trend.shift();
+    const slope = heapGrowthMbPerHour(trend);
+    if (slope !== null) {
+      s.heapGrowthMbPerHour = slope;
+      s.trendWindowMinutes =
+        Math.round(((trend[trend.length - 1]!.atMs - trend[0]!.atMs) / 60_000) * 10) / 10;
+    }
+
     emit(s.heapUsedFraction >= warnFraction ? 'warn' : 'info', s);
     if (
       !criticalFired &&
