@@ -74,7 +74,13 @@ function makeItem(overrides: Partial<EnhancementListItem> = {}): EnhancementList
     model: 'gpt-image-1',
     params: { preset: 'restore_old_photo', strength: 'strong' },
     original: { thumbnailUrl: 'https://cdn/o.jpg', width: 4000, height: 3000, size: '5000' },
-    enhanced: { thumbnailUrl: 'https://cdn/e.jpg', width: 1024, height: 1024, size: '900' },
+    enhanced: {
+      thumbnailUrl: 'https://cdn/e-thumb.jpg',
+      previewUrl: 'https://cdn/e-full.jpg',
+      width: 1024,
+      height: 1024,
+      size: '900',
+    },
     downscaled: false,
     expiresAt: new Date(NOW + 6 * 86_400_000 + 4 * 3_600_000).toISOString(),
     lastError: null,
@@ -255,12 +261,46 @@ describe('PendingEnhancementsTab', () => {
       expect(within(card).getByRole('button', { name: 'Discard' })).toBeEnabled();
     });
 
+    it('renders the enhanced side from the thumbnail derivative, not the full-resolution staged bytes (issue #203)', () => {
+      mockList([makeItem()]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      const img = within(cardFor('enh-1')).getByAltText('Enhanced IMG_0001.jpg');
+      expect(img).toHaveAttribute('src', 'https://cdn/e-thumb.jpg');
+    });
+
+    it('falls back to the full-resolution previewUrl when a row has no thumbnail derivative', () => {
+      // Pre-#203 rows, and rows whose best-effort thumbnail render failed, have
+      // a null thumbnailUrl — the card must still show something.
+      mockList([
+        makeItem({
+          enhanced: {
+            thumbnailUrl: null,
+            previewUrl: 'https://cdn/e-full.jpg',
+            width: 1024,
+            height: 1024,
+            size: '900',
+          },
+        }),
+      ]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      const img = within(cardFor('enh-1')).getByAltText('Enhanced IMG_0001.jpg');
+      expect(img).toHaveAttribute('src', 'https://cdn/e-full.jpg');
+    });
+
     it('renders a failed card with the error and only a Discard action', () => {
       mockList([
         makeItem({
           status: 'failed',
           lastError: 'The model returned a 400',
-          enhanced: { thumbnailUrl: null, width: null, height: null, size: null },
+          enhanced: {
+            thumbnailUrl: null,
+            previewUrl: null,
+            width: null,
+            height: null,
+            size: null,
+          },
         }),
       ]);
       render(<PendingEnhancementsTab circleId="circle-1" />);
