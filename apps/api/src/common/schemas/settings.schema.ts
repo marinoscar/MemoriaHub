@@ -370,6 +370,17 @@ export const systemSettingsSchema = z.object({
     maxInputMegapixels: 50,
     retentionHours: 168,
   }),
+  // Node backup change feed (issue #310, epic #308). Read by
+  // NodeBackupQueryService via the cached getSettings() call.
+  backup: z.object({
+    maxPageSize: z.number().int().min(50).max(500).default(200),
+    feedSafetyHorizonSeconds: z.number().int().min(0).max(60).default(5),
+    runStaleMinutes: z.number().int().min(5).max(120).default(15),
+  }).optional().default({
+    maxPageSize: 200,
+    feedSafetyHorizonSeconds: 5,
+    runStaleMinutes: 15,
+  }),
   // Media Workflow Automation (issue #139 / epic #138). The full namespace ships
   // here in Phase 1; later phases read these values via getSettings() without a
   // further schema change. Phase 1 actively reads maxItemsPerRun,
@@ -523,6 +534,11 @@ export const systemSettingsPatchSchema = z.object({
     blockReplaceOnDownscale: z.boolean().optional(),
     maxInputMegapixels: z.number().min(1).max(100).optional(),
     retentionHours: z.number().int().min(1).max(720).optional(),
+  }).optional(),
+  backup: z.object({
+    maxPageSize: z.number().int().min(50).max(500).optional(),
+    feedSafetyHorizonSeconds: z.number().int().min(0).max(60).optional(),
+    runStaleMinutes: z.number().int().min(5).max(120).optional(),
   }).optional(),
   workflows: z.object({
     maxItemsPerRun: z.number().int().min(100).max(500000).optional(),

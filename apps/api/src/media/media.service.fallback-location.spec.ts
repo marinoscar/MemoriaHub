@@ -30,6 +30,7 @@ import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
+import { MediaTouchService } from './media-touch.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 
 const CIRCLE_ID = 'circle-uuid-0001-0002-0003';
@@ -179,6 +180,10 @@ describe('MediaService.createMedia — fallback location', () => {
           // #247 upload_completed producer — fire-and-forget, not asserted here.
           provide: UploadNotificationService,
           useValue: { recordUploadAsync: jest.fn(), recordUpload: jest.fn() },
+        },
+        {
+          provide: MediaTouchService,
+          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
       ],

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { NodesService } from './nodes.service';
+import { NodeBackupQueryService } from './node-backup-query.service';
 import { NodesController } from './nodes.controller';
 import { NodesAdminController } from './nodes-admin.controller';
 import { NodeCredentialsController } from './node-credentials.controller';
@@ -43,6 +44,7 @@ import { TaggingModule } from '../tagging/tagging.module';
     NodeCredentialModule,
   ],
   controllers: [NodesController, NodesAdminController, NodeCredentialsController],
-  providers: [NodesService, NodeOfflinePruneTask],
+  providers: [NodesService, NodeOfflinePruneTask, NodeBackupQueryService],
+  exports: [NodeBackupQueryService],
 })
 export class NodesModule {}

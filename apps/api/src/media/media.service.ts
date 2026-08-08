@@ -52,6 +52,7 @@ import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
+import { MediaTouchService } from './media-touch.service';
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -85,6 +86,7 @@ export class MediaService {
     private readonly mediaEnrichmentService: MediaEnrichmentService,
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly uploadNotificationService: UploadNotificationService,
+    private readonly mediaTouch: MediaTouchService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -1042,6 +1044,9 @@ export class MediaService {
       result.push({ tagId: tag.id, name: tag.name });
     }
 
+    // Backup change feed: tag joins don't touch the MediaItem row (issue #310).
+    await this.mediaTouch.touchMediaItems([item.id]);
+
     this.logger.log(
       `Attached ${dto.names.length} tag(s) to MediaItem ${mediaItemId}`,
     );
@@ -1078,6 +1083,9 @@ export class MediaService {
     await this.prisma.mediaTag.delete({
       where: { tagId_mediaItemId: { tagId, mediaItemId } },
     });
+
+    // Backup change feed: tag joins don't touch the MediaItem row (issue #310).
+    await this.mediaTouch.touchMediaItems([mediaItemId]);
 
     this.logger.log(`Removed tag ${tagId} from MediaItem ${mediaItemId}`);
   }
@@ -1257,6 +1265,13 @@ export class MediaService {
       },
     });
 
+    // Backup change feed: sidecars embed album names, so a rename must surface
+    // every member item in the incremental scan (issue #310). Renames are rare;
+    // an updateMany over thousands of members is acceptable.
+    if (dto.name !== undefined && dto.name !== album.name) {
+      await this.touchAlbumMembers(album.id);
+    }
+
     this.logger.log(`Album updated: ${id} by user ${userId}`);
 
     return updated;
@@ -1273,8 +1288,24 @@ export class MediaService {
       'collaborator' as CircleRole,
     );
 
+    // Backup change feed: capture member ids BEFORE the cascade removes the
+    // join rows — the members' sidecars lose this album (issue #310).
+    // Best-effort: a lookup failure must never block the delete.
+    let memberIds: string[] = [];
+    try {
+      const rows = await this.prisma.albumItem.findMany({
+        where: { albumId: id },
+        select: { mediaItemId: true },
+      });
+      memberIds = (rows ?? []).map((m) => m.mediaItemId);
+    } catch {
+      // swallowed — feed bookkeeping only
+    }
+
     // Cascade in the schema deletes AlbumItems when Album is deleted
     await this.prisma.album.delete({ where: { id } });
+
+    await this.mediaTouch.touchMediaItems(memberIds);
 
     this.logger.log(`Album deleted: ${id} by user ${userId}`);
   }
@@ -1322,6 +1353,9 @@ export class MediaService {
       });
       created.push(item);
     }
+
+    // Backup change feed: AlbumItem joins don't bump MediaItem.updatedAt (issue #310).
+    await this.mediaTouch.touchMediaItems(dto.mediaItemIds);
 
     this.logger.log(
       `Added ${dto.mediaItemIds.length} item(s) to album ${albumId}`,
@@ -1418,8 +1452,36 @@ export class MediaService {
       totalAdded += result.count;
     }
 
+    // Backup change feed (issue #310). skipDuplicates hides which rows were
+    // actually inserted, so touch the whole matched set when anything landed —
+    // an over-touch only re-syncs an unchanged sidecar, never loses a change.
+    if (totalAdded > 0) {
+      await this.mediaTouch.touchMediaItems(matches.map((m) => m.id));
+    }
+
     this.logger.log(`Added ${totalAdded} item(s) to album ${albumId} by filter`);
     return { added: totalAdded };
+  }
+
+  /**
+   * Backup change feed helper (issue #310): touch every member item of an
+   * album. Best-effort — a lookup failure is logged and swallowed so backup
+   * bookkeeping can never fail the triggering album mutation.
+   */
+  private async touchAlbumMembers(albumId: string): Promise<void> {
+    try {
+      const members = await this.prisma.albumItem.findMany({
+        where: { albumId },
+        select: { mediaItemId: true },
+      });
+      await this.mediaTouch.touchMediaItems(
+        (members ?? []).map((m) => m.mediaItemId),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `touchAlbumMembers failed for album ${albumId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**
@@ -1451,6 +1513,9 @@ export class MediaService {
     await this.prisma.albumItem.delete({
       where: { albumId_mediaItemId: { albumId, mediaItemId: itemId } },
     });
+
+    // Backup change feed: AlbumItem joins don't bump MediaItem.updatedAt (issue #310).
+    await this.mediaTouch.touchMediaItems([itemId]);
 
     this.logger.log(
       `Removed MediaItem ${itemId} from album ${albumId} by user ${userId}`,
@@ -2001,6 +2066,11 @@ export class MediaService {
         }
       }
     });
+
+    // Backup change feed: MediaTag joins don't bump MediaItem.updatedAt (issue #310).
+    if (added > 0 || removed > 0) {
+      await this.mediaTouch.touchMediaItems(dto.ids);
+    }
 
     this.logger.log(
       `bulkTags: added=${added} removed=${removed} for ${dto.ids.length} items by user ${userId}`,

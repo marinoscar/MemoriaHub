@@ -5,6 +5,7 @@ import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.regi
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FaceMatchingService } from './face-matching.service';
+import { MediaTouchService } from '../media/media-touch.service';
 
 /**
  * FaceAutoArchiveSweepHandler
@@ -34,6 +35,7 @@ export class FaceAutoArchiveSweepHandler implements EnrichmentHandler, OnModuleI
     private readonly prisma: PrismaService,
     private readonly matchingService: FaceMatchingService,
     private readonly systemSettings: SystemSettingsService,
+    private readonly mediaTouch: MediaTouchService,
   ) {}
 
   onModuleInit(): void {
@@ -120,6 +122,14 @@ export class FaceAutoArchiveSweepHandler implements EnrichmentHandler, OnModuleI
           data: { hiddenAt: new Date(), hiddenReason: 'auto_archive_match' },
         });
         hidden += count;
+
+        // Backup change feed: Face.hiddenAt is a Face-row-only write (issue #310)
+        const parents = await this.prisma.face.findMany({
+          where: { id: { in: matchedIds }, circleId },
+          select: { mediaItemId: true },
+          distinct: ['mediaItemId'],
+        });
+        await this.mediaTouch.touchMediaItems(parents.map((f) => f.mediaItemId));
       }
 
       if (batch.length < FaceAutoArchiveSweepHandler.LIVE_BATCH_SIZE) break;

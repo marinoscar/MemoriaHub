@@ -138,6 +138,7 @@ describe('SystemSettingsService', () => {
         email: DEFAULT_SYSTEM_SETTINGS.email,
         pictureEnhancement: DEFAULT_SYSTEM_SETTINGS.pictureEnhancement,
         workflows: DEFAULT_SYSTEM_SETTINGS.workflows,
+        backup: DEFAULT_SYSTEM_SETTINGS.backup,
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
       };
@@ -241,6 +242,7 @@ describe('SystemSettingsService', () => {
         email: DEFAULT_SYSTEM_SETTINGS.email,
         pictureEnhancement: DEFAULT_SYSTEM_SETTINGS.pictureEnhancement,
         workflows: DEFAULT_SYSTEM_SETTINGS.workflows,
+        backup: DEFAULT_SYSTEM_SETTINGS.backup,
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
       };

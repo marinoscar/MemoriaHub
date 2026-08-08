@@ -7,6 +7,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { FaceDetectionCore, ResolvedProvider } from './face-detection-core.service';
+import { MediaTouchService } from '../media/media-touch.service';
 import type { DetectedFace } from './providers/face-provider.interface';
 
 @Injectable()
@@ -18,6 +19,7 @@ export class FaceDetectionService {
     private readonly resolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly core: FaceDetectionCore,
+    private readonly mediaTouch: MediaTouchService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -230,6 +232,10 @@ export class FaceDetectionService {
       result.providerKey,
       result.modelVersion,
     );
+
+    // Backup change feed (issue #310): Face rows were deleted/recreated (and
+    // possibly person-matched) without any MediaItem column write.
+    await this.mediaTouch.touchMediaItems([job.mediaItemId]);
   }
 
   // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { StorageProvidersModule } from '../storage/providers/storage-providers.m
 import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
+import { MediaTouchModule } from '../media/media-touch.module';
 import { AutoTaggingHandler } from './auto-tagging.handler';
 import { AutoTaggingService } from './auto-tagging.service';
 import { TaggingController } from './tagging.controller';
@@ -14,7 +15,7 @@ import { TaggingBackfillService } from './tagging-backfill.service';
 import { AdminTaggingController } from './admin-tagging.controller';
 
 @Module({
-  imports: [EnrichmentModule, AiModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule],
+  imports: [EnrichmentModule, AiModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, MediaTouchModule],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
   providers: [AutoTaggingHandler, AutoTaggingService, TagLabelsService, TaggingBackfillService],
   exports: [AutoTaggingService],

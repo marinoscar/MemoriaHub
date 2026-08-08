@@ -46,6 +46,7 @@ import {
 } from '@prisma/client';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { MediaTouchService } from '../media/media-touch.service';
 import { RateLimitError } from '../enrichment/rate-limit.error';
 
 // ---------------------------------------------------------------------------
@@ -213,6 +214,10 @@ describe('AutoTaggingService', () => {
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        {
+          provide: MediaTouchService,
+          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

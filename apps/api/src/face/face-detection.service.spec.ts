@@ -27,6 +27,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { FaceDetectionService } from './face-detection.service';
 import { FaceDetectionCore } from './face-detection-core.service';
+import { MediaTouchService } from '../media/media-touch.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
@@ -109,6 +110,7 @@ describe('FaceDetectionService', () => {
   };
   let mockEnrichmentJobService: { recordModel: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
+  let mockMediaTouch: { touchMediaItems: jest.Mock };
 
   beforeEach(async () => {
     // Reset sharp mock call counts between tests (implementations set in the factory are retained)
@@ -167,6 +169,12 @@ describe('FaceDetectionService', () => {
     // Default face.update succeeds
     (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
 
+    // Backup change feed (issue #310) — captured in a variable so tests can
+    // assert exactly which MediaItem ids persistFaces touches.
+    mockMediaTouch = {
+      touchMediaItems: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceDetectionService,
@@ -179,6 +187,7 @@ describe('FaceDetectionService', () => {
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: MediaTouchService, useValue: mockMediaTouch },
       ],
     }).compile();
 
@@ -750,6 +759,20 @@ describe('FaceDetectionService', () => {
       expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
         where: { mediaItemId: 'media-1', manuallyAssigned: false },
       });
+    });
+
+    it('touches the MediaItem for the backup change feed after persisting (issue #310)', async () => {
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(['media-1']);
+    });
+
+    it('still touches the MediaItem when the DTO has zero faces (Face rows cleared, not created)', async () => {
+      const empty = { ...makeCannedResult(), faces: [] };
+
+      await service.persistFaces(makeJob(), empty);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(['media-1']);
     });
 
     it('normalizes the PIXEL bounding box by the DTO imageWidth/imageHeight (not raw MediaItem dims)', async () => {
