@@ -35,6 +35,7 @@ import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.servi
 import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { UploadNotificationService } from '../../src/notifications/producers/upload-notification.service';
+import { MediaTouchService } from '../../src/media/media-touch.service';
 import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
 import { randomUUID } from 'crypto';
 
@@ -200,6 +201,10 @@ describe('MediaService.streamExport', () => {
           // #247 upload_completed producer — fire-and-forget, not asserted here.
           provide: UploadNotificationService,
           useValue: { recordUploadAsync: jest.fn(), recordUpload: jest.fn() },
+        },
+        {
+          provide: MediaTouchService,
+          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: MediaEnrichmentService, useValue: { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined) } },
       ],

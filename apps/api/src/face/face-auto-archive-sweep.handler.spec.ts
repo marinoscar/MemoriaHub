@@ -199,7 +199,11 @@ describe('FaceAutoArchiveSweepHandler', () => {
     (mockPrisma.face.findMany as jest.Mock)
       .mockResolvedValueOnce([{ id: 'archived-1', embedding: [1, 0] }]) // archived pool
       .mockResolvedValueOnce(firstPage)
-      .mockResolvedValueOnce(secondPage);
+      // Backup change-feed parent lookup for the first page's hidden faces (issue #310)
+      .mockResolvedValueOnce([{ mediaItemId: 'media-0' }])
+      .mockResolvedValueOnce(secondPage)
+      // Parent lookup for the second page's hidden faces
+      .mockResolvedValueOnce([{ mediaItemId: 'media-500' }]);
 
     // First page match: live-0; second page match: live-500.
     mockMatchingService.findLiveMatchesAgainstArchived
@@ -213,11 +217,11 @@ describe('FaceAutoArchiveSweepHandler', () => {
     const job = makeJob();
     await handler.process(job);
 
-    // archived pool + 2 live pages = 3 findMany calls total.
-    expect((mockPrisma.face.findMany as jest.Mock).mock.calls.length).toBe(3);
+    // archived pool + 2 live pages + 2 backup-touch parent lookups = 5 calls.
+    expect((mockPrisma.face.findMany as jest.Mock).mock.calls.length).toBe(5);
 
     // Second live-page query must use the last id of the first page as cursor.
-    const secondPageCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[2][0];
+    const secondPageCall = (mockPrisma.face.findMany as jest.Mock).mock.calls[3][0];
     expect(secondPageCall.cursor).toEqual({ id: 'live-499' });
     expect(secondPageCall.skip).toBe(1);
 

@@ -21,6 +21,7 @@ import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
+import { MediaTouchService } from './media-touch.service';
 import { mediaThumbnailsQuerySchema } from './dto/media-thumbnails-query.dto';
 import { MediaThumbnailService } from './media-thumbnail.service';
 
@@ -294,6 +295,10 @@ describe('MediaService', () => {
           useValue: mockUploadNotificationService,
         },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
+        {
+          provide: MediaTouchService,
+          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

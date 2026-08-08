@@ -14,6 +14,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { TagLabelsService } from './tag-labels.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MediaTouchService } from '../media/media-touch.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -61,6 +62,10 @@ describe('TagLabelsService', () => {
       providers: [
         TagLabelsService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: MediaTouchService,
+          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

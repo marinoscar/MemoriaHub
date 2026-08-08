@@ -14,6 +14,7 @@ import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaTouchService } from '../media/media-touch.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,10 @@ describe('PeopleService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
+        {
+          provide: MediaTouchService,
+          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

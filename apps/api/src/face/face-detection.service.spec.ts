@@ -27,6 +27,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { FaceDetectionService } from './face-detection.service';
 import { FaceDetectionCore } from './face-detection-core.service';
+import { MediaTouchService } from '../media/media-touch.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
@@ -179,6 +180,10 @@ describe('FaceDetectionService', () => {
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
+        {
+          provide: MediaTouchService,
+          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
