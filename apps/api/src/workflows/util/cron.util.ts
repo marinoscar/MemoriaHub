@@ -60,9 +60,19 @@ export function isValidCron(expr: string): boolean {
  * Next fire time of `expr` strictly after `from`, as a plain `Date`. Pure — no
  * scheduling side effects. `expr` must already be a valid cron (guard with
  * `isValidCron` first at save time).
+ *
+ * Optional `timezone` (IANA name, e.g. "America/Costa_Rica") evaluates the
+ * cron's fields in that zone instead of the server's local zone — used by the
+ * node backup schedule (NodeBackupConfig.timezone). Callers must validate the
+ * zone name beforehand (e.g. against Intl.supportedValuesOf('timeZone'));
+ * CronTime throws on an unknown zone.
  */
-export function nextCronDate(expr: string, from: Date): Date {
-  return new CronTime(expr).getNextDateFrom(from).toJSDate();
+export function nextCronDate(expr: string, from: Date, timezone?: string): Date {
+  // NOTE: the zone must be passed to getNextDateFrom, not (only) the CronTime
+  // constructor — the constructor's zone is used by CronJob scheduling, but
+  // getNextDateFrom derives its zone from the start argument unless one is
+  // given explicitly.
+  return new CronTime(expr, timezone).getNextDateFrom(from, timezone).toJSDate();
 }
 
 /**
