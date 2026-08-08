@@ -414,7 +414,7 @@ model Circle {
   // supersedes the former LocationSuggestionRun-only relation, issue #190)
   reviewRuns            ReviewRun[]
   // Notification Center relations (epic #240, issue #244; schema-only)
-  notifications         Notification[]       @relation("CircleNotifications")
+  notifications         Notification[]        @relation("CircleNotifications")
 
   @@index([ownerId])
   @@map("circles")
@@ -601,6 +601,10 @@ model MediaItem {
   @@index([burstGroupId])
   @@index([duplicateGroupId])
   @@index([circleId, perceptualHash])
+  // Serves the Local Media Backup feed's cursor-based incremental scan
+  // (node backup runs page media_items by updatedAt with an id tiebreak).
+  // See NodeBackupConfig/NodeBackupRun below (issue #310, epic #308).
+  @@index([updatedAt, id])
   // NOTE: a hand-authored partial composite index "media_items_map_locations_idx"
   // ON (circle_id, captured_at DESC, taken_lat, taken_lng) WHERE deleted_at IS NULL
   // AND archived_at IS NULL AND taken_lat IS NOT NULL AND taken_lng IS NOT NULL
@@ -1413,8 +1417,11 @@ model WorkerNode {
   createdById     String     @map("created_by_id") @db.Uuid
 
   // Relations
-  createdBy   User            @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  claimedJobs EnrichmentJob[]
+  createdBy    User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  claimedJobs  EnrichmentJob[]
+  // Local Media Backup relations (issue #310, epic #308)
+  backupConfig NodeBackupConfig?
+  backupRuns   NodeBackupRun[]
 
   // Idempotent register-or-reattach: a containerized replica re-registering
   // under the same (owner, name) re-attaches to its existing row instead of
@@ -1446,6 +1453,109 @@ model NodeCredential {
 
   @@index([userId])
   @@map("node_credentials")
+}
+
+// =============================================================================
+// Local Media Backup via Worker Nodes (issue #310, epic #308)
+// =============================================================================
+//
+// Prisma-schema foundation only — no service/API/CLI logic lands in this
+// change. A worker node can run a local backup feed that pulls a circle
+// owner's media down to local disk. NodeBackupConfig is the per-node
+// schedule/scope/checkpoint; NodeBackupRun is one execution attempt's
+// progress/outcome, mirroring the WorkerNode job-run pattern already used
+// elsewhere (e.g. StorageMigrationRun, TrashEmptyRun).
+
+enum NodeBackupRunKind {
+  incremental
+  reconcile
+}
+
+enum NodeBackupRunStatus {
+  running
+  completed
+  failed
+  aborted
+  stale
+}
+
+// Per-node backup configuration; at most one row per WorkerNode (1:1).
+// circleIds empty = ALL circles the node owner belongs to. The checkpoint
+// columns track the cursor position of the last successfully-acknowledged
+// item in the incremental media_items (updated_at, id) scan (see the
+// media_items updatedAt+id index above), so the next run resumes rather
+// than rescanning the whole library.
+model NodeBackupConfig {
+  id      String  @id @default(uuid()) @db.Uuid
+  nodeId  String  @unique @map("node_id") @db.Uuid
+  enabled Boolean @default(true)
+
+  // Schedule
+  scheduleCron String?   @map("schedule_cron") // cron expression; null = manual-trigger only
+  timezone     String? // IANA timezone name the cron is evaluated in
+  nextRunAt    DateTime? @map("next_run_at") @db.Timestamptz(6)
+
+  // Scope
+  circleIds String[] @map("circle_ids") @db.Uuid // empty = ALL circles the owner belongs to
+
+  // Checkpoint (incremental scan cursor)
+  checkpointUpdatedAt DateTime? @map("checkpoint_updated_at") @db.Timestamptz(6)
+  checkpointId        String?   @map("checkpoint_id") @db.Uuid
+  itemsAcked          BigInt    @default(0) @map("items_acked")
+  bytesAcked          BigInt    @default(0) @map("bytes_acked")
+
+  // Run history summary
+  lastRunAt          DateTime? @map("last_run_at") @db.Timestamptz(6)
+  lastCompletedRunAt DateTime? @map("last_completed_run_at") @db.Timestamptz(6)
+  lastReconcileAt    DateTime? @map("last_reconcile_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  node WorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nextRunAt])
+  @@map("node_backup_configs")
+}
+
+// One row per backup run attempt for a node. kind='incremental' scans only
+// media_items updated since the config's checkpoint; kind='reconcile' is a
+// full re-scan/verification pass. The cursor snapshot columns record the
+// (updatedAt, id) window this specific run covered, independent of the
+// config's live checkpoint (which only advances on ack).
+model NodeBackupRun {
+  id      String              @id @default(uuid()) @db.Uuid
+  nodeId  String              @map("node_id") @db.Uuid
+  kind    NodeBackupRunKind
+  status  NodeBackupRunStatus @default(running)
+  trigger String // 'manual' | 'scheduled'
+
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  lastAckAt  DateTime? @map("last_ack_at") @db.Timestamptz(6) // staleness detection
+
+  itemsDownloaded Int    @default(0) @map("items_downloaded")
+  itemsSkipped    Int    @default(0) @map("items_skipped")
+  sidecarsWritten Int    @default(0) @map("sidecars_written")
+  bytesDownloaded BigInt @default(0) @map("bytes_downloaded")
+
+  errorCount Int     @default(0) @map("error_count")
+  lastError  String? @map("last_error")
+  cliVersion String? @map("cli_version")
+
+  // Cursor snapshot for this run's (updatedAt, id) scan window.
+  cursorStartUpdatedAt DateTime? @map("cursor_start_updated_at") @db.Timestamptz(6)
+  cursorStartId        String?   @map("cursor_start_id") @db.Uuid
+  cursorEndUpdatedAt   DateTime? @map("cursor_end_updated_at") @db.Timestamptz(6)
+  cursorEndId          String?   @map("cursor_end_id") @db.Uuid
+
+  // Relations
+  node WorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, startedAt(sort: Desc)])
+  @@index([status])
+  @@map("node_backup_runs")
 }
 
 // =============================================================================
@@ -1484,20 +1594,20 @@ model MediaEnhancement {
   prompt      String?                   @db.Text
 
   // --- Staged result (pre-decision) ---
-  stagingStorageKey String? @map("staging_storage_key")
+  stagingStorageKey   String? @map("staging_storage_key")
   // Thumbnail derivative of the staged bytes (issue #203), so the /enhancements
   // hub can paint a ~148px card without downloading the full-resolution
   // gpt-image-1 output. Lives on the SAME stagingProvider/stagingBucket (written
   // in the same handler run) and has no StorageObject row of its own; nullable
   // because generation is best-effort and pre-#203 rows never had one.
   stagingThumbnailKey String? @map("staging_thumbnail_key")
-  stagingProvider   String? @map("staging_provider")
-  stagingBucket     String? @map("staging_bucket")
-  originalWidth     Int?    @map("original_width")
-  originalHeight    Int?    @map("original_height")
-  enhancedWidth     Int?    @map("enhanced_width")
-  enhancedHeight    Int?    @map("enhanced_height")
-  enhancedSize      BigInt? @map("enhanced_size")
+  stagingProvider     String? @map("staging_provider")
+  stagingBucket       String? @map("staging_bucket")
+  originalWidth       Int?    @map("original_width")
+  originalHeight      Int?    @map("original_height")
+  enhancedWidth       Int?    @map("enhanced_width")
+  enhancedHeight      Int?    @map("enhanced_height")
+  enhancedSize        BigInt? @map("enhanced_size")
 
   resultMediaItemId String? @map("result_media_item_id") @db.Uuid
   lastError         String? @map("last_error")
@@ -1939,18 +2049,18 @@ enum NotificationType {
 //   media_items_map_locations_idx, people_circle_id_hidden_at_idx, and the
 //   review_run_items partial uniques above.
 model Notification {
-  id          String            @id @default(uuid()) @db.Uuid
-  userId      String            @map("user_id") @db.Uuid
-  circleId    String?           @map("circle_id") @db.Uuid
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  circleId    String?          @map("circle_id") @db.Uuid
   type        NotificationType
   title       String
   body        String?
   link        String?
-  data        Json?             @db.JsonB
-  readAt      DateTime?         @map("read_at") @db.Timestamptz
-  dismissedAt DateTime?         @map("dismissed_at") @db.Timestamptz
-  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  data        Json?            @db.JsonB
+  readAt      DateTime?        @map("read_at") @db.Timestamptz
+  dismissedAt DateTime?        @map("dismissed_at") @db.Timestamptz
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   user   User    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
