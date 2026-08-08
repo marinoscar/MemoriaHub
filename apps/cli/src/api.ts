@@ -51,27 +51,41 @@ export interface WorkflowRunSummary {
   finishedAt: string | null;
 }
 
-export interface BackupRunResult {
-  runId: string;
-  scope: string;
-  copied: number;
-  skipped: number;
-  failed: number;
-  errors: string[];
+// ---------------------------------------------------------------------------
+// Node backup control-plane types (issue #314 — /api/nodes/:id/backup/*)
+// ---------------------------------------------------------------------------
+
+/**
+ * A node's backup configuration as serialized by the server. Shape mirrors
+ * NodeBackupService.serializeConfig (apps/api/src/nodes/node-backup.service.ts);
+ * only the fields the CLI relies on are typed, extra fields pass through.
+ * Byte fields are STRINGS (BigInt-safe serialization).
+ */
+export interface NodeBackupConfig {
+  nodeId: string;
+  enabled: boolean;
+  scheduleCron: string | null;
+  timezone: string | null;
+  /** Empty array = ALL circles the node owner belongs to. */
+  circleIds: string[];
+  [key: string]: unknown;
 }
 
-export interface BackupObject {
-  mediaItemId: string;
-  storageKey: string;
-  downloadUrl: string;
-  originalFilename: string;
-  mimeType: string;
-  size: number;
-  circleId: string;
+/**
+ * Envelope returned by GET/PUT /api/nodes/:id/backup/config. The backup
+ * controller returns `{ config }` at the TOP level (not under `{ data }`), so
+ * parseOk passes it through unchanged. `config` is null only on GET before the
+ * node's backup has ever been configured.
+ */
+export interface NodeBackupConfigResult {
+  config: NodeBackupConfig | null;
 }
 
-export interface BackupObjectsResult {
-  items: BackupObject[];
+export interface UpdateNodeBackupConfigBody {
+  enabled?: boolean;
+  scheduleCron?: string | null;
+  timezone?: string | null;
+  circleIds?: string[];
 }
 
 export class ApiError extends Error {
@@ -379,6 +393,21 @@ export class ApiClient {
     });
   }
 
+  async put<T>(path: string, body: unknown): Promise<T> {
+    return this.run(async () => {
+      const res = await this.fetchWithGate(`${this.baseUrl}${path}`, {
+        method: 'PUT',
+        headers: {
+          ...this.authHeaders(),
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      return this.parseOk<T>(res);
+    });
+  }
+
   /**
    * PUT a raw buffer directly to a presigned URL.
    * No auth header — the URL is pre-signed, and S3 rejects extra auth headers.
@@ -443,13 +472,32 @@ export class ApiClient {
     return res?.items ?? [];
   }
 
-  async triggerBackup(body: { circleId?: string; all?: boolean }): Promise<BackupRunResult> {
-    return this.post<BackupRunResult>('/api/admin/backup', body);
+  // -------------------------------------------------------------------------
+  // Node backup control plane (issue #314) — /api/nodes/:id/backup/*
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get a node's backup configuration. The server returns `{ config: null }`
+   * when backup has never been configured for the node.
+   */
+  getNodeBackupConfig(nodeId: string): Promise<NodeBackupConfigResult> {
+    return this.get<NodeBackupConfigResult>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/config`,
+    );
   }
 
-  async listBackupObjects(circleId?: string): Promise<BackupObjectsResult> {
-    const qs = circleId ? `?circleId=${encodeURIComponent(circleId)}` : '';
-    return this.get<BackupObjectsResult>(`/api/admin/backup/objects${qs}`);
+  /**
+   * Create or update a node's backup configuration (partial upsert — only the
+   * provided keys change). Response matches GET: `{ config }`.
+   */
+  putNodeBackupConfig(
+    nodeId: string,
+    body: UpdateNodeBackupConfigBody,
+  ): Promise<NodeBackupConfigResult> {
+    return this.put<NodeBackupConfigResult>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/config`,
+      body,
+    );
   }
 
   /** Fetch live job queue insights. windowDays defaults to 7 on the server. */
