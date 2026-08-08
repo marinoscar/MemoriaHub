@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useMemo, useState, FormEvent } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate, Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -56,6 +56,7 @@ import {
   Add as AddIcon,
   ContentCopy as ContentCopyIcon,
   Check as CheckIcon,
+  SettingsBackupRestore as BackupSettingsIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkers } from '../../hooks/useWorkers';
@@ -288,6 +289,7 @@ function NodeCredentialRevealDialog({ open, onClose, token }: NodeCredentialReve
 // ---------------------------------------------------------------------------
 
 function WorkersPageContent() {
+  const navigate = useNavigate();
   const { nodes, loading, error, autoRefresh, setAutoRefresh, refresh, deleteWorker } = useWorkers({
     autoRefresh: true,
   });
@@ -349,6 +351,12 @@ function WorkersPageContent() {
 
   const nodeActions = useMemo<DataTableRowAction<WorkerNodeDto>[]>(
     () => [
+      {
+        id: 'backup-settings',
+        label: 'Backup settings',
+        icon: <BackupSettingsIcon fontSize="small" />,
+        onClick: (node) => navigate(`/admin/settings/nodes/${node.id}/backup`),
+      },
       {
         id: 'deregister',
         label: 'Deregister node',
