@@ -13,6 +13,10 @@
  *      emit never called).
  *   6. intervalMs is floored at 1000ms (Math.max(1000, ...) clamp) — a tick
  *      requested at 1ms still only fires once 1000ms have elapsed.
+ *   7. The heap-growth trend (issue #156): omitted until the retained readings
+ *      span MIN_TREND_SPAN_MS, then reported as a MB/hour slope — including
+ *      the case that motivates the span guard, where a bounded GC sawtooth
+ *      over a short window would otherwise regress to a steep phantom leak.
  *
  * Uses Jest fake timers since the module drives its sampling via
  * setInterval. process.env['MEMORIAHUB_MEMWATCH'] is snapshotted/restored
@@ -25,6 +29,9 @@ import {
   startMemoryWatchdog,
   resolveRestartFraction,
   untunedWatchdogOptions,
+  heapGrowthMbPerHour,
+  MIN_TREND_SAMPLES,
+  MIN_TREND_SPAN_MS,
   UNTUNED_WATCHDOG_INTERVAL_MS,
   UNTUNED_RESTART_FRACTION,
 } from '../../src/node/memory-watchdog.js';
@@ -287,5 +294,82 @@ describe('startMemoryWatchdog onCritical', () => {
     expect(emit).toHaveBeenCalledTimes(5);
 
     stop();
+  });
+
+  // -------------------------------------------------------------------------
+  // Heap-growth trend (issue #156)
+  // -------------------------------------------------------------------------
+
+  it('omits the growth trend until the retained readings span MIN_TREND_SPAN_MS, then reports it', () => {
+    const emit = jest.fn();
+    const stop = startMemoryWatchdog(emit, { intervalMs: 60_000 });
+
+    // Just short of the required span — every sample so far must omit the trend.
+    jest.advanceTimersByTime(MIN_TREND_SPAN_MS);
+    expect(emit.mock.calls.length).toBeGreaterThan(MIN_TREND_SAMPLES);
+    for (const call of emit.mock.calls) {
+      const [, s] = call as [MemoryWatchdogLevel, MemorySample];
+      expect(s.heapGrowthMbPerHour).toBeUndefined();
+      expect(s.trendWindowMinutes).toBeUndefined();
+    }
+
+    jest.advanceTimersByTime(60_000);
+    const [, latest] = emit.mock.calls[emit.mock.calls.length - 1] as [
+      MemoryWatchdogLevel,
+      MemorySample,
+    ];
+    expect(typeof latest.heapGrowthMbPerHour).toBe('number');
+    expect(latest.trendWindowMinutes).toBeGreaterThanOrEqual(30);
+
+    stop();
+  });
+});
+
+describe('heapGrowthMbPerHour', () => {
+  const HOUR = 3_600_000;
+
+  /** `count` readings evenly spaced across `spanMs`, valued by `valueAt`. */
+  function series(
+    count: number,
+    spanMs: number,
+    valueAt: (i: number) => number,
+  ): Array<{ atMs: number; heapUsedMb: number }> {
+    const step = spanMs / (count - 1);
+    return Array.from({ length: count }, (_, i) => ({ atMs: i * step, heapUsedMb: valueAt(i) }));
+  }
+
+  it('returns null below MIN_TREND_SAMPLES readings', () => {
+    const points = series(MIN_TREND_SAMPLES - 1, 2 * HOUR, (i) => 100 + i);
+    expect(heapGrowthMbPerHour(points)).toBeNull();
+  });
+
+  it('returns null when the readings span less than MIN_TREND_SPAN_MS', () => {
+    // Plenty of readings, but only a five-minute window — the span guard is
+    // what stops a GC sawtooth from being reported as a steep leak.
+    const points = series(20, MIN_TREND_SPAN_MS - 1000, (i) => 500 + i * 10);
+    expect(heapGrowthMbPerHour(points)).toBeNull();
+  });
+
+  it('measures a steady climb in MB/hour', () => {
+    // +100 MB over 2 hours, sampled every 15 minutes → 50 MB/h.
+    const points = series(9, 2 * HOUR, (i) => 500 + i * 12.5);
+    expect(heapGrowthMbPerHour(points)).toBeCloseTo(50, 1);
+  });
+
+  it('reports a near-flat slope for a bounded GC sawtooth over a full window', () => {
+    // Oscillates around a flat mean: over the module's one-hour window the
+    // alternation regresses to a few MB/h, well under any real leak rate.
+    const points = series(60, HOUR, (i) => 800 + (i % 2 === 0 ? -40 : 40));
+    expect(Math.abs(heapGrowthMbPerHour(points)!)).toBeLessThan(10);
+  });
+
+  it('reports a negative slope when the heap is shrinking', () => {
+    const points = series(6, 2.5 * HOUR, (i) => 1000 - i * 100);
+    expect(heapGrowthMbPerHour(points)!).toBeLessThan(0);
+  });
+
+  it('returns null when every reading shares one instant (no time span)', () => {
+    const points = Array.from({ length: 6 }, () => ({ atMs: 1000, heapUsedMb: 500 }));
+    expect(heapGrowthMbPerHour(points)).toBeNull();
   });
 });

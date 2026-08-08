@@ -17,7 +17,15 @@
  *
  * Client → server commands (one JSON per line):
  *   { cmd: 'status' } | { cmd: 'set-concurrency', value } |
- *   { cmd: 'drain' } | { cmd: 'stop' }
+ *   { cmd: 'drain' } | { cmd: 'stop' } | { cmd: 'heap-snapshot' }
+ *
+ * `heap-snapshot` is the diagnostic escape hatch for issue #156: it makes the
+ * LIVE daemon serialize its V8 heap to a file so a slow leak can be pinned
+ * without restarting the process (a restart discards exactly the accumulated
+ * state you need to inspect). The write is synchronous and stops the world for
+ * seconds on a multi-GB heap — deliberate, since it is an explicit operator
+ * action; in-flight leases are renewed on a far shorter cadence than the
+ * server's lease window, so a stalled tick is harmless.
  *
  * Lifecycle safety:
  *   - A stale pidfile (dead pid) is removed; a live one refuses startup.
@@ -34,8 +42,22 @@ import { nodePidPath, nodeSocketPath } from '../paths.js';
 import { loadConfig, saveConfig } from '../config.js';
 import { NdjsonParser, encodeNdjson } from './ndjson.js';
 import { NODE_EV } from './node-events.js';
+import {
+  writeWorkerHeapSnapshot,
+  describeHeapSnapshotResult,
+  type HeapSnapshotOptions,
+  type HeapSnapshotResult,
+} from './heap-snapshot.js';
 import type { NodeEngine } from './node-engine.js';
 import type { NodeLogger } from './logger.js';
+
+/**
+ * Maximum bytes allowed to queue in one IPC client's socket before the daemon
+ * drops it. Sized well above any legitimate burst (a snapshot frame for a
+ * 50-job history is a few KB) and far below anything that matters to a worker's
+ * memory budget. See `send()` for why an unread socket is a genuine retainer.
+ */
+export const MAX_CLIENT_BACKLOG_BYTES = 1024 * 1024;
 
 /** Contents of the daemon pidfile (JSON). */
 export interface DaemonPidInfo {
@@ -52,6 +74,12 @@ export interface DaemonHostOptions {
   /** Number of recent log lines sent to a client on connect (default 20). */
   logTailLines?: number;
   /**
+   * Write-backlog cap per IPC client before it is dropped (default
+   * MAX_CLIENT_BACKLOG_BYTES). Injectable so tests can force the drop without
+   * having to queue a megabyte of frames.
+   */
+  maxClientBacklogBytes?: number;
+  /**
    * Persist a live concurrency change (default: write NodeConfig.concurrency
    * via loadConfig/saveConfig; no-op when no config exists). Injectable so
    * tests/harnesses never touch the real ~/.memoriahub/config.json.
@@ -59,6 +87,12 @@ export interface DaemonHostOptions {
   persistConcurrency?: (n: number) => void;
   /** Process-exit hook used by the 'stop' command (default process.exit). */
   exit?: (code: number) => void;
+  /**
+   * Heap-snapshot writer for the 'heap-snapshot' command (default
+   * `writeWorkerHeapSnapshot`). Injectable so tests exercise the command
+   * without serializing a real multi-hundred-MB Jest heap to disk.
+   */
+  heapSnapshotFn?: (opts?: HeapSnapshotOptions) => HeapSnapshotResult;
 }
 
 export interface DaemonHost {
@@ -135,8 +169,10 @@ export async function startDaemonHost(
   const socketPath = opts.socketPath ?? nodeSocketPath();
   const pidPath = opts.pidPath ?? nodePidPath();
   const logTailLines = opts.logTailLines ?? 20;
+  const maxBacklogBytes = opts.maxClientBacklogBytes ?? MAX_CLIENT_BACKLOG_BYTES;
   const persistConcurrency = opts.persistConcurrency ?? defaultPersistConcurrency;
   const exit = opts.exit ?? ((code: number) => process.exit(code));
+  const writeHeapSnapshot = opts.heapSnapshotFn ?? writeWorkerHeapSnapshot;
   const isWindows = os.platform() === 'win32';
 
   // ---- Stale-instance detection -------------------------------------------
@@ -177,6 +213,25 @@ export async function startDaemonHost(
   let closed = false;
 
   const send = (socket: net.Socket, frame: Record<string, unknown>): void => {
+    // A client that stops reading (suspended terminal, SIGSTOP'd TUI, a peer
+    // that half-closed without us noticing) does NOT make write() fail — Node
+    // buffers the frame in the socket's writable queue instead. Under
+    // sustained load the daemon emits several frames per job, so an unnoticed
+    // stalled reader turns into an unbounded, job-count-linear accumulation of
+    // strings on the heap. Issue #156's audit recorded the IPC host as
+    // "buffers nothing per event", which is only true of a reader that keeps
+    // up. Drop a client whose backlog crosses the cap: this is a diagnostic
+    // channel, and a detached dashboard is worth strictly less than the
+    // worker's memory.
+    if (socket.writableLength > maxBacklogBytes) {
+      logger.warn('dropping unresponsive ipc client (write backlog exceeded)', {
+        backlogBytes: socket.writableLength,
+        limitBytes: maxBacklogBytes,
+      });
+      clients.delete(socket);
+      socket.destroy();
+      return;
+    }
     try {
       socket.write(encodeNdjson(frame));
     } catch {
@@ -213,6 +268,23 @@ export async function startDaemonHost(
         }
         logger.info('concurrency changed via ipc', { value });
         send(socket, { kind: 'ack', cmd: 'set-concurrency', value });
+        break;
+      }
+      case 'heap-snapshot': {
+        const res = writeHeapSnapshot({ reason: 'manual' });
+        const summary = describeHeapSnapshotResult(res);
+        logger.log(res.ok ? 'info' : 'warn', { ev: 'heap-snapshot', msg: summary, ...res });
+        if (!res.ok) {
+          send(socket, { kind: 'error', message: summary });
+          break;
+        }
+        send(socket, {
+          kind: 'ack',
+          cmd: 'heap-snapshot',
+          path: res.path,
+          bytes: res.bytes,
+          durationMs: res.durationMs,
+        });
         break;
       }
       case 'drain': {

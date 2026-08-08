@@ -92,6 +92,11 @@ import {
 } from '../node/runtime-tuning.js';
 import { startMemoryWatchdog } from '../node/memory-watchdog.js';
 import {
+  writeWorkerHeapSnapshot,
+  describeHeapSnapshotResult,
+  heapSnapshotsEnabled,
+} from '../node/heap-snapshot.js';
+import {
   detectLinuxDistro,
   ensureNpmNativeDeps,
   ensureFfmpeg,
@@ -729,11 +734,29 @@ function startCmd(): Command {
         // caused. No work is lost: drained/expired job leases are re-queued
         // server-side. Drain is bounded so a stuck job can't wedge the exit.
         // Disable with MEMORIAHUB_HEAP_RESTART_FRACTION=0.
+        //
+        // Before draining, capture a heap snapshot (issue #156). This ordering
+        // is the whole point: V8's own --heapsnapshot-near-heap-limit only
+        // fires at genuine near-OOM, which is ABOVE this threshold, so on a
+        // hardened worker the valve would otherwise recycle the process
+        // forever and the retainer could never be named. Taking it here — at
+        // ~90% of a raised ceiling, with hours of accumulation behind it — is
+        // also a better snapshot than one taken mid-crash. Opt out with
+        // MEMORIAHUB_HEAP_SNAPSHOT=0; guarded by a disk pre-flight and a
+        // keep-newest-N retention so it can never fill the volume.
         let memoryRestarting = false;
         startMemoryWatchdog((level, s) => logger.log(level, { ev: 'memory', ...s }), {
           onCritical: (s) => {
             if (memoryRestarting) return;
             memoryRestarting = true;
+            const snap = writeWorkerHeapSnapshot({ reason: 'critical' });
+            const snapSummary = describeHeapSnapshotResult(snap);
+            logger.log(snap.ok ? 'error' : 'warn', {
+              ev: 'heap-snapshot',
+              msg: snapSummary,
+              ...snap,
+            });
+            if (snap.ok) ui.warn(`Heap snapshot written: ${snap.path}`);
             logger.log('error', {
               ev: 'memory-restart',
               msg: 'heapUsed crossed the restart threshold — draining and exiting for a supervised restart',
@@ -1077,6 +1100,66 @@ function setConcurrencyCmd(): Command {
       const cfg = requireConfig();
       saveConfig({ ...cfg, node: { ...cfg.node, concurrency: n } });
       ui.success(`Concurrency ${n} saved to config (applies on the next \`node start\`).`);
+    });
+
+  return cmd;
+}
+
+// ---------------------------------------------------------------------------
+// node heap-snapshot — capture a V8 heap snapshot from the running daemon
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask the RUNNING daemon to serialize its heap (issue #156). This must go
+ * through IPC rather than snapshotting the CLI process: the leak lives in the
+ * long-lived worker, and the accumulated state that names the retainer is
+ * exactly what a restart would throw away.
+ */
+function heapSnapshotCmd(): Command {
+  const cmd = new Command('heap-snapshot');
+  cmd
+    .description(
+      'Write a V8 heap snapshot from the running worker daemon (memory-leak diagnosis)',
+    )
+    .action(async () => {
+      if (!heapSnapshotsEnabled()) {
+        ui.error('Heap snapshots are disabled (MEMORIAHUB_HEAP_SNAPSHOT=0).');
+        process.exit(1);
+      }
+      if (!(await isDaemonRunning())) {
+        ui.error('No worker node daemon is running — nothing to snapshot.');
+        ui.info(
+          'Start one with `memoriahub node start --daemon` (or the container/systemd service), ' +
+            'let it run under load, then re-run this command.',
+        );
+        process.exit(1);
+      }
+
+      try {
+        const client = await connectToDaemon();
+        client.send({ cmd: 'heap-snapshot' });
+        // Serializing a multi-GB heap stops the world for seconds — wait well
+        // past the default 5s reply timeout rather than reporting a false
+        // failure for a snapshot that is actually being written.
+        const msg: DaemonMessage = await client.waitFor(
+          (m) => m.kind === 'ack' || m.kind === 'error',
+          180_000,
+        );
+        client.close();
+        if (msg.kind === 'error') {
+          ui.error(String(msg['message'] ?? 'daemon could not write a heap snapshot'));
+          process.exit(1);
+        }
+        const mb = Math.round(Number(msg['bytes'] ?? 0) / (1024 * 1024));
+        ui.success(`Heap snapshot written: ${String(msg['path'])} (${mb} MB)`);
+        ui.info(
+          'Open it in Chrome DevTools → Memory → Load and sort by Retained Size; ' +
+            'the top constructor names the retainer.',
+        );
+      } catch (err) {
+        ui.error(`Heap snapshot request failed: ${(err as Error).message}`);
+        process.exit(1);
+      }
     });
 
   return cmd;
@@ -1688,6 +1771,7 @@ export function nodeCommand(): Command {
   cmd.addCommand(statusCmd());
   cmd.addCommand(logsCmd());
   cmd.addCommand(setConcurrencyCmd());
+  cmd.addCommand(heapSnapshotCmd());
   cmd.addCommand(serviceCmd());
   cmd.addCommand(listCmd());
   cmd.addCommand(doctorCmd());
