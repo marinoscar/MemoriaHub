@@ -1,97 +1,229 @@
 /**
- * commands/backup.ts — `memoriahub backup` command.
+ * commands/backup.ts — `memoriahub backup` command family (issue #314, epic #308).
  *
- * Pulls media blobs from the server to a local destination directory.
- * Requires an admin PAT. Uses GET /api/admin/backup/objects to enumerate
- * items with signed download URLs, then downloads each to --dest.
+ * v1 of the node-based local backup replaces the old admin-PAT blob puller
+ * (the v0 `backup --dest` command and its run-backup engine were removed):
  *
- * The enumerate → download loop lives in the UI-agnostic `runBackup` engine
- * (src/backup/run-backup.ts); this command is a thin headless renderer over
- * its `onProgress` events, so a future Ink TUI can reuse the same core.
+ *   memoriahub backup init --dest <dir> [--node-name <name>] [--circles <ids>]
+ *       Bind this machine to a backup root: register a worker node if needed,
+ *       enable backup server-side, create the root skeleton + SQLite catalog,
+ *       and persist the binding locally. Engine: src/backup/init-backup.ts.
  *
- * Usage:
- *   memoriahub backup --circle <id> --dest <path>
- *   memoriahub backup --all --dest <path>
+ *   memoriahub backup run
+ *       Stub — the sync engine lands in the next release.
+ *
+ * All terminal output lives here; the engines never print.
  */
+
+import * as os from 'node:os';
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
-import { requireConfig } from '../config.js';
-import { ApiClient } from '../api.js';
-import { runBackup, type BackupProgress, type BackupResult } from '../backup/run-backup.js';
-import { ui } from '../ui.js';
+import { loadConfig, requireConfig, saveConfig, type CliConfig } from '../config.js';
+import { ApiClient, ApiError } from '../api.js';
+import { getDb } from '../db/database.js';
+import { SettingsRepo } from '../repo/settings.js';
+import { registerWorkerNode } from '../node/register.js';
+import {
+  enrollNode,
+  defaultNodeCredentialName,
+  NodeEnrollmentUnsupportedError,
+} from '../node/enroll.js';
+import { runDeviceLogin } from '../device-login.js';
+import { runBackupInit, BackupRootConflictError } from '../backup/init-backup.js';
+import { CATALOG_DB_REL_PATH } from '../backup/layout.js';
+import { ui, isTTY } from '../ui.js';
+
+const require = createRequire(import.meta.url);
+
+/** CLI version read from package.json at runtime (same pattern as commands/node.ts). */
+function cliVersion(): string {
+  try {
+    const pkg = require('../../package.json') as { version: string };
+    return pkg.version;
+  } catch {
+    return '0.0.0';
+  }
+}
+
+/** Parse the --circles csv into a trimmed, de-duplicated id list. */
+function parseCircleIds(csv: string | undefined): string[] {
+  if (!csv) return [];
+  return [...new Set(csv.split(',').map((s) => s.trim()).filter((s) => s.length > 0))];
+}
+
+/**
+ * When the stored token is NOT a durable node credential (`nod_`) and stdin is
+ * interactive, offer the `node enroll` flow so the backup node runs on a
+ * least-privilege, never-expiring credential instead of a PAT that will
+ * expire. Returns the (possibly refreshed) config.
+ */
+async function maybeOfferEnroll(cfg: CliConfig): Promise<CliConfig> {
+  if (cfg.pat.startsWith('nod_') || !isTTY || !process.stdin.isTTY) return cfg;
+
+  ui.info(
+    'Your stored token is a personal access token (PAT). Backups run unattended, ' +
+      'so a durable node credential is recommended.',
+  );
+  const rl = readline.createInterface({ input, output });
+  let answer: string;
+  try {
+    answer = (await rl.question('Mint a node credential now (opens browser login)? [y/N] ')).trim();
+  } finally {
+    rl.close();
+  }
+  if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+    ui.dim('Keeping the existing PAT.');
+    return cfg;
+  }
+
+  try {
+    const result = await enrollNode(
+      { serverUrl: cfg.serverUrl, name: defaultNodeCredentialName(), cfg },
+      {
+        deviceLogin: (url) => runDeviceLogin(url, 'MemoriaHub Backup Enrollment'),
+        makeApi: (o) => new ApiClient(o),
+        saveConfigFn: saveConfig,
+      },
+    );
+    ui.success(`Node credential minted: ${result.credential.name}`);
+  } catch (err) {
+    if (err instanceof NodeEnrollmentUnsupportedError) {
+      ui.warn(err.message);
+      ui.dim('Continuing with the existing PAT.');
+      return cfg;
+    }
+    throw err;
+  }
+
+  // enrollNode persisted the new token — re-read the config.
+  const refreshed = loadConfig();
+  return refreshed ?? cfg;
+}
+
+function initCmd(): Command {
+  return new Command('init')
+    .description('Initialize a local backup root on this machine')
+    .requiredOption('--dest <dir>', 'Backup root directory (created if missing)')
+    .option('--node-name <name>', 'Worker-node name when registering (default: backup-<hostname>)')
+    .option('--circles <ids>', 'Comma-separated circle IDs to back up (default: all your circles)')
+    .addHelpText(
+      'after',
+      '\nThe backup catalog is written to <dest>/' +
+        CATALOG_DB_REL_PATH +
+        ' — a plain SQLite\nfile you can inspect directly with any sqlite3 client ' +
+        '(e.g. `sqlite3 <dest>/' +
+        CATALOG_DB_REL_PATH +
+        ' "SELECT count(*) FROM items"`).\n\n' +
+        'Re-running init against the same --dest re-binds and refreshes the root without\n' +
+        'touching the existing catalog. Only one backup root per machine is supported.',
+    )
+    .action(async (opts: { dest: string; nodeName?: string; circles?: string }) => {
+      let cfg = requireConfig();
+
+      // Offer the least-privilege enroll flow before any API call.
+      try {
+        cfg = await maybeOfferEnroll(cfg);
+      } catch (err) {
+        ui.error(`Enrollment failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+
+      const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+      const settings = new SettingsRepo(getDb());
+      const nodeName = opts.nodeName ?? cfg.node?.name ?? `backup-${os.hostname()}`;
+      const circleIds = parseCircleIds(opts.circles);
+
+      let result;
+      try {
+        result = await runBackupInit(
+          {
+            destDir: opts.dest,
+            existingNodeId: cfg.nodeId ?? null,
+            nodeName,
+            circleIds,
+            serverUrl: cfg.serverUrl,
+          },
+          {
+            api,
+            settings,
+            registerNode: async (name) => {
+              ui.step(`Registering this machine as worker node "${name}"…`);
+              const reg = await registerWorkerNode({
+                cfg,
+                api,
+                name,
+                concurrency: cfg.node?.concurrency ?? 1,
+                requestedTypes: cfg.node?.eligibleTypes ?? [],
+                faceProvider: cfg.node?.faceProvider ?? 'compreface',
+                comprefaceUrl: cfg.node?.comprefaceUrl,
+                cliVersion: cliVersion(),
+              });
+              return { nodeId: reg.nodeId, reattached: reg.reattached };
+            },
+          },
+        );
+      } catch (err) {
+        if (err instanceof BackupRootConflictError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        if (err instanceof ApiError) {
+          if (err.status === 403) {
+            ui.error(
+              'This token is not permitted to manage worker-node backups ' +
+                '(jobs:write required).',
+            );
+          } else {
+            ui.error(`Backup init failed (HTTP ${err.status}): ${err.serverMessage}`);
+          }
+          process.exit(1);
+        }
+        ui.error(`Backup init failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+
+      ui.blank();
+      if (result.registeredNode) {
+        ui.success(
+          result.reattached
+            ? `Re-attached to existing worker node (${result.nodeId})`
+            : `Registered worker node (${result.nodeId})`,
+        );
+      }
+      ui.success(
+        result.reinitialized
+          ? `Backup root re-bound: ${result.root}`
+          : `Backup root initialized: ${result.root}`,
+      );
+      ui.dim(`  Node        : ${result.nodeId}`);
+      ui.dim(
+        `  Circles     : ${result.config.circleIds.length > 0 ? result.config.circleIds.join(', ') : 'all your circles'}`,
+      );
+      ui.dim(`  Catalog     : ${result.root}/${CATALOG_DB_REL_PATH} (plain SQLite — query it directly)`);
+      ui.blank();
+      ui.info('Run `memoriahub backup run` once the sync engine ships in the next release.');
+    });
+}
+
+function runCmd(): Command {
+  return new Command('run')
+    .description('Run a backup sync (not available yet)')
+    .action(() => {
+      ui.error(
+        '`backup run` is not available yet — the sync engine lands in the next release. ' +
+          'Use `memoriahub backup init` to prepare a backup root now.',
+      );
+      process.exit(1);
+    });
+}
 
 export function backupCommand(): Command {
   const cmd = new Command('backup');
   cmd
-    .description('Pull media blobs from the server to a local directory')
-    .option('--circle <id>', 'Circle ID to back up')
-    .option('--all', 'Back up all circles')
-    .requiredOption('--dest <path>', 'Destination directory for backup')
-    .action(async (options: { circle?: string; all?: boolean; dest: string }) => {
-      // 1. Validate options
-      if (!options.circle && !options.all) {
-        ui.error('Provide either --circle <id> or --all');
-        process.exit(1);
-      }
-
-      // 2. Get config (exits with error message if not logged in)
-      const config = requireConfig();
-      const api = new ApiClient({ serverUrl: config.serverUrl, pat: config.pat });
-
-      // Renderer: turn engine progress events into the same terminal output
-      // the command emitted when the loop was inlined.
-      const onProgress = (p: BackupProgress): void => {
-        // Post-listing event: total known, no per-item detail yet.
-        if (p.phase === 'downloading' && !p.item) {
-          ui.info(`Found ${p.total} item(s) to back up`);
-          return;
-        }
-
-        // Per-item event.
-        if (p.item) {
-          switch (p.item.outcome) {
-            case 'skipped':
-              ui.dim(`Skipped (already exists): ${p.item.originalFilename}`);
-              break;
-            case 'downloaded':
-              ui.success(`Downloaded: ${p.item.originalFilename} → ${p.item.localFile}`);
-              break;
-            case 'failed':
-              ui.error(`Failed: ${p.item.originalFilename}: ${p.item.error}`);
-              break;
-          }
-        }
-        // 'done' event carries no per-item output; summary printed below.
-      };
-
-      // 3. Run the backup engine. A listing failure throws.
-      let result: BackupResult;
-      try {
-        result = await runBackup(
-          api,
-          { circle: options.circle, all: options.all, dest: options.dest },
-          onProgress,
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        ui.error(`Failed to list backup objects: ${msg}`);
-        process.exit(1);
-      }
-
-      // 4. Nothing-to-do path.
-      if (result.total === 0) {
-        ui.success('Nothing to back up.');
-        process.exit(0);
-      }
-
-      ui.blank();
-      ui.step(
-        `Backup complete: ${result.downloaded} downloaded, ${result.skipped} skipped, ${result.failed} failed`,
-      );
-
-      if (result.failed > 0) {
-        process.exit(1);
-      }
-    });
-
+    .description('Local media backup to a folder on this machine (node-based)')
+    .addCommand(initCmd())
+    .addCommand(runCmd());
   return cmd;
 }

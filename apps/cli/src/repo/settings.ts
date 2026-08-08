@@ -113,6 +113,28 @@ export class SettingsRepo {
   }
 
   // ---------------------------------------------------------------------------
+  // Local backup binding (issue #314 — keys: backup.root, backup.nodeId)
+  // ---------------------------------------------------------------------------
+
+  /** Absolute path of the machine's single configured backup root (null = none). */
+  backupRoot(): string | null {
+    return this.get<string | null>('backup.root', null);
+  }
+
+  setBackupRoot(root: string): void {
+    this.set('backup.root', root);
+  }
+
+  /** Worker-node id the backup root is bound to (null = not initialized). */
+  backupNodeId(): string | null {
+    return this.get<string | null>('backup.nodeId', null);
+  }
+
+  setBackupNodeId(nodeId: string): void {
+    this.set('backup.nodeId', nodeId);
+  }
+
+  // ---------------------------------------------------------------------------
   // Update-check throttle cache (keys: update_check_last_at, update_check_latest_version)
   // ---------------------------------------------------------------------------
 
