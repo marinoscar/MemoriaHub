@@ -38,6 +38,7 @@ export interface ResolvedSettings {
   reviewRuns: SystemSettingsValue['reviewRuns'];
   notifications: SystemSettingsValue['notifications'];
   pictureEnhancement: SystemSettingsValue['pictureEnhancement'];
+  backup: SystemSettingsValue['backup'];
   workflows: SystemSettingsValue['workflows'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
@@ -139,6 +140,7 @@ export class SystemSettingsService {
       reviewRuns: value.reviewRuns,
       notifications: value.notifications,
       pictureEnhancement: value.pictureEnhancement,
+      backup: value.backup,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
@@ -235,6 +237,7 @@ export class SystemSettingsService {
       reviewRuns: value.reviewRuns,
       notifications: value.notifications,
       pictureEnhancement: value.pictureEnhancement,
+      backup: value.backup,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
@@ -634,6 +637,7 @@ export class SystemSettingsService {
       reviewRuns: value.reviewRuns,
       notifications: value.notifications,
       pictureEnhancement: value.pictureEnhancement,
+      backup: value.backup,
       workflows: value.workflows,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
