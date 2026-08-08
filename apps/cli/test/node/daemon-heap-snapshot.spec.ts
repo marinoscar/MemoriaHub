@@ -18,6 +18,7 @@
 
 import { jest } from '@jest/globals';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -80,7 +81,10 @@ describe('daemon heap-snapshot command', () => {
   let logger: ReturnType<typeof stubLogger>;
   let heapSnapshotFn: jest.Mock<() => HeapSnapshotResult>;
 
-  async function startHost(result: HeapSnapshotResult): Promise<void> {
+  async function startHost(
+    result: HeapSnapshotResult,
+    hostOpts: { maxClientBacklogBytes?: number } = {},
+  ): Promise<void> {
     socketPath = tmpPath('node.sock');
     logger = stubLogger();
     heapSnapshotFn = jest.fn<() => HeapSnapshotResult>(() => result);
@@ -107,6 +111,7 @@ describe('daemon heap-snapshot command', () => {
       persistConcurrency: () => {},
       exit: () => {},
       heapSnapshotFn: heapSnapshotFn as never,
+      ...hostOpts,
     });
 
     void engine.start();
@@ -154,4 +159,50 @@ describe('daemon heap-snapshot command', () => {
     expect(status.kind).toBe('ack');
     expect(engine.getSnapshot().concurrency).toBe(3);
   });
+
+  // ---------------------------------------------------------------------------
+  // Unresponsive-client backpressure (issue #156)
+  // ---------------------------------------------------------------------------
+
+  it('drops a client whose write backlog exceeds the cap instead of buffering forever', async () => {
+    // A client that stops reading does not make write() fail — Node queues the
+    // frames on the heap. With several frames emitted per job, an unnoticed
+    // stalled reader is a job-count-linear retainer, so the daemon must shed it.
+    await startHost(
+      { ok: true, path: '/tmp/unused.heapsnapshot', bytes: 0, durationMs: 0 },
+      { maxClientBacklogBytes: 4096 },
+    );
+
+    // Raw socket, never read from: `data` is deliberately not consumed and the
+    // stream is paused, so the daemon's writes back up.
+    const raw = net.connect(socketPath);
+    await new Promise<void>((resolve, reject) => {
+      raw.once('connect', () => resolve());
+      raw.once('error', reject);
+    });
+    raw.pause();
+
+    // Emit enough large frames to overflow the kernel buffer and push the
+    // daemon's own writable queue past the (tiny, injected) cap.
+    const bigError = 'x'.repeat(64 * 1024);
+    for (let i = 0; i < 64; i += 1) {
+      engine.emit(NODE_EV.JOB_ERROR, {
+        jobId: `job-${i}`,
+        type: 'face_detection',
+        error: bigError,
+        willRetry: true,
+      });
+    }
+
+    // Assert on the daemon's own log rather than the client's 'close': a
+    // paused readable with buffered data does not emit 'close' until that data
+    // is consumed, so the peer is the wrong place to observe the drop.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(logger.lines.some((l) => l.includes('dropping unresponsive ipc client'))).toBe(true);
+    raw.destroy();
+
+    // Shedding the stalled client must not disturb the control plane.
+    const reply = await sendCommand(socketPath, { cmd: 'set-concurrency', value: 2 });
+    expect(reply.kind).toBe('ack');
+  }, 15_000);
 });

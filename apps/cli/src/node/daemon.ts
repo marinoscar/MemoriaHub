@@ -51,6 +51,14 @@ import {
 import type { NodeEngine } from './node-engine.js';
 import type { NodeLogger } from './logger.js';
 
+/**
+ * Maximum bytes allowed to queue in one IPC client's socket before the daemon
+ * drops it. Sized well above any legitimate burst (a snapshot frame for a
+ * 50-job history is a few KB) and far below anything that matters to a worker's
+ * memory budget. See `send()` for why an unread socket is a genuine retainer.
+ */
+export const MAX_CLIENT_BACKLOG_BYTES = 1024 * 1024;
+
 /** Contents of the daemon pidfile (JSON). */
 export interface DaemonPidInfo {
   pid: number;
@@ -65,6 +73,12 @@ export interface DaemonHostOptions {
   pidPath?: string;
   /** Number of recent log lines sent to a client on connect (default 20). */
   logTailLines?: number;
+  /**
+   * Write-backlog cap per IPC client before it is dropped (default
+   * MAX_CLIENT_BACKLOG_BYTES). Injectable so tests can force the drop without
+   * having to queue a megabyte of frames.
+   */
+  maxClientBacklogBytes?: number;
   /**
    * Persist a live concurrency change (default: write NodeConfig.concurrency
    * via loadConfig/saveConfig; no-op when no config exists). Injectable so
@@ -155,6 +169,7 @@ export async function startDaemonHost(
   const socketPath = opts.socketPath ?? nodeSocketPath();
   const pidPath = opts.pidPath ?? nodePidPath();
   const logTailLines = opts.logTailLines ?? 20;
+  const maxBacklogBytes = opts.maxClientBacklogBytes ?? MAX_CLIENT_BACKLOG_BYTES;
   const persistConcurrency = opts.persistConcurrency ?? defaultPersistConcurrency;
   const exit = opts.exit ?? ((code: number) => process.exit(code));
   const writeHeapSnapshot = opts.heapSnapshotFn ?? writeWorkerHeapSnapshot;
@@ -198,6 +213,25 @@ export async function startDaemonHost(
   let closed = false;
 
   const send = (socket: net.Socket, frame: Record<string, unknown>): void => {
+    // A client that stops reading (suspended terminal, SIGSTOP'd TUI, a peer
+    // that half-closed without us noticing) does NOT make write() fail — Node
+    // buffers the frame in the socket's writable queue instead. Under
+    // sustained load the daemon emits several frames per job, so an unnoticed
+    // stalled reader turns into an unbounded, job-count-linear accumulation of
+    // strings on the heap. Issue #156's audit recorded the IPC host as
+    // "buffers nothing per event", which is only true of a reader that keeps
+    // up. Drop a client whose backlog crosses the cap: this is a diagnostic
+    // channel, and a detached dashboard is worth strictly less than the
+    // worker's memory.
+    if (socket.writableLength > maxBacklogBytes) {
+      logger.warn('dropping unresponsive ipc client (write backlog exceeded)', {
+        backlogBytes: socket.writableLength,
+        limitBytes: maxBacklogBytes,
+      });
+      clients.delete(socket);
+      socket.destroy();
+      return;
+    }
     try {
       socket.write(encodeNdjson(frame));
     } catch {
