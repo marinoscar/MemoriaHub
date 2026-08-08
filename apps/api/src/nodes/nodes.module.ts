@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { NodesService } from './nodes.service';
 import { NodeBackupQueryService } from './node-backup-query.service';
+import { NodeBackupService } from './node-backup.service';
+import { NodeBackupController } from './node-backup.controller';
+import { NodeBackupStaleTask } from './node-backup-stale.task';
 import { NodesController } from './nodes.controller';
 import { NodesAdminController } from './nodes-admin.controller';
 import { NodeCredentialsController } from './node-credentials.controller';
@@ -43,8 +46,19 @@ import { TaggingModule } from '../tagging/tagging.module';
     // context, mirroring the PatModule wiring.
     NodeCredentialModule,
   ],
-  controllers: [NodesController, NodesAdminController, NodeCredentialsController],
-  providers: [NodesService, NodeOfflinePruneTask, NodeBackupQueryService],
+  controllers: [
+    NodesController,
+    NodeBackupController,
+    NodesAdminController,
+    NodeCredentialsController,
+  ],
+  providers: [
+    NodesService,
+    NodeOfflinePruneTask,
+    NodeBackupQueryService,
+    NodeBackupService,
+    NodeBackupStaleTask,
+  ],
   exports: [NodeBackupQueryService],
 })
 export class NodesModule {}

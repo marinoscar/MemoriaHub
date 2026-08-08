@@ -18,7 +18,13 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { EnrichmentJob, JobStatus, NodeStatus, WorkerNode } from '@prisma/client';
+import {
+  EnrichmentJob,
+  JobStatus,
+  NodeBackupRunStatus,
+  NodeStatus,
+  WorkerNode,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
@@ -89,9 +95,11 @@ export class NodesService {
   /**
    * Load a node and assert the caller owns it. Throws NotFoundException if the
    * node does not exist, ForbiddenException if it belongs to another user.
-   * Every owner-scoped data-plane call funnels through this.
+   * Every owner-scoped data-plane call funnels through this — including the
+   * node backup control plane (NodeBackupService/NodeBackupController), which
+   * is why it is public.
    */
-  private async assertOwnership(userId: string, nodeId: string): Promise<WorkerNode> {
+  async assertOwnership(userId: string, nodeId: string): Promise<WorkerNode> {
     const node = await this.prisma.workerNode.findUnique({ where: { id: nodeId } });
     if (!node) {
       throw new NotFoundException(`WorkerNode ${nodeId} not found`);
@@ -825,10 +833,60 @@ export class NodesService {
   // listNodes
   // -------------------------------------------------------------------------
 
+  /**
+   * Fold a node's joined backup rows into the `backup` summary surfaced on the
+   * fleet endpoints (owner list/detail + admin list). `null` when the node has
+   * no NodeBackupConfig at all. Deliberately NO lag/pending computation here —
+   * that lives only on GET /nodes/:id/backup/config (issue #312).
+   */
+  private summarizeBackup(
+    backupConfig:
+      | {
+          enabled: boolean;
+          lastCompletedRunAt: Date | null;
+          checkpointUpdatedAt: Date | null;
+        }
+      | null
+      | undefined,
+    runningRuns: Array<{ id: string }> | null | undefined,
+  ): {
+    enabled: boolean;
+    lastCompletedRunAt: Date | null;
+    checkpointUpdatedAt: Date | null;
+    activeRun: boolean;
+  } | null {
+    if (!backupConfig) {
+      return null;
+    }
+    return {
+      enabled: backupConfig.enabled,
+      lastCompletedRunAt: backupConfig.lastCompletedRunAt,
+      checkpointUpdatedAt: backupConfig.checkpointUpdatedAt,
+      activeRun: (runningRuns?.length ?? 0) > 0,
+    };
+  }
+
   async listNodes(userId?: string) {
     const nodes = await this.prisma.workerNode.findMany({
       where: userId ? { createdById: userId } : undefined,
       orderBy: { registeredAt: 'desc' },
+      // Single joined query for the fleet backup summary — the narrow select
+      // keeps NodeBackupConfig's BigInt counters (itemsAcked/bytesAcked) out
+      // of the response path entirely (BigInt is not JSON-serializable).
+      include: {
+        backupConfig: {
+          select: {
+            enabled: true,
+            lastCompletedRunAt: true,
+            checkpointUpdatedAt: true,
+          },
+        },
+        backupRuns: {
+          where: { status: NodeBackupRunStatus.running },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
 
     if (nodes.length === 0) {
@@ -839,11 +897,17 @@ export class NodesService {
     const countsByNode = await this.getJobCountsForNodes(nodeIds);
 
     return nodes.map((node) => {
+      const { backupConfig, backupRuns, ...rest } = node;
       const health = this.deriveNodeHealth(node);
       const jobCounts =
         countsByNode.get(node.id) ?? { running: 0, succeeded: 0, failed: 0 };
 
-      return { ...node, health, jobCounts };
+      return {
+        ...rest,
+        health,
+        jobCounts,
+        backup: this.summarizeBackup(backupConfig, backupRuns),
+      };
     });
   }
 
@@ -860,11 +924,30 @@ export class NodesService {
     const node = await this.assertOwnership(userId, nodeId);
 
     const health = this.deriveNodeHealth(node);
-    const countsByNode = await this.getJobCountsForNodes([nodeId]);
+    const [countsByNode, backupConfig, runningRun] = await Promise.all([
+      this.getJobCountsForNodes([nodeId]),
+      this.prisma.nodeBackupConfig.findUnique({
+        where: { nodeId },
+        select: {
+          enabled: true,
+          lastCompletedRunAt: true,
+          checkpointUpdatedAt: true,
+        },
+      }),
+      this.prisma.nodeBackupRun.findFirst({
+        where: { nodeId, status: NodeBackupRunStatus.running },
+        select: { id: true },
+      }),
+    ]);
     const jobCounts =
       countsByNode.get(nodeId) ?? { running: 0, succeeded: 0, failed: 0 };
 
-    return { ...node, health, jobCounts };
+    return {
+      ...node,
+      health,
+      jobCounts,
+      backup: this.summarizeBackup(backupConfig, runningRun ? [runningRun] : []),
+    };
   }
 
   // -------------------------------------------------------------------------
