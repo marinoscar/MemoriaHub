@@ -1,6 +1,15 @@
-// DB_GATED: This test requires a real PostgreSQL database. It will not run in environments
-// without database connectivity (no POSTGRES_HOST or DATABASE_URL). In CI, ensure the
-// postgres service is available and migrations have been applied before running this suite.
+// DB_GATED: This test requires a real PostgreSQL database. When none is
+// reachable the whole suite is registered via a real `describe.skip`, so Jest
+// reports these tests as SKIPPED — never PASSED (issue #288).
+//
+// The gate is `describeMaybeDb` from test/helpers/db-probe.helper.ts, whose
+// probe is SYNCHRONOUS and evaluated at module load. This file previously
+// gated on env vars alone and probed asynchronously in `beforeAll`, which
+// meant: `.env.test` declares POSTGRES_HOST unconditionally so the `describe`
+// always ran, the async probe resolved long after Jest had already registered
+// the suite, and a per-test `skipIfNoDb` wrapper whose body was
+// `expect(true).toBe(true); return;` turned all 15 tests into vacuous PASSES
+// with no database anywhere. See that helper's header for the full rationale.
 //
 // Purpose: Validate that the post-migration schema invariants hold for the family-circles
 // feature. Specifically:
@@ -14,7 +23,7 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
-import * as net from 'net';
+import { describeMaybeDb } from '../helpers/db-probe.helper';
 
 // ---------------------------------------------------------------------------
 // Build a Postgres connection string from environment variables, mirroring
@@ -32,24 +41,6 @@ function buildConnectionString(): string {
   const dbName = process.env.POSTGRES_DB ?? 'appdb';
   const encoded = encodeURIComponent(password);
   return `postgresql://${user}:${encoded}@${host}:${port}/${dbName}`;
-}
-
-// ---------------------------------------------------------------------------
-// TCP connectivity probe — checks whether the Postgres server is actually
-// listening before we attempt to instantiate PrismaClient, so this suite
-// gracefully skips even when .env.test declares DB variables but no server
-// is running.
-// ---------------------------------------------------------------------------
-
-function probeDbConnectivity(host: string, port: number, timeoutMs = 1500): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    const fail = () => { socket.destroy(); resolve(false); };
-    socket.setTimeout(timeoutMs);
-    socket.once('error', fail);
-    socket.once('timeout', fail);
-    socket.connect(port, host, () => { socket.destroy(); resolve(true); });
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -76,28 +67,16 @@ const TAG_1_ID = padId('tag1');
 const TAG_2_ID = padId('tag2');
 
 // ---------------------------------------------------------------------------
-// Suite guard — only run the describe block when env vars are declared.
-// Within beforeAll we do a real TCP probe and skip if DB is unreachable.
+// Suite guard — `describeMaybeDb` is already resolved (see the header): inside
+// this block the database is known to be reachable, so `prisma` is
+// non-nullable and no test needs a runtime guard.
 // ---------------------------------------------------------------------------
 
-const DB_ENV_VARS_SET = !!(process.env.POSTGRES_HOST || process.env.DATABASE_URL);
-const describeMaybeDb = DB_ENV_VARS_SET ? describe : describe.skip;
-
 describeMaybeDb('Migration Backfill Invariants (DB_GATED: real PostgreSQL)', () => {
-  let prisma: PrismaClient | null = null;
-  let dbReachable = false;
+  let prisma: PrismaClient;
 
   beforeAll(async () => {
-    const host = process.env.POSTGRES_HOST ?? 'localhost';
-    const port = parseInt(process.env.POSTGRES_PORT ?? '5432', 10);
-    dbReachable = await probeDbConnectivity(host, port, 2000);
-
-    if (!dbReachable) {
-      // DB unreachable — tests below will be skipped individually
-      return;
-    }
-
-    // PrismaClient in this project requires the PrismaPg driver adapter
+    // PrismaClient in this project requires the PrismaPg driver adapter.
     const adapter = new PrismaPg(buildConnectionString());
     prisma = new PrismaClient({ adapter } as any);
     await prisma.$connect();
@@ -105,49 +84,36 @@ describeMaybeDb('Migration Backfill Invariants (DB_GATED: real PostgreSQL)', () 
   }, 30000);
 
   afterAll(async () => {
-    if (dbReachable && prisma) {
+    if (prisma) {
       await cleanupTestData(prisma);
       await prisma.$disconnect();
     }
   }, 30000);
-
-  // Helper: resolve immediately with a no-op expectation when DB is unavailable.
-  // This makes the test show as passing-with-note rather than erroring.
-  function skipIfNoDb(testFn: () => Promise<void>): () => Promise<void> {
-    return async () => {
-      if (!dbReachable || !prisma) {
-        // Database is not available in this environment — test is a no-op
-        expect(true).toBe(true); // satisfy Jest's "no assertions" check
-        return;
-      }
-      await testFn();
-    };
-  }
 
   // =========================================================================
   // 1. Every MediaItem created post-migration has a non-null circleId
   // =========================================================================
 
   describe('MediaItem circleId invariant', () => {
-    it('MediaItem has a non-null circleId after creation', skipIfNoDb(async () => {
-      const item = await prisma!.mediaItem.findUnique({ where: { id: MEDIA_1_ID } });
+    it('MediaItem has a non-null circleId after creation', async () => {
+      const item = await prisma.mediaItem.findUnique({ where: { id: MEDIA_1_ID } });
       expect(item).not.toBeNull();
       expect(item!.circleId).not.toBeNull();
       expect(item!.circleId).toBe(CIRCLE_1_ID);
-    }));
+    });
 
-    it('MediaItem created by user 2 belongs to user 2 circle', skipIfNoDb(async () => {
-      const item = await prisma!.mediaItem.findUnique({ where: { id: MEDIA_2_ID } });
+    it('MediaItem created by user 2 belongs to user 2 circle', async () => {
+      const item = await prisma.mediaItem.findUnique({ where: { id: MEDIA_2_ID } });
       expect(item).not.toBeNull();
       expect(item!.circleId).toBe(CIRCLE_2_ID);
-    }));
+    });
 
-    it('addedById is preserved and matches the creating user', skipIfNoDb(async () => {
-      const item1 = await prisma!.mediaItem.findUnique({ where: { id: MEDIA_1_ID } });
-      const item2 = await prisma!.mediaItem.findUnique({ where: { id: MEDIA_2_ID } });
+    it('addedById is preserved and matches the creating user', async () => {
+      const item1 = await prisma.mediaItem.findUnique({ where: { id: MEDIA_1_ID } });
+      const item2 = await prisma.mediaItem.findUnique({ where: { id: MEDIA_2_ID } });
       expect(item1!.addedById).toBe(USER_1_ID);
       expect(item2!.addedById).toBe(USER_2_ID);
-    }));
+    });
   });
 
   // =========================================================================
@@ -155,25 +121,25 @@ describeMaybeDb('Migration Backfill Invariants (DB_GATED: real PostgreSQL)', () 
   // =========================================================================
 
   describe('Album circleId invariant', () => {
-    it('Album has a non-null circleId after creation', skipIfNoDb(async () => {
-      const album = await prisma!.album.findUnique({ where: { id: ALBUM_1_ID } });
+    it('Album has a non-null circleId after creation', async () => {
+      const album = await prisma.album.findUnique({ where: { id: ALBUM_1_ID } });
       expect(album).not.toBeNull();
       expect(album!.circleId).not.toBeNull();
       expect(album!.circleId).toBe(CIRCLE_1_ID);
-    }));
+    });
 
-    it('Album created by user 2 belongs to user 2 circle', skipIfNoDb(async () => {
-      const album = await prisma!.album.findUnique({ where: { id: ALBUM_2_ID } });
+    it('Album created by user 2 belongs to user 2 circle', async () => {
+      const album = await prisma.album.findUnique({ where: { id: ALBUM_2_ID } });
       expect(album).not.toBeNull();
       expect(album!.circleId).toBe(CIRCLE_2_ID);
-    }));
+    });
 
-    it('addedById on Album is preserved', skipIfNoDb(async () => {
-      const album1 = await prisma!.album.findUnique({ where: { id: ALBUM_1_ID } });
-      const album2 = await prisma!.album.findUnique({ where: { id: ALBUM_2_ID } });
+    it('addedById on Album is preserved', async () => {
+      const album1 = await prisma.album.findUnique({ where: { id: ALBUM_1_ID } });
+      const album2 = await prisma.album.findUnique({ where: { id: ALBUM_2_ID } });
       expect(album1!.addedById).toBe(USER_1_ID);
       expect(album2!.addedById).toBe(USER_2_ID);
-    }));
+    });
   });
 
   // =========================================================================
@@ -181,18 +147,18 @@ describeMaybeDb('Migration Backfill Invariants (DB_GATED: real PostgreSQL)', () 
   // =========================================================================
 
   describe('Tag circleId invariant', () => {
-    it('Tag has a non-null circleId after creation', skipIfNoDb(async () => {
-      const tag = await prisma!.tag.findUnique({ where: { id: TAG_1_ID } });
+    it('Tag has a non-null circleId after creation', async () => {
+      const tag = await prisma.tag.findUnique({ where: { id: TAG_1_ID } });
       expect(tag).not.toBeNull();
       expect(tag!.circleId).not.toBeNull();
       expect(tag!.circleId).toBe(CIRCLE_1_ID);
-    }));
+    });
 
-    it('Tag created in user 2 circle has the correct circleId', skipIfNoDb(async () => {
-      const tag = await prisma!.tag.findUnique({ where: { id: TAG_2_ID } });
+    it('Tag created in user 2 circle has the correct circleId', async () => {
+      const tag = await prisma.tag.findUnique({ where: { id: TAG_2_ID } });
       expect(tag).not.toBeNull();
       expect(tag!.circleId).toBe(CIRCLE_2_ID);
-    }));
+    });
   });
 
   // =========================================================================
@@ -200,21 +166,21 @@ describeMaybeDb('Migration Backfill Invariants (DB_GATED: real PostgreSQL)', () 
   // =========================================================================
 
   describe('Personal circle membership invariant', () => {
-    it('circle owner is a circle_admin member of their personal circle', skipIfNoDb(async () => {
-      const membership1 = await prisma!.circleMember.findUnique({
+    it('circle owner is a circle_admin member of their personal circle', async () => {
+      const membership1 = await prisma.circleMember.findUnique({
         where: { circleId_userId: { circleId: CIRCLE_1_ID, userId: USER_1_ID } },
       });
       expect(membership1).not.toBeNull();
       expect(membership1!.role).toBe('circle_admin');
-    }));
+    });
 
-    it('user 2 is a circle_admin of their own personal circle', skipIfNoDb(async () => {
-      const membership2 = await prisma!.circleMember.findUnique({
+    it('user 2 is a circle_admin of their own personal circle', async () => {
+      const membership2 = await prisma.circleMember.findUnique({
         where: { circleId_userId: { circleId: CIRCLE_2_ID, userId: USER_2_ID } },
       });
       expect(membership2).not.toBeNull();
       expect(membership2!.role).toBe('circle_admin');
-    }));
+    });
   });
 
   // =========================================================================
@@ -222,19 +188,19 @@ describeMaybeDb('Migration Backfill Invariants (DB_GATED: real PostgreSQL)', () 
   // =========================================================================
 
   describe('Every user has at least one circle', () => {
-    it('user 1 has at least one circle', skipIfNoDb(async () => {
-      const circles = await prisma!.circle.findMany({
+    it('user 1 has at least one circle', async () => {
+      const circles = await prisma.circle.findMany({
         where: { ownerId: USER_1_ID },
       });
       expect(circles.length).toBeGreaterThanOrEqual(1);
-    }));
+    });
 
-    it('user 2 has at least one circle', skipIfNoDb(async () => {
-      const circles = await prisma!.circle.findMany({
+    it('user 2 has at least one circle', async () => {
+      const circles = await prisma.circle.findMany({
         where: { ownerId: USER_2_ID },
       });
       expect(circles.length).toBeGreaterThanOrEqual(1);
-    }));
+    });
   });
 
   // =========================================================================
@@ -242,35 +208,35 @@ describeMaybeDb('Migration Backfill Invariants (DB_GATED: real PostgreSQL)', () 
   // =========================================================================
 
   describe('Bulk null-check for seeded records', () => {
-    it('no seeded MediaItem has a null circleId', skipIfNoDb(async () => {
-      const items = await prisma!.mediaItem.findMany({
+    it('no seeded MediaItem has a null circleId', async () => {
+      const items = await prisma.mediaItem.findMany({
         where: { id: { in: [MEDIA_1_ID, MEDIA_2_ID] } },
       });
       expect(items).toHaveLength(2);
       items.forEach((item) => {
         expect(item.circleId).not.toBeNull();
       });
-    }));
+    });
 
-    it('no seeded Album has a null circleId', skipIfNoDb(async () => {
-      const albums = await prisma!.album.findMany({
+    it('no seeded Album has a null circleId', async () => {
+      const albums = await prisma.album.findMany({
         where: { id: { in: [ALBUM_1_ID, ALBUM_2_ID] } },
       });
       expect(albums).toHaveLength(2);
       albums.forEach((album) => {
         expect(album.circleId).not.toBeNull();
       });
-    }));
+    });
 
-    it('no seeded Tag has a null circleId', skipIfNoDb(async () => {
-      const tags = await prisma!.tag.findMany({
+    it('no seeded Tag has a null circleId', async () => {
+      const tags = await prisma.tag.findMany({
         where: { id: { in: [TAG_1_ID, TAG_2_ID] } },
       });
       expect(tags).toHaveLength(2);
       tags.forEach((tag) => {
         expect(tag.circleId).not.toBeNull();
       });
-    }));
+    });
   });
 });
 
