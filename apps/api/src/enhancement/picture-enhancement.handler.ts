@@ -16,6 +16,11 @@ import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import {
+  renderThumbnailBuffer,
+  THUMBNAIL_CACHE_CONTROL,
+} from '../storage/processing/thumbnail-render.util';
+import { StorageProvider } from '../storage/providers/storage-provider.interface';
 import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder';
 import { ExifCarryoverService } from './exif-carryover.service';
 
@@ -219,11 +224,22 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
         contentLength: finalBuffer.length,
       });
 
+      // Thumbnail derivative of the staged bytes (issue #203) so the
+      // /enhancements hub can paint a card without downloading the full
+      // gpt-image-1 output. Same provider/bucket as the staged object, so the
+      // existing stagingProvider/stagingBucket columns cover both.
+      const stagingThumbnailKey = await this.uploadStagingThumbnail(
+        row.id,
+        finalBuffer,
+        activeProvider,
+      );
+
       await this.prisma.mediaEnhancement.update({
         where: { id: row.id },
         data: {
           status: MediaEnhancementStatus.ready,
           stagingStorageKey: stagingKey,
+          stagingThumbnailKey,
           stagingProvider: activeProviderId,
           stagingBucket: activeProvider.getBucket(),
           originalWidth: mediaItem.width,
@@ -288,6 +304,42 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       // other error is rethrown untouched for normal retry/backoff.
       if (rl) throw rl;
       throw err;
+    }
+  }
+
+  /**
+   * Render and upload a thumbnail derivative of the staged bytes, returning its
+   * storage key — or `null` if it could not be produced (issue #203).
+   *
+   * Best-effort by contract: a thumbnail is a display optimization, so a
+   * rendering or upload failure must never fail an enhancement whose expensive
+   * `gpt-image-1` call already succeeded. The API then reports
+   * `enhanced.thumbnailUrl: null` and the client falls back to the
+   * full-resolution `enhanced.previewUrl` — the pre-#203 behavior.
+   *
+   * Uploaded to the SAME provider instance the staged bytes just went to, which
+   * is what lets stagingProvider/stagingBucket describe both objects.
+   */
+  private async uploadStagingThumbnail(
+    enhancementId: string,
+    bytes: Buffer,
+    provider: { upload: StorageProvider['upload'] },
+  ): Promise<string | null> {
+    const key = `enhancements/${enhancementId}/thumb.jpg`;
+    try {
+      const thumb = await renderThumbnailBuffer(bytes, { sourceFilename: 'result.jpg' });
+      await provider.upload(key, Readable.from(thumb), {
+        mimeType: 'image/jpeg',
+        contentLength: thumb.length,
+        cacheControl: THUMBNAIL_CACHE_CONTROL,
+      });
+      return key;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `picture_enhancement: staging thumbnail skipped for enhancement ${enhancementId} (non-fatal): ${msg}`,
+      );
+      return null;
     }
   }
 

@@ -358,6 +358,11 @@ describe('PictureEnhancementHandler', () => {
         data: {
           status: MediaEnhancementStatus.ready,
           stagingStorageKey: 'enhancements/enh-1/result.jpg',
+          // Null here because the default mock returns the non-decodable stub
+          // 'enhanced-jpeg-bytes' — thumbnail generation is best-effort and
+          // degrades to null rather than failing the enhancement (issue #203).
+          // The decodable-bytes case is covered in "staging thumbnail" below.
+          stagingThumbnailKey: null,
           stagingProvider: 'r2',
           stagingBucket: 'active-bucket',
           originalWidth: 1200,
@@ -747,6 +752,82 @@ describe('PictureEnhancementHandler', () => {
       expect(readyCall![0].data.enhancedWidth).not.toBe(1536);
       expect(readyCall![0].data.enhancedHeight).not.toBe(1024);
       expect(readyCall![0].data.enhancedSize).toBe(BigInt(realJpeg.length));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Staging thumbnail derivative (issue #203). Needs REAL decodable bytes,
+  // since the renderer runs sharp for real; the default stub bytes elsewhere in
+  // this file exercise the best-effort degradation path instead.
+  // -------------------------------------------------------------------------
+
+  describe('staging thumbnail', () => {
+    async function stageRealJpeg(): Promise<Buffer> {
+      const realJpeg = await sharp({
+        create: { width: 1200, height: 900, channels: 3, background: { r: 10, g: 20, b: 30 } },
+      })
+        .jpeg()
+        .toBuffer();
+      mockEnhanceImage.mockResolvedValue({
+        imageBase64: realJpeg.toString('base64'),
+        mimeType: 'image/jpeg',
+      });
+      return realJpeg;
+    }
+
+    it('uploads a thumbnail derivative alongside the staged result and records its key', async () => {
+      await stageRealJpeg();
+
+      await handler.process(makeJob());
+
+      expect(mockUpload).toHaveBeenCalledWith(
+        'enhancements/enh-1/thumb.jpg',
+        expect.any(Readable),
+        expect.objectContaining({
+          mimeType: 'image/jpeg',
+          // Same immutable caching contract as every other thumbnail.
+          cacheControl: 'public, max-age=31536000, immutable',
+        }),
+      );
+
+      const readyCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
+      );
+      expect(readyCall![0].data.stagingThumbnailKey).toBe('enhancements/enh-1/thumb.jpg');
+    });
+
+    it('the thumbnail is genuinely smaller than the staged full-resolution bytes', async () => {
+      const realJpeg = await stageRealJpeg();
+
+      await handler.process(makeJob());
+
+      const thumbCall = mockUpload.mock.calls.find(
+        (c: any[]) => c[0] === 'enhancements/enh-1/thumb.jpg',
+      );
+      const thumbBytes = await streamToBuffer(thumbCall![1]);
+      const meta = await sharp(thumbBytes).metadata();
+      // Default THUMBNAIL_MAX_DIM is 800; a 1200x900 source must come down.
+      expect(meta.width).toBeLessThanOrEqual(800);
+      expect(meta.height).toBeLessThanOrEqual(800);
+      expect(thumbBytes.length).toBeLessThan(realJpeg.length);
+    });
+
+    it('a thumbnail failure is NON-FATAL: the row still reaches ready with a null thumbnail key', async () => {
+      // Default (non-decodable) stub bytes: the renderer cannot produce a
+      // thumbnail, and the enhancement must survive it untouched.
+      await handler.process(makeJob());
+
+      const readyCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
+      );
+      expect(readyCall).toBeDefined();
+      expect(readyCall![0].data.stagingThumbnailKey).toBeNull();
+      // The full-resolution result was still staged.
+      expect(mockUpload).toHaveBeenCalledWith(
+        'enhancements/enh-1/result.jpg',
+        expect.any(Readable),
+        expect.objectContaining({ mimeType: 'image/jpeg' }),
+      );
     });
   });
 

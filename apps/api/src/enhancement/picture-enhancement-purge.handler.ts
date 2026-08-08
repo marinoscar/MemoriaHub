@@ -59,17 +59,33 @@ export class PictureEnhancementPurgeHandler implements EnrichmentHandler, OnModu
 
     let expired = 0;
     for (const row of rows) {
-      // Best-effort delete of the staged bytes.
-      if (row.stagingStorageKey && row.stagingProvider) {
+      // Best-effort delete of every staged object the row owns: the
+      // full-resolution result AND its thumbnail derivative (issue #203). Both
+      // live on the same provider/bucket, so one resolve covers them; each
+      // delete is independent so a failure on one still attempts the other.
+      const stagedKeys = [row.stagingStorageKey, row.stagingThumbnailKey].filter(
+        (k): k is string => !!k,
+      );
+      if (stagedKeys.length > 0 && row.stagingProvider) {
         try {
           const provider = await this.resolver.getProviderFor(
             row.stagingProvider,
             row.stagingBucket,
           );
-          await provider.delete(row.stagingStorageKey);
+          for (const key of stagedKeys) {
+            try {
+              await provider.delete(key);
+            } catch (err) {
+              this.logger.warn(
+                `picture_enhancement_purge: failed to delete staging ${key} (non-fatal): ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+          }
         } catch (err) {
           this.logger.warn(
-            `picture_enhancement_purge: failed to delete staging ${row.stagingStorageKey} (non-fatal): ${
+            `picture_enhancement_purge: failed to resolve provider ${row.stagingProvider} (non-fatal): ${
               err instanceof Error ? err.message : String(err)
             }`,
           );
@@ -78,7 +94,11 @@ export class PictureEnhancementPurgeHandler implements EnrichmentHandler, OnModu
 
       await this.prisma.mediaEnhancement.update({
         where: { id: row.id },
-        data: { status: MediaEnhancementStatus.expired, stagingStorageKey: null },
+        data: {
+          status: MediaEnhancementStatus.expired,
+          stagingStorageKey: null,
+          stagingThumbnailKey: null,
+        },
       });
       expired += 1;
     }

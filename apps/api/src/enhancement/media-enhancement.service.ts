@@ -221,7 +221,11 @@ export class MediaEnhancementService {
       await this.deleteStaging(row);
       await this.prisma.mediaEnhancement.update({
         where: { id: row.id },
-        data: { status: MediaEnhancementStatus.discarded, stagingStorageKey: null },
+        data: {
+          status: MediaEnhancementStatus.discarded,
+          stagingStorageKey: null,
+          stagingThumbnailKey: null,
+        },
       });
       this.logger.log(`Superseded live enhancement ${row.id} for MediaItem ${mediaItemId}`);
     }
@@ -243,11 +247,18 @@ export class MediaEnhancementService {
    *     emitted as decimal STRINGS — matching signOriginal/signStaging.
    *
    *  2. **No N+1 signing.** Every source item for the page is loaded in ONE
-   *     `mediaItem.findMany`, and every thumbnail key on the page is signed by
-   *     exactly ONE `signThumbsBatched` call. Staged (enhanced) bytes have no
-   *     thumbnail derivative, so they must be signed directly — those go
-   *     through a per-`provider|bucket` provider cache so a page of N rows
-   *     resolves at most one provider per distinct destination, not N.
+   *     `mediaItem.findMany`, and every source thumbnail key on the page is
+   *     signed by exactly ONE `signThumbsBatched` call. Staged objects (the
+   *     enhanced result and, since #203, its thumbnail derivative) are signed
+   *     directly instead: they deliberately have no `StorageObject` row, which
+   *     is what `signThumbsBatched` resolves providers from. They go through a
+   *     per-`provider|bucket` provider cache, so a page of N rows resolves at
+   *     most one provider per distinct destination, not N — and unlike
+   *     `signThumbsBatched` it costs no extra query at all.
+   *
+   *     Since #203 the card-sized `enhanced.thumbnailUrl` points at that
+   *     thumbnail derivative rather than the full-resolution staged object; the
+   *     full-resolution URL is still returned, as `enhanced.previewUrl`.
    *
    *  3. **`expiresAt` is computed server-side** from `updatedAt` +
    *     `pictureEnhancement.retentionHours`, read ONCE per request, and is
@@ -385,7 +396,20 @@ export class MediaEnhancementService {
               : null,
         },
         enhanced: {
-          thumbnailUrl: hasStaged
+          // A REAL thumbnail derivative (issue #203) — null for a row staged
+          // before #203, or one whose best-effort thumbnail render failed.
+          thumbnailUrl:
+            hasStaged && row.stagingThumbnailKey
+              ? await signStaged(
+                  row.stagingProvider!,
+                  row.stagingBucket,
+                  row.stagingThumbnailKey,
+                )
+              : null,
+          // Full-resolution staged bytes, under an honest name. Clients fall
+          // back to this when `thumbnailUrl` is null, and the compare view uses
+          // it directly.
+          previewUrl: hasStaged
             ? await signStaged(
                 row.stagingProvider!,
                 row.stagingBucket,
@@ -720,6 +744,7 @@ export class MediaEnhancementService {
         decision: MediaEnhancementDecision.keep_both,
         resultMediaItemId: newItem.id,
         stagingStorageKey: null,
+        stagingThumbnailKey: null,
       },
     });
 
@@ -861,6 +886,7 @@ export class MediaEnhancementService {
         status: MediaEnhancementStatus.applied,
         decision: MediaEnhancementDecision.replace,
         stagingStorageKey: null,
+        stagingThumbnailKey: null,
       },
     });
 
@@ -891,7 +917,11 @@ export class MediaEnhancementService {
     await this.deleteStaging(row);
     await this.prisma.mediaEnhancement.update({
       where: { id: row.id },
-      data: { status: MediaEnhancementStatus.discarded, stagingStorageKey: null },
+      data: {
+          status: MediaEnhancementStatus.discarded,
+          stagingStorageKey: null,
+          stagingThumbnailKey: null,
+        },
     });
     this.logger.log(`Enhancement ${row.id} discarded for MediaItem ${mediaItemId}`);
   }
@@ -937,22 +967,51 @@ export class MediaEnhancementService {
     return row;
   }
 
+  /**
+   * Delete every staged byte the row owns — the full-resolution result AND its
+   * thumbnail derivative (issue #203) — on the provider recorded at staging
+   * time. Both keys live on the same provider/bucket, so one resolve covers
+   * them; each delete is independent so a failure on one still attempts the
+   * other. Best-effort throughout: an undeletable object must not block the
+   * apply/discard/supersede that called this.
+   *
+   * Callers are responsible for nulling `stagingStorageKey` /
+   * `stagingThumbnailKey` on the row afterwards.
+   */
   private async deleteStaging(
     row: Awaited<ReturnType<PrismaService['mediaEnhancement']['findUniqueOrThrow']>>,
   ): Promise<void> {
-    if (!row.stagingStorageKey || !row.stagingProvider) return;
+    if (!row.stagingProvider) return;
+    const keys = [row.stagingStorageKey, row.stagingThumbnailKey].filter(
+      (k): k is string => !!k,
+    );
+    if (keys.length === 0) return;
+
+    let provider: Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>;
     try {
-      const provider = await this.resolver.getProviderFor(
+      provider = await this.resolver.getProviderFor(
         row.stagingProvider,
         row.stagingBucket,
       );
-      await provider.delete(row.stagingStorageKey);
     } catch (err) {
       this.logger.warn(
-        `deleteStaging: failed to delete ${row.stagingStorageKey} (non-fatal): ${
+        `deleteStaging: failed to resolve provider ${row.stagingProvider} (non-fatal): ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
+      return;
+    }
+
+    for (const key of keys) {
+      try {
+        await provider.delete(key);
+      } catch (err) {
+        this.logger.warn(
+          `deleteStaging: failed to delete ${key} (non-fatal): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
   }
 
