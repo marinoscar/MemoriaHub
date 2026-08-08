@@ -17,7 +17,15 @@
  *
  * Client → server commands (one JSON per line):
  *   { cmd: 'status' } | { cmd: 'set-concurrency', value } |
- *   { cmd: 'drain' } | { cmd: 'stop' }
+ *   { cmd: 'drain' } | { cmd: 'stop' } | { cmd: 'heap-snapshot' }
+ *
+ * `heap-snapshot` is the diagnostic escape hatch for issue #156: it makes the
+ * LIVE daemon serialize its V8 heap to a file so a slow leak can be pinned
+ * without restarting the process (a restart discards exactly the accumulated
+ * state you need to inspect). The write is synchronous and stops the world for
+ * seconds on a multi-GB heap — deliberate, since it is an explicit operator
+ * action; in-flight leases are renewed on a far shorter cadence than the
+ * server's lease window, so a stalled tick is harmless.
  *
  * Lifecycle safety:
  *   - A stale pidfile (dead pid) is removed; a live one refuses startup.
@@ -34,6 +42,12 @@ import { nodePidPath, nodeSocketPath } from '../paths.js';
 import { loadConfig, saveConfig } from '../config.js';
 import { NdjsonParser, encodeNdjson } from './ndjson.js';
 import { NODE_EV } from './node-events.js';
+import {
+  writeWorkerHeapSnapshot,
+  describeHeapSnapshotResult,
+  type HeapSnapshotOptions,
+  type HeapSnapshotResult,
+} from './heap-snapshot.js';
 import type { NodeEngine } from './node-engine.js';
 import type { NodeLogger } from './logger.js';
 
@@ -59,6 +73,12 @@ export interface DaemonHostOptions {
   persistConcurrency?: (n: number) => void;
   /** Process-exit hook used by the 'stop' command (default process.exit). */
   exit?: (code: number) => void;
+  /**
+   * Heap-snapshot writer for the 'heap-snapshot' command (default
+   * `writeWorkerHeapSnapshot`). Injectable so tests exercise the command
+   * without serializing a real multi-hundred-MB Jest heap to disk.
+   */
+  heapSnapshotFn?: (opts?: HeapSnapshotOptions) => HeapSnapshotResult;
 }
 
 export interface DaemonHost {
@@ -137,6 +157,7 @@ export async function startDaemonHost(
   const logTailLines = opts.logTailLines ?? 20;
   const persistConcurrency = opts.persistConcurrency ?? defaultPersistConcurrency;
   const exit = opts.exit ?? ((code: number) => process.exit(code));
+  const writeHeapSnapshot = opts.heapSnapshotFn ?? writeWorkerHeapSnapshot;
   const isWindows = os.platform() === 'win32';
 
   // ---- Stale-instance detection -------------------------------------------
@@ -213,6 +234,23 @@ export async function startDaemonHost(
         }
         logger.info('concurrency changed via ipc', { value });
         send(socket, { kind: 'ack', cmd: 'set-concurrency', value });
+        break;
+      }
+      case 'heap-snapshot': {
+        const res = writeHeapSnapshot({ reason: 'manual' });
+        const summary = describeHeapSnapshotResult(res);
+        logger.log(res.ok ? 'info' : 'warn', { ev: 'heap-snapshot', msg: summary, ...res });
+        if (!res.ok) {
+          send(socket, { kind: 'error', message: summary });
+          break;
+        }
+        send(socket, {
+          kind: 'ack',
+          cmd: 'heap-snapshot',
+          path: res.path,
+          bytes: res.bytes,
+          durationMs: res.durationMs,
+        });
         break;
       }
       case 'drain': {
