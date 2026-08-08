@@ -111,6 +111,14 @@ export type EnhancementSortOrder = 'asc' | 'desc';
  */
 export interface EnhancementThumbInfo {
   thumbnailUrl: string | null;
+  /**
+   * Full-resolution signed URL. Present only on the `enhanced` side, and only
+   * while `status === 'ready'` (issue #203): the enhanced result is a staged
+   * object whose thumbnail derivative is best-effort, so a card renders
+   * `thumbnailUrl ?? previewUrl`. Absent on `original`, which always has a real
+   * thumbnail from the normal upload pipeline.
+   */
+  previewUrl?: string | null;
   width: number | null;
   height: number | null;
   size: string | null;

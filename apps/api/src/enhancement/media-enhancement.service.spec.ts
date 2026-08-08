@@ -108,6 +108,7 @@ function makeEnhancementRow(overrides: Record<string, any> = {}) {
     model: 'gpt-image-1',
     prompt: 'Enhance this photograph...',
     stagingStorageKey: 'enhancements/enh-1/result.jpg',
+    stagingThumbnailKey: 'enhancements/enh-1/thumb.jpg',
     stagingProvider: 'r2',
     stagingBucket: 'active-bucket',
     originalWidth: 1200,
@@ -337,9 +338,15 @@ describe('MediaEnhancementService', () => {
       // Staging bytes of the old row were deleted, and it was marked discarded.
       expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'active-bucket');
       expect(mockActiveProvider.delete).toHaveBeenCalledWith('enhancements/enh-1/result.jpg');
+      // ...including the thumbnail derivative (issue #203).
+      expect(mockActiveProvider.delete).toHaveBeenCalledWith('enhancements/enh-1/thumb.jpg');
       expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
         where: { id: 'enh-old' },
-        data: { status: MediaEnhancementStatus.discarded, stagingStorageKey: null },
+        data: {
+          status: MediaEnhancementStatus.discarded,
+          stagingStorageKey: null,
+          stagingThumbnailKey: null,
+        },
       });
     });
 
@@ -620,6 +627,7 @@ describe('MediaEnhancementService', () => {
             decision: MediaEnhancementDecision.keep_both,
             resultMediaItemId: 'new-media-1',
             stagingStorageKey: null,
+            stagingThumbnailKey: null,
           },
         });
       });
@@ -841,6 +849,7 @@ describe('MediaEnhancementService', () => {
             status: MediaEnhancementStatus.applied,
             decision: MediaEnhancementDecision.replace,
             stagingStorageKey: null,
+            stagingThumbnailKey: null,
           },
         });
       });
@@ -908,15 +917,24 @@ describe('MediaEnhancementService', () => {
       await service.discardEnhancement(MEDIA_ID, ENH_ID, USER);
 
       expect(mockActiveProvider.delete).toHaveBeenCalledWith('enhancements/enh-1/result.jpg');
+      expect(mockActiveProvider.delete).toHaveBeenCalledWith('enhancements/enh-1/thumb.jpg');
       expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
         where: { id: ENH_ID },
-        data: { status: MediaEnhancementStatus.discarded, stagingStorageKey: null },
+        data: {
+          status: MediaEnhancementStatus.discarded,
+          stagingStorageKey: null,
+          stagingThumbnailKey: null,
+        },
       });
     });
 
     it('is a no-op on staging deletion for a row with no staged bytes (already superseded)', async () => {
       (mockPrisma.mediaEnhancement.findUnique as jest.Mock).mockResolvedValue(
-        makeEnhancementRow({ stagingStorageKey: null, stagingProvider: null }),
+        makeEnhancementRow({
+          stagingStorageKey: null,
+          stagingThumbnailKey: null,
+          stagingProvider: null,
+        }),
       );
 
       await service.discardEnhancement(MEDIA_ID, ENH_ID, USER);
@@ -1222,9 +1240,57 @@ describe('MediaEnhancementService', () => {
         const item = result.items[0] as any;
 
         expect(item.enhanced.thumbnailUrl).toBe('https://cdn.example.com/active-signed');
+        expect(item.enhanced.previewUrl).toBe('https://cdn.example.com/active-signed');
         expect(item.enhanced.width).toBe(1536);
         expect(item.enhanced.height).toBe(1024);
         expect(item.enhanced.size).toBe('999999');
+      });
+
+      it('signs the THUMBNAIL derivative for thumbnailUrl and the full-resolution staged object for previewUrl (issue #203)', async () => {
+        const row = makeEnhancementListRow({ id: 'enh-1', mediaItemId: 'media-a' });
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a' }),
+        ]);
+        // Distinguish the two signed keys so the mapping is asserted, not assumed.
+        mockActiveProvider.getSignedDownloadUrl.mockImplementation(
+          async (key: string) => `https://cdn.example.com/${key}`,
+        );
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        const item = result.items[0] as any;
+
+        expect(item.enhanced.thumbnailUrl).toBe(
+          'https://cdn.example.com/enhancements/enh-1/thumb.jpg',
+        );
+        expect(item.enhanced.previewUrl).toBe(
+          'https://cdn.example.com/enhancements/enh-1/result.jpg',
+        );
+        // ONE provider resolution for the page, not one per signed key.
+        expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
+      });
+
+      it('leaves thumbnailUrl null but still returns previewUrl for a row with no thumbnail derivative (pre-#203 / failed render)', async () => {
+        const row = makeEnhancementListRow({
+          id: 'enh-1',
+          mediaItemId: 'media-a',
+          stagingThumbnailKey: null,
+        });
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([row]);
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
+          makeSourceItem({ id: 'media-a' }),
+        ]);
+        mockActiveProvider.getSignedDownloadUrl.mockImplementation(
+          async (key: string) => `https://cdn.example.com/${key}`,
+        );
+
+        const result = await service.listEnhancements(makeListQuery(), USER);
+        const item = result.items[0] as any;
+
+        expect(item.enhanced.thumbnailUrl).toBeNull();
+        expect(item.enhanced.previewUrl).toBe(
+          'https://cdn.example.com/enhancements/enh-1/result.jpg',
+        );
       });
 
       it('suppresses enhanced.* to null for a non-ready row even when the row still carries stale enhancedWidth/Height/enhancedSize', async () => {
@@ -1249,6 +1315,7 @@ describe('MediaEnhancementService', () => {
 
         expect(item.enhanced).toEqual({
           thumbnailUrl: null,
+          previewUrl: null,
           width: null,
           height: null,
           size: null,
@@ -1260,23 +1327,30 @@ describe('MediaEnhancementService', () => {
           id: 'enh-a',
           mediaItemId: 'media-a',
           stagingStorageKey: 'enhancements/enh-a/result.jpg',
+          stagingThumbnailKey: 'enhancements/enh-a/thumb.jpg',
         });
         const rowB = makeEnhancementListRow({
           id: 'enh-b',
           mediaItemId: 'media-b',
           stagingStorageKey: 'enhancements/enh-b/result.jpg',
+          stagingThumbnailKey: 'enhancements/enh-b/thumb.jpg',
         });
         (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([rowA, rowB]);
         (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
           makeSourceItem({ id: 'media-a' }),
           makeSourceItem({ id: 'media-b' }),
         ]);
+        // First signed key of the page is row A's THUMBNAIL — failing it must
+        // degrade that one field only, not the row and not the page.
         mockActiveProvider.getSignedDownloadUrl.mockRejectedValueOnce(new Error('signing exploded'));
 
         const result = await service.listEnhancements(makeListQuery(), USER);
         const byId = new Map(result.items.map((i: any) => [i.id, i]));
 
         expect((byId.get('enh-a') as any).enhanced.thumbnailUrl).toBeNull();
+        expect((byId.get('enh-a') as any).enhanced.previewUrl).toBe(
+          'https://cdn.example.com/active-signed',
+        );
         expect((byId.get('enh-b') as any).enhanced.thumbnailUrl).toBe(
           'https://cdn.example.com/active-signed',
         );

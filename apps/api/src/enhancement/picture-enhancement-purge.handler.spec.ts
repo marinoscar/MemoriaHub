@@ -51,6 +51,7 @@ function makeRow(overrides: Record<string, any> = {}) {
     id: 'enh-1',
     status: MediaEnhancementStatus.ready,
     stagingStorageKey: 'enhancements/enh-1/result.jpg',
+    stagingThumbnailKey: 'enhancements/enh-1/thumb.jpg',
     stagingProvider: 'r2',
     stagingBucket: 'active-bucket',
     updatedAt: new Date('2026-07-01T00:00:00Z'),
@@ -145,17 +146,29 @@ describe('PictureEnhancementPurgeHandler', () => {
     await handler.process(makeJob());
 
     expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'active-bucket');
+    // Both staged objects are reaped: the full-resolution result AND its
+    // thumbnail derivative (issue #203).
     expect(mockDeleteFn).toHaveBeenCalledWith('enhancements/enh-1/result.jpg');
+    expect(mockDeleteFn).toHaveBeenCalledWith('enhancements/enh-1/thumb.jpg');
     expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
       where: { id: 'enh-1' },
-      data: { status: MediaEnhancementStatus.expired, stagingStorageKey: null },
+      data: {
+        status: MediaEnhancementStatus.expired,
+        stagingStorageKey: null,
+        stagingThumbnailKey: null,
+      },
     });
   });
 
   it('handles multiple candidate rows in one sweep', async () => {
     mockPrisma.mediaEnhancement.findMany.mockResolvedValue([
       makeRow({ id: 'enh-1' }),
-      makeRow({ id: 'enh-2', status: MediaEnhancementStatus.failed, stagingStorageKey: 'enhancements/enh-2/result.jpg' }),
+      makeRow({
+        id: 'enh-2',
+        status: MediaEnhancementStatus.failed,
+        stagingStorageKey: 'enhancements/enh-2/result.jpg',
+        stagingThumbnailKey: 'enhancements/enh-2/thumb.jpg',
+      }),
     ] as any);
 
     await handler.process(makeJob());
@@ -163,11 +176,19 @@ describe('PictureEnhancementPurgeHandler', () => {
     expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledTimes(2);
     expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
       where: { id: 'enh-1' },
-      data: { status: MediaEnhancementStatus.expired, stagingStorageKey: null },
+      data: {
+        status: MediaEnhancementStatus.expired,
+        stagingStorageKey: null,
+        stagingThumbnailKey: null,
+      },
     });
     expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
       where: { id: 'enh-2' },
-      data: { status: MediaEnhancementStatus.expired, stagingStorageKey: null },
+      data: {
+        status: MediaEnhancementStatus.expired,
+        stagingStorageKey: null,
+        stagingThumbnailKey: null,
+      },
     });
   });
 
@@ -179,13 +200,45 @@ describe('PictureEnhancementPurgeHandler', () => {
 
     expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
       where: { id: 'enh-1' },
-      data: { status: MediaEnhancementStatus.expired, stagingStorageKey: null },
+      data: {
+        status: MediaEnhancementStatus.expired,
+        stagingStorageKey: null,
+        stagingThumbnailKey: null,
+      },
     });
+  });
+
+  it('deletes only the result when the row never got a thumbnail derivative', async () => {
+    // Pre-#203 rows, and rows whose best-effort thumbnail render failed, carry
+    // a null stagingThumbnailKey — the sweep must not attempt a delete for it.
+    mockPrisma.mediaEnhancement.findMany.mockResolvedValue([
+      makeRow({ stagingThumbnailKey: null }),
+    ] as any);
+
+    await handler.process(makeJob());
+
+    expect(mockDeleteFn).toHaveBeenCalledTimes(1);
+    expect(mockDeleteFn).toHaveBeenCalledWith('enhancements/enh-1/result.jpg');
+  });
+
+  it('still deletes the thumbnail when deleting the result fails (independent best-effort)', async () => {
+    mockPrisma.mediaEnhancement.findMany.mockResolvedValue([makeRow()] as any);
+    mockDeleteFn.mockImplementation(async (key: string) => {
+      if (key.endsWith('result.jpg')) throw new Error('object not found');
+    });
+
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+
+    expect(mockDeleteFn).toHaveBeenCalledWith('enhancements/enh-1/thumb.jpg');
   });
 
   it('skips the staging delete call entirely for a row with no stagingStorageKey (still expires it)', async () => {
     mockPrisma.mediaEnhancement.findMany.mockResolvedValue([
-      makeRow({ stagingStorageKey: null, stagingProvider: null }),
+      makeRow({
+        stagingStorageKey: null,
+        stagingThumbnailKey: null,
+        stagingProvider: null,
+      }),
     ] as any);
 
     await handler.process(makeJob());
@@ -193,7 +246,11 @@ describe('PictureEnhancementPurgeHandler', () => {
     expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
     expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
       where: { id: 'enh-1' },
-      data: { status: MediaEnhancementStatus.expired, stagingStorageKey: null },
+      data: {
+        status: MediaEnhancementStatus.expired,
+        stagingStorageKey: null,
+        stagingThumbnailKey: null,
+      },
     });
   });
 

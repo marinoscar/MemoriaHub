@@ -1,0 +1,86 @@
+/**
+ * Shared thumbnail rendering.
+ *
+ * Extracted from ThumbnailProcessor (issue #203) so that anything producing a
+ * thumbnail derivative — the upload pipeline's ThumbnailProcessor and the AI
+ * Picture Enhancer's staged result alike — renders it with the SAME sizing,
+ * format, quality and Cache-Control. Previously the only thumbnail renderer was
+ * private to ThumbnailProcessor and coupled to creating a StorageObject row,
+ * so a caller that just needed thumbnail BYTES (a staging object, which
+ * deliberately has no StorageObject row) had no way to reuse it and would have
+ * had to fork the sizing constants.
+ *
+ * This module owns pixels only. Uploading, StorageObject rows and storage keys
+ * stay with the caller, because those differ per use case.
+ */
+import { extname } from 'path';
+import { transcodeToDecodableJpeg } from './image-orientation.util';
+
+/**
+ * Cache-Control applied to every uploaded thumbnail. Thumbnail bytes for a
+ * given storage key never change, so they are immutable and cacheable for a
+ * year — combined with the stable, long-TTL signed URLs from
+ * MediaThumbnailService this lets browsers reuse downloaded thumbnails instead
+ * of re-fetching them on every gallery/inbox load.
+ */
+export const THUMBNAIL_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+export interface ThumbnailRenderOptions {
+  /** Max width and height in px (fit: inside, no enlargement). */
+  maxDim?: number;
+  /** JPEG quality, 1–100. */
+  quality?: number;
+  /**
+   * Original filename (e.g. `IMG_0001.HEIC`). Its extension is used only as a
+   * format hint for the ffmpeg transcode fallback when sharp cannot decode the
+   * input.
+   */
+  sourceFilename?: string;
+}
+
+/** Defaults, read from env at call time (mirrors ThumbnailProcessor). */
+export function resolveThumbnailDefaults(): { maxDim: number; quality: number } {
+  return {
+    maxDim: parseInt(process.env.THUMBNAIL_MAX_DIM ?? '800', 10),
+    quality: parseInt(process.env.THUMBNAIL_QUALITY ?? '85', 10),
+  };
+}
+
+/**
+ * Render thumbnail JPEG bytes from an image buffer.
+ *
+ * `.rotate()` bakes in EXIF orientation before the resize. On a sharp decode
+ * failure (most commonly HEIC, whose HEVC decoder sharp's bundled libvips omits
+ * for licensing reasons — see issue #106) the input is ffmpeg-transcoded to a
+ * JPEG and re-run through the identical pipeline; ffmpeg has already applied
+ * orientation by then, so the second `.rotate()` is a harmless no-op.
+ *
+ * Throws if the input cannot be decoded even after the transcode fallback —
+ * callers decide whether that is fatal.
+ */
+export async function renderThumbnailBuffer(
+  input: Buffer,
+  options: ThumbnailRenderOptions = {},
+): Promise<Buffer> {
+  const defaults = resolveThumbnailDefaults();
+  const maxDim = options.maxDim ?? defaults.maxDim;
+  const quality = options.quality ?? defaults.quality;
+
+  const sharp = (await import('sharp')).default;
+
+  const resize = (buffer: Buffer): Promise<Buffer> =>
+    sharp(buffer)
+      .rotate()
+      .resize({ width: maxDim, height: maxDim, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality })
+      .toBuffer();
+
+  try {
+    return await resize(input);
+  } catch {
+    const jpeg = await transcodeToDecodableJpeg(input, {
+      fileExtension: extname(options.sourceFilename ?? ''),
+    });
+    return resize(jpeg);
+  }
+}

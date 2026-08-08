@@ -223,7 +223,14 @@ export function EnhancementCard({
               </Stack>
               <CompareArrowsIcon fontSize="small" color="disabled" />
               <Stack spacing={0.5} sx={{ alignItems: 'center' }}>
-                <Thumb url={item.enhanced.thumbnailUrl} alt={`Enhanced ${title}`} />
+                {/* Prefer the real thumbnail derivative (issue #203); fall
+                    back to the full-resolution staged bytes only for rows
+                    staged before it existed, or whose best-effort thumbnail
+                    render failed. */}
+                <Thumb
+                  url={item.enhanced.thumbnailUrl ?? item.enhanced.previewUrl ?? null}
+                  alt={`Enhanced ${title}`}
+                />
                 <Typography variant="caption" color="text.secondary">
                   Enhanced
                 </Typography>

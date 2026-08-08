@@ -6,7 +6,10 @@ import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
-import { transcodeToDecodableJpeg } from '../image-orientation.util';
+import {
+  renderThumbnailBuffer,
+  THUMBNAIL_CACHE_CONTROL,
+} from '../thumbnail-render.util';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
@@ -123,35 +126,15 @@ export class ThumbnailProcessor implements ObjectProcessor {
       const stream = await getStream();
       const buffer = await streamToBuffer(stream);
 
-      // Intentionally rotates inline like the shared prepareImageForProcessing utility — thumbnail processor predates the util.
-      const sharp = (await import('sharp')).default;
-
-      const resize = (input: Buffer): Promise<Buffer> =>
-        sharp(input)
-          .rotate()
-          .resize({
-            width: this.maxDim,
-            height: this.maxDim,
-            fit: 'inside',
-            withoutEnlargement: true,
-          })
-          .jpeg({ quality: this.quality })
-          .toBuffer();
-
-      let thumbBuffer: Buffer;
-      try {
-        thumbBuffer = await resize(buffer);
-      } catch (decodeError) {
-        // sharp's bundled libvips can't decode this format (e.g. HEIC — the
-        // HEVC decoder is omitted for licensing reasons). Transcode the input
-        // to a JPEG via ffmpeg, then run the same resize pipeline (ffmpeg has
-        // already baked in EXIF orientation, so the extra `.rotate()` is a
-        // harmless no-op). See issue #106.
-        const jpeg = await transcodeToDecodableJpeg(buffer, {
-          fileExtension: extname(object.name || ''),
-        });
-        thumbBuffer = await resize(jpeg);
-      }
+      // Shared renderer (issue #203) — rotate, resize, JPEG-encode, with the
+      // ffmpeg transcode fallback for formats sharp's bundled libvips cannot
+      // decode (HEIC, see issue #106). Shared with the AI Picture Enhancer's
+      // staged-result thumbnail so both use identical sizing and quality.
+      const thumbBuffer = await renderThumbnailBuffer(buffer, {
+        maxDim: this.maxDim,
+        quality: this.quality,
+        sourceFilename: object.name || '',
+      });
 
       return await this.uploadThumbnail(object, thumbBuffer);
     } catch (error) {
@@ -186,18 +169,14 @@ export class ThumbnailProcessor implements ObjectProcessor {
         ffmpegTimeoutMs: this.ffmpegTimeoutMs,
       });
 
-      // 3. Run the extracted frame through sharp (consistent sizing and
-      //    quality with the image path)
-      const sharp = (await import('sharp')).default;
-      const thumbBuffer = await sharp(frameBuffer)
-        .resize({
-          width: this.maxDim,
-          height: this.maxDim,
-          fit: 'inside',
-          withoutEnlargement: true,
-        })
-        .jpeg({ quality: this.quality })
-        .toBuffer();
+      // 3. Run the extracted frame through the same shared renderer as the
+      //    image path (consistent sizing and quality). ffmpeg has already
+      //    applied orientation to the frame, so the renderer's `.rotate()` is
+      //    a no-op here.
+      const thumbBuffer = await renderThumbnailBuffer(frameBuffer, {
+        maxDim: this.maxDim,
+        quality: this.quality,
+      });
 
       return await this.uploadThumbnail(object, thumbBuffer);
     } catch (error) {
@@ -231,11 +210,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
     await activeProvider.upload(thumbKey, thumbStream, {
       mimeType: 'image/jpeg',
       contentLength: thumbBuffer.length,
-      // Thumbnail bytes for a given storage key never change, so mark them
-      // immutable and cacheable for a year — combined with the stable, long-TTL
-      // signed URL from MediaThumbnailService this lets browsers reuse the
-      // downloaded thumbnail instead of re-fetching it on every gallery load.
-      cacheControl: 'public, max-age=31536000, immutable',
+      cacheControl: THUMBNAIL_CACHE_CONTROL,
     });
 
     // Upsert a StorageObject row directly via Prisma (NOT emitting

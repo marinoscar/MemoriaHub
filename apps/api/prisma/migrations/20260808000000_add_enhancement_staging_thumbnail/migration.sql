@@ -1,0 +1,32 @@
+-- Thumbnail derivative for AI-enhancement staging objects (issue #203).
+--
+-- Staged enhanced bytes have never had a thumbnail, so every consumer that
+-- wanted a preview had to serve the FULL-RESOLUTION staged object. That was
+-- acceptable while the only consumer was MediaEnhancementDrawer's large
+-- compare view; it stopped being free in #201, whose /enhancements hub renders
+-- a page of `ready` rows as ~148px cards — each one downloading a full
+-- gpt-image-1 output (up to 1536x1024) to paint a thumbnail.
+--
+-- This column records the storage key of a thumbnail derivative written by
+-- PictureEnhancementHandler right after it stages the enhanced bytes. It rides
+-- on the EXISTING staging_provider / staging_bucket columns: the thumbnail is
+-- always uploaded to the same provider/bucket as staging_storage_key in the
+-- same handler run, so it needs no provider columns of its own and no
+-- StorageObject row (deliberately — a row would pollute storage insights and
+-- the reprocess sweeps with objects that are neither uploads nor `thumbnails/`
+-- derivatives of one).
+--
+-- Nullable and unpopulated for existing rows by design:
+--   - thumbnail generation is best-effort, so a row can legitimately be `ready`
+--     with staged bytes and no thumbnail;
+--   - rows staged before this migration keep NULL forever.
+-- Both cases are handled by the API returning `enhanced.thumbnailUrl: null` and
+-- the client falling back to the full-resolution `enhanced.previewUrl`.
+--
+-- Cleanup follows staging_storage_key exactly: MediaEnhancementService's
+-- deleteStaging (apply / discard / supersede) and PictureEnhancementPurgeHandler
+-- both delete these bytes and null the column, so retention never leaks an
+-- orphaned thumbnail.
+
+-- AlterTable
+ALTER TABLE "media_enhancements" ADD COLUMN "staging_thumbnail_key" TEXT;
