@@ -272,6 +272,7 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `node doctor` | (none) | Capability self-test, API access, model, and daemon-liveness report | Tools ▸ Worker Node ▸ Node dashboard (`[r]` doctor — capability probe only, lighter than the full CLI command) |
 | `node logs` | `--follow` / `-n, --lines <n>` | Print or tail the JSONL worker-node log | — |
 | `node set-concurrency <n>` | (none) | Adjust concurrency live over IPC when a daemon is running, else persist to config | Tools ▸ Worker Node ▸ Node config |
+| `node heap-snapshot` | (none) | Ask the running daemon to write a V8 heap snapshot to the log directory (memory-leak diagnosis, [issue #156](https://github.com/marinoscar/MemoriaHub/issues/156)) | — |
 | `node service install\|uninstall\|status` | (none) | Install/remove/inspect the systemd user unit that keeps the node always on | — |
 | `import <folder>` | `-r, --recursive` / `--dry-run` | One-shot import alias for `sync <folder>` (legacy back-compat) | — |
 | `menu` | (none) | Launch the interactive terminal UI (requires a TTY) | — |
@@ -1107,6 +1108,8 @@ memoriahub node set-concurrency 4
 `node logs` prints (or, with `--follow`, tails) the JSONL structured log at `~/.memoriahub/logs/node.log`, size-rotated at 5 MB. Every line is passed through a redaction filter before being written — a PAT, a transient provider credential, or a presigned URL query string can never land in the log file, even by accident.
 
 `node set-concurrency <n>` pushes the change live over IPC to a running daemon (applied starting with the next claim batch, no restart) when one exists, or otherwise persists it to local config for the next `node start`.
+
+`node heap-snapshot` asks the running daemon to serialize its V8 heap to `~/.memoriahub/logs/heap-manual-<pid>-<timestamp>.heapsnapshot` and prints the path. It exists for memory-leak diagnosis ([issue #156](https://github.com/marinoscar/MemoriaHub/issues/156)): the useful snapshot is one taken from a worker that is *already* leaking, and restarting it to attach `--heapsnapshot-near-heap-limit` throws away exactly the accumulated state you need. Check `heapGrowthMbPerHour` in `node logs` first — capture once it is clearly climbing. The write blocks the daemon for a few seconds on a large heap, is refused unless free disk is at least 1.5× the heap, and older snapshots are pruned to the newest two. Open the file in Chrome DevTools → Memory → Load and sort by Retained Size.
 
 ### The TUI: Tools ▸ Worker Node
 
