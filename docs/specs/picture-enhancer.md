@@ -278,6 +278,7 @@ One row per enhancement attempt on a media item. Mirrors the shape of status tab
 | `model` | text | resolved model id |
 | `prompt` | text | the compiled prompt actually sent (audit/repro) |
 | `staging_storage_key` | text? | key of the enhanced preview bytes (null after apply/discard) |
+| `staging_thumbnail_key` | text? | key of the preview's thumbnail derivative (issue #203; same provider/bucket; null when never generated or after apply/discard) |
 | `staging_provider` / `staging_bucket` | text? | where the preview lives |
 | `original_width` / `original_height` | int? | snapshot for the compare UI |
 | `enhanced_width` / `enhanced_height` | int? | Actual pixel dims of the final (possibly EXIF-stamped) staged bytes, read via `sharp(...).metadata()` — not the requested canvas, since `gpt-image-1` does not always honor it (falls back to the requested size only if dims can't be read); drives the downscale warning |
@@ -302,6 +303,17 @@ No new column required in v1 (uses `metadata._aiEnhanced` + system tag, §5.3). 
 ### 6.4 Retention cron
 
 `PictureEnhancementPurgeTask` (hourly `@Cron`) enqueues a global `picture_enhancement_purge` job (`mediaItemId: null`) that deletes staging objects + marks rows `expired` for `ready`/`failed` enhancements older than `pictureEnhancement.retentionHours`, mirroring `TrashPurgeTask`. Keeps orphaned previews from accumulating in storage.
+
+### 6.5 Staging thumbnail derivative *(issue #203)*
+
+Right after staging the enhanced bytes, `PictureEnhancementHandler` renders a thumbnail of them and uploads it to `enhancements/<enhancementId>/thumb.jpg`, recording the key in `staging_thumbnail_key`. Four properties are deliberate:
+
+- **Same renderer as every other thumbnail.** `renderThumbnailBuffer` (`apps/api/src/storage/processing/thumbnail-render.util.ts`) was extracted from `ThumbnailProcessor` for this, so sizing (`THUMBNAIL_MAX_DIM`, default 800px, fit-inside, no enlargement), format (JPEG at `THUMBNAIL_QUALITY`), the HEIC transcode fallback, and `Cache-Control: public, max-age=31536000, immutable` are shared rather than forked. `ThumbnailProcessor` now calls the same function, so the two cannot drift.
+- **No `StorageObject` row.** Unlike a normal thumbnail, the staged derivative gets no row: it is neither an upload nor a `thumbnails/`-prefixed derivative of one, and a row would show up in storage insights and the reprocess/repair sweeps as a phantom object. The consequence is that it cannot be signed via `signThumbsBatched` (which resolves providers *from* those rows) — it is signed through the list endpoint's existing per-`provider|bucket` cache instead (§8.9 point 5), which needs no query at all.
+- **No new provider columns.** It is uploaded to the same active provider, in the same handler run, as `staging_storage_key`, so the existing `staging_provider` / `staging_bucket` describe both objects.
+- **Best-effort.** A render or upload failure logs a warning and leaves `staging_thumbnail_key` null; the enhancement still reaches `ready`. A thumbnail is a display optimization and must never discard an expensive `gpt-image-1` result that already succeeded.
+
+Cleanup follows the full-resolution object exactly: `MediaEnhancementService.deleteStaging` (apply / discard / supersede) and `PictureEnhancementPurgeHandler` (§6.4) delete both keys and null both columns, so retention never leaks an orphaned thumbnail. Each delete is independent, so a failure on one still attempts the other.
 
 ---
 
@@ -413,7 +425,7 @@ Cross-item, paginated listing of every AI picture enhancement in a circle — th
     "id": "…", "mediaItemId": "…", "status": "ready", "decision": null,
     "model": "gpt-image-1", "params": { "preset": "low_light" },
     "original": { "thumbnailUrl": "<signed>", "width": 4032, "height": 3024, "size": "3145728" },
-    "enhanced": { "thumbnailUrl": "<signed>", "width": 1536, "height": 1152, "size": "812345" },
+    "enhanced": { "thumbnailUrl": "<signed>", "previewUrl": "<signed>", "width": 1536, "height": 1152, "size": "812345" },
     "downscaled": true,
     "expiresAt": "2026-08-03T12:00:00.000Z",
     "lastError": null,
@@ -428,8 +440,9 @@ Cross-item, paginated listing of every AI picture enhancement in a circle — th
 - **Contract points worth calling out explicitly:**
   1. **Byte-size fields are STRINGS.** `original.size` and `enhanced.size` are decimal strings, not numbers — the same BigInt-JSON-safety pattern used everywhere else in the codebase (the underlying `enhancedSize`/storage-object `size` columns are Prisma `BigInt`).
   2. **`expiresAt` is computed server-side**, once per request (not per row), as `updatedAt + pictureEnhancement.retentionHours` — and is **non-null only for the `ready` and `failed` statuses**, the two the `picture_enhancement_purge` retention job (§6.4) actually reaps. The client never has to know the retention setting to render a countdown; it just watches the deadline the server already resolved.
-  3. **`enhanced.*` is populated only while the row is `ready`.** A row that is `applied`/`discarded`/`expired`/`pending`/`processing`/`failed` gets `enhanced: { thumbnailUrl: null, width: null, height: null, size: null }`, because staged bytes exist only for a `ready` row (every other status has had them promoted, discarded, or reaped). `enhanced.thumbnailUrl` is a signed URL to the staged **full-resolution** object itself, not a thumbnail derivative — staged objects have no thumbnail derivative to sign.
-  4. **Batched signing, no N+1.** One `mediaItem.findMany` loads every source item on the page; one `signThumbsBatched` call signs every source thumbnail key; a per-`provider|bucket` cache resolves staged-bytes signing so a page of N rows touches at most one provider client per distinct destination, not N. A single unsignable staged object logs a warning and degrades to `null` rather than failing the whole page.
+  3. **`enhanced.*` is populated only while the row is `ready`.** A row that is `applied`/`discarded`/`expired`/`pending`/`processing`/`failed` gets `enhanced: { thumbnailUrl: null, previewUrl: null, width: null, height: null, size: null }`, because staged bytes exist only for a `ready` row (every other status has had them promoted, discarded, or reaped).
+  4. **`enhanced.thumbnailUrl` is a real thumbnail; `enhanced.previewUrl` is the full-resolution staged object** (issue #203). Originally the field named `thumbnailUrl` served the full-res staged bytes, because staged objects had no thumbnail derivative — so a page of `ready` rows downloaded N full `gpt-image-1` outputs (up to 1536×1024) to paint 148px cards, and the `pageSize` cap existed partly to bound that. `PictureEnhancementHandler` now writes a derivative alongside the result (§6.5), so the two use cases have two honestly-named fields. `thumbnailUrl` is `null` — with `previewUrl` still populated — for rows staged before #203 and for rows whose best-effort thumbnail render failed; clients render `thumbnailUrl ?? previewUrl`.
+  5. **Batched signing, no N+1.** One `mediaItem.findMany` loads every source item on the page; one `signThumbsBatched` call signs every source thumbnail key; a per-`provider|bucket` cache resolves *both* staged keys so a page of N rows touches at most one provider client per distinct destination, not N. Staged objects deliberately have no `StorageObject` row (see §6.5), which is what `signThumbsBatched` resolves providers from — so they are signed through that cache instead, which also costs no extra query. A single unsignable staged object logs a warning and degrades that field to `null` rather than failing the whole page.
 - **Response `400`:** invalid query params. **Response `403`:** caller is not a viewer of the circle.
 
 ---
