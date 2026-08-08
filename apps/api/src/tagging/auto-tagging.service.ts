@@ -15,6 +15,7 @@ import { prepareImageForProcessing } from '../storage/processing/image-orientati
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
+import { MediaTouchService } from '../media/media-touch.service';
 
 /**
  * System prompt sent alongside every tagging vision call. Extracted to a
@@ -56,6 +57,7 @@ export class AutoTaggingService {
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly mediaTouch: MediaTouchService,
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
@@ -449,6 +451,13 @@ export class AutoTaggingService {
         });
       }
     });
+
+    // Backup change feed (issue #310): the parseOk branch above already bumps
+    // updatedAt via mediaItem.update; when the parse failed, only MediaTag rows
+    // changed (stale-AI-tag deletion) and the item must be touched explicitly.
+    if (!parseOk) {
+      await this.mediaTouch.touchMediaItems([mediaItem.id]);
+    }
 
     // Best-effort embedding — must not fail the tagging job. Reloads people
     // names independently since a node-result call has no preloaded context.

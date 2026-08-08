@@ -62,6 +62,7 @@ import {
 import { VideoFrameExtractionService } from './video-frame-extraction.service';
 import { FaceMatchingService } from './face-matching.service';
 import type { DetectedFace } from './providers/face-provider.interface';
+import { MediaTouchService } from '../media/media-touch.service';
 
 // Max long-edge for face detection on video frames (same env var as photo path).
 const FACE_MAX_IMAGE_DIM = (): number =>
@@ -128,6 +129,7 @@ export class VideoFaceDetectionService {
     private readonly matchingService: FaceMatchingService,
     private readonly resolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly mediaTouch: MediaTouchService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -595,5 +597,9 @@ export class VideoFaceDetectionService {
       result.providerKey,
       result.modelVersion,
     );
+
+    // Backup change feed (issue #310): Face rows were deleted/recreated (and
+    // possibly person-matched) without any MediaItem column write.
+    await this.mediaTouch.touchMediaItems([job.mediaItemId]);
   }
 }

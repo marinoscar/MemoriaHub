@@ -21,9 +21,10 @@ import { VideoFaceDetectionService } from './video-face-detection.service';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
 import { MediaModule } from '../media/media.module';
+import { MediaTouchModule } from '../media/media-touch.module';
 
 @Module({
-  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule],
+  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,

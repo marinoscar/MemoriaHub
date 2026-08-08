@@ -85,6 +85,7 @@ describe('FaceAutoArchiveSweepHandler', () => {
       mockPrisma as unknown as PrismaService,
       mockMatchingService as unknown as FaceMatchingService,
       mockSystemSettings as unknown as SystemSettingsService,
+      { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,
     );
   });
 

@@ -28,6 +28,7 @@ import {
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaTouchService } from '../media/media-touch.service';
 
 @Injectable()
 export class PeopleService {
@@ -41,6 +42,7 @@ export class PeopleService {
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: SystemSettingsService,
     private readonly mediaThumbnailService: MediaThumbnailService,
+    private readonly mediaTouch: MediaTouchService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -374,6 +376,8 @@ export class PeopleService {
       // Re-enqueue auto-tagging for media items that now have a person assigned
       const createAffected = await this.fetchAffectedMediaItems(dto.faceIds);
       await this.enqueueAutoTaggingForMediaItems(createAffected);
+      // Backup change feed: face→person assignment doesn't bump MediaItem.updatedAt (issue #310)
+      await this.mediaTouch.touchMediaItems(createAffected.map((m) => m.mediaItemId));
     }
 
     this.logger.log(
@@ -467,6 +471,14 @@ export class PeopleService {
       data: updateData as any,
     });
 
+    // Backup change feed: sidecars embed person names/favorite, so a rename or
+    // favorite flip must surface every item this person appears in (issue #310).
+    // Renames are rare; touching thousands of items is acceptable.
+    if (dto.name !== undefined || dto.favorite !== undefined) {
+      const renameAffected = await this.fetchAffectedMediaItemsByPersonId(personId);
+      await this.mediaTouch.touchMediaItems(renameAffected.map((m) => m.mediaItemId));
+    }
+
     this.logger.log(`Person updated: ${personId} by user ${userId}`);
 
     return {
@@ -525,6 +537,9 @@ export class PeopleService {
     const affectedItems = await this.fetchAffectedMediaItems(dto.faceIds);
     await this.enqueueAutoTaggingForMediaItems(affectedItems);
 
+    // Backup change feed: face→person assignment doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems(affectedItems.map((m) => m.mediaItemId));
+
     this.logger.log(
       `Assigned ${dto.faceIds.length} face(s) to person ${personId} by user ${userId}`,
     );
@@ -574,6 +589,9 @@ export class PeopleService {
     await this.enqueueAutoTaggingForMediaItems([
       { mediaItemId: face.mediaItemId, circleId: person.circleId },
     ]);
+
+    // Backup change feed: face unassignment doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems([face.mediaItemId]);
 
     this.logger.log(
       `Unassigned face ${faceId} from person ${personId} by user ${userId}`,
@@ -732,6 +750,9 @@ export class PeopleService {
     // Re-enqueue auto-tagging for all media items affected by the merge
     await this.enqueueAutoTaggingForMediaItems(allMergeAffected);
 
+    // Backup change feed: the merge rewired Face.personId rows only (issue #310)
+    await this.mediaTouch.touchMediaItems(allMergeAffected.map((m) => m.mediaItemId));
+
     this.logger.log(
       `Person merge: ${sourceId} → ${targetId} in circle ${circleId} by user ${userId}`,
     );
@@ -805,6 +826,9 @@ export class PeopleService {
     // Re-enqueue auto-tagging for all media items that lost a person assignment
     await this.enqueueAutoTaggingForMediaItems(deleteAffected);
 
+    // Backup change feed: faces released to the unknown pool (issue #310)
+    await this.mediaTouch.touchMediaItems(deleteAffected.map((m) => m.mediaItemId));
+
     this.logger.log(
       `Person ${personId} soft-deleted by user ${userId}; faces returned to unknown pool`,
     );
@@ -837,6 +861,9 @@ export class PeopleService {
       },
       data: { hiddenAt: new Date() },
     });
+
+    // Backup change feed: person hide is a Person-row-only write (issue #310)
+    await this.touchMediaForPersons(ids, circleId);
 
     await this.prisma.auditEvent.create({
       data: {
@@ -882,6 +909,9 @@ export class PeopleService {
       },
       data: { hiddenAt: null },
     });
+
+    // Backup change feed: person unhide is a Person-row-only write (issue #310)
+    await this.touchMediaForPersons(ids, circleId);
 
     await this.prisma.auditEvent.create({
       data: {
@@ -966,6 +996,9 @@ export class PeopleService {
     // Re-enqueue auto-tagging for all affected media items (people removed from context)
     await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
 
+    // Backup change feed: Face + Person rows hard-deleted (issue #310)
+    await this.mediaTouch.touchMediaItems(dedupedMedia.map((m) => m.mediaItemId));
+
     this.logger.log(
       `purgePeople: ${deleted} person(s) permanently deleted in circle ${circleId} by user ${userId}`,
     );
@@ -1002,6 +1035,10 @@ export class PeopleService {
       },
       data: { hiddenAt: new Date() },
     });
+
+    // Face ids whose parent MediaItems must be touched for the backup change
+    // feed (issue #310): the manual hides plus any auto-archive sweep hides.
+    const touchFaceIds: string[] = [...ids];
 
     // Best-effort auto-archive sweep: retroactively hide the currently-visible
     // unassigned faces that match the just-archived person(s), so the queue is
@@ -1047,6 +1084,7 @@ export class PeopleService {
               data: { hiddenAt: new Date(), hiddenReason: 'auto_archive_match' },
             });
             autoHidden = swept;
+            touchFaceIds.push(...sweepIds);
           }
         }
       }
@@ -1057,6 +1095,9 @@ export class PeopleService {
         }`,
       );
     }
+
+    // Backup change feed: Face.hiddenAt is a Face-row-only write (issue #310)
+    await this.touchMediaForFaceIds(touchFaceIds, circleId);
 
     await this.prisma.auditEvent.create({
       data: {
@@ -1102,6 +1143,9 @@ export class PeopleService {
       },
       data: { hiddenAt: null },
     });
+
+    // Backup change feed: Face.hiddenAt is a Face-row-only write (issue #310)
+    await this.touchMediaForFaceIds(ids, circleId);
 
     await this.prisma.auditEvent.create({
       data: {
@@ -1182,6 +1226,9 @@ export class PeopleService {
     // Re-enqueue auto-tagging for all affected media items (faces removed from context)
     await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
 
+    // Backup change feed: Face rows hard-deleted (issue #310)
+    await this.mediaTouch.touchMediaItems(dedupedMedia.map((m) => m.mediaItemId));
+
     this.logger.log(
       `purgeFaces: ${deleted} face(s) permanently deleted in circle ${circleId} by user ${userId}`,
     );
@@ -1251,6 +1298,9 @@ export class PeopleService {
 
     // Re-enqueue auto-tagging for all affected media items (faces removed from context)
     await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
+
+    // Backup change feed: Face rows hard-deleted (issue #310)
+    await this.mediaTouch.touchMediaItems(dedupedMedia.map((m) => m.mediaItemId));
 
     this.logger.log(
       `purgeArchivedFaces: ${deleted} archived face(s) permanently deleted in circle ${circleId} by user ${userId}`,
@@ -1348,6 +1398,9 @@ export class PeopleService {
     // 6. Enqueue auto-tagging rerun so description/embedding reflect the new person
     await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
 
+    // 7. Backup change feed: the manual Face row doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems([mediaItemId]);
+
     this.logger.log(
       `Manual person association created: person ${person.id} → media ${mediaItemId} by user ${userId}`,
     );
@@ -1396,6 +1449,9 @@ export class PeopleService {
 
     // 5. Enqueue auto-tagging rerun so description/embedding reflect the removed person
     await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
+
+    // 6. Backup change feed: the manual Face delete doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems([mediaItemId]);
 
     this.logger.log(
       `Manual person association removed: person ${personId} → media ${mediaItemId} by user ${userId}`,
@@ -1491,6 +1547,53 @@ export class PeopleService {
           `Failed to enqueue auto-tagging rerun for MediaItem ${mediaItemId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    }
+  }
+
+  /**
+   * Backup change feed helper (issue #310): touch all media items containing a
+   * face assigned to any of the given persons. Best-effort — failures inside
+   * MediaTouchService are swallowed, and the lookup itself is guarded here so a
+   * feed-bookkeeping failure never fails the user action.
+   */
+  private async touchMediaForPersons(
+    personIds: string[],
+    circleId: string,
+  ): Promise<void> {
+    try {
+      const faces = await this.prisma.face.findMany({
+        where: { personId: { in: personIds }, circleId },
+        select: { mediaItemId: true },
+        distinct: ['mediaItemId'],
+      });
+      await this.mediaTouch.touchMediaItems(faces.map((f) => f.mediaItemId));
+    } catch (err) {
+      this.logger.warn(
+        `touchMediaForPersons failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Backup change feed helper (issue #310): touch the parent media items of the
+   * given face ids. Best-effort, mirrors touchMediaForPersons.
+   */
+  private async touchMediaForFaceIds(
+    faceIds: string[],
+    circleId: string,
+  ): Promise<void> {
+    if (faceIds.length === 0) return;
+    try {
+      const faces = await this.prisma.face.findMany({
+        where: { id: { in: faceIds }, circleId },
+        select: { mediaItemId: true },
+        distinct: ['mediaItemId'],
+      });
+      await this.mediaTouch.touchMediaItems(faces.map((f) => f.mediaItemId));
+    } catch (err) {
+      this.logger.warn(
+        `touchMediaForFaceIds failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

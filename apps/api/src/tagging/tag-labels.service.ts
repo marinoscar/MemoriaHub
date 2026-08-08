@@ -8,6 +8,7 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { stringify as csvStringify } from 'csv-stringify/sync';
 import { PrismaService } from '../prisma/prisma.service';
+import { MediaTouchService } from '../media/media-touch.service';
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -53,7 +54,10 @@ export interface ImportSummary {
 
 @Injectable()
 export class TagLabelsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mediaTouch: MediaTouchService,
+  ) {}
 
   getAll() {
     return this.prisma.tagLabel.findMany({ orderBy: { name: 'asc' } });
@@ -95,17 +99,37 @@ export class TagLabelsService {
       throw new NotFoundException(`Tag label ${id} not found`);
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await this.cascadeDeleteLabel(tx, id, label.name);
+    const affected = await this.prisma.$transaction(async (tx) => {
+      return this.cascadeDeleteLabel(tx, id, label.name);
     });
+
+    // Backup change feed (issue #310): the cascade deleted MediaTag rows across
+    // all circles — touch the affected items AFTER the transaction commits.
+    await this.mediaTouch.touchMediaItems(affected);
   }
 
+  /**
+   * Delete a label and cascade away its AI-applied MediaTag instances.
+   * Returns the distinct affected mediaItemIds so the caller can propagate the
+   * change onto the parent MediaItems (backup change feed, issue #310) once the
+   * surrounding transaction has committed.
+   */
   private async cascadeDeleteLabel(
     tx: Prisma.TransactionClient,
     labelId: string,
     labelName: string,
-  ): Promise<void> {
+  ): Promise<string[]> {
     await tx.tagLabel.delete({ where: { id: labelId } });
+
+    // Capture the affected media items BEFORE deleting the joins.
+    const affectedRows = await tx.mediaTag.findMany({
+      where: {
+        source: 'ai',
+        tag: { name: { equals: labelName, mode: 'insensitive' } },
+      },
+      select: { mediaItemId: true },
+      distinct: ['mediaItemId'],
+    });
 
     // Delete all AI-sourced MediaTag instances for this label name (case-insensitive)
     await tx.mediaTag.deleteMany({
@@ -128,6 +152,8 @@ export class TagLabelsService {
         where: { id: { in: emptyTags.map((t) => t.id) } },
       });
     }
+
+    return affectedRows.map((r) => r.mediaItemId);
   }
 
   // ---------------------------------------------------------------------------
@@ -178,6 +204,10 @@ export class TagLabelsService {
       return ['true', '1', 'yes'].includes(val.trim().toLowerCase());
     };
 
+    // Distinct media ids whose AI tag instances were cascade-deleted; touched
+    // after the transaction commits (backup change feed, issue #310).
+    const touchedMediaIds = new Set<string>();
+
     // Process inside a transaction so successful rows commit together.
     await this.prisma.$transaction(async (tx) => {
       for (let i = 0; i < rows.length; i++) {
@@ -217,7 +247,8 @@ export class TagLabelsService {
             continue;
           }
           try {
-            await this.cascadeDeleteLabel(tx, id, labelToDelete.name);
+            const affected = await this.cascadeDeleteLabel(tx, id, labelToDelete.name);
+            for (const mediaId of affected) touchedMediaIds.add(mediaId);
             summary.deleted++;
           } catch (e: any) {
             summary.errors.push({
@@ -264,6 +295,8 @@ export class TagLabelsService {
         }
       }
     });
+
+    await this.mediaTouch.touchMediaItems([...touchedMediaIds]);
 
     return summary;
   }

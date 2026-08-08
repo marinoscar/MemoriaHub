@@ -365,6 +365,7 @@ describe('VideoFaceDetectionHandler', () => {
       mockMatchingService as any,
       mockResolver as any,
       mockEnrichmentJobService as any,
+      { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     handler = new VideoFaceDetectionHandler(

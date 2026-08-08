@@ -7,6 +7,7 @@ import { GeoLocationModule } from './geo/geo-location.module';
 import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { MediaTouchModule } from './media-touch.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
@@ -86,6 +87,7 @@ import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute
     SettingsModule,
     EnrichmentModule,
     NotificationsModule,
+    MediaTouchModule,
   ],
   controllers: [
     MediaController,
@@ -115,6 +117,6 @@ import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute
     TrashEmptyEvaluateHandler,
     TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService],
+  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService, MediaTouchModule],
 })
 export class MediaModule {}
