@@ -78,8 +78,23 @@ Added when `apps/cli` first gained CI coverage (`cli-test` job in `ci.yml`, issu
 
 ---
 
+## API — DB-gated suites must SKIP, never vacuously pass (RESOLVED, issue #288)
+
+Not an exclusion — a reporting-honesty rule, recorded here because it is the same failure mode this file exists to catch: a suite that looks green while covering nothing.
+
+Three suites (`circles/migration-backfill`, `notifications/notification-dedup`, `review-runs/review-runs`) need a real PostgreSQL server and cannot run in CI. `migration-backfill` reported its 15 tests as **passed** with no database anywhere, asserting nothing. Two mistakes combined:
+
+1. **The gate read env vars only.** `.env.test` declares `POSTGRES_HOST` unconditionally, so the check was true even with nothing listening and the `describe` block ran.
+2. **The real probe was async, inside `beforeAll`.** Jest fixes `describe`/`it` registration — and therefore skipped-vs-passed — at module-evaluation time, which completes before any `beforeAll` body runs. By the time the probe resolved, the suite was already registered as a normal `describe`. The fallback was a per-test `skipIfNoDb` wrapper whose body was `expect(true).toBe(true); return;` — **a genuine PASS.**
+
+**Rule:** a DB-gated suite gates on `describeMaybeDb` / `isDatabaseReachable` from `apps/api/test/helpers/db-probe.helper.ts`, whose probe is synchronous and evaluated at module load, so a real `describe.skip` is chosen before Jest registers anything. Inside the block the database is known reachable — `prisma` is non-nullable and no test needs a runtime guard. **Never add a per-test guard that returns early with a trivial assertion**; `test/helpers/db-probe.helper.spec.ts` fails the build if one reappears.
+
+With no database, the three suites now report **36 skipped** (previously 15 passed + 21 skipped).
+
+---
+
 ## Priority
 
 1. **CLI rotted fixture suites** — update stale fixture expectations (version numbers, column lists) to match current schema.
 2. **CLI TUI concurrency-flaky pattern** — convert the remaining ~13 files to the poll-based `wait-for.ts` helpers, then remove the retry safety net.
-3. **API integration suites** — requires CI infrastructure work (DB service container).
+3. **API DB-gated suites** — they skip honestly today. Running them for real needs a PostgreSQL service container in the CI job plus applied migrations; until then their coverage is local-only, which the skip count now states plainly.
