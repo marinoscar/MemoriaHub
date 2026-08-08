@@ -475,8 +475,7 @@ export class PeopleService {
     // favorite flip must surface every item this person appears in (issue #310).
     // Renames are rare; touching thousands of items is acceptable.
     if (dto.name !== undefined || dto.favorite !== undefined) {
-      const renameAffected = await this.fetchAffectedMediaItemsByPersonId(personId);
-      await this.mediaTouch.touchMediaItems(renameAffected.map((m) => m.mediaItemId));
+      await this.touchMediaForPersons([personId], person.circleId);
     }
 
     this.logger.log(`Person updated: ${personId} by user ${userId}`);

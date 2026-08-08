@@ -153,7 +153,7 @@ export class TagLabelsService {
       });
     }
 
-    return affectedRows.map((r) => r.mediaItemId);
+    return (affectedRows ?? []).map((r) => r.mediaItemId);
   }
 
   // ---------------------------------------------------------------------------

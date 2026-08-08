@@ -1269,11 +1269,7 @@ export class MediaService {
     // every member item in the incremental scan (issue #310). Renames are rare;
     // an updateMany over thousands of members is acceptable.
     if (dto.name !== undefined && dto.name !== album.name) {
-      const members = await this.prisma.albumItem.findMany({
-        where: { albumId: album.id },
-        select: { mediaItemId: true },
-      });
-      await this.mediaTouch.touchMediaItems(members.map((m) => m.mediaItemId));
+      await this.touchAlbumMembers(album.id);
     }
 
     this.logger.log(`Album updated: ${id} by user ${userId}`);
@@ -1294,15 +1290,22 @@ export class MediaService {
 
     // Backup change feed: capture member ids BEFORE the cascade removes the
     // join rows — the members' sidecars lose this album (issue #310).
-    const members = await this.prisma.albumItem.findMany({
-      where: { albumId: id },
-      select: { mediaItemId: true },
-    });
+    // Best-effort: a lookup failure must never block the delete.
+    let memberIds: string[] = [];
+    try {
+      const rows = await this.prisma.albumItem.findMany({
+        where: { albumId: id },
+        select: { mediaItemId: true },
+      });
+      memberIds = (rows ?? []).map((m) => m.mediaItemId);
+    } catch {
+      // swallowed — feed bookkeeping only
+    }
 
     // Cascade in the schema deletes AlbumItems when Album is deleted
     await this.prisma.album.delete({ where: { id } });
 
-    await this.mediaTouch.touchMediaItems(members.map((m) => m.mediaItemId));
+    await this.mediaTouch.touchMediaItems(memberIds);
 
     this.logger.log(`Album deleted: ${id} by user ${userId}`);
   }
@@ -1458,6 +1461,27 @@ export class MediaService {
 
     this.logger.log(`Added ${totalAdded} item(s) to album ${albumId} by filter`);
     return { added: totalAdded };
+  }
+
+  /**
+   * Backup change feed helper (issue #310): touch every member item of an
+   * album. Best-effort — a lookup failure is logged and swallowed so backup
+   * bookkeeping can never fail the triggering album mutation.
+   */
+  private async touchAlbumMembers(albumId: string): Promise<void> {
+    try {
+      const members = await this.prisma.albumItem.findMany({
+        where: { albumId },
+        select: { mediaItemId: true },
+      });
+      await this.mediaTouch.touchMediaItems(
+        (members ?? []).map((m) => m.mediaItemId),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `touchAlbumMembers failed for album ${albumId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**
