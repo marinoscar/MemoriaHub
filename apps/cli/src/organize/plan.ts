@@ -10,6 +10,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { localMonthBucket } from '../dates/month-bucket.js';
 
 /** Full English month names, index 0 = January. */
 export const MONTH_NAMES: string[] = [
@@ -42,18 +43,20 @@ export const MONTH_NAMES: string[] = [
  *   no date  + has GPS → `NODATE`
  *   no date  + no GPS  → `NODATE/NO-GPS`
  *
- * LOCAL getters are used deliberately: EXIF capture dates are naive wall-clock
- * timestamps, so an item must bucket by the local date it was recorded, not the
- * UTC date (which can shift across a day boundary).
+ * LOCAL getters are used deliberately (via localMonthBucket): EXIF capture
+ * dates are naive wall-clock timestamps, so an item must bucket by the local
+ * date it was recorded, not the UTC date (which can shift across a day
+ * boundary). The year/month derivation itself is shared with the backup
+ * layout — see src/dates/month-bucket.ts.
  */
 export function bucketFor(date: Date | null, hasGps: boolean): string[] {
-  const segments =
-    date === null
-      ? ['NODATE']
-      : [
-          String(date.getFullYear()),
-          `${String(date.getMonth() + 1).padStart(2, '0')} - ${MONTH_NAMES[date.getMonth()]}`,
-        ];
+  let segments: string[];
+  if (date === null) {
+    segments = ['NODATE'];
+  } else {
+    const bucket = localMonthBucket(date);
+    segments = [bucket.year, `${bucket.month} - ${MONTH_NAMES[bucket.monthIndex]}`];
+  }
   if (!hasGps) {
     segments.push('NO-GPS');
   }
