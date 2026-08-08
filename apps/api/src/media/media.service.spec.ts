@@ -214,6 +214,7 @@ describe('MediaService', () => {
     enqueueThumbnailRerun: jest.Mock;
   };
   let mockUploadNotificationService: { recordUploadAsync: jest.Mock; recordUpload: jest.Mock };
+  let mockMediaTouch: { touchMediaItems: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -266,6 +267,11 @@ describe('MediaService', () => {
       recordUploadAsync: jest.fn(),
       recordUpload: jest.fn(),
     };
+    // Backup change feed (issue #310) — captured in a variable so tests can
+    // assert exactly which MediaItem ids each mutation touches.
+    mockMediaTouch = {
+      touchMediaItems: jest.fn().mockResolvedValue(undefined),
+    };
     // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched) always
     // issues one storageObject.findMany call. The deep prisma mock returns
     // undefined for unconfigured methods, which would throw inside a `for...of`
@@ -295,10 +301,7 @@ describe('MediaService', () => {
           useValue: mockUploadNotificationService,
         },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
-        {
-          provide: MediaTouchService,
-          useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
-        },
+        { provide: MediaTouchService, useValue: mockMediaTouch },
       ],
     }).compile();
 
@@ -1191,6 +1194,19 @@ describe('MediaService', () => {
       expect(result).toHaveLength(2);
     });
 
+    it('touches the MediaItem for the backup change feed (issue #310)', async () => {
+      const item = makeMediaItem({ addedById: 'user-1' });
+      const tag = makeTag({ name: 'nature' });
+
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.tag.upsert.mockResolvedValue(tag as any);
+      mockPrisma.mediaTag.upsert.mockResolvedValue({} as any);
+
+      await service.attachTags(item.id, { names: ['nature'] }, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith([item.id]);
+    });
+
     it('creates MediaTag with source=manual and promotes only ai rows to manual (never downgrades system/manual)', async () => {
       const item = makeMediaItem({ addedById: 'user-1' });
       const tag = makeTag({ name: 'nature' });
@@ -1267,6 +1283,20 @@ describe('MediaService', () => {
       expect(mockPrisma.mediaTag.delete).toHaveBeenCalledWith({
         where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: item.id } },
       });
+    });
+
+    it('touches the MediaItem for the backup change feed (issue #310)', async () => {
+      const item = makeMediaItem({ addedById: 'user-1' });
+      const tag = makeTag();
+      const mediaTag = { id: randomUUID(), tagId: tag.id, mediaItemId: item.id, addedAt: new Date() };
+
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
+      mockPrisma.mediaTag.findUnique.mockResolvedValue(mediaTag as any);
+      mockPrisma.mediaTag.delete.mockResolvedValue(mediaTag as any);
+
+      await service.removeTag(item.id, tag.id, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith([item.id]);
     });
 
     it('should throw NotFoundException when the tag is not attached', async () => {
@@ -1590,6 +1620,61 @@ describe('MediaService', () => {
     });
 
     // -----------------------------------------------------------------------
+    // backup change feed (issue #310) — renames touch every member item
+    // -----------------------------------------------------------------------
+
+    it('touches every album member when the name actually changes (issue #310)', async () => {
+      const album = makeAlbum({ addedById: 'user-1', name: 'Old Name' });
+      const updated = { ...album, name: 'New Name' };
+      const memberIds = [randomUUID(), randomUUID()];
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.album.update.mockResolvedValue(updated as any);
+      mockPrisma.albumItem.findMany.mockResolvedValue(
+        memberIds.map((mediaItemId) => ({ mediaItemId })) as any,
+      );
+
+      await service.updateAlbum(album.id, { name: 'New Name' }, 'user-1', ownPerms);
+
+      expect(mockPrisma.albumItem.findMany).toHaveBeenCalledWith({
+        where: { albumId: album.id },
+        select: { mediaItemId: true },
+      });
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(memberIds);
+    });
+
+    it('does NOT touch members when name is set to the same value it already had', async () => {
+      const album = makeAlbum({ addedById: 'user-1', name: 'Same Name' });
+      const updated = { ...album };
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.album.update.mockResolvedValue(updated as any);
+
+      await service.updateAlbum(album.id, { name: 'Same Name' }, 'user-1', ownPerms);
+
+      expect(mockPrisma.albumItem.findMany).not.toHaveBeenCalled();
+      expect(mockMediaTouch.touchMediaItems).not.toHaveBeenCalled();
+    });
+
+    it('does NOT touch members for a non-rename update (e.g. description-only)', async () => {
+      const album = makeAlbum({ addedById: 'user-1', name: 'Unchanged' });
+      const updated = { ...album, description: 'New description' };
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.album.update.mockResolvedValue(updated as any);
+
+      await service.updateAlbum(
+        album.id,
+        { description: 'New description' },
+        'user-1',
+        ownPerms,
+      );
+
+      expect(mockPrisma.albumItem.findMany).not.toHaveBeenCalled();
+      expect(mockMediaTouch.touchMediaItems).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------------
     // coverMediaItemId (album cover pointer)
     // -----------------------------------------------------------------------
 
@@ -1719,6 +1804,36 @@ describe('MediaService', () => {
         service.deleteAlbum(album.id, 'user-1', ownPerms),
       ).rejects.toThrow(ForbiddenException);
     });
+
+    it('touches every member captured BEFORE the cascade removes AlbumItem rows (issue #310)', async () => {
+      const album = makeAlbum({ addedById: 'user-1' });
+      const memberIds = [randomUUID(), randomUUID(), randomUUID()];
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.albumItem.findMany.mockResolvedValue(
+        memberIds.map((mediaItemId) => ({ mediaItemId })) as any,
+      );
+      mockPrisma.album.delete.mockResolvedValue(album as any);
+
+      await service.deleteAlbum(album.id, 'user-1', ownPerms);
+
+      expect(mockPrisma.albumItem.findMany).toHaveBeenCalledWith({
+        where: { albumId: album.id },
+        select: { mediaItemId: true },
+      });
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(memberIds);
+    });
+
+    it('still deletes the album and touches an empty set when the member lookup throws (best-effort)', async () => {
+      const album = makeAlbum({ addedById: 'user-1' });
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.albumItem.findMany.mockRejectedValueOnce(new Error('db blip'));
+      mockPrisma.album.delete.mockResolvedValue(album as any);
+
+      await expect(service.deleteAlbum(album.id, 'user-1', ownPerms)).resolves.toBeUndefined();
+
+      expect(mockPrisma.album.delete).toHaveBeenCalledWith({ where: { id: album.id } });
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith([]);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1749,6 +1864,30 @@ describe('MediaService', () => {
 
       expect(mockPrisma.albumItem.upsert).toHaveBeenCalledTimes(2);
       expect(result).toHaveLength(2);
+    });
+
+    it('touches every added MediaItem for the backup change feed (issue #310)', async () => {
+      const album = makeAlbum({ addedById: 'user-1' });
+      const item1 = makeMediaItem({ addedById: 'user-1' });
+      const item2 = makeMediaItem({ addedById: 'user-1' });
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item1, item2] as any);
+      (mockPrisma.albumItem.upsert as jest.Mock).mockImplementation(async ({ create }: any) => ({
+        id: randomUUID(),
+        albumId: create.albumId,
+        mediaItemId: create.mediaItemId,
+        addedAt: new Date(),
+      }));
+
+      await service.addAlbumItems(
+        album.id,
+        { mediaItemIds: [item1.id, item2.id] },
+        'user-1',
+        ownPerms,
+      );
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith([item1.id, item2.id]);
     });
 
     it('should throw NotFoundException when a mediaItemId is not found', async () => {
@@ -1805,6 +1944,33 @@ describe('MediaService', () => {
       );
 
       expect(result).toEqual({ added: 3 });
+    });
+
+    it('touches every matched item for the backup change feed when items land (issue #310)', async () => {
+      const album = makeAlbum({ addedById: 'user-1', circleId: CIRCLE_ID });
+      const matches = [{ id: 'item-a' }, { id: 'item-b' }, { id: 'item-c' }];
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findMany.mockResolvedValue(matches as any);
+      (mockPrisma.albumItem.createMany as jest.Mock).mockResolvedValue({ count: 3 });
+
+      await service.addAlbumItemsByFilter(album.id, dto, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(['item-a', 'item-b', 'item-c']);
+    });
+
+    it('does NOT touch anything when nothing was added (createMany count 0)', async () => {
+      const album = makeAlbum({ addedById: 'user-1', circleId: CIRCLE_ID });
+      const matches = [{ id: 'item-a' }];
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.mediaItem.findMany.mockResolvedValue(matches as any);
+      // Everything already existed — skipDuplicates left count at 0.
+      (mockPrisma.albumItem.createMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+      await service.addAlbumItemsByFilter(album.id, dto, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).not.toHaveBeenCalled();
     });
 
     it('cross-circle safety: where clause uses album.circleId even if dto carries a different circleId', async () => {
@@ -1917,6 +2083,25 @@ describe('MediaService', () => {
       expect(mockPrisma.albumItem.delete).toHaveBeenCalledWith({
         where: { albumId_mediaItemId: { albumId: album.id, mediaItemId: item.id } },
       });
+    });
+
+    it('touches the MediaItem for the backup change feed (issue #310)', async () => {
+      const album = makeAlbum({ addedById: 'user-1' });
+      const item = makeMediaItem({ addedById: 'user-1' });
+      const albumItem = {
+        id: randomUUID(),
+        albumId: album.id,
+        mediaItemId: item.id,
+        addedAt: new Date(),
+      };
+
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.albumItem.findUnique.mockResolvedValue(albumItem as any);
+      mockPrisma.albumItem.delete.mockResolvedValue(albumItem as any);
+
+      await service.removeAlbumItem(album.id, item.id, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith([item.id]);
     });
 
     it('should NOT delete the underlying MediaItem', async () => {
@@ -3183,6 +3368,45 @@ describe('MediaService', () => {
           ]),
         }),
       );
+    });
+
+    it('touches every id for the backup change feed when tags were added (issue #310)', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const dto = makeBulkTagsDto({ ids, add: ['nature'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(ids.map((id) => ({ id })) as any);
+      mockPrisma.tag.upsert.mockResolvedValue(makeTag({ name: 'nature' }) as any);
+      mockPrisma.mediaTag.createMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(ids);
+    });
+
+    it('touches every id for the backup change feed when tags were removed (issue #310)', async () => {
+      const ids = [randomUUID(), randomUUID()];
+      const tagId = randomUUID();
+      const dto = makeBulkTagsDto({ ids, add: undefined, remove: ['nature'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(ids.map((id) => ({ id })) as any);
+      mockPrisma.tag.findMany.mockResolvedValue([{ id: tagId }] as any);
+      mockPrisma.mediaTag.deleteMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(ids);
+    });
+
+    it('does NOT touch anything when nothing was added or removed', async () => {
+      const ids = [randomUUID()];
+      const dto = makeBulkTagsDto({ ids, add: undefined, remove: ['nonexistent'] });
+
+      mockPrisma.mediaItem.findMany.mockResolvedValue(ids.map((id) => ({ id })) as any);
+      mockPrisma.tag.findMany.mockResolvedValue([] as any);
+
+      await service.bulkTags(dto, 'user-1', ownPerms);
+
+      expect(mockMediaTouch.touchMediaItems).not.toHaveBeenCalled();
     });
 
     it('promotes existing ai-sourced MediaTags to manual via updateMany after createMany', async () => {
