@@ -6,11 +6,11 @@ These suites are excluded from `test:ci` in each app. Each exclusion is intentio
 
 ---
 
-## API — Integration Suites (RESOLVED, issue #220 — one file still excluded)
+## API — Integration Suites (RESOLVED, issues #220 + #221 — nothing excluded)
 
-**Pattern excluded:** `media\.integration\.spec\.ts$` (was: `integration\.spec\.ts$`)
+**Pattern excluded:** none. `test:ci` now ignores only `e2e`.
 
-25 of the 26 `*.integration.spec.ts` suites now run in `test:ci`. Only `apps/api/test/media/media.integration.spec.ts` remains excluded — see below.
+All 26 `*.integration.spec.ts` suites run in `test:ci`. #220 fixed the harness and repaired five suites; #221 rewrote the sixth (`media/media.integration.spec.ts`) against the circle-scoped API and lifted the last exclusion.
 
 > ### ⚠️ The root cause previously recorded here was wrong
 >
@@ -40,15 +40,13 @@ Four further suites were repaired alongside it:
 
 ---
 
-## API — `media.integration.spec.ts` (1 file)
+## API — `media.integration.spec.ts` — RESOLVED (issue #221)
 
-**Pattern excluded:** `media\.integration\.spec\.ts$`
+**No longer excluded.** The spec predated Family Circles: zero references to `circleId` across 1071 lines, factories building items with an `ownerId` field against a schema that had moved to `added_by_id` + `circle_id`, and 35 of its 54 tests failing with 400 because `/api/media*` requires `circleId` plus per-circle membership. That was not assertion drift — it was a spec written against a superseded data model — so #220 deliberately left it out of the harness fix rather than mixing a rewrite into that change.
 
-**Root cause:** this spec predates the Family Circles feature entirely — it contains **zero** references to `circleId` across 1071 lines, and its factories still build media items with an `ownerId` field against a schema that now uses `added_by_id` + `circle_id`. `GET`/`POST /api/media` require `circleId` and per-circle membership, so 35 of its 54 tests fail with 400.
+Rewritten against the current API using `media-bulk-dashboard.integration.spec.ts` as the reference (its `setupCircleMocks` helper, its `circleId`/`addedById` factories, and the `flattenWhere` helper for AND-composed filter predicates). The rewrite also added the per-circle authorization coverage the old spec could not express at all — a non-member getting 403, and a `viewer` refused on every write — which is the invariant the suite most needed to protect.
 
-This is not assertion drift; it is a spec written against a superseded data model. Repairing it means threading `circleId` through ~20 requests, adding circle-membership mocks per test, and rewriting the factories — a rewrite that did not belong in the same change that fixed the harness.
-
-**Fix:** rewrite against the current circle-scoped API, using `media-bulk-dashboard.integration.spec.ts` as the reference (it has the `setupCircleMocks` helper and correct factories). Remove this exclusion in the same PR, per the rule above.
+63 tests, all passing in `test:ci`.
 
 ---
 
