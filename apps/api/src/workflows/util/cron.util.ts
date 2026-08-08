@@ -68,7 +68,11 @@ export function isValidCron(expr: string): boolean {
  * CronTime throws on an unknown zone.
  */
 export function nextCronDate(expr: string, from: Date, timezone?: string): Date {
-  return new CronTime(expr, timezone).getNextDateFrom(from).toJSDate();
+  // NOTE: the zone must be passed to getNextDateFrom, not (only) the CronTime
+  // constructor — the constructor's zone is used by CronJob scheduling, but
+  // getNextDateFrom derives its zone from the start argument unless one is
+  // given explicitly.
+  return new CronTime(expr, timezone).getNextDateFrom(from, timezone).toJSDate();
 }
 
 /**
