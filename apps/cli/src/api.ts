@@ -69,9 +69,44 @@ export interface NodeBackupConfig {
   enabled: boolean;
   scheduleCron: string | null;
   timezone: string | null;
+  /**
+   * SERVER-computed next scheduled fire time (ISO), null when no cron is set.
+   * The client never computes cron — the scheduler poll (issue #318) fires a
+   * run when this timestamp is due, and the server rolls it forward at run
+   * start for trigger='scheduled'.
+   */
+  nextRunAt?: string | null;
   /** Empty array = ALL circles the node owner belongs to. */
   circleIds: string[];
+  /** Server-side acked checkpoint cursor; null before the first acked page. */
+  checkpoint?: { updatedAt: string; id: string } | null;
+  /** Lifetime acked counters (bytes as a decimal STRING). */
+  itemsAcked?: string;
+  bytesAcked?: string;
+  lastRunAt?: string | null;
+  lastCompletedRunAt?: string | null;
+  /** Change-feed lag past the checkpoint (bytes as a decimal STRING). */
+  pending?: { items: number; bytes: string };
+  activeRunId?: string | null;
   [key: string]: unknown;
+}
+
+/** One run row from GET /api/nodes/:id/backup/runs (byte fields are STRINGS). */
+export interface NodeBackupRunSummary {
+  id: string;
+  kind: string;
+  status: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string | null;
+  lastAckAt: string | null;
+  itemsDownloaded: number;
+  itemsSkipped: number;
+  sidecarsWritten: number;
+  bytesDownloaded: string;
+  errorCount: number;
+  lastError: string | null;
+  cliVersion: string | null;
 }
 
 /**
@@ -734,6 +769,17 @@ export class ApiClient {
   getNodeBackupDimensions(nodeId: string): Promise<BackupDimensions> {
     return this.get<BackupDimensions>(
       `/api/nodes/${encodeURIComponent(nodeId)}/backup/dimensions`,
+    );
+  }
+
+  /** List recent backup runs for a node (`backup status`'s server section). */
+  listNodeBackupRuns(
+    nodeId: string,
+    limit?: number,
+  ): Promise<{ runs: NodeBackupRunSummary[] }> {
+    const qs = limit !== undefined ? `?limit=${encodeURIComponent(String(limit))}` : '';
+    return this.get<{ runs: NodeBackupRunSummary[] }>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/runs${qs}`,
     );
   }
 
