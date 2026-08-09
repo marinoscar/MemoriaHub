@@ -2163,6 +2163,7 @@ cd apps/web && npm test
 | [CLAUDE.md](../CLAUDE.md) | AI assistant guidance |
 | [Face Detection and Recognition](specs/face-recognition.md) | End-to-end face detection, provider abstraction, matching, people labeling |
 | [Enrichment Queue](specs/enrichment-queue.md) | Generic background enrichment queue; how to add new AI capabilities |
+| [Memories](specs/memories.md) | Auto-curated memory collections (On This Day, Trips, People, Themes, Seasonal, Year in Review): data model, curation engine, AI titling, notifications/email digest, web story player, API/RBAC/settings |
 
 ### 15.3 Specification Index
 

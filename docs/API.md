@@ -4877,3 +4877,138 @@ Cancel a runaway run app-wide, bypassing the circle-membership check the non-adm
 **Error Cases (all admin endpoints):**
 - 403 — missing Admin role or the named permission
 - 404 — target not found, or feature disabled
+
+## Memories (media:read / media:write + per-circle roles)
+
+Auto-curated memory collections — On This Day, Trip, Best of {Person}, {Person} Through the Years, Theme, Seasonal, Year in Review — pre-generated on a schedule and surfaced on Home, in a `/memories` hub, and as a full-screen story. Feature-gated by `features.memories` (default off) + the `MEMORIES_ENABLED` env kill-switch: every non-admin endpoint below returns an **empty result** (list/feed) or **404** (`:id` routes) when the feature is disabled — never an error. No new RBAC permission was introduced; every endpoint reuses `media:read`/`media:write` plus per-circle `viewer`/`collaborator` roles, the same decision Workflows made — a memory is a derived view over media the caller can already see. For the full curation algorithm, AI titling contract, and digest design, see [docs/specs/memories.md](specs/memories.md).
+
+A memory in a circle the caller does not belong to returns **404, not 403** (enumeration-resistant); a member who belongs to the circle but lacks the required role gets **403**.
+
+### GET /memories
+
+**Permissions:** `media:read` + circle `viewer`
+
+Keyset page of memory cards, newest-generated first. Excludes tombstoned (deleted) memories, expired `on_this_day` memories, memories the caller has hidden, and anything filtered by the caller's `user_settings.memories` preferences (hidden people / sensitive date ranges).
+
+**Query Parameters:** `circleId` (required, uuid), `type` (optional, one of the seven `MemoryType` values), `year` (optional — matches memories whose covered period overlaps that UTC calendar year), `favorite` (optional boolean — narrows to the caller's own favorites), `cursor` (optional, uuid), `pageSize` (optional, max 100)
+
+**Response:** `200 OK`
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "type": "trip",
+      "title": "Trip to Guanacaste",
+      "subtitle": "March 2023",
+      "itemCount": 24,
+      "periodStart": "2023-03-12T00:00:00.000Z",
+      "periodEnd": "2023-03-17T00:00:00.000Z",
+      "coverMediaItemId": "uuid",
+      "coverThumbnailUrl": "https://...",
+      "meta": { "locality": "Guanacaste", "country": "Costa Rica", "dayCount": 6 },
+      "myState": { "seen": true, "favorited": false },
+      "generatedAt": "2026-08-09T04:00:00.000Z"
+    }
+  ],
+  "meta": { "pageSize": 20, "nextCursor": "uuid-or-null", "hasMore": true }
+}
+```
+
+### GET /memories/feed
+
+**Permissions:** `media:read` + circle `viewer`
+
+Home carousel feed, capped at 10 cards: today's `on_this_day` memories first (closest year first), then the newest unseen, then the newest seen. Each card additionally carries up to four `itemThumbnailUrls` for the fan effect.
+
+**Query Parameters:** `circleId` (required, uuid)
+
+### GET /memories/:id
+
+**Permissions:** `media:read` + circle `viewer`
+
+Full detail, including `narrative` (the AI-written blurb, when present) and the ordered item list. Preference filters are deliberately **not** applied here — a direct link from the story player, a notification, or the email digest must always resolve; hide and delete are the tools offered on this page instead.
+
+**Response:** `200 OK` — adds `narrative`, `titleSource` (`'template'`\|`'ai'`), `titleModel`, `personId`, `expiresAt`, `myState.hidden`, and `items: [{ id, mediaItemId, position, mediaType, width, height, durationMs, capturedAt, thumbnailUrl }]` to the card shape above.
+
+**Error Cases:**
+- 404 — not found, tombstoned, expired, not a member of the owning circle, or feature disabled
+
+### POST /memories/:id/seen
+
+**Permissions:** `media:read` + circle `viewer` (scoped to the caller's own state)
+
+Marks a memory seen by the calling user. Idempotent — `seenAt` is set via `COALESCE`, so a repeat call never moves the timestamp off the first view. **Response:** `204 No Content`.
+
+### POST /memories/:id/hide, DELETE /memories/:id/hide
+
+**Permissions:** `media:read` + circle `viewer`
+
+Per-user hide / un-hide. Personal and reversible — the memory stays visible to every other circle member, and it stays reachable by id for the user who hid it. **Response:** `204 No Content`.
+
+### POST /memories/:id/favorite, DELETE /memories/:id/favorite
+
+**Permissions:** `media:read` + circle `viewer`
+
+Per-user favorite / un-favorite. **Response:** `204 No Content`.
+
+### POST /memories/:id/save-album
+
+**Permissions:** `media:write` + circle `collaborator`
+
+Save the memory's live items, in position order, as a new album — reusing the existing album service path (`createAlbum` → `addAlbumItems` → cover), so it inherits the same circle checks and cover-membership validation. Deliberately **not** idempotent: saving the same memory twice yields two albums.
+
+**Request Body:** `{ "name": "Optional custom album name" }` (optional — defaults to the memory's own title, capped at 256 characters)
+
+**Response:** `201 Created` `{ "albumId": "uuid" }`
+
+### DELETE /memories/:id
+
+**Permissions:** `media:write` + circle `collaborator`
+
+Circle-level **tombstone** delete: sets `deletedAt`. The memory disappears for every member of the circle and can never be regenerated — the `(circleId, type, periodKey, subjectKey)` unique index spans tombstoned rows, so future curation recognizes and skips it. Writes a `memory:deleted` audit event. Underlying photos are untouched; only the curated collection is removed.
+
+**Response:** `204 No Content`
+
+**Error Cases:**
+- 403 — member without the collaborator circle role
+- 404 — not found, already deleted, not a circle member, or feature disabled
+
+### Per-user preferences (no dedicated endpoint)
+
+Hidden people, sensitive date ranges, and email-digest opt-out are stored in the `memories` namespace of the existing `user_settings` JSONB and read/written **only** through `GET`/`PATCH`/`PUT /user-settings` — there is no memories-specific settings endpoint. See the `user_settings` entry in [CLAUDE.md](../CLAUDE.md#database-tables) for the full schema and merge semantics.
+
+### Admin: Memories
+
+#### POST /admin/memories/backfill
+
+**Permissions:** Admin + `system_settings:write`
+
+Enqueue the sharded `memory_generation` backfill plan — 18 background-priority jobs per circle (12 On This Day month-shards + one shard each for the remaining six curators) — for one circle, or every circle when `circleId` is omitted. Idempotent and safe to re-run: every curator write is an upsert keyed on `(circleId, type, periodKey, subjectKey)`, and a memory the user has deleted is never resurrected. A circle that already has a `memory_generation` job pending or running is skipped, not double-queued.
+
+**Request Body:** `{ "circleId": "uuid-optional" }`
+
+**Response:** `201 Created` `{ "data": { "enqueued": 18, "circles": 1, "skipped": 0 } }`
+
+**Error Cases:**
+- 400 — Memories is disabled globally
+- 404 — the named circle does not exist
+
+### AI titling model — PUT /ai/features/memories
+
+**Permissions:** Admin + `ai_settings:write`
+
+Set the active chat-capable provider/model used to write memory titles, subtitles, and narratives (`ai.features.memories`). List candidates with `GET /ai/models?capability=chat`. Passing a null provider or model clears the selection, in which case memories fall back to deterministic template titles — never an error.
+
+**Request Body:** `{ "provider": "anthropic", "model": "claude-..." }`
+
+**Error Cases:**
+- 400 — the selected provider has no configured, enabled credential
+
+### Public digest routes (no authentication)
+
+Three `@Public()` routes back the HTML email digest — see [docs/specs/memories.md §7.7–7.8](specs/memories.md#77-stateless-signed-capabilities) for the full HMAC-signed-capability security design. Access control is the signed token, never RBAC; every failure mode (malformed, tampered, wrong-purpose, expired) returns an identical generic 404 / invalid-link page.
+
+- `GET /public/memories/digest-image/:token` — stream a digest email's cover thumbnail bytes (never the original)
+- `GET /public/memories/digest-unsubscribe/:token` — render a confirmation page (mutates nothing)
+- `POST /public/memories/digest-unsubscribe/:token` — perform the opt-out (`user_settings.memories.emailDigestOptOut = true`); idempotent
