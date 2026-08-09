@@ -41,6 +41,7 @@ export interface ResolvedSettings {
   backup: SystemSettingsValue['backup'];
   workflows: SystemSettingsValue['workflows'];
   memories: SystemSettingsValue['memories'];
+  databaseBackup: SystemSettingsValue['databaseBackup'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
   version: number;
@@ -144,6 +145,7 @@ export class SystemSettingsService {
       backup: value.backup,
       workflows: value.workflows,
       memories: value.memories,
+      databaseBackup: value.databaseBackup,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -242,6 +244,7 @@ export class SystemSettingsService {
       backup: value.backup,
       workflows: value.workflows,
       memories: value.memories,
+      databaseBackup: value.databaseBackup,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -718,6 +721,60 @@ export class SystemSettingsService {
             30,
         },
       },
+      // PostgreSQL Database Backup & Restore (epic #339, issue #340).
+      databaseBackup: {
+        enabled:
+          (dto as any).databaseBackup?.enabled ??
+          (current as any).databaseBackup?.enabled ??
+          false,
+        frequency:
+          (dto as any).databaseBackup?.frequency ??
+          (current as any).databaseBackup?.frequency ??
+          'daily',
+        dayOfWeek:
+          (dto as any).databaseBackup?.dayOfWeek ??
+          (current as any).databaseBackup?.dayOfWeek ??
+          0,
+        dayOfMonth:
+          (dto as any).databaseBackup?.dayOfMonth ??
+          (current as any).databaseBackup?.dayOfMonth ??
+          1,
+        timeOfDay:
+          (dto as any).databaseBackup?.timeOfDay ??
+          (current as any).databaseBackup?.timeOfDay ??
+          '02:00',
+        timezone:
+          (dto as any).databaseBackup?.timezone ??
+          (current as any).databaseBackup?.timezone ??
+          'UTC',
+        retentionCount:
+          (dto as any).databaseBackup?.retentionCount ??
+          (current as any).databaseBackup?.retentionCount ??
+          7,
+        // Nullable: null is meaningful ("use the active storage provider"),
+        // so use !== undefined rather than ?? to distinguish "not sent" from
+        // "explicitly cleared to null".
+        storageProvider:
+          (dto as any).databaseBackup?.storageProvider !== undefined
+            ? (dto as any).databaseBackup?.storageProvider
+            : ((current as any).databaseBackup?.storageProvider ?? null),
+        runStaleMinutes:
+          (dto as any).databaseBackup?.runStaleMinutes ??
+          (current as any).databaseBackup?.runStaleMinutes ??
+          30,
+        compressionLevel:
+          (dto as any).databaseBackup?.compressionLevel ??
+          (current as any).databaseBackup?.compressionLevel ??
+          1,
+        restoreRollbackMode:
+          (dto as any).databaseBackup?.restoreRollbackMode ??
+          (current as any).databaseBackup?.restoreRollbackMode ??
+          'retain_database',
+        oldDatabaseRetentionHours:
+          (dto as any).databaseBackup?.oldDatabaseRetentionHours ??
+          (current as any).databaseBackup?.oldDatabaseRetentionHours ??
+          168,
+      },
     };
 
     // Validate merged result
@@ -769,6 +826,7 @@ export class SystemSettingsService {
       backup: value.backup,
       workflows: value.workflows,
       memories: value.memories,
+      databaseBackup: value.databaseBackup,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
