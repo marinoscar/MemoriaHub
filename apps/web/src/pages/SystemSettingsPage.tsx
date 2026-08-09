@@ -16,6 +16,7 @@ import { useSystemSettings } from '../hooks/useSystemSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { UISettings } from '../components/admin/UISettings';
 import { StorageSettings } from '../components/admin/StorageSettings';
+import { MaintenanceSettings } from '../components/admin/MaintenanceSettings';
 import { resetJobHistory } from '../services/jobInsights';
 
 interface TabPanelProps {
@@ -110,6 +111,7 @@ export default function SystemSettingsPage() {
             >
               <Tab label="UI Settings" />
               <Tab label="Storage" />
+              <Tab label="Maintenance" />
             </Tabs>
 
             <Box sx={{ p: 3 }}>
@@ -133,6 +135,23 @@ export default function SystemSettingsPage() {
                   }
                   onResetHistory={canWrite ? () => resetJobHistory().then(() => undefined) : undefined}
                   disabled={!canWrite || isSaving}
+                />
+              </TabPanel>
+
+              {/* Maintenance mode (issue #348). Not part of the system-settings
+                  PUT above — it has its own endpoint pair, which is exempt from
+                  the maintenance block so this toggle keeps working while the
+                  rest of the API is 503ing. */}
+              <TabPanel value={tabIndex} index={2}>
+                <MaintenanceSettings
+                  disabled={!canWrite}
+                  onSaved={(active) =>
+                    setSuccessMessage(
+                      active
+                        ? 'Maintenance mode enabled'
+                        : 'Maintenance mode disabled',
+                    )
+                  }
                 />
               </TabPanel>
             </Box>
