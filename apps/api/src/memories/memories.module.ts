@@ -25,6 +25,8 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { AiModule } from '../ai/ai.module';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { MemoriesNotificationService } from './notifications/memories-notification.service';
 import { MemoriesController } from './api/memories.controller';
 import { MemoriesService } from './api/memories.service';
 import { MemoryTitleService } from './titles/memory-title.service';
@@ -51,6 +53,11 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   // batched signing, MediaService for the album path save-as-album reuses
   // rather than duplicating). Both point one way — neither imports
   // MemoriesModule — so there is no cycle and no forwardRef.
+  //
+  // #311 adds NotificationsModule for MemoriesNotificationService. That edge
+  // points INTO notifications exactly like MediaModule's and WorkflowsModule's;
+  // NotificationsModule itself still imports NOTHING, which is the load-bearing
+  // property that keeps the module graph acyclic (see its header).
   imports: [
     PrismaModule,
     SettingsModule,
@@ -58,10 +65,12 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     AiModule,
     CirclesModule,
     MediaModule,
+    NotificationsModule,
   ],
   controllers: [MemoriesController],
   providers: [
     MemoriesService,
+    MemoriesNotificationService,
     MemoriesGenerationTask,
     MemoryGenerationHandler,
     MemoryCurationService,

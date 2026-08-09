@@ -21,7 +21,8 @@ export type NotificationType =
   | 'upload_completed'
   | 'enrichment_failed'
   | 'workflow_run_completed'
-  | 'share_expiring';
+  | 'share_expiring'
+  | 'memories_ready';
 
 /** One notification row. */
 export interface NotificationItem {

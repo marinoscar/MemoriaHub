@@ -10,6 +10,7 @@
 
 import type { ReactElement } from 'react';
 import {
+  AutoAwesome as AutoAwesomeIcon,
   AutoFixHigh as AutoFixHighIcon,
   BurstMode as BurstModeIcon,
   CloudUpload as CloudUploadIcon,
@@ -71,6 +72,14 @@ const META: Record<string, NotificationMeta> = {
     icon: <PublicIcon fontSize="small" />,
     tone: 'warning',
     label: 'Share expiring',
+  },
+  // Epic #300 / issue #311. Positive tone on purpose: unlike every other row in
+  // this map, "your memories are ready" is good news the user opted into, not a
+  // queue to drain or a failure to fix.
+  memories_ready: {
+    icon: <AutoAwesomeIcon fontSize="small" />,
+    tone: 'success',
+    label: 'Memories ready',
   },
 };
 
