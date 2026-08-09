@@ -810,9 +810,14 @@ Circle collaborators and admins can publish a single media item or an entire alb
 Agentic search is **stateless** — no conversation rows are stored server-side. The client holds the full message history in memory and sends it with every request.
 - `POST /api/search/agent` - Send a message history and stream the AI response via SSE (text/event-stream). Body: `{ circleId: string; messages: Array<{ role: 'user'|'assistant'; content: string }> }` (last message must be `role: 'user'`). Verifies circle viewer membership. Stream events: `token`, `tool_call`, `results`, `done`, `error`. The agent's `search_media` tool also accepts a top-level `semanticQuery` parameter for visual/scene-based queries, a `noFaces: true` parameter to filter to photos with no faces, a `missingCapturedAt: true` parameter to filter to items with no EXIF capture date, a `missingCamera: true` parameter to filter to items with no camera make/model, and a `near: { lat, lng, radiusKm }` parameter for map-radius proximity search. Each item in `results` SSE events includes a signed `thumbnailUrl` so clients can render thumbnails directly without a second request. (search:use)
 
+### Admin: Maintenance Mode (Admin role + system_settings:read / system_settings:write)
+Admin-controlled app-wide maintenance mode (issue #348) — see the [Maintenance Mode runbook](docs/runbooks/maintenance-mode.md) for the recommended upgrade sequence, lockout recovery, and an nginx-level fallback for when the API itself won't start. A global `MaintenanceGuard` (`apps/api/src/common/maintenance/`) blocks non-exempt requests with a `503` carrying a stable `{error:'maintenance', message, startedAt}` marker (`MAINTENANCE_ERROR_MARKER`) and a `Retry-After: 120` header; `@AllowDuringMaintenance()`-tagged routes (health probes, sign-in routes, and the maintenance endpoints themselves) stay reachable. **No new permission was added** — this is a system setting like any other, and the existing `system_settings:read`/`system_settings:write` pair already means "can change global app behavior," so a dedicated maintenance permission would protect nothing a new grant of that pair doesn't already cover. State resolves as `env override ?? in-memory override ?? persisted setting`; the in-memory layer exists only for issue #344's database-rename swap window, when the persisted flag briefly lives in an unreadable database.
+- `GET /api/admin/maintenance` (system_settings:read) - Return the effective maintenance state plus each contributing layer: `{ active, message, allowAdmins, startedAt, startedById, persistedEnabled, inMemoryOverride, envOverride }`
+- `PUT /api/admin/maintenance` body `{ enabled: boolean, message?, allowAdmins? }` (system_settings:write) - Enable/disable maintenance; persists to `system_settings.maintenance.*` (surviving the restart it was enabled for) and writes an `AuditEvent` (`maintenance:enabled`/`maintenance:disabled`); `allowAdmins:false` blocks even Admin sessions from the UI (recover via the `MAINTENANCE_MODE=false` env break-glass — see the runbook); a `MAINTENANCE_MODE` env override still wins over whatever is written here, in both directions
+
 ### Health
-- `GET /api/health/live` - Liveness check
-- `GET /api/health/ready` - Readiness check (includes DB)
+- `GET /api/health/live` - Liveness check; stays 200 during maintenance mode so orchestrators don't kill the container mid-upgrade
+- `GET /api/health/ready` - Readiness check (includes DB); reports not-ready (503) during maintenance mode so load balancers drain the instance, checked before the DB probe so it still answers correctly during the #344 database-swap window
 
 ## RBAC Model
 
@@ -976,6 +981,7 @@ Key variables (see `infra/compose/.env.example` for full list):
 - `NODE_ENV` - Environment (development/production)
 - `PORT` - API port (default: 3000)
 - `APP_URL` - Base URL (default: http://localhost:3535)
+- `MAINTENANCE_MODE` - Break-glass override for admin-controlled maintenance mode (issue #348): `true` forces maintenance ON at boot (works even with an unreadable database), `false` forces it OFF (the documented recovery from a bad `allowAdmins: false` lockout); unset or any other value means "no override — the persisted `maintenance.enabled` setting governs." Re-read on every request; wins over the persisted setting in both directions. See the [Maintenance Mode runbook](docs/runbooks/maintenance-mode.md)
 
 **Database (individual connection parameters):**
 - `POSTGRES_HOST` - Database hostname (default: localhost)
@@ -1264,6 +1270,15 @@ The `backup.*` namespace (also with no dedicated admin settings-page panel as of
 - `backup.maxPageSize` — integer, 50–500, default 200; hard cap on rows a node may request per `GET /api/nodes/:id/backup/changes` or `.../manifest` page (a client-requested `limit` above this is clamped, not rejected)
 - `backup.feedSafetyHorizonSeconds` — integer, 0–60, default 5; rows whose `updatedAt` is within this many seconds of "now" are withheld from the change feed so an in-flight same-timestamp write can never be skipped by the keyset cursor; `0` disables the horizon
 - `backup.runStaleMinutes` — integer, 5–120, default 15; minutes without a page fetch or ack before a `running` `NodeBackupRun` is released as `stale` by `NodeBackupStaleTask` (a 10-minute cron) or the next `POST /api/nodes/:id/backup/runs` call, unblocking that node's single-active-run guard
+
+**Maintenance Mode (issue #348):**
+
+The `maintenance.*` namespace (no dedicated admin settings-page panel as of this writing — managed via `GET`/`PUT /api/admin/maintenance` above, not the generic system-settings JSON) is the persisted layer of the two-layer state model `MaintenanceModeService` resolves against; see the [Maintenance Mode runbook](docs/runbooks/maintenance-mode.md) for the full model, the upgrade sequence, and lockout recovery.
+- `maintenance.enabled` — boolean, default false; whether the app is currently in maintenance mode. Persisting this (rather than an in-memory-only flag) is the point: it survives the very container restart an admin enables it for
+- `maintenance.message` — string, max 500 chars, default `''`; operator-facing message shown to blocked users, e.g. `"Upgrading to v2.4, back by 03:00 UTC"`
+- `maintenance.allowAdmins` — boolean, default true; when true, a request carrying a valid JWT with the Admin role bypasses the block entirely. Defaults true so an admin can exercise the upgraded app before flipping maintenance off; setting it false blocks even Admin sessions and is the one path that can lock an admin out of the UI (though `PUT /api/admin/maintenance` itself stays reachable by direct API call — see the runbook)
+- `maintenance.startedAt` — ISO timestamp, nullable, default null; set when maintenance was last enabled, cleared on disable
+- `maintenance.startedById` — string (user id), nullable, default null; the user who enabled maintenance, cleared on disable
 
 ## Common Patterns
 
