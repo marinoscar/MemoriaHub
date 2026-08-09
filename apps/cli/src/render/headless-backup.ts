@@ -18,6 +18,7 @@ import {
   type BackupEngineStats,
   type ItemDonePayload,
   type PageFetchedPayload,
+  type ReconcileDonePayload,
   type RunFinishedPayload,
   type RunStartedPayload,
   type ThrottlePayload,
@@ -68,6 +69,8 @@ export function renderBackupHeadless(engine: BackupTypedEmitter, opts: RenderBac
     engine.on(BACKUP_EV.ITEM_DONE, (p) => emitLine('item-done', p));
     engine.on(BACKUP_EV.PAGE_COMMITTED, (p) => emitLine('page-committed', p));
     engine.on(BACKUP_EV.THROTTLE, (p) => emitLine('throttle', p));
+    engine.on(BACKUP_EV.RECONCILE_STARTED, (p) => emitLine('reconcile-started', p));
+    engine.on(BACKUP_EV.RECONCILE_DONE, (p) => emitLine('reconcile-done', p));
     engine.on(BACKUP_EV.RUN_FINISHED, (p) => emitLine('run-finished', p));
     engine.on(BACKUP_EV.ERROR, (p) => emitLine('error', p));
     return;
@@ -145,6 +148,26 @@ export function renderBackupHeadless(engine: BackupTypedEmitter, opts: RenderBac
     const secs = (p.delayMs / 1000).toFixed(1);
     if (isTTY) write('\r\x1b[2K');
     ui.dim(`  ⏳ Rate limited — slowing down for ${secs}s…`);
+  });
+
+  engine.on(BACKUP_EV.RECONCILE_STARTED, () => {
+    if (isTTY) write('\r\x1b[2K');
+    ui.step('Reconciling the local catalog against the server manifest…');
+  });
+
+  engine.on(BACKUP_EV.RECONCILE_DONE, (p: ReconcileDonePayload) => {
+    if (isTTY) write('\r\x1b[2K');
+    if (p.cancelled) {
+      ui.warn('Reconcile cancelled before the manifest stream completed — no diff applied.');
+      return;
+    }
+    ui.line(
+      `  Reconcile    : ${p.manifestIds} server item(s) checked — ` +
+        `${p.quarantined} quarantined, ${p.driftMarked} marked for re-download`,
+    );
+    if (p.quarantined > 0) {
+      ui.dim('  Quarantined files moved to _quarantine/ — review with `memoriahub backup prune`.');
+    }
   });
 
   engine.on(BACKUP_EV.RUN_FINISHED, (p: RunFinishedPayload) => {

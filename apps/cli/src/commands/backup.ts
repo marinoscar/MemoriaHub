@@ -37,8 +37,24 @@ import {
 import { runDeviceLogin } from '../device-login.js';
 import { runBackupInit, BackupRootConflictError } from '../backup/init-backup.js';
 import { RunAlreadyActiveError } from '../backup/backup-engine.js';
-import { CatalogOpenError } from '../backup/catalog-db.js';
+import { CatalogOpenError, openCatalogDb } from '../backup/catalog-db.js';
 import { executeRun, resolveBackupExitCode } from '../backup/execute-run.js';
+import {
+  RECONCILE_EVERY_DAYS,
+  listQuarantined,
+  pruneQuarantine,
+  resolveRunKind,
+} from '../backup/reconcile.js';
+import {
+  DEFAULT_VERIFY_CONCURRENCY,
+  VerifyEmitter,
+  resolveVerifyExitCode,
+  runVerify,
+} from '../backup/verify.js';
+import {
+  printQuarantineListing,
+  renderVerifyHeadless,
+} from '../render/headless-verify.js';
 import {
   runViaDaemon,
   shouldDelegateToDaemon,
@@ -252,15 +268,10 @@ function runCmd(): Command {
     .option('--page-size <n>', 'Change-feed page size (default: backup.pageSize setting, 100)')
     .option('--json', 'Emit NDJSON events instead of human output')
     .option('--strict', 'Exit non-zero when any item failed')
-    .option('--reconcile', 'Full reconcile pass (not available yet)')
+    .option('--reconcile', 'Force a full reconcile pass (manifest diff + quarantine)')
     .option('--embedded', 'Force the in-process engine even when a daemon is running')
     .action(async (opts: RunCmdOpts) => {
       const cfg = requireConfig();
-
-      if (opts.reconcile) {
-        ui.error('`backup run --reconcile` arrives with verify/reconcile in a later release.');
-        process.exit(1);
-      }
 
       const settings = new SettingsRepo(getDb());
       const root = settings.backupRoot();
@@ -273,6 +284,22 @@ function runCmd(): Command {
         process.exit(1);
       }
 
+      // Run-kind resolution (issue #320): --reconcile forces a reconcile;
+      // otherwise the server config's lastReconcileAt drives the 30-day
+      // auto-cadence (a config fetch failure degrades to incremental).
+      const kindApi = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+      const { kind, reason } = await resolveRunKind(kindApi, nodeId, opts.reconcile === true);
+      if (!opts.json) {
+        if (reason === 'auto') {
+          ui.info(
+            `Last full reconcile is more than ${RECONCILE_EVERY_DAYS} days old (or never ran) — ` +
+              'upgrading this run to a reconcile pass.',
+          );
+        } else if (reason === 'forced') {
+          ui.dim('Reconcile pass forced via --reconcile.');
+        }
+      }
+
       // Delegate to a running daemon (issue #318): the daemon owns the run
       // lock and the scheduler, so an embedded engine next to it would only
       // race the 409 guard. Events stream back over IPC into the SAME
@@ -283,6 +310,7 @@ function runCmd(): Command {
           try {
             if (!opts.json) ui.dim('Worker-node daemon detected — delegating the run over IPC.');
             const outcome = await runViaDaemon(client, {
+              kind,
               attachRenderer: (emitter) =>
                 renderBackupHeadless(emitter, { json: opts.json === true }),
             });
@@ -320,6 +348,7 @@ function runCmd(): Command {
           pat: cfg.pat,
           root,
           nodeId,
+          kind,
           trigger: 'manual',
           cliVersion: cliVersion(),
           concurrency: Math.max(1, Math.floor(concurrency)),
@@ -623,6 +652,181 @@ function setRateCmd(): Command {
     });
 }
 
+// ---------------------------------------------------------------------------
+// backup verify (issue #320)
+// ---------------------------------------------------------------------------
+
+/** Resolve the backup root, exiting with guidance when none is bound. */
+function requireBackupRoot(settings: SettingsRepo): string {
+  const root = settings.backupRoot();
+  if (!root) {
+    ui.error(
+      'No backup root is configured on this machine. Run ' +
+        '`memoriahub backup init --dest <dir>` first.',
+    );
+    process.exit(1);
+  }
+  return root;
+}
+
+function verifyCmd(): Command {
+  return new Command('verify')
+    .description('Verify the local backup root against the catalog (existence, size, sha256)')
+    .option('--deep', 'Hash EVERY file, not only the ones not yet proven')
+    .option('--json', 'Emit NDJSON events instead of human output')
+    .option(
+      '--concurrency <n>',
+      `Parallel hashing workers (default: ${DEFAULT_VERIFY_CONCURRENCY})`,
+    )
+    .addHelpText(
+      'after',
+      '\nBy default verify stats every `present` item and fully hashes only the items\n' +
+        'whose bytes have not been proven since they landed (downloaded since the last\n' +
+        'verify, never verified, or previously failed). --deep hashes everything.\n\n' +
+        'A missing file or a hash mismatch marks the item for re-download — the next\n' +
+        '`memoriahub backup run` re-fetches it. Verify never deletes or moves anything.\n' +
+        'Exits non-zero when any item failed.',
+    )
+    .action(async (opts: { deep?: boolean; json?: boolean; concurrency?: string }) => {
+      const settings = new SettingsRepo(getDb());
+      const root = requireBackupRoot(settings);
+      const concurrency =
+        parseNumberFlag(opts.concurrency, '--concurrency') ?? DEFAULT_VERIFY_CONCURRENCY;
+
+      let db;
+      try {
+        db = openCatalogDb(root);
+      } catch (err) {
+        if (err instanceof CatalogOpenError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        throw err;
+      }
+
+      try {
+        const emitter = new VerifyEmitter();
+        renderVerifyHeadless(emitter, { json: opts.json === true });
+        const summary = await runVerify(
+          { root, deep: opts.deep === true, concurrency: Math.max(1, Math.floor(concurrency)) },
+          { db },
+          emitter,
+        );
+        process.exit(resolveVerifyExitCode(summary));
+      } finally {
+        db.close();
+      }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// backup prune (issue #320) — the ONLY path that deletes quarantined bytes
+// ---------------------------------------------------------------------------
+
+function pruneCmd(): Command {
+  return new Command('prune')
+    .description('List (and with --yes permanently delete) quarantined backup files')
+    .option('--yes', 'Actually delete the quarantined files (default: dry run)')
+    .option('--older-than <days>', 'Only entries quarantined more than N days ago')
+    .option('--json', 'Emit the listing as JSON')
+    .addHelpText(
+      'after',
+      '\nA reconcile run moves files the server no longer lists into <root>/_quarantine/\n' +
+        'instead of deleting them. This command is the ONLY way those bytes are removed.\n' +
+        'Without --yes it prints what WOULD be deleted and exits.',
+    )
+    .action(async (opts: { yes?: boolean; olderThan?: string; json?: boolean }) => {
+      const settings = new SettingsRepo(getDb());
+      const root = requireBackupRoot(settings);
+
+      let olderThanDays: number | undefined;
+      if (opts.olderThan !== undefined) {
+        const n = Number(opts.olderThan);
+        if (!Number.isFinite(n) || n < 0) {
+          ui.error(`Invalid --older-than: ${opts.olderThan} (expected a non-negative number of days)`);
+          process.exit(1);
+        }
+        olderThanDays = n;
+      }
+
+      let db;
+      try {
+        db = openCatalogDb(root);
+      } catch (err) {
+        if (err instanceof CatalogOpenError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        throw err;
+      }
+
+      try {
+        const entries = listQuarantined(db, olderThanDays);
+
+        // Dry run is the DEFAULT: without --yes nothing is deleted unless the
+        // operator explicitly confirms at an interactive prompt.
+        let confirmed = opts.yes === true;
+        if (!confirmed) {
+          if (opts.json) {
+            process.stdout.write(
+              `${JSON.stringify({ dryRun: true, entries }, null, 2)}\n`,
+            );
+            return;
+          }
+          printQuarantineListing(entries, {
+            deleted: false,
+            ...(olderThanDays !== undefined ? { olderThanDays } : {}),
+          });
+          if (entries.length === 0 || !isTTY || !process.stdin.isTTY) return;
+
+          ui.blank();
+          const rl = readline.createInterface({ input, output });
+          let answer: string;
+          try {
+            answer = (
+              await rl.question(
+                `Permanently delete these ${entries.length} quarantined item(s)? [y/N] `,
+              )
+            ).trim();
+          } finally {
+            rl.close();
+          }
+          if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+            ui.dim('Nothing deleted.');
+            return;
+          }
+          confirmed = true;
+        }
+
+        if (entries.length === 0) {
+          if (opts.json) {
+            process.stdout.write(`${JSON.stringify({ deleted: [], bytesFreed: 0 }, null, 2)}\n`);
+            return;
+          }
+          printQuarantineListing(entries, {
+            deleted: true,
+            ...(olderThanDays !== undefined ? { olderThanDays } : {}),
+          });
+          return;
+        }
+
+        const result = pruneQuarantine(root, db, entries);
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+          return;
+        }
+        printQuarantineListing(result.deleted, {
+          deleted: true,
+          ...(olderThanDays !== undefined ? { olderThanDays } : {}),
+        });
+        ui.blank();
+        ui.success(`Permanently deleted ${result.deleted.length} quarantined item(s).`);
+      } finally {
+        db.close();
+      }
+    });
+}
+
 export function backupCommand(): Command {
   const cmd = new Command('backup');
   cmd
@@ -630,6 +834,8 @@ export function backupCommand(): Command {
     .addCommand(initCmd())
     .addCommand(runCmd())
     .addCommand(statusCmd())
+    .addCommand(verifyCmd())
+    .addCommand(pruneCmd())
     .addCommand(scheduleCmd())
     .addCommand(setRateCmd());
   return cmd;
