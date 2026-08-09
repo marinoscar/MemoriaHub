@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.8 (data model + generation plumbing + curation engine; all seven curators; AI titles; read/act API + per-user preferences; web Home carousel & hub; notifications & email digest) |
+| **Version** | 1.0 (complete: data model + generation plumbing + curation engine; all seven curators; AI titles; read/act API + per-user preferences; web Home carousel, hub & story player; notifications & email digest; admin settings page & sharded library backfill) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306), API / per-user state / delete / save-as-album / preferences (#307), web Home carousel & `/memories` hub (#309), Notification Center integration & HTML email digest (#311), story player / save-as-album / share / preferences UI (#313); the admin settings page + library backfill (#315) is still outstanding |
+| **Status** | Implemented — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306), API / per-user state / delete / save-as-album / preferences (#307), web Home carousel & `/memories` hub (#309), Notification Center integration & HTML email digest (#311), story player / save-as-album / share / preferences UI (#313), admin settings page & sharded library backfill (#315). The epic's remaining issue (#317) is documentation only |
 
 ---
 
@@ -34,7 +34,7 @@ Seven memory types ship across the epic (see [§2.1](#21-memorytype-enum)): `on_
 
 The epic is delivered incrementally, and this document grows with it. Implemented so far: the database foundation — the `MemoryType` enum and the `Memory` / `MemoryItem` / `MemoryUserState` models ([#301](https://github.com/marinoscar/MemoriaHub/issues/301), §2) — and the configuration surface plus generation plumbing: the `features.memories` flag, the `memories.*` namespace, `ai.features.memories`, and an hourly per-circle `memory_generation` job whose handler is still a deliberate **no-op** ([#302](https://github.com/marinoscar/MemoriaHub/issues/302), §3 and §9). Every later issue builds on the #301 schema without altering it.
 
-With #313 landed, an enabled deployment now curates all seven memory types, serves them over the API and the web hub, announces them through the Notification Center bell, mails them out as an HTML digest, plays a memory back as a full-screen story, saves and shares one as an album, and lets each user hide the people and dates they never want resurfaced. What remains of the epic is administration: #315's admin settings page and library backfill.
+With #315 landed, an enabled deployment curates all seven memory types, serves them over the API and the web hub, announces them through the Notification Center bell, mails them out as an HTML digest, plays a memory back as a full-screen story, saves and shares one as an album, lets each user hide the people and dates they never want resurfaced, and gives an admin one page to turn the feature on, tune every parameter, pick the titling model, and sweep the existing library in bounded background jobs. The epic's remaining issue is documentation.
 
 ## 2. Data Model
 
@@ -228,6 +228,33 @@ v1's body is a log line and a return. That log line is the observability hook pr
 ### 3.4 Job-type labels
 
 `JOB_TYPE_LABELS` (`apps/api/src/enrichment/job-type-labels.ts`) gains `memory_generation: 'Memory generation'` so the type renders with a friendly name in `/admin/settings/jobs`. `memory_digest: 'Memory email digest'` sits alongside it ([§7.2](#72-digest-architecture)); both are server-only global jobs, one per circle — generation curates, digest mails the result out.
+
+### 3.5 The library backfill, and why it is sharded
+
+`POST /api/admin/memories/backfill` (issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315), Admin + `system_settings:write`, body `{ circleId? }`) sweeps the **existing** library so a deployment that has just switched Memories on lights up with years of memories immediately, instead of the hourly cron trickling in today's anniversaries one day at a time.
+
+It **only enqueues**. What "backfill" means — every curator's widened horizon (§4.7's every-`(month, day)` anchor set, §4.8's whole-geo-history trip scan, §4.9's all-years person census, §4.10–§4.11's all-history periods) — lives in the curators, keyed off `payload.backfill`, so there is exactly one implementation of it and this endpoint cannot drift from the scheduled path.
+
+**Why it is not one job per circle.** A scheduled run is small by construction: two anchor days, a bounded lookback, the current and previous year. A backfill deliberately removes every one of those horizons, and the result is a job whose work is proportional to the whole library. On This Day is the worst case — up to 366 anchor days × `lookbackYears` curations, each a query plus a scored selection plus an upsert — which #303 shipped as one job while explicitly noting it can approach `ENRICHMENT_JOB_TIMEOUT_MS` (10 minutes by default). A job killed by that timeout is not merely slow: `attempts` is charged at *claim* time, so each kill burns an attempt, and after `ENRICHMENT_MAX_ATTEMPTS` the backfill fails permanently having produced only whatever the first few minutes managed each time.
+
+So the plan is split into bounded units (`apps/api/src/memories/admin/memory-backfill.shards.ts`), following the precedent `duplicate_detection_batch` set with its 100-items-per-job chunking chosen to stay under the worker's stuck-job threshold:
+
+| Shard | Count per circle | Bound |
+|---|---|---|
+| On This Day, one calendar month each | 12 | ≤ 31 anchors × `lookbackYears` |
+| Trip / People highlights / People over years / Theme / Seasonal / Year in Review | 1 each (6) | Bounded by period or subject count, not by 366 days |
+
+**18 rows per circle.** The axes differ per curator on purpose: only On This Day's cost scales with distinct calendar days, and a month is the natural bounded slice of that. Nothing is sharded further by year, person or tag — that would multiply job rows for slices whose individual cost is already small, and each extra shard re-pays that curator's census query.
+
+Each shard is an ordinary `memory_generation` row: background priority 100 (so it can never starve upload enrichment), `skipDedup: true`, `reason: 'backfill'`, and a payload naming its slice — `{ backfill: true, curators: [...], anchorMonths?: [...], aiTitleCap }`. Being ordinary rows is the point: they are retryable, claimable by any worker slot, visible in `/admin/settings/jobs` under `type=memory_generation`, and individually idempotent, because every curator write is an upsert keyed on `(circleId, type, periodKey, subjectKey)`. A shard that fails and retries re-does only its own slice.
+
+**The payload contract is total.** `parseMemoryGenerationPayload` (`memory-generation.payload.ts`) coerces the untrusted JSONB — hand-editable from the jobs dashboard, and possibly written by a different release — and every malformed field degrades to *absent*, i.e. to the full unsharded behaviour. That direction is deliberate: a job that runs every curator is merely slower, whereas one that silently runs none would leave an admin's backfill looking complete while producing nothing. A `curators` list naming nothing the registry knows is logged and no-ops rather than throwing.
+
+**The AI-title budget is divided, not multiplied.** #306's `BACKFILL_AI_TITLE_CAP` is a per-**job** ceiling, so N shards would silently turn one admin click into an N× larger provider bill. The planner hands each shard `cap / shards` via `payload.aiTitleCap`, and `beginRun` clamps that to the cap so a payload can only ever *lower* it. Subsequent scheduled runs get a fresh, uncapped budget, so the library still converges on AI titles over time — exactly the convergence §5.5 designed for.
+
+**Skipping, not double-queueing.** Circles are keyset-paged 100 at a time with **one** batched in-flight query per page; a circle that already has a `memory_generation` job pending or running is skipped and counted in `skipped`, which is what makes a double-clicked button harmless. The response is `{ enqueued, circles, skipped }`, where `enqueued` counts job **rows** (18 per circle) rather than circles. A per-shard enqueue failure is logged and skipped — one bad insert must not cost the rest of the deployment its backfill.
+
+Gating matches the sibling global backfills exactly: `isMemoriesEnabled(settings)` — folding in the `MEMORIES_ENABLED` kill-switch, so a hard-disabled deployment cannot be made to enqueue jobs its handler would no-op — returning **400** when off, and **404** for an unknown `circleId` rather than a cheerful `{ enqueued: 0 }` that reads like success.
 
 ## 4. Curation Engine
 
@@ -612,7 +639,7 @@ One wall clock (`ctx.now`) is captured once by the handler and shared by every c
 ### 4.15 Known gaps
 
 - **A period that falls below `minItems` after items are removed keeps its existing memory.** Curators only upsert periods that still qualify; they do not delete a memory whose material has since been trashed. Its `MemoryItem` rows for hard-deleted media cascade away and `itemCount` is corrected on the next refresh, but a memory whose items were all *soft*-deleted lingers until read-time filtering ([#307](https://github.com/marinoscar/MemoriaHub/issues/307)) hides it. Deleting it automatically was rejected for v1: a curator silently destroying a memory a user may have favorited is a worse failure than a stale one.
-- **Backfill is unchunked.** A full On This Day backfill for a dense circle is up to 366 anchors × `lookbackYears` curations in one job, which can approach `ENRICHMENT_JOB_TIMEOUT_MS`. It is memory-safe (nothing accumulates across anchors) and restartable (every write is idempotent), but chunking the admin backfill into multiple jobs belongs to #315.
+- ~~**Backfill is unchunked.**~~ **Resolved by [#315](https://github.com/marinoscar/MemoriaHub/issues/315)** — the admin backfill now enqueues 18 bounded shards per circle (On This Day split by calendar month, one shard per other curator) rather than one job whose On This Day pass alone could reach 366 anchors × `lookbackYears`. See [§3.5](#35-the-library-backfill-and-why-it-is-sharded). The *scheduled* path is unchanged and was never at risk: it curates two anchor days.
 - **Truncation is chronologically biased.** When `DEFAULT_MAX_CANDIDATES` is hit the scan keeps the earliest candidates. See §4.2 for why that is accepted as a crash guard rather than solved.
 - **`person_highlights` never writes `periodKey = 'all'`,** although the `MemoryType` enum reserves it. An all-time view of a person is what `person_over_years` already is, and generating both would produce two near-identical memories for the same subject. The key shape is kept available for a future variant.
 - **`themes.minItems` / `seasonal.minItems` / `yearInReview.minItems` above `maxItemsPerMemory`** can never be satisfied, since curation caps the selection first — the same un-cross-validated combination already noted for `trips.minItems` in §4.8.
@@ -752,7 +779,7 @@ Introduced by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307).
 | `POST /api/memories/:id/save-album` | `media:write` + **collaborator** | Creates an album from the memory's items — `201 { albumId }` |
 | `DELETE /api/memories/:id` | `media:write` + **collaborator** | Circle-level tombstone (§2.5) + a `memory:deleted` audit event — 204 |
 
-`POST /api/admin/memories/backfill` belongs to this API map but is implemented by issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315), not here.
+`POST /api/admin/memories/backfill` (Admin + `system_settings:write`) belongs to this API map but lives in `AdminMemoriesController`, not this controller — it is an administration action over the generation pipeline rather than a circle-scoped read. See [§3.5](#35-the-library-backfill-and-why-it-is-sharded).
 
 Per-user preferences are **not** endpoints of this controller at all — see §6.7.
 
@@ -1299,9 +1326,34 @@ Three controls:
 
 The section is gated strict-true on `useMemoriesEnabled()` and threads that into `usePeople` (`enabled ? circleId : null`), so with the flag off it renders nothing **and** fires no people request — the same standard as the carousel (§8.3).
 
+### 8.18 The admin settings page
+
+`apps/web/src/pages/Admin/MemoriesSettingsPage.tsx` (`/admin/settings/memories`, issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315)) is the deployment-wide counterpart to §8.17's per-user preferences, and the two are deliberately different surfaces: one decides what the *feature* does, the other what one *person* sees. It follows `BurstsSettingsPage`/`EnhancerSettingsPage` exactly — admin gate → `Navigate`, `useSystemSettings()`, local state synced with `?? default`, `Paper` sections, snackbars — plus a route in `App.tsx` and a tile in `SettingsHubPage` (AI & Enrichment group, `AutoAwesomeMotion`).
+
+Six sections:
+
+1. **Feature toggle** — `features.memories`, plus prose on the default-off posture and the `MEMORIES_ENABLED` env kill-switch that overrides it.
+2. **AI titles** — the `memories.aiTitles.enabled` switch, and the provider/model picker for `ai.features.memories` (§9.4).
+3. **Generation** — `generation.intervalHours`, `maxItemsPerMemory`.
+4. **Memory types** — a switch plus that type's parameters for each of the six curator families.
+5. **Email digest** — `digest.*`, with a warning when no email provider is configured.
+6. **Backfill** — the circle selector and the button described in §3.5.
+
+Five things about it are load-bearing rather than cosmetic:
+
+**The feature toggle merge-spreads.** `features` is one open `Record<string, boolean>` holding every flag in the deployment, so `updateSettings({ features: { memories: checked } })` would clear auto-tagging, face recognition and the rest. The page writes `{ ...(settings?.features ?? {}), memories: checked }`, and a test asserts the two unrelated flags survive — this is the documented footgun of the settings shape, not a hypothetical.
+
+**One Save for the whole `memories` namespace.** Per-section saves would let an admin persist a `minItems` above `maxItemsPerMemory` in two steps without ever seeing them side by side. A single `updateSettings({ memories: { … } })` writes the namespace as one consistent document, matching how the curators read it (§4.14). The AI model is the one exception — it is not in this namespace at all, and saves separately through `PUT /api/ai/features/memories`.
+
+**Every bound is duplicated from the zod schema, on purpose.** The `BOUNDS` table at the top of the file mirrors §9.2 so a number field rejects out-of-range input in the browser instead of surfacing an opaque 400. That makes the page a **fourth** hand-maintained copy of this namespace on top of the three §9.3 already warns about — the tradeoff was taken because the alternative is a form that lets an admin type a value the API silently refuses, but a bound changed on the server has to be changed here too.
+
+**The credential warning exists because the failure is invisible.** Selecting a provider with no enabled credential is not an error anywhere: titling just returns `null` and every memory gets a template title (§5.1), which is *correct* behaviour and therefore indistinguishable from working. The page cross-checks the selection against `GET /api/ai/settings`'s provider list and says so out loud, linking to `/admin/settings/ai` — the same reasoning behind `EnhancerSettingsPage`'s readiness panel. The same logic drives the digest section's "Email not configured" chip: `digest.enabled` with no email provider is a switch that does nothing.
+
+**The backfill button is gated on the feature flag client-side and the API 400s anyway.** Both, deliberately: the client gate is the affordance (with a caption saying why it is disabled), the server gate is the guarantee — and only the server sees `MEMORIES_ENABLED`. On success the alert reports `enqueued`/`skipped` and links to `/admin/settings/jobs?type=memory_generation`, because a backfill's real progress lives in the job queue, not on this page; the caption states up front that it is idempotent, background-priority, and AI-title-capped, so nobody has to read §3.5 to know it is safe to press twice.
+
 ## 9. Settings
 
-Introduced by issue [#302](https://github.com/marinoscar/MemoriaHub/issues/302). The admin page that edits these (`/admin/settings/memories`) arrives with issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315); until then every key below is reachable through the generic `PUT`/`PATCH /api/system-settings` (Admin + `system_settings:write`).
+Introduced by issue [#302](https://github.com/marinoscar/MemoriaHub/issues/302) and edited by the `/admin/settings/memories` admin page ([§8.18](#818-the-admin-settings-page)) since issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315). Every key below also remains reachable through the generic `PUT`/`PATCH /api/system-settings` (Admin + `system_settings:write`), which is what the page itself uses.
 
 The **full** namespace ships now, not just the keys #302 reads, so every later issue in the epic consumes its parameters through the one cached `SystemSettingsService.getSettings()` call with no further schema change. Issue #302 itself actively reads only `memories.generation.intervalHours` (plus the feature flag).
 
@@ -1372,7 +1424,7 @@ Consumed by `MemoryTitleService` in [#306](https://github.com/marinoscar/Memoria
 
 ## 10. RBAC
 
-Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) for the user-facing API; the admin surface (`/admin/settings/memories`, the library backfill) arrives with issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315) and reuses `system_settings:read`/`system_settings:write` like every other admin settings page.
+Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) for the user-facing API. The admin surface — `/admin/settings/memories` and the library backfill ([#315](https://github.com/marinoscar/MemoriaHub/issues/315)) — reuses `system_settings:read`/`system_settings:write` like every other admin settings page, and the AI model picker on that page reuses `ai_settings:write` because it writes `ai.features.memories` through the existing `PUT /api/ai/features/memories`.
 
 **No new permission was introduced, and none should be.** A memory is a *derived view* over media the caller can already see — it grants access to nothing they could not reach through `GET /api/media`. `media:read` / `media:write` plus the per-circle roles express the intent exactly, so a `memories:*` permission would add a second thing to keep in sync with the media permissions for zero additional expressiveness. That was the epic's explicit decision, and it follows the precedent set by Workflows (which reuses `media:read`/`media:write`/`media:delete` + per-circle roles) and Notifications (authentication only, because every route is already user-scoped).
 
@@ -1382,6 +1434,9 @@ Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) f
 | Mark seen / hide / un-hide / favorite / un-favorite | `media:read` | **viewer** | Scoped to the JWT's `userId` and touching no circle content, so membership is the real gate; `media:read` rides along because it is what the whole surface is gated on and a caller without it has no business reading the memory the state refers to |
 | Save as album | `media:write` | **collaborator** | Same bar as `POST /api/media/albums`, whose service path this reuses |
 | Delete (tombstone) | `media:write` | **collaborator** | Mutates circle content for every member; a viewer's equivalent is the personal hide |
+| View / edit `/admin/settings/memories` | `system_settings:read` / `system_settings:write` (+ **Admin** role) | — | Not circle-scoped: these are deployment-wide settings |
+| Run the library backfill | `system_settings:write` (+ **Admin** role) | — | Same guard as `POST /api/admin/bursts/backfill` and every other global backfill |
+| Choose the memory-titling model | `ai_settings:write` (+ **Admin** role) | — | Written through the existing `PUT /api/ai/features/memories`; the page adds no endpoint of its own |
 
 **Super-admin bypass.** A user holding `circles:manage_any`, `media:write_any` or `media:read_any` bypasses the per-circle role check entirely, exactly as `CircleMembershipService.assertCircleAccess` does elsewhere — `loadAccessibleMemory` reproduces that bypass rather than inventing a second policy. This is what lets a system Admin moderate a circle they do not belong to.
 
@@ -1408,6 +1463,7 @@ Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) f
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 1.0 | August 2026 | AI Assistant | Issue #315: added §3.5 (the library backfill — why it enqueues rather than implements backfill semantics, why one job per circle could not hold On This Day's 366-anchor pass under `ENRICHMENT_JOB_TIMEOUT_MS` and what a claim-time-charged attempt makes that cost, the 12-months + 6-curators shard plan and why only On This Day needed an intra-curator axis, the total payload parser and its degrade-to-more-work direction, the divided-not-multiplied AI-title budget, and the per-page batched in-flight skip with its 400/404 gating) and §8.18 (the admin settings page — its six sections, the merge-spread feature toggle, the one-Save-per-namespace decision, the bounds table as a knowingly-fourth hand-maintained copy, and why the missing-credential and unconfigured-email warnings exist at all: both failures are silent by design). Marked §4.15's "backfill is unchunked" gap resolved, pointed §6.1's backfill row at `AdminMemoriesController`, and extended §9's lead-in and §10's RBAC table with the admin surface.  |
 | 0.9 | August 2026 | AI Assistant | Issue #313: completed §8 (Web UI) — §8.10 rewritten from "what #309 stops at" to a record of where the seam fell, plus new §8.12 (why the story player is a dedicated component rather than `MediaLightbox` with a `storyMode` flag, and what is reused instead), §8.13 (the timing table; the two-clock model with JS owning advance correctness and CSS owning smoothness, and why driving the advance off `animationend` would break under reduced motion or a background tab; pause as a derived value that banks its remainder; the step-index reset key, the item-id-tagged video measurement, and the 1,500 ms short-clip floor as the one deliberate deviation from the issue text; on-demand full-media resolution with opacity-0 neighbour mounting), §8.14 (what `prefers-reduced-motion` turns off, and why the progress fill is deliberately not one of them), §8.15 (tap zones / hold-to-pause / swipe and the engaged-hold rule; the window-bound keyboard map and its interactive-target `Space` guard; one progressbar rather than a dozen unlabelled meters, the polite live region as the only position channel for a screen reader, and the accessible name belonging on the Paper; safe-area insets; muted video autoplay with a real unmute control), §8.16 (save-as-album naming, and sharing as album chaining with the honesty requirement, the shared three-call-site component, and the flow-keyed effect that prevents duplicate albums), and §8.17 (the preferences UI and the absent-key contract it must not break — derive-never-mirror, one-key deltas, `null`-to-delete; unresolvable person ids preserved rather than dropped; native date inputs and why; why only the date ranges have a Save button). Updated the status line, §1, the file map, and the §6.7 / §7.8 pointers to the in-app digest toggle. §8 is now complete; only #315's admin page remains outstanding for the epic. |
 | 0.8 | August 2026 | AI Assistant | Issue #309: filled in §8 (Web UI — the file map; the strict-true `useMemoriesEnabled()` gate, its three consumers, why the flag is threaded INTO the feed hook rather than wrapped around the component, and the deliberately unfolded `MEMORIES_ENABLED` env kill-switch; the carousel's self-hiding contract including the failed-request case and why Home carries no empty state or poll; the one-card/two-sizes anatomy, the gradient-padding-box unseen ring, the fan's DTO-driven absence on the hub, and the two literal-rgba exceptions; motion as opt-out with pointer-only hover and ungated focus; the ≥90%-for-1s seen dwell and its module-scoped cross-surface dedup; the merge-not-replace and index-preserving-restore rollback rules; the hub's URL-coerced filters, the single People chip narrowing, the auto-fill grid with `md`-only wide spans, `generatedAt` month grouping, dual kebab/long-press action entry, omitted-not-disabled Delete, and the two distinct empty states; the delete dialog's permanence copy and in-dialog hide alternative; the #313 seam; and the retired dashboard components). §7 remains a placeholder. |
 | 0.7 | August 2026 | AI Assistant | Issue #307: filled in §6 (API — the endpoint catalogue with its permission/role column; the three read invariants and why per-user hide is deliberately not the tombstone; the flag-checked-before-any-query ordering that makes the default-off state cost zero queries and return empty lists rather than errors; keyset-only pagination, the `year` range-overlap compilation, and why `nextCursor` must come from the RAW page; the feed's two bounded reads, exact-`periodKey` anchor match and 60-row candidate window; the 404-not-403 `loadAccessibleMemory` policy and why it does not call `assertCircleAccess`; the `user_settings.memories` namespace with its absent-means-default rule, field-wise merge, overlap-not-containment date filtering and the read-time-never-generation-input rationale; COALESCE state writes and why clearing never upserts; the tombstone write and its audit event; save-as-album's reuse of the album service path plus its trashed-item and non-idempotence decisions; the one-batched-call thumbnail rule; serialization; and six known gaps) and §10 (RBAC — the no-new-permission decision, the capability table, super-admin bypass, the two status-code rules, and why preferences carry no permission). §7 and §8 remain placeholders. |
