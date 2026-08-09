@@ -56,6 +56,19 @@ import {
   renderVerifyHeadless,
 } from '../render/headless-verify.js';
 import {
+  DEFAULT_RESTORE_CONCURRENCY,
+  NodeCredentialNotAllowedError,
+  RestoreEmitter,
+  RestoreMappingError,
+  assertRestoreCredential,
+  parseMapCircle,
+  resolveRestoreExitCode,
+  runRestore,
+} from '../backup/restore-engine.js';
+import { renderRestoreHeadless } from '../render/headless-restore.js';
+import { uploadFile } from '../upload.js';
+import { CooldownGate } from '../http/cooldown-gate.js';
+import {
   runViaDaemon,
   shouldDelegateToDaemon,
   DaemonBackupBusyError,
@@ -827,6 +840,179 @@ function pruneCmd(): Command {
     });
 }
 
+// ---------------------------------------------------------------------------
+// backup restore (issue #321) — the read-back half of the whole epic
+// ---------------------------------------------------------------------------
+
+interface RestoreCmdOpts {
+  root: string;
+  dryRun?: boolean;
+  intoCircle?: string;
+  mapCircle?: string[];
+  include?: string[];
+  concurrency?: string;
+  skipMetadata?: boolean;
+  json?: boolean;
+}
+
+/** Collect a repeatable option into an array (commander's accumulator idiom). */
+function collectOption(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
+function restoreCmd(): Command {
+  return new Command('restore')
+    .description('Restore a backup root back into a MemoriaHub server')
+    .requiredOption('--root <dir>', 'Backup root to restore FROM (the folder `backup init --dest` created)')
+    .option('--dry-run', 'Print the full plan (circle mapping + totals) and write nothing')
+    .option('--into-circle <id>', 'Restore every source circle into this existing circle')
+    .option(
+      '--map-circle <src=dst>',
+      'Map one source circle id to a target circle id (repeatable)',
+      collectOption,
+    )
+    .option(
+      '--include <what>',
+      'Extra scope: "trashed" (restored as ACTIVE items). Repeatable.',
+      collectOption,
+    )
+    .option('--concurrency <n>', `Concurrent upload workers (default: ${DEFAULT_RESTORE_CONCURRENCY})`)
+    .option('--skip-metadata', 'Upload originals only — reapply no sidecar metadata')
+    .option('--json', 'Emit NDJSON events instead of human output')
+    .addHelpText(
+      'after',
+      '\nAUTHENTICATION\n' +
+        '  Restore writes media, albums, tags and people, so it needs a NORMAL account\n' +
+        '  login (`memoriahub login`) or a personal access token. A `nod_` node\n' +
+        '  credential is refused up front: the server accepts it ONLY on /api/nodes/*\n' +
+        '  routes, so it can never reach any endpoint a restore needs.\n\n' +
+        'CIRCLE MAPPING (precedence)\n' +
+        '  1. --map-circle <sourceCircleId>=<targetCircleId>\n' +
+        '  2. --into-circle <targetCircleId>  (everything lands there)\n' +
+        '  3. find-or-create a circle matching the sidecar\'s circle name\n' +
+        '  The resolved mapping is printed before anything is written; an unknown\n' +
+        '  --map-circle/--into-circle target is a hard error BEFORE the first write.\n\n' +
+        'SCOPE\n' +
+        '  Default: every `present` item — active AND archived (archived items are\n' +
+        '  restored, then re-archived at the end). --include trashed additionally\n' +
+        '  restores trashed rows, but they land as ACTIVE items: no public API can\n' +
+        '  put an item back into the server\'s Trash. Quarantined items are NEVER\n' +
+        '  restored — the server no longer lists them.\n\n' +
+        'WHAT IS NOT RESTORED\n' +
+        '  Detected faces (bounding boxes / embeddings), thumbnails, EXIF-derived\n' +
+        '  columns, perceptual hashes and burst/duplicate grouping are DERIVED data:\n' +
+        '  enrichment regenerates them from the restored bytes. People associations\n' +
+        '  ARE restored, by name.\n\n' +
+        'RE-RUNNABLE\n' +
+        '  Every restored item records the MediaItem id it landed on. A second run\n' +
+        '  verifies those ids and skips them; anything else is caught by server-side\n' +
+        '  content-hash dedup. Interrupt it freely and re-run.',
+    )
+    .action(async (opts: RestoreCmdOpts) => {
+      const cfg = requireConfig();
+
+      // A node credential can never write media — fail before touching the disk.
+      try {
+        assertRestoreCredential(cfg.pat);
+      } catch (err) {
+        if (err instanceof NodeCredentialNotAllowedError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        throw err;
+      }
+
+      let mapCircle: Map<string, string> | undefined;
+      try {
+        mapCircle = opts.mapCircle ? parseMapCircle(opts.mapCircle) : undefined;
+      } catch (err) {
+        ui.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+
+      let includeTrashed = false;
+      for (const value of opts.include ?? []) {
+        for (const token of value.split(',').map((s) => s.trim()).filter(Boolean)) {
+          if (token === 'trashed') includeTrashed = true;
+          else if (token === 'archived') {
+            // Accepted and documented as a no-op: archived items are a flag on
+            // a `present` row and are always in scope.
+            ui.dim('--include archived is redundant — archived items are restored by default.');
+          } else {
+            ui.error(`Unknown --include value "${token}" (expected: archived, trashed)`);
+            process.exit(1);
+          }
+        }
+      }
+
+      const concurrency =
+        parseNumberFlag(opts.concurrency, '--concurrency') ?? DEFAULT_RESTORE_CONCURRENCY;
+
+      let db;
+      try {
+        db = openCatalogDb(opts.root);
+      } catch (err) {
+        if (err instanceof CatalogOpenError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        throw err;
+      }
+
+      const settings = new SettingsRepo(getDb());
+      const api = new ApiClient({
+        serverUrl: cfg.serverUrl,
+        pat: cfg.pat,
+        retry: settings.retryConfig(),
+        cooldownGate: new CooldownGate(settings.cooldownConfig()),
+      });
+
+      try {
+        const emitter = new RestoreEmitter();
+        renderRestoreHeadless(emitter, { json: opts.json === true });
+        const summary = await runRestore(
+          {
+            root: opts.root,
+            dryRun: opts.dryRun === true,
+            ...(opts.intoCircle !== undefined ? { intoCircle: opts.intoCircle } : {}),
+            ...(mapCircle !== undefined ? { mapCircle } : {}),
+            includeTrashed,
+            concurrency: Math.max(1, Math.floor(concurrency)),
+            skipMetadata: opts.skipMetadata === true,
+          },
+          {
+            db,
+            api,
+            upload: (filePath, mimeType, onProgress) =>
+              uploadFile(api, filePath, mimeType, onProgress),
+          },
+          emitter,
+        );
+        process.exit(resolveRestoreExitCode(summary));
+      } catch (err) {
+        if (err instanceof RestoreMappingError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        if (err instanceof ApiError) {
+          if (err.status === 401 || err.status === 403) {
+            ui.error(
+              `This token is not permitted to restore media (HTTP ${err.status}): ` +
+                `${err.serverMessage}. Restore needs a normal account login, not a node credential.`,
+            );
+          } else {
+            ui.error(`Restore failed (HTTP ${err.status}): ${err.serverMessage}`);
+          }
+          process.exit(1);
+        }
+        ui.error(`Restore failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      } finally {
+        db.close();
+      }
+    });
+}
+
 export function backupCommand(): Command {
   const cmd = new Command('backup');
   cmd
@@ -836,6 +1022,7 @@ export function backupCommand(): Command {
     .addCommand(statusCmd())
     .addCommand(verifyCmd())
     .addCommand(pruneCmd())
+    .addCommand(restoreCmd())
     .addCommand(scheduleCmd())
     .addCommand(setRateCmd());
   return cmd;
