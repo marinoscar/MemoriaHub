@@ -2007,7 +2007,16 @@ model ReviewRunItem {
 // =============================================================================
 
 // review_queue_* types are refreshed STATE rows (see Notification's comment
-// below); the remaining four are per-occurrence EVENT rows.
+// below); the remaining five are per-occurrence EVENT rows.
+//
+// `memories_ready` (epic #300, issue #311) is a COUNTED EVENT written through
+// NotificationsService.upsertCountedEvent() with a 24h rolling window, so a
+// generation run that creates six memories folds into ONE row reading
+// "6 new memories in {circle}" rather than fanning out six. It is deliberately
+// NOT a STATE type: STATE rows are protected by the raw-SQL partial unique
+// index notifications_review_queue_live_uniq_idx, whose predicate lists only
+// the four review_queue_* values, and there is no reason to widen that index
+// for a type whose natural semantics are "N new things happened".
 enum NotificationType {
   review_queue_bursts
   review_queue_duplicates
@@ -2017,6 +2026,7 @@ enum NotificationType {
   enrichment_failed
   workflow_run_completed
   share_expiring
+  memories_ready
 }
 
 // Schema-only foundation for the in-app notification center (issue #244,
