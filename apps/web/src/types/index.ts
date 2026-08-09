@@ -3,6 +3,10 @@ import type {
   NotificationPreferences,
   NotificationPreferencesPatch,
 } from './notifications';
+import type {
+  MemoriesPreferences,
+  MemoriesPreferencesPatch,
+} from './memories';
 
 export interface Role {
   name: string;
@@ -47,6 +51,14 @@ export interface UserSettings {
    * means EVERYTHING IS ENABLED, not "nothing configured yet".
    */
   notifications?: NotificationPreferences;
+  /**
+   * Per-user Memories preferences (issue #307's namespace, issue #313's UI):
+   * hidden people, sensitive date ranges, email-digest opt-out.
+   *
+   * Same absent-key contract again — `undefined` is the normal state and means
+   * "no preference", NOT "nothing configured yet".
+   */
+  memories?: MemoriesPreferences;
   activeCircleId?: string | null;
   updatedAt: string;
   version: number;
@@ -55,14 +67,17 @@ export interface UserSettings {
 /**
  * What may be sent to `PATCH /api/user-settings`.
  *
- * `Partial<UserSettings>` almost describes it, but the `notifications`
- * namespace accepts a strictly wider value on the way IN than it ever holds at
- * rest: a per-type entry may be `null` to delete the override (JSON Merge
+ * `Partial<UserSettings>` almost describes it, but the `notifications` and
+ * `memories` namespaces accept a strictly wider value on the way IN than they
+ * ever hold at rest: a key may be `null` to delete the override (JSON Merge
  * Patch). Modelling that here keeps the delete expressible without a cast at
  * the call site.
  */
-export type UserSettingsUpdate = Partial<Omit<UserSettings, 'notifications'>> & {
+export type UserSettingsUpdate = Partial<
+  Omit<UserSettings, 'notifications' | 'memories'>
+> & {
   notifications?: NotificationPreferencesPatch | null;
+  memories?: MemoriesPreferencesPatch | null;
 };
 
 export interface SystemSettings {
