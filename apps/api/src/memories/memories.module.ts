@@ -5,7 +5,8 @@
 // Owns the Memories generation plumbing: the hourly per-circle scheduling cron,
 // the `memory_generation` enrichment handler, the shared curation engine and the
 // curator registry. Later issues in the epic add more curators (#304–#305), AI
-// titles (#306), the read API (#307) and the email digest (#311) here.
+// titles (#306) and the email digest (#311) here. Issue #307 added the read/act
+// HTTP surface (MemoriesController + MemoriesService) under `api/`.
 //
 // Minimal-template module (mirrors InsightsModule): PrismaModule for DB access,
 // SettingsModule for the cached feature-flag/settings reads, EnrichmentModule
@@ -22,6 +23,10 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { AiModule } from '../ai/ai.module';
+import { CirclesModule } from '../circles/circles.module';
+import { MediaModule } from '../media/media.module';
+import { MemoriesController } from './api/memories.controller';
+import { MemoriesService } from './api/memories.service';
 import { MemoryTitleService } from './titles/memory-title.service';
 import { MemoriesGenerationTask } from './memories-generation.task';
 import { MemoryGenerationHandler } from './memory-generation.handler';
@@ -40,8 +45,23 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   // credential) and AiProviderRegistry to MemoryTitleService (#306). The edge
   // points one way only — AiModule imports SettingsModule and nothing else —
   // so there is no cycle to break.
-  imports: [PrismaModule, SettingsModule, EnrichmentModule, AiModule],
+  //
+  // #307's API layer adds two edges: CirclesModule (CircleMembershipService,
+  // the per-circle role checks) and MediaModule (MediaThumbnailService for
+  // batched signing, MediaService for the album path save-as-album reuses
+  // rather than duplicating). Both point one way — neither imports
+  // MemoriesModule — so there is no cycle and no forwardRef.
+  imports: [
+    PrismaModule,
+    SettingsModule,
+    EnrichmentModule,
+    AiModule,
+    CirclesModule,
+    MediaModule,
+  ],
+  controllers: [MemoriesController],
   providers: [
+    MemoriesService,
     MemoriesGenerationTask,
     MemoryGenerationHandler,
     MemoryCurationService,
@@ -55,6 +75,6 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     YearInReviewCurator,
     memoryCuratorsProvider,
   ],
-  exports: [MemoriesGenerationTask, MemoryCurationService],
+  exports: [MemoriesGenerationTask, MemoryCurationService, MemoriesService],
 })
 export class MemoriesModule {}

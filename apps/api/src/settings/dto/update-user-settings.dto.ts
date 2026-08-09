@@ -5,6 +5,8 @@ import {
   dataTablesPatchSchema,
   notificationPreferencesSchema,
   notificationPreferencesPatchSchema,
+  memoriesPreferencesSchema,
+  memoriesPreferencesPatchSchema,
 } from '../../common/schemas/settings.schema';
 
 // Full replacement (PUT)
@@ -26,6 +28,9 @@ export const updateUserSettingsSchema = z.object({
   // an absent namespace / field / type key means ENABLED. See
   // settings.schema.ts for the absent-key rule.
   notifications: notificationPreferencesSchema.optional(),
+  // Per-user Memories preferences (issue #307). Optional with NO default: an
+  // absent namespace / field means "no preference". See settings.schema.ts.
+  memories: memoriesPreferencesSchema.optional(),
 });
 
 export class UpdateUserSettingsDto extends createZodDto(
@@ -56,6 +61,10 @@ export const patchUserSettingsSchema = z.object({
   // another's stored value; a `null` type entry resets that type to its
   // default, and `notifications: null` clears the whole namespace.
   notifications: notificationPreferencesPatchSchema.nullable().optional(),
+  // Merged field-wise (see UserSettingsService.mergeMemories): a listed field
+  // replaces, an unlisted one is untouched, a `null` field clears it, and
+  // `memories: null` clears the whole namespace.
+  memories: memoriesPreferencesPatchSchema.nullable().optional(),
 }).default({});
 
 export class PatchUserSettingsDto extends createZodDto(

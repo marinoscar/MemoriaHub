@@ -1016,4 +1016,120 @@ describe('User Settings Integration', () => {
       );
     });
   });
+  // ===========================================================================
+  // memories — per-user Memories preferences (issue #307, epic #300)
+  // ===========================================================================
+
+  describe('memories preference namespace', () => {
+    const settingsRow = (value: UserSettingsValue, version = 1) => ({
+      id: 'settings-1',
+      userId: 'user-1',
+      value: value as any,
+      version,
+      updatedAt: new Date(),
+    });
+
+    const seedStored = (memories?: Record<string, any>) => {
+      const stored: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        ...(memories ? { memories: memories as any } : {}),
+      };
+      context.prismaMock.userSettings.findUnique.mockResolvedValue(
+        settingsRow(stored),
+      );
+      context.prismaMock.userSettings.update.mockImplementation(
+        async ({ data }: any) => settingsRow(data.value, 2),
+      );
+      context.prismaMock.userSettings.upsert.mockImplementation(
+        async ({ create, update }: any) =>
+          settingsRow((update?.value ?? create?.value) as UserSettingsValue, 2),
+      );
+      context.prismaMock.user.update.mockResolvedValue({} as any);
+    };
+
+    const PERSON = '11111111-1111-4111-8111-111111111111';
+
+    it('omits the namespace entirely when nothing is stored (absent = default)', async () => {
+      const user = await createMockTestUser(context);
+      seedStored();
+
+      const res = await request(context.app.getHttpServer())
+        .get('/api/user-settings')
+        .set(authHeader(user.accessToken))
+        .expect(200);
+
+      expect(res.body.data.memories).toBeUndefined();
+    });
+
+    it('round-trips a namespace through PATCH', async () => {
+      const user = await createMockTestUser(context);
+      seedStored();
+
+      const res = await request(context.app.getHttpServer())
+        .patch('/api/user-settings')
+        .set(authHeader(user.accessToken))
+        .send({
+          memories: {
+            hiddenPersonIds: [PERSON],
+            hiddenDateRanges: [{ from: '2024-06-10', to: '2024-06-20' }],
+            emailDigestOptOut: true,
+          },
+        })
+        .expect(200);
+
+      expect(res.body.data.memories).toEqual({
+        hiddenPersonIds: [PERSON],
+        hiddenDateRanges: [{ from: '2024-06-10', to: '2024-06-20' }],
+        emailDigestOptOut: true,
+      });
+    });
+
+    it('rejects an unknown key with 400 (.strict() at the HTTP boundary)', async () => {
+      const user = await createMockTestUser(context);
+      seedStored();
+
+      await request(context.app.getHttpServer())
+        .patch('/api/user-settings')
+        .set(authHeader(user.accessToken))
+        .send({ memories: { hiddenPetIds: ['x'] } })
+        .expect(400);
+    });
+
+    it('rejects an inverted date range with 400', async () => {
+      const user = await createMockTestUser(context);
+      seedStored();
+
+      await request(context.app.getHttpServer())
+        .patch('/api/user-settings')
+        .set(authHeader(user.accessToken))
+        .send({
+          memories: { hiddenDateRanges: [{ from: '2024-02-10', to: '2024-02-01' }] },
+        })
+        .expect(400);
+    });
+
+    it('rejects a non-uuid person id with 400', async () => {
+      const user = await createMockTestUser(context);
+      seedStored();
+
+      await request(context.app.getHttpServer())
+        .patch('/api/user-settings')
+        .set(authHeader(user.accessToken))
+        .send({ memories: { hiddenPersonIds: ['not-a-uuid'] } })
+        .expect(400);
+    });
+
+    it('clears the namespace on `memories: null`', async () => {
+      const user = await createMockTestUser(context);
+      seedStored({ hiddenPersonIds: [PERSON] });
+
+      const res = await request(context.app.getHttpServer())
+        .patch('/api/user-settings')
+        .set(authHeader(user.accessToken))
+        .send({ memories: null })
+        .expect(200);
+
+      expect(res.body.data.memories).toBeUndefined();
+    });
+  });
 });

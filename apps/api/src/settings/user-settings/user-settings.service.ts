@@ -12,11 +12,13 @@ import { PatchUserSettingsDto } from '../dto/update-user-settings.dto';
 import {
   DEFAULT_USER_SETTINGS,
   DataTableLayoutValue,
+  MemoriesPreferencesValue,
   NotificationPreferencesValue,
   UserSettingsValue,
 } from '../../common/types/settings.types';
 import {
   DATA_TABLE_MAX_TABLES,
+  MemoriesPreferencesPatch,
   NotificationPreferencesPatch,
   userSettingsSchema,
 } from '../../common/schemas/settings.schema';
@@ -64,6 +66,9 @@ export class UserSettingsService {
       // Same contract: absent namespace / field / type key means ENABLED (with
       // `workflowMicroRuns` the one inverted default). Never materialized here.
       notifications: value.notifications,
+      // Same contract again: absent namespace / field means "no preference"
+      // (nothing hidden, digest not opted out). Never materialized here.
+      memories: value.memories,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -107,6 +112,9 @@ export class UserSettingsService {
       // namespace/entry/field against the column contract's defaults.
       dataTables: value.dataTables,
       notifications: value.notifications,
+      // Same contract again: absent namespace / field means "no preference"
+      // (nothing hidden, digest not opted out). Never materialized here.
+      memories: value.memories,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -156,6 +164,7 @@ export class UserSettingsService {
         current.notifications,
         dto.notifications,
       ),
+      memories: this.mergeMemories(current.memories, dto.memories),
     };
 
     // The per-table-id merge above can push the namespace past its cap even
@@ -198,6 +207,9 @@ export class UserSettingsService {
       // namespace/entry/field against the column contract's defaults.
       dataTables: value.dataTables,
       notifications: value.notifications,
+      // Same contract again: absent namespace / field means "no preference"
+      // (nothing hidden, digest not opted out). Never materialized here.
+      memories: value.memories,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -306,6 +318,50 @@ export class UserSettingsService {
     if (microRuns !== undefined) merged.workflowMicroRuns = microRuns;
 
     if (Object.keys(types).length > 0) merged.types = types;
+
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  /**
+   * Merge a PATCH's `memories` payload into the stored namespace (issue #307).
+   *
+   * FIELD-WISE, one level deep — the same shape as mergeNotifications():
+   *   - `memories` absent from the patch  → stored namespace untouched;
+   *   - `memories: null`                  → namespace DELETED, i.e. reset to
+   *     defaults (nothing hidden, digest not opted out) rather than pinned to
+   *     an explicit empty blob;
+   *   - a field present                   → replaced wholesale. The two list
+   *     fields are replace-not-append deliberately: "hide this person" and
+   *     "un-hide this person" are the same PATCH from the client's point of
+   *     view, and an append-only merge would make removal inexpressible;
+   *   - a field set to `null`             → DELETED (JSON Merge Patch), which
+   *     resets it to its absent default instead of writing `[]` / `false` that
+   *     would survive a future default change.
+   *
+   * An empty result collapses back to `undefined` — the absent namespace IS
+   * the canonical "nothing persisted" state, and storing `{}` is only noise.
+   */
+  private mergeMemories(
+    current: MemoriesPreferencesValue | undefined,
+    patch: MemoriesPreferencesPatch | null | undefined,
+  ): MemoriesPreferencesValue | undefined {
+    if (patch === undefined) return current;
+    if (patch === null) return undefined;
+
+    const merged: MemoriesPreferencesValue = { ...(current ?? {}) };
+
+    if (patch.hiddenPersonIds !== undefined) {
+      if (patch.hiddenPersonIds === null) delete merged.hiddenPersonIds;
+      else merged.hiddenPersonIds = patch.hiddenPersonIds;
+    }
+    if (patch.hiddenDateRanges !== undefined) {
+      if (patch.hiddenDateRanges === null) delete merged.hiddenDateRanges;
+      else merged.hiddenDateRanges = patch.hiddenDateRanges;
+    }
+    if (patch.emailDigestOptOut !== undefined) {
+      if (patch.emailDigestOptOut === null) delete merged.emailDigestOptOut;
+      else merged.emailDigestOptOut = patch.emailDigestOptOut;
+    }
 
     return Object.keys(merged).length > 0 ? merged : undefined;
   }
