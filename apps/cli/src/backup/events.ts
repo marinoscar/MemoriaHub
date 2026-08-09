@@ -22,6 +22,22 @@ export const BACKUP_EV = {
 
 export type BackupEventName = (typeof BACKUP_EV)[keyof typeof BACKUP_EV];
 
+/**
+ * BackupHost-level event name: the host re-emits every engine event as one
+ * 'backup-event' emission that the daemon frames for IPC (issue #318). Lives
+ * HERE (not in backup-host.ts) so node/daemon.ts can subscribe without a
+ * runtime import of the backup engine graph — NodeDashboard imports
+ * daemon.ts's readPidFile, and dragging ApiClient/ApiError into that module
+ * graph would break every consumer that mocks '../api.js' partially.
+ */
+export const BACKUP_HOST_EVENT = 'backup-event';
+
+/** Payload of the host's 'backup-event' emission (daemon adds kind + ts). */
+export interface BackupHostEventFrame {
+  ev: BackupEventName;
+  payload: unknown;
+}
+
 /** Change-feed keyset cursor, as mirrored in the local catalog checkpoint. */
 export interface BackupCursor {
   updatedAt: string;

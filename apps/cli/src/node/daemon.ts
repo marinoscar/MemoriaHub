@@ -70,12 +70,13 @@ import {
 } from './heap-snapshot.js';
 import type { NodeEngine } from './node-engine.js';
 import type { NodeLogger } from './logger.js';
-import {
-  BACKUP_HOST_EVENT,
-  BackupBusyError,
-  type BackupHost,
-  type BackupHostEventFrame,
-} from '../backup/backup-host.js';
+// Deliberately type-only + events-only: daemon.ts is imported by the TUI
+// dashboard (readPidFile), so it must NOT pull the backup engine's runtime
+// graph (ApiClient/ApiError/better-sqlite3) into every consumer's module
+// graph. The BackupHost VALUE is constructed by `node start` and injected
+// via DaemonHostOptions; events.ts has no runtime dependencies.
+import { BACKUP_HOST_EVENT, type BackupHostEventFrame } from '../backup/events.js';
+import type { BackupHost } from '../backup/backup-host.js';
 
 /**
  * Maximum bytes allowed to queue in one IPC client's socket before the daemon
@@ -353,12 +354,14 @@ export async function startDaemonHost(
           logger.info('backup run started via ipc');
           send(socket, { kind: 'ack', cmd: 'backup-run-now' });
         } catch (err) {
-          if (err instanceof BackupBusyError) {
+          // Duck-typed (not instanceof BackupBusyError) so this module never
+          // needs a runtime import from backup-host.js — see the import note.
+          if ((err as { code?: unknown })?.code === 'busy') {
             send(socket, {
               kind: 'error',
               cmd: 'backup-run-now',
               code: 'busy',
-              message: err.message,
+              message: err instanceof Error ? err.message : String(err),
             });
           } else {
             send(socket, {

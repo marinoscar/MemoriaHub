@@ -52,7 +52,13 @@ import {
   type BackupEngineOpts,
   type BackupRunOutcome,
 } from './backup-engine.js';
-import { BACKUP_EV, BackupTypedEmitter, type BackupCursor, type BackupEventName } from './events.js';
+import {
+  BACKUP_EV,
+  BACKUP_HOST_EVENT,
+  BackupTypedEmitter,
+  type BackupCursor,
+  type BackupHostEventFrame,
+} from './events.js';
 import { TokenBucket } from './rate-limiter.js';
 import {
   BackupScheduler,
@@ -60,14 +66,11 @@ import {
   type BackupSchedulerOpts,
 } from './backup-scheduler.js';
 
-/** Host event name: every engine event re-emitted as one host-level event. */
-export const BACKUP_HOST_EVENT = 'backup-event';
-
-/** Payload of the host's 'backup-event' emission (daemon adds kind + ts). */
-export interface BackupHostEventFrame {
-  ev: BackupEventName;
-  payload: unknown;
-}
+// Re-exported for existing consumers; the canonical definition lives in
+// events.ts so daemon.ts can subscribe without importing this module's
+// runtime graph (see the note there).
+export { BACKUP_HOST_EVENT } from './events.js';
+export type { BackupHostEventFrame } from './events.js';
 
 /** Thrown by startRun() when a run is already active (serialized host). */
 export class BackupBusyError extends Error {
