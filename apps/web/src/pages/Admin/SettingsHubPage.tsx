@@ -31,6 +31,7 @@ import {
   Email as EmailIcon,
   AccountTree as AccountTreeIcon,
   AutoFixHigh as AutoFixHighIcon,
+  AutoAwesomeMotion as AutoAwesomeMotionIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
 
@@ -135,6 +136,13 @@ export default function SettingsHubPage() {
             'Enable AI photo enhancement and set the quality, strength, and review presets.',
           icon: <AutoFixHighIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/enhancer',
+          permission: 'system_settings:read',
+        },
+        {
+          title: 'Memories',
+          description: 'Automatic memory curation, story feed, and email digests.',
+          icon: <AutoAwesomeMotionIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/memories',
           permission: 'system_settings:read',
         },
         {

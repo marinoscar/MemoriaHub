@@ -20,6 +20,8 @@ export interface AiSettingsResponse {
     tagging: { provider: string | null; model: string | null } | null;
     embedding: { provider: string | null; model: string | null } | null;
     enhance?: { provider: string | null; model: string | null } | null;
+    /** Memories title/subtitle/narrative model (epic #300). */
+    memories?: { provider: string | null; model: string | null } | null;
   };
   conversations: {
     archiveAfterDays: number;
@@ -103,6 +105,18 @@ export async function putAiEnhanceFeature(body: {
   model: string;
 }): Promise<void> {
   await api.put<void>('/ai/features/enhance', body);
+}
+
+/**
+ * Set the chat-capable provider/model that writes memory titles, subtitles and
+ * narratives (epic #300). Passing nulls clears the selection, in which case
+ * memories fall back to deterministic template titles.
+ */
+export async function putAiMemoriesFeature(body: {
+  provider: string | null;
+  model: string | null;
+}): Promise<void> {
+  await api.put<void>('/ai/features/memories', body);
 }
 
 export async function getAiImageModels(provider: string): Promise<string[]> {

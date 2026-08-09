@@ -180,6 +180,38 @@ export interface SystemSettings {
     };
     scheduleMinIntervalMinutes?: number;
   };
+  /**
+   * Memories (epic #300). Mirrors the `memories` namespace in
+   * `apps/api/src/common/schemas/settings.schema.ts` — every bound quoted in
+   * `/admin/settings/memories`'s number fields comes from there.
+   *
+   * Every key is optional because the namespace is genuinely absent on any
+   * deployment that has never saved it; the admin page reads each value with a
+   * `?? default` fallback rather than assuming presence.
+   */
+  memories?: {
+    generation?: { intervalHours?: number };
+    maxItemsPerMemory?: number;
+    aiTitles?: { enabled?: boolean };
+    onThisDay?: { enabled?: boolean; lookbackYears?: number; minItems?: number };
+    trips?: {
+      enabled?: boolean;
+      minDays?: number;
+      minItems?: number;
+      minDistanceKm?: number;
+      lookbackMonths?: number;
+    };
+    people?: { enabled?: boolean; favoritesOnly?: boolean; minItems?: number };
+    themes?: { enabled?: boolean; minItems?: number; maxPerPeriod?: number };
+    seasonal?: { enabled?: boolean; minItems?: number };
+    yearInReview?: { enabled?: boolean; minItems?: number };
+    digest?: {
+      enabled?: boolean;
+      frequency?: 'off' | 'daily' | 'weekly' | 'monthly';
+      sendHourUtc?: number;
+      imageTokenTtlDays?: number;
+    };
+  };
   updatedAt: string;
   updatedBy: { id: string; email: string } | null;
   version: number;
