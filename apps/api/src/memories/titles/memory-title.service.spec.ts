@@ -146,6 +146,27 @@ describe('MemoryTitleService', () => {
         BACKFILL_AI_TITLE_CAP,
       );
     });
+
+    // #315: a library backfill is sharded, and the cap is per JOB — so the
+    // planner divides it across shards. beginRun accepts that slice.
+    it('accepts a lower per-shard cap for a sharded backfill', () => {
+      expect(
+        service.beginRun({ backfill: true, aiTitlesEnabled: true, maxAiCalls: 5 }).maxAiCalls,
+      ).toBe(5);
+    });
+
+    it('never lets a payload RAISE the backfill cap', () => {
+      expect(
+        service.beginRun({ backfill: true, aiTitlesEnabled: true, maxAiCalls: 10_000 })
+          .maxAiCalls,
+      ).toBe(BACKFILL_AI_TITLE_CAP);
+    });
+
+    it('ignores the override outside a backfill, where the budget is unbounded', () => {
+      expect(
+        service.beginRun({ backfill: false, aiTitlesEnabled: true, maxAiCalls: 5 }).maxAiCalls,
+      ).toBe(Number.POSITIVE_INFINITY);
+    });
   });
 
   // --- success --------------------------------------------------------------
