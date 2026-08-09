@@ -89,6 +89,19 @@ export interface UpsertMemoryInput {
   selection: CuratedSelection;
   meta?: Record<string, unknown> | null;
   expiresAt?: Date | null;
+  /**
+   * Force `title`/`subtitle` back to the supplied template on a refresh that
+   * `membershipDistance` would otherwise call minor.
+   *
+   * Defaults to false, so the anti-churn rule (a memory whose membership barely
+   * moved keeps its title, including an AI one from #306) is unchanged for every
+   * existing caller. It exists for the case where the memory's SUBJECT changed
+   * rather than its contents: the Trips curator (#304) re-keys a memory whose
+   * dominant locality drifted after a better reverse-geocode, and a title still
+   * naming the old town would be wrong forever — the anti-churn rule is meant to
+   * protect a title that is still accurate, not one that has been falsified.
+   */
+  retitle?: boolean;
 }
 
 /** Outcome of one `upsertMemory` call. */
