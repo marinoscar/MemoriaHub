@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { DEFAULT_SYSTEM_SETTINGS, SystemSettingsValue } from '../common/types/settings.types';
+import { haversineKm } from '../common/geo/haversine.util';
 
 export type LocationInferenceConfig = NonNullable<SystemSettingsValue['locationInference']>;
 
@@ -34,17 +35,15 @@ export interface ComputedLocationSuggestion {
   autoApplyEligible: boolean;
 }
 
-/** Great-circle distance between two lat/lng points, in kilometers. */
-export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+/**
+ * Great-circle distance between two lat/lng points, in kilometers.
+ *
+ * The implementation moved to `common/geo/haversine.util` when the Memories
+ * Trips curator (#304) needed the same computation; it is re-exported here so
+ * this module's existing importers and its golden-value spec keep working, and
+ * so there is exactly one earth-radius constant in the codebase.
+ */
+export { haversineKm } from '../common/geo/haversine.util';
 
 /**
  * Antimeridian-safe time-weighted longitude interpolation.
