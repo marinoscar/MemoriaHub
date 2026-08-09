@@ -37,7 +37,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MemoryCurationService } from '../curation/memory-curation.service';
 import { onThisDayTitle } from '../curation/memory-title-templates';
 import {
-  MEMORY_CURATORS,
   MemoryCurator,
   MemoryCuratorContext,
   MemoryCuratorResult,
@@ -314,13 +313,3 @@ export class OnThisDayCurator implements MemoryCurator {
     return deleted;
   }
 }
-
-/**
- * Registry factory for the curator array. Later issues append their curators
- * here; ordering is the execution order inside a generation job.
- */
-export const memoryCuratorsProvider = {
-  provide: MEMORY_CURATORS,
-  useFactory: (onThisDay: OnThisDayCurator): MemoryCurator[] => [onThisDay],
-  inject: [OnThisDayCurator],
-};

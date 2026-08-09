@@ -12,9 +12,9 @@
 // for the job service and the handler registry.
 //
 // THE CURATOR REGISTRY is provided as an injected array under the
-// MEMORY_CURATORS token (see memoryCuratorsProvider) rather than hard-coded in
-// the handler, so a new curator is a provider + one entry in that factory and
-// nothing else changes.
+// MEMORY_CURATORS token (see curators/memory-curators.provider.ts) rather than
+// hard-coded in the handler, so a new curator is a provider + one entry in that
+// factory and nothing else changes.
 // =============================================================================
 
 import { Module } from '@nestjs/common';
@@ -24,7 +24,9 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MemoriesGenerationTask } from './memories-generation.task';
 import { MemoryGenerationHandler } from './memory-generation.handler';
 import { MemoryCurationService } from './curation/memory-curation.service';
-import { OnThisDayCurator, memoryCuratorsProvider } from './curators/on-this-day.curator';
+import { OnThisDayCurator } from './curators/on-this-day.curator';
+import { TripCurator } from './curators/trip.curator';
+import { memoryCuratorsProvider } from './curators/memory-curators.provider';
 
 @Module({
   imports: [PrismaModule, SettingsModule, EnrichmentModule],
@@ -33,6 +35,7 @@ import { OnThisDayCurator, memoryCuratorsProvider } from './curators/on-this-day
     MemoryGenerationHandler,
     MemoryCurationService,
     OnThisDayCurator,
+    TripCurator,
     memoryCuratorsProvider,
   ],
   exports: [MemoriesGenerationTask, MemoryCurationService],
