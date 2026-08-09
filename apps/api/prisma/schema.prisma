@@ -2277,8 +2277,8 @@ enum DatabaseBackupTrigger {
 // DSL (same precedent as `notifications_review_queue_live_uniq_idx` and
 // `media_items_gallery_idx`): a partial unique index on ("status") WHERE
 // status IN ('pending','running') enforces at most one backup run in flight
-// at a time app-wide. See migration `<timestamp>_add_database_backups` for
-// the actual index, named `database_backup_runs_active_uniq_idx`.
+// at a time app-wide. See migration `20260809150000_add_database_backups`
+// for the actual index, named `database_backup_runs_active_uniq_idx`.
 model DatabaseBackupRun {
   id      String                @id @default(uuid()) @db.Uuid
   status  DatabaseBackupStatus  @default(pending)
