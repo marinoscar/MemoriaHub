@@ -209,6 +209,7 @@ describe('AiSettingsService', () => {
         tagging: { provider: null, model: null },
         embedding: { provider: null, model: null },
         enhance: null,
+        memories: null,
       });
     });
 
@@ -351,6 +352,100 @@ describe('AiSettingsService', () => {
       );
 
       expect(result).toEqual({ provider: 'anthropic', model: 'embed-v1' });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setMemoriesFeature / resolveMemoriesConfig (epic #300, issue #302)
+  // ---------------------------------------------------------------------------
+  describe('setMemoriesFeature', () => {
+    it('persists the provider/model pair when the credential exists and is enabled', async () => {
+      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
+        enabled: true,
+      } as any);
+      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+
+      const result = await service.setMemoriesFeature(
+        { provider: 'openai', model: 'gpt-4o-mini' },
+        'user-1',
+      );
+
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ai: {
+            features: {
+              memories: { provider: 'openai', model: 'gpt-4o-mini' },
+            },
+          },
+        }),
+        'user-1',
+      );
+      expect(result).toEqual({ provider: 'openai', model: 'gpt-4o-mini' });
+    });
+
+    it('rejects a provider with NO configured credential (400)', async () => {
+      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.setMemoriesFeature({ provider: 'openai', model: 'gpt-4o-mini' }, 'user-1'),
+      ).rejects.toThrow(BadRequestException);
+
+      // Nothing is written when validation fails.
+      expect(mockSystemSettings.patchSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects a provider whose credential is DISABLED (400)', async () => {
+      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
+        enabled: false,
+      } as any);
+
+      await expect(
+        service.setMemoriesFeature({ provider: 'openai', model: 'gpt-4o-mini' }, 'user-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockSystemSettings.patchSettings).not.toHaveBeenCalled();
+    });
+
+    it('clears the selection to null when either field is null — no credential check', async () => {
+      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+
+      const result = await service.setMemoriesFeature(
+        { provider: 'openai', model: null },
+        'user-1',
+      );
+
+      expect(result).toBeNull();
+      expect(mockPrisma.aiProviderCredential.findUnique).not.toHaveBeenCalled();
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ ai: { features: { memories: null } } }),
+        'user-1',
+      );
+    });
+  });
+
+  describe('resolveMemoriesConfig', () => {
+    it('returns {provider, model} when configured', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: { features: { memories: { provider: 'openai', model: 'gpt-4o-mini' } } },
+      });
+
+      await expect(service.resolveMemoriesConfig()).resolves.toEqual({
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+      });
+    });
+
+    it('returns null when unset, so callers fall back to template titles', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: { features: { memories: null } },
+      });
+
+      await expect(service.resolveMemoriesConfig()).resolves.toBeNull();
+    });
+
+    it('returns null on a pre-#302 settings document with no memories key', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({ ai: { features: {} } });
+
+      await expect(service.resolveMemoriesConfig()).resolves.toBeNull();
     });
   });
 

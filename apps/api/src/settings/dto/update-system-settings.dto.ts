@@ -72,6 +72,13 @@ export const patchSystemSettingsSchema = z.object({
             })
             .nullable()
             .optional(),
+          memories: z
+            .object({
+              provider: z.string(),
+              model: z.string(),
+            })
+            .nullable()
+            .optional(),
         })
         .optional(),
     })
@@ -191,6 +198,77 @@ export const patchSystemSettingsSchema = z.object({
       blockReplaceOnDownscale: z.boolean().optional(),
       maxInputMegapixels: z.number().min(1).max(100).optional(),
       retentionHours: z.number().int().min(1).max(720).optional(),
+    })
+    .optional(),
+  // Memories (epic #300, issue #302). NOTE: this is the THIRD hand-maintained
+  // copy of the namespace (systemSettingsSchema + systemSettingsPatchSchema in
+  // common/schemas/settings.schema.ts are the other two). This one is the wire
+  // DTO, so a key missing HERE is silently stripped from the request body
+  // before the service ever sees it — a namespace added only to the other two
+  // would appear to work while every PATCH quietly no-ops.
+  memories: z
+    .object({
+      generation: z
+        .object({
+          intervalHours: z.number().int().min(1).max(168).optional(),
+        })
+        .optional(),
+      maxItemsPerMemory: z.number().int().min(5).max(100).optional(),
+      aiTitles: z
+        .object({
+          enabled: z.boolean().optional(),
+        })
+        .optional(),
+      onThisDay: z
+        .object({
+          enabled: z.boolean().optional(),
+          lookbackYears: z.number().int().min(1).max(50).optional(),
+          minItems: z.number().int().min(1).max(20).optional(),
+        })
+        .optional(),
+      trips: z
+        .object({
+          enabled: z.boolean().optional(),
+          minDays: z.number().int().min(1).max(14).optional(),
+          minItems: z.number().int().min(3).max(100).optional(),
+          minDistanceKm: z.number().int().min(5).max(500).optional(),
+          lookbackMonths: z.number().int().min(1).max(240).optional(),
+        })
+        .optional(),
+      people: z
+        .object({
+          enabled: z.boolean().optional(),
+          favoritesOnly: z.boolean().optional(),
+          minItems: z.number().int().min(3).max(50).optional(),
+        })
+        .optional(),
+      themes: z
+        .object({
+          enabled: z.boolean().optional(),
+          minItems: z.number().int().min(3).max(50).optional(),
+          maxPerPeriod: z.number().int().min(1).max(10).optional(),
+        })
+        .optional(),
+      seasonal: z
+        .object({
+          enabled: z.boolean().optional(),
+          minItems: z.number().int().min(5).max(100).optional(),
+        })
+        .optional(),
+      yearInReview: z
+        .object({
+          enabled: z.boolean().optional(),
+          minItems: z.number().int().min(5).max(100).optional(),
+        })
+        .optional(),
+      digest: z
+        .object({
+          enabled: z.boolean().optional(),
+          frequency: z.enum(['off', 'daily', 'weekly', 'monthly']).optional(),
+          sendHourUtc: z.number().int().min(0).max(23).optional(),
+          imageTokenTtlDays: z.number().int().min(7).max(90).optional(),
+        })
+        .optional(),
     })
     .optional(),
 }).default({});
