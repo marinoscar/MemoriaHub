@@ -142,6 +142,7 @@ export class SystemSettingsService {
       pictureEnhancement: value.pictureEnhancement,
       backup: value.backup,
       workflows: value.workflows,
+      memories: value.memories,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,

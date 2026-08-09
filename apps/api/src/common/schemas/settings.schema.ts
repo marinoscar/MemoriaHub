@@ -207,6 +207,9 @@ export const systemSettingsSchema = z.object({
   //   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
   //   - socialMediaDetection: social-media video detection (OCR-based)
   //   - faceAutoArchive: auto-archive faces matching a previously-archived face
+  //   - pictureEnhancement: AI picture enhancer
+  //   - workflows: media workflow automation
+  //   - memories: curated memory collections (On This Day, Trips, People, …)
   features: z.record(z.string(), z.boolean()),
   ai: z.object({
     features: z.object({
@@ -223,6 +226,14 @@ export const systemSettingsSchema = z.object({
         model: z.string().nullable(),
       }),
       enhance: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).nullable().default(null),
+      // Memories title/subtitle/narrative generation (epic #300, issue #302).
+      // Chat-capable provider+model, same nullable-object shape as `enhance`:
+      // a half-filled pair is not a valid selection, so the whole object is
+      // either present or null. Consumed by MemoryTitleService (#306).
+      memories: z.object({
         provider: z.string(),
         model: z.string(),
       }).nullable().default(null),
@@ -411,6 +422,67 @@ export const systemSettingsSchema = z.object({
     triggers: { onEnrichment: true, scheduled: true },
     scheduleMinIntervalMinutes: 60,
   }),
+  // Memories (epic #300, issue #302). The FULL namespace ships here alongside the
+  // generation job skeleton so every later issue in the epic (curators #303–#305,
+  // AI titles #306, API #307, digest #311, admin page #315) reads its parameters
+  // through the one cached getSettings() call with no further schema change.
+  // Issue #302 actively reads only generation.intervalHours (+ features.memories).
+  memories: z.object({
+    generation: z.object({
+      intervalHours: z.number().int().min(1).max(168).default(24),
+    }).default({ intervalHours: 24 }),
+    maxItemsPerMemory: z.number().int().min(5).max(100).default(30),
+    aiTitles: z.object({
+      enabled: z.boolean().default(true),
+    }).default({ enabled: true }),
+    onThisDay: z.object({
+      enabled: z.boolean().default(true),
+      lookbackYears: z.number().int().min(1).max(50).default(10),
+      minItems: z.number().int().min(1).max(20).default(3),
+    }).default({ enabled: true, lookbackYears: 10, minItems: 3 }),
+    trips: z.object({
+      enabled: z.boolean().default(true),
+      minDays: z.number().int().min(1).max(14).default(2),
+      minItems: z.number().int().min(3).max(100).default(10),
+      minDistanceKm: z.number().int().min(5).max(500).default(50),
+      lookbackMonths: z.number().int().min(1).max(240).default(18),
+    }).default({ enabled: true, minDays: 2, minItems: 10, minDistanceKm: 50, lookbackMonths: 18 }),
+    people: z.object({
+      enabled: z.boolean().default(true),
+      favoritesOnly: z.boolean().default(true),
+      minItems: z.number().int().min(3).max(50).default(8),
+    }).default({ enabled: true, favoritesOnly: true, minItems: 8 }),
+    themes: z.object({
+      enabled: z.boolean().default(true),
+      minItems: z.number().int().min(3).max(50).default(8),
+      maxPerPeriod: z.number().int().min(1).max(10).default(3),
+    }).default({ enabled: true, minItems: 8, maxPerPeriod: 3 }),
+    seasonal: z.object({
+      enabled: z.boolean().default(true),
+      minItems: z.number().int().min(5).max(100).default(12),
+    }).default({ enabled: true, minItems: 12 }),
+    yearInReview: z.object({
+      enabled: z.boolean().default(true),
+      minItems: z.number().int().min(5).max(100).default(15),
+    }).default({ enabled: true, minItems: 15 }),
+    digest: z.object({
+      enabled: z.boolean().default(true),
+      frequency: z.enum(['off', 'daily', 'weekly', 'monthly']).default('weekly'),
+      sendHourUtc: z.number().int().min(0).max(23).default(8),
+      imageTokenTtlDays: z.number().int().min(7).max(90).default(30),
+    }).default({ enabled: true, frequency: 'weekly', sendHourUtc: 8, imageTokenTtlDays: 30 }),
+  }).optional().default({
+    generation: { intervalHours: 24 },
+    maxItemsPerMemory: 30,
+    aiTitles: { enabled: true },
+    onThisDay: { enabled: true, lookbackYears: 10, minItems: 3 },
+    trips: { enabled: true, minDays: 2, minItems: 10, minDistanceKm: 50, lookbackMonths: 18 },
+    people: { enabled: true, favoritesOnly: true, minItems: 8 },
+    themes: { enabled: true, minItems: 8, maxPerPeriod: 3 },
+    seasonal: { enabled: true, minItems: 12 },
+    yearInReview: { enabled: true, minItems: 15 },
+    digest: { enabled: true, frequency: 'weekly', sendHourUtc: 8, imageTokenTtlDays: 30 },
+  }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -436,6 +508,10 @@ export const systemSettingsPatchSchema = z.object({
         model: z.string().nullable().optional(),
       }).optional(),
       enhance: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).nullable().optional(),
+      memories: z.object({
         provider: z.string(),
         model: z.string(),
       }).nullable().optional(),
@@ -554,5 +630,51 @@ export const systemSettingsPatchSchema = z.object({
       scheduled: z.boolean().optional(),
     }).optional(),
     scheduleMinIntervalMinutes: z.number().int().min(60).max(10080).optional(),
+  }).optional(),
+  // Memories (epic #300, issue #302) — all-optional twin of the namespace above.
+  memories: z.object({
+    generation: z.object({
+      intervalHours: z.number().int().min(1).max(168).optional(),
+    }).optional(),
+    maxItemsPerMemory: z.number().int().min(5).max(100).optional(),
+    aiTitles: z.object({
+      enabled: z.boolean().optional(),
+    }).optional(),
+    onThisDay: z.object({
+      enabled: z.boolean().optional(),
+      lookbackYears: z.number().int().min(1).max(50).optional(),
+      minItems: z.number().int().min(1).max(20).optional(),
+    }).optional(),
+    trips: z.object({
+      enabled: z.boolean().optional(),
+      minDays: z.number().int().min(1).max(14).optional(),
+      minItems: z.number().int().min(3).max(100).optional(),
+      minDistanceKm: z.number().int().min(5).max(500).optional(),
+      lookbackMonths: z.number().int().min(1).max(240).optional(),
+    }).optional(),
+    people: z.object({
+      enabled: z.boolean().optional(),
+      favoritesOnly: z.boolean().optional(),
+      minItems: z.number().int().min(3).max(50).optional(),
+    }).optional(),
+    themes: z.object({
+      enabled: z.boolean().optional(),
+      minItems: z.number().int().min(3).max(50).optional(),
+      maxPerPeriod: z.number().int().min(1).max(10).optional(),
+    }).optional(),
+    seasonal: z.object({
+      enabled: z.boolean().optional(),
+      minItems: z.number().int().min(5).max(100).optional(),
+    }).optional(),
+    yearInReview: z.object({
+      enabled: z.boolean().optional(),
+      minItems: z.number().int().min(5).max(100).optional(),
+    }).optional(),
+    digest: z.object({
+      enabled: z.boolean().optional(),
+      frequency: z.enum(['off', 'daily', 'weekly', 'monthly']).optional(),
+      sendHourUtc: z.number().int().min(0).max(23).optional(),
+      imageTokenTtlDays: z.number().int().min(7).max(90).optional(),
+    }).optional(),
   }).optional(),
 });
