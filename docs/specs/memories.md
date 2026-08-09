@@ -4,7 +4,7 @@
 |-------|-------|
 | **Version** | 0.8 (data model + generation plumbing + curation engine; all seven curators; AI titles; read/act API + per-user preferences; web Home carousel & hub; notifications & email digest) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306), API / per-user state / delete / save-as-album / preferences (#307), web Home carousel & `/memories` hub (#309), Notification Center integration & HTML email digest (#311); the story player / save-as-album / preferences UI (#313) and the admin settings page + library backfill (#315) are still outstanding |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306), API / per-user state / delete / save-as-album / preferences (#307), web Home carousel & `/memories` hub (#309), Notification Center integration & HTML email digest (#311), story player / save-as-album / share / preferences UI (#313); the admin settings page + library backfill (#315) is still outstanding |
 
 ---
 
@@ -34,7 +34,7 @@ Seven memory types ship across the epic (see [§2.1](#21-memorytype-enum)): `on_
 
 The epic is delivered incrementally, and this document grows with it. Implemented so far: the database foundation — the `MemoryType` enum and the `Memory` / `MemoryItem` / `MemoryUserState` models ([#301](https://github.com/marinoscar/MemoriaHub/issues/301), §2) — and the configuration surface plus generation plumbing: the `features.memories` flag, the `memories.*` namespace, `ai.features.memories`, and an hourly per-circle `memory_generation` job whose handler is still a deliberate **no-op** ([#302](https://github.com/marinoscar/MemoriaHub/issues/302), §3 and §9). Every later issue builds on the #301 schema without altering it.
 
-With #311 landed, an enabled deployment now curates all seven memory types, serves them over the API and the web hub, announces them through the Notification Center bell, and mails them out as an HTML digest. What remains of the epic is UI (#313's story player, save-as-album and preferences panel) and administration (#315's settings page and library backfill); §8.9 marks exactly where the #309/#313 seam falls.
+With #313 landed, an enabled deployment now curates all seven memory types, serves them over the API and the web hub, announces them through the Notification Center bell, mails them out as an HTML digest, plays a memory back as a full-screen story, saves and shares one as an album, and lets each user hide the people and dates they never want resurfaced. What remains of the epic is administration: #315's admin settings page and library backfill.
 
 ## 2. Data Model
 
@@ -884,7 +884,7 @@ Handler return values are wrapped by the global `TransformInterceptor`, so a lis
 
 - **Preference filtering shortens pages.** Because it runs after the fetch (as specified by #307), a page can return fewer than `pageSize` items. Pushing `hiddenPersonIds` into the SQL `WHERE` as `personId: { notIn }` would fix it for the person rule; the date-range rule would still need the in-memory pass, so the asymmetry was not worth two filtering paths in v1.
 - **No item-level scrubbing** of hidden people inside mixed memories (§6.7, §11).
-- **`emailDigestOptOut`** is consumed by the email digest ([§7.5](#75-per-recipient-rendering)), which reuses this section's `resolveMemoryPreferences` / `isMemoryHiddenByPreferences` helpers rather than reimplementing them. The in-app toggle that flips it back on ships with #313.
+- **`emailDigestOptOut`** is consumed by the email digest ([§7.5](#75-per-recipient-rendering)), which reuses this section's `resolveMemoryPreferences` / `isMemoryHiddenByPreferences` helpers rather than reimplementing them. The in-app toggle that flips it back on is [§8.17](#817-the-preferences-ui-and-the-absent-key-contract-it-must-not-break).
 - **Expired memories 404 on detail.** A user who opens an `on_this_day` story a minute before midnight will find the link dead a minute later. The alternative — serving expired memories by id — was rejected because the `on_this_day` retention tail hard-deletes them shortly afterwards anyway, so the link would break regardless, just less predictably.
 - **No cross-circle "all my memories" view.** Every read is scoped to one `circleId`, matching the rest of the media surface.
 
@@ -1059,7 +1059,7 @@ All three are `@Public()` and live in `PublicMemoryDigestController`.
 
 **GET must not mutate.** Mail clients, corporate link scanners and prefetchers follow every GET in a message; if GET unsubscribed, a security scanner would silently opt out every recipient it "protected". So the GET renders a page whose only control is a form that POSTs the same token. The pages (`unsubscribe-page.ts`) are standalone HTML rather than React routes — the reader is by definition not logged in, possibly in a webmail preview pane, and must get an answer without a SPA bundle, an auth redirect, or any JavaScript. **No user-supplied string appears in any of the three pages**: the confirm page interpolates exactly one value, a token this server minted and already verified, URL-encoded, into a form action. Nothing to escape, and nothing that confirms to a stranger holding a stale link *whose* link it is. Every failure — bad signature, wrong purpose, expired, deleted user — renders the **same** `invalidLinkPage()` at status 404, saying only that the link no longer works.
 
-**The POST** re-verifies, resolves the user (a token for a since-deleted user 404s rather than letting Prisma throw), and writes through `UserSettingsService.patchSettings` — the same zod validation, per-namespace merge and version increment as the in-app toggle (#313) that flips it back. It is idempotent: unsubscribing twice is a no-op that still renders the success page, which matters because a mail client may fire one-click more than once.
+**The POST** re-verifies, resolves the user (a token for a since-deleted user 404s rather than letting Prisma throw), and writes through `UserSettingsService.patchSettings` — the same zod validation, per-namespace merge and version increment as the in-app toggle ([§8.17](#817-the-preferences-ui-and-the-absent-key-contract-it-must-not-break)) that flips it back. It is idempotent: unsubscribing twice is a no-op that still renders the success page, which matters because a mail client may fire one-click more than once.
 
 **`List-Unsubscribe` headers.** The template returns:
 
@@ -1076,7 +1076,7 @@ One-click POSTs `List-Unsubscribe=One-Click` as `application/x-www-form-urlencod
 
 **Both unsubscribe routes write their own response** (`@Res()`) rather than returning a string under `@Header('Content-Type', 'text/html')`. That decorator applies *before* the handler runs, so a thrown `NotFoundException` would be serialized as a JSON object into a response already declared as HTML — which Fastify refuses to send, turning every invalid-token 404 into a 500. Writing the response explicitly keeps the success and failure paths symmetric and lets the 404 be a real HTML page a human can read.
 
-**Re-subscribing** is the profile settings toggle ("Email me memory digests"), shipping with #313 against the same key.
+**Re-subscribing** is the profile settings toggle ("Email me memory digests") in [§8.17](#817-the-preferences-ui-and-the-absent-key-contract-it-must-not-break), which writes the same key — and, being a *re*-subscribe, DELETES it rather than writing `false`.
 
 ### 7.9 Known gaps
 
@@ -1091,7 +1091,7 @@ One-click POSTs `List-Unsubscribe=One-Click` as `application/x-www-form-urlencod
 
 ## 8. Web UI
 
-Introduced by issue [#309](https://github.com/marinoscar/MemoriaHub/issues/309): the Home carousel, the `/memories` hub, the `/memories/:id` detail page, and the client plumbing all three share. The full-screen story player, the save-as-album dialog, sharing, and the per-user memory-preferences UI are issue [#313](https://github.com/marinoscar/MemoriaHub/issues/313) — see §8.9 for exactly where the seam falls.
+Introduced by issue [#309](https://github.com/marinoscar/MemoriaHub/issues/309): the Home carousel, the `/memories` hub, the `/memories/:id` detail page, and the client plumbing all three share. Completed by issue [#313](https://github.com/marinoscar/MemoriaHub/issues/313): the full-screen story player (§8.12–§8.15), the save-as-album dialog and the album-chaining share hand-off (§8.16), and the per-user memory-preferences UI (§8.17).
 
 ### 8.1 File map
 
@@ -1110,6 +1110,10 @@ Introduced by issue [#309](https://github.com/marinoscar/MemoriaHub/issues/309):
 | `apps/web/src/components/memories/MemoriesCarousel.tsx` | The Home row |
 | `apps/web/src/components/memories/MemoryActionMenu.tsx` | Kebab / long-press menu |
 | `apps/web/src/components/memories/DeleteMemoryDialog.tsx` | Tombstone confirm |
+| `apps/web/src/components/memories/MemoryStoryPlayer.tsx` | The full-screen story player (#313) |
+| `apps/web/src/components/memories/storyTiming.ts` | The player's pure timing model (#313) |
+| `apps/web/src/components/memories/MemoryAlbumDialogs.tsx` | Save-as-album naming dialog + share hand-off (#313) |
+| `apps/web/src/components/settings/MemoriesSettings.tsx` | Per-user memory preferences (#313) |
 | `apps/web/src/components/memories/memoryTypeMeta.tsx` | Per-type icon + labels |
 | `apps/web/src/components/memories/memoryFormat.ts` | Period, month-group and a11y-label formatting |
 | `apps/web/src/pages/Memories/MemoriesPage.tsx` | `/memories` |
@@ -1197,18 +1201,103 @@ The `person_highlights` and `person_over_years` kinds share **one** filter chip 
 
 `DELETE /api/memories/:id` is a circle-level tombstone whose natural key curation checks on every future run (§2.5). The memory is therefore not "deleted until it regenerates" — it can never come back, and it disappears for every other member of the circle at the same moment. `DeleteMemoryDialog` states both facts literally ("It won't be created again", "This can't be undone"), clarifies that the underlying photos are untouched, and offers **per-user hide as an in-dialog alternative**, because "I don't want to see this" is by far the more common intent and a user who arrives here by that route should not have to guess that a reversible option exists elsewhere in the menu.
 
-### 8.10 What #309 stops at
+### 8.10 Where the #309/#313 seam fell
 
-- **Play** opens `/memories/:id`. The full-screen auto-advancing story player is #313; the detail page's Play button is its entry point and currently says so.
-- **Save as album** is wired end-to-end (`POST /api/memories/:id/save-album` with the memory's own title, then a snackbar linking to the new album) because #309's acceptance criteria require it to work. The *dialog* — custom naming, then the share hand-off — is #313.
-- **Per-user memory preferences** (hidden people, sensitive date ranges, digest opt-out) have no UI at all yet; the API is §6.7 and the UI is #313.
-- **The detail page renders its own item tile**, not a gallery tile. `MemoryDetailItem` is a deliberately narrow projection (id, media type, dimensions, duration, signed thumbnail) and is *not* a `MediaItem`; adapting one to the other would mean inventing the fields `MediaGallery`'s tile needs and cannot get, and every one of them would be a lie. This is a real duplication and is accepted knowingly.
+For the record, since three sections below exist to close it. #309 shipped the surfaces and left three placeholders: **Play** navigated to `/memories/:id` and the detail page's Play button raised a "coming soon" toast; **save as album** worked end-to-end but always used the memory's own title, with no dialog; and **per-user preferences** had no UI at all. #313 replaced all three. One #309 decision stands unchanged and is worth restating, because it looks like duplication:
+
+- **The detail page renders its own item tile**, not a gallery tile. `MemoryDetailItem` is a deliberately narrow projection (id, media type, dimensions, duration, signed thumbnail) and is *not* a `MediaItem`; adapting one to the other would mean inventing the fields `MediaGallery`'s tile needs and cannot get, and every one of them would be a lie. This is a real duplication and is accepted knowingly. §8.13 explains how the story player closes the same gap differently — by *resolving* the real `MediaItem` on demand rather than by faking one.
 
 ### 8.11 Retired with this issue
 
 `components/home/OnThisDay.tsx`, `components/home/MemoryHighlights.tsx`, `components/home/QuickActions.tsx` and `hooks/useDashboard.ts` were deleted. All four were orphaned by the issue #250 Notification Center cutover — nothing had imported them since — and this epic replaces that generation of UI outright; leaving them would have left a second, unreachable memories surface in the tree. `GET /api/media/dashboard` and its `getDashboard()` client remain, still used elsewhere.
 
 A side effect worth naming: `HomePage`'s "review-queue banners removed" regression guard used to work by mocking `useDashboard` with non-zero counts. With the hook gone, that guard is now the *compiler* — there is no module left to import — and the suite's remaining assertions cover the rendered shape instead.
+
+### 8.12 The story player — why it is not `MediaLightbox` with a flag
+
+`MediaLightbox` is the existing full-screen viewer and it already has an autoplay slideshow, so extending it was the obvious first idea. It was rejected. That component is ~1,000 lines of *viewer*: zoom, a properties pane, orientation editing, AI enhance, archive, trash, tag and metadata reruns, an overflow menu, and a fixed 4-second slideshow bolted on. A story is a different interaction model end to end — per-item timing, segmented progress, hold-to-pause, Ken Burns, a title card, an end card — and every one of those would have had to be threaded through code paths that exist for something else, with a `storyMode` flag deciding which half of the component is live.
+
+What IS reused is the machinery rather than the shell: `getMedia()` for the signed full-resolution URL, the module-scope full-item cache, the neighbour-prefetch idea, the pointer-swipe arithmetic, and `Dialog fullScreen` — whose Modal supplies the focus trap, so the accessibility requirement is satisfied by the framework instead of by a hand-rolled trap that would need its own tests. `MemoryStoryPlayer` is ~900 lines including its comments, and none of it is conditional on a mode.
+
+### 8.13 The timing model, and why two clocks
+
+Every constant lives in `storyTiming.ts` as a pure function over the DTO, so the pacing is unit-testable without mounting a Dialog, a `<video>` and four CSS animations.
+
+| Step | Duration |
+|---|---|
+| Title card | 2,500 ms |
+| Photo | 5,000 ms |
+| Video | `min(measured ?? durationMs ?? cap, 15 s)`, floored at 1,500 ms |
+| End card | never advances |
+
+A story is a walk over `[-1, 0 … n-1, n]`: `-1` is the title card, `0…n-1` the items, `n` the end card. Each step drives **two synchronized clocks**:
+
+- a `setTimeout` that performs the advance, and
+- a CSS animation that fills the active progress segment (and runs Ken Burns).
+
+They are separate deliberately. Driving the bar from JS would mean a `requestAnimationFrame` loop re-rendering the tree 60 times a second for a decoration. Driving the *advance* from `animationend` would tie correctness to an animation that `prefers-reduced-motion`, a background tab, or a `display: none` ancestor may legally never run — a player that silently stops advancing whenever motion is suppressed. So **JS owns correctness, CSS owns smoothness**, and one boolean pauses both: `animation-play-state: paused` freezes the fill exactly where the timer's remaining-time arithmetic freezes the clock.
+
+Pause is a **derived value**, never state: `paused = userPaused || holding || suspended`. Press-and-hold, the pause button and an open save-as-album dialog therefore take the same path and cannot disagree about who resumed. Pausing **banks the unspent remainder** rather than restarting the slide, so a photo paused with 1 s left advances 1 s after the resume.
+
+Three details that are easy to get wrong and are therefore pinned by tests:
+
+- **The reset key is the step index, not the duration.** Two consecutive photos both last 5,000 ms, so keying the timer's restart on the duration would leave the second slide running out the first one's timer and advancing early.
+- **A measured video duration is tagged with its item's id.** The `<video>` element reports its real length on `loadedmetadata`, which wins over the ingest-time `durationMs` (that value can be absent for an old import or a failed ffprobe, or stale relative to the bytes being played). Tagging the measurement removes any window in which the previous clip's length paces the next slide, so no reset-on-navigate is needed at all.
+- **A sub-second clip is floored at 1,500 ms.** `min(duration, 15 s)` taken literally gives a 300 ms clip a 300 ms segment, which reads as a flicker rather than a slide. This is the one deliberate deviation from #313's literal wording.
+
+**Media resolution.** The memory DTO ships an 800 px signed thumbnail per item and no place name. A full-screen story needs the original bytes — mandatory for a video, visibly better for a photo on a desktop display — plus `geoLocality` for the caption, so the player resolves `GET /api/media/:id` for the current slide and the next two, caching results module-wide. Meanwhile the thumbnail is what is on screen, which is why a slow or failed fetch degrades to "slightly soft" rather than to a black frame. Neighbours are additionally **mounted at `opacity: 0`** so the browser has already decoded them by the time they become current; that, plus an `Image()` warm of the resolved original, is what removes the flash on advance. A `<video>` is only ever mounted for the *current* slide — mounting a hidden one would autoplay it.
+
+### 8.14 Motion, and what `prefers-reduced-motion` actually turns off
+
+- **Ken Burns**: a slow `scale(1) → scale(1.08)` with a translate, alternating pan direction per item so consecutive slides do not drift the same way. Transform-only, so it stays on the compositor: no layout, no paint, no jank on a phone.
+- **Crossfade**: 400 ms opacity transition between slides.
+- **Title card**: the type chip, title, subtitle and AI narrative fade up on a 120 ms stagger.
+
+Under `prefers-reduced-motion: reduce` all three are suppressed and the player **cuts** instead — and keeps working, which is the property the reduced-motion test exists to protect.
+
+The progress fill is deliberately **not** suppressed. It is the only indication of how long the current slide will hold, which makes it feedback rather than decoration; a story whose progress bar sat still would leave a reduced-motion user unable to tell whether the player had frozen.
+
+### 8.15 Interaction and accessibility
+
+**Pointer.** A full-bleed gesture surface sits above the slides and below the chrome. A tap in the left 30% goes back, anywhere else advances; a horizontal drag past 50 px is a swipe; a press held for 220 ms is hold-to-pause. A drag cancels a *pending* hold but never releases an *engaged* one, so a finger that shifts slightly while resting on the screen does not silently resume playback. The surface is `aria-hidden` and unfocusable — keyboard users have the arrow keys and the explicit chevrons, so exposing an unlabelled full-screen hit target would only add noise to the tab order.
+
+**Keyboard.** `←`/`↑` back, `→`/`↓` forward, `Space` toggles pause, `Home`/`End` jump to the title and end cards, `M` toggles mute, `Esc` closes (MUI's own handler). The listener is bound to the window rather than the dialog node so shortcuts work wherever focus sits inside the trap — including on the backdrop, which is what holds focus right after the dialog opens. It **skips `Space` and `M` when the event target is interactive**, so a focused button still activates on Space instead of double-firing.
+
+**Screen readers.** The whole bar is ONE `role="progressbar"` with `aria-valuenow`/`aria-valuemax`/`aria-valuetext`; the individual segments are `aria-hidden` decoration. Marking each segment up as its own progressbar would announce a dozen unlabelled meters and convey nothing about position. A `role="status" aria-live="polite"` region announces `Photo 3 of 12 · 12 March 2023` on every step — for a non-sighted user that region is the *only* channel carrying position, which is why it names the index rather than merely describing the slide. The accessible name sits on the Paper (the node carrying `role="dialog"`), not on the Modal root, or the dialog announces as unnamed.
+
+**Phone.** Safe-area insets are applied to the chrome (`env(safe-area-inset-*)`) while the media itself stays edge to edge; every control clears the 44 px touch target.
+
+**Videos** autoplay muted with a visible unmute control in the top bar rather than a bare tap-to-unmute — the surface tap advances the story, so unmuting needed an affordance that is also reachable by keyboard. A refused `play()` (autoplay policy, decode failure) degrades to a still poster that still advances on time, because the story's clock is its own.
+
+### 8.16 Save as album, and sharing by album chaining
+
+**Save as album** opens a naming dialog prefilled with the memory's title (client-capped at the API's 256 characters), calls `POST /api/memories/:id/save-album`, and reports a snackbar linking to the new album.
+
+**Share** is **album chaining**, per the epic's explicit v1 decision. A memory has no public share target — `ShareTargetType` is `media_item | album`, and extending it would mean a new enum value, a new public renderer and a new unauthenticated read path, all deferred to v2. So sharing saves the memory as an album *silently* (using the memory title), then hands that album id to the very same `ShareDialog`/`SharePanel` the album page uses, landing the user directly on the copy-public-link step. Nothing in the sharing subsystem changed.
+
+The one thing this owes the user is honesty: sharing creates a visible album in their library. The first step of the flow says so before the album exists, rather than leaving them to find an album they never asked for.
+
+`MemoryAlbumDialogs` owns both flows for all three call sites (hub, detail page, player), each of which keeps a single `MemoryAlbumMode | null`. The silent save is keyed on the flow rather than on the callback's identity, so a re-render cannot fire a second save — that failure would litter the library with duplicate albums and nothing would fail loudly, which is why it is pinned by a test. The dialogs render at `zIndex: modal + 2` so they sit over the player, and the player is `suspended` (paused) while one is open.
+
+### 8.17 The preferences UI, and the absent-key contract it must not break
+
+`MemoriesSettings` is a section on the user settings page, structurally modelled on `NotificationSettings`, reading and writing `user_settings.memories` (§6.7) through the existing `PATCH /api/user-settings`. There is no memories-specific settings endpoint and none was added.
+
+The namespace is stored **sparsely** and absent means *no preference*: nobody hidden, no sensitive window, digest ON. That contract is what let it ship without a migration, and it is what a preferences UI most easily destroys — so this component:
+
+- **derives** every control from `settings.memories`, with no defaulted local mirror that could be written back;
+- **PATCHes exactly the one key it changed**, never a materialized namespace;
+- **clears a key with `null`** (a JSON Merge Patch delete) rather than `[]` / `false`, so removing your last hidden person returns you to the absent default instead of pinning you to today's default forever. Re-subscribing to the digest likewise deletes `emailDigestOptOut` rather than writing `false`.
+
+Three controls:
+
+- **Hide people** — an autocomplete over the active circle's people with cover-face avatars. Because the preference is app-wide while the picker can only show one circle, ids it cannot resolve (set in another circle, or belonging to a since-deleted or merged person) are surfaced as plain removable chips and **preserved across saves**; dropping them would silently un-hide somebody the user asked to hide.
+- **Hide date ranges** — from/to rows with a `from ≤ to` check. These use **native `<input type="date">`**: `@mui/x-date-pickers` is not a dependency of this app, `SharePanel` already sets the native-input precedent, and the native control emits exactly the `YYYY-MM-DD` the API accepts, whereas a picker returning a `Date` would need a formatting step whose only likely contribution is a timezone bug.
+- **Email digest** — a switch bound to the inverse of `emailDigestOptOut`. This is the in-app counterpart of the tokenized unsubscribe link in §7.8; both write the same key.
+
+**Why the ranges have a Save button and the other two do not.** A switch flip and a chip removal are complete gestures — the intent is unambiguous the moment they happen, so they save immediately as a one-key delta, exactly like the notification switches. A date range is *incomplete* until both bounds are filled and ordered; saving per keystroke would PATCH a half-typed year that the API would reject. So ranges are edited locally and committed explicitly.
+
+The section is gated strict-true on `useMemoriesEnabled()` and threads that into `usePeople` (`enabled ? circleId : null`), so with the flag off it renders nothing **and** fires no people request — the same standard as the carousel (§8.3).
 
 ## 9. Settings
 
@@ -1319,6 +1408,7 @@ Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) f
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.9 | August 2026 | AI Assistant | Issue #313: completed §8 (Web UI) — §8.10 rewritten from "what #309 stops at" to a record of where the seam fell, plus new §8.12 (why the story player is a dedicated component rather than `MediaLightbox` with a `storyMode` flag, and what is reused instead), §8.13 (the timing table; the two-clock model with JS owning advance correctness and CSS owning smoothness, and why driving the advance off `animationend` would break under reduced motion or a background tab; pause as a derived value that banks its remainder; the step-index reset key, the item-id-tagged video measurement, and the 1,500 ms short-clip floor as the one deliberate deviation from the issue text; on-demand full-media resolution with opacity-0 neighbour mounting), §8.14 (what `prefers-reduced-motion` turns off, and why the progress fill is deliberately not one of them), §8.15 (tap zones / hold-to-pause / swipe and the engaged-hold rule; the window-bound keyboard map and its interactive-target `Space` guard; one progressbar rather than a dozen unlabelled meters, the polite live region as the only position channel for a screen reader, and the accessible name belonging on the Paper; safe-area insets; muted video autoplay with a real unmute control), §8.16 (save-as-album naming, and sharing as album chaining with the honesty requirement, the shared three-call-site component, and the flow-keyed effect that prevents duplicate albums), and §8.17 (the preferences UI and the absent-key contract it must not break — derive-never-mirror, one-key deltas, `null`-to-delete; unresolvable person ids preserved rather than dropped; native date inputs and why; why only the date ranges have a Save button). Updated the status line, §1, the file map, and the §6.7 / §7.8 pointers to the in-app digest toggle. §8 is now complete; only #315's admin page remains outstanding for the epic. |
 | 0.8 | August 2026 | AI Assistant | Issue #309: filled in §8 (Web UI — the file map; the strict-true `useMemoriesEnabled()` gate, its three consumers, why the flag is threaded INTO the feed hook rather than wrapped around the component, and the deliberately unfolded `MEMORIES_ENABLED` env kill-switch; the carousel's self-hiding contract including the failed-request case and why Home carries no empty state or poll; the one-card/two-sizes anatomy, the gradient-padding-box unseen ring, the fan's DTO-driven absence on the hub, and the two literal-rgba exceptions; motion as opt-out with pointer-only hover and ungated focus; the ≥90%-for-1s seen dwell and its module-scoped cross-surface dedup; the merge-not-replace and index-preserving-restore rollback rules; the hub's URL-coerced filters, the single People chip narrowing, the auto-fill grid with `md`-only wide spans, `generatedAt` month grouping, dual kebab/long-press action entry, omitted-not-disabled Delete, and the two distinct empty states; the delete dialog's permanence copy and in-dialog hide alternative; the #313 seam; and the retired dashboard components). §7 remains a placeholder. |
 | 0.7 | August 2026 | AI Assistant | Issue #307: filled in §6 (API — the endpoint catalogue with its permission/role column; the three read invariants and why per-user hide is deliberately not the tombstone; the flag-checked-before-any-query ordering that makes the default-off state cost zero queries and return empty lists rather than errors; keyset-only pagination, the `year` range-overlap compilation, and why `nextCursor` must come from the RAW page; the feed's two bounded reads, exact-`periodKey` anchor match and 60-row candidate window; the 404-not-403 `loadAccessibleMemory` policy and why it does not call `assertCircleAccess`; the `user_settings.memories` namespace with its absent-means-default rule, field-wise merge, overlap-not-containment date filtering and the read-time-never-generation-input rationale; COALESCE state writes and why clearing never upserts; the tombstone write and its audit event; save-as-album's reuse of the album service path plus its trashed-item and non-idempotence decisions; the one-batched-call thumbnail rule; serialization; and six known gaps) and §10 (RBAC — the no-new-permission decision, the capability table, super-admin bypass, the two status-code rules, and why preferences carry no permission). §7 and §8 remain placeholders. |
 | 0.6 | August 2026 | AI Assistant | Issue #306: filled in §5 (AI Titles, Subtitles & Narratives — the total `generate()` contract and the complete failure table with which entries avoid a provider call at all, the metadata-only prompt payload and the absent-by-construction privacy list, the one-file prompt with its per-type snapshots and the strict-JSON/length-cap contract shared between the system prompt and the parser, the 10s whole-stream timeout with its remaining-budget race and fire-and-forget iterator close plus the new optional `ChatRequest.temperature`, the per-job `MemoryTitleRun` budget and why it is a passed object rather than service state, the rate-limit stop-the-run rule and the 100-call backfill cap, the two `upsertMemory` branches that call titling and the tombstone/outside-the-transaction ordering, the no-network test strategy, and five known gaps). §6–§8 and §10 remain placeholders. |
