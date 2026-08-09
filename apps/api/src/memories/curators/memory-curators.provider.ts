@@ -30,6 +30,7 @@ import { MEMORY_CURATORS, MemoryCurator } from './memory-curator.interface';
 import { OnThisDayCurator } from './on-this-day.curator';
 import { PersonHighlightsCurator } from './person-highlights.curator';
 import { PersonOverYearsCurator } from './person-over-years.curator';
+import { ThemeCurator } from './theme.curator';
 import { TripCurator } from './trip.curator';
 
 export const memoryCuratorsProvider = {
@@ -39,6 +40,13 @@ export const memoryCuratorsProvider = {
     trip: TripCurator,
     personHighlights: PersonHighlightsCurator,
     personOverYears: PersonOverYearsCurator,
-  ): MemoryCurator[] => [onThisDay, trip, personHighlights, personOverYears],
-  inject: [OnThisDayCurator, TripCurator, PersonHighlightsCurator, PersonOverYearsCurator],
+    theme: ThemeCurator,
+  ): MemoryCurator[] => [onThisDay, trip, personHighlights, personOverYears, theme],
+  inject: [
+    OnThisDayCurator,
+    TripCurator,
+    PersonHighlightsCurator,
+    PersonOverYearsCurator,
+    ThemeCurator,
+  ],
 };

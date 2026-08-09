@@ -28,6 +28,7 @@ import { OnThisDayCurator } from './curators/on-this-day.curator';
 import { TripCurator } from './curators/trip.curator';
 import { PersonHighlightsCurator } from './curators/person-highlights.curator';
 import { PersonOverYearsCurator } from './curators/person-over-years.curator';
+import { ThemeCurator } from './curators/theme.curator';
 import { memoryCuratorsProvider } from './curators/memory-curators.provider';
 
 @Module({
@@ -40,6 +41,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     TripCurator,
     PersonHighlightsCurator,
     PersonOverYearsCurator,
+    ThemeCurator,
     memoryCuratorsProvider,
   ],
   exports: [MemoriesGenerationTask, MemoryCurationService],
