@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.7 (data model + generation plumbing + curation engine; all seven curators; AI titles; read/act API + per-user preferences) |
+| **Version** | 0.8 (data model + generation plumbing + curation engine; all seven curators; AI titles; read/act API + per-user preferences; web Home carousel & hub; notifications & email digest) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306), API / per-user state / delete / save-as-album / preferences (#307); §7 and §8 are placeholders for later issues in epic #300 |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306), API / per-user state / delete / save-as-album / preferences (#307), web Home carousel & `/memories` hub (#309), Notification Center integration & HTML email digest (#311); the story player / save-as-album / preferences UI (#313) and the admin settings page + library backfill (#315) are still outstanding |
 
 ---
 
@@ -34,7 +34,7 @@ Seven memory types ship across the epic (see [§2.1](#21-memorytype-enum)): `on_
 
 The epic is delivered incrementally, and this document grows with it. Implemented so far: the database foundation — the `MemoryType` enum and the `Memory` / `MemoryItem` / `MemoryUserState` models ([#301](https://github.com/marinoscar/MemoriaHub/issues/301), §2) — and the configuration surface plus generation plumbing: the `features.memories` flag, the `memories.*` namespace, `ai.features.memories`, and an hourly per-circle `memory_generation` job whose handler is still a deliberate **no-op** ([#302](https://github.com/marinoscar/MemoriaHub/issues/302), §3 and §9). Every later issue builds on the #301 schema without altering it.
 
-Sections 5–8 and 10 are placeholders that name the issue expected to fill them in; do not treat their absence as an oversight. With #303 landed, an enabled deployment generates real `on_this_day` memories; the remaining six types arrive with #304–#305 and plug into the §4 engine unchanged.
+With #311 landed, an enabled deployment now curates all seven memory types, serves them over the API and the web hub, announces them through the Notification Center bell, and mails them out as an HTML digest. What remains of the epic is UI (#313's story player, save-as-album and preferences panel) and administration (#315's settings page and library backfill); §8.9 marks exactly where the #309/#313 seam falls.
 
 ## 2. Data Model
 
@@ -227,7 +227,7 @@ v1's body is a log line and a return. That log line is the observability hook pr
 
 ### 3.4 Job-type labels
 
-`JOB_TYPE_LABELS` (`apps/api/src/enrichment/job-type-labels.ts`) gains `memory_generation: 'Memory generation'` so the type renders with a friendly name in `/admin/settings/jobs`. `memory_digest: 'Memory email digest'` is declared alongside it now, ahead of its handler, so [#311](https://github.com/marinoscar/MemoriaHub/issues/311) does not have to touch the file again.
+`JOB_TYPE_LABELS` (`apps/api/src/enrichment/job-type-labels.ts`) gains `memory_generation: 'Memory generation'` so the type renders with a friendly name in `/admin/settings/jobs`. `memory_digest: 'Memory email digest'` sits alongside it ([§7.2](#72-digest-architecture)); both are server-only global jobs, one per circle — generation curates, digest mails the result out.
 
 ## 4. Curation Engine
 
@@ -837,7 +837,7 @@ Filtering is read-time and **never** a generation input. Generation is circle-sc
 
 **V1 limitation (from the epic, deliberate):** a memory is dropped **whole**. A hidden person removes the `person_highlights` / `person_over_years` memories keyed to them, but a trip or theme memory that merely *contains* that person among several faces is **not** scrubbed at the item level. Item-level scrubbing is listed in §11.
 
-`emailDigestOptOut` is stored and validated here; it is consumed by the digest producer in issue [#311](https://github.com/marinoscar/MemoriaHub/issues/311).
+`emailDigestOptOut` is stored and validated here; it is consumed by the digest's per-recipient send ([§7.5](#75-per-recipient-rendering)) and set without a login by the tokenized unsubscribe route ([§7.8](#78-the-public-routes)).
 
 ### 6.8 Per-user state writes
 
@@ -884,13 +884,206 @@ Handler return values are wrapped by the global `TransformInterceptor`, so a lis
 
 - **Preference filtering shortens pages.** Because it runs after the fetch (as specified by #307), a page can return fewer than `pageSize` items. Pushing `hiddenPersonIds` into the SQL `WHERE` as `personId: { notIn }` would fix it for the person rule; the date-range rule would still need the in-memory pass, so the asymmetry was not worth two filtering paths in v1.
 - **No item-level scrubbing** of hidden people inside mixed memories (§6.7, §11).
-- **`emailDigestOptOut` is stored but unread** until issue #311 lands the digest producer.
+- **`emailDigestOptOut`** is consumed by the email digest ([§7.5](#75-per-recipient-rendering)), which reuses this section's `resolveMemoryPreferences` / `isMemoryHiddenByPreferences` helpers rather than reimplementing them. The in-app toggle that flips it back on ships with #313.
 - **Expired memories 404 on detail.** A user who opens an `on_this_day` story a minute before midnight will find the link dead a minute later. The alternative — serving expired memories by id — was rejected because the `on_this_day` retention tail hard-deletes them shortly afterwards anyway, so the link would break regardless, just less predictably.
 - **No cross-circle "all my memories" view.** Every read is scoped to one `circleId`, matching the rest of the media surface.
 
 ## 7. Notification Center Integration & Email Digest
 
-Placeholder. Covered by issue [#311](https://github.com/marinoscar/MemoriaHub/issues/311). Expected to define: a new `memories_ready` `NotificationType` enum value (see `docs/specs/notifications.md`) with a per-user preference, and a `MemoryDigestTask` cron → per-circle `memory_digest` `enrichment_jobs` row producing a per-recipient HTML email with a long-lived HMAC-signed public thumbnail route and a tokenized, no-login unsubscribe link.
+Introduced by issue [#311](https://github.com/marinoscar/MemoriaHub/issues/311). Two delivery channels for the same underlying fact — *new memories exist* — with deliberately different volume guards, audiences and failure modes: the in-app **bell** (§7.1) and the **email digest** (§7.2 onward).
+
+Both are **best-effort**. A failed notification write and a failed email send are logged and counted; neither ever throws into, blocks, or rolls back the thing that triggered it. That is the same contract the circle-invitation / membership-confirmation sends and every notification producer already follow.
+
+### 7.1 The `memories_ready` notification
+
+| | |
+|---|---|
+| **Enum value** | `memories_ready`, added to `NotificationType` in its own migration (`20260810000000_add_memories_ready_notification_type`) — Postgres cannot add an enum value in the same transaction as statements using it; precedent `20260705000000_add_media_tag_source_system` |
+| **Primitive** | `upsertCountedEvent()` — a counted **EVENT**, not a **STATE** row |
+| **Window** | 24 h rolling, anchored on `updated_at` |
+| **Partition** | `matchData: { circleId }` |
+| **Producer** | `MemoriesNotificationService` (`apps/api/src/memories/notifications/`) |
+| **Audience** | Every circle member, every per-circle role |
+| **Title / body / link** | `"{count} new memor{y\|ies} in {circle}"` / the run's top memory title / `/memories` |
+| **Preference** | Automatic — `notificationTypeKeySchema` derives from the live enum; absent ⇒ enabled |
+
+**Why counted-event and not state.** Memories arrive in *batches*: one generation pass routinely creates six or more (a year of On This Day anchors, several trips, a theme), and an admin backfill creates dozens. `emit()` would append one row per memory — exactly the fan-out the notification design exists to prevent — and a member of three circles would find their bell buried after a single backfill. `upsertCountedEvent()` folds every creation in the window into ONE row whose `data.count` grows: "6 new memories in Familia" becomes "31 new memories in Familia" after the backfill, still one row.
+
+It is deliberately **not** `upsertState()`. A state row would require widening the raw-SQL partial unique index `notifications_review_queue_live_uniq_idx`, whose predicate lists only the four `review_queue_*` values — but more importantly the semantics are wrong: "N new memories arrived" counts things that *happened*, not the current depth of a queue the user drains. There is no number that falls back to zero when the user acts, which is the property that makes a STATE row a STATE row.
+
+**Audience rationale.** Every member regardless of role, because browsing memories needs no write access — a `viewer` genuinely can act on this. Same reasoning as `upload_completed`, and deliberately unlike #246's collaborator-only review-queue audience, where resolving a group *does* need write access.
+
+**Only creations notify.** `MemoryGenerationHandler` calls `recordGeneratedAsync()` only when the run's `created` count is greater than zero. A refresh-only pass resurfaces nothing new, and a bell row that says so every day is how a user learns to ignore the bell.
+
+**Module placement — the constraint that decided it.** `NotificationsModule` imports **nothing**, and that is load-bearing for the acyclicity of the module graph. The producer needs circle-membership lookups, so it lives in **`MemoriesModule`**, which imports `NotificationsModule` — an edge pointing *into* notifications exactly like `MediaModule`'s and `WorkflowsModule`'s. No cycle is closed and no `forwardRef` is needed. (This is the same reasoning that put #246's review-queue reconcile in the separate `NotificationsReconcileModule`.)
+
+**Web.** `memories_ready` is registered in `apps/web/src/components/notifications/notificationMeta.tsx` (icon `AutoAwesome`, positive tone) and `apps/web/src/types/notifications.ts`; the per-type toggle appears in `NotificationSettings.tsx` automatically, since that list is derived from the type map.
+
+### 7.2 Digest architecture
+
+```
+MemoryDigestTask  (hourly @Cron)
+      │  gates 1–8, per circle
+      ▼
+enrichment_jobs row  type='memory_digest', circleId, priority 100, skipDedup
+      ▼
+MemoryDigestHandler  (server-only)
+      ▼
+MemoryDigestService.sendForCircle()
+      │  per recipient: preferences → filter → render → send
+      ▼
+EmailService.sendEmail('memory-digest', …)   →  SES | SMTP
+```
+
+| File | Role |
+|---|---|
+| `apps/api/src/memories/digest/memory-digest.task.ts` | Hourly cron; picks due circles, enqueues one job each |
+| `apps/api/src/memories/digest/memory-digest.service.ts` | The gate stack, the watermark/candidate queries, and the per-recipient send |
+| `apps/api/src/memories/digest/memory-digest.handler.ts` | `memory_digest` enrichment handler |
+| `apps/api/src/memories/digest/digest-token.util.ts` | HMAC sign/verify for the image and unsubscribe capabilities |
+| `apps/api/src/memories/digest/public-memory-digest.controller.ts` | The three `@Public()` routes |
+| `apps/api/src/memories/digest/unsubscribe-page.ts` | The two standalone HTML pages |
+| `apps/api/src/email/templates/memory-digest.email.ts` | The email itself |
+
+**Why the send is a job and not in-process work.** `ShareExpiringTask` and #246's reconcile do their work in process, because both are bounded local SQL that cannot fail transiently. Sending is the one part of this feature that talks to a third party, so it is the part that genuinely *does* fail transiently. Being an `enrichment_jobs` row gives it the queue's retry budget, makes a stuck send visible in `/admin/settings/jobs`, and bounds a broken provider to `ENRICHMENT_MAX_ATTEMPTS` rather than an hourly silent failure nobody sees.
+
+**Server-only, by omission.** `MemoryDigestHandler` defines no `nodeResultSchema` / `persistNodeResult` pair, so `EnrichmentHandlerRegistry.serverOnlyTypes()` infers the type and it becomes eligible for the `ENRICHMENT_WORKER_MODE=system` claim set with no explicit pinning — the same inference that covers `memory_generation`, `face_auto_archive_sweep` and the `location_inference` sweep. It is correspondingly absent from the CLI's `NODE_JOB_TYPES`. A node holds neither the email credential nor the `SECRETS_ENCRYPTION_KEY`-derived signing key, and there is no per-item unit of work to hand it.
+
+**Why `skipDedup: true` is mandatory** — identical to §3.2's reasoning for `memory_generation`: `EnrichmentJobService`'s default dedup keys on `(type, mediaItemId)`, and for a global job `mediaItemId` is NULL for *every* circle, so the first circle's pending job would swallow the enqueue for the whole deployment. The task's own per-circle pending/running check is the correctly-scoped replacement.
+
+### 7.3 The gate stack
+
+Evaluated in this order, cheapest first. Gates 1–5 are deployment-wide and read **once per sweep** through the cached `getSettings()`; gates 6–8 are per circle.
+
+| # | Gate | Where | Effect when closed |
+|---|---|---|---|
+| 1 | `MEMORIES_ENABLED !== 'false'` | task | Cron returns before any settings read |
+| 2 | `features.memories` | `evaluateGlobalGate` | `reason: 'feature_disabled'` — no circle paging at all |
+| 3 | `memories.digest.enabled` | `evaluateGlobalGate` | `reason: 'digest_disabled'` — the admin global kill |
+| 4 | `memories.digest.frequency !== 'off'` | `evaluateGlobalGate` | `reason: 'frequency_off'` |
+| 5 | `email.enabled && email.provider && email.fromAddress` | `evaluateGlobalGate` | `reason: 'email_unconfigured'` |
+| 6 | `now.getUTCHours() >= memories.digest.sendHourUtc` | task | `gate: 'before_send_hour'` |
+| 7 | Last **succeeded** `memory_digest` job older than the frequency window | task | circle counted as `skipped` |
+| 8 | **≥ 1 memory created or refreshed since that watermark** | task **and** handler | circle counted as `skipped` / run `skippedReason: 'no_new_content'` |
+
+**Zero cost when off** is a stated epic success criterion, not a nicety. With `features.memories` off — the default — an hourly tick costs exactly one *cached* settings read and returns: no circle paging, no job rows, no mail. The same holds when the admin has killed the digest, set `frequency: 'off'`, or simply never configured email; gate 5 is what makes "email not configured ⇒ the digest task no-ops and in-app memories are unaffected" true at the *cron* level rather than only at the send, so a deployment with no SMTP does not queue a job per circle per period forever.
+
+**Gate 8 is the hard one.** The epic states it absolutely: **no new content ⇒ no email, ever**. A weekly digest that arrives every week saying nothing happened is the fastest way to train a family to filter the sender. It is enforced **twice** — in the task before enqueueing, so a quiet circle costs one bounded `SELECT` instead of a job row plus a worker slot plus a red-herring entry in the job dashboard; and again in the handler, because the two happen minutes apart, a memory can be tombstoned in between, and a job can be hand-retried from `/admin/settings/jobs` long afterwards.
+
+**The one-tick tolerance.** The frequency window is `FREQUENCY_HOURS[frequency] − 1h` (`daily` 24, `weekly` 168, `monthly` 720). Without the subtraction the digest drifts an hour later every period: a run that finished at 08:00:30 is not yet 24 h old when the next day's 08:00:10 tick evaluates it, so it slips to 09:00, then 10:00. One cron period of slack pins the send to its intended hour, and it cannot cause a double-send because the send-hour gate already admits at most one qualifying window per day *and* gate 8 requires new content the previous send consumed.
+
+### 7.4 The watermark is the job row
+
+Nothing is persisted to record "a digest was sent". The **`finishedAt` of the most recent succeeded `memory_digest` job for the circle** *is* the watermark, read by `MemoryDigestService.lastDigestAt()`. The currently-running job is `running`, not `succeeded`, so it can never be its own watermark — which is what lets the handler re-derive exactly the boundary the task used with no state threaded through the job payload.
+
+This is also why the handler **succeeds on a partial send**: a failed row is not a watermark, so a retry would re-mail everyone the first pass already reached. There is no per-recipient checkpoint, and duplicate mail is worse than a missed one. Per-recipient failures are counted in the completion log line (`sent` / `failed` / `skippedOptOut` / `skippedEmpty` / `skippedNoEmail`); only an infrastructure error — the circle read itself failing — escapes and fails the job so the queue retries it.
+
+"New content" means **created OR materially refreshed** (`generatedAt > watermark OR refreshedAt > watermark`), restricted to live, non-expired rows (`deletedAt IS NULL` and `expiresAt IS NULL OR expiresAt > now()`). A trip that grew from 40 photos to 120 because the user finally uploaded the rest of the holiday is genuinely worth resurfacing, and `refreshedAt` is the only signal for it. A first-ever digest has no watermark and takes the circle's newest memories outright.
+
+### 7.5 Per-recipient rendering
+
+One broadcast email per circle would be cheaper and is **wrong**: each member has their own `user_settings.memories` preferences (hidden people, sensitive date ranges) and their own `emailDigestOptOut`. Those are read-time filters (§6.7), so the only way to honour them is to build the list per recipient.
+
+The digest is #307's **first consumer** of `emailDigestOptOut`, and it reuses #307's `resolveMemoryPreferences()` / `isMemoryHiddenByPreferences()` from `apps/api/src/memories/api/memory-preferences.ts` rather than reimplementing them — a second copy of the date-range overlap arithmetic is exactly the drift this epic keeps warning about.
+
+Per recipient, in order:
+
+1. **No email address** → `skippedNoEmail`.
+2. **`emailDigestOptOut === true`** → `skippedOptOut`. Never mailed, full stop.
+3. **Filter** the shared candidate pool through their preferences, then take the top `DIGEST_MEMORY_LIMIT` (5 — one hero plus four cards, matching the template exactly; a sixth would silently vanish).
+4. **Empty after filtering** → `skippedEmpty`. An email that shows them nothing is worse than silence.
+5. Otherwise render and send.
+
+The candidate pool is loaded **once for the circle** (`DIGEST_CANDIDATE_LIMIT` = 25, deliberately larger than the 5 rendered so a member with several hidden people still gets a full email rather than a short one), and preferences are read for the whole membership in **one** `userSettings.findMany` — the same batching #246's reconcile does. Image tokens are minted once per circle too, since a token is a capability over the *media item*, not over the reader; only the unsubscribe URL is per recipient.
+
+Ordering puts **`on_this_day` first** regardless of `generatedAt` — it is the one type anchored to today, so it is both the most likely thing the reader wants and the strongest subject line. The sort runs in memory over an already-bounded page rather than as a SQL `CASE`, since the index serving the query orders by `generatedAt`.
+
+A preference read that fails resolves to "no preference" with a logged warning: over-showing beats failing a send.
+
+### 7.6 The email
+
+`apps/api/src/email/templates/memory-digest.email.ts`, registered in the typed `TEMPLATES` map as `memory-digest`.
+
+**Outlook for Windows is the binding constraint.** It renders through the Word HTML engine: no flexbox, no grid, no `max-width` on a `div`, no reliable `background-image`, no `border-radius`. Everything about the template follows from that, and `memory-digest.email.spec.ts` pins each rule so a future edit that "looks fine in Gmail" cannot ship silently:
+
+- **Tables for layout**, never divs — nested `<table role="presentation">` with explicit pixel widths.
+- **Inline styles on every element.** Gmail strips `<head><style>` except media queries, so the `<style>` block carries *only* the ≤480px stacking query, which is a progressive enhancement: without it the grid stays two-column, which is the desktop design anyway.
+- **No web fonts, no JavaScript, no SVG, no external CSS.**
+- **Every `<img>` carries `width`, `height` and `alt`.** Fixed dimensions stop the layout collapsing while images load; alt text is what most Outlook readers actually see, since remote images are blocked there by default.
+- **Bulletproof buttons** — a padded `<td>` with a background colour wrapping an `<a>`. A styled anchor loses its background in Outlook and becomes invisible text.
+- **Gradients degrade**: the golden-hour band (`#f6d365 → #fda085`) paints a solid `bgcolor` **first**, so Outlook shows a warm band rather than a white void. `border-radius` is simply ignored there — squared corners are an accepted, documented degradation.
+- **600px body width**, the widest every major client renders un-scaled.
+
+Structure: gradient header band with a hidden preheader ("Your memories from {circle}") → greeting → **hero** memory (600×338 cover, type chip, 24px/700 title, subtitle, and the AI `narrative` when present) → up to **four** two-column cards (268×151 cover, chip, 16px/600 title, subtitle) → "See all memories" CTA → footer with the membership explanation and the unsubscribe link. The narrative is hero-only: four stacked paragraphs would turn a glanceable digest into an essay. A memory with no usable cover renders a **same-size** gradient placeholder, so a still-processing cover cannot shuffle every card below it.
+
+**Subject line.** `"{count} new memories from {circle}"`, or — when a today-anchored `on_this_day` memory is present — `"On this day: {title} — and {n} more memories"`, which is the most emotionally specific thing in the mail and the strongest reason to open it.
+
+**Plaintext part** is generated alongside (titles, subtitles, links, and the unsubscribe URL) via `layout.ts`'s `plainText()`. A multipart mail with an *empty* text part scores worse for spam than one with none, and the text part is all a terminal client or a text-mode screen reader ever sees.
+
+**Light mode only.** `prefers-color-scheme` handling in email is a minefield — Outlook.com and Gmail both rewrite colours in dark mode in ways that fight any author-side scheme — so the design commits to one look. Known limitation.
+
+### 7.7 Stateless signed capabilities
+
+Two things in the mail must work for a reader with no session, weeks later. Both are solved the same way and neither creates a database row.
+
+**Format**: `base64url(JSON payload) + '.' + base64url(HMAC-SHA256(payload))`. The payload is readable by design — it carries an opaque UUID and an expiry, never a secret — and the signature is what makes it unforgeable. Same shape as the OAuth `state` token (`oauth-state.util.ts`).
+
+| | Image token | Unsubscribe token |
+|---|---|---|
+| Payload | `{ m: mediaItemId, e: exp, p: 'memory-digest-image' }` | `{ u: userId, e: exp, p: 'memory-digest-unsubscribe' }` |
+| TTL | `memories.digest.imageTokenTtlDays` (7–90, default 30) | 90 days (`UNSUBSCRIBE_TTL_DAYS`) |
+| Grants | The **thumbnail** of exactly one media item | Opting exactly one user out of digests |
+
+Signed-storage URLs expire in 24 h, which is useless for something sitting in an inbox — hence the long-lived capability. Inline/CID attachments were rejected (multi-MB mails, SES size limits), and minting a `MediaShare` row per image was rejected as DB litter with revocation churn.
+
+**Security properties, each load-bearing:**
+
+- **Keyed per purpose.** The two token kinds are signed with *different* `deriveSubKey()` sub-keys (`apps/api/src/common/crypto/secret-cipher.ts`, an HKDF-extract-style HMAC over a labelled constant), so an image token can never be replayed as an unsubscribe token or vice versa. The purpose is *also* carried in the signed payload and re-checked — belt and braces, so a future refactor that accidentally shared a key still fails closed. Both directions, and the shared-key scenario, are tested.
+- **Never the master key.** Signing uses a derived sub-key, not `SECRETS_ENCRYPTION_KEY` itself, whose job is AES-256-GCM encryption of credentials at rest. Handing the same bytes to a routine whose outputs are published in emails would needlessly widen what an oracle against one primitive could say about the other.
+- **Constant-time comparison.** `crypto.timingSafeEqual` over equal-length buffers, never `===`. Lengths are compared first (that comparison leaks only the length of a base64url SHA-256 digest, a constant).
+- **Expiry is inside the signature**, so it cannot be extended by editing the URL. Expiry is the *only* revocation mechanism, which is precisely why the image capability is deliberately narrow.
+- **No cross-resource replay.** A token names exactly one media item or one user; changing the id invalidates the signature. There is no wildcard token.
+- **Every failure is the same failure.** Malformed, tampered, wrong-purpose and expired all return `null` and become a bare `NotFoundException`, so the routes are not an oracle for which media ids or user ids exist — the same enumeration-resistant posture as public shares and the notification `:id` routes.
+
+### 7.8 The public routes
+
+All three are `@Public()` and live in `PublicMemoryDigestController`.
+
+| Route | Behaviour |
+|---|---|
+| `GET /api/public/memories/digest-image/:token` | Verifies the token, resolves the item's `metadata.thumbnailStorageKey`, streams those bytes |
+| `GET /api/public/memories/digest-unsubscribe/:token` | Verifies the token, renders a confirmation page. **Mutates nothing** |
+| `POST /api/public/memories/digest-unsubscribe/:token` | Verifies the token, sets `user_settings.memories.emailDigestOptOut = true` |
+
+**Thumbnails only, never originals.** The image route selects *only* `metadata` from the media item — the original's storage key is never even read — so no token, valid or forged, has a code path to full-resolution bytes. An item whose thumbnail has not been generated yet 404s rather than falling back to the original. Bytes are proxied (not redirected to a signed storage URL) for the same reason `PublicShareController` proxies: the storage URL and the bucket layout it reveals never leave the server. Headers: `Content-Type: image/jpeg` (thumbnails are always JPEG, so the type is not derived from anything attacker-influenced), `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `Cache-Control: public, max-age=86400, immutable` — the bytes behind a storage key never change, and an email client's image proxy (Gmail's, notably) fetches once and serves the reader forever after. A trashed item (`deletedAt IS NOT NULL`) goes dark immediately; archived items are still served, matching the public-share policy. A storage failure becomes a bare 404, never a 500 carrying a provider message.
+
+**GET must not mutate.** Mail clients, corporate link scanners and prefetchers follow every GET in a message; if GET unsubscribed, a security scanner would silently opt out every recipient it "protected". So the GET renders a page whose only control is a form that POSTs the same token. The pages (`unsubscribe-page.ts`) are standalone HTML rather than React routes — the reader is by definition not logged in, possibly in a webmail preview pane, and must get an answer without a SPA bundle, an auth redirect, or any JavaScript. **No user-supplied string appears in either page**: the confirm page interpolates exactly one value, a token this server minted and already verified, URL-encoded, into a form action. Nothing to escape, and nothing that confirms to a stranger holding a stale link *whose* link it is.
+
+**The POST** re-verifies, resolves the user (a token for a since-deleted user 404s rather than letting Prisma throw), and writes through `UserSettingsService.patchSettings` — the same zod validation, per-namespace merge and version increment as the in-app toggle (#313) that flips it back. It is idempotent: unsubscribing twice is a no-op that still renders the success page, which matters because a mail client may fire one-click more than once.
+
+**`List-Unsubscribe` headers.** The template returns:
+
+```
+List-Unsubscribe: <{unsubscribeUrl}>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+RFC 2369 + RFC 8058. The URL embeds a per-recipient token, which is exactly why per-message `headers` had to be threaded through `RenderedEmail → EmailMessage →` both the SES and SMTP providers rather than living in provider configuration. `One-Click` promises the client that a bare POST to that URL unsubscribes with no further interaction, which the POST route honours.
+
+One-click POSTs `List-Unsubscribe=One-Click` as `application/x-www-form-urlencoded`. Fastify ships parsers for JSON and `text/plain` only, so `main.ts` registers a **raw** parser for that content type — without it a mail-client unsubscribe would be rejected with 415 before reaching the route. The body is deliberately left unparsed and unread: the capability is the signed token in the URL, never the body, so parsing it would be needless attack surface. `@fastify/formbody` is not pulled in for the same reason.
+
+**Re-subscribing** is the profile settings toggle ("Email me memory digests"), shipping with #313 against the same key.
+
+### 7.9 Known gaps
+
+- **A partial send is not resumable.** If the provider dies halfway through a large circle, the job still succeeds (§7.4) and the members it never reached simply wait for the next period. A per-recipient checkpoint table was rejected as disproportionate: circles are families, not mailing lists.
+- **The digest is per circle, not per user.** A member of four circles that all have new content receives four emails in the same hour. Coalescing across circles would need a user-scoped scheduler and a watermark per (user, circle) pair; deferred.
+- **`sendHourUtc` is UTC only** — there is no per-user or per-circle timezone. A deployment spanning many timezones cannot hit "9am local" for everyone. The `backup.*` namespace's IANA-timezone precedent exists if this becomes worth doing.
+- **Item-level scrubbing** of hidden people inside mixed memories is not applied to the email either — it inherits §6.7's whole-memory rule exactly.
+- **Image tokens cannot be revoked** before expiry, by design (no token table). A leaked digest URL exposes one thumbnail until `imageTokenTtlDays` elapses. Lowering the setting shortens the window for *future* mails only.
+- **The `<style>` mobile query is best-effort.** Clients that strip it render the two-column grid on a phone; legible at 600px, but not the intended layout.
+- **Light mode only** (§7.6).
+- **Rendering is verified by unit tests plus manual inspection** in Gmail, Outlook and Apple Mail — there is no automated cross-client rendering check in CI.
 
 ## 8. Web UI
 
@@ -1102,6 +1295,8 @@ Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) f
 **Two status-code rules.** A memory in a circle the caller is not a member of is **404** (enumeration-resistant — the caller must not be able to confirm the id exists), while a member who lacks the *rank* gets **403** (their membership is not a secret and the distinction is actionable). See §6.6.
 
 **Preferences carry no permission at all.** The `user_settings.memories` namespace (§6.7) is read and written through the existing `GET`/`PATCH`/`PUT /api/user-settings`, which is already scoped to the calling user — there is nothing an additional permission would protect, the same rationale that kept `notifications` and `dataTables` permission-free.
+
+**The notification and digest surfaces add no permission either.** `memories_ready` follows the Notification Center's authentication-only model (every row is already `userId`-scoped, so an Admin-gated permission would protect nothing). The three digest routes ([§7.8](#78-the-public-routes)) are `@Public()` by necessity — their whole purpose is to work with no session — and their access control is the HMAC signature rather than RBAC. That is a deliberate substitution, not an exemption: each token is a single-resource, expiring, purpose-bound capability that grants strictly less than any role would ([§7.7](#77-stateless-signed-capabilities)), and the failure mode of every invalid token is an identical bare 404.
 
 ## 11. Future Work
 
