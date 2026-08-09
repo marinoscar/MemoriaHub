@@ -45,6 +45,33 @@ export interface NotificationPreferencesValue {
   workflowMicroRuns?: boolean;
 }
 
+/** One inclusive `YYYY-MM-DD` date window a user never wants resurfaced. */
+export interface MemoriesHiddenDateRangeValue {
+  from: string;
+  to: string;
+}
+
+/**
+ * Per-user Memories preferences (epic #300, issue #307).
+ *
+ * EVERY field is optional and is NEVER filled in server-side. An absent key
+ * means "no preference" — no person is hidden, no date range is sensitive, and
+ * the digest is NOT opted out of. Same absent-key contract as `dataTables` and
+ * `notifications` above, and the same reason it needs no data migration: every
+ * existing row simply has no namespace.
+ *
+ * `hiddenPersonIds` / `hiddenDateRanges` filter READ paths only (see
+ * MemoriesService) — generation is circle-scoped and cannot be personalised.
+ */
+export interface MemoriesPreferencesValue {
+  /** Memories whose `personId` is listed are dropped from list + feed. */
+  hiddenPersonIds?: string[];
+  /** Memories whose `[periodStart, periodEnd]` overlaps a range are dropped. */
+  hiddenDateRanges?: MemoriesHiddenDateRangeValue[];
+  /** Absent = false, i.e. the user receives the circle's memory digest. */
+  emailDigestOptOut?: boolean;
+}
+
 /**
  * User settings schema - stored in user_settings.value JSONB
  */
@@ -70,6 +97,12 @@ export interface UserSettingsValue {
    * namespace needed no data migration. Absent ⇒ everything enabled.
    */
   notifications?: NotificationPreferencesValue;
+  /**
+   * Per-user Memories preferences (issue #307). Absent for any user who has
+   * never hidden a person or a date range — the normal state, and why this
+   * namespace needed no data migration. Absent ⇒ nothing filtered.
+   */
+  memories?: MemoriesPreferencesValue;
 }
 
 /**

@@ -155,6 +155,97 @@ export type NotificationPreferencesPatch = z.infer<
 >;
 
 // =============================================================================
+// Per-user Memories preferences (issue #307, epic #300)
+// =============================================================================
+//
+// Stored inside the existing `user_settings` JSONB blob — no new table, no new
+// endpoint, no migration, no new RBAC permission. Read/written exclusively
+// through GET/PATCH/PUT /api/user-settings, exactly like `dataTables` and
+// `notifications` above.
+//
+// ABSENT-KEY RULE (load-bearing — same contract as the two namespaces above):
+//   Every field is `.optional()` with NO `.default()`, and `memories` itself is
+//   optional. An absent key means "no preference": nobody is hidden, no date
+//   range is sensitive, and the digest is NOT opted out of. That is what lets
+//   the namespace ship without a data migration, and it means a future field
+//   added here is opt-IN rather than silently applied to everyone who ever
+//   saved a preference. Do NOT add `.default()` to anything in this block —
+//   a `.default([])` on `hiddenPersonIds` would pin a stored blob to "no
+//   people hidden" and make it indistinguishable from "never expressed one".
+
+/** Max hidden person ids one user may persist. */
+export const MEMORIES_MAX_HIDDEN_PERSON_IDS = 200;
+/** Max sensitive date ranges one user may persist. */
+export const MEMORIES_MAX_HIDDEN_DATE_RANGES = 50;
+
+/** Calendar-day key, `YYYY-MM-DD`. */
+export const MEMORIES_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A `YYYY-MM-DD` string that names a REAL calendar day. The regex alone accepts
+ * `2026-02-31`; the round-trip check rejects it, because a range whose bound
+ * silently rolls into the next month would filter days the user never named.
+ */
+const memoriesDateSchema = z
+  .string()
+  .regex(MEMORIES_DATE_PATTERN, 'Date must be formatted YYYY-MM-DD')
+  .refine((v) => {
+    const parsed = new Date(`${v}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === v;
+  }, 'Date must be a real calendar day');
+
+/** One inclusive sensitive-date window. `.strict()` — unknown keys rejected. */
+export const memoriesHiddenDateRangeSchema = z
+  .object({
+    from: memoriesDateSchema,
+    to: memoriesDateSchema,
+  })
+  .strict()
+  .refine((v) => v.from <= v.to, {
+    message: 'hiddenDateRanges entries require from <= to',
+  });
+
+/** The `memories` namespace as accepted by PUT and stored at rest. */
+export const memoriesPreferencesSchema = z
+  .object({
+    hiddenPersonIds: z
+      .array(z.string().uuid())
+      .max(MEMORIES_MAX_HIDDEN_PERSON_IDS)
+      .optional(),
+    hiddenDateRanges: z
+      .array(memoriesHiddenDateRangeSchema)
+      .max(MEMORIES_MAX_HIDDEN_DATE_RANGES)
+      .optional(),
+    emailDigestOptOut: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * The `memories` namespace as accepted by PATCH. Identical, except any field
+ * may be set to `null` to DELETE it (JSON Merge Patch), resetting it to its
+ * absent default rather than pinning an explicit empty list / `false` that
+ * would survive a future default change.
+ */
+export const memoriesPreferencesPatchSchema = z
+  .object({
+    hiddenPersonIds: z
+      .array(z.string().uuid())
+      .max(MEMORIES_MAX_HIDDEN_PERSON_IDS)
+      .nullable()
+      .optional(),
+    hiddenDateRanges: z
+      .array(memoriesHiddenDateRangeSchema)
+      .max(MEMORIES_MAX_HIDDEN_DATE_RANGES)
+      .nullable()
+      .optional(),
+    emailDigestOptOut: z.boolean().nullable().optional(),
+  })
+  .strict();
+
+export type MemoriesPreferencesSettings = z.infer<typeof memoriesPreferencesSchema>;
+export type MemoriesPreferencesPatch = z.infer<typeof memoriesPreferencesPatchSchema>;
+
+// =============================================================================
 // User Settings Schema
 // =============================================================================
 
@@ -170,6 +261,7 @@ export const userSettingsSchema = z.object({
   }).optional(),
   dataTables: dataTablesSchema.optional(),
   notifications: notificationPreferencesSchema.optional(),
+  memories: memoriesPreferencesSchema.optional(),
 });
 
 export type UserSettingsDto = z.infer<typeof userSettingsSchema>;
@@ -189,6 +281,10 @@ export const userSettingsPatchSchema = z.object({
   // `null` clears the whole namespace back to defaults (everything enabled,
   // micro-runs off) — JSON Merge Patch, mirroring dataTables' per-entry null.
   notifications: notificationPreferencesPatchSchema.nullable().optional(),
+  // Merged field-wise (see UserSettingsService.mergeMemories): a listed field
+  // replaces, an unlisted one is untouched, `null` clears that field, and
+  // `memories: null` clears the whole namespace.
+  memories: memoriesPreferencesPatchSchema.nullable().optional(),
 });
 
 // =============================================================================
