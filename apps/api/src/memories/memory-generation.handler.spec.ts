@@ -276,6 +276,89 @@ describe('MemoryGenerationHandler', () => {
     expect(titles.beginRun).toHaveBeenCalledWith({ backfill: true, aiTitlesEnabled: true });
   });
 
+  // --- #315: backfill sharding ----------------------------------------------
+  //
+  // A library backfill is split into bounded jobs so no single one approaches
+  // ENRICHMENT_JOB_TIMEOUT_MS. The handler's half of that contract is honouring
+  // the shard descriptor in the payload — and, just as importantly, behaving
+  // exactly as before when there isn't one.
+
+  it('SHARDING: runs only the curators named in the payload', async () => {
+    const otd = fakeCurator('on_this_day');
+    const trip = fakeCurator('trip');
+    const theme = fakeCurator('theme');
+    await build([otd, trip, theme]);
+
+    await handler.process(
+      makeJob({ payload: { backfill: true, curators: ['on_this_day', 'theme'] } as never }),
+    );
+
+    expect(otd.run).toHaveBeenCalled();
+    expect(theme.run).toHaveBeenCalled();
+    expect(trip.run).not.toHaveBeenCalled();
+    // A curator outside the shard must not even have its retention tail run —
+    // another shard owns that type entirely.
+    expect(trip.purge).not.toHaveBeenCalled();
+  });
+
+  it('SHARDING: an absent curator list still runs the whole registry', async () => {
+    const a = fakeCurator('a');
+    const b = fakeCurator('b');
+    await build([a, b]);
+
+    await handler.process(makeJob());
+
+    expect(a.run).toHaveBeenCalled();
+    expect(b.run).toHaveBeenCalled();
+  });
+
+  it('SHARDING: an unknown curator name is a logged no-op, not a failure', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    // A payload written by another release must never poison the queue.
+    await expect(
+      handler.process(makeJob({ payload: { backfill: true, curators: ['nope'] } as never })),
+    ).resolves.toBeUndefined();
+    expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('SHARDING: passes anchorMonths through to the curator context', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await handler.process(
+      makeJob({
+        payload: { backfill: true, curators: ['on_this_day'], anchorMonths: [7] } as never,
+      }),
+    );
+
+    expect(curator.run.mock.calls[0]![0].anchorMonths).toEqual([7]);
+  });
+
+  it('SHARDING: a scheduled run carries no anchorMonths at all', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await handler.process(makeJob());
+
+    expect(curator.run.mock.calls[0]![0].anchorMonths).toBeUndefined();
+  });
+
+  it('SHARDING: forwards the shard AI-title cap to beginRun', async () => {
+    const curator = fakeCurator('a');
+    await build([curator]);
+
+    await handler.process(makeJob({ payload: { backfill: true, aiTitleCap: 5 } as never }));
+
+    // Divided, not multiplied: N shards must not cost N x #306's per-job cap.
+    expect(titles.beginRun).toHaveBeenCalledWith({
+      backfill: true,
+      aiTitlesEnabled: true,
+      maxAiCalls: 5,
+    });
+  });
+
   // --- #311: the memories_ready notification hook ---------------------------
 
   it('NOTIFY: fires memories_ready once with the run-wide created total', async () => {

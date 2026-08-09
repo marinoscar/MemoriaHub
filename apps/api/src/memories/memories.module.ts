@@ -33,6 +33,8 @@ import { MemoryDigestService } from './digest/memory-digest.service';
 import { MemoryDigestHandler } from './digest/memory-digest.handler';
 import { MemoryDigestTask } from './digest/memory-digest.task';
 import { PublicMemoryDigestController } from './digest/public-memory-digest.controller';
+import { AdminMemoriesController } from './admin/admin-memories.controller';
+import { MemoryBackfillService } from './admin/memory-backfill.service';
 import { MemoriesController } from './api/memories.controller';
 import { MemoriesService } from './api/memories.service';
 import { MemoryTitleService } from './titles/memory-title.service';
@@ -83,9 +85,15 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     EmailModule,
     StorageProvidersModule,
   ],
-  controllers: [MemoriesController, PublicMemoryDigestController],
+  // #315's AdminMemoriesController is mounted here rather than in a separate
+  // admin module: it needs MemoryBackfillService and MEMORY_GENERATION_JOB_TYPE,
+  // both of which live in this module, and every other feature's admin backfill
+  // controller (AdminBurstController, AdminLocationInferenceController) sits in
+  // its own feature module for the same reason.
+  controllers: [MemoriesController, AdminMemoriesController, PublicMemoryDigestController],
   providers: [
     MemoriesService,
+    MemoryBackfillService,
     MemoriesNotificationService,
     MemoryDigestService,
     MemoryDigestHandler,
@@ -105,6 +113,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   ],
   exports: [
     MemoriesGenerationTask,
+    MemoryBackfillService,
     MemoryCurationService,
     MemoriesService,
     MemoryDigestTask,

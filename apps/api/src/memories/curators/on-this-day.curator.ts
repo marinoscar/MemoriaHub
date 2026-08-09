@@ -140,6 +140,12 @@ export class OnThisDayCurator implements MemoryCurator {
    * backfilled memory's `periodKey` and `expiresAt` describe a day that is still
    * ahead, rather than a day that has already passed (which would make the row
    * born expired and immediately purge-eligible).
+   *
+   * `ctx.anchorMonths` narrows that backfill set to one calendar month, which
+   * is the axis #315 shards a library backfill along — see
+   * `admin/memory-backfill.shards.ts`. The filter is pushed into SQL rather
+   * than applied to the result set so each shard's DISTINCT scan reads only its
+   * own month instead of the whole circle twelve times over.
    */
   private async resolveAnchors(ctx: MemoryCuratorContext): Promise<Date[]> {
     if (!ctx.backfill) {
@@ -147,7 +153,13 @@ export class OnThisDayCurator implements MemoryCurator {
       return [today, new Date(today.getTime() + MS_PER_DAY)];
     }
 
-    // At most 366 rows — one per calendar day the circle has any candidate on.
+    const months = ctx.anchorMonths?.length ? ctx.anchorMonths : null;
+    const monthFilter = months
+      ? Prisma.sql`AND EXTRACT(MONTH FROM ("captured_at" AT TIME ZONE 'UTC'))::int IN (${Prisma.join(months)})`
+      : Prisma.empty;
+
+    // At most 366 rows — one per calendar day the circle has any candidate on
+    // (at most 31 when this is one shard of a sharded backfill).
     const pairs = await this.prisma.$queryRaw<Array<{ month: number; day: number }>>(Prisma.sql`
       SELECT DISTINCT
         EXTRACT(MONTH FROM ("captured_at" AT TIME ZONE 'UTC'))::int AS month,
@@ -158,6 +170,7 @@ export class OnThisDayCurator implements MemoryCurator {
         AND "archived_at" IS NULL
         AND "captured_at" IS NOT NULL
         AND "social_media_source" IS NULL
+        ${monthFilter}
     `);
 
     const byKey = new Map<string, Date>();
