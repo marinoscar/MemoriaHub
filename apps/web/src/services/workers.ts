@@ -18,6 +18,20 @@ export interface NodeJobCounts {
 }
 
 /**
+ * Fleet-level backup summary folded onto each node row (issue #312/#319).
+ *
+ * `null` when the node has no NodeBackupConfig at all. Deliberately narrow:
+ * no pending-lag computation and NO latest-run status — those live only on
+ * `GET /nodes/:id/backup/config` / `GET /nodes/:id/backup/runs`.
+ */
+export interface WorkerNodeBackupSummary {
+  enabled: boolean;
+  lastCompletedRunAt: string | null;
+  checkpointUpdatedAt: string | null;
+  activeRun: boolean;
+}
+
+/**
  * A worker node row as returned by `GET /admin/nodes`.
  *
  * Shape matches NodesService.listNodes(): the full WorkerNode record plus a
@@ -40,6 +54,8 @@ export interface WorkerNodeDto {
   health: NodeHealth;
   /** Per-node claimed-job counts by status. */
   jobCounts: NodeJobCounts;
+  /** Backup summary; null when backup was never configured for this node. */
+  backup?: WorkerNodeBackupSummary | null;
 }
 
 // ---------------------------------------------------------------------------

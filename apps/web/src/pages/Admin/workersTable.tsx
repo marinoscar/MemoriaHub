@@ -34,6 +34,7 @@ import type {
   AdminNodeCredentialDto,
   NodeHealth,
   NodeStatus,
+  WorkerNodeBackupSummary,
   WorkerNodeDto,
 } from '../../services/workers';
 import { relativeTime } from '../../utils/formatBytes';
@@ -96,6 +97,92 @@ function HeartbeatPill({ node }: { node: WorkerNodeDto }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Backup summary chip (issue #319)
+// ---------------------------------------------------------------------------
+
+/**
+ * Age past which an enabled backup with no recent completed run reads as a
+ * warning. Fixed heuristic — a daily schedule plus slack — deliberately NOT
+ * computed from the node's cron client-side.
+ */
+export const BACKUP_WARNING_AGE_MS = 26 * 60 * 60 * 1000;
+
+/**
+ * Chip states derivable from the fleet list payload.
+ *
+ * There is deliberately NO `failed` state: the list summary
+ * ({@link WorkerNodeBackupSummary}) carries no latest-run status field, so a
+ * failed last run is not derivable without a per-row request — which this
+ * column must never make. Failures surface on the node's backup page instead.
+ *
+ * Precedence: off > running > warning > ok.
+ */
+export type BackupChipState = 'off' | 'running' | 'warning' | 'ok';
+
+export function backupChipState(
+  backup: WorkerNodeBackupSummary | null | undefined,
+  now: number = Date.now(),
+): BackupChipState {
+  if (!backup || !backup.enabled) return 'off';
+  if (backup.activeRun) return 'running';
+  if (!backup.lastCompletedRunAt) return 'warning';
+  if (now - new Date(backup.lastCompletedRunAt).getTime() > BACKUP_WARNING_AGE_MS) {
+    return 'warning';
+  }
+  return 'ok';
+}
+
+const BACKUP_CHIP_META: Record<
+  BackupChipState,
+  { color: 'default' | 'info' | 'warning' | 'success'; label: string }
+> = {
+  off: { color: 'default', label: 'Off' },
+  running: { color: 'info', label: 'Running' },
+  warning: { color: 'warning', label: 'Warning' },
+  ok: { color: 'success', label: 'OK' },
+};
+
+/** The scalar the Backup column sorts/exports (and the chip label for `ok`). */
+export function backupChipLabel(
+  backup: WorkerNodeBackupSummary | null | undefined,
+): string {
+  const state = backupChipState(backup);
+  if (state === 'ok' && backup?.lastCompletedRunAt) {
+    return `OK — backed up ${relativeTime(backup.lastCompletedRunAt)}`;
+  }
+  return BACKUP_CHIP_META[state].label;
+}
+
+function BackupChip({ backup }: { backup: WorkerNodeBackupSummary | null | undefined }) {
+  const state = backupChipState(backup);
+  const meta = BACKUP_CHIP_META[state];
+  const tooltip =
+    state === 'warning'
+      ? backup?.lastCompletedRunAt
+        ? `Enabled, but last completed run was ${relativeTime(backup.lastCompletedRunAt)}`
+        : 'Enabled, but no run has ever completed'
+      : state === 'off'
+        ? 'Backup is not configured or disabled for this node'
+        : undefined;
+  const chip = (
+    <Chip
+      label={backupChipLabel(backup)}
+      color={meta.color}
+      size="small"
+      variant="outlined"
+      sx={tooltip ? { cursor: 'help' } : undefined}
+    />
+  );
+  return tooltip ? (
+    <Tooltip title={tooltip} arrow>
+      {chip}
+    </Tooltip>
+  ) : (
+    chip
+  );
+}
+
 const MAX_TYPE_CHIPS = 3;
 
 /** Eligible job types as chips, truncated with a "+N" overflow chip. */
@@ -128,11 +215,11 @@ function EligibleTypes({ types }: { types: string[] }) {
 // ---------------------------------------------------------------------------
 
 /**
- * The eleven fleet columns.
+ * The twelve fleet columns.
  *
  * Priorities:
  *   - primary   — Node, Status
- *   - secondary — Heartbeat, Running, Failed
+ *   - secondary — Heartbeat, Backup, Running, Failed
  *   - detail    — Platform, CLI version, Eligible types, Concurrency, Succeeded
  */
 export function buildWorkerNodeColumns(): DataTableColumn<WorkerNodeDto>[] {
@@ -173,6 +260,14 @@ export function buildWorkerNodeColumns(): DataTableColumn<WorkerNodeDto>[] {
       value: (node) => node.health,
       render: (node) => <HeartbeatPill node={node} />,
       minWidth: 180,
+    },
+    {
+      id: 'backup',
+      label: 'Backup',
+      priority: 'secondary',
+      value: (node) => backupChipLabel(node.backup),
+      render: (node) => <BackupChip backup={node.backup} />,
+      minWidth: 170,
     },
     {
       id: 'running',

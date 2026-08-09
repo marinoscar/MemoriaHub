@@ -39,8 +39,12 @@ vi.mock('../../hooks/useNodeCredentials', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
+import { Routes, Route } from 'react-router-dom';
 import WorkersPage from '../../pages/Admin/WorkersPage';
 import {
+  BACKUP_WARNING_AGE_MS,
+  backupChipLabel,
+  backupChipState,
   buildNodeCredentialColumns,
   buildWorkerNodeColumns,
   credentialState,
@@ -53,6 +57,7 @@ import type { UseNodeCredentialsResult } from '../../hooks/useNodeCredentials';
 import type {
   AdminNodeCredentialDto,
   CreatedNodeCredentialDto,
+  WorkerNodeBackupSummary,
   WorkerNodeDto,
 } from '../../services/workers';
 import { api } from '../../services/api';
@@ -285,9 +290,11 @@ describe('WorkersPage', () => {
       const user = userEvent.setup();
 
       renderPage();
+      // Two row actions (Backup settings + Deregister) collapse into a menu.
       await user.click(
-        await screen.findByRole('button', { name: /deregister node for gpu-box-1/i }),
+        await screen.findByRole('button', { name: /row actions for gpu-box-1/i }),
       );
+      await user.click(await screen.findByRole('menuitem', { name: /deregister node/i }));
 
       const dialog = await screen.findByRole('dialog');
       expect(within(dialog).getByText(/deregister worker node\?/i)).toBeInTheDocument();
@@ -310,8 +317,9 @@ describe('WorkersPage', () => {
 
       renderPage();
       await user.click(
-        await screen.findByRole('button', { name: /deregister node for gpu-box-1/i }),
+        await screen.findByRole('button', { name: /row actions for gpu-box-1/i }),
       );
+      await user.click(await screen.findByRole('menuitem', { name: /deregister node/i }));
 
       const dialog = await screen.findByRole('dialog');
       await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
@@ -330,6 +338,138 @@ describe('WorkersPage', () => {
       expect(toggle).toBeChecked();
       await user.click(toggle);
       expect(setAutoRefresh).toHaveBeenCalledWith(false);
+    });
+  });
+
+  // =========================================================================
+  // Backup column (issue #319)
+  // =========================================================================
+
+  describe('Backup column', () => {
+    const HOUR = 60 * 60 * 1000;
+
+    function makeBackup(
+      overrides: Partial<WorkerNodeBackupSummary> = {},
+    ): WorkerNodeBackupSummary {
+      return {
+        enabled: true,
+        lastCompletedRunAt: new Date(Date.now() - 2 * HOUR).toISOString(),
+        checkpointUpdatedAt: new Date(Date.now() - 1 * HOUR).toISOString(),
+        activeRun: false,
+        ...overrides,
+      };
+    }
+
+    describe('backupChipState', () => {
+      it('is "off" when the summary is null (never configured)', () => {
+        expect(backupChipState(null)).toBe('off');
+        expect(backupChipState(undefined)).toBe('off');
+      });
+
+      it('is "off" when disabled — Off wins over an active run', () => {
+        expect(backupChipState(makeBackup({ enabled: false }))).toBe('off');
+        expect(
+          backupChipState(makeBackup({ enabled: false, activeRun: true })),
+        ).toBe('off');
+      });
+
+      it('is "running" while a run is active — Running wins over Warning', () => {
+        expect(backupChipState(makeBackup({ activeRun: true }))).toBe('running');
+        expect(
+          backupChipState(makeBackup({ activeRun: true, lastCompletedRunAt: null })),
+        ).toBe('running');
+      });
+
+      it('is "warning" when enabled but no run has ever completed', () => {
+        expect(backupChipState(makeBackup({ lastCompletedRunAt: null }))).toBe('warning');
+      });
+
+      it('is "warning" when the last completed run is older than 26h (fixed heuristic)', () => {
+        const now = Date.now();
+        const past = new Date(now - BACKUP_WARNING_AGE_MS - 1000).toISOString();
+        expect(backupChipState(makeBackup({ lastCompletedRunAt: past }), now)).toBe(
+          'warning',
+        );
+      });
+
+      it('is "ok" with a recent completed run, and the label includes the relative time', () => {
+        const backup = makeBackup();
+        expect(backupChipState(backup)).toBe('ok');
+        expect(backupChipLabel(backup)).toMatch(/^OK — backed up 2h ago$/);
+      });
+    });
+
+    it('renders a chip per node from the list payload alone (no per-row requests)', async () => {
+      mockUseWorkers.mockReturnValue(
+        makeWorkersHook({
+          nodes: [
+            makeNode({ id: 'n-off', name: 'node-off', backup: null }),
+            makeNode({
+              id: 'n-run',
+              name: 'node-run',
+              backup: makeBackup({ activeRun: true }),
+            }),
+            makeNode({
+              id: 'n-warn',
+              name: 'node-warn',
+              backup: makeBackup({ lastCompletedRunAt: null }),
+            }),
+            makeNode({ id: 'n-ok', name: 'node-ok', backup: makeBackup() }),
+          ],
+        }),
+      );
+
+      renderPage();
+
+      const grid = await screen.findByRole('grid', { name: /worker nodes/i });
+      // Scope to chip labels — "Running" is also a column header.
+      const chip = { selector: '.MuiChip-label' };
+      await waitFor(() => {
+        expect(within(grid).getByText('Off', chip)).toBeInTheDocument();
+      });
+      expect(within(grid).getByText('Running', chip)).toBeInTheDocument();
+      expect(within(grid).getByText('Warning', chip)).toBeInTheDocument();
+      expect(within(grid).getByText(/OK — backed up/, chip)).toBeInTheDocument();
+    });
+
+    it('renders the table unconditionally while loading (rows stay visible under the overlay)', async () => {
+      mockUseWorkers.mockReturnValue(
+        makeWorkersHook({ nodes: [makeNode()], loading: true }),
+      );
+
+      renderPage();
+
+      const grid = await screen.findByRole('grid', { name: /worker nodes/i });
+      await waitFor(() => {
+        expect(within(grid).getByText('gpu-box-1')).toBeInTheDocument();
+      });
+    });
+
+    it('navigates to the node backup page from the "Backup settings" row action', async () => {
+      mockUseWorkers.mockReturnValue(
+        makeWorkersHook({ nodes: [makeNode({ id: 'node-uuid-1' })] }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <Routes>
+          <Route path="/" element={<WorkersPage />} />
+          <Route
+            path="/admin/settings/nodes/:id/backup"
+            element={<div>node backup page target</div>}
+          />
+        </Routes>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
+
+      await user.click(
+        await screen.findByRole('button', { name: /row actions for gpu-box-1/i }),
+      );
+      await user.click(await screen.findByRole('menuitem', { name: /backup settings/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('node backup page target')).toBeInTheDocument();
+      });
     });
   });
 
