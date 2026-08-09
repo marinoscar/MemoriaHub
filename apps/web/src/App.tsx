@@ -70,6 +70,8 @@ const WorkflowBuilderPage = lazy(() => import('./pages/Workflows/WorkflowBuilder
 const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
 const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));
+const MemoriesPage = lazy(() => import('./pages/Memories/MemoriesPage'));
+const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -156,6 +158,11 @@ function AppRoutes() {
                 <Route path="/workflows/:id/runs/:runId" element={<WorkflowRunPage />} />
                 <Route path="/enhancements" element={<EnhancementsPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
+                {/* Memories (epic #300). The routes always resolve — a bookmark
+                    must not 404 — and each page renders its own disabled state
+                    when `features.memories` is off. */}
+                <Route path="/memories" element={<MemoriesPage />} />
+                <Route path="/memories/:id" element={<MemoryDetailPage />} />
                 <Route path="/bursts" element={<BurstsPage />} />
                 <Route path="/bursts/:id" element={<BurstGroupPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />

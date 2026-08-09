@@ -34,12 +34,14 @@ import {
   Public as PublicIcon,
   AccountTree as AccountTreeIcon,
   AutoFixHigh as AutoFixHighIcon,
+  AutoAwesomeMotion as AutoAwesomeMotionIcon,
   NotificationsNone as NotificationsNoneIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
+import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
 import { useReviewCounts } from '../../hooks/useReviewCounts';
 import { useNotifications } from '../../hooks/useNotifications';
 
@@ -87,9 +89,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   // timer already exists — so this second consumer adds a subscriber, never a
   // second poller, and the sidebar badge can never drift from the bell's.
   const { unreadCount } = useNotifications();
+  // Same module-level flag cache the enhancer entry above reads — this adds no
+  // second request. `=== true` for the same reason documented there: the entry
+  // must not flash in while the flags load, and a flags outage must hide it.
+  const memoriesEnabled = useMemoriesEnabled();
 
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
+    ...(memoriesEnabled === true
+      ? [{ label: 'Memories', icon: <AutoAwesomeMotionIcon />, path: '/memories' }]
+      : []),
     { label: 'Explore', icon: <ExploreIcon />, path: '/search' },
     { label: 'Map', icon: <MapIcon />, path: '/map' },
     { label: 'Circles', icon: <GroupWorkIcon />, path: '/circles' },
