@@ -23,7 +23,7 @@
  * `variant` prop:
  *   - 'screen'  (default) — full, menu-reachable screen. Owns its own
  *     Esc/q → onBack key handling (matches every other full-screen TUI
- *     component in this repo, e.g. BackupScreen/NodeConfig).
+ *     component in this repo, e.g. BackupSettings/NodeConfig).
  *   - 'overlay' — compact rendering (capability table + summary only, no
  *     step log) intended for embedding inside another screen's own
  *     conditional render. Does NOT bind its own useInput — the host screen

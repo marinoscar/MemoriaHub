@@ -16,6 +16,8 @@ export const BACKUP_EV = {
   ITEM_DONE: 'item-done',
   PAGE_COMMITTED: 'page-committed',
   THROTTLE: 'throttle',
+  RECONCILE_STARTED: 'reconcile-started',
+  RECONCILE_DONE: 'reconcile-done',
   RUN_FINISHED: 'run-finished',
   ERROR: 'error',
 } as const;
@@ -118,6 +120,23 @@ export interface ThrottlePayload {
   delayMs: number;
 }
 
+/** Emitted when a reconcile run's manifest-diff phase begins (issue #320). */
+export interface ReconcileStartedPayload {
+  runId: string;
+}
+
+/** Emitted when the reconcile phase finished (or was cancelled mid-stream). */
+export interface ReconcileDonePayload {
+  /** Ids streamed from the server manifest. */
+  manifestIds: number;
+  /** Catalog rows moved to _quarantine/ (absent from the manifest). */
+  quarantined: number;
+  /** Catalog rows marked for re-download (contentHash drift). */
+  driftMarked: number;
+  /** True when the stream was cancelled before completion (no diff ran). */
+  cancelled: boolean;
+}
+
 export interface RunFinishedPayload {
   status: BackupRunStatus;
   /** Cumulative run totals. */
@@ -136,6 +155,8 @@ export interface BackupEngineEvents {
   [BACKUP_EV.ITEM_DONE]: (payload: ItemDonePayload) => void;
   [BACKUP_EV.PAGE_COMMITTED]: (payload: PageCommittedPayload) => void;
   [BACKUP_EV.THROTTLE]: (payload: ThrottlePayload) => void;
+  [BACKUP_EV.RECONCILE_STARTED]: (payload: ReconcileStartedPayload) => void;
+  [BACKUP_EV.RECONCILE_DONE]: (payload: ReconcileDonePayload) => void;
   [BACKUP_EV.RUN_FINISHED]: (payload: RunFinishedPayload) => void;
   [BACKUP_EV.ERROR]: (payload: BackupErrorPayload) => void;
 }

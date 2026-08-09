@@ -283,6 +283,51 @@ export class CatalogRepo {
       .run(relPath, sidecarRelPath, new Date().toISOString(), mediaItemId);
   }
 
+  /**
+   * Mark an item for re-download (reconcile contentHash drift): clear the
+   * stored hash + verified_at and fail the row, so the next incremental pass
+   * re-fetches the bytes (the engine's classification re-downloads failed
+   * rows, and a null local hash can never spuriously match).
+   */
+  markForRedownload(mediaItemId: string, lastError: string): void {
+    this.db
+      .prepare(
+        `UPDATE items SET content_hash = NULL, verified_at = NULL, status = 'failed',
+           last_error = ?, updated_at = ? WHERE media_item_id = ?`,
+      )
+      .run(lastError, new Date().toISOString(), mediaItemId);
+  }
+
+  /** Record a successful verification: verified_at set, row healed to present. */
+  markVerified(mediaItemId: string, atIso: string): void {
+    this.db
+      .prepare(
+        `UPDATE items SET verified_at = ?, status = 'present', last_error = NULL,
+           updated_at = ? WHERE media_item_id = ?`,
+      )
+      .run(atIso, new Date().toISOString(), mediaItemId);
+  }
+
+  /** Record a failed verification: status='failed', verified_at cleared. */
+  markVerifyFailed(mediaItemId: string, lastError: string): void {
+    this.db
+      .prepare(
+        `UPDATE items SET verified_at = NULL, status = 'failed', last_error = ?,
+           updated_at = ? WHERE media_item_id = ?`,
+      )
+      .run(lastError, new Date().toISOString(), mediaItemId);
+  }
+
+  /** Hard-delete an item row AND its dimension rows (prune) in one transaction. */
+  deleteItem(mediaItemId: string): void {
+    this.db.transaction(() => {
+      for (const table of ['item_tags', 'item_albums', 'item_people']) {
+        this.db.prepare(`DELETE FROM ${table} WHERE media_item_id = ?`).run(mediaItemId);
+      }
+      this.db.prepare('DELETE FROM items WHERE media_item_id = ?').run(mediaItemId);
+    })();
+  }
+
   // -------------------------------------------------------------------------
   // runs
   // -------------------------------------------------------------------------

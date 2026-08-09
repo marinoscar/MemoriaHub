@@ -85,6 +85,8 @@ export interface NodeBackupConfig {
   bytesAcked?: string;
   lastRunAt?: string | null;
   lastCompletedRunAt?: string | null;
+  /** Last COMPLETED reconcile run; drives the 30-day auto-reconcile cadence. */
+  lastReconcileAt?: string | null;
   /** Change-feed lag past the checkpoint (bytes as a decimal STRING). */
   pending?: { items: number; bytes: string };
   activeRunId?: string | null;

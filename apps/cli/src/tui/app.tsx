@@ -41,7 +41,9 @@ import { ConvertFileInput } from './ConvertFileInput.js';
 import { ReportView } from './ReportView.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { FactoryResetScreen } from './FactoryResetScreen.js';
-import { BackupScreen } from './BackupScreen.js';
+import { BackupDashboard } from './BackupDashboard.js';
+import { BackupVerify } from './BackupVerify.js';
+import { BackupSettings } from './BackupSettings.js';
 import { JobsDashboard } from './JobsDashboard.js';
 import { NodeDashboard } from './NodeDashboard.js';
 import { NodeConfig } from './NodeConfig.js';
@@ -84,7 +86,9 @@ type Screen =
   | { kind: 'factoryReset' }
   | { kind: 'report'; reportId: string }
   | { kind: 'jobs' }
-  | { kind: 'backup' }
+  | { kind: 'backupDashboard'; autoRun?: boolean }
+  | { kind: 'backupVerify' }
+  | { kind: 'backupSettings' }
   | { kind: 'nodeDashboard' }
   | { kind: 'nodeConfig' }
   | { kind: 'nodeStart' }
@@ -278,8 +282,17 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       case 'jobs':
         push({ kind: 'screen', screen: { kind: 'jobs' } });
         break;
-      case 'backup':
-        push({ kind: 'screen', screen: { kind: 'backup' } });
+      case 'backup-dashboard':
+        push({ kind: 'screen', screen: { kind: 'backupDashboard' } });
+        break;
+      case 'backup-run':
+        push({ kind: 'screen', screen: { kind: 'backupDashboard', autoRun: true } });
+        break;
+      case 'backup-verify':
+        push({ kind: 'screen', screen: { kind: 'backupVerify' } });
+        break;
+      case 'backup-settings':
+        push({ kind: 'screen', screen: { kind: 'backupSettings' } });
         break;
       case 'node-dashboard':
         push({ kind: 'screen', screen: { kind: 'nodeDashboard' } });
@@ -642,7 +655,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
         />
       );
 
-    case 'backup':
+    case 'backupDashboard':
       if (!config) {
         return (
           <Box paddingX={1} flexDirection="column" gap={1}>
@@ -652,7 +665,30 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           </Box>
         );
       }
-      return <BackupScreen config={config} onBack={pop} />;
+      return (
+        <BackupDashboard
+          config={config}
+          autoRun={screen.autoRun}
+          onBack={pop}
+          onOpenVerify={() => push({ kind: 'screen', screen: { kind: 'backupVerify' } })}
+          onOpenSettings={() => push({ kind: 'screen', screen: { kind: 'backupSettings' } })}
+        />
+      );
+
+    case 'backupVerify':
+      return <BackupVerify onBack={pop} />;
+
+    case 'backupSettings':
+      if (!config) {
+        return (
+          <Box paddingX={1} flexDirection="column" gap={1}>
+            <Text color="yellow">Not logged in. Please login first.</Text>
+            <Text dimColor>Press q to go back.</Text>
+            <KeyHandler onBack={pop} />
+          </Box>
+        );
+      }
+      return <BackupSettings config={config} onBack={pop} />;
 
     case 'nodeDashboard':
       if (!config) {

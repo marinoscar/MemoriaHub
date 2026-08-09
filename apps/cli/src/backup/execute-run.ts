@@ -24,6 +24,8 @@ export interface ExecuteRunOptions {
   /** Worker-node id the root is bound to (from settings backup.nodeId). */
   nodeId: string;
   nodeName?: string;
+  /** Run kind; 'reconcile' adds the manifest-diff phase (default 'incremental'). */
+  kind?: 'incremental' | 'reconcile';
   trigger: 'manual' | 'scheduled';
   cliVersion: string;
   concurrency: number;
@@ -65,6 +67,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<BackupRunOutc
         root: opts.root,
         nodeId: opts.nodeId,
         ...(opts.nodeName !== undefined ? { nodeName: opts.nodeName } : {}),
+        ...(opts.kind !== undefined ? { kind: opts.kind } : {}),
         serverUrl: opts.serverUrl,
         trigger: opts.trigger,
         cliVersion: opts.cliVersion,

@@ -53,6 +53,8 @@ const VALID_EVENTS = new Set<string>(Object.values(BACKUP_EV));
 export interface RunViaDaemonOptions {
   /** Attach the renderer to the event proxy BEFORE the run is requested. */
   attachRenderer: (emitter: BackupTypedEmitter) => void;
+  /** Run kind forwarded to the daemon (default 'incremental'). */
+  kind?: 'incremental' | 'reconcile';
   /** Timeout for the daemon to accept/reject the run (default 10 s). */
   acceptTimeoutMs?: number;
 }
@@ -131,6 +133,9 @@ export function runViaDaemon(
       settle(() => reject(new Error('daemon connection closed before the backup run finished')));
     });
 
-    client.send({ cmd: 'backup-run-now' });
+    client.send({
+      cmd: 'backup-run-now',
+      ...(opts.kind !== undefined ? { kind: opts.kind } : {}),
+    });
   });
 }

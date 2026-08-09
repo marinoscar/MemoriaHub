@@ -34,7 +34,10 @@ export type MenuActionId =
   | 'app-settings'
   | 'factory-reset'
   | 'jobs'
-  | 'backup'
+  | 'backup-dashboard'
+  | 'backup-run'
+  | 'backup-verify'
+  | 'backup-settings'
   | 'node-dashboard'
   | 'node-config'
   | 'node-start'
@@ -167,7 +170,17 @@ export const MENU_TREE: MenuSubmenu = {
           ],
         },
         { kind: 'action', label: 'Job queue monitor', action: 'jobs' },
-        { kind: 'action', label: 'Backup', action: 'backup' },
+        {
+          kind: 'submenu',
+          id: 'backup',
+          label: 'Backup',
+          children: [
+            { kind: 'action', label: 'Backup dashboard', action: 'backup-dashboard' },
+            { kind: 'action', label: 'Run backup now', action: 'backup-run' },
+            { kind: 'action', label: 'Verify backup', action: 'backup-verify' },
+            { kind: 'action', label: 'Backup settings', action: 'backup-settings' },
+          ],
+        },
         {
           kind: 'submenu',
           id: 'node',

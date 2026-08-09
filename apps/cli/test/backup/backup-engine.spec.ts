@@ -21,6 +21,7 @@ import {
   type BackupAckBody,
   type BackupChangeItem,
   type BackupChangesPage,
+  type BackupManifestItem,
   type FinishBackupRunBody,
   type GetRawOptions,
   type GetRawResult,
@@ -116,6 +117,8 @@ const EMPTY_PAGE: BackupChangesPage = {
 interface FakeApiState {
   api: BackupApi;
   changesCalls: string[];
+  /** afterId of each manifest page fetch (null = first page). */
+  manifestCalls: Array<string | null>;
   acks: BackupAckBody[];
   finishes: Array<{ runId: string; body: FinishBackupRunBody }>;
   getRawCalls: Map<string, number>;
@@ -130,6 +133,8 @@ interface FakeApiOverrides {
   onDownloadStart?: () => Promise<void> | void;
   onDownloadEnd?: () => void;
   startRun?: () => Promise<{ run: { id: string; kind: string; startedAt: string; cursorStart: { updatedAt: string | null; id: string | null } } }>;
+  /** Full reconcile-manifest row set (paged by id keyset); default empty. */
+  manifest?: BackupManifestItem[];
 }
 
 function makeApi(
@@ -141,6 +146,7 @@ function makeApi(
   const acks: BackupAckBody[] = [];
   const finishes: Array<{ runId: string; body: FinishBackupRunBody }> = [];
   const getRawCalls = new Map<string, number>();
+  const manifestCalls: Array<string | null> = [];
   const perKeyCalls = new Map<string, number>();
   let runCounter = 0;
 
@@ -181,6 +187,24 @@ function makeApi(
       generatedAt: '2024-01-05T02:00:00.000Z',
     })) as BackupApi['getNodeBackupDimensions'],
 
+    // Reconcile manifest (issue #320): id-keyset paging over `over.manifest`.
+    getNodeBackupManifest: (async (
+      _nodeId: string,
+      q: { afterId?: string; limit?: number },
+    ) => {
+      const all = [...(over.manifest ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const limit = q.limit ?? 1000;
+      const startIdx =
+        q.afterId === undefined ? 0 : all.findIndex((r) => r.id === q.afterId) + 1;
+      const slice = all.slice(startIdx, startIdx + limit);
+      manifestCalls.push(q.afterId ?? null);
+      return {
+        items: slice,
+        nextAfterId: slice.length > 0 ? slice[slice.length - 1]!.id : null,
+        hasMore: startIdx + slice.length < all.length,
+      };
+    }) as BackupApi['getNodeBackupManifest'],
+
     getRaw: (async (url: string, destPath: string, opts?: GetRawOptions): Promise<GetRawResult> => {
       getRawCalls.set(url, (getRawCalls.get(url) ?? 0) + 1);
       await over.onDownloadStart?.();
@@ -206,7 +230,7 @@ function makeApi(
     }) as BackupApi['getRaw'],
   };
 
-  return { api, changesCalls, acks, finishes, getRawCalls };
+  return { api, changesCalls, acks, finishes, getRawCalls, manifestCalls };
 }
 
 // ---------------------------------------------------------------------------
