@@ -10,6 +10,7 @@ import { ThemeSettings } from '../components/settings/ThemeSettings';
 import { ProfileSettings } from '../components/settings/ProfileSettings';
 import { SearchFieldsSettings } from '../components/settings/SearchFieldsSettings';
 import { NotificationSettings } from '../components/settings/NotificationSettings';
+import { MemoriesSettings } from '../components/settings/MemoriesSettings';
 import { PersonalAccessTokens } from '../components/settings/PersonalAccessTokens';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -86,6 +87,15 @@ export default function UserSettingsPage() {
 
             {/* Notification Preferences (issue #251) */}
             <NotificationSettings
+              settings={settings}
+              updateSettings={updateSettings}
+              onSaved={setSuccessMessage}
+              disabled={isSaving}
+            />
+
+            {/* Memory Preferences (issue #313) — self-hiding when the
+                `features.memories` flag is off. */}
+            <MemoriesSettings
               settings={settings}
               updateSettings={updateSettings}
               onSaved={setSuccessMessage}

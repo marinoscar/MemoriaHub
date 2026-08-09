@@ -133,3 +133,51 @@ export interface MemoryListParams {
 export interface SaveMemoryAlbumResult {
   albumId: string;
 }
+
+// ---------------------------------------------------------------------------
+// Per-user memory preferences (issue #307's `user_settings.memories`
+// namespace; the UI that reads and writes it is issue #313)
+//
+// Mirrors `memoriesPreferencesSchema` / `memoriesPreferencesPatchSchema` in
+// `apps/api/src/common/schemas/settings.schema.ts`.
+//
+// THE ABSENT-KEY RULE IS LOAD-BEARING and identical to `notifications` and
+// `dataTables`: every field is optional, the API never materializes one, and an
+// absent key means "no preference" — nobody hidden, no sensitive range, digest
+// NOT opted out of. Never model these as required-with-a-default on the client
+// either: a defaulted local mirror is exactly what ends up PATCHing a fully
+// materialized object back and pinning a user to today's defaults forever.
+// ---------------------------------------------------------------------------
+
+/** One inclusive sensitive-date window. Both bounds are `YYYY-MM-DD`. */
+export interface MemoryHiddenDateRange {
+  from: string;
+  to: string;
+}
+
+/** The `memories` namespace as it is stored and returned. */
+export interface MemoriesPreferences {
+  /** Person ids whose memories are never shown to this user. */
+  hiddenPersonIds?: string[];
+  /** Memories overlapping any of these windows are never shown to this user. */
+  hiddenDateRanges?: MemoryHiddenDateRange[];
+  /** `true` = do not email me the memory digest. Absent means "send it". */
+  emailDigestOptOut?: boolean;
+}
+
+/**
+ * The `memories` namespace as accepted by `PATCH /api/user-settings`.
+ *
+ * Any field may be `null` to DELETE it (JSON Merge Patch), which resets it to
+ * its absent default rather than pinning an explicit empty list / `false` that
+ * would survive a future change of default.
+ */
+export interface MemoriesPreferencesPatch {
+  hiddenPersonIds?: string[] | null;
+  hiddenDateRanges?: MemoryHiddenDateRange[] | null;
+  emailDigestOptOut?: boolean | null;
+}
+
+/** Server-side caps, mirrored so the UI can refuse before the API 400s. */
+export const MEMORIES_MAX_HIDDEN_PERSON_IDS = 200;
+export const MEMORIES_MAX_HIDDEN_DATE_RANGES = 50;

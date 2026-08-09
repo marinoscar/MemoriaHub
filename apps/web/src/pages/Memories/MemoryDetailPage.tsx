@@ -1,10 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Chip,
-  CircularProgress,
   IconButton,
   Link,
   Skeleton,
@@ -18,29 +17,44 @@ import {
   DeleteOutlined as DeleteIcon,
   Favorite as FavoriteIcon,
   FavoriteBorder as FavoriteBorderIcon,
+  IosShare as IosShareIcon,
   PhotoAlbum as PhotoAlbumIcon,
   PlayArrow as PlayArrowIcon,
   Videocam as VideocamIcon,
   Visibility as VisibilityIcon,
   VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
+import {
+  Link as RouterLink,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import { useCircleRole } from '../../hooks/useCircleRole';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
 import { useMemory } from '../../hooks/useMemory';
 import { useMemoryActions } from '../../hooks/useMemoryActions';
 import { DeleteMemoryDialog } from '../../components/memories/DeleteMemoryDialog';
+import { MemoryAlbumDialogs } from '../../components/memories/MemoryAlbumDialogs';
+import type { MemoryAlbumMode } from '../../components/memories/MemoryAlbumDialogs';
+import { MemoryStoryPlayer } from '../../components/memories/MemoryStoryPlayer';
 import { formatMemoryPeriod } from '../../components/memories/memoryFormat';
 import { memoryTypeMeta } from '../../components/memories/memoryTypeMeta';
-import { saveMemoryAsAlbum } from '../../services/memories';
 import type { MemoryDetailItem } from '../../types/memories';
 
 /**
- * `/memories/:id` — a memory's full item grid with its header.
+ * `/memories/:id` — a memory's full item grid with its header, and the ONE
+ * mount point for the full-screen story player (issue #313).
  *
- * This is also the click target for every card until the full-screen story
- * player lands in issue #313; "Play" on this page is that player's entry point
- * and currently opens the first item's position in this same grid.
+ * Every other surface that wants playback links here with `?play=1` rather than
+ * mounting a player of its own — the same single-owner pattern `AlbumPage` uses
+ * for `MediaLightbox`. That keeps one place responsible for the player's props,
+ * makes playback deep-linkable (the notification and the digest email can point
+ * a user straight at a running story), and means the back button leaves the
+ * story on the detail page instead of on whatever surface launched it.
+ *
+ * The `?play=1` flag is consumed once and stripped with `replace`, so a Back
+ * press does not immediately relaunch the story the user just closed.
  *
  * The items are `MemoryDetailItem`s, NOT `MediaItem`s — the detail DTO returns
  * a deliberately narrow projection (id, type, dimensions, duration, signed
@@ -51,6 +65,7 @@ import type { MemoryDetailItem } from '../../types/memories';
 export default function MemoryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const enabled = useMemoriesEnabled();
   const { isCollaborator } = useCircleRole();
   const { memory, isLoading, error, notFound, patchMyState } = useMemory(
@@ -61,23 +76,32 @@ export default function MemoryDetailPage() {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [savingAlbum, setSavingAlbum] = useState(false);
+  const [albumMode, setAlbumMode] = useState<MemoryAlbumMode | null>(null);
+  const [playerOpen, setPlayerOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; albumId?: string } | null>(null);
 
-  const handleSaveAsAlbum = useCallback(async () => {
-    if (!memory) return;
-    setSavingAlbum(true);
-    try {
-      const result = await saveMemoryAsAlbum(memory.id);
-      setToast({ message: 'Saved as an album', albumId: result.albumId });
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : 'Could not save this album',
-      });
-    } finally {
-      setSavingAlbum(false);
-    }
-  }, [memory]);
+  // Deep link: `/memories/:id?play=1` opens the story as soon as the memory has
+  // loaded (there is nothing to play before that), then drops the flag.
+  useEffect(() => {
+    if (searchParams.get('play') !== '1') return;
+    if (!memory || memory.items.length === 0) return;
+    setPlayerOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('play');
+    setSearchParams(next, { replace: true });
+  }, [memory, searchParams, setSearchParams]);
+
+  const handleSaved = useCallback(
+    (albumId: string, mode: MemoryAlbumMode) => {
+      // A share's save is a means to an end — the album is an implementation
+      // detail of the link the user actually asked for, so it gets no snackbar.
+      if (mode === 'save') {
+        setToast({ message: 'Saved as an album', albumId });
+        setAlbumMode(null);
+      }
+    },
+    [],
+  );
 
   const confirmDelete = useCallback(async () => {
     if (!memory) return;
@@ -197,7 +221,8 @@ export default function MemoryDetailPage() {
           <Button
             variant="contained"
             startIcon={<PlayArrowIcon />}
-            onClick={() => setToast({ message: 'The story player is coming soon.' })}
+            disabled={memory.items.length === 0}
+            onClick={() => setPlayerOpen(true)}
           >
             Play
           </Button>
@@ -223,15 +248,17 @@ export default function MemoryDetailPage() {
             </IconButton>
           </Tooltip>
           <Tooltip title="Save as album">
-            <span>
-              <IconButton
-                aria-label="Save as album"
-                disabled={savingAlbum}
-                onClick={() => void handleSaveAsAlbum()}
-              >
-                {savingAlbum ? <CircularProgress size={20} /> : <PhotoAlbumIcon />}
-              </IconButton>
-            </span>
+            <IconButton
+              aria-label="Save as album"
+              onClick={() => setAlbumMode('save')}
+            >
+              <PhotoAlbumIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Share — creates a shareable album from this memory">
+            <IconButton aria-label="Share memory" onClick={() => setAlbumMode('share')}>
+              <IosShareIcon />
+            </IconButton>
           </Tooltip>
           {isCollaborator && (
             <Tooltip title="Delete for everyone">
@@ -276,6 +303,28 @@ export default function MemoryDetailPage() {
           moved or deleted.
         </Alert>
       )}
+
+      <MemoryStoryPlayer
+        memory={memory}
+        open={playerOpen}
+        // The album/share dialogs render OVER the player; playback pauses while
+        // one is open so the story is not running unwatched behind a modal.
+        suspended={albumMode !== null}
+        onClose={() => setPlayerOpen(false)}
+        onSeen={actions.markSeen}
+        onToggleFavorite={(next) => void actions.setFavorite(memory.id, next)}
+        onSaveAsAlbum={() => setAlbumMode('save')}
+        onShare={() => setAlbumMode('share')}
+        onViewAllPhotos={() => setPlayerOpen(false)}
+      />
+
+      <MemoryAlbumDialogs
+        mode={albumMode}
+        memoryId={memory.id}
+        memoryTitle={memory.title}
+        onClose={() => setAlbumMode(null)}
+        onSaved={handleSaved}
+      />
 
       <DeleteMemoryDialog
         open={deleteOpen}
