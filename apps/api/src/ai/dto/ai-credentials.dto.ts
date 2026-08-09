@@ -38,6 +38,15 @@ export const setEnhanceFeatureSchema = z.object({
 });
 export class SetEnhanceFeatureDto extends createZodDto(setEnhanceFeatureSchema) {}
 
+// Memories title/subtitle/narrative generation (epic #300, issue #302).
+// Same nullable pair shape as `enhance`: clearing either field clears the
+// whole selection, since a half-filled provider/model pair is not usable.
+export const setMemoriesFeatureSchema = z.object({
+  provider: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+});
+export class SetMemoriesFeatureDto extends createZodDto(setMemoriesFeatureSchema) {}
+
 // Both fields optional — an empty body tests the configured ai.features.embedding.
 // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
 export const testEmbeddingSchema = z.object({

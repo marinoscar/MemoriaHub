@@ -40,6 +40,7 @@ export interface ResolvedSettings {
   pictureEnhancement: SystemSettingsValue['pictureEnhancement'];
   backup: SystemSettingsValue['backup'];
   workflows: SystemSettingsValue['workflows'];
+  memories: SystemSettingsValue['memories'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
   version: number;
@@ -240,6 +241,7 @@ export class SystemSettingsService {
       pictureEnhancement: value.pictureEnhancement,
       backup: value.backup,
       workflows: value.workflows,
+      memories: value.memories,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -297,6 +299,11 @@ export class SystemSettingsService {
             (dto as any).ai?.features?.enhance !== undefined
               ? (dto as any).ai?.features?.enhance
               : ((current.ai?.features as any)?.enhance ?? null),
+          // Nullable object, same contract as `enhance` above (epic #300).
+          memories:
+            (dto as any).ai?.features?.memories !== undefined
+              ? (dto as any).ai?.features?.memories
+              : ((current.ai?.features as any)?.memories ?? null),
         },
       },
       face: {
@@ -590,6 +597,127 @@ export class SystemSettingsService {
           (current as any).workflows?.scheduleMinIntervalMinutes ??
           60,
       },
+      // Memories (epic #300, issue #302).
+      memories: {
+        generation: {
+          intervalHours:
+            (dto as any).memories?.generation?.intervalHours ??
+            (current as any).memories?.generation?.intervalHours ??
+            24,
+        },
+        maxItemsPerMemory:
+          (dto as any).memories?.maxItemsPerMemory ??
+          (current as any).memories?.maxItemsPerMemory ??
+          30,
+        aiTitles: {
+          enabled:
+            (dto as any).memories?.aiTitles?.enabled ??
+            (current as any).memories?.aiTitles?.enabled ??
+            true,
+        },
+        onThisDay: {
+          enabled:
+            (dto as any).memories?.onThisDay?.enabled ??
+            (current as any).memories?.onThisDay?.enabled ??
+            true,
+          lookbackYears:
+            (dto as any).memories?.onThisDay?.lookbackYears ??
+            (current as any).memories?.onThisDay?.lookbackYears ??
+            10,
+          minItems:
+            (dto as any).memories?.onThisDay?.minItems ??
+            (current as any).memories?.onThisDay?.minItems ??
+            3,
+        },
+        trips: {
+          enabled:
+            (dto as any).memories?.trips?.enabled ??
+            (current as any).memories?.trips?.enabled ??
+            true,
+          minDays:
+            (dto as any).memories?.trips?.minDays ??
+            (current as any).memories?.trips?.minDays ??
+            2,
+          minItems:
+            (dto as any).memories?.trips?.minItems ??
+            (current as any).memories?.trips?.minItems ??
+            10,
+          minDistanceKm:
+            (dto as any).memories?.trips?.minDistanceKm ??
+            (current as any).memories?.trips?.minDistanceKm ??
+            50,
+          lookbackMonths:
+            (dto as any).memories?.trips?.lookbackMonths ??
+            (current as any).memories?.trips?.lookbackMonths ??
+            18,
+        },
+        people: {
+          enabled:
+            (dto as any).memories?.people?.enabled ??
+            (current as any).memories?.people?.enabled ??
+            true,
+          favoritesOnly:
+            (dto as any).memories?.people?.favoritesOnly ??
+            (current as any).memories?.people?.favoritesOnly ??
+            true,
+          minItems:
+            (dto as any).memories?.people?.minItems ??
+            (current as any).memories?.people?.minItems ??
+            8,
+        },
+        themes: {
+          enabled:
+            (dto as any).memories?.themes?.enabled ??
+            (current as any).memories?.themes?.enabled ??
+            true,
+          minItems:
+            (dto as any).memories?.themes?.minItems ??
+            (current as any).memories?.themes?.minItems ??
+            8,
+          maxPerPeriod:
+            (dto as any).memories?.themes?.maxPerPeriod ??
+            (current as any).memories?.themes?.maxPerPeriod ??
+            3,
+        },
+        seasonal: {
+          enabled:
+            (dto as any).memories?.seasonal?.enabled ??
+            (current as any).memories?.seasonal?.enabled ??
+            true,
+          minItems:
+            (dto as any).memories?.seasonal?.minItems ??
+            (current as any).memories?.seasonal?.minItems ??
+            12,
+        },
+        yearInReview: {
+          enabled:
+            (dto as any).memories?.yearInReview?.enabled ??
+            (current as any).memories?.yearInReview?.enabled ??
+            true,
+          minItems:
+            (dto as any).memories?.yearInReview?.minItems ??
+            (current as any).memories?.yearInReview?.minItems ??
+            15,
+        },
+        digest: {
+          enabled:
+            (dto as any).memories?.digest?.enabled ??
+            (current as any).memories?.digest?.enabled ??
+            true,
+          frequency:
+            (dto as any).memories?.digest?.frequency ??
+            (current as any).memories?.digest?.frequency ??
+            'weekly',
+          sendHourUtc:
+            (dto as any).memories?.digest?.sendHourUtc ??
+            (current as any).memories?.digest?.sendHourUtc ??
+            8,
+          imageTokenTtlDays:
+            (dto as any).memories?.digest?.imageTokenTtlDays ??
+            (current as any).memories?.digest?.imageTokenTtlDays ??
+            30,
+        },
+      },
     };
 
     // Validate merged result
@@ -640,6 +768,7 @@ export class SystemSettingsService {
       pictureEnhancement: value.pictureEnhancement,
       backup: value.backup,
       workflows: value.workflows,
+      memories: value.memories,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
