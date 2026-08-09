@@ -24,6 +24,18 @@
  * Presigned URLs are minted per page and expire: a PresignExpiredError makes
  * the engine re-fetch the SAME page (cursor unmoved ⇒ idempotent) to re-mint
  * URLs, capped at MAX_PAGE_REMINTS per page before the remaining items fail.
+ *
+ * Reconcile runs (issue #320): `kind: 'reconcile'` executes the SAME
+ * incremental page loop first (catalog current), then streams the server's
+ * reconcile manifest and quarantines/marks-for-redownload via
+ * backup/reconcile.ts before the dimension catalogs are written.
+ *
+ * MULTI-NODE CONTRACT: each machine binds exactly ONE backup root, and nodes
+ * never coordinate with each other. Every node keeps its own local catalog +
+ * mirrored checkpoint and its own server-side checkpoint row (keyed by
+ * nodeId), so node A acking a page can never move node B's cursor. Two nodes
+ * backing up the same circles independently converge on identical local
+ * content purely by each replaying the same server change feed.
  */
 
 import * as fs from 'node:fs';
@@ -61,6 +73,7 @@ import {
 import { CATALOG_SCHEMA_VERSION } from './catalog-db.js';
 import { TokenBucket } from './rate-limiter.js';
 import { downloadVerified, HashMismatchError, PresignExpiredError } from './download.js';
+import { performReconcile, type BackupRunKind, type ReconcileSummary } from './reconcile.js';
 
 /** Catalog checkpoint key holding the JSON-encoded mirrored server cursor. */
 export const CHECKPOINT_CURSOR_KEY = 'cursor';
@@ -86,6 +99,8 @@ export interface BackupEngineOpts {
   nodeId: string;
   nodeName?: string;
   serverUrl: string;
+  /** Run kind; 'reconcile' adds the manifest-diff phase (default 'incremental'). */
+  kind?: BackupRunKind;
   trigger: 'manual' | 'scheduled';
   cliVersion: string;
   /** Concurrent download workers. */
@@ -106,6 +121,7 @@ export type BackupApi = Pick<
   | 'ackNodeBackup'
   | 'finishNodeBackupRun'
   | 'getNodeBackupDimensions'
+  | 'getNodeBackupManifest'
   | 'getRaw'
 >;
 
@@ -124,6 +140,8 @@ export interface BackupRunOutcome {
   runId: string;
   status: BackupRunStatus;
   stats: BackupEngineStats;
+  /** Present for reconcile runs whose manifest-diff phase ran (issue #320). */
+  reconcile?: ReconcileSummary;
   error?: string;
 }
 
@@ -180,17 +198,21 @@ function statsFromResults(results: ItemResult[]): BackupEngineStats {
 export class BackupEngine extends BackupTypedEmitter {
   private readonly opts: BackupEngineOpts;
   private readonly api: BackupApi;
+  private readonly db: BetterSqlite3.Database;
   private readonly repo: CatalogRepo;
   private readonly bucket: TokenBucket;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => Date;
+  private readonly kind: BackupRunKind;
 
   private cancelled = false;
 
   constructor(opts: BackupEngineOpts, deps: BackupEngineDeps) {
     super();
     this.opts = opts;
+    this.kind = opts.kind ?? 'incremental';
     this.api = deps.api;
+    this.db = deps.db;
     this.repo = new CatalogRepo(deps.db);
     this.bucket = deps.bucket ?? new TokenBucket(opts.maxMbps);
     this.sleep = deps.sleep ?? defaultSleep;
@@ -221,7 +243,7 @@ export class BackupEngine extends BackupTypedEmitter {
     let cursorStart: { updatedAt: string | null; id: string | null };
     try {
       const res = await this.api.startNodeBackupRun(nodeId, {
-        kind: 'incremental',
+        kind: this.kind,
         trigger,
         cliVersion,
       });
@@ -236,7 +258,7 @@ export class BackupEngine extends BackupTypedEmitter {
     }
 
     const startedAt = this.now().toISOString();
-    this.emit(BACKUP_EV.RUN_STARTED, { runId, kind: 'incremental', trigger });
+    this.emit(BACKUP_EV.RUN_STARTED, { runId, kind: this.kind, trigger });
 
     // 2. Cursor: local mirrored checkpoint wins (it may be AHEAD of the server
     //    after a committed-but-unacked page); fall back to the server snapshot.
@@ -300,10 +322,31 @@ export class BackupEngine extends BackupTypedEmitter {
         pageIndex++;
       }
 
-      // 4. Dimension catalogs + manifest (completed runs only).
+      // 4. Reconcile phase (kind 'reconcile' only, issue #320): the catalog
+      //    is now current, so stream the server manifest and diff it. A
+      //    cancel mid-stream aborts the run without running the diff.
+      let reconcile: ReconcileSummary | undefined;
+      if (this.kind === 'reconcile') {
+        this.emit(BACKUP_EV.RECONCILE_STARTED, { runId });
+        reconcile = await performReconcile(
+          { root: this.opts.root, nodeId, runId },
+          {
+            api: this.api,
+            db: this.db,
+            now: this.now,
+            isCancelled: () => this.cancelled,
+          },
+        );
+        this.emit(BACKUP_EV.RECONCILE_DONE, reconcile);
+        if (reconcile.cancelled) {
+          return await this.finishRun(runId, 'aborted', totals, startedAt, undefined, reconcile);
+        }
+      }
+
+      // 5. Dimension catalogs + manifest (completed runs only).
       await this.writeDimensionCatalogs(cursor, runId, startedAt, totals);
 
-      return await this.finishRun(runId, 'completed', totals, startedAt);
+      return await this.finishRun(runId, 'completed', totals, startedAt, undefined, reconcile);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (this.listenerCount(BACKUP_EV.ERROR) > 0) {
@@ -678,7 +721,7 @@ export class BackupEngine extends BackupTypedEmitter {
       counts: this.repo.stats(),
       lastRun: {
         id: runId,
-        kind: 'incremental',
+        kind: this.kind,
         status: 'completed',
         startedAt,
         finishedAt: this.now().toISOString(),
@@ -706,6 +749,7 @@ export class BackupEngine extends BackupTypedEmitter {
     totals: BackupEngineStats,
     startedAt: string,
     error?: string,
+    reconcile?: ReconcileSummary,
   ): Promise<BackupRunOutcome> {
     const finishedAt = this.now().toISOString();
 
@@ -713,7 +757,7 @@ export class BackupEngine extends BackupTypedEmitter {
     try {
       this.repo.recordRun({
         id: runId,
-        kind: 'incremental',
+        kind: this.kind,
         status,
         startedAt,
         finishedAt,
@@ -744,6 +788,12 @@ export class BackupEngine extends BackupTypedEmitter {
       ...(error !== undefined ? { error } : {}),
     });
 
-    return { runId, status, stats: totals, ...(error !== undefined ? { error } : {}) };
+    return {
+      runId,
+      status,
+      stats: totals,
+      ...(reconcile !== undefined ? { reconcile } : {}),
+      ...(error !== undefined ? { error } : {}),
+    };
   }
 }

@@ -233,9 +233,11 @@ export class BackupHost extends EventEmitter {
   /**
    * Start one backup run. Rejects with BackupBusyError while a run is active
    * (the host serializes runs). Returns immediately — progress streams as
-   * 'backup-event' emissions and the outcome is logged.
+   * 'backup-event' emissions and the outcome is logged. `kind: 'reconcile'`
+   * adds the manifest-diff phase (issue #320; forwarded from the
+   * backup-run-now IPC verb).
    */
-  startRun(trigger: 'manual' | 'scheduled'): void {
+  startRun(trigger: 'manual' | 'scheduled', kind: 'incremental' | 'reconcile' = 'incremental'): void {
     if (this.active) throw new BackupBusyError();
 
     const engineOpts: BackupEngineOpts = {
@@ -243,6 +245,7 @@ export class BackupHost extends EventEmitter {
       nodeId: this.cfg.nodeId,
       ...(this.cfg.nodeName !== undefined ? { nodeName: this.cfg.nodeName } : {}),
       serverUrl: this.cfg.serverUrl,
+      kind,
       trigger,
       cliVersion: this.cfg.cliVersion,
       concurrency: Math.max(1, Math.floor(this.settings.backupConcurrency())),

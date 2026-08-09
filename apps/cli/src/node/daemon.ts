@@ -350,8 +350,12 @@ export async function startDaemonHost(
           break;
         }
         try {
-          backupHost.startRun('manual');
-          logger.info('backup run started via ipc');
+          const kind =
+            (msg as { kind?: unknown }).kind === 'reconcile'
+              ? ('reconcile' as const)
+              : ('incremental' as const);
+          backupHost.startRun('manual', kind);
+          logger.info('backup run started via ipc', { kind });
           send(socket, { kind: 'ack', cmd: 'backup-run-now' });
         } catch (err) {
           // Duck-typed (not instanceof BackupBusyError) so this module never
