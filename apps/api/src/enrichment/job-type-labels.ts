@@ -50,9 +50,8 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   workflow_evaluate_item: 'Workflow evaluate (item)',
   workflow_execute_batch: 'Workflow execute batch',
   workflow_history_purge: 'Workflow history purge',
-  // Memories (epic #300). `memory_digest` has no handler yet — its label is
-  // declared here with `memory_generation` so #311 does not have to touch this
-  // file again; an unlabeled type would only render title-cased anyway.
+  // Memories (epic #300). Both types are server-only global jobs, one per
+  // circle: generation curates, digest mails the result out.
   memory_generation: 'Memory generation',
   memory_digest: 'Memory email digest',
 };

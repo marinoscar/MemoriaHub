@@ -43,6 +43,25 @@ async function bootstrap() {
     },
   });
 
+  // RFC 8058 one-click unsubscribe (epic #300, issue #311) POSTs
+  // `List-Unsubscribe=One-Click` as `application/x-www-form-urlencoded`.
+  // Fastify ships parsers for JSON and text/plain only, so without this an
+  // unsubscribe triggered from a mail client's own button would be rejected
+  // with 415 before ever reaching the route. The body is intentionally left as
+  // the raw string: the only route accepting this content type ignores it
+  // entirely (the capability is the signed token in the URL, never the body),
+  // and parsing it would be a needless attack surface. @fastify/formbody is not
+  // pulled in for the same reason — a dependency for a body nobody reads.
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addContentTypeParser(
+      'application/x-www-form-urlencoded',
+      { parseAs: 'string' },
+      (_req: unknown, body: string, done: (err: Error | null, body?: unknown) => void) =>
+        done(null, body),
+    );
+
   // Global prefix for all routes
   app.setGlobalPrefix('api');
 

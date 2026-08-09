@@ -26,7 +26,13 @@ import { AiModule } from '../ai/ai.module';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { EmailModule } from '../email/email.module';
+import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
+import { MemoryDigestService } from './digest/memory-digest.service';
+import { MemoryDigestHandler } from './digest/memory-digest.handler';
+import { MemoryDigestTask } from './digest/memory-digest.task';
+import { PublicMemoryDigestController } from './digest/public-memory-digest.controller';
 import { MemoriesController } from './api/memories.controller';
 import { MemoriesService } from './api/memories.service';
 import { MemoryTitleService } from './titles/memory-title.service';
@@ -58,6 +64,14 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   // points INTO notifications exactly like MediaModule's and WorkflowsModule's;
   // NotificationsModule itself still imports NOTHING, which is the load-bearing
   // property that keeps the module graph acyclic (see its header).
+  //
+  // #311's digest adds two more one-way edges: EmailModule (EmailService, the
+  // fire-and-forget send path shared with the circle-invitation mails) and
+  // StorageProvidersModule (StorageProviderResolver, so the public digest-image
+  // route can stream thumbnail bytes the way PublicShareController does).
+  // Neither imports MemoriesModule, so no cycle and no forwardRef. The
+  // unsubscribe write reuses SettingsModule's UserSettingsService, already
+  // imported above.
   imports: [
     PrismaModule,
     SettingsModule,
@@ -66,11 +80,16 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     CirclesModule,
     MediaModule,
     NotificationsModule,
+    EmailModule,
+    StorageProvidersModule,
   ],
-  controllers: [MemoriesController],
+  controllers: [MemoriesController, PublicMemoryDigestController],
   providers: [
     MemoriesService,
     MemoriesNotificationService,
+    MemoryDigestService,
+    MemoryDigestHandler,
+    MemoryDigestTask,
     MemoriesGenerationTask,
     MemoryGenerationHandler,
     MemoryCurationService,
@@ -84,6 +103,12 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     YearInReviewCurator,
     memoryCuratorsProvider,
   ],
-  exports: [MemoriesGenerationTask, MemoryCurationService, MemoriesService],
+  exports: [
+    MemoriesGenerationTask,
+    MemoryCurationService,
+    MemoriesService,
+    MemoryDigestTask,
+    MemoryDigestService,
+  ],
 })
 export class MemoriesModule {}
