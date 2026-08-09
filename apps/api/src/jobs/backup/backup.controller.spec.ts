@@ -15,7 +15,6 @@ describe('BackupController', () => {
     runBackup: jest.Mock;
     getRecentRuns: jest.Mock;
     getRunStatus: jest.Mock;
-    listObjects: jest.Mock;
   };
 
   const mockUser: RequestUser = {
@@ -40,7 +39,6 @@ describe('BackupController', () => {
       runBackup: jest.fn().mockResolvedValue(mockRunResult),
       getRecentRuns: jest.fn().mockResolvedValue([]),
       getRunStatus: jest.fn().mockResolvedValue({ runId: 'run-abc-123', status: 'completed' }),
-      listObjects: jest.fn().mockResolvedValue({ items: [] }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -130,29 +128,6 @@ describe('BackupController', () => {
       const result = await controller.getRunStatus('run-xyz');
 
       expect(result).toBe(statusResult);
-    });
-  });
-
-  describe('listObjects() — GET /admin/backup/objects', () => {
-    it('calls backupService.listObjects() without circleId when not provided', async () => {
-      await controller.listObjects(undefined);
-
-      expect(mockBackupService.listObjects).toHaveBeenCalledWith(undefined);
-    });
-
-    it('calls backupService.listObjects() with circleId when provided', async () => {
-      await controller.listObjects('circle-77');
-
-      expect(mockBackupService.listObjects).toHaveBeenCalledWith('circle-77');
-    });
-
-    it('returns the service result', async () => {
-      const fakeObjects = { items: [{ mediaItemId: 'm1', storageKey: 'key1', downloadUrl: 'https://s3.example.com/key1', originalFilename: 'photo.jpg', mimeType: 'image/jpeg', size: 1024, circleId: 'circle-1' }] };
-      mockBackupService.listObjects.mockResolvedValue(fakeObjects);
-
-      const result = await controller.listObjects(undefined);
-
-      expect(result).toBe(fakeObjects);
     });
   });
 });

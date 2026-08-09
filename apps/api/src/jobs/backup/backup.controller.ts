@@ -49,11 +49,4 @@ export class BackupController {
   async getRunStatus(@Param('runId') runId: string) {
     return this.backupService.getRunStatus(runId);
   }
-
-  @Get('objects')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.BACKUP_READ] })
-  @ApiOperation({ summary: 'List media objects (returns storageKey + downloadUrl)' })
-  async listObjects(@Query('circleId') circleId?: string) {
-    return this.backupService.listObjects(circleId);
-  }
 }

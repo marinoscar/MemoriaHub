@@ -359,62 +359,6 @@ describe('BackupService', () => {
     });
   });
 
-  describe('listObjects()', () => {
-    it('calls mediaItem.findMany and getSignedDownloadUrl for each item', async () => {
-      const item = makeMediaItem();
-      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
-      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://example.com/signed');
-
-      const result = await service.listObjects();
-
-      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalled();
-      expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(
-        item.storageObject!.storageKey,
-      );
-      expect(result.items).toHaveLength(1);
-      expect(result.items[0]).toMatchObject({
-        mediaItemId: item.id,
-        storageKey: item.storageObject!.storageKey,
-        downloadUrl: 'https://example.com/signed',
-        mimeType: item.storageObject!.mimeType,
-      });
-    });
-
-    it('filters by circleId when provided', async () => {
-      mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
-
-      await service.listObjects('circle-99');
-
-      expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ circleId: 'circle-99' }),
-        }),
-      );
-    });
-
-    it('does not include circleId filter when not provided', async () => {
-      mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
-
-      await service.listObjects();
-
-      const callArg = mockPrisma.mediaItem.findMany.mock.calls[0]?.[0];
-      expect(callArg?.where).not.toHaveProperty('circleId');
-    });
-
-    it('excludes items with no storageObject', async () => {
-      mockPrisma.mediaItem.findMany.mockResolvedValue([
-        makeMediaItem({ storageObject: null }),
-        makeMediaItem({ id: 'item-2' }),
-      ] as any);
-      mockStorageProvider.getSignedDownloadUrl.mockResolvedValue('https://example.com/signed');
-
-      const result = await service.listObjects();
-
-      expect(result.items).toHaveLength(1);
-      expect(result.items[0].mediaItemId).toBe('item-2');
-    });
-  });
-
   describe('getRunStatus()', () => {
     it('returns completed when both start and complete events exist', async () => {
       const runId = 'run-xyz';
