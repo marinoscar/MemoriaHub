@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.4 (data model + generation plumbing + curation engine, On This Day & Trips) |
+| **Version** | 0.5 (data model + generation plumbing + curation engine; all seven curators) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304); §5–§8 and §10 are placeholders for later issues in epic #300 |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305); §5–§8 and §10 are placeholders for later issues in epic #300 |
 
 ---
 
@@ -312,6 +312,10 @@ Selection is **deterministic**: ties break on `(selectionScore, capturedAt, id)`
 
 Final items are ordered **chronologically ascending** with contiguous `position` values. The cover is the highest-scored **non-video** item; a video is never a cover (cover art renders as a still, and a poster frame is a different — usually worse — image than any photo in the set). An all-video memory simply has `coverMediaItemId = NULL`.
 
+**Calendar bucketing is an opt-in second policy** (`selectByBuckets()`, added by #305, selected per call via `CurateOptions.bucketBy`). Equal time spans cannot express "every year appears" or "every month appears" — for a person photographed heavily in 2016 and again in 2025 with a quiet stretch between, equal thirds of the elapsed span put two buckets inside the same busy period. The bucketed policy takes an explicit key function (`yearBucket` for `person_over_years`, `monthBucket` for `year_in_review`) and fills **round-robin**: every bucket contributes its best item before any bucket contributes a second, so the `maxItems` cut stays unbiased rather than exhausting the earliest buckets. An optional `maxPerBucket` bounds any one bucket's share, which matters when buckets are few relative to the budget. The 3-video cap behaves exactly as above — a rejected video does not cost its bucket its turn, the bucket simply advances to its next candidate. Every other curator uses the default policy and passes nothing.
+
+Both policies are pure and exported, and both are unit-tested with plain object literals (`memory-curation.pure.spec.ts`, `curators/curator-rules.spec.ts`).
+
 ### 4.6 Template titles
 
 `memory-title-templates.ts` is pure, I/O-free, and covers all seven types:
@@ -422,7 +426,7 @@ Overlap is computed against `meta.startDate`/`meta.endDate` — the **detected**
 
 **Tombstoned trips take part in matching.** This is what makes §2.5's contract hold here at all: `upsertMemory`'s own tombstone check is keyed on `(periodKey, subjectKey)`, and a shifted boundary carries *different* keys, so a key-only check would sail straight past a deleted trip and insert a fresh one. A run overlapping a tombstone is refused before any curation work.
 
-**A drifted subject re-titles.** When a better reverse-geocode changes the dominant locality, the row is re-keyed *and* `upsertMemory` is called with `retitle: true` — an optional flag (default `false`, so every other caller is unchanged) added for exactly this case. §4.9's anti-churn rule exists to protect a title that is still accurate; a memory keyed `playa-grande` and titled "Trip to Tamarindo" is not aged, it is falsified. An ordinary refresh — one photo joining — still preserves the title, AI ones included.
+**A drifted subject re-titles.** When a better reverse-geocode changes the dominant locality, the row is re-keyed *and* `upsertMemory` is called with `retitle: true` — an optional flag (default `false`, so every other caller is unchanged) added for exactly this case. §4.12's anti-churn rule exists to protect a title that is still accurate; a memory keyed `playa-grande` and titled "Trip to Tamarindo" is not aged, it is falsified. An ordinary refresh — one photo joining — still preserves the title, AI ones included.
 
 If the slot a re-key would move into is already held by a *different* memory, the row keeps its current identity and refreshes there instead. The keys are an identity, not data: a stale-but-stable one beats either a failed unique-index write or deleting a memory a user may have favorited.
 
@@ -449,10 +453,128 @@ So #304 adds **no migration**. The one known cost is inherited from §4.2's `loa
 
 - **A day straddling the ±180° antimeridian gets a meaningless median longitude**, and the home centroid has the same weakness (it is a plain mean). Both would misclassify a Fiji/Kiribati-area day. Documented rather than solved: the fix is circular-mean arithmetic like `interpolateLng`'s in the location-inference engine, and it is not worth the complexity until someone is affected.
 - **A day whose photos are split ~50/50 between home and a destination** can produce a marginal median that is at neither — a phantom point built from one cluster's latitude and the other's longitude. Real travel days are not bimodal; a fixture of ours was, which is how this surfaced.
-- **A trip that no longer detects is not deleted**, per §4.12's general rule — the curator only upserts runs that still qualify.
+- **A trip that no longer detects is not deleted**, per §4.15's general rule — the curator only upserts runs that still qualify.
 - **`trips.minItems` above `maxItemsPerMemory`** can never be satisfied, since curation caps the selection first. Both are admin-settable within their own bounds and the combination is not cross-validated.
 
-### 4.9 Idempotent regeneration — `upsertMemory()`
+### 4.9 The People curators
+
+Issue [#305](https://github.com/marinoscar/MemoriaHub/issues/305). Two memory types, one shared notion of who counts: `person_highlights` ("Best of Abuela, 2025" — one memory per person **per year**) and `person_over_years` ("Camila through the years" — one memory per person, spanning everything). This is the face-recognition payoff, and the pair users most often go looking for on purpose rather than stumbling into.
+
+| | `person_highlights` | `person_over_years` |
+|---|---|---|
+| `periodKey` | the calendar year, `"2025"` | `"all"` |
+| `subjectKey` | `personId` | `personId` |
+| `personId` column | set | set |
+| `meta` | `{ year, personName, generatorVersion }` | `{ firstYear, lastYear, yearCount, personName, generatorVersion }` |
+| Floor | `memories.people.minItems` (8) curated items | same, plus **≥3 distinct years** of material |
+| Diversity | engine default (equal time buckets) | **year buckets**, ≤4 items per year |
+| `expiresAt` | `NULL` — a person memory stays relevant | `NULL` |
+
+**Eligibility is one rule, in one place** (`curators/person-candidates.ts`), shared by both curators so they cannot drift on the question with the most policy in it. A person qualifies when they are live (`deletedAt IS NULL`), not circle-hidden (`hiddenAt IS NULL`), identifiable (a non-empty `name` **or** a `coverFaceId`), and — when `memories.people.favoritesOnly` is on, which is the default — marked `favorite`. The "non-empty" half is tightened in memory rather than in SQL: Prisma cannot express `trim(name) <> ''`, and a person named `"   "` with no cover face would otherwise get a memory titled after nothing.
+
+**Per-user hidden-people preferences are deliberately NOT applied here.** Memories are circle-scoped content generated once for everybody; whose faces a given user does not want to see is a per-user preference, and applying it at generation time would mean either generating per user (N× the rows and N× the cost) or letting whichever user's preferences were read first decide for the whole circle. That filtering is read-time and belongs to [#307](https://github.com/marinoscar/MemoriaHub/issues/307). See §11 for the item-level limitation the epic accepts alongside it.
+
+**An archived face does not count.** The census and both curators require `faces.hidden_at IS NULL`, mirroring the archive semantics of `PATCH /api/people/faces/bulk/hide`: an archived face is no longer evidence the person is in that photo, so it must not qualify a year they are effectively absent from.
+
+**One grouped census decides what is worth curating.** A single query returns `COUNT(DISTINCT media_item)` per `(person, year)` for the whole circle — `persons × years-with-data` rows, a few hundred — and only pairs already clearing `minItems` on raw counts get a `curate()` pass. The alternative (streaming every person's candidates through the engine to discover most person-years are short) would page the library once per person. `COUNT(DISTINCT)` rather than `COUNT(*)` because one media item can carry several faces of the same person — a video's cross-frame identity rows, or a genuine second detection — and it is still one photo.
+
+The census can only ever **over**-count relative to the curated set (collapse and the video cap remove items, never add), so a pair under the floor there cannot clear it afterwards. That is what makes the pre-filter sound rather than merely cheap.
+
+**Person predicates go to the engine, not into an id list.** Both curators hand `faces: { some: { personId, hiddenAt: null } }` to `curate()` as part of the slice `where`, so the base filter, the keyset streaming and near-duplicate collapse all apply exactly as they do for every other type — there is no parallel selection path.
+
+**Scheduled runs do the current and previous year; backfill does all of them.** "Last year" stays in scope well into the following autumn because a December import lands in the previous year's memory long after that year ended. `person_over_years` has no such narrowing: its period is always `"all"`, so scheduled and backfill runs do identical work.
+
+#### Why `person_over_years` needs its own diversity policy
+
+The engine's `selectDiverse` divides the memory's **time span** into equal buckets. For a person photographed heavily in 2016 and again in 2025 with a quiet stretch between, equal thirds of nine elapsed years put two buckets inside the same busy period and none in the middle — and the entire promise of this type is "every year appears", which is a statement about the calendar rather than about elapsed time.
+
+So #305 adds `selectByBuckets()` to the engine and an opt-in `CurateOptions.bucketBy` (§4.5), used here with `key = capturedAt's UTC year` and `maxPerBucket = 4`. It is **round-robin, not bucket-at-a-time**: every year contributes its best item in round 1, its second-best in round 2, and so on, so a 30-item budget over twelve years yields at least two items from every year rather than four each from the first seven and nothing after. Bucket-at-a-time filling would reproduce precisely the chronological bias the policy exists to remove. The per-year cap is what lets quiet years appear at all; four photos of one prolific year is plenty, and issue #305 fixes the "2–4 items per year" range.
+
+The **≥3-year floor** is what separates the two types. Two years is not "through the years", it is two years, and the per-year highlight memories already tell that story better. It is checked on the census (years with any material) rather than on the curated set, so a person whose middle year loses its slots to the item cap still qualifies.
+
+#### Cover preference
+
+A person memory's cover is the curated item carrying that person's **highest-confidence face** (photos only, NULLs sorted last, id tiebreak), overriding the engine's generic "highest-scored non-video item". In a memory built from group shots the engine's choice is easily the frame where the subject is a blur in the background. When nothing qualifies — an all-video selection, or only NULL-confidence faces — the engine's cover stands.
+
+#### Person delete and merge
+
+`Memory.personId` is a **Cascade** FK, and that is the entire cleanup story:
+
+- **Delete** removes the person's memories outright, never leaving one dangling against a person who no longer exists.
+- **Merge** (`PeopleService.merge`) reassigns the source's faces to the target and **soft**-deletes the source, which drops it out of `loadEligiblePersons`. The source's memories stop being regenerated immediately; the next run refreshes the survivor's memories over the now-larger face set.
+
+Neither curator tries to migrate, repair or re-key anything on a merge, and that is deliberate: regenerating under the survivor is both simpler and more correct than transplanting a memory whose item set was curated from a different candidate pool.
+
+#### Bounds
+
+`MAX_ELIGIBLE_PERSONS` (500) caps the persons considered in one pass — reachable only with `favoritesOnly = false` in a circle with a very large cluster population, where the work would otherwise be `persons × years` curation passes. The ordering is deterministic (favorites first, then id) so the cut is stable across runs rather than reshuffling which persons get memories, and it logs a warning. A crash guard, not a tuning knob.
+
+### 4.10 The Theme curator
+
+Issue #305. "Golden Sunsets", "Beach", "Pets" — memories built from the AI auto-tagging vocabulary, and the only type whose subject is a piece of **admin-controlled configuration** rather than something the library derived on its own.
+
+| Field | Value |
+|---|---|
+| `periodKey` | the calendar year `"2025"`, or `"all"` for the whole-history period |
+| `subjectKey` | the tag name, **lowercased** |
+| `meta` | `{ tag, year, generatorVersion }` (`year: null` for the all-history period) |
+| Floor | `memories.themes.minItems` (8) curated items |
+| Cap | `memories.themes.maxPerPeriod` (3) memories per period |
+
+**Why the tag vocabulary and not CLIP clustering.** Unsupervised embedding clustering would find themes nobody named, but its output is unexplainable ("here are 40 photos that are near each other in a 512-dimensional space") and untunable. Tag themes are explainable, already computed, free, and admin-controllable — an admin who does not want "Food" memories disables that label. Epic #300 defers clustering explicitly.
+
+**Three filters decide which tags become memories:**
+
+1. **`media_tags.source = 'ai'`.** A manually applied tag is a filing decision, not a claim about content; a user who tagged 200 photos "Taxes" did not ask for a memory about it. The distinction exists in the schema precisely because AI and manual tag instances are governed by different rules.
+2. **The label is still `enabled` in `tag_labels`.** Disabling a label is how an admin retires a concept, and a retired concept must stop producing memories without anyone hunting down what it already generated. The join is on `LOWER(name)`, so a tag whose label was deleted outright — which leaves manual `media_tags` rows behind, per `DELETE /api/tag-labels/:id` — cannot resurrect a retired theme either.
+3. **`THEME_TAG_DENYLIST`** — `screenshot`, `screenshots`, `document`, `documents`, `text`, `whiteboard`. A handful of vocabulary entries describe an artifact rather than a moment. They score *well* (screenshots are sharp and often favorited for reference) and would produce genuinely bad memories. Deliberately tiny and hand-maintained rather than heuristic.
+
+**Ranking is by distinct qualifying items, and the memory is still curated.** One grouped query returns `COUNT(DISTINCT media_item)` per `(LOWER(tag), year)` for the circle; the top `maxPerPeriod` become memories. So "the top themes" means the themes with the most material, while each memory is that theme's *best* photos — favorites-weighted, near-duplicate collapsed — not all of them.
+
+**The all-history period is an exact sum, not an approximation.** A media item has exactly one `capturedAt` and therefore contributes to exactly one year's distinct count, so a tag's per-year counts *partition* its all-history set with no overlap to correct for. That is what lets one grouped query serve every period, and it is unit-tested directly.
+
+**Scheduled runs do the current year only** — the only period a new upload can change, and the one a user is most likely to be shown. **Backfill** does every year with material *plus* the all-history period, which is what makes a young, thinly-spread library produce themes at all: a circle whose photos are scattered across eight years may have no single year clearing `minItems` for "Sunsets" while having plenty overall.
+
+**Walking past a tag that falls short.** The rule is "the top N tags that produce at least `minItems` **curated** items", which cannot be evaluated without curating — a tag can clear the raw census and then fall short once near-duplicates collapse. When that happens the curator continues down the ranking rather than producing fewer memories, bounded at `maxPerPeriod × 3` attempts per period so a circle with 200 sparse tags cannot turn one period into 200 curation passes. Ties in the ranking break on tag name, so which themes exist is stable across runs over an unchanged library.
+
+**A tombstoned theme still consumes a slot.** The user deleted *that* theme for *that* period; quietly promoting the next-ranked tag into its place would read as the delete having done nothing.
+
+### 4.11 The Seasonal and Year-in-Review curators
+
+Issue #305. The whole-library payoff: no subject, no clustering, no AI signal required. Everything interesting about these two is **which** date range and **when**.
+
+| | `seasonal` | `year_in_review` |
+|---|---|---|
+| `periodKey` | `"2025-summer"` — year is the year the season **starts** | `"2025"` |
+| `subjectKey` | `""` (unused) | `""` (unused) |
+| `meta` | `{ season, seasonYear, seasonOrdinal, generatorVersion }` | `{ year, monthsCovered, generatorVersion }` |
+| Floor | `memories.seasonal.minItems` (12) | `memories.yearInReview.minItems` (15) |
+| Diversity | engine default | **month buckets**, no per-bucket cap |
+| `expiresAt` | `NULL` | `NULL` |
+
+Both gate on a **shared per-month census** (`curators/circle-month-counts.ts`): one `GROUP BY (year, month)` aggregate returning at most `12 × years-of-history` rows, from which a period's raw count is a range sum. A period under its floor therefore costs **no candidate scan at all**. Its `WHERE` clause is the base filter hand-written for raw SQL, and it must stay identical to `memoryCandidateBaseWhere()` — a census that counted archived items would send a curator off to curate a period that then comes back short. The integration suite asserts the two agree.
+
+#### Seasonal
+
+**Only completed seasons.** A "Summer 2026" memory generated in July would be a partial summer, and every subsequent generation run would rewrite it as more photos landed — churning the item set and, once [#306](https://github.com/marinoscar/MemoriaHub/issues/306) lands, re-paying for an AI title, daily, for three months. Waiting until the season has fully elapsed makes the memory stable the moment it is created. `mostRecentCompletedSeason()` owns that rule.
+
+**The season year is the year the season STARTS.** Northern-hemisphere meteorological winter runs December Y → February Y+1, so `2025-winter` legitimately contains January 2026 photos and its `periodKey` disagrees with a naive `getUTCFullYear()` of its own contents. `seasonOf()` performs that fold once, centrally; `seasonForMonth()` in the title templates answers only "which season is month N" and knows nothing about years.
+
+The season **ordinal** — the arithmetic that makes "the previous season" well-defined — orders seasons `spring, summer, fall, winter` *within* a season year, not alphabetically or winter-first. Winter Y begins in December Y, i.e. **after** fall Y; ordering it first would make `previousSeason(spring 2026)` return fall 2024 instead of winter 2025, silently skipping a year. This is the one piece of the file most worth its unit tests.
+
+**Scheduled runs do exactly one season** — there is only ever one that can newly qualify between two runs — so the daily job costs one census query plus at most one curation pass. **Backfill** enumerates every completed season from the circle's oldest material forward, contiguously (a gap season is cheap: its raw count is zero and it is skipped before any query). A circle whose only photos sit inside the still-running season produces nothing, which falls out of the enumeration returning empty for an inverted range rather than needing a special case.
+
+#### Year in Review
+
+**Generated during December of Y and all of January Y+1.** December because the year-in-review is a December ritual and the memory has to *exist* before anyone looks for it — [#311](https://github.com/marinoscar/MemoriaHub/issues/311)'s digest and notification producers announce content generation must already have produced. All of January because "your year in review" is exactly what people go looking for over New Year, and a memory that only ever appeared for 31 days in December would be gone by the time most of the circle noticed. Outside that window a scheduled run generates nothing and does not touch the database at all.
+
+The December half means a review **is** generated for a year with three weeks left to run, with late-December uploads landing through refresh. That is the deliberate trade: an existing-but-slightly-early memory beats a missing one, and `upsertMemory`'s Jaccard rule (§4.12) keeps the refresh from churning the title unless the additions are material. Backfill applies the same completeness rule — every past year, plus the current one only once December has arrived — so a mid-year backfill never mints a three-month "Your 2026 in review" that then churns for the rest of the year.
+
+**Bucketed by month.** A year in review whose thirty photos all come from one two-week holiday is not a year in review. Equal-span diversity is the same thing as month bucketing *only if* the year's material is spread across it; a library with a six-month gap collapses into two dense clusters. `bucketBy: { key: monthBucket }` states the intent structurally instead. No per-bucket cap is set: with twelve buckets and a 30-item budget the round-robin already yields two to three items a month, and a year whose material is genuinely concentrated in four months should be allowed to fill its slots from those four.
+
+`monthBucket` is **year-qualified** (`year * 12 + monthIndex`) rather than a bare 0–11 month, so January 2024 and January 2025 can never merge into one bucket if a future caller hands the policy a range wider than a year.
+
+### 4.12 Idempotent regeneration — `upsertMemory()`
 
 Every curator writes through this one method, keyed on `@@unique([circleId, type, periodKey, subjectKey])`.
 
@@ -468,9 +590,11 @@ Every curator writes through this one method, keyed on `@@unique([circleId, type
 
 `meta.generatorVersion` (currently `1`) is stamped centrally on every write. Bump it when scoring or selection changes in a way that would produce a different item set from identical inputs — it is the only way to tell, after the fact, which algorithm produced a given memory.
 
-### 4.10 Registry and per-curator error isolation
+### 4.13 Registry and per-curator error isolation
 
-Curators are injected as an array under the `MEMORY_CURATORS` token (`memoryCuratorsProvider`, which moved to its own `curators/memory-curators.provider.ts` in #304 once it imported more than one curator — a file that also *defines* a curator importing its siblings is a needless coupling and an easy way to grow an import cycle), so #305 adds a provider plus one entry in that factory and touches nothing else. Order is execution order, cheapest-first: On This Day runs two bounded functional-index queries, Trips streams the circle's geo history. `MemoryGenerationHandler` iterates it:
+Curators are injected as an array under the `MEMORY_CURATORS` token (`memoryCuratorsProvider`, which moved to its own `curators/memory-curators.provider.ts` in #304 once it imported more than one curator — a file that also *defines* a curator importing its siblings is a needless coupling and an easy way to grow an import cycle). Adding a memory type is a provider plus one entry in that factory and nothing else, which is exactly what #305 did for its five: the handler was not touched.
+
+Order is execution order, cheapest-first: On This Day runs two bounded functional-index queries; Trips streams the circle's geo history; the people and theme curators answer a grouped census before curating anything; seasonal and year-in-review each curate one full calendar period. A job cut short by a timeout has then produced the daily content users actually see on Home. `MemoryGenerationHandler` iterates the array:
 
 - each curator is gated by **its own** `memories.<type>.enabled` toggle, checked via `MemoryCurator.isEnabled(settings)` rather than a stringly-typed settings key on the registry entry;
 - each `run()` is **individually try/caught**, and so is each `purge()`;
@@ -481,15 +605,20 @@ This is a correctness requirement, not politeness. The seven types are independe
 
 One wall clock (`ctx.now`) is captured once by the handler and shared by every curator, so a run that straddles midnight cannot have one curator anchoring on today and the next on tomorrow.
 
-### 4.11 Settings resolution
+### 4.14 Settings resolution
 
 `resolveMemoriesSettings()` deep-merges the stored `memories.*` namespace over `DEFAULT_SYSTEM_SETTINGS.memories` **once per generation job**, so curators read `settings.onThisDay.minItems` unconditionally and never carry their own `?? 10` fallbacks. The namespace is genuinely optional on an older JSONB row — that is what makes it migration-free (§9.2) — and per-curator fallbacks would be a fourth hand-maintained copy of every default, on top of the three §9.3 already warns about.
 
-### 4.12 Known gaps
+### 4.15 Known gaps
 
 - **A period that falls below `minItems` after items are removed keeps its existing memory.** Curators only upsert periods that still qualify; they do not delete a memory whose material has since been trashed. Its `MemoryItem` rows for hard-deleted media cascade away and `itemCount` is corrected on the next refresh, but a memory whose items were all *soft*-deleted lingers until read-time filtering ([#307](https://github.com/marinoscar/MemoriaHub/issues/307)) hides it. Deleting it automatically was rejected for v1: a curator silently destroying a memory a user may have favorited is a worse failure than a stale one.
 - **Backfill is unchunked.** A full On This Day backfill for a dense circle is up to 366 anchors × `lookbackYears` curations in one job, which can approach `ENRICHMENT_JOB_TIMEOUT_MS`. It is memory-safe (nothing accumulates across anchors) and restartable (every write is idempotent), but chunking the admin backfill into multiple jobs belongs to #315.
 - **Truncation is chronologically biased.** When `DEFAULT_MAX_CANDIDATES` is hit the scan keeps the earliest candidates. See §4.2 for why that is accepted as a crash guard rather than solved.
+- **`person_highlights` never writes `periodKey = 'all'`,** although the `MemoryType` enum reserves it. An all-time view of a person is what `person_over_years` already is, and generating both would produce two near-identical memories for the same subject. The key shape is kept available for a future variant.
+- **`themes.minItems` / `seasonal.minItems` / `yearInReview.minItems` above `maxItemsPerMemory`** can never be satisfied, since curation caps the selection first — the same un-cross-validated combination already noted for `trips.minItems` in §4.8.
+- **A theme's identity is its tag name.** Renaming a `TagLabel` produces a new `subjectKey` and therefore a new memory, orphaning the old row (which is then never refreshed) rather than re-keying it in place the way a drifted trip is (§4.8). Tag renames are rare and admin-driven; the trips machinery exists because trip boundaries move on their own.
+- **`MAX_ELIGIBLE_PERSONS` truncation is silent to the user.** It logs a warning and is only reachable with `favoritesOnly = false` in a circle with a very large cluster population — see §4.9.
+- **Seasons are northern-hemisphere only.** `SEASON_LABELS` / `seasonForMonth` centralize the assumption (§4.6) so a hemisphere or locale setting replaces one table, but no such setting exists yet: a southern-hemisphere circle gets "Summer 2025" over its actual winter.
 
 ## 5. AI Titles, Subtitles & Narratives
 
@@ -600,6 +729,7 @@ Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/is
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 0.1 | August 2026 | AI Assistant | Initial specification for issue #301: the `MemoryType` enum, the `Memory`/`MemoryItem`/`MemoryUserState` data model, the `periodKey`/`subjectKey` semantics, the tombstone contract, cascade summary, and alternatives considered. Sections 3–10 are placeholders for later issues in epic #300. |
+| 0.5 | August 2026 | AI Assistant | Issue #305: added §4.9 (the People curators — the one shared eligibility rule and why per-user hidden people are deliberately excluded from generation, the archived-face exclusion, the grouped `(person, year)` census and why over-counting makes the pre-filter sound, the year-bucketed diversity policy and the >=3-year floor that separates the two types, the highest-confidence cover override, and the Cascade-FK delete/merge story), §4.10 (the Theme curator — the tag-vocabulary-over-clustering rationale, the three filters `source='ai'` / enabled label / denylist, ranking by distinct qualifying items with the exact per-year sum behind the all-history period, walking past a short tag under a bounded attempt cap, and why a tombstoned theme consumes its slot), and §4.11 (Seasonal & Year-in-Review — the shared per-month census, completed-seasons-only and the season-year fold with its spring-first ordinal, and the December/January window plus month bucketing). Extended §4.5 with the opt-in `selectByBuckets` calendar policy, rewrote §4.13's registry paragraph for the full seven, and added five known gaps to §4.15. Renumbered the former §4.9–§4.12 to §4.12–§4.15 so the curator sections stay together. §5–§8 and §10 remain placeholders. |
 | 0.4 | August 2026 | AI Assistant | Issue #304: added §4.8 (the Trips curator — fixed-24-month home inference with the 30% modal-share floor and the same-floor `geoAdmin1` fallback, median-based three-way away/home/neutral day classification and the coordinate-less metadata fallback that can only add an away day, gap-tolerant run merging where a home day terminates rather than bridges, the >=50%-of-the-SHORTER-span overlap matching that re-keys a boundary-shifted trip in place instead of duplicating it, tombstone participation in that matching, the `retitle` flag for a drifted subject, backfill and its flat-memory streaming aggregation, the EXPLAIN-verified reuse of `media_items_gallery_idx` with no new migration, and known gaps). Renumbered the former §4.8–§4.11 to §4.9–§4.12 so the curator sections sit together. §5–§8 and §10 remain placeholders. |
 | 0.3 | August 2026 | AI Assistant | Issue #303: filled in §4 (Curation Engine — the structural base filter, constant-memory keyset candidate streaming with per-page batched signal lookups, the scoring weights and the neutral-NULL-sharpness rule, the pure-score-vs-selectionScore split for the long-video preference, burst/duplicate collapse and its burst-wins precedence, time-bucket diversity with the 3-video cap, deterministic ordering and the never-a-video cover rule, template titles for all seven types, the On This Day curator with its today+tomorrow anchors / one-query-per-anchor design / new circle-scoped functional index / backfill anchor widening / retention tail, the `upsertMemory()` idempotency and tombstone contract with its Jaccard title-preservation rule, the curator registry and per-curator error isolation, settings resolution, and known gaps). §5–§8 and §10 remain placeholders. |
 | 0.2 | August 2026 | AI Assistant | Issue #302: filled in §3 (Generation — `MemoriesGenerationTask`'s three gates and zero-cost-when-off contract, the mandatory `skipDedup: true` rationale, the server-only `MemoryGenerationHandler` and its no-node-pair system-mode inference, job labels, and the `JobReason.backfill` deviation from the issue text) and §9 (Settings — `features.memories` + the `MEMORIES_ENABLED` kill-switch and their shared `isMemoriesEnabled()` gate, the full `memories.*` bounds/defaults table, the three-hand-maintained-copies pitfall, and `ai.features.memories` with its up-front credential validation). §4–§8 and §10 remain placeholders. |
