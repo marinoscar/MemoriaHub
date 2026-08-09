@@ -49,6 +49,7 @@ import { WorkflowEvaluateItemHandler } from '../workflows/runs/workflow-evaluate
 import { WorkflowEvaluateHandler } from '../workflows/runs/workflow-evaluate.handler';
 import { WorkflowExecuteBatchHandler } from '../workflows/runs/workflow-execute-batch.handler';
 import { WorkflowHistoryPurgeHandler } from '../workflows/runs/workflow-history-purge.handler';
+import { MemoryGenerationHandler } from '../memories/memory-generation.handler';
 
 /** Every registered enrichment handler class (keep in sync with the modules). */
 const ALL_HANDLER_CLASSES = [
@@ -82,6 +83,7 @@ const ALL_HANDLER_CLASSES = [
   WorkflowEvaluateHandler,
   WorkflowExecuteBatchHandler,
   WorkflowHistoryPurgeHandler,
+  MemoryGenerationHandler,
 ];
 
 /**
@@ -97,6 +99,7 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'location_inference',
   'location_suggestion_run_evaluate',
   'location_suggestion_run_execute_batch',
+  'memory_generation',
   'notification_purge',
   'review_run_evaluate',
   'review_run_execute_batch',
@@ -254,6 +257,22 @@ describe('server-only type derivation (drift guard)', () => {
     it('duplicate_confidence_backfill is server-only and system-mode eligible', () => {
       expect(registry.serverOnlyTypes()).toContain('duplicate_confidence_backfill');
       expect(systemModeEligibleTypes(registry, {})).toContain('duplicate_confidence_backfill');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Memories (epic #300, issue #302): memory_generation omits the node-result
+  // pair by design — curation is a whole-circle DB read/write pass with no
+  // per-item unit of work to hand a node, and (from #306) needs a server-held
+  // AI credential. It therefore falls out of serverOnlyTypes() naturally, with
+  // no explicit pinning needed (unlike thumbnail_repair /
+  // workflow_execute_batch above), the same inference as the
+  // location_inference sweep and face_auto_archive_sweep.
+  // -------------------------------------------------------------------------
+  describe('memory_generation (issue #302)', () => {
+    it('memory_generation is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('memory_generation');
+      expect(systemModeEligibleTypes(registry, {})).toContain('memory_generation');
     });
   });
 });

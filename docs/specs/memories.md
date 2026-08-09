@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.1 (data model only) |
+| **Version** | 0.2 (data model + generation plumbing) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model Implemented (issue #301); all other sections are placeholders for later issues in epic #300 |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302); §4–§8 and §10 are placeholders for later issues in epic #300 |
 
 ---
 
@@ -32,7 +32,9 @@ Following the Immich precedent, memories are **persisted and pre-generated**, no
 
 Seven memory types ship across the epic (see [§2.1](#21-memorytype-enum)): `on_this_day`, `trip`, `person_highlights`, `person_over_years`, `theme`, `seasonal`, `year_in_review`. Each is produced by its own curator, gated by its own `memories.<type>.enabled` setting, and degrades independently — e.g. no geo data means no trips, but every other type is unaffected.
 
-This issue (#301) lays only the database foundation: the `MemoryType` enum and the `Memory` / `MemoryItem` / `MemoryUserState` models, with no generation, curation, AI, API, or UI code yet. Every later issue in the epic builds on this schema without altering it. Sections 3–10 below are placeholders that name the issue expected to fill them in; do not treat their absence as an oversight.
+The epic is delivered incrementally, and this document grows with it. Implemented so far: the database foundation — the `MemoryType` enum and the `Memory` / `MemoryItem` / `MemoryUserState` models ([#301](https://github.com/marinoscar/MemoriaHub/issues/301), §2) — and the configuration surface plus generation plumbing: the `features.memories` flag, the `memories.*` namespace, `ai.features.memories`, and an hourly per-circle `memory_generation` job whose handler is still a deliberate **no-op** ([#302](https://github.com/marinoscar/MemoriaHub/issues/302), §3 and §9). Every later issue builds on the #301 schema without altering it.
+
+Sections 4–8 and 10 are placeholders that name the issue expected to fill them in; do not treat their absence as an oversight. Until curators land in #303–#305, an enabled deployment schedules jobs and creates **zero** memory rows — which is the intended, tested intermediate state.
 
 ## 2. Data Model
 
@@ -181,7 +183,51 @@ Note that `Memory.deletedAt` (the tombstone, §2.5) is an **application-level** 
 
 ## 3. Generation
 
-Placeholder. Covered by issue [#302](https://github.com/marinoscar/MemoriaHub/issues/302) (settings namespace, feature flag, AI model selection, and the generation job skeleton) and issue [#303](https://github.com/marinoscar/MemoriaHub/issues/303) (curation engine, On This Day curator, template titles). Expected shape per the epic's architecture summary: an hourly `MemoriesGenerationTask` cron enqueuing one `memory_generation` `enrichment_jobs` row per circle (`skipDedup: true`, background priority), whose handler runs each enabled type-specific curator with per-curator error isolation, server-only (no `nodeResultSchema`).
+Introduced by issue [#302](https://github.com/marinoscar/MemoriaHub/issues/302). The scheduling, gating, dedup and observability plumbing ships here with a **no-op handler** — zero curators — so the whole queue path is proven end to end before any curation logic lands in [#303](https://github.com/marinoscar/MemoriaHub/issues/303)–[#305](https://github.com/marinoscar/MemoriaHub/issues/305).
+
+Everything lives in `apps/api/src/memories/` (`MemoriesModule`, registered in `AppModule`), a minimal-template module mirroring `InsightsModule`: `imports: [PrismaModule, SettingsModule, EnrichmentModule]`.
+
+### 3.1 `MemoriesGenerationTask` — the hourly interval-gated cron
+
+`memories-generation.task.ts`. `@Cron(CronExpression.EVERY_HOUR)`, wrapped in a try/catch that never throws (the contract every cron task in this repo follows), plus an in-process `sweepInFlight` overlap guard so a sweep that outlives its hourly slot is not run twice concurrently.
+
+Three gates, **in this order**:
+
+| # | Gate | Effect |
+|---|---|---|
+| 1 | `MEMORIES_ENABLED=false` (env) | Return immediately — before even the cached settings read |
+| 2 | `isMemoriesEnabled(settings)` — i.e. `features.memories === true` | Return before paging circles |
+| 3 | Per circle: no `pending`/`running` `memory_generation` job for that circle, **and** its last `succeeded` job is older than `memories.generation.intervalHours` | Enqueue, else skip |
+
+Gate ordering is what delivers the epic's **zero-cost-when-off** requirement (see the new-install matrix in [#300](https://github.com/marinoscar/MemoriaHub/issues/300)): with the flag absent — the default — a tick costs exactly one *cached* `SystemSettingsService.getSettings()` call and writes nothing; with the env kill-switch set it costs nothing at all. A circle that has never generated has no `succeeded` row, so it has no `last` and is always eligible. Only `succeeded` jobs gate the interval — a `failed` run does not push the next attempt out by a day.
+
+Circles are keyset-paged 100 at a time (`orderBy: { id: 'asc' }`, `cursor` + `skip: 1`), and each page issues exactly **two** batched job reads — one `findMany` for in-flight jobs and one `groupBy(['circleId'], { _max: { finishedAt } })` for the last success — rather than two reads per circle. A per-circle enqueue failure is logged and counted, never fatal: one bad circle must not stop the rest of the deployment from generating.
+
+The sweep body is exposed as `sweep()` (returning `{ circles, enqueued, skipped, errors }`) rather than inlined into the cron handler, so the admin backfill in [#315](https://github.com/marinoscar/MemoriaHub/issues/315) can drive the identical code path.
+
+### 3.2 Why `skipDedup: true` is mandatory
+
+Jobs are enqueued through `EnrichmentJobService.enqueue({ type: 'memory_generation', mediaItemId: null, circleId, reason: JobReason.backfill, priority: 100, skipDedup: true })`.
+
+`skipDedup: true` is **not optional**. The service's default idempotency check looks for an existing pending/running job with the same `(type, mediaItemId)` — and for a global job `mediaItemId` is `NULL` for *every* circle, so the first circle's job would swallow the enqueue for all the others, system-wide. This task's per-circle pending/running check (gate 3) is the correctly-scoped replacement for that dedup. Same reasoning, same flag, as `face_auto_archive_sweep`.
+
+`priority: 100` is the repo's background tier (`rerun=0`, `upload=10`, `backfill=100`), so memory generation can never starve upload enrichment.
+
+> **Deviation from the issue text.** Issue #302 specifies `reason: 'scheduled'`, but the `JobReason` enum is `upload | rerun | backfill` and adding a value is a schema change owned by [#301](https://github.com/marinoscar/MemoriaHub/issues/301). `JobReason.backfill` is used instead — this repo's established reason for cron-enqueued background work at priority 100 (`trash_purge`, `thumbnail_repair`, `storage_insights` all do the same).
+
+### 3.3 `MemoryGenerationHandler` — server-only, v1 no-op
+
+`memory-generation.handler.ts`. Implements `EnrichmentHandler` with `readonly type = 'memory_generation'` and self-registers via `onModuleInit() { this.registry.register(this) }` — the mandatory registration pattern (see [Enrichment Queue §6](enrichment-queue.md)), never multi-provider DI.
+
+**Server-only**: it deliberately omits both `nodeResultSchema` and `persistNodeResult`. Curation is a whole-circle DB read/write pass with no per-item unit of work to hand a distributed node, and from [#306](https://github.com/marinoscar/MemoriaHub/issues/306) it needs a server-held AI credential. Because the pair is absent, `EnrichmentHandlerRegistry.serverOnlyTypes()` picks the type up automatically and it becomes eligible for the `ENRICHMENT_WORKER_MODE=system` claim set **with no explicit pinning** — the same no-node-pair inference that already covers `face_auto_archive_sweep` and the `location_inference` sweep, and unlike `thumbnail_repair` / `workflow_execute_batch`, which carry the pair and must be pinned by hand. The drift guard in `apps/api/src/enrichment/server-only-types.spec.ts` asserts this. `memory_generation` is correspondingly absent from the CLI's `NODE_JOB_TYPES`.
+
+The handler **re-checks the feature gate itself** rather than trusting the cron's. A job can sit pending across a settings change, be retried by hand from `/admin/settings/jobs`, or be enqueued by the future admin backfill — none of which pass through the cron's gate. When the feature is off it **succeeds as a no-op rather than throwing**: a disabled feature is not a failure, and failing would burn retry attempts and light up the admin job dashboard for no reason. A job with a null `circleId` is likewise a logged no-op, since every memory is circle-scoped.
+
+v1's body is a log line and a return. That log line is the observability hook proving the scheduling path works end to end.
+
+### 3.4 Job-type labels
+
+`JOB_TYPE_LABELS` (`apps/api/src/enrichment/job-type-labels.ts`) gains `memory_generation: 'Memory generation'` so the type renders with a friendly name in `/admin/settings/jobs`. `memory_digest: 'Memory email digest'` is declared alongside it now, ahead of its handler, so [#311](https://github.com/marinoscar/MemoriaHub/issues/311) does not have to touch the file again.
 
 ## 4. Curation Engine
 
@@ -205,7 +251,74 @@ Placeholder. Covered by issue [#309](https://github.com/marinoscar/MemoriaHub/is
 
 ## 9. Settings
 
-Placeholder. Covered by issue [#302](https://github.com/marinoscar/MemoriaHub/issues/302) (feature flag and settings namespace skeleton) and issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315) (admin settings page `/admin/settings/memories` and library backfill). Expected namespace per the epic's architecture summary: `features.memories` (global flag, default off) and a `memories.*` namespace covering `generation.intervalHours`, `maxItemsPerMemory`, `aiTitles.enabled`, and per-type sub-namespaces (`onThisDay`, `trips`, `people`, `themes`, `seasonal`, `yearInReview`, `digest`) — see epic [#300](https://github.com/marinoscar/MemoriaHub/issues/300) for the full parameter table and bounds/defaults.
+Introduced by issue [#302](https://github.com/marinoscar/MemoriaHub/issues/302). The admin page that edits these (`/admin/settings/memories`) arrives with issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315); until then every key below is reachable through the generic `PUT`/`PATCH /api/system-settings` (Admin + `system_settings:write`).
+
+The **full** namespace ships now, not just the keys #302 reads, so every later issue in the epic consumes its parameters through the one cached `SystemSettingsService.getSettings()` call with no further schema change. Issue #302 itself actively reads only `memories.generation.intervalHours` (plus the feature flag).
+
+### 9.1 `features.memories` — the global flag
+
+A boolean in the open `features` record (`z.record(z.string(), z.boolean())`), so it needs no schema change of its own; it is added to `FEATURE_KEYS` and to `DEFAULT_SYSTEM_SETTINGS.features` as `false`. **Default off.** It flows to clients automatically via `GET /api/features`, whose `getPublicFeatures()` spreads `settings.features` — which matters because that endpoint requires authentication only, so a non-admin circle member can resolve the gated affordance without a 403 on the Admin-only `GET /api/system-settings`.
+
+`MEMORIES_ENABLED` (env, default `true`) is the hard kill-switch, with the same semantics as `THUMBNAIL_REPAIR_ENABLED` / `BURST_DETECTION_ENABLED`: when `'false'`, the cron enqueues nothing and the handler no-ops **regardless** of the system setting. The two are folded together by `isMemoriesEnabled(settings)` in `apps/api/src/common/types/settings.types.ts` — a single source of truth shared by the cron, the handler and every future Memories surface, mirroring `isWorkflowsEnabled` / `isPictureEnhancementEnabled` so no caller can drift on what "enabled" means. Documented in `infra/compose/.env.example`.
+
+### 9.2 The `memories.*` namespace
+
+| Key | Type / bounds | Default | Read by |
+|---|---|---|---|
+| `generation.intervalHours` | int 1–168 | `24` | #302 (the cron's interval gate) |
+| `maxItemsPerMemory` | int 5–100 | `30` | #303 |
+| `aiTitles.enabled` | bool | `true` | #306 |
+| `onThisDay.enabled` | bool | `true` | #303 |
+| `onThisDay.lookbackYears` | int 1–50 | `10` | #303 |
+| `onThisDay.minItems` | int 1–20 | `3` | #303 |
+| `trips.enabled` | bool | `true` | #304 |
+| `trips.minDays` | int 1–14 | `2` | #304 |
+| `trips.minItems` | int 3–100 | `10` | #304 |
+| `trips.minDistanceKm` | int 5–500 | `50` | #304 |
+| `trips.lookbackMonths` | int 1–240 | `18` | #304 |
+| `people.enabled` | bool | `true` | #305 |
+| `people.favoritesOnly` | bool | `true` | #305 |
+| `people.minItems` | int 3–50 | `8` | #305 |
+| `themes.enabled` | bool | `true` | #305 |
+| `themes.minItems` | int 3–50 | `8` | #305 |
+| `themes.maxPerPeriod` | int 1–10 | `3` | #305 |
+| `seasonal.enabled` | bool | `true` | #305 |
+| `seasonal.minItems` | int 5–100 | `12` | #305 |
+| `yearInReview.enabled` | bool | `true` | #305 |
+| `yearInReview.minItems` | int 5–100 | `15` | #305 |
+| `digest.enabled` | bool | `true` | #311 |
+| `digest.frequency` | enum `off`\|`daily`\|`weekly`\|`monthly` | `weekly` | #311 |
+| `digest.sendHourUtc` | int 0–23 | `8` | #311 |
+| `digest.imageTokenTtlDays` | int 7–90 | `30` | #311 |
+
+Note the per-type `enabled` flags all default to **`true`** while `features.memories` defaults to **`false`**. That is intentional: the master flag is the only off switch that matters for a fresh install, and once an admin turns Memories on they should get all seven memory types without having to enable each one individually.
+
+### 9.3 Three hand-maintained copies — a real pitfall
+
+This repo duplicates every settings namespace by hand across **three** files, and all three must be edited together:
+
+| File | Symbol | Role |
+|---|---|---|
+| `common/schemas/settings.schema.ts` | `systemSettingsSchema` | Validation + defaults for `PUT`, and for the merged document `patchSettings` re-parses |
+| `common/schemas/settings.schema.ts` | `systemSettingsPatchSchema` | All-optional twin |
+| `settings/dto/update-system-settings.dto.ts` | `patchSystemSettingsSchema` | **The wire DTO** |
+
+The third one is the trap. It is what `nestjs-zod` validates the request body against, and it **strips unknown keys**, so a namespace added only to the first two validates and merges perfectly in unit tests while every real `PATCH` silently no-ops — the key never survives the DTO. (`workflows.*` and `backup.*` are, as of this writing, in exactly that state: schema-complete but absent from the wire DTO, hence not PATCH-able over HTTP.) `memories` is present in all three, and `test/memories/memories-settings.integration.spec.ts` round-trips every key through the real HTTP endpoint precisely to keep it that way.
+
+`SystemSettingsService.patchSettings` also merges each key by hand (there is no generic deep merge), and `getSettings()`/`replaceSettings()` project the resolved document field by field — so a new namespace must be added there too or it will never be *returned*, only stored.
+
+### 9.4 `ai.features.memories`
+
+Lives under `ai.features.*`, not `features.*`. Shape is `{ provider, model } | null`, default `null` — the same nullable-object contract as `ai.features.enhance`, chosen because a half-filled provider/model pair is not a usable selection, so clearing either field clears the whole thing.
+
+- `PUT /api/ai/features/memories` — body `{ provider, model }`, Admin + `ai_settings:write`. Mirrors `PUT /api/ai/features/tagging`.
+- Surfaced (masked, like its siblings) by `GET /api/ai/settings`.
+- Model candidates come from the existing `GET /api/ai/models?provider=&capability=chat` — memories generate titles/subtitles/narratives, which is a **chat** capability. No new capability value was added.
+- `AiSettingsService.resolveMemoriesConfig()` returns the pair or `null`; `null` means memory titles fall back to deterministic templates (#306), never an error.
+
+One deliberate divergence from the older `search`/`tagging`/`embedding` setters: a non-null selection is **validated against the credential store up front** and rejected with a `400` when the provider has no configured, *enabled* credential. Those older setters accept anything, which is tolerable for a feature whose next call is an interactive request the admin will see fail — but a bad Memories selection would only ever surface inside a background `memory_generation` job, where nobody is watching.
+
+Consumed by `MemoryTitleService` in [#306](https://github.com/marinoscar/MemoriaHub/issues/306); #302 ships only the config, the endpoint and their tests.
 
 ## 10. RBAC
 
@@ -229,3 +342,4 @@ Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/is
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 0.1 | August 2026 | AI Assistant | Initial specification for issue #301: the `MemoryType` enum, the `Memory`/`MemoryItem`/`MemoryUserState` data model, the `periodKey`/`subjectKey` semantics, the tombstone contract, cascade summary, and alternatives considered. Sections 3–10 are placeholders for later issues in epic #300. |
+| 0.2 | August 2026 | AI Assistant | Issue #302: filled in §3 (Generation — `MemoriesGenerationTask`'s three gates and zero-cost-when-off contract, the mandatory `skipDedup: true` rationale, the server-only `MemoryGenerationHandler` and its no-node-pair system-mode inference, job labels, and the `JobReason.backfill` deviation from the issue text) and §9 (Settings — `features.memories` + the `MEMORIES_ENABLED` kill-switch and their shared `isMemoriesEnabled()` gate, the full `memories.*` bounds/defaults table, the three-hand-maintained-copies pitfall, and `ai.features.memories` with its up-front credential validation). §4–§8 and §10 remain placeholders. |

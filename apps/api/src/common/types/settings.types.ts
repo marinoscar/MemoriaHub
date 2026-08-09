@@ -88,6 +88,9 @@ export interface SystemSettingsValue {
    *   - locationInference: interpolate/extrapolate missing GPS coords from timeline anchors
    *   - socialMediaDetection: social-media video detection (OCR-based)
    *   - faceAutoArchive: auto-archive faces matching a previously-archived face
+   *   - pictureEnhancement: AI picture enhancer
+   *   - workflows: media workflow automation
+   *   - memories: curated memory collections (On This Day, Trips, People, …)
    */
   features: {
     [key: string]: boolean;
@@ -108,6 +111,15 @@ export interface SystemSettingsValue {
       };
       /** Active provider+model for AI picture enhancement; null when unset. */
       enhance?: {
+        provider: string;
+        model: string;
+      } | null;
+      /**
+       * Active chat-capable provider+model for Memories title/subtitle/narrative
+       * generation (epic #300); null when unset, in which case memory titles fall
+       * back to deterministic templates. Consumed by MemoryTitleService (#306).
+       */
+      memories?: {
         provider: string;
         model: string;
       } | null;
@@ -298,6 +310,43 @@ export interface SystemSettingsValue {
     /** Minimum cron interval enforced for scheduled workflows (Phase 4). */
     scheduleMinIntervalMinutes: number;
   };
+  /**
+   * Memories (epic #300). The full namespace ships with the generation job
+   * skeleton (issue #302) so later issues read it through getSettings() with no
+   * further schema change. Issue #302 actively reads only
+   * `generation.intervalHours` (plus the `features.memories` flag).
+   */
+  memories?: MemoriesSettingsValue;
+}
+
+/** The `memories.*` system-settings namespace (epic #300, issue #302). */
+export interface MemoriesSettingsValue {
+  generation: {
+    /** Hours between scheduled per-circle `memory_generation` jobs. */
+    intervalHours: number;
+  };
+  /** Hard cap on `MemoryItem` rows a curator may attach to one memory. */
+  maxItemsPerMemory: number;
+  /** Master switch for AI-written titles; templates are used when off (#306). */
+  aiTitles: { enabled: boolean };
+  onThisDay: { enabled: boolean; lookbackYears: number; minItems: number };
+  trips: {
+    enabled: boolean;
+    minDays: number;
+    minItems: number;
+    minDistanceKm: number;
+    lookbackMonths: number;
+  };
+  people: { enabled: boolean; favoritesOnly: boolean; minItems: number };
+  themes: { enabled: boolean; minItems: number; maxPerPeriod: number };
+  seasonal: { enabled: boolean; minItems: number };
+  yearInReview: { enabled: boolean; minItems: number };
+  digest: {
+    enabled: boolean;
+    frequency: 'off' | 'daily' | 'weekly' | 'monthly';
+    sendHourUtc: number;
+    imageTokenTtlDays: number;
+  };
 }
 
 /**
@@ -330,6 +379,25 @@ export function isPictureEnhancementEnabled(settings: {
   return (
     settings.features?.[FEATURE_KEYS.PICTURE_ENHANCEMENT] === true &&
     process.env['PICTURE_ENHANCEMENT_ENABLED'] !== 'false'
+  );
+}
+
+/**
+ * Resolve whether the Memories feature is active: the `features.memories`
+ * system-setting toggle must be on AND the `MEMORIES_ENABLED` env kill-switch
+ * must not be explicitly set to 'false'.
+ *
+ * Single source of truth shared by the generation cron, the generation handler,
+ * and every later Memories surface in epic #300, so no caller can drift from
+ * the others on what "enabled" means. Mirrors isWorkflowsEnabled /
+ * isPictureEnhancementEnabled above.
+ */
+export function isMemoriesEnabled(settings: {
+  features?: Record<string, boolean>;
+}): boolean {
+  return (
+    settings.features?.[FEATURE_KEYS.MEMORIES] === true &&
+    process.env['MEMORIES_ENABLED'] !== 'false'
   );
 }
 
@@ -392,6 +460,7 @@ export const FEATURE_KEYS = {
   FACE_AUTO_ARCHIVE: 'faceAutoArchive',
   PICTURE_ENHANCEMENT: 'pictureEnhancement',
   WORKFLOWS: 'workflows',
+  MEMORIES: 'memories',
 } as const;
 
 /**
@@ -424,6 +493,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.FACE_AUTO_ARCHIVE]: false,
     [FEATURE_KEYS.PICTURE_ENHANCEMENT]: false,
     [FEATURE_KEYS.WORKFLOWS]: false,
+    [FEATURE_KEYS.MEMORIES]: false,
   },
   ai: {
     features: {
@@ -431,6 +501,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       tagging: { provider: null, model: null },
       embedding: { provider: null, model: null },
       enhance: null,
+      memories: null,
     },
   },
   face: {
@@ -526,5 +597,17 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       scheduled: true,
     },
     scheduleMinIntervalMinutes: 60,
+  },
+  memories: {
+    generation: { intervalHours: 24 },
+    maxItemsPerMemory: 30,
+    aiTitles: { enabled: true },
+    onThisDay: { enabled: true, lookbackYears: 10, minItems: 3 },
+    trips: { enabled: true, minDays: 2, minItems: 10, minDistanceKm: 50, lookbackMonths: 18 },
+    people: { enabled: true, favoritesOnly: true, minItems: 8 },
+    themes: { enabled: true, minItems: 8, maxPerPeriod: 3 },
+    seasonal: { enabled: true, minItems: 12 },
+    yearInReview: { enabled: true, minItems: 15 },
+    digest: { enabled: true, frequency: 'weekly', sendHourUtc: 8, imageTokenTtlDays: 30 },
   },
 };

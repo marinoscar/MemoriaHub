@@ -26,6 +26,7 @@ import {
   SetTaggingFeatureDto,
   SetEmbeddingFeatureDto,
   SetEnhanceFeatureDto,
+  SetMemoriesFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
@@ -176,5 +177,29 @@ export class AiSettingsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.aiSettingsService.setEnhanceFeature(dto, userId);
+  }
+
+  @Put('features/memories')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @ApiOperation({
+    summary:
+      'Set active provider and model for Memories title generation (Admin)',
+    description:
+      'Chat-capable provider/model used to write memory titles, subtitles and ' +
+      'narratives (epic #300). List candidates with GET /api/ai/models?capability=chat. ' +
+      'Passing a null provider or model clears the selection, in which case ' +
+      'memories fall back to deterministic template titles. Returns 400 when the ' +
+      'selected provider has no configured, enabled credential.',
+  })
+  @ApiResponse({ status: 200, description: 'Memories feature config updated' })
+  @ApiResponse({
+    status: 400,
+    description: 'Provider is not configured or is disabled',
+  })
+  async setMemoriesFeature(
+    @Body() dto: SetMemoriesFeatureDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.aiSettingsService.setMemoriesFeature(dto, userId);
   }
 }

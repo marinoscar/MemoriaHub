@@ -121,12 +121,15 @@ describe('SystemSettingsService', () => {
       // fixture must mirror ALL of those defaults (face, storage, burst,
       // dedup, geo, jobs, pictureEnhancement, workflows) or the
       // toHaveBeenCalledWith assertion below drifts out of sync every time a
-      // new default branch is added to the schema. `ai.features.enhance` is
-      // also filled with its default (null) even though `ai.features` itself
-      // was supplied, since the DTO's `ai.features` omits the `enhance` key.
+      // new default branch is added to the schema. `ai.features.enhance` and
+      // `ai.features.memories` are also filled with their defaults (null) even
+      // though `ai.features` itself was supplied, since the DTO's `ai.features`
+      // omits both keys.
       const expectedParsed = {
         ...newSettings,
-        ai: { features: { ...newSettings.ai.features, enhance: null } },
+        ai: {
+          features: { ...newSettings.ai.features, enhance: null, memories: null },
+        },
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
@@ -141,6 +144,7 @@ describe('SystemSettingsService', () => {
         backup: DEFAULT_SYSTEM_SETTINGS.backup,
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
+        memories: DEFAULT_SYSTEM_SETTINGS.memories,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -230,7 +234,9 @@ describe('SystemSettingsService', () => {
       // the "should replace entire settings" test above re: ai.features.enhance.
       const expectedValidated = {
         ...newSettings,
-        ai: { features: { ...newSettings.ai.features, enhance: null } },
+        ai: {
+          features: { ...newSettings.ai.features, enhance: null, memories: null },
+        },
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
@@ -245,6 +251,7 @@ describe('SystemSettingsService', () => {
         backup: DEFAULT_SYSTEM_SETTINGS.backup,
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
+        memories: DEFAULT_SYSTEM_SETTINGS.memories,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({

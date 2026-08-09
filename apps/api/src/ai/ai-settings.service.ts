@@ -15,6 +15,7 @@ import {
   SetTaggingFeatureDto,
   SetEmbeddingFeatureDto,
   SetEnhanceFeatureDto,
+  SetMemoriesFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
@@ -69,6 +70,7 @@ export class AiSettingsService {
         tagging: { provider: null, model: null },
         embedding: { provider: null, model: null },
         enhance: null,
+        memories: null,
       },
     };
   }
@@ -326,6 +328,74 @@ export class AiSettingsService {
       userId,
     );
     return value;
+  }
+
+  /**
+   * Update the Memories title/subtitle/narrative feature config (epic #300).
+   *
+   * Same nullable-object shape as ai.features.enhance — a partial provider/model
+   * pair is not a valid selection, so clearing either field clears the whole
+   * setting and Memories falls back to deterministic template titles.
+   *
+   * Unlike the older search/tagging/embedding setters, a non-null selection is
+   * validated against the credential store up front: selecting a provider that
+   * has no enabled credential can only ever fail later, inside a background
+   * `memory_generation` job where the admin would never see the error.
+   */
+  async setMemoriesFeature(dto: SetMemoriesFeatureDto, userId: string) {
+    const value =
+      dto.provider && dto.model
+        ? { provider: dto.provider, model: dto.model }
+        : null;
+
+    if (value) {
+      await this.assertProviderUsable(value.provider);
+    }
+
+    await this.systemSettings.patchSettings(
+      {
+        ai: {
+          features: {
+            memories: value,
+          },
+        },
+      } as any,
+      userId,
+    );
+    return value;
+  }
+
+  /**
+   * Throw a 400 unless the provider has a configured AND enabled credential.
+   * Deliberately does not decrypt the key — existence and the enabled flag are
+   * all a feature-selection write needs to know.
+   */
+  private async assertProviderUsable(providerKey: string): Promise<void> {
+    const cred = await this.prisma.aiProviderCredential.findUnique({
+      where: { provider: providerKey },
+      select: { enabled: true },
+    });
+    if (!cred) {
+      throw new BadRequestException(
+        `Provider "${providerKey}" is not configured`,
+      );
+    }
+    if (!cred.enabled) {
+      throw new BadRequestException(`Provider "${providerKey}" is disabled`);
+    }
+  }
+
+  /**
+   * Resolve the active Memories provider + model from system settings.
+   * Returns null when unset — callers fall back to template titles (#306).
+   */
+  async resolveMemoriesConfig(): Promise<{ provider: string; model: string } | null> {
+    const sysSettings = await this.systemSettings.getSettings();
+    const memories = sysSettings.ai?.features?.memories;
+    if (!memories?.provider || !memories?.model) {
+      return null;
+    }
+    return { provider: memories.provider, model: memories.model };
   }
 
   /**

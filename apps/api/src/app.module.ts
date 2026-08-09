@@ -39,6 +39,7 @@ import { NodesModule } from './nodes/nodes.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
+import { MemoriesModule } from './memories/memories.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
@@ -105,6 +106,7 @@ import configuration from './config/configuration';
     WorkflowsModule,
     NotificationsModule,
     NotificationsReconcileModule,
+    MemoriesModule,
 
     // Test modules (non-production only)
     ...(process.env.NODE_ENV !== 'production' ? [TestAuthModule] : []),
