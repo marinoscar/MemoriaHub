@@ -84,7 +84,11 @@ import {
   verifyDigestImageToken,
   verifyDigestUnsubscribeToken,
 } from './digest-token.util';
-import { unsubscribeConfirmPage, unsubscribeDonePage } from './unsubscribe-page';
+import {
+  invalidLinkPage,
+  unsubscribeConfirmPage,
+  unsubscribeDonePage,
+} from './unsubscribe-page';
 
 @ApiTags('Public Memories')
 @Controller('public/memories')
@@ -197,20 +201,19 @@ export class PublicMemoryDigestController {
    */
   @Get('digest-unsubscribe/:token')
   @Public()
-  @Header('Content-Type', 'text/html; charset=utf-8')
-  @Header('X-Content-Type-Options', 'nosniff')
-  @Header('Referrer-Policy', 'no-referrer')
-  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Digest unsubscribe confirmation page (no auth required)' })
   @ApiParam({ name: 'token', description: 'HMAC-signed unsubscribe token' })
   @ApiResponse({ status: 200, description: 'HTML confirmation page' })
   @ApiResponse({ status: 404, description: 'Invalid or expired token' })
-  unsubscribePage(@Param('token') token: string): string {
-    if (!verifyDigestUnsubscribeToken(token)) throw new NotFoundException();
+  unsubscribePage(@Param('token') token: string, @Res() res: FastifyReply): void {
+    if (!verifyDigestUnsubscribeToken(token)) {
+      this.sendHtml(res, 404, invalidLinkPage());
+      return;
+    }
     // The token is echoed ONLY into the form action, and only after verifying
     // its signature — so the value is one this server minted, not attacker
     // text. It is URL-encoded regardless.
-    return unsubscribeConfirmPage(encodeURIComponent(token));
+    this.sendHtml(res, 200, unsubscribeConfirmPage(encodeURIComponent(token)));
   }
 
   /**
@@ -225,23 +228,29 @@ export class PublicMemoryDigestController {
    */
   @Post('digest-unsubscribe/:token')
   @Public()
-  @Header('Content-Type', 'text/html; charset=utf-8')
-  @Header('X-Content-Type-Options', 'nosniff')
-  @Header('Referrer-Policy', 'no-referrer')
-  @Header('Cache-Control', 'no-store')
   @ApiExcludeEndpoint()
-  async unsubscribe(@Param('token') token: string): Promise<string> {
+  async unsubscribe(
+    @Param('token') token: string,
+    @Res() res: FastifyReply,
+  ): Promise<void> {
     const userId = verifyDigestUnsubscribeToken(token);
-    if (!userId) throw new NotFoundException();
+    if (!userId) {
+      this.sendHtml(res, 404, invalidLinkPage());
+      return;
+    }
 
     // A token for a user who has since been deleted verifies fine (the
-    // signature is over the id, not the row) — resolve it to a 404 rather than
-    // letting patchSettings throw a Prisma error.
+    // signature is over the id, not the row) — resolve it to the SAME 404 page
+    // rather than letting patchSettings throw a Prisma error, and rather than
+    // distinguishing it from a bad signature.
     const exists = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true },
     });
-    if (!exists) throw new NotFoundException();
+    if (!exists) {
+      this.sendHtml(res, 404, invalidLinkPage());
+      return;
+    }
 
     // `PatchUserSettingsDto` is a zod-derived class; a structurally-matching
     // literal is what the HTTP path hands it too, after validation.
@@ -250,6 +259,26 @@ export class PublicMemoryDigestController {
     } as PatchUserSettingsDto);
 
     this.logger.log(`Memory digest unsubscribe honoured for user ${userId}`);
-    return unsubscribeDonePage();
+    this.sendHtml(res, 200, unsubscribeDonePage());
+  }
+
+  /**
+   * Send one of the standalone HTML pages.
+   *
+   * Both unsubscribe routes write the response themselves rather than
+   * returning a string under `@Header('Content-Type', 'text/html')`: that
+   * decorator applies BEFORE the handler runs, so a thrown `NotFoundException`
+   * would be serialized as a JSON object into a response already declared as
+   * HTML, which Fastify refuses to send ("Attempted to send payload of invalid
+   * type 'object'") — turning every invalid-token 404 into a 500. Writing the
+   * response explicitly keeps the success and failure paths symmetric and lets
+   * both be real HTML a human can read.
+   */
+  private sendHtml(res: FastifyReply, status: number, html: string): void {
+    void res.header('Content-Type', 'text/html; charset=utf-8');
+    void res.header('X-Content-Type-Options', 'nosniff');
+    void res.header('Referrer-Policy', 'no-referrer');
+    void res.header('Cache-Control', 'no-store');
+    void res.status(status).send(html);
   }
 }

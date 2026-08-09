@@ -58,6 +58,23 @@ export function unsubscribeConfirmPage(encodedToken: string): string {
   `);
 }
 
+/**
+ * The 404 body, served for EVERY failure — malformed token, bad signature,
+ * wrong purpose, expired, deleted user.
+ *
+ * One page for all of them is what keeps the route from being an oracle: it
+ * says only that the link no longer works, never why, and never whether the
+ * user or resource it names exists. It is HTML rather than the API's JSON error
+ * envelope because the reader is a human who just clicked a link in an email
+ * client, not a client library.
+ */
+export function invalidLinkPage(): string {
+  return page(`
+    <h1>This link is no longer valid</h1>
+    <p>Unsubscribe links expire after a while. Open MemoriaHub and turn off "Email me memory digests" in your settings instead.</p>
+  `);
+}
+
 /** Step 2: done. Reached by the form POST and by RFC 8058 one-click alike. */
 export function unsubscribeDonePage(): string {
   return page(`

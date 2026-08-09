@@ -31,7 +31,7 @@ const USER_ID = 'f0000000-0000-4000-8000-000000000002';
 /** Minimal FastifyReply stand-in that records what the route set. */
 function fakeReply() {
   const headers: Record<string, string> = {};
-  return {
+  const reply: any = {
     headers,
     header: jest.fn((k: string, v: string) => {
       headers[k] = v;
@@ -39,6 +39,9 @@ function fakeReply() {
     }),
     send: jest.fn(),
   };
+  // `status(n).send(html)` is chainable on a real FastifyReply.
+  reply.status = jest.fn(() => reply);
+  return reply as typeof reply & { headers: Record<string, string> };
 }
 
 describe('PublicMemoryDigestController', () => {
@@ -201,70 +204,95 @@ describe('PublicMemoryDigestController', () => {
   // =========================================================================
 
   describe('unsubscribe', () => {
-    it('GET renders a confirmation page and MUTATES NOTHING', () => {
-      const html = controller.unsubscribePage(signDigestUnsubscribeToken(USER_ID));
+    /** Run a route that writes its own response, and return what it wrote. */
+    function capture(): { res: ReturnType<typeof fakeReply>; body: () => string } {
+      const res = fakeReply();
+      return { res, body: () => String(res.send.mock.calls[0]?.[0] ?? '') };
+    }
 
-      expect(html).toContain('Stop receiving memory digests?');
-      expect(html).toContain('method="post"');
+    it('GET renders a confirmation page and MUTATES NOTHING', () => {
+      const { res, body } = capture();
+
+      controller.unsubscribePage(signDigestUnsubscribeToken(USER_ID), res as never);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(body()).toContain('Stop receiving memory digests?');
+      expect(body()).toContain('method="post"');
+      expect(res.headers['Content-Type']).toContain('text/html');
+      expect(res.headers['Cache-Control']).toBe('no-store');
       // The critical property: a link prefetcher or mail security scanner that
       // follows every GET must not unsubscribe anyone.
       expect(userSettings.patchSettings).not.toHaveBeenCalled();
     });
 
-    it('GET 404s on an invalid or expired token', () => {
-      expect(() => controller.unsubscribePage('nope')).toThrow(NotFoundException);
-      expect(() =>
-        controller.unsubscribePage(signDigestUnsubscribeToken(USER_ID, -1)),
-      ).toThrow(NotFoundException);
-    });
+    it.each([
+      ['a garbage token', () => 'nope'],
+      ['an expired token', () => signDigestUnsubscribeToken(USER_ID, -1)],
+      ['an image token replayed here', () => signDigestImageToken(MEDIA_ID, 30)],
+    ])('GET 404s on %s, with the same page every time', (_label, make) => {
+      const { res, body } = capture();
 
-    it('GET 404s on an image token replayed here', () => {
-      expect(() => controller.unsubscribePage(signDigestImageToken(MEDIA_ID, 30))).toThrow(
-        NotFoundException,
-      );
+      controller.unsubscribePage(make(), res as never);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      // One identical body for every failure mode — the route must not be an
+      // oracle for which users exist or why a token failed.
+      expect(body()).toContain('This link is no longer valid');
+      expect(userSettings.patchSettings).not.toHaveBeenCalled();
     });
 
     it('POST opts the token holder out, with no login', async () => {
-      const html = await controller.unsubscribe(signDigestUnsubscribeToken(USER_ID));
+      const { res, body } = capture();
+
+      await controller.unsubscribe(signDigestUnsubscribeToken(USER_ID), res as never);
 
       expect(userSettings.patchSettings).toHaveBeenCalledWith(USER_ID, {
         memories: { emailDigestOptOut: true },
       });
-      expect(html).toContain("You're unsubscribed");
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(body()).toContain("You're unsubscribed");
     });
 
     it('POST is idempotent — a second one-click is still a success page', async () => {
-      await controller.unsubscribe(signDigestUnsubscribeToken(USER_ID));
-      const html = await controller.unsubscribe(signDigestUnsubscribeToken(USER_ID));
+      const token = signDigestUnsubscribeToken(USER_ID);
+      await controller.unsubscribe(token, fakeReply() as never);
+      const { res, body } = capture();
+      await controller.unsubscribe(token, res as never);
 
       expect(userSettings.patchSettings).toHaveBeenCalledTimes(2);
-      expect(html).toContain("You're unsubscribed");
+      expect(body()).toContain("You're unsubscribed");
     });
 
     it('POST 404s on a forged token and writes nothing', async () => {
       const token = signDigestUnsubscribeToken(USER_ID);
       const forged = token.slice(0, -1) + (token.endsWith('A') ? 'B' : 'A');
+      const { res, body } = capture();
 
-      await expect(controller.unsubscribe(forged)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await controller.unsubscribe(forged, res as never);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(body()).toContain('This link is no longer valid');
       expect(userSettings.patchSettings).not.toHaveBeenCalled();
     });
 
-    it('POST 404s for a user who no longer exists', async () => {
+    it('POST 404s for a user who no longer exists — same page, no hint', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
+      const { res, body } = capture();
 
-      await expect(
-        controller.unsubscribe(signDigestUnsubscribeToken(USER_ID)),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      await controller.unsubscribe(signDigestUnsubscribeToken(USER_ID), res as never);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(body()).toContain('This link is no longer valid');
       expect(userSettings.patchSettings).not.toHaveBeenCalled();
     });
 
     it('never reveals whose address a token belongs to', () => {
-      const html = controller.unsubscribePage(signDigestUnsubscribeToken(USER_ID));
+      const { res, body } = capture();
 
-      expect(html).not.toContain(USER_ID);
-      expect(html).not.toContain('@');
+      controller.unsubscribePage(signDigestUnsubscribeToken(USER_ID), res as never);
+
+      expect(body()).not.toContain(USER_ID);
+      expect(body()).not.toContain('@');
     });
   });
 });

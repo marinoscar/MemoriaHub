@@ -11,6 +11,7 @@ import { Logger } from '@nestjs/common';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
+import { fastifyAdapterOptions } from './common/fastify-setup';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -20,6 +21,10 @@ async function bootstrap() {
     throw new Error('TEST_AUTH_ENABLED must not be true in production');
   }
 
+  // Options live in common/fastify-setup.ts so the integration harness boots
+  // the SAME server — see that file's header for the 414 bug the split hid.
+  const adapter = new FastifyAdapter(fastifyAdapterOptions({ logger: true }));
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     // SECURITY: do not add `http2: true` here without reading
@@ -27,7 +32,7 @@ async function bootstrap() {
     // dependency (via @nestjs/platform-fastify) carries an accepted,
     // documented HTTP/2 DDoS advisory (GHSA-c96f-x56v-gq3h) that is only
     // inert because HTTP/2 is off. Enabling HTTP/2 reactivates it.
-    new FastifyAdapter({ logger: true }),
+    adapter,
   );
 
   // Register cookie plugin
@@ -42,25 +47,6 @@ async function bootstrap() {
       files: 1,
     },
   });
-
-  // RFC 8058 one-click unsubscribe (epic #300, issue #311) POSTs
-  // `List-Unsubscribe=One-Click` as `application/x-www-form-urlencoded`.
-  // Fastify ships parsers for JSON and text/plain only, so without this an
-  // unsubscribe triggered from a mail client's own button would be rejected
-  // with 415 before ever reaching the route. The body is intentionally left as
-  // the raw string: the only route accepting this content type ignores it
-  // entirely (the capability is the signed token in the URL, never the body),
-  // and parsing it would be a needless attack surface. @fastify/formbody is not
-  // pulled in for the same reason — a dependency for a body nobody reads.
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .addContentTypeParser(
-      'application/x-www-form-urlencoded',
-      { parseAs: 'string' },
-      (_req: unknown, body: string, done: (err: Error | null, body?: unknown) => void) =>
-        done(null, body),
-    );
 
   // Global prefix for all routes
   app.setGlobalPrefix('api');
