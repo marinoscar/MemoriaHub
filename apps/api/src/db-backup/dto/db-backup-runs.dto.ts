@@ -24,19 +24,19 @@ export const ListDatabaseBackupRunsSchema = z
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
   })
-  .default({});
+  .default({ page: 1, pageSize: 20 });
 
 export class ListDatabaseBackupRunsDto extends createZodDto(
   ListDatabaseBackupRunsSchema,
 ) {
   @ApiPropertyOptional({ enum: DB_BACKUP_STATUSES })
-  status?: (typeof DB_BACKUP_STATUSES)[number];
+  declare status?: (typeof DB_BACKUP_STATUSES)[number];
 
   @ApiPropertyOptional({ default: 1, minimum: 1 })
-  page?: number;
+  declare page: number;
 
   @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
-  pageSize?: number;
+  declare pageSize: number;
 }
 
 /**

@@ -3,6 +3,8 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
+import { DatabaseBackupAdminService } from './db-backup-admin.service';
+import { DatabaseBackupController } from './db-backup.controller';
 
 /**
  * DbBackupModule — PostgreSQL Database Backup & Restore (epic #339, issue #341).
@@ -26,7 +28,8 @@ import { DatabaseBackupRunnerService } from './database-backup-runner.service';
  */
 @Module({
   imports: [PrismaModule, SettingsModule, StorageProvidersModule],
-  providers: [DatabaseBackupRunnerService],
+  controllers: [DatabaseBackupController],
+  providers: [DatabaseBackupRunnerService, DatabaseBackupAdminService],
   exports: [DatabaseBackupRunnerService],
 })
 export class DbBackupModule {}
