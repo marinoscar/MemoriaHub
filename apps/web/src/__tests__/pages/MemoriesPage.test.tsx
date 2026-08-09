@@ -126,6 +126,21 @@ describe('MemoriesPage — feature gating', () => {
     expect(mockList).not.toHaveBeenCalled();
   });
 
+  it('shows skeletons — not the empty state — while the flags load', () => {
+    setFlags(null, true);
+
+    renderPage();
+
+    // The list hook is disabled until the flag resolves, so `items` is empty
+    // for a reason that is NOT "this circle has no memories". Rendering the
+    // new-install copy here would flash a wrong answer before the first
+    // request has even been allowed to fire.
+    expect(
+      screen.queryByText(/your memories will appear here/i),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('memory-card-skeleton').length).toBeGreaterThan(0);
+  });
+
   it('points an admin at the settings page when the feature is off', async () => {
     setFlags({ memories: false });
 

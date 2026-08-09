@@ -200,6 +200,13 @@ export default function MemoriesPage() {
 
   const filtersActive = Boolean(type || year || favorite);
 
+  // While the flags are still resolving the list hook is disabled, so `items`
+  // is legitimately empty — showing the "your memories will appear here" state
+  // then would flash a wrong answer before the first request has even been
+  // allowed to fire. Treat it as loading instead.
+  const flagsResolving = enabled === null;
+  const showSkeletons = flagsResolving || isInitialLoading;
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -317,7 +324,7 @@ export default function MemoriesPage() {
       )}
 
       {/* Skeleton grid — same geometry as the real one, so no layout jump. */}
-      {isInitialLoading && (
+      {showSkeletons && (
         <MemoryGrid>
           {Array.from({ length: 8 }, (_, i) => (
             <MemoryGridCell key={i} wide={i % 5 === 0}>
@@ -328,7 +335,7 @@ export default function MemoriesPage() {
       )}
 
       {/* Empty states */}
-      {!isInitialLoading && items.length === 0 && !error && (
+      {!showSkeletons && items.length === 0 && !error && (
         <EmptyState filtersActive={filtersActive} type={type} isAdmin={isAdmin} />
       )}
 
