@@ -332,12 +332,11 @@ Consistent success/error format:
 - `POST /api/circles/:id/invites` — send invite by email; upserts allowed_emails (circles:write + circle_admin rank)
 - `DELETE /api/circles/:id/invites/:inviteId` — cancel pending invite (circles:write + circle_admin)
 
-**Admin: Backup**
+**Admin: Backup** (server-side S3-to-local-disk replication; distinct from the node-based Local Media Backup feature at `/api/nodes/:id/backup/*` — see [docs/specs/local-backup.md](specs/local-backup.md))
 - `POST /api/admin/backup` — trigger backup run (Admin + backup:run)
 - `GET /api/admin/backup/runs` — list recent backup runs (Admin + backup:read)
 - `GET /api/admin/backup/status` — alias for /runs (Admin + backup:read)
 - `GET /api/admin/backup/runs/:runId` — get single run detail (Admin + backup:read)
-- `GET /api/admin/backup/objects` — list objects in the backup destination (Admin + backup:read)
 
 **Health**
 - `GET /api/health/live`

@@ -2561,19 +2561,7 @@ Get the status and result of a specific backup run.
 
 ---
 
-#### GET /admin/backup/objects
-**Requires:** Admin role + `backup:read` permission
-
-List media objects available for backup, each with a signed download URL.
-
-**Query Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `circleId` | uuid (optional) | Filter to one circle |
-
-**Response 200:** Array of `{ storageKey, downloadUrl, mediaItemId, circleId, size }`
-
----
+> **Node-based Local Media Backup** (a separate feature, epic #308) is not documented in this file's endpoint enumeration — see the [Local Media Backup specification §12](specs/local-backup.md#12-api-endpoints-reference) for the full `/api/nodes/:id/backup/*` control-plane reference (config, runs, change feed, ack, manifest, dimensions).
 
 ## Admin: Job Queue
 

@@ -308,7 +308,8 @@ Interactive API documentation is available at `/api/docs` when running the appli
 - `GET /api/admin/backup/runs` - List recent backup runs
 - `GET /api/admin/backup/status` - Alias for `/runs`
 - `GET /api/admin/backup/runs/:runId` - Get status of a specific run
-- `GET /api/admin/backup/objects` - List media objects with signed download URLs
+
+> Node-based Local Media Backup (a worker node pulling original bytes to its own disk) is a separate feature at `/api/nodes/:id/backup/*` — see [docs/specs/local-backup.md](docs/specs/local-backup.md).
 
 **Media (circle-scoped — `circleId` required):**
 - `GET /api/media/dashboard` - Circle dashboard (On This Day, recent, favorites, review-queue counts)
