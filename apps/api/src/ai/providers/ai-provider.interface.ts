@@ -32,6 +32,21 @@ export interface ChatRequest {
   system?: string;
   messages: ChatMessage[];
   tools?: AiToolDef[];
+  /**
+   * Sampling temperature, forwarded verbatim when set and omitted entirely
+   * when absent — so every existing caller keeps the provider's own default.
+   *
+   * Added for Memories title generation (epic #300, issue #306), which wants
+   * moderate creativity (~0.7) rather than the near-deterministic output the
+   * agentic-search path relies on.
+   *
+   * CAVEAT: some newer OpenAI reasoning models accept only the default
+   * temperature and reject an explicit value with a 400. That is a graceful
+   * degradation for the one caller that sets it (memory titling falls back to
+   * deterministic templates), but it is the reason this stays opt-in rather
+   * than becoming a default on `ChatRequest`.
+   */
+  temperature?: number;
 }
 
 export type ChatStreamEvent =

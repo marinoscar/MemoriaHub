@@ -86,6 +86,7 @@ export class AnthropicProvider implements AiProvider {
       model: req.model || ANTHROPIC_DEFAULT_MODEL,
       max_tokens: 16000,
       messages,
+      ...(req.temperature !== undefined && { temperature: req.temperature }),
       ...(req.system && { system: req.system }),
       ...(tools && { tools }),
     };
