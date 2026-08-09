@@ -78,6 +78,17 @@ export class SesEmailProvider implements EmailProvider {
               Html: { Data: msg.html, Charset: 'UTF-8' },
               Text: { Data: msg.text, Charset: 'UTF-8' },
             },
+            // SESv2 accepts extra headers on Simple content. Used for the
+            // Memories digest's List-Unsubscribe / List-Unsubscribe-Post pair,
+            // which is per-recipient and so cannot be provider configuration.
+            ...(msg.headers
+              ? {
+                  Headers: Object.entries(msg.headers).map(([Name, Value]) => ({
+                    Name,
+                    Value,
+                  })),
+                }
+              : {}),
           },
         },
       });
