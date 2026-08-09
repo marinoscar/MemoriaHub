@@ -26,10 +26,12 @@ const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 export class TokenBucket {
-  /** Refill rate in bytes per millisecond; 0 = unlimited. */
-  private readonly ratePerMs: number;
+  /** Refill rate in bytes per millisecond; 0 = unlimited. Mutable via setRate(). */
+  private ratePerMs: number;
   /** Maximum accumulated balance (one second's worth) — bounds idle bursts. */
-  private readonly capacity: number;
+  private capacity: number;
+  /** The configured cap in Mbps, kept for reporting (`backup-status`). */
+  private maxMbpsValue: number;
   /** Current balance in bytes (can go negative while a deficit is slept off). */
   private available = 0;
   private lastRefillAt: number;
@@ -38,6 +40,7 @@ export class TokenBucket {
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(maxMbps: number, hooks: TokenBucketHooks = {}) {
+    this.maxMbpsValue = maxMbps;
     this.ratePerMs = maxMbps > 0 ? (maxMbps * 1e6) / 8 / 1000 : 0;
     this.capacity = this.ratePerMs * 1000;
     this.now = hooks.now ?? Date.now;
@@ -48,6 +51,25 @@ export class TokenBucket {
   /** True when this bucket enforces no cap (maxMbps <= 0). */
   get unlimited(): boolean {
     return this.ratePerMs <= 0;
+  }
+
+  /** The currently configured cap in Mbps (0 = unlimited). */
+  get maxMbps(): number {
+    return this.maxMbpsValue;
+  }
+
+  /**
+   * Change the cap LIVE (issue #318 — `backup set-rate` on a running daemon):
+   * the new rate applies from the next take(). The balance is settled at the
+   * old rate first, then clamped to the new capacity so a rate cut cannot
+   * carry over a large old-rate burst.
+   */
+  setRate(maxMbps: number): void {
+    this.refill();
+    this.maxMbpsValue = maxMbps;
+    this.ratePerMs = maxMbps > 0 ? (maxMbps * 1e6) / 8 / 1000 : 0;
+    this.capacity = this.ratePerMs * 1000;
+    if (this.available > this.capacity) this.available = this.capacity;
   }
 
   private refill(): void {

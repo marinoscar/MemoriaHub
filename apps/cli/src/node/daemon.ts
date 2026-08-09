@@ -11,13 +11,33 @@
  *   { kind: 'snapshot', ...EngineSnapshot }        — sent once on connect
  *   { kind: 'log-tail', lines: string[] }          — recent log lines on connect
  *   { kind: 'event', ev, payload, ts }             — every engine event, live
+ *   { kind: 'backup-event', ev, payload, ts }      — every BackupEngine event,
+ *                                                    live (issue #318; only when
+ *                                                    a BackupHost is attached)
  *   { kind: 'status', ...EngineSnapshot }          — reply to { cmd: 'status' }
+ *   { kind: 'backup-status', ...BackupHostSnapshot } — reply to
+ *                                                    { cmd: 'backup-status' }
  *   { kind: 'ack', cmd, ... }                      — command acknowledged
- *   { kind: 'error', message }                     — malformed/unknown command
+ *   { kind: 'error', message, cmd?, code? }        — malformed/unknown command,
+ *                                                    or a command-scoped failure
+ *                                                    (code 'busy' /
+ *                                                    'not-configured' for the
+ *                                                    backup verbs)
  *
  * Client → server commands (one JSON per line):
  *   { cmd: 'status' } | { cmd: 'set-concurrency', value } |
- *   { cmd: 'drain' } | { cmd: 'stop' } | { cmd: 'heap-snapshot' }
+ *   { cmd: 'drain' } | { cmd: 'stop' } | { cmd: 'heap-snapshot' } |
+ *   { cmd: 'backup-status' } | { cmd: 'backup-run-now' } |
+ *   { cmd: 'backup-cancel' } | { cmd: 'backup-set-rate', concurrency?, maxMbps? }
+ *
+ * Backup hosting (issue #318): when `node start` finds a bound backup root it
+ * passes a BackupHost in DaemonHostOptions. The daemon then serves the four
+ * backup-* verbs and re-broadcasts the host's engine events. Backup and
+ * enrichment share ONLY the process — independent concurrency, and the
+ * BackupHost uses its OWN ApiClient because the CooldownGate is per-client
+ * (an enrichment provider cooldown must never brake backup, or vice versa).
+ * Without a BackupHost, backup-status answers { configured: false } and the
+ * other backup verbs reply with a 'not-configured' error frame.
  *
  * `heap-snapshot` is the diagnostic escape hatch for issue #156: it makes the
  * LIVE daemon serialize its V8 heap to a file so a slow leak can be pinned
@@ -50,6 +70,12 @@ import {
 } from './heap-snapshot.js';
 import type { NodeEngine } from './node-engine.js';
 import type { NodeLogger } from './logger.js';
+import {
+  BACKUP_HOST_EVENT,
+  BackupBusyError,
+  type BackupHost,
+  type BackupHostEventFrame,
+} from '../backup/backup-host.js';
 
 /**
  * Maximum bytes allowed to queue in one IPC client's socket before the daemon
@@ -93,6 +119,12 @@ export interface DaemonHostOptions {
    * without serializing a real multi-hundred-MB Jest heap to disk.
    */
   heapSnapshotFn?: (opts?: HeapSnapshotOptions) => HeapSnapshotResult;
+  /**
+   * Backup hosting (issue #318): serve the backup-* IPC verbs and
+   * re-broadcast BackupEngine events. Absent when no backup root is bound —
+   * the daemon then runs enrichment-only.
+   */
+  backupHost?: BackupHost;
 }
 
 export interface DaemonHost {
@@ -173,6 +205,7 @@ export async function startDaemonHost(
   const persistConcurrency = opts.persistConcurrency ?? defaultPersistConcurrency;
   const exit = opts.exit ?? ((code: number) => process.exit(code));
   const writeHeapSnapshot = opts.heapSnapshotFn ?? writeWorkerHeapSnapshot;
+  const backupHost = opts.backupHost;
   const isWindows = os.platform() === 'win32';
 
   // ---- Stale-instance detection -------------------------------------------
@@ -287,6 +320,120 @@ export async function startDaemonHost(
         });
         break;
       }
+      // ---- Backup verbs (issue #318) --------------------------------------
+      case 'backup-status': {
+        if (!backupHost) {
+          send(socket, {
+            kind: 'backup-status',
+            configured: false,
+            running: null,
+            lastRun: null,
+            checkpoint: null,
+            counters: null,
+            rate: null,
+          });
+          break;
+        }
+        send(socket, { kind: 'backup-status', ...backupHost.getSnapshot() });
+        break;
+      }
+      case 'backup-run-now': {
+        if (!backupHost) {
+          send(socket, {
+            kind: 'error',
+            cmd: 'backup-run-now',
+            code: 'not-configured',
+            message:
+              'backup is not configured on this daemon (run `memoriahub backup init` and restart the node)',
+          });
+          break;
+        }
+        try {
+          backupHost.startRun('manual');
+          logger.info('backup run started via ipc');
+          send(socket, { kind: 'ack', cmd: 'backup-run-now' });
+        } catch (err) {
+          if (err instanceof BackupBusyError) {
+            send(socket, {
+              kind: 'error',
+              cmd: 'backup-run-now',
+              code: 'busy',
+              message: err.message,
+            });
+          } else {
+            send(socket, {
+              kind: 'error',
+              cmd: 'backup-run-now',
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        break;
+      }
+      case 'backup-cancel': {
+        if (!backupHost) {
+          send(socket, {
+            kind: 'error',
+            cmd: 'backup-cancel',
+            code: 'not-configured',
+            message: 'backup is not configured on this daemon',
+          });
+          break;
+        }
+        const cancelled = backupHost.cancel();
+        if (cancelled) logger.info('backup run cancel requested via ipc');
+        send(socket, { kind: 'ack', cmd: 'backup-cancel', cancelled });
+        break;
+      }
+      case 'backup-set-rate': {
+        if (!backupHost) {
+          send(socket, {
+            kind: 'error',
+            cmd: 'backup-set-rate',
+            code: 'not-configured',
+            message: 'backup is not configured on this daemon',
+          });
+          break;
+        }
+        const body = msg as { concurrency?: unknown; maxMbps?: unknown };
+        const update: { concurrency?: number; maxMbps?: number } = {};
+        if (body.concurrency !== undefined) {
+          const value = Number(body.concurrency);
+          if (!Number.isInteger(value) || value < 1 || value > 32) {
+            send(socket, {
+              kind: 'error',
+              cmd: 'backup-set-rate',
+              message: 'backup-set-rate requires an integer concurrency between 1 and 32',
+            });
+            break;
+          }
+          update.concurrency = value;
+        }
+        if (body.maxMbps !== undefined) {
+          const value = Number(body.maxMbps);
+          if (!Number.isFinite(value) || value < 0) {
+            send(socket, {
+              kind: 'error',
+              cmd: 'backup-set-rate',
+              message: 'backup-set-rate requires a non-negative maxMbps (0 = unlimited)',
+            });
+            break;
+          }
+          update.maxMbps = value;
+        }
+        if (update.concurrency === undefined && update.maxMbps === undefined) {
+          send(socket, {
+            kind: 'error',
+            cmd: 'backup-set-rate',
+            message: 'backup-set-rate requires concurrency and/or maxMbps',
+          });
+          break;
+        }
+        const effective = backupHost.setRate(update);
+        logger.info('backup rate changed via ipc', { ...effective });
+        send(socket, { kind: 'ack', cmd: 'backup-set-rate', ...effective });
+        break;
+      }
       case 'drain': {
         engine.drain();
         logger.info('drain requested via ipc');
@@ -363,6 +510,18 @@ export async function startDaemonHost(
     subscriptions.push([ev, listener]);
   }
 
+  // BackupHost events (issue #318): the host re-emits every BackupEngine
+  // event as one 'backup-event' emission; the daemon frames it for IPC.
+  const backupListener = (frame: BackupHostEventFrame): void => {
+    broadcast({
+      kind: 'backup-event',
+      ev: frame.ev,
+      payload: frame.payload,
+      ts: new Date().toISOString(),
+    });
+  };
+  backupHost?.on(BACKUP_HOST_EVENT, backupListener);
+
   // ---- Cleanup --------------------------------------------------------------
   const cleanupFiles = (): void => {
     if (!isWindows) {
@@ -385,6 +544,12 @@ export async function startDaemonHost(
     if (closed) return Promise.resolve();
     closed = true;
     for (const [ev, listener] of subscriptions) emitter.off(ev, listener);
+    if (backupHost) {
+      backupHost.off(BACKUP_HOST_EVENT, backupListener);
+      // Stop the scheduler poll; an in-flight backup run completes on its own
+      // (its timers/sockets are what keep the process alive if needed).
+      backupHost.stopScheduler();
+    }
     for (const socket of clients) socket.destroy();
     clients.clear();
     process.removeListener('exit', cleanupFiles);

@@ -144,9 +144,17 @@ export class SettingsRepo {
     return this.get<number>('backup.concurrency', 2);
   }
 
+  setBackupConcurrency(n: number): void {
+    this.set('backup.concurrency', n);
+  }
+
   /** Aggregate download bandwidth cap in Mbps; 0 = unlimited (default: 0). */
   backupMaxMbps(): number {
     return this.get<number>('backup.maxMbps', 0);
+  }
+
+  setBackupMaxMbps(mbps: number): void {
+    this.set('backup.maxMbps', mbps);
   }
 
   /** Change-feed page size (default: 100; server clamps to backup.maxPageSize). */
