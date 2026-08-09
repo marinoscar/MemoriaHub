@@ -357,6 +357,26 @@ export interface SystemSettingsValue {
    * with no further schema change.
    */
   databaseBackup?: DatabaseBackupSettingsValue;
+  /**
+   * Admin-controlled maintenance mode (issue #348). Persisted so the flag
+   * survives the container restart it was enabled for; MaintenanceModeService
+   * layers a process-local override on top for the #344 DB-rename window.
+   */
+  maintenance?: MaintenanceSettingsValue;
+}
+
+/** The `maintenance.*` system-settings namespace (issue #348). */
+export interface MaintenanceSettingsValue {
+  /** Persisted master switch. The env override wins over this in both directions. */
+  enabled: boolean;
+  /** Operator message shown on the maintenance screen (≤500 chars). */
+  message: string;
+  /** When true (default), Admin-role users bypass the 503 entirely. */
+  allowAdmins: boolean;
+  /** ISO timestamp maintenance was last enabled; null when off. */
+  startedAt: string | null;
+  /** User id that enabled maintenance; null when off. */
+  startedById: string | null;
 }
 
 /** The `databaseBackup.*` system-settings namespace (epic #339, issue #340). */
@@ -690,5 +710,12 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     compressionLevel: 1,
     restoreRollbackMode: 'retain_database',
     oldDatabaseRetentionHours: 168,
+  },
+  maintenance: {
+    enabled: false,
+    message: '',
+    allowAdmins: true,
+    startedAt: null,
+    startedById: null,
   },
 };

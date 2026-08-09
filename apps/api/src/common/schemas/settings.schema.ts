@@ -616,6 +616,35 @@ export const systemSettingsSchema = z.object({
     restoreRollbackMode: 'retain_database',
     oldDatabaseRetentionHours: 168,
   }),
+  // Admin-controlled maintenance mode (issue #348).
+  //
+  // PERSISTENCE IS THE POINT: an in-memory-only flag would be cleared by the
+  // very container restart the admin enabled it for, so the app would come
+  // back up serving traffic mid-upgrade. MaintenanceModeService layers a
+  // short-lived in-memory override on top of this for #344's DB-rename window.
+  maintenance: z.object({
+    enabled: z.boolean().default(false),
+    /** Shown to blocked users, e.g. "Upgrading to v2.4, back by 03:00 UTC". */
+    message: z.string().max(500).default(''),
+    /**
+     * LOCKOUT SAFEGUARD #2 (see maintenance.guard.ts). Default true so an
+     * admin can exercise the app and confirm an upgrade landed BEFORE
+     * flipping maintenance off. Setting it false blocks even admins and is
+     * the one path that can lock you out of the UI — recover with the
+     * MAINTENANCE_MODE=false env break-glass.
+     */
+    allowAdmins: z.boolean().default(true),
+    /** ISO timestamp set when maintenance was last enabled; null when off. */
+    startedAt: z.string().nullable().default(null),
+    /** User id that enabled maintenance; null when off. */
+    startedById: z.string().nullable().default(null),
+  }).optional().default({
+    enabled: false,
+    message: '',
+    allowAdmins: true,
+    startedAt: null,
+    startedById: null,
+  }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -828,5 +857,13 @@ export const systemSettingsPatchSchema = z.object({
     compressionLevel: z.number().int().min(0).max(9).optional(),
     restoreRollbackMode: z.enum(['retain_database', 'pre_restore_dump']).optional(),
     oldDatabaseRetentionHours: z.number().int().min(1).max(720).optional(),
+  }).optional(),
+  // Admin-controlled maintenance mode (issue #348) — all-optional twin.
+  maintenance: z.object({
+    enabled: z.boolean().optional(),
+    message: z.string().max(500).optional(),
+    allowAdmins: z.boolean().optional(),
+    startedAt: z.string().nullable().optional(),
+    startedById: z.string().nullable().optional(),
   }).optional(),
 });

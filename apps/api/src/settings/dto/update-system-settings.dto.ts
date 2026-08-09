@@ -294,6 +294,18 @@ export const patchSystemSettingsSchema = z.object({
       oldDatabaseRetentionHours: z.number().int().min(1).max(720).optional(),
     })
     .optional(),
+  // Admin-controlled maintenance mode (issue #348). Same THIRD hand-maintained
+  // copy caveat as `databaseBackup`/`memories` above — a key missing HERE is
+  // silently stripped from the request body before the service ever sees it.
+  maintenance: z
+    .object({
+      enabled: z.boolean().optional(),
+      message: z.string().max(500).optional(),
+      allowAdmins: z.boolean().optional(),
+      startedAt: z.string().nullable().optional(),
+      startedById: z.string().nullable().optional(),
+    })
+    .optional(),
 }).default({});
 
 export class PatchSystemSettingsDto extends createZodDto(
