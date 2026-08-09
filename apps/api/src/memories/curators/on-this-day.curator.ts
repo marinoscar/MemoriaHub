@@ -31,7 +31,7 @@
 // scheduled run, not 2 × lookbackYears.
 // =============================================================================
 
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { MemoryType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MemoryCurationService } from '../curation/memory-curation.service';

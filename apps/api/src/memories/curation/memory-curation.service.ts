@@ -43,7 +43,7 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { MediaTagSource, MediaType, MemoryType, Prisma } from '@prisma/client';
+import { MediaTagSource, MediaType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CuratedItem,
