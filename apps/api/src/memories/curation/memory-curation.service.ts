@@ -717,6 +717,11 @@ export class MemoryCurationService {
       input.selection.items.map((i) => i.mediaItemId),
     );
     const materiallyChanged = distance >= MATERIAL_CHANGE_THRESHOLD;
+    // A caller may also declare the title stale for a reason membership cannot
+    // show — see UpsertMemoryInput.retitle. This resets titling without claiming
+    // the item set materially changed, which is a separate fact the caller (and
+    // #311's digest) reads independently.
+    const resetTitle = materiallyChanged || input.retitle === true;
 
     await this.prisma.$transaction(async (tx) => {
       // Replace rather than diff: MemoryItem carries no per-item user state, so
@@ -747,10 +752,11 @@ export class MemoryCurationService {
           expiresAt: input.expiresAt ?? null,
           personId: input.personId ?? null,
           // Titling is preserved on a minor refresh — including an AI title and
-          // narrative from #306. On a MATERIAL change the old title may now
-          // describe a set that no longer exists, so it is reset to the
-          // template and handed back to AI re-titling on a later pass.
-          ...(materiallyChanged
+          // narrative from #306. On a MATERIAL change (or an explicit `retitle`)
+          // the old title may now describe a set, or a place, that no longer
+          // exists, so it is reset to the template and handed back to AI
+          // re-titling on a later pass.
+          ...(resetTitle
             ? {
                 title: input.title,
                 subtitle: input.subtitle ?? null,

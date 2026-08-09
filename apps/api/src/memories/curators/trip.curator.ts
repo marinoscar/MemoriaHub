@@ -475,6 +475,11 @@ export class TripCurator implements MemoryCurator {
       selection,
       // Trips never expire — unlike on_this_day, a trip stays interesting.
       expiresAt: null,
+      // The trip is still the same trip, but it is no longer named after the
+      // same town, so the stored title has been falsified rather than merely
+      // aged. See UpsertMemoryInput.retitle for why that is distinct from a
+      // material membership change.
+      retitle: identity.subjectChanged,
       meta: {
         locality: place.locality,
         admin1: place.admin1,
@@ -516,13 +521,13 @@ export class TripCurator implements MemoryCurator {
     subjectKey: string;
     match: ExistingTrip | null;
     existing: ExistingTrip[];
-  }): Promise<{ periodKey: string; subjectKey: string }> {
+  }): Promise<{ periodKey: string; subjectKey: string; subjectChanged: boolean }> {
     const { circleId, run, subjectKey, match, existing } = args;
     const periodKey = dayIndexToKey(run.startDayIndex);
 
-    if (!match) return { periodKey, subjectKey };
+    if (!match) return { periodKey, subjectKey, subjectChanged: false };
     if (match.periodKey === periodKey && match.subjectKey === subjectKey) {
-      return { periodKey, subjectKey };
+      return { periodKey, subjectKey, subjectChanged: false };
     }
 
     // Another memory already occupies the slot we would move into. Rather than
@@ -539,9 +544,10 @@ export class TripCurator implements MemoryCurator {
           `${periodKey}/${subjectKey}, which memory ${conflict.id} already holds; ` +
           'refreshing under its existing keys instead',
       );
-      return { periodKey: match.periodKey, subjectKey: match.subjectKey };
+      return { periodKey: match.periodKey, subjectKey: match.subjectKey, subjectChanged: false };
     }
 
+    const subjectChanged = match.subjectKey !== subjectKey;
     await this.prisma.memory.update({
       where: { id: match.id },
       data: { periodKey, subjectKey },
@@ -550,6 +556,6 @@ export class TripCurator implements MemoryCurator {
     match.periodKey = periodKey;
     match.subjectKey = subjectKey;
 
-    return { periodKey, subjectKey };
+    return { periodKey, subjectKey, subjectChanged };
   }
 }
