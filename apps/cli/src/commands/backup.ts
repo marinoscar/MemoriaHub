@@ -39,8 +39,16 @@ import { runBackupInit, BackupRootConflictError } from '../backup/init-backup.js
 import { RunAlreadyActiveError } from '../backup/backup-engine.js';
 import { CatalogOpenError } from '../backup/catalog-db.js';
 import { executeRun, resolveBackupExitCode } from '../backup/execute-run.js';
+import {
+  runViaDaemon,
+  shouldDelegateToDaemon,
+  DaemonBackupBusyError,
+  DaemonBackupUnavailableError,
+} from '../backup/run-via-daemon.js';
+import { collectBackupStatus, type BackupStatusReport } from '../backup/status-report.js';
 import { CATALOG_DB_REL_PATH } from '../backup/layout.js';
-import { renderBackupHeadless } from '../render/headless-backup.js';
+import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
+import { renderBackupHeadless, formatBytes } from '../render/headless-backup.js';
 import { ui, isTTY } from '../ui.js';
 
 const require = createRequire(import.meta.url);
@@ -233,6 +241,7 @@ interface RunCmdOpts {
   json?: boolean;
   strict?: boolean;
   reconcile?: boolean;
+  embedded?: boolean;
 }
 
 function runCmd(): Command {
@@ -244,6 +253,7 @@ function runCmd(): Command {
     .option('--json', 'Emit NDJSON events instead of human output')
     .option('--strict', 'Exit non-zero when any item failed')
     .option('--reconcile', 'Full reconcile pass (not available yet)')
+    .option('--embedded', 'Force the in-process engine even when a daemon is running')
     .action(async (opts: RunCmdOpts) => {
       const cfg = requireConfig();
 
@@ -261,6 +271,41 @@ function runCmd(): Command {
             '`memoriahub backup init --dest <dir>` first.',
         );
         process.exit(1);
+      }
+
+      // Delegate to a running daemon (issue #318): the daemon owns the run
+      // lock and the scheduler, so an embedded engine next to it would only
+      // race the 409 guard. Events stream back over IPC into the SAME
+      // renderer; --embedded forces the in-process engine.
+      if (shouldDelegateToDaemon(opts.embedded === true, await isDaemonRunning())) {
+        try {
+          const client = await connectToDaemon();
+          try {
+            if (!opts.json) ui.dim('Worker-node daemon detected — delegating the run over IPC.');
+            const outcome = await runViaDaemon(client, {
+              attachRenderer: (emitter) =>
+                renderBackupHeadless(emitter, { json: opts.json === true }),
+            });
+            process.exit(resolveBackupExitCode(outcome, opts.strict === true));
+          } finally {
+            client.close();
+          }
+        } catch (err) {
+          if (err instanceof DaemonBackupBusyError) {
+            ui.error(err.message);
+            process.exit(1);
+          }
+          if (err instanceof DaemonBackupUnavailableError) {
+            // Daemon started before this machine's backup root was bound —
+            // fall through to the embedded engine.
+            ui.warn(`${err.message} — running the embedded engine instead.`);
+          } else {
+            ui.warn(
+              `Daemon delegation failed (${err instanceof Error ? err.message : String(err)}) ` +
+                '— running the embedded engine instead.',
+            );
+          }
+        }
       }
 
       const concurrency =
@@ -309,11 +354,283 @@ function runCmd(): Command {
     });
 }
 
+// ---------------------------------------------------------------------------
+// backup status (issue #318)
+// ---------------------------------------------------------------------------
+
+function renderStatusReport(report: BackupStatusReport): void {
+  const { local, daemon, server } = report;
+
+  // --- Local catalog (offline-capable) --------------------------------------
+  ui.line(`Local catalog${local.root ? ` (${local.root})` : ''}  [${local.source}]`);
+  if (!local.configured) {
+    ui.dim(`  ${local.error ?? 'not configured'}`);
+  } else if (local.error) {
+    ui.dim(`  ${local.error}`);
+  } else {
+    const c = local.counters;
+    if (c) {
+      ui.line(
+        `  Items      : ${c.totalItems} (${formatBytes(c.totalBytes)}) — ` +
+          `${c.byStatus.present.count} present, ${c.byStatus.failed.count} failed, ` +
+          `${c.byStatus.trashed.count} trashed, ${c.archivedCount} archived`,
+      );
+    }
+    ui.line(`  Checkpoint : ${local.checkpoint ? local.checkpoint.updatedAt : '(none — never synced)'}`);
+    if (local.lastRun) {
+      ui.line(
+        `  Last run   : ${local.lastRun.status} at ${local.lastRun.startedAt} — ` +
+          `${local.lastRun.itemsDownloaded ?? 0} downloaded, ${local.lastRun.errorCount ?? 0} error(s)`,
+      );
+    } else {
+      ui.line('  Last run   : (none recorded)');
+    }
+  }
+  ui.blank();
+
+  // --- Daemon (live, via IPC) ------------------------------------------------
+  ui.line(`Daemon  [${daemon.source}]`);
+  if (daemon.error) {
+    ui.dim(`  ${daemon.error}`);
+  } else if (!daemon.running) {
+    ui.dim('  not running (runs execute embedded; schedules fire only while a daemon is up)');
+  } else if (daemon.snapshot) {
+    const snap = daemon.snapshot as {
+      configured?: boolean;
+      running?: { trigger?: string; startedAt?: string } | null;
+      rate?: { concurrency?: number; maxMbps?: number } | null;
+    };
+    if (snap.configured === false) {
+      ui.dim('  running, but backup hosting is not active (daemon started before `backup init`)');
+    } else if (snap.running) {
+      ui.line(
+        `  Run active : ${snap.running.trigger ?? 'manual'} (since ${snap.running.startedAt ?? '?'})`,
+      );
+    } else {
+      ui.line('  Run active : no (idle)');
+    }
+    if (snap.rate) {
+      ui.line(
+        `  Rate       : concurrency ${snap.rate.concurrency ?? '?'}, ` +
+          `max ${snap.rate.maxMbps && snap.rate.maxMbps > 0 ? `${snap.rate.maxMbps} Mbps` : 'unlimited'}`,
+      );
+    }
+  }
+  ui.blank();
+
+  // --- Server ---------------------------------------------------------------
+  ui.line(`Server  [${server.source}]`);
+  if (!server.reachable) {
+    ui.dim(`  ${server.error ?? 'unreachable'}`);
+    return;
+  }
+  const cfg = server.config;
+  if (!cfg) {
+    ui.dim('  backup has never been configured for this node server-side');
+    return;
+  }
+  ui.line(`  Enabled    : ${cfg.enabled ? 'yes' : 'no'}`);
+  ui.line(
+    `  Schedule   : ${cfg.scheduleCron ?? '(none)'}${cfg.timezone ? ` (${cfg.timezone})` : ''}`,
+  );
+  ui.line(`  Next run   : ${cfg.nextRunAt ?? '(not scheduled)'}`);
+  if (cfg.pending) {
+    ui.line(
+      `  Pending    : ${cfg.pending.items} item(s), ${formatBytes(Number(cfg.pending.bytes))} behind the checkpoint`,
+    );
+  }
+  if (server.runs.length > 0) {
+    ui.line('  Recent runs:');
+    for (const run of server.runs) {
+      ui.line(
+        `    ${run.startedAt}  ${run.status.padEnd(9)} (${run.trigger}) — ` +
+          `${run.itemsDownloaded} downloaded, ${run.errorCount} error(s)`,
+      );
+    }
+  }
+}
+
+function statusCmd(): Command {
+  return new Command('status')
+    .description('Show backup status: local catalog, running daemon, and server')
+    .option('--json', 'Emit the merged status report as JSON')
+    .action(async (opts: { json?: boolean }) => {
+      const settings = new SettingsRepo(getDb());
+      const cfg = loadConfig();
+      const report = await collectBackupStatus({
+        settings,
+        api: cfg ? new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat }) : null,
+        isDaemonRunningFn: isDaemonRunning,
+        connectFn: () => connectToDaemon(),
+      });
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+        return;
+      }
+      renderStatusReport(report);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// backup schedule (issue #318 — the SERVER computes cron/nextRunAt)
+// ---------------------------------------------------------------------------
+
+function requireBackupNodeId(settings: SettingsRepo): string {
+  const nodeId = settings.backupNodeId();
+  if (!nodeId) {
+    ui.error(
+      'No backup root is configured on this machine. Run ' +
+        '`memoriahub backup init --dest <dir>` first.',
+    );
+    process.exit(1);
+  }
+  return nodeId;
+}
+
+function scheduleCmd(): Command {
+  return new Command('schedule')
+    .description('Manage the automatic backup schedule (cron is computed server-side)')
+    .argument('[cron]', '5-field cron expression, e.g. "0 3 * * *"')
+    .option('--tz <iana>', 'IANA timezone for the schedule (e.g. America/Costa_Rica)')
+    .option('--show', 'Show the current schedule')
+    .option('--disable', 'Clear the schedule (no more scheduled runs)')
+    .addHelpText(
+      'after',
+      '\nScheduled runs fire from a RUNNING worker-node daemon (`memoriahub node start`),\n' +
+        'which polls the server every minute and starts a run when the server-computed\n' +
+        'nextRunAt is due. A machine offline at the scheduled time self-heals: the run\n' +
+        'fires on the first poll after the daemon is back up.',
+    )
+    .action(async (cron: string | undefined, opts: { tz?: string; show?: boolean; disable?: boolean }) => {
+      const cfg = requireConfig();
+      const settings = new SettingsRepo(getDb());
+      const nodeId = requireBackupNodeId(settings);
+      const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
+
+      try {
+        if (opts.show) {
+          const { config } = await api.getNodeBackupConfig(nodeId);
+          if (!config) {
+            ui.info('Backup has never been configured for this node server-side.');
+            return;
+          }
+          ui.line(`Schedule : ${config.scheduleCron ?? '(none)'}`);
+          ui.line(`Timezone : ${config.timezone ?? '(server default, UTC)'}`);
+          ui.line(`Enabled  : ${config.enabled ? 'yes' : 'no'}`);
+          ui.line(`Next run : ${config.nextRunAt ?? '(not scheduled)'}`);
+          return;
+        }
+
+        if (opts.disable) {
+          await api.putNodeBackupConfig(nodeId, { scheduleCron: null });
+          ui.success('Backup schedule cleared — no more scheduled runs.');
+          return;
+        }
+
+        if (!cron) {
+          ui.error('Provide a cron expression, or use --show / --disable.');
+          process.exit(1);
+        }
+
+        const res = await api.putNodeBackupConfig(nodeId, {
+          scheduleCron: cron,
+          ...(opts.tz !== undefined ? { timezone: opts.tz } : {}),
+        });
+        ui.success(`Backup schedule set: ${cron}${opts.tz ? ` (${opts.tz})` : ''}`);
+        ui.line(`Next run : ${res.config?.nextRunAt ?? '(unknown)'}`);
+        if (!res.config?.enabled) {
+          ui.warn('Backup is currently DISABLED server-side — the schedule will not fire.');
+        }
+        ui.dim('Scheduled runs fire from a running daemon (`memoriahub node start`).');
+      } catch (err) {
+        if (err instanceof ApiError) {
+          // Surface server validation (bad cron / bad timezone) verbatim.
+          ui.error(err.serverMessage);
+          process.exit(1);
+        }
+        ui.error(`Schedule update failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// backup set-rate (issue #318 — persists to settings KV + live IPC push)
+// ---------------------------------------------------------------------------
+
+function setRateCmd(): Command {
+  return new Command('set-rate')
+    .description('Set backup throttle knobs (persisted; applied live to a running daemon)')
+    .option('--concurrency <n>', 'Concurrent download workers (1-32)')
+    .option('--max-mbps <x>', 'Aggregate bandwidth cap in Mbps; 0 = unlimited')
+    .action(async (opts: { concurrency?: string; maxMbps?: string }) => {
+      if (opts.concurrency === undefined && opts.maxMbps === undefined) {
+        ui.error('Provide --concurrency and/or --max-mbps.');
+        process.exit(1);
+      }
+
+      let concurrency: number | undefined;
+      if (opts.concurrency !== undefined) {
+        const n = Number(opts.concurrency);
+        if (!Number.isInteger(n) || n < 1 || n > 32) {
+          ui.error(`Invalid --concurrency: ${opts.concurrency} (expected an integer 1-32)`);
+          process.exit(1);
+        }
+        concurrency = n;
+      }
+      const maxMbps = parseNumberFlag(opts.maxMbps, '--max-mbps');
+
+      const settings = new SettingsRepo(getDb());
+      requireBackupNodeId(settings);
+      if (concurrency !== undefined) settings.setBackupConcurrency(concurrency);
+      if (maxMbps !== undefined) settings.setBackupMaxMbps(maxMbps);
+      ui.success(
+        `Backup rate saved: concurrency ${settings.backupConcurrency()}, ` +
+          `max ${settings.backupMaxMbps() > 0 ? `${settings.backupMaxMbps()} Mbps` : 'unlimited'}`,
+      );
+
+      // Live push: a running daemon applies the change on its next page/chunk.
+      if (await isDaemonRunning()) {
+        try {
+          const client = await connectToDaemon();
+          try {
+            client.send({
+              cmd: 'backup-set-rate',
+              ...(concurrency !== undefined ? { concurrency } : {}),
+              ...(maxMbps !== undefined ? { maxMbps } : {}),
+            });
+            const reply = await client.waitFor(
+              (m) => (m.kind === 'ack' || m.kind === 'error') && m['cmd'] === 'backup-set-rate',
+              5000,
+            );
+            if (reply.kind === 'ack') {
+              ui.success('Applied live to the running daemon (next page uses the new rate).');
+            } else {
+              ui.warn(`Daemon did not apply the rate: ${String(reply['message'])}`);
+            }
+          } finally {
+            client.close();
+          }
+        } catch (err) {
+          ui.warn(
+            `Could not push the rate to the running daemon: ` +
+              `${err instanceof Error ? err.message : String(err)} (it will pick it up next run).`,
+          );
+        }
+      } else {
+        ui.dim('No daemon running — the new rate applies from the next run.');
+      }
+    });
+}
+
 export function backupCommand(): Command {
   const cmd = new Command('backup');
   cmd
     .description('Local media backup to a folder on this machine (node-based)')
     .addCommand(initCmd())
-    .addCommand(runCmd());
+    .addCommand(runCmd())
+    .addCommand(statusCmd())
+    .addCommand(scheduleCmd())
+    .addCommand(setRateCmd());
   return cmd;
 }

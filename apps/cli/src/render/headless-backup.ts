@@ -14,6 +14,7 @@ import chalk from 'chalk';
 import { ui, isTTY } from '../ui.js';
 import {
   BACKUP_EV,
+  type BackupTypedEmitter,
   type BackupEngineStats,
   type ItemDonePayload,
   type PageFetchedPayload,
@@ -22,7 +23,6 @@ import {
   type ThrottlePayload,
   type BackupErrorPayload,
 } from '../backup/events.js';
-import type { BackupEngine } from '../backup/backup-engine.js';
 
 /** Format a byte count for humans (decimal units, one decimal place). */
 export function formatBytes(bytes: number): string {
@@ -48,9 +48,10 @@ export interface RenderBackupOptions {
 
 /**
  * Attach terminal-output listeners to `engine`. Must be called before
- * `engine.runBackup()`.
+ * `engine.runBackup()`. Accepts any BackupTypedEmitter — the embedded
+ * BackupEngine or the IPC event proxy used by daemon delegation (#318).
  */
-export function renderBackupHeadless(engine: BackupEngine, opts: RenderBackupOptions): void {
+export function renderBackupHeadless(engine: BackupTypedEmitter, opts: RenderBackupOptions): void {
   const write = opts.write ?? ((line: string): void => void process.stdout.write(line));
   const now = opts.now ?? Date.now;
 
