@@ -39,15 +39,11 @@ vi.mock('../../components/media/MediaGallery', () => ({
   )),
 }));
 
-// REGRESSION GUARD (issue #250): `useDashboard` is mocked here even though
-// HomePage no longer imports it. The mock resolves with counts that WOULD
-// render all three review-queue banners if the removed JSX were ever
-// reintroduced — so this is a real trap, not just "the banners aren't here
-// today because nothing fetches them". If a future change re-adds the
-// `useDashboard()` call and the banner JSX, this mock feeds it non-zero
-// counts and the "banners removed" assertions below start failing.
-vi.mock('../../hooks/useDashboard', () => ({
-  useDashboard: vi.fn(),
+// The memories carousel owns its own feature-flag gating and feed request;
+// mocking it keeps this file's assertions about HomePage chrome isolated from
+// both. Its default mock renders nothing, matching the flag-off default.
+vi.mock('../../components/memories/MemoriesCarousel', () => ({
+  MemoriesCarousel: vi.fn(() => null),
 }));
 
 // ---------------------------------------------------------------------------
@@ -56,10 +52,10 @@ vi.mock('../../hooks/useDashboard', () => ({
 
 import HomePage from '../../pages/HomePage';
 import { useCircle } from '../../hooks/useCircle';
-import { useDashboard } from '../../hooks/useDashboard';
+import { MemoriesCarousel } from '../../components/memories/MemoriesCarousel';
 
 const mockUseCircle = vi.mocked(useCircle);
-const mockUseDashboard = vi.mocked(useDashboard);
+const mockMemoriesCarousel = vi.mocked(MemoriesCarousel);
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -118,27 +114,7 @@ function setupCircleLoading() {
 describe('HomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Non-zero on every count, and on every level (0/1/plural), so that a
-    // reintroduced banner would render regardless of which count triggered it
-    // or which singular/plural label branch it hit. See the module mock above.
-    mockUseDashboard.mockReturnValue({
-      data: {
-        onThisDay: [],
-        recent: [],
-        favorites: [],
-        counts: {
-          total: 10,
-          missingGeo: 0,
-          pendingBurstGroups: 2,
-          pendingDuplicateGroups: 4,
-          pendingLocationSuggestions: 7,
-          pendingEnhancements: 3,
-        },
-      },
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    mockMemoriesCarousel.mockReturnValue(null);
   });
 
   // -------------------------------------------------------------------------
@@ -230,24 +206,15 @@ describe('HomePage', () => {
   // -------------------------------------------------------------------------
   // e) Review-queue banners removed (issue #250, epic #240) — REGRESSION GUARD
   //
-  // The point of this block is not "the banners aren't on the page" (trivially
-  // true of any page that renders nothing extra) — it's that reintroducing the
-  // deleted `useDashboard()` call and banner JSX would be CAUGHT here. The
-  // `useDashboard` mock (see module mocks above) is wired to resolve with
-  // non-zero pendingBurstGroups/pendingDuplicateGroups/pendingLocationSuggestions
-  // on every render in this file, precisely so that IF the removed code came
-  // back, these assertions would start failing instead of staying vacuously
-  // green. All cases run with an ACTIVE circle — the banners' rendering
-  // condition (per the deleted code) never depended on `showNoCircle`.
+  // The banners' `useDashboard()` source was deleted outright in issue #309, so
+  // the strongest guard against their return is now the compiler: there is no
+  // module left to import. These assertions cover the rendered shape — that no
+  // Alert-bearing banner sits beside the gallery — which is what a hand-rolled
+  // reintroduction (fetching the counts some other way) would still trip. All
+  // cases run with an ACTIVE circle, since the banners' rendering condition
+  // never depended on `showNoCircle`.
   // -------------------------------------------------------------------------
   describe('Review-queue banners removed (issue #250)', () => {
-    it('does not call useDashboard at all', () => {
-      setupActiveCircle();
-      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
-
-      expect(mockUseDashboard).not.toHaveBeenCalled();
-    });
-
     it('does not render the pending burst groups banner', () => {
       setupActiveCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
@@ -289,6 +256,37 @@ describe('HomePage', () => {
       // `.MuiAlert-root` siblings here (the no-circle alert is not present
       // because a circle is active in this scenario).
       expect(container.querySelectorAll('.MuiAlert-root')).toHaveLength(0);
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // f) Memories carousel (issue #309, epic #300)
+  //
+  // HomePage's only job here is to MOUNT the row and hand it the active
+  // circle — every gating decision (flag off, empty feed) belongs to the
+  // carousel and is covered by its own suite. The second case is the one that
+  // matters for "Home is pixel-identical on a new install": a carousel that
+  // renders null must leave nothing behind on the page.
+  // -------------------------------------------------------------------------
+  describe('Memories carousel', () => {
+    it('mounts the carousel with the active circle id', () => {
+      setupActiveCircle();
+      render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
+
+      expect(mockMemoriesCarousel).toHaveBeenCalled();
+      expect(mockMemoriesCarousel.mock.calls[0][0]).toMatchObject({
+        circleId: 'circle-1',
+      });
+    });
+
+    it('adds nothing to the page when the carousel renders null', () => {
+      setupActiveCircle();
+      const { container } = render(<HomePage />, {
+        wrapperOptions: { authenticated: true, user: mockUser },
+      });
+
+      expect(container.querySelectorAll('section')).toHaveLength(0);
       expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
     });
   });

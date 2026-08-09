@@ -1547,4 +1547,62 @@ describe('Sidebar', () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Memories entry (issue #309, epic #300)
+  //
+  // Same strict-true convention the AI Enhancements entry above documents, and
+  // for the same reason: `features.memories` defaults OFF, so a truthy check
+  // would flash the entry in for one render while the flags load and a flags
+  // outage (which leaves `features` null) would show a nav item pointing at a
+  // surface the API answers with empty lists.
+  // ---------------------------------------------------------------------------
+  describe('Memories entry (issue #309)', () => {
+    /** Set the raw feature record directly; the enhancer flag stays off. */
+    function mockMemories(features: Record<string, boolean> | null): void {
+      vi.mocked(useFeatureFlags).mockReturnValue({
+        features,
+        pictureEnhancement: null,
+        isLoading: false,
+        error: null,
+        refresh: vi.fn().mockResolvedValue(undefined),
+      });
+    }
+
+    it('is hidden when the flag is off', () => {
+      mockMemories({ memories: false });
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByText('Memories')).not.toBeInTheDocument();
+    });
+
+    it('is hidden when the flag key is absent entirely', () => {
+      mockMemories({});
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByText('Memories')).not.toBeInTheDocument();
+    });
+
+    it('is hidden when the flags failed to load', () => {
+      mockMemories(null);
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByText('Memories')).not.toBeInTheDocument();
+    });
+
+    it('appears in the primary section when the flag is on', () => {
+      mockMemories({ memories: true });
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(screen.getByText('Memories')).toBeInTheDocument();
+    });
+
+    it('navigates to /memories when clicked', async () => {
+      mockMemories({ memories: true });
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByText('Memories'));
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/memories'));
+    });
+  });
 });

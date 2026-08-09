@@ -12,8 +12,15 @@
  * `useDashboard()` went with them. Those three counts were its ONLY consumer on
  * this page, so keeping the call would have left the app's busiest route paying
  * for a dashboard payload (On This Day + recent + favorites, each with signed
- * thumbnails) that nothing rendered. The endpoint and the hook both stay — they
+ * thumbnails) that nothing rendered. The hook was deleted outright in issue
+ * #309; `GET /api/media/dashboard` and its `getDashboard()` client remain, and
  * are simply not what Home needs.
+ *
+ * ONE row was added back in issue #309 (epic #300): <MemoriesCarousel>. It is
+ * not a return to the dashboard shape — it renders `null` whenever
+ * `features.memories` is off (the default), no circle is active, or the feed is
+ * empty, and it fires no request in any of those cases. A brand-new install
+ * therefore sees this page exactly as it was.
  */
 
 import { useMemo } from 'react';
@@ -22,6 +29,7 @@ import { PhotoLibrary as PhotoLibraryIcon } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../hooks/useCircle';
 import { MediaGallery } from '../components/media/MediaGallery';
+import { MemoriesCarousel } from '../components/memories/MemoriesCarousel';
 
 export default function HomePage() {
   const { activeCircle, activeCircleId, activeCircleRole, loading: circleLoading } = useCircle();
@@ -67,6 +75,9 @@ export default function HomePage() {
           </Alert>
         </Box>
       )}
+
+      {/* Memories row — self-hiding; see the header comment. */}
+      <MemoriesCarousel circleId={activeCircleId} />
 
       {/* Gallery — only rendered when a circle is active */}
       {activeCircle && (
