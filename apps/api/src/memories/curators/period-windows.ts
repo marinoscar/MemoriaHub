@@ -94,7 +94,8 @@ export function seasonOf(date: Date): SeasonPeriod {
   const month = date.getUTCMonth() + 1;
   const season = seasonForMonth(month);
   // January and February belong to the winter that STARTED last December.
-  const year = season === 'winter' && month <= 2 ? date.getUTCFullYear() - 1 : date.getUTCFullYear();
+  const year =
+    season === 'winter' && month <= 2 ? date.getUTCFullYear() - 1 : date.getUTCFullYear();
   return { year, season };
 }
 

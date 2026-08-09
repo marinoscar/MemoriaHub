@@ -206,7 +206,10 @@ export async function preferredPersonCover(
 }
 
 /** Replace a selection's cover, leaving the rest of it untouched. */
-export function withCover(selection: CuratedSelection, coverMediaItemId: string | null): CuratedSelection {
+export function withCover(
+  selection: CuratedSelection,
+  coverMediaItemId: string | null,
+): CuratedSelection {
   if (!coverMediaItemId) return selection;
   return { ...selection, coverMediaItemId };
 }

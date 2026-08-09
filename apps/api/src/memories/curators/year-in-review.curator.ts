@@ -187,7 +187,8 @@ export class YearInReviewCurator implements MemoryCurator {
       // the selection does not carry: months that HAVE material, bounded by the
       // year. Reported as context in `meta`, never as a gate.
       [...counts.keys()].filter(
-        (bucket) => bucket >= monthBucket(window.start) && bucket < monthBucket(window.endExclusive),
+        (bucket) =>
+          bucket >= monthBucket(window.start) && bucket < monthBucket(window.endExclusive),
       ),
     ).size;
 
