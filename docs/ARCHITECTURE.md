@@ -530,12 +530,12 @@ Per-circle role ranking: `viewer (1) < collaborator (2) < circle_admin (3)`.
 apps/api/src/jobs/backup/
 ├── backup.module.ts
 ├── backup.controller.ts           # @Controller('admin/backup')
-├── backup.service.ts              # runBackup, getRecentRuns, getRunStatus, listObjects
+├── backup.service.ts              # runBackup, getRecentRuns, getRunStatus
 └── dto/
     └── trigger-backup.dto.ts
 ```
 
-The backup job mirrors ready `MediaItem` blobs from S3 to the local provider rooted at `BACKUP_LOCAL_PATH`. Runs are tracked as `audit_events` records.
+The backup job mirrors ready `MediaItem` blobs from S3 to the local provider rooted at `BACKUP_LOCAL_PATH`. Runs are tracked as `audit_events` records. This is a separate, server-side feature from the node-based **Local Media Backup** (`apps/api/src/nodes/node-backup.*`, `/api/nodes/:id/backup/*`), which pulls original bytes to a worker node's own disk — see [docs/specs/local-backup.md](specs/local-backup.md).
 
 #### LocalDiskStorageProvider
 
@@ -1303,13 +1303,14 @@ Before OAuth authentication completes:
 
 #### Admin Backup
 
+Server-side S3-to-local-disk replication, distinct from the node-based Local Media Backup feature (`/api/nodes/:id/backup/*` — see [docs/specs/local-backup.md](specs/local-backup.md)), which pulls original bytes to a worker node's own disk instead of the server's.
+
 | Method | Path | Permission | Purpose |
 |--------|------|------------|---------|
 | `POST` | `/api/admin/backup` | `backup:run` (Admin role required) | Trigger local-drive replication |
 | `GET` | `/api/admin/backup/runs` | `backup:read` (Admin) | List recent backup runs |
 | `GET` | `/api/admin/backup/status` | `backup:read` (Admin) | Alias for `/runs` |
 | `GET` | `/api/admin/backup/runs/:runId` | `backup:read` (Admin) | Get specific run status |
-| `GET` | `/api/admin/backup/objects` | `backup:read` (Admin) | List objects with signed URLs |
 
 #### Admin Job Queue
 
