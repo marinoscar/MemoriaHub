@@ -91,6 +91,7 @@ function defaultSettingsMock() {
     testEmbedding: vi.fn().mockResolvedValue({ ok: true, provider: 'openai', model: 'text-embedding-3-small', dimensions: 1536 }),
     saveEnhanceFeature: vi.fn().mockResolvedValue(undefined),
     getImageModels: vi.fn().mockResolvedValue(['gpt-image-1']),
+    saveMemoriesFeature: vi.fn().mockResolvedValue(undefined),
   };
 }
 
