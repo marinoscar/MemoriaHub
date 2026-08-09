@@ -81,6 +81,9 @@ import {
   nodeLogPath,
 } from '../node/logger.js';
 import { startDaemonHost, readPidFile, isPidAlive } from '../node/daemon.js';
+import { BackupHost } from '../backup/backup-host.js';
+import { getDb } from '../db/database.js';
+import { SettingsRepo } from '../repo/settings.js';
 import { connectToDaemon, isDaemonRunning, type DaemonMessage } from '../node/ipc-client.js';
 import { checkNodeAlreadyRunning } from '../node/daemon-launch.js';
 import {
@@ -682,9 +685,47 @@ function startCmd(): Command {
         attachEngineLogging(logger, engine);
         attachHeadlessPrinter(engine);
 
+        // Backup hosting (issue #318): when this machine has a backup root
+        // bound (settings backup.root + backup.nodeId), the daemon ALSO hosts
+        // the backup engine + scheduler next to the enrichment engine — no
+        // flag needed, presence of the binding activates hosting. The two
+        // engines share ONLY the process: independent concurrency, and the
+        // BackupHost builds its OWN ApiClient because the CooldownGate is
+        // per-ApiClient — an enrichment provider cooldown must never brake
+        // backup downloads, and a storage throttle hitting backup must never
+        // brake enrichment claims.
+        let backupHost: BackupHost | undefined;
+        try {
+          const settings = new SettingsRepo(getDb());
+          const backupRoot = settings.backupRoot();
+          const backupNodeId = settings.backupNodeId();
+          if (backupRoot && backupNodeId) {
+            backupHost = new BackupHost(
+              {
+                serverUrl: cfg.serverUrl,
+                pat: cfg.pat,
+                root: backupRoot,
+                nodeId: backupNodeId,
+                ...(cfg.node?.name !== undefined ? { nodeName: cfg.node.name } : {}),
+                cliVersion: cliVersion(),
+              },
+              {
+                settings,
+                logger,
+                retry: settings.retryConfig(),
+                cooldown: settings.cooldownConfig(),
+              },
+            );
+            backupHost.startScheduler();
+            ui.info(`Backup hosting active — root ${backupRoot} (node ${backupNodeId}).`);
+          }
+        } catch (err) {
+          ui.warn(`Backup hosting unavailable: ${(err as Error).message}`);
+        }
+
         let host;
         try {
-          host = await startDaemonHost(engine, logger);
+          host = await startDaemonHost(engine, logger, backupHost ? { backupHost } : {});
         } catch (err) {
           ui.error(`Cannot start worker node: ${(err as Error).message}`);
           process.exit(1);

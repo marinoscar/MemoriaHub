@@ -309,6 +309,40 @@ export class CatalogRepo {
       );
   }
 
+  /** Most recent locally-recorded run (by started_at), for `backup status`. */
+  latestRun(): CatalogRun | null {
+    const row = this.db
+      .prepare<
+        [],
+        {
+          id: string;
+          kind: string | null;
+          status: string | null;
+          started_at: string | null;
+          finished_at: string | null;
+          items_downloaded: number;
+          items_skipped: number;
+          bytes_downloaded: number;
+          error_count: number;
+          last_error: string | null;
+        }
+      >('SELECT * FROM runs ORDER BY started_at DESC LIMIT 1')
+      .get();
+    if (!row) return null;
+    return {
+      id: row.id,
+      kind: row.kind ?? 'incremental',
+      status: row.status ?? 'unknown',
+      startedAt: row.started_at ?? '',
+      finishedAt: row.finished_at,
+      itemsDownloaded: row.items_downloaded,
+      itemsSkipped: row.items_skipped,
+      bytesDownloaded: row.bytes_downloaded,
+      errorCount: row.error_count,
+      lastError: row.last_error,
+    };
+  }
+
   // -------------------------------------------------------------------------
   // checkpoint (mirrored server cursor — offline cache)
   // -------------------------------------------------------------------------
