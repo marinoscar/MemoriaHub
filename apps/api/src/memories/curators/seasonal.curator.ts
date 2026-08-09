@@ -143,6 +143,8 @@ export class SeasonalCurator implements MemoryCurator {
     const { title, subtitle } = seasonalTitle(period.season, period.year);
     const upsert = await this.curation.upsertMemory({
       circleId: ctx.circleId,
+      // #306: the run-wide AI-titling budget/circuit breaker.
+      titling: ctx.titling,
       type: MemoryType.seasonal,
       periodKey: seasonPeriodKey(period),
       // Seasonal memories have no subject — one per circle per season. '' is

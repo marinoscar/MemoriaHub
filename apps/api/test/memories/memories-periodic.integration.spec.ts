@@ -25,6 +25,7 @@ import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { MemoryCurationService } from '../../src/memories/curation/memory-curation.service';
+import { neverCalledTitleService } from './memory-title.stub';
 import { ThemeCurator } from '../../src/memories/curators/theme.curator';
 import { SeasonalCurator } from '../../src/memories/curators/seasonal.curator';
 import { YearInReviewCurator } from '../../src/memories/curators/year-in-review.curator';
@@ -201,7 +202,12 @@ describeMaybeDb('Memories — theme / seasonal / year-in-review (DB_GATED: real 
     prisma = new PrismaClient({ adapter });
     await prisma.$connect();
 
-    curation = new MemoryCurationService(prisma as unknown as PrismaService);
+    curation = new MemoryCurationService(
+      prisma as unknown as PrismaService,
+      // #306: never invoked here — these contexts carry no `titling` run,
+      // so upsertMemory short-circuits to deterministic template titles.
+      neverCalledTitleService(),
+    );
     theme = new ThemeCurator(prisma as unknown as PrismaService, curation);
     seasonal = new SeasonalCurator(prisma as unknown as PrismaService, curation);
     yearInReview = new YearInReviewCurator(prisma as unknown as PrismaService, curation);

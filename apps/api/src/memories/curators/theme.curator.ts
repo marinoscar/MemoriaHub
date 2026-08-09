@@ -207,6 +207,8 @@ export class ThemeCurator implements MemoryCurator {
       const { title, subtitle } = themeTitle(tag, selection.items.length);
       const upsert = await this.curation.upsertMemory({
         circleId: ctx.circleId,
+        // #306: the run-wide AI-titling budget/circuit breaker.
+        titling: ctx.titling,
         type: MemoryType.theme,
         periodKey: period.periodKey,
         subjectKey: tag,

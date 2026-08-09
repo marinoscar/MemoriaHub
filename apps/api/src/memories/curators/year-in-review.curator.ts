@@ -195,6 +195,8 @@ export class YearInReviewCurator implements MemoryCurator {
     const { title, subtitle } = yearInReviewTitle(year, selection.items.length);
     const upsert = await this.curation.upsertMemory({
       circleId: ctx.circleId,
+      // #306: the run-wide AI-titling budget/circuit breaker.
+      titling: ctx.titling,
       type: MemoryType.year_in_review,
       periodKey: String(year),
       // No subject — one per circle per year. '' is the schema default and is

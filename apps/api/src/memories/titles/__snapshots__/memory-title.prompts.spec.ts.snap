@@ -1,0 +1,99 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`MEMORY_TITLE_SYSTEM_PROMPT is a stable constant 1`] = `
+"You write titles for a private family photo app. A "memory" is a small,
+automatically curated collection of a family's own photos and videos.
+
+Voice: warm, specific and human — the way someone would describe the
+collection to their own family. Never saccharine, never advertising copy,
+never a listicle. No emojis. No exclamation marks unless genuinely earned,
+and never more than one. Do not invent people, places or events that the
+supplied facts do not mention; if the facts are thin, stay general rather
+than fabricating detail. Do not address the reader or refer to yourself.
+
+You are given facts about one memory, including the deterministic fallback
+title the app would otherwise use. Improve on it when the facts support
+something better; stay close to it when they do not.
+
+Respond with ONLY a JSON object, no code fences and no commentary:
+{"title": string, "subtitle": string, "narrative": string}
+- "title": at most 60 characters.
+- "subtitle": at most 80 characters; a short line of
+  context such as the place or the date range. May be an empty string.
+- "narrative": at most 240 characters; one or two
+  sentences describing what this collection holds. May be an empty string."
+`;
+
+exports[`buildMemoryTitleUserPrompt — per-type snapshots on_this_day 1`] = `
+"Memory type: On this day (an anniversary of a past day)
+Items in the collection: 8
+Date: 2019-03-12
+Years ago: 6
+People pictured: Camila
+Common tags: beach (6), sunset (3)
+Sample photo descriptions:
+- Two children building a sandcastle at the water line.
+Fallback title: On this day — 6 years ago
+Fallback subtitle: March 12, 2019"
+`;
+
+exports[`buildMemoryTitleUserPrompt — per-type snapshots person_highlights 1`] = `
+"Memory type: Highlights of one person
+Items in the collection: 8
+Date range: 2025-01-06 to 2025-12-22
+Year: 2025
+People pictured: Abuela
+Fallback title: Best of Abuela
+Fallback subtitle: 2025"
+`;
+
+exports[`buildMemoryTitleUserPrompt — per-type snapshots person_over_years 1`] = `
+"Memory type: One person across many years
+Items in the collection: 8
+Date range: 2016-05-02 to 2025-11-30
+People pictured: Camila
+Fallback title: Camila through the years
+Fallback subtitle: 2016–2025"
+`;
+
+exports[`buildMemoryTitleUserPrompt — per-type snapshots seasonal 1`] = `
+"Memory type: One season
+Items in the collection: 8
+Date range: 2025-06-02 to 2025-08-28
+Year: 2025
+Season: summer
+Fallback title: Summer 2025"
+`;
+
+exports[`buildMemoryTitleUserPrompt — per-type snapshots theme 1`] = `
+"Memory type: A theme drawn from photo tags
+Items in the collection: 8
+Date: 2019-03-12
+Year: 2025
+Theme tag: sunset
+Common tags: sunset (14)
+Fallback title: Golden Sunsets
+Fallback subtitle: 14 favorite moments"
+`;
+
+exports[`buildMemoryTitleUserPrompt — per-type snapshots trip 1`] = `
+"Memory type: A trip away from home
+Items in the collection: 24
+Date range: 2023-03-04 to 2023-03-09
+Place: Tamarindo, Guanacaste, Costa Rica
+People pictured: Camila, Abuela
+Common tags: beach (14), surf (5)
+Sample photo descriptions:
+- A long stretch of empty beach at golden hour.
+Fallback title: Trip to Guanacaste
+Fallback subtitle: March 2023"
+`;
+
+exports[`buildMemoryTitleUserPrompt — per-type snapshots year_in_review 1`] = `
+"Memory type: A whole year in review
+Items in the collection: 30
+Date range: 2025-01-01 to 2025-12-31
+Year: 2025
+Fallback title: Your 2025 in review
+Fallback subtitle: 30 highlights from the year"
+`;

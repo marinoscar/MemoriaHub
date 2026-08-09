@@ -250,6 +250,8 @@ export class OnThisDayCurator implements MemoryCurator {
 
       const upsert = await this.curation.upsertMemory({
         circleId: ctx.circleId,
+        // #306: the run-wide AI-titling budget/circuit breaker.
+        titling: ctx.titling,
         type: MemoryType.on_this_day,
         periodKey,
         subjectKey: String(sourceYear),

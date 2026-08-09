@@ -479,6 +479,8 @@ export class TripCurator implements MemoryCurator {
 
     const upsert = await this.curation.upsertMemory({
       circleId: ctx.circleId,
+      // #306: the run-wide AI-titling budget/circuit breaker.
+      titling: ctx.titling,
       type: MemoryType.trip,
       periodKey: identity.periodKey,
       subjectKey: identity.subjectKey,

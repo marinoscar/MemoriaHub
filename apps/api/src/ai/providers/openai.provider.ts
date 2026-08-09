@@ -132,6 +132,7 @@ export class OpenAiProvider implements AiProvider {
       model: req.model,
       stream: true,
       messages,
+      ...(req.temperature !== undefined && { temperature: req.temperature }),
       ...(tools && {
         tools,
         // Limit to one tool call per response so the per-tool assistant+result

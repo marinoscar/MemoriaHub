@@ -31,6 +31,7 @@ import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.regi
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isMemoriesEnabled } from '../common/types/settings.types';
 import { resolveMemoriesSettings } from './memories-settings.util';
+import { MemoryTitleService } from './titles/memory-title.service';
 import {
   MEMORY_CURATORS,
   MemoryCurator,
@@ -52,6 +53,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly systemSettings: SystemSettingsService,
+    private readonly titles: MemoryTitleService,
     @Inject(MEMORY_CURATORS) private readonly curators: MemoryCurator[],
   ) {}
 
@@ -84,9 +86,20 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
     }
 
     const payload = (job.payload as unknown as MemoryGenerationPayload | null) ?? {};
+    const memoriesSettings = resolveMemoriesSettings(settings.memories);
+    // ONE titling budget for the whole job (#306), shared by every curator: a
+    // provider rate limit must stop titling for the rest of the run, and a
+    // backfill's 100-call cap is job-wide, not per curator. It is created here
+    // rather than held on MemoryTitleService because that service is a
+    // singleton and several `memory_generation` jobs can run concurrently.
+    const titling = this.titles.beginRun({
+      backfill: payload.backfill === true,
+      aiTitlesEnabled: memoriesSettings.aiTitles.enabled,
+    });
     const ctx: MemoryCuratorContext = {
       circleId: job.circleId,
-      settings: resolveMemoriesSettings(settings.memories),
+      settings: memoriesSettings,
+      titling,
       // ONE wall clock for the whole run: a pass that straddles midnight must
       // not have curator A anchoring on today and curator B on tomorrow.
       now: new Date(),
@@ -143,6 +156,11 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
       tombstoned,
       purged,
       failedCurators: failed,
+      // #306 audit: how much titling this run actually paid for, and whether it
+      // gave up early. `aiTitleStopReason` is the one-line explanation for a run
+      // whose memories are mostly template-titled despite a configured provider.
+      aiTitleCalls: titling.aiCalls,
+      aiTitleStopReason: titling.stopReason,
     });
   }
 }

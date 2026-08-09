@@ -40,11 +40,23 @@
 //    material change (Jaccard distance >= 30% on the media-item id set) resets
 //    titling. Without this, every generation run would discard and re-pay for
 //    AI titles because one photo joined.
+//
+// 5. AI TITLING RUNS OUTSIDE THE WRITE TRANSACTION (#306). `MemoryTitleService`
+//    makes a network call bounded at 10 seconds; doing that inside
+//    `$transaction` would hold row locks and a pool connection for its whole
+//    duration. Every fact the prompt needs comes from the selection the curator
+//    already computed, so titling happens BEFORE the transaction opens — and it
+//    happens only on the two paths that reset titling (create, and a material
+//    refresh), never on a minor refresh. Its result is optional by contract: a
+//    `null` means "write the template", which is exactly what this file did
+//    before #306 existed.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
 import { MediaTagSource, MediaType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MemoryTitleService } from '../titles/memory-title.service';
+import { MemoryAiTitle } from '../titles/memory-title.types';
 import {
   CuratedItem,
   CuratedSelection,
@@ -489,7 +501,10 @@ function chunk<T>(items: T[], size: number): T[][] {
 export class MemoryCurationService {
   private readonly logger = new Logger(MemoryCurationService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly titles: MemoryTitleService,
+  ) {}
 
   /**
    * Stream every candidate matching the base filter AND the curator's `where`,
@@ -732,7 +747,9 @@ export class MemoryCurationService {
 
     if (!existing) {
       try {
-        const memoryId = await this.createMemory(input, subjectKey);
+        // AFTER the tombstone check, BEFORE the transaction — see header note 5.
+        const aiTitle = await this.generateAiTitle(input);
+        const memoryId = await this.createMemory(input, subjectKey, aiTitle);
         return { memoryId, created: true, materiallyChanged: true, skippedTombstone: false };
       } catch (err) {
         // A concurrent generation pass won the race on the unique key. Re-read
@@ -770,7 +787,64 @@ export class MemoryCurationService {
     } as Prisma.InputJsonValue;
   }
 
-  private async createMemory(input: UpsertMemoryInput, subjectKey: string): Promise<string> {
+  /**
+   * Ask #306's titling service for an AI title, or `null` for the template.
+   *
+   * Never throws: `MemoryTitleService.generate` is total by contract, and the
+   * absent-run case (no `titling` on the input) short-circuits to templates
+   * without touching the service at all.
+   */
+  private async generateAiTitle(input: UpsertMemoryInput): Promise<MemoryAiTitle | null> {
+    if (!input.titling) return null;
+    return this.titles.generate(
+      {
+        type: input.type,
+        templateTitle: input.title,
+        templateSubtitle: input.subtitle ?? null,
+        meta: input.meta ?? null,
+        mediaItemIds: input.selection.items.map((item) => item.mediaItemId),
+        periodStart: input.selection.periodStart,
+        periodEnd: input.selection.periodEnd,
+      },
+      input.titling,
+    );
+  }
+
+  /**
+   * The five title columns for one write, from the AI result when there is one
+   * and from the caller's template when there is not. One helper so the create
+   * and material-refresh paths cannot drift — in particular so neither can
+   * write `titleSource: 'ai'` without also writing `titleModel`.
+   */
+  private titleColumns(input: UpsertMemoryInput, aiTitle: MemoryAiTitle | null) {
+    if (aiTitle) {
+      return {
+        title: aiTitle.title,
+        // The model's own subtitle wins, but a model that returned none falls
+        // back to the template's rather than leaving the card bare.
+        subtitle: aiTitle.subtitle ?? input.subtitle ?? null,
+        narrative: aiTitle.narrative,
+        titleSource: 'ai',
+        titleModel: aiTitle.model,
+      };
+    }
+    return {
+      title: input.title,
+      subtitle: input.subtitle ?? null,
+      // Narrative is an AI-only field; a template-titled memory has none, and
+      // writing an empty string instead of NULL would make "has a narrative"
+      // untestable downstream.
+      narrative: null,
+      titleSource: 'template',
+      titleModel: null,
+    };
+  }
+
+  private async createMemory(
+    input: UpsertMemoryInput,
+    subjectKey: string,
+    aiTitle: MemoryAiTitle | null,
+  ): Promise<string> {
     const now = new Date();
     const { periodStart, periodEnd } = this.resolvePeriod(input, now);
 
@@ -782,14 +856,7 @@ export class MemoryCurationService {
           periodKey: input.periodKey,
           subjectKey,
           personId: input.personId ?? null,
-          title: input.title,
-          subtitle: input.subtitle ?? null,
-          // Narrative is an AI-only field (#306); a template-titled memory has
-          // none, and writing an empty string instead of NULL would make
-          // "has a narrative" untestable downstream.
-          narrative: null,
-          titleSource: 'template',
-          titleModel: null,
+          ...this.titleColumns(input, aiTitle),
           coverMediaItemId: input.selection.coverMediaItemId,
           periodStart,
           periodEnd,
@@ -835,6 +902,12 @@ export class MemoryCurationService {
     // #311's digest) reads independently.
     const resetTitle = materiallyChanged || input.retitle === true;
 
+    // Only a title RESET is worth a model call: a minor refresh keeps whatever
+    // the row already carries, which is the whole anti-churn rule (header note
+    // 4) and the reason #306's cost story works at all. Outside the
+    // transaction, as always.
+    const aiTitle = resetTitle ? await this.generateAiTitle(input) : null;
+
     await this.prisma.$transaction(async (tx) => {
       // Replace rather than diff: MemoryItem carries no per-item user state, so
       // a wholesale replacement is both simpler and cheaper than computing an
@@ -866,17 +939,11 @@ export class MemoryCurationService {
           // Titling is preserved on a minor refresh — including an AI title and
           // narrative from #306. On a MATERIAL change (or an explicit `retitle`)
           // the old title may now describe a set, or a place, that no longer
-          // exists, so it is reset to the template and handed back to AI
-          // re-titling on a later pass.
-          ...(resetTitle
-            ? {
-                title: input.title,
-                subtitle: input.subtitle ?? null,
-                narrative: null,
-                titleSource: 'template',
-                titleModel: null,
-              }
-            : {}),
+          // exists, so it is rewritten: freshly AI-generated when titling is
+          // configured and the call succeeded, and reset to the deterministic
+          // template otherwise (which also clears a stale `titleModel` and a
+          // narrative that no longer describes the contents).
+          ...(resetTitle ? this.titleColumns(input, aiTitle) : {}),
         },
       });
     });

@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.5 (data model + generation plumbing + curation engine; all seven curators) |
+| **Version** | 0.6 (data model + generation plumbing + curation engine; all seven curators; AI titles) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305); §5–§8 and §10 are placeholders for later issues in epic #300 |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306); §6–§8 and §10 are placeholders for later issues in epic #300 |
 
 ---
 
@@ -584,7 +584,7 @@ Every curator writes through this one method, keyed on `@@unique([circleId, type
 
 **`MemoryUserState` is untouched by design.** It lives in its own table keyed by memory id, so a refresh that replaces every item preserves seen/hidden/favorited for every user. That is precisely why per-user state was not modeled as columns on `Memory` (§2.4).
 
-**Titles survive a minor refresh.** Membership change is measured as Jaccard **distance** on the media-item id sets; below `MATERIAL_CHANGE_THRESHOLD` (30%) the `title`/`subtitle`/`narrative`/`titleSource`/`titleModel` are all left alone. Without this, one new photo joining a ten-item memory would discard an AI title (#306) and re-pay for it on every generation run forever. At or above 30% the old title may now describe a collection that no longer exists, so it is reset to the template with `titleSource = 'template'`, `titleModel = NULL` and `narrative = NULL`, and handed back to AI re-titling on a later pass.
+**Titles survive a minor refresh.** Membership change is measured as Jaccard **distance** on the media-item id sets; below `MATERIAL_CHANGE_THRESHOLD` (30%) the `title`/`subtitle`/`narrative`/`titleSource`/`titleModel` are all left alone. Without this, one new photo joining a ten-item memory would discard an AI title (#306) and re-pay for it on every generation run forever. At or above 30% the old title may now describe a collection that no longer exists, so it is rewritten: AI re-titling runs in the same pass when it is configured (§5.6), and otherwise the row is reset to the template with `titleSource = 'template'`, `titleModel = NULL` and `narrative = NULL`.
 
 `UpsertMemoryResult` returns `{ memoryId, created, materiallyChanged, skippedTombstone }`. `materiallyChanged` exists for [#311](https://github.com/marinoscar/MemoriaHub/issues/311)'s notification and digest producers, which need "is there anything genuinely new to tell the circle about?" without re-diffing the item set themselves.
 
@@ -622,7 +622,118 @@ One wall clock (`ctx.now`) is captured once by the handler and shared by every c
 
 ## 5. AI Titles, Subtitles & Narratives
 
-Placeholder. Covered by issue [#306](https://github.com/marinoscar/MemoriaHub/issues/306). Expected to define: the `ai.features.memories` `{ provider, model }` config (mirroring `ai.features.tagging`/`search`/`embedding`) and its `PUT /api/ai/features/memories` endpoint, and a `MemoryTitleService` that generates `title`/`subtitle`/`narrative` with a hard timeout and falls back to deterministic templates on any failure — `Memory.titleSource`/`Memory.titleModel` (§2.2) exist specifically to audit which path ran for a given row.
+Template titles (§4.6) are correct everywhere and generic everywhere. `MemoryTitleService` (`apps/api/src/memories/titles/`) upgrades them to warm, specific prose — *"Five golden days on the Pacific coast — sunsets, surf, and Camila's first time in the ocean"* — using the admin-selected `ai.features.memories` provider and model (§9.4), and degrades to the template on **any** failure.
+
+### 5.1 The contract: `generate()` returns a title or `null`, and never throws
+
+`MemoryTitleService.generate()` is **total**. It resolves to a `MemoryAiTitle` or to `null`, and `null` means "write the deterministic template". Every one of the following lands on `null`:
+
+| Condition | Provider called? |
+|---|---|
+| `memories.aiTitles.enabled` is `false` | **no** |
+| `ai.features.memories` is unset (no provider configured) | **no** |
+| The selected provider has no credential, or its credential is disabled | no |
+| The selected provider key is not in `AiProviderRegistry` | no |
+| A backfill run has spent its call budget (§5.5) | **no** |
+| An earlier call in this run was throttled (§5.5) | **no** |
+| HTTP error, network failure, SDK exception | yes |
+| The call exceeds the 10 s hard timeout (§5.4) | yes |
+| The response is not JSON, is JSON of the wrong shape, or has an empty title (§5.3) | yes |
+| A fact lookup for the prompt fails | no |
+
+Three properties follow, and all three are stated success criteria of epic #300:
+
+- **Titling can never fail a generation run.** There is no exception path out of `generate()`, so a curator cannot lose its job's retry budget to a cosmetic field.
+- **A deployment with no AI provider is a supported configuration, not a broken one.** Every fallback logs at **DEBUG**, never `warn` or `error` — logging normal degradation as an error trains operators to ignore the log. The unit suite asserts this directly: each fallback test checks that nothing above debug was emitted.
+- **`titleSource` / `titleModel` audit which path actually ran.** A row is either `('ai', '<model id>')` or `('template', NULL)`; there is no third state and no partial one, because both are written by the one `titleColumns()` helper in `MemoryCurationService`.
+
+### 5.2 What is sent, and what is not
+
+**Metadata only — never image bytes.** Vision-model titling from the actual pixels was rejected for v1 on cost and latency at library scale. It is also largely redundant: the tags and descriptions below were themselves produced by a vision model (§ auto-tagging), so the visual signal arrives secondhand and already paid for.
+
+The complete list of what may leave the deployment is the `MemoryTitleFacts` type in `memory-title.prompts.ts`:
+
+| Fact | Source |
+|---|---|
+| Memory type, item count | the `Memory` being written |
+| Date range (`periodStart`/`periodEnd`, ISO day precision) | the curated selection |
+| Place — locality, admin1, country | `meta` (Trips curator, §4.8) |
+| Person names (≤ 5, subject first) | assigned faces on the selected items, excluding hidden/deleted/merged people |
+| Top AI tags with counts (≤ 10) | `media_tags` with `source = 'ai'` on the selected items |
+| Item descriptions (≤ 5, each truncated to 200 chars) | `MediaItem.description` |
+| Years-ago / theme tag / season / year | `meta` |
+| The deterministic template title and subtitle | §4.6 — the floor the model is asked to beat |
+
+Absent **by construction**, because the builder takes facts rather than rows: media-item ids, the circle id, the person id, the user id, file names, storage keys, GPS coordinates, EXIF. A prompt-builder test asserts that a rendered prompt over a maximal fact set contains no UUID.
+
+All four input caps are enforced **inside the builder**, not by its caller, so no call site can widen what gets sent.
+
+### 5.3 The prompt lives in one file, and its output is snapshotted
+
+`memory-title.prompts.ts` holds the system prompt as a single exported constant plus the per-type context builder. A prompt has no type errors and no test failures of its own, so a wording change is invisible in a diff unless the output is asserted somewhere: `memory-title.prompts.spec.ts` snapshots the rendered prompt for **all seven memory types**, which turns prompt drift into a reviewable diff.
+
+The response contract is strict JSON — `{"title", "subtitle", "narrative"}` — with caps of **60 / 80 / 240** characters. Those caps are stated in the system prompt *and* enforced on parse, from the same three constants, so the two can never disagree.
+
+`parseMemoryTitleResponse()` (`memory-title.parse.ts`) is likewise total: it strips a ``` / ```json fence, slices from the first `{` to the last `}` (which removes a chatty preamble and a sign-off in one step), `JSON.parse`s in a try/catch, validates with zod, normalizes an empty or `null` subtitle/narrative to `NULL`, and hard-caps every field with an ellipsis. A missing, non-string or blank **title** fails the whole parse — a memory with no title is not a partial success, it is the template case. Unknown extra keys are ignored rather than rejected: strictness there would turn a usable answer into a fallback for no benefit.
+
+### 5.4 The hard timeout bounds the whole stream
+
+The provider is called through the existing `AiProvider.chat()` abstraction — the same streaming chat path agentic search uses — not a second HTTP client.
+
+`MEMORY_TITLE_TIMEOUT_MS` is **10 000 ms**, and it bounds the *whole* stream rather than each chunk: each `next()` is raced against the **remaining** budget, so a provider dribbling one token every nine seconds is caught just as a silent one is. On timeout the iterator's `return()` is invoked fire-and-forget — awaiting it would re-block on the very network call that just stalled — so the generator can release its connection. A `MAX_RESPONSE_CHARS` ceiling (8 000) additionally stops a model stuck in a repetition loop from growing an unbounded string inside a memory-sensitive worker.
+
+`MEMORY_TITLE_TEMPERATURE` is `0.7`. Carrying it required adding an **optional** `temperature` to `ChatRequest`, forwarded verbatim by both providers and omitted entirely when unset — so no existing caller's behavior changed.
+
+### 5.5 The run budget: one per job, shared by every curator
+
+`MemoryTitleRun` is a small mutable object created once per `memory_generation` job by `MemoryGenerationHandler.beginRun()`, carried on `MemoryCuratorContext.titling`, and forwarded verbatim by each of the seven curators as `titling: ctx.titling` on their `upsertMemory` call.
+
+**Why a passed object rather than service state.** `MemoryTitleService` is a Nest singleton and the enrichment worker can run several `memory_generation` jobs concurrently (`ENRICHMENT_WORKER_CONCURRENCY`). A mutable field on the service would let one circle's rate-limit trip silently template another circle's memories, and one circle's backfill would consume another's budget.
+
+**An absent run means template titles.** That default is deliberately fail-safe: a curator (or a test) that does not thread it degrades to the documented floor rather than making unbudgeted, uncapped model calls.
+
+The run carries two independent stop conditions:
+
+- **Rate limiting stops the run; it does not fail the job.** A `429` or `529` (Anthropic "Overloaded") — classified by the shared `classifyRateLimit()` — sets `stopped`/`stopReason = 'rate_limited'`, and every remaining memory in the job is templated with no further calls. Routing this through the enrichment rate-limit-deferral path was explicitly rejected: that would defer a whole generation job, whose real output is the memories, over a cosmetic field.
+- **Backfill is capped at `BACKFILL_AI_TITLE_CAP` = 100 calls per job.** A 70k-item library backfill can create thousands of memories in one unattended run; without the cap it would fire thousands of model calls at once. Beyond the cap everything is templated, and each later scheduled run gets a fresh budget, so the library converges instead of billing for itself all at once. Scheduled (non-backfill) runs are uncapped — they produce few memories by construction (typically < 20).
+
+`attempts` are charged **before** the call, so a timing-out or 500-ing provider consumes budget too; otherwise a persistently failing provider would retry uncapped. The job's `memory_generation.completed` log line reports `aiTitleCalls` and `aiTitleStopReason`, which is the one-line explanation for a run whose memories are mostly template-titled despite a configured provider.
+
+### 5.6 Where titling is called from
+
+`MemoryCurationService.upsertMemory()` — the single write path every curator funnels through (§4.12) — and only on the two branches that **reset** titling:
+
+1. **Create.** A new memory is titled on the spot.
+2. **A refresh that resets the title:** membership moved by at least `MATERIAL_CHANGE_THRESHOLD` (30% Jaccard distance), or the curator set `retitle` because the memory's *subject* drifted (the Trips re-keying case, §4.8).
+
+A **minor** refresh calls nothing and keeps whatever the row already carries, including an existing AI title and narrative. That anti-churn rule is what makes the cost story work: without it, one new photo joining a ten-item memory would discard an AI title and re-pay for it on every generation run forever.
+
+Two ordering properties matter and are both tested:
+
+- **The tombstone check comes first.** A user-deleted memory is not re-titled — no model call is made at all.
+- **The model call happens outside the write transaction.** A 10-second call inside `$transaction` would hold row locks and a pool connection for its whole duration. Every fact the prompt needs comes from the selection the curator already computed, so titling completes before the transaction opens.
+
+When a call succeeds but the model returned no subtitle, the **template's** subtitle is written rather than leaving the card bare; the narrative stays `NULL`, since it is an AI-only field. When a *re-title* fails on a memory that previously had an AI title, all five columns are reset together — leaving `titleModel` or `narrative` behind would attach a model id and a blurb to a title that model never wrote.
+
+### 5.7 Testing
+
+No test in this feature can reach a network. The service suite drives a hand-written `AiProvider` double returned by a stubbed `AiProviderRegistry`, which is a level below the repo's `jest.mock('openai')` convention and strictly stronger — a mocked SDK still requires the production code to route through it, whereas here there is no SDK in the graph at all.
+
+| Suite | Covers |
+|---|---|
+| `memory-title.prompts.spec.ts` | per-type prompt snapshots, the four input caps, the no-UUID privacy assertion, cap constants echoed in the system prompt |
+| `memory-title.parse.spec.ts` | fences, preambles, truncated/array/wrong-type/blank-title JSON, length capping, "never throws" over every malformed shape |
+| `memory-title.service.spec.ts` | every row of §5.1's table, the 429/529 stop-the-run behavior, the backfill cap, and that each fallback logs at debug only |
+| `memory-generation.handler.spec.ts` | one budget per job, shared by every curator; the `aiTitles.enabled` flag and the backfill flag reaching `beginRun` |
+| `test/memories/memories-ai-titles.integration.spec.ts` (DB-gated) | the five persisted title columns for success and failure, anti-churn preservation, material-change re-titling, a failed re-title clearing a stale `titleModel`, `retitle`, and the tombstone short-circuit |
+
+### 5.8 Known gaps
+
+- **A reasoning model that rejects an explicit temperature degrades silently.** Some newer OpenAI models accept only their default temperature and answer `400`. That is a clean fallback to templates rather than an outage, but an admin who selects such a model gets template titles with only a debug log to explain it. The Doctor sweep does not yet include an `ai.memories` check.
+- **A failed titling attempt is not retried until the memory changes materially again.** The anti-churn rule (§5.6) is membership-based and does not know *why* a row is template-titled, so a memory templated because the provider was down stays templated until its item set moves by 30%. Retrying template-titled rows on a later run was rejected for v1: it would re-call for every memory on a deployment with no provider configured, which is exactly the case the whole degradation story exists to make free.
+- **The backfill cap is per job, not per library.** A backfill re-run gets a fresh 100 calls. That is intended (it is how a large library converges over several runs), but it means the cap bounds a single unattended run's cost, not the total cost of repeatedly backfilling.
+- **No response cache.** The rendered prompt is deterministic, so identical facts would key a cache exactly — but memories are titled once and then protected by the anti-churn rule, so there is little to hit.
+- **English only.** The system prompt and the template floor are both English; there is no locale setting to hand the model.
 
 ## 6. API
 
@@ -728,6 +839,7 @@ Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/is
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.6 | August 2026 | AI Assistant | Issue #306: filled in §5 (AI Titles, Subtitles & Narratives — the total `generate()` contract and the complete failure table with which entries avoid a provider call at all, the metadata-only prompt payload and the absent-by-construction privacy list, the one-file prompt with its per-type snapshots and the strict-JSON/length-cap contract shared between the system prompt and the parser, the 10s whole-stream timeout with its remaining-budget race and fire-and-forget iterator close plus the new optional `ChatRequest.temperature`, the per-job `MemoryTitleRun` budget and why it is a passed object rather than service state, the rate-limit stop-the-run rule and the 100-call backfill cap, the two `upsertMemory` branches that call titling and the tombstone/outside-the-transaction ordering, the no-network test strategy, and five known gaps). §6–§8 and §10 remain placeholders. |
 | 0.1 | August 2026 | AI Assistant | Initial specification for issue #301: the `MemoryType` enum, the `Memory`/`MemoryItem`/`MemoryUserState` data model, the `periodKey`/`subjectKey` semantics, the tombstone contract, cascade summary, and alternatives considered. Sections 3–10 are placeholders for later issues in epic #300. |
 | 0.5 | August 2026 | AI Assistant | Issue #305: added §4.9 (the People curators — the one shared eligibility rule and why per-user hidden people are deliberately excluded from generation, the archived-face exclusion, the grouped `(person, year)` census and why over-counting makes the pre-filter sound, the year-bucketed diversity policy and the >=3-year floor that separates the two types, the highest-confidence cover override, and the Cascade-FK delete/merge story), §4.10 (the Theme curator — the tag-vocabulary-over-clustering rationale, the three filters `source='ai'` / enabled label / denylist, ranking by distinct qualifying items with the exact per-year sum behind the all-history period, walking past a short tag under a bounded attempt cap, and why a tombstoned theme consumes its slot), and §4.11 (Seasonal & Year-in-Review — the shared per-month census, completed-seasons-only and the season-year fold with its spring-first ordinal, and the December/January window plus month bucketing). Extended §4.5 with the opt-in `selectByBuckets` calendar policy, rewrote §4.13's registry paragraph for the full seven, and added five known gaps to §4.15. Renumbered the former §4.9–§4.12 to §4.12–§4.15 so the curator sections stay together. §5–§8 and §10 remain placeholders. |
 | 0.4 | August 2026 | AI Assistant | Issue #304: added §4.8 (the Trips curator — fixed-24-month home inference with the 30% modal-share floor and the same-floor `geoAdmin1` fallback, median-based three-way away/home/neutral day classification and the coordinate-less metadata fallback that can only add an away day, gap-tolerant run merging where a home day terminates rather than bridges, the >=50%-of-the-SHORTER-span overlap matching that re-keys a boundary-shifted trip in place instead of duplicating it, tombstone participation in that matching, the `retitle` flag for a drifted subject, backfill and its flat-memory streaming aggregation, the EXPLAIN-verified reuse of `media_items_gallery_idx` with no new migration, and known gaps). Renumbered the former §4.8–§4.11 to §4.9–§4.12 so the curator sections sit together. §5–§8 and §10 remain placeholders. |

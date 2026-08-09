@@ -27,6 +27,7 @@ import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { MemoryCurationService } from '../../src/memories/curation/memory-curation.service';
+import { neverCalledTitleService } from './memory-title.stub';
 import {
   ON_THIS_DAY_RETENTION_DAYS,
   OnThisDayCurator,
@@ -154,7 +155,12 @@ describeMaybeDb('Memories — curation engine & On This Day (DB_GATED: real Post
 
     // The services take a PrismaService (a Nest-lifecycle subclass of
     // PrismaClient); a raw client satisfies every method they actually call.
-    curation = new MemoryCurationService(prisma as unknown as PrismaService);
+    curation = new MemoryCurationService(
+      prisma as unknown as PrismaService,
+      // #306: never invoked here — these contexts carry no `titling` run,
+      // so upsertMemory short-circuits to deterministic template titles.
+      neverCalledTitleService(),
+    );
     curator = new OnThisDayCurator(prisma as unknown as PrismaService, curation);
 
     await prisma.user.create({
