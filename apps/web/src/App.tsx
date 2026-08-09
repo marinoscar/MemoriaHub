@@ -7,6 +7,7 @@ import { ThemeContextProvider, useThemeContext } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { MaintenanceGate } from './components/common/MaintenanceGate';
 
 // Pages (lazy loaded)
 import { Suspense, lazy } from 'react';
@@ -85,6 +86,10 @@ function AppRoutes() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <ErrorBoundary>
+        {/* Maintenance mode (issue #348): sits outside <Routes> so the takeover
+            is global — every route, authenticated or not — instead of each
+            page having to handle a maintenance 503 itself. */}
+        <MaintenanceGate>
         <Suspense fallback={<LoadingSpinner fullScreen />}>
           <Routes>
             {/* Public routes */}
@@ -187,6 +192,7 @@ function AppRoutes() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </MaintenanceGate>
       </ErrorBoundary>
     </ThemeProvider>
   );
