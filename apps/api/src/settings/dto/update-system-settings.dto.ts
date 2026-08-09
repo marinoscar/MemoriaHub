@@ -271,6 +271,29 @@ export const patchSystemSettingsSchema = z.object({
         .optional(),
     })
     .optional(),
+  // PostgreSQL Database Backup & Restore (epic #339, issue #340). Same THIRD
+  // hand-maintained copy caveat as the `memories` comment above — a key
+  // missing HERE is silently stripped from the request body before the
+  // service ever sees it.
+  databaseBackup: z
+    .object({
+      enabled: z.boolean().optional(),
+      frequency: z.enum(['daily', 'weekly', 'monthly']).optional(),
+      dayOfWeek: z.number().int().min(0).max(6).optional(),
+      dayOfMonth: z.number().int().min(1).max(28).optional(),
+      timeOfDay: z
+        .string()
+        .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'timeOfDay must be "HH:mm"')
+        .optional(),
+      timezone: z.string().min(1).optional(),
+      retentionCount: z.number().int().min(1).max(100).optional(),
+      storageProvider: z.string().nullable().optional(),
+      runStaleMinutes: z.number().int().min(5).max(240).optional(),
+      compressionLevel: z.number().int().min(0).max(9).optional(),
+      restoreRollbackMode: z.enum(['retain_database', 'pre_restore_dump']).optional(),
+      oldDatabaseRetentionHours: z.number().int().min(1).max(720).optional(),
+    })
+    .optional(),
 }).default({});
 
 export class PatchSystemSettingsDto extends createZodDto(

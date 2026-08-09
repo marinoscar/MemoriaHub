@@ -119,12 +119,12 @@ describe('SystemSettingsService', () => {
       // systemSettingsSchema.parse fills in every optional top-level branch
       // with its default when omitted from the DTO — not just `face`. This
       // fixture must mirror ALL of those defaults (face, storage, burst,
-      // dedup, geo, jobs, pictureEnhancement, workflows) or the
-      // toHaveBeenCalledWith assertion below drifts out of sync every time a
-      // new default branch is added to the schema. `ai.features.enhance` and
-      // `ai.features.memories` are also filled with their defaults (null) even
-      // though `ai.features` itself was supplied, since the DTO's `ai.features`
-      // omits both keys.
+      // dedup, geo, jobs, pictureEnhancement, workflows, databaseBackup) or
+      // the toHaveBeenCalledWith assertion below drifts out of sync every
+      // time a new default branch is added to the schema. `ai.features.enhance`
+      // and `ai.features.memories` are also filled with their defaults (null)
+      // even though `ai.features` itself was supplied, since the DTO's
+      // `ai.features` omits both keys.
       const expectedParsed = {
         ...newSettings,
         ai: {
@@ -145,6 +145,7 @@ describe('SystemSettingsService', () => {
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
         memories: DEFAULT_SYSTEM_SETTINGS.memories,
+        databaseBackup: DEFAULT_SYSTEM_SETTINGS.databaseBackup,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -252,6 +253,7 @@ describe('SystemSettingsService', () => {
         reviewRuns: DEFAULT_SYSTEM_SETTINGS.reviewRuns,
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
         memories: DEFAULT_SYSTEM_SETTINGS.memories,
+        databaseBackup: DEFAULT_SYSTEM_SETTINGS.databaseBackup,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({

@@ -350,6 +350,40 @@ export interface SystemSettingsValue {
    * `generation.intervalHours` (plus the `features.memories` flag).
    */
   memories?: MemoriesSettingsValue;
+  /**
+   * PostgreSQL Database Backup & Restore (epic #339, issue #340). The full
+   * namespace ships here as a schema-only foundation so every later issue in
+   * the epic reads its parameters through the one cached getSettings() call
+   * with no further schema change.
+   */
+  databaseBackup?: DatabaseBackupSettingsValue;
+}
+
+/** The `databaseBackup.*` system-settings namespace (epic #339, issue #340). */
+export interface DatabaseBackupSettingsValue {
+  /** Master switch for the scheduled backup cron. */
+  enabled: boolean;
+  frequency: 'daily' | 'weekly' | 'monthly';
+  /** Day of week (0=Sunday) the weekly schedule fires on. */
+  dayOfWeek: number;
+  /** Day of month (1-28) the monthly schedule fires on. */
+  dayOfMonth: number;
+  /** "HH:mm" local time (in `timezone`) the schedule fires at. */
+  timeOfDay: string;
+  /** IANA timezone name the schedule is evaluated in. */
+  timezone: string;
+  /** How many completed backups to retain before pruning the oldest. */
+  retentionCount: number;
+  /** Storage provider key backups are written to; null = use the active storage provider. */
+  storageProvider: string | null;
+  /** Minutes without a heartbeat before a `running` backup run is marked stale. */
+  runStaleMinutes: number;
+  /** pg_dump custom-format compression level, 0 (none) to 9 (max). */
+  compressionLevel: number;
+  /** How the old database is handled after a restore swap. */
+  restoreRollbackMode: 'retain_database' | 'pre_restore_dump';
+  /** Hours the pre-swap old database is retained before cleanup. */
+  oldDatabaseRetentionHours: number;
 }
 
 /** The `memories.*` system-settings namespace (epic #300, issue #302). */
@@ -642,5 +676,19 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     seasonal: { enabled: true, minItems: 12 },
     yearInReview: { enabled: true, minItems: 15 },
     digest: { enabled: true, frequency: 'weekly', sendHourUtc: 8, imageTokenTtlDays: 30 },
+  },
+  databaseBackup: {
+    enabled: false,
+    frequency: 'daily',
+    dayOfWeek: 0,
+    dayOfMonth: 1,
+    timeOfDay: '02:00',
+    timezone: 'UTC',
+    retentionCount: 7,
+    storageProvider: null,
+    runStaleMinutes: 30,
+    compressionLevel: 1,
+    restoreRollbackMode: 'retain_database',
+    oldDatabaseRetentionHours: 168,
   },
 };

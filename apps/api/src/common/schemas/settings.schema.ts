@@ -579,6 +579,43 @@ export const systemSettingsSchema = z.object({
     yearInReview: { enabled: true, minItems: 15 },
     digest: { enabled: true, frequency: 'weekly', sendHourUtc: 8, imageTokenTtlDays: 30 },
   }),
+  // PostgreSQL Database Backup & Restore (epic #339, issue #340). The full
+  // namespace ships here as a schema-only foundation, mirroring the
+  // `backup` (Local Media Backup) and `memories` precedents above — later
+  // issues in the epic read these through the one cached getSettings() call
+  // with no further schema change.
+  databaseBackup: z.object({
+    enabled: z.boolean().default(false),
+    frequency: z.enum(['daily', 'weekly', 'monthly']).default('daily'),
+    dayOfWeek: z.number().int().min(0).max(6).default(0),
+    dayOfMonth: z.number().int().min(1).max(28).default(1),
+    timeOfDay: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'timeOfDay must be "HH:mm"')
+      .default('02:00'),
+    timezone: z.string().min(1).default('UTC'),
+    retentionCount: z.number().int().min(1).max(100).default(7),
+    storageProvider: z.string().nullable().default(null),
+    runStaleMinutes: z.number().int().min(5).max(240).default(30),
+    compressionLevel: z.number().int().min(0).max(9).default(1),
+    restoreRollbackMode: z
+      .enum(['retain_database', 'pre_restore_dump'])
+      .default('retain_database'),
+    oldDatabaseRetentionHours: z.number().int().min(1).max(720).default(168),
+  }).optional().default({
+    enabled: false,
+    frequency: 'daily',
+    dayOfWeek: 0,
+    dayOfMonth: 1,
+    timeOfDay: '02:00',
+    timezone: 'UTC',
+    retentionCount: 7,
+    storageProvider: null,
+    runStaleMinutes: 30,
+    compressionLevel: 1,
+    restoreRollbackMode: 'retain_database',
+    oldDatabaseRetentionHours: 168,
+  }),
 });
 
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>;
@@ -772,5 +809,24 @@ export const systemSettingsPatchSchema = z.object({
       sendHourUtc: z.number().int().min(0).max(23).optional(),
       imageTokenTtlDays: z.number().int().min(7).max(90).optional(),
     }).optional(),
+  }).optional(),
+  // PostgreSQL Database Backup & Restore (epic #339, issue #340) — all-optional
+  // twin of the namespace above.
+  databaseBackup: z.object({
+    enabled: z.boolean().optional(),
+    frequency: z.enum(['daily', 'weekly', 'monthly']).optional(),
+    dayOfWeek: z.number().int().min(0).max(6).optional(),
+    dayOfMonth: z.number().int().min(1).max(28).optional(),
+    timeOfDay: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'timeOfDay must be "HH:mm"')
+      .optional(),
+    timezone: z.string().min(1).optional(),
+    retentionCount: z.number().int().min(1).max(100).optional(),
+    storageProvider: z.string().nullable().optional(),
+    runStaleMinutes: z.number().int().min(5).max(240).optional(),
+    compressionLevel: z.number().int().min(0).max(9).optional(),
+    restoreRollbackMode: z.enum(['retain_database', 'pre_restore_dump']).optional(),
+    oldDatabaseRetentionHours: z.number().int().min(1).max(720).optional(),
   }).optional(),
 });
