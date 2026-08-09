@@ -193,7 +193,7 @@ The MVP web app should allow users to:
 * Manage basic storage settings.
 * Review import and sync status.
 * Identify media that may not be a meaningful family memory.
-* Browse a memories dashboard showing On This Day highlights, recent imports, favorites, and a review queue of unclassified or geoless items.
+* **Shipped: Memories.** What began as an MVP "memories dashboard" idea (On This Day highlights plus a review queue) grew into a full curated-memories feature: seven auto-generated collection types — On This Day, Trips (auto-detected away-from-home clusters), Best of {Person}, {Person} Through the Years, Theme, Seasonal, and Year in Review — pre-generated on a schedule, played back as a full-screen story with AI-written titles (optional, provider-configurable, degrading gracefully to template titles), surfaced on Home and in a dedicated `/memories` hub, announced through the Notification Center, and mailed out as a self-hosted HTML digest. Off by default behind a feature flag; see [docs/specs/memories.md](docs/specs/memories.md) for the full design.
 * Bulk-edit location, tags, classification, and favorite flag across many items at once, reducing the time to organize large imports.
 
 The web app should be clean, simple, and focused on control rather than social sharing.
