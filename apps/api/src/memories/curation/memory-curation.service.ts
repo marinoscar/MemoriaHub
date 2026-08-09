@@ -129,12 +129,36 @@ interface CandidateRow {
   description: string | null;
 }
 
+/**
+ * A CALENDAR-bucketed diversity policy, replacing the default equal-time-span
+ * buckets for the memory types whose whole point is even calendar coverage:
+ * `person_over_years` (one bucket per year — the "growing up" effect) and
+ * `year_in_review` (one bucket per month).
+ *
+ * Equal-time buckets cannot express either. A person photographed heavily in
+ * 2016 and again in 2025 with a five-year quiet stretch between has a span
+ * whose equal thirds land two buckets inside the same busy year; bucketing on
+ * the calendar unit itself is the only way to guarantee "each year is
+ * represented" rather than "each equal slice of elapsed time is".
+ */
+export interface BucketPolicy {
+  /** Bucket identity for a candidate. Buckets are visited in ascending order. */
+  key: (candidate: MemoryCandidate) => number;
+  /** Ceiling on items taken from any one bucket. Default: unbounded. */
+  maxPerBucket?: number;
+}
+
 /** Options accepted by `loadCandidates` / `curate`. */
 export interface CurateOptions {
   /** Hard cap on items in the produced memory (`memories.maxItemsPerMemory`). */
   maxItems: number;
   /** Override the resident-candidate ceiling. Defaults to DEFAULT_MAX_CANDIDATES. */
   maxCandidates?: number;
+  /**
+   * Replace equal-time-span diversity with calendar bucketing. Omit for the
+   * default `selectDiverse` behavior every other curator uses.
+   */
+  bucketBy?: BucketPolicy;
 }
 
 /**
@@ -310,6 +334,84 @@ export function selectDiverse(scored: ScoredCandidate[], maxItems: number): Scor
   for (const c of ranked) {
     if (selected.size >= maxItems) break;
     tryAdd(c);
+  }
+
+  return [...selected.values()];
+}
+
+/**
+ * Pick up to `maxItems` items with EXPLICIT calendar buckets (one per year, one
+ * per month) instead of `selectDiverse`'s equal time spans.
+ *
+ * ROUND-ROBIN, NOT BUCKET-BY-BUCKET. Every bucket contributes its best item in
+ * round 1, its second-best in round 2, and so on. That ordering is what makes
+ * the `maxItems` cut graceful: a 30-item budget over 12 years yields at least
+ * two items from every year rather than four each from the first seven and
+ * nothing from the rest. Bucket-at-a-time filling would produce exactly the
+ * chronological bias this function exists to prevent.
+ *
+ * `maxPerBucket` bounds any single bucket's share. It matters when buckets are
+ * few relative to `maxItems` — `person_over_years` uses it so a three-year span
+ * reads as a representative sample rather than a dump of one prolific year.
+ *
+ * The video cap is enforced exactly as in `selectDiverse`: a rejected video
+ * does not consume its bucket's turn, the bucket simply advances to its next
+ * candidate.
+ *
+ * Pure — exported for unit testing.
+ */
+export function selectByBuckets(
+  scored: ScoredCandidate[],
+  maxItems: number,
+  bucketOf: (candidate: ScoredCandidate) => number,
+  maxPerBucket: number = Number.POSITIVE_INFINITY,
+): ScoredCandidate[] {
+  if (scored.length === 0 || maxItems <= 0 || maxPerBucket <= 0) return [];
+
+  const buckets = new Map<number, ScoredCandidate[]>();
+  for (const c of scored) {
+    const key = bucketOf(c);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(c);
+    else buckets.set(key, [c]);
+  }
+
+  const keys = [...buckets.keys()].sort((a, b) => a - b);
+  for (const key of keys) buckets.get(key)!.sort(compareForSelection);
+
+  const selected = new Map<string, ScoredCandidate>();
+  const cursors = new Map<number, number>();
+  const takenPerBucket = new Map<number, number>();
+  let videoCount = 0;
+
+  // Every round adds at least one item or breaks out, so `maxItems` is a safe
+  // loop bound even when `maxPerBucket` is unbounded.
+  const rounds = Math.min(maxPerBucket, maxItems);
+  for (let round = 0; round < rounds; round += 1) {
+    let progressed = false;
+
+    for (const key of keys) {
+      if (selected.size >= maxItems) break;
+      if ((takenPerBucket.get(key) ?? 0) >= maxPerBucket) continue;
+
+      const members = buckets.get(key)!;
+      let index = cursors.get(key) ?? 0;
+      while (index < members.length) {
+        const candidate = members[index]!;
+        index += 1;
+        if (candidate.type === MediaType.video) {
+          if (videoCount >= MAX_VIDEOS_PER_MEMORY) continue;
+          videoCount += 1;
+        }
+        selected.set(candidate.id, candidate);
+        takenPerBucket.set(key, (takenPerBucket.get(key) ?? 0) + 1);
+        progressed = true;
+        break;
+      }
+      cursors.set(key, index);
+    }
+
+    if (!progressed || selected.size >= maxItems) break;
   }
 
   return [...selected.values()];
@@ -561,6 +663,9 @@ export class MemoryCurationService {
    * The full pipeline for one memory's slice:
    * load (base filter + curator `where`) → score → collapse near-duplicates →
    * diversity-select → order chronologically and pick a cover.
+   *
+   * Diversity is equal-time-span buckets by default; pass `options.bucketBy` for
+   * the calendar-bucketed policy `person_over_years` and `year_in_review` need.
    */
   async curate(
     circleId: string,
@@ -577,7 +682,14 @@ export class MemoryCurationService {
     const scored = scoreCandidates(candidates);
     const suggestedBest = await this.resolveSuggestedBest(candidates);
     const collapsed = collapseGroups(scored, suggestedBest);
-    const chosen = selectDiverse(collapsed, options.maxItems);
+    const chosen = options.bucketBy
+      ? selectByBuckets(
+          collapsed,
+          options.maxItems,
+          options.bucketBy.key,
+          options.bucketBy.maxPerBucket,
+        )
+      : selectDiverse(collapsed, options.maxItems);
     return finalizeSelection(chosen, candidates.length, truncated);
   }
 

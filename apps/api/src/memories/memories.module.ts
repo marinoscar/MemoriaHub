@@ -26,6 +26,11 @@ import { MemoryGenerationHandler } from './memory-generation.handler';
 import { MemoryCurationService } from './curation/memory-curation.service';
 import { OnThisDayCurator } from './curators/on-this-day.curator';
 import { TripCurator } from './curators/trip.curator';
+import { PersonHighlightsCurator } from './curators/person-highlights.curator';
+import { PersonOverYearsCurator } from './curators/person-over-years.curator';
+import { ThemeCurator } from './curators/theme.curator';
+import { SeasonalCurator } from './curators/seasonal.curator';
+import { YearInReviewCurator } from './curators/year-in-review.curator';
 import { memoryCuratorsProvider } from './curators/memory-curators.provider';
 
 @Module({
@@ -36,6 +41,11 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     MemoryCurationService,
     OnThisDayCurator,
     TripCurator,
+    PersonHighlightsCurator,
+    PersonOverYearsCurator,
+    ThemeCurator,
+    SeasonalCurator,
+    YearInReviewCurator,
     memoryCuratorsProvider,
   ],
   exports: [MemoriesGenerationTask, MemoryCurationService],
