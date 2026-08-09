@@ -1,0 +1,17 @@
+-- AlterEnum
+--
+-- Memories notification type (epic #300, issue #311).
+--
+-- `ALTER TYPE ... ADD VALUE` cannot run in the same transaction as statements
+-- that REFERENCE the new value, so this gets its own migration containing
+-- nothing else — the same precedent as 20260705000000_add_media_tag_source_system.
+--
+-- No index change is required. `memories_ready` is a COUNTED EVENT type written
+-- through NotificationsService.upsertCountedEvent(), whose find-or-create is
+-- serialized by a transaction-scoped advisory lock rather than by the partial
+-- unique index `notifications_review_queue_live_uniq_idx` (whose predicate
+-- deliberately lists only the four review_queue_* STATE values).
+--
+-- IF NOT EXISTS makes the statement idempotent, so a re-applied migration on a
+-- database that already carries the value is a no-op rather than an error.
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'memories_ready';

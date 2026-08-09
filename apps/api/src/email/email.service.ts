@@ -53,6 +53,9 @@ export class EmailService {
         subject: rendered.subject,
         html: rendered.html,
         text: rendered.text,
+        // Per-message headers (e.g. the digest's List-Unsubscribe pair), passed
+        // straight through to the provider. Absent for templates that set none.
+        ...(rendered.headers ? { headers: rendered.headers } : {}),
       };
 
       const provider: EmailProvider =

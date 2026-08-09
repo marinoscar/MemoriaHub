@@ -31,6 +31,7 @@ import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.regi
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isMemoriesEnabled } from '../common/types/settings.types';
 import { resolveMemoriesSettings } from './memories-settings.util';
+import { MemoriesNotificationService } from './notifications/memories-notification.service';
 import { MemoryTitleService } from './titles/memory-title.service';
 import {
   MEMORY_CURATORS,
@@ -54,6 +55,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly systemSettings: SystemSettingsService,
     private readonly titles: MemoryTitleService,
+    private readonly memoriesNotifications: MemoriesNotificationService,
     @Inject(MEMORY_CURATORS) private readonly curators: MemoryCurator[],
   ) {}
 
@@ -143,6 +145,31 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
               (err instanceof Error ? err.message : String(err)),
           );
         }
+      }
+    }
+
+    // Notification Center (#311) — fire-and-forget, never awaited, and only
+    // when the run genuinely CREATED something. A refresh-only pass resurfaces
+    // nothing new, and a bell row that says so every day is how a user learns
+    // to ignore the bell. `ctx.now` is the run's start, so the producer's
+    // "newest memory of this run" lookup sees exactly this pass's rows.
+    //
+    // Wrapped defensively even though the producer's entry point is documented
+    // as never throwing: the job's real work is already committed by this
+    // point, so nothing about a bell row is worth turning a green job red and
+    // burning a retry attempt on a re-run that would duplicate the whole pass.
+    if (created > 0) {
+      try {
+        this.memoriesNotifications.recordGeneratedAsync({
+          circleId: ctx.circleId,
+          createdCount: created,
+          since: ctx.now,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `memories_ready notification hook failed for circle ${ctx.circleId}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
       }
     }
 

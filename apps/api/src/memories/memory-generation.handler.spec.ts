@@ -30,6 +30,7 @@ import {
   MemoryCuratorResult,
 } from './curators/memory-curator.interface';
 import { MemoryTitleService } from './titles/memory-title.service';
+import { MemoriesNotificationService } from './notifications/memories-notification.service';
 
 function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   return {
@@ -62,6 +63,7 @@ describe('MemoryGenerationHandler', () => {
   let registry: EnrichmentHandlerRegistry;
   let settings: { getSettings: jest.Mock };
   let titles: { beginRun: jest.Mock };
+  let memoriesNotifications: { recordGeneratedAsync: jest.Mock };
   let curators: MemoryCurator[];
 
   const originalEnv = process.env['MEMORIES_ENABLED'];
@@ -74,6 +76,7 @@ describe('MemoryGenerationHandler', () => {
         EnrichmentHandlerRegistry,
         { provide: SystemSettingsService, useValue: settings },
         { provide: MemoryTitleService, useValue: titles },
+        { provide: MemoriesNotificationService, useValue: memoriesNotifications },
         { provide: MEMORY_CURATORS, useValue: curators },
       ],
     }).compile();
@@ -97,6 +100,7 @@ describe('MemoryGenerationHandler', () => {
         stopReason: null,
       })),
     };
+    memoriesNotifications = { recordGeneratedAsync: jest.fn() };
     delete process.env['MEMORIES_ENABLED'];
     await build();
   });
@@ -270,5 +274,60 @@ describe('MemoryGenerationHandler', () => {
     await handler.process(makeJob({ payload: { backfill: true } as never }));
 
     expect(titles.beginRun).toHaveBeenCalledWith({ backfill: true, aiTitlesEnabled: true });
+  });
+
+  // --- #311: the memories_ready notification hook ---------------------------
+
+  it('NOTIFY: fires memories_ready once with the run-wide created total', async () => {
+    const a = fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ created: 4 })) });
+    const b = fakeCurator('b', { run: jest.fn().mockResolvedValue(result({ created: 2 })) });
+    await build([a, b]);
+
+    await handler.process(makeJob());
+
+    // ONE call carrying the summed total — the whole point of the counted-event
+    // primitive is that a batch of six memories is one row, not six.
+    expect(memoriesNotifications.recordGeneratedAsync).toHaveBeenCalledTimes(1);
+    const arg = memoriesNotifications.recordGeneratedAsync.mock.calls[0]![0] as {
+      circleId: string;
+      createdCount: number;
+      since: Date;
+    };
+    expect(arg.circleId).toBe('circle-a');
+    expect(arg.createdCount).toBe(6);
+    // `since` is the run's shared wall clock, so the producer's "newest memory
+    // of THIS run" lookup sees exactly this pass's rows.
+    expect(arg.since).toBe((a.run.mock.calls[0]![0] as MemoryCuratorContext).now);
+  });
+
+  it('NOTIFY: a refresh-only run notifies nobody', async () => {
+    const curator = fakeCurator('a', {
+      run: jest.fn().mockResolvedValue(result({ refreshed: 9, skipped: 3 })),
+    });
+    await build([curator]);
+
+    await handler.process(makeJob());
+
+    expect(memoriesNotifications.recordGeneratedAsync).not.toHaveBeenCalled();
+  });
+
+  it('NOTIFY: a disabled feature never reaches the producer', async () => {
+    settings.getSettings.mockResolvedValue({ features: { memories: false } });
+    await build([fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ created: 3 })) })]);
+
+    await handler.process(makeJob());
+
+    expect(memoriesNotifications.recordGeneratedAsync).not.toHaveBeenCalled();
+  });
+
+  it('NOTIFY: a throwing producer never fails the generation job', async () => {
+    memoriesNotifications.recordGeneratedAsync.mockImplementation(() => {
+      throw new Error('notification exploded');
+    });
+    await build([fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ created: 1 })) })]);
+
+    // The producer's public entry point is documented as never throwing, but
+    // the handler must not depend on that promise to keep a job green.
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
   });
 });
