@@ -31,6 +31,7 @@ const EmailSettingsPage = lazy(() => import('./pages/Admin/EmailSettingsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
 const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
+const NodeBackupPage = lazy(() => import('./pages/Admin/NodeBackupPage'));
 const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
 const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettingsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
@@ -125,6 +126,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/jobs" element={<JobsPage />} />
                 <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
                 <Route path="/admin/settings/nodes" element={<WorkersPage />} />
+                <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
                 <Route path="/admin/settings/doctor" element={<DoctorPage />} />
                 <Route path="/admin/settings/workflows" element={<WorkflowsSettingsPage />} />
                 <Route path="/admin/settings/backup" element={<BackupPage />} />
