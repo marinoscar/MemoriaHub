@@ -113,6 +113,16 @@ function rowToItem(row: ItemRow): CatalogItem {
 export class CatalogRepo {
   constructor(private readonly db: BetterSqlite3.Database) {}
 
+  /**
+   * Run `fn` inside ONE catalog transaction. Repo methods that open their own
+   * transactions (e.g. upsertItemWithDims) nest as savepoints, so the engine's
+   * page commit — every item/dim/status write plus the checkpoint mirror —
+   * lands atomically (issue #316's crash-safe page-commit contract).
+   */
+  transaction(fn: () => void): void {
+    this.db.transaction(fn)();
+  }
+
   // -------------------------------------------------------------------------
   // meta
   // -------------------------------------------------------------------------
