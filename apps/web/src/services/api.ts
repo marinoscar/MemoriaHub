@@ -1,3 +1,8 @@
+import {
+  isMaintenancePayload,
+  reportMaintenance,
+} from './maintenanceState';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 interface RequestOptions extends RequestInit {
@@ -59,13 +64,7 @@ class ApiService {
         });
 
         if (!retryResponse.ok) {
-          const error = await retryResponse.json().catch(() => ({}));
-          throw new ApiError(
-            error.message || 'Request failed',
-            retryResponse.status,
-            error.code,
-            error.details,
-          );
+          await this.throwForResponse(retryResponse);
         }
 
         if (retryResponse.status === 204) {
@@ -79,13 +78,7 @@ class ApiService {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new ApiError(
-        error.message || 'Request failed',
-        response.status,
-        error.code,
-        error.details,
-      );
+      await this.throwForResponse(response);
     }
 
     // Handle 204 No Content
@@ -95,6 +88,38 @@ class ApiService {
 
     const data = await response.json();
     return (data && typeof data === 'object' && 'data' in data) ? data.data : data;
+  }
+
+  /**
+   * Single exit for every non-OK response. Always throws.
+   *
+   * Maintenance mode (issue #348): a 503 carrying the API's stable
+   * `{ error: 'maintenance', message, startedAt }` marker is published to the
+   * global maintenance store BEFORE throwing, so the app can take over with a
+   * single maintenance screen instead of every page rendering its own error.
+   * It still throws (as `MaintenanceError`, an `ApiError` subclass) so any
+   * in-flight caller's `catch`/`finally` runs exactly as it does today — the
+   * screen is a takeover, not a replacement for normal error propagation.
+   *
+   * An ordinary 503 WITHOUT the marker — a crashed API, a proxy with no
+   * upstream — is deliberately left alone and surfaces as a normal ApiError.
+   */
+  private async throwForResponse(response: Response): Promise<never> {
+    const error = await response.json().catch(() => ({}));
+
+    if (isMaintenancePayload(response.status, error)) {
+      const message =
+        error.message || 'The application is temporarily down for maintenance.';
+      reportMaintenance({ message, startedAt: error.startedAt ?? null });
+      throw new MaintenanceError(message, error.startedAt ?? null);
+    }
+
+    throw new ApiError(
+      error.message || 'Request failed',
+      response.status,
+      error.code,
+      error.details,
+    );
   }
 
   async refreshToken(): Promise<boolean> {
@@ -186,6 +211,22 @@ export class ApiError extends Error {
   ) {
     super(message);
     this.name = 'ApiError';
+  }
+}
+
+/**
+ * A 503 that carried the maintenance marker (issue #348). Subclasses ApiError
+ * so every existing `instanceof ApiError` / `err.status` check keeps working;
+ * the distinct class exists so a caller that cares can tell "the whole app is
+ * down on purpose" apart from "this one request failed".
+ */
+export class MaintenanceError extends ApiError {
+  constructor(
+    message: string,
+    public startedAt: string | null = null,
+  ) {
+    super(message, 503, 'MAINTENANCE');
+    this.name = 'MaintenanceError';
   }
 }
 
