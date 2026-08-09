@@ -151,6 +151,8 @@ export class PersonHighlightsCurator implements MemoryCurator {
 
     const upsert = await this.curation.upsertMemory({
       circleId: ctx.circleId,
+      // #306: the run-wide AI-titling budget/circuit breaker.
+      titling: ctx.titling,
       type: MemoryType.person_highlights,
       periodKey: String(year),
       subjectKey: person.id,

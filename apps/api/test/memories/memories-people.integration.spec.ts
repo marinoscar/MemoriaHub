@@ -26,6 +26,7 @@ import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { MemoryCurationService } from '../../src/memories/curation/memory-curation.service';
+import { neverCalledTitleService } from './memory-title.stub';
 import { PersonHighlightsCurator } from '../../src/memories/curators/person-highlights.curator';
 import { PersonOverYearsCurator } from '../../src/memories/curators/person-over-years.curator';
 import { PERSON_OVER_YEARS_MAX_PER_YEAR } from '../../src/memories/curators/person-candidates';
@@ -201,7 +202,12 @@ describeMaybeDb('Memories — people curators (DB_GATED: real PostgreSQL)', () =
     prisma = new PrismaClient({ adapter });
     await prisma.$connect();
 
-    curation = new MemoryCurationService(prisma as unknown as PrismaService);
+    curation = new MemoryCurationService(
+      prisma as unknown as PrismaService,
+      // #306: never invoked here — these contexts carry no `titling` run,
+      // so upsertMemory short-circuits to deterministic template titles.
+      neverCalledTitleService(),
+    );
     highlights = new PersonHighlightsCurator(prisma as unknown as PrismaService, curation);
     overYears = new PersonOverYearsCurator(prisma as unknown as PrismaService, curation);
 

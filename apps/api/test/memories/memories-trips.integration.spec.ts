@@ -26,6 +26,7 @@ import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { MemoryCurationService } from '../../src/memories/curation/memory-curation.service';
+import { neverCalledTitleService } from './memory-title.stub';
 import { TripCurator } from '../../src/memories/curators/trip.curator';
 import { MemoryCuratorContext } from '../../src/memories/curators/memory-curator.interface';
 import { resolveMemoriesSettings } from '../../src/memories/memories-settings.util';
@@ -214,7 +215,12 @@ describeMaybeDb('Memories — Trips curator (DB_GATED: real PostgreSQL)', () => 
     prisma = new PrismaClient({ adapter });
     await prisma.$connect();
 
-    curation = new MemoryCurationService(prisma as unknown as PrismaService);
+    curation = new MemoryCurationService(
+      prisma as unknown as PrismaService,
+      // #306: never invoked here — these contexts carry no `titling` run,
+      // so upsertMemory short-circuits to deterministic template titles.
+      neverCalledTitleService(),
+    );
     curator = new TripCurator(prisma as unknown as PrismaService, curation);
 
     await prisma.user.create({

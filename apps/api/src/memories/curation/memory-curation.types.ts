@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { MediaType, MemoryType } from '@prisma/client';
+import type { MemoryTitleRun } from '../titles/memory-title.types';
 
 /**
  * One media item considered for inclusion in a memory, hydrated with exactly
@@ -102,6 +103,16 @@ export interface UpsertMemoryInput {
    * protect a title that is still accurate, not one that has been falsified.
    */
   retitle?: boolean;
+  /**
+   * The generation job's AI-titling budget (#306), created once per job by
+   * `MemoryGenerationHandler` and carried on `MemoryCuratorContext.titling`.
+   *
+   * OMITTING IT MEANS TEMPLATE TITLES ONLY — deliberately fail-safe, so a
+   * curator (or a unit test) that does not thread it degrades to the documented
+   * floor instead of making unbudgeted model calls. Every curator passes
+   * `titling: ctx.titling`.
+   */
+  titling?: MemoryTitleRun;
 }
 
 /** Outcome of one `upsertMemory` call. */

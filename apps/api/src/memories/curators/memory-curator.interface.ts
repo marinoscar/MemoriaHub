@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { MemoriesSettingsValue } from '../../common/types/settings.types';
+import type { MemoryTitleRun } from '../titles/memory-title.types';
 
 /** DI token for the ordered curator registry. */
 export const MEMORY_CURATORS = Symbol('MEMORY_CURATORS');
@@ -39,6 +40,17 @@ export interface MemoryCuratorContext {
    * this circle's library supports". Scheduled runs are always `false`.
    */
   backfill: boolean;
+  /**
+   * The run's AI-titling budget and circuit breaker (#306), created ONCE by the
+   * handler and shared by every curator so a provider rate limit stops the
+   * whole job's titling and a backfill's 100-call cap is job-wide rather than
+   * per curator.
+   *
+   * Every curator forwards it verbatim as `titling: ctx.titling` on its
+   * `upsertMemory` call. Optional so a test can construct a context without it
+   * — which yields template titles, the documented floor.
+   */
+  titling?: MemoryTitleRun;
 }
 
 /** What one curator did, for logging and the handler's run summary. */

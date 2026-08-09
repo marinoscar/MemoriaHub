@@ -21,6 +21,8 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { AiModule } from '../ai/ai.module';
+import { MemoryTitleService } from './titles/memory-title.service';
 import { MemoriesGenerationTask } from './memories-generation.task';
 import { MemoryGenerationHandler } from './memory-generation.handler';
 import { MemoryCurationService } from './curation/memory-curation.service';
@@ -34,11 +36,16 @@ import { YearInReviewCurator } from './curators/year-in-review.curator';
 import { memoryCuratorsProvider } from './curators/memory-curators.provider';
 
 @Module({
-  imports: [PrismaModule, SettingsModule, EnrichmentModule],
+  // AiModule supplies AiSettingsService (ai.features.memories + the decrypted
+  // credential) and AiProviderRegistry to MemoryTitleService (#306). The edge
+  // points one way only — AiModule imports SettingsModule and nothing else —
+  // so there is no cycle to break.
+  imports: [PrismaModule, SettingsModule, EnrichmentModule, AiModule],
   providers: [
     MemoriesGenerationTask,
     MemoryGenerationHandler,
     MemoryCurationService,
+    MemoryTitleService,
     OnThisDayCurator,
     TripCurator,
     PersonHighlightsCurator,

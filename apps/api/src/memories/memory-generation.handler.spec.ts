@@ -26,8 +26,10 @@ import { SystemSettingsService } from '../settings/system-settings/system-settin
 import {
   MEMORY_CURATORS,
   MemoryCurator,
+  MemoryCuratorContext,
   MemoryCuratorResult,
 } from './curators/memory-curator.interface';
+import { MemoryTitleService } from './titles/memory-title.service';
 
 function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   return {
@@ -59,6 +61,7 @@ describe('MemoryGenerationHandler', () => {
   let handler: MemoryGenerationHandler;
   let registry: EnrichmentHandlerRegistry;
   let settings: { getSettings: jest.Mock };
+  let titles: { beginRun: jest.Mock };
   let curators: MemoryCurator[];
 
   const originalEnv = process.env['MEMORIES_ENABLED'];
@@ -70,6 +73,7 @@ describe('MemoryGenerationHandler', () => {
         MemoryGenerationHandler,
         EnrichmentHandlerRegistry,
         { provide: SystemSettingsService, useValue: settings },
+        { provide: MemoryTitleService, useValue: titles },
         { provide: MEMORY_CURATORS, useValue: curators },
       ],
     }).compile();
@@ -81,6 +85,17 @@ describe('MemoryGenerationHandler', () => {
   beforeEach(async () => {
     settings = {
       getSettings: jest.fn().mockResolvedValue({ features: { memories: true } }),
+    };
+    // The handler only ever OPENS the titling budget (#306); `generate` is
+    // reached through MemoryCurationService, which these fake curators replace.
+    titles = {
+      beginRun: jest.fn((options: { backfill: boolean; aiTitlesEnabled: boolean }) => ({
+        ...options,
+        maxAiCalls: options.backfill ? 100 : Number.POSITIVE_INFINITY,
+        aiCalls: 0,
+        stopped: false,
+        stopReason: null,
+      })),
     };
     delete process.env['MEMORIES_ENABLED'];
     await build();
@@ -215,5 +230,45 @@ describe('MemoryGenerationHandler', () => {
     await handler.process(makeJob({ payload: { backfill: true } as never }));
 
     expect(curator.run.mock.calls[0]![0].backfill).toBe(true);
+  });
+
+  // --- #306: the run-wide AI-titling budget ---------------------------------
+
+  it('AI TITLING: opens ONE titling run per job and shares it with every curator', async () => {
+    const a = fakeCurator('a');
+    const b = fakeCurator('b');
+    await build([a, b]);
+
+    await handler.process(makeJob());
+
+    // One budget per job, not one per curator — a provider rate limit must stop
+    // titling for the whole run, and a backfill cap must be job-wide.
+    expect(titles.beginRun).toHaveBeenCalledTimes(1);
+    const runA = (a.run.mock.calls[0]![0] as MemoryCuratorContext).titling;
+    const runB = (b.run.mock.calls[0]![0] as MemoryCuratorContext).titling;
+    expect(runA).toBeDefined();
+    expect(runB).toBe(runA);
+  });
+
+  it('AI TITLING: passes the resolved memories.aiTitles.enabled flag through', async () => {
+    settings.getSettings.mockResolvedValue({
+      features: { memories: true },
+      memories: { aiTitles: { enabled: false } },
+    });
+    const curator = fakeCurator('a');
+    await build([curator]);
+
+    await handler.process(makeJob());
+
+    expect(titles.beginRun).toHaveBeenCalledWith({ backfill: false, aiTitlesEnabled: false });
+  });
+
+  it('AI TITLING: a backfill job opens a backfill-capped budget', async () => {
+    const curator = fakeCurator('a');
+    await build([curator]);
+
+    await handler.process(makeJob({ payload: { backfill: true } as never }));
+
+    expect(titles.beginRun).toHaveBeenCalledWith({ backfill: true, aiTitlesEnabled: true });
   });
 });
