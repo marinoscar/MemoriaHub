@@ -151,10 +151,15 @@ export function MemoryCard({
           : 'none',
         ...(hoverable && {
           '&:hover': { transform: 'scale(1.03)', boxShadow: 6 },
-          '&:focus-within': { transform: 'scale(1.03)', boxShadow: 6 },
         }),
-        // Focus is visible regardless of motion preference.
-        '&:focus-within': { boxShadow: 6 },
+        // Focus stays visible regardless of the motion preference — the lift is
+        // an accessibility affordance here, not decoration. Only the transform
+        // half of it is dropped under reduced motion. Declared AFTER the hover
+        // block so it is not silently overwritten by a later duplicate key.
+        '&:focus-within': {
+          boxShadow: 6,
+          ...(hoverable && { transform: 'scale(1.03)' }),
+        },
       }}
     >
       {/* Stacked fan — up to four item thumbnails peeking out behind the cover.
