@@ -29,6 +29,67 @@ export interface Circle {
   // other fields may be present but we only need these
 }
 
+// ---------------------------------------------------------------------------
+// Restore types (issue #321) — only the fields the CLI relies on are typed;
+// extra server fields pass through untouched.
+// ---------------------------------------------------------------------------
+
+/** A MediaItem as returned by POST /api/media and GET /api/media/:id. */
+export interface MediaItemRecord {
+  id: string;
+  circleId?: string;
+  capturedAt?: string | null;
+  favorite?: boolean;
+  description?: string | null;
+  archivedAt?: string | null;
+  /** True when the server matched an existing (circleId, contentHash) row. */
+  deduplicated?: boolean;
+  [key: string]: unknown;
+}
+
+/** Body of POST /api/media (mirrors createMediaSchema in the API). */
+export interface CreateMediaItemBody {
+  storageObjectId: string;
+  type: 'photo' | 'video';
+  source: 'web' | 'cli' | 'android' | 'import' | 'sync';
+  originalFilename: string;
+  circleId: string;
+  contentHash?: string;
+  capturedAt?: string;
+  capturedAtOffset?: number;
+  description?: string;
+  favorite?: boolean;
+  originalCreatedAt?: string;
+  sourcePath?: string;
+  sourceDeviceId?: string;
+  sourceDeviceName?: string;
+  /** Client-supplied FALLBACK location; the server restricts this to 'manual'. */
+  takenLat?: number;
+  takenLng?: number;
+  takenAltitude?: number;
+  coordSource?: 'manual';
+}
+
+/** Body of PATCH /api/media/bulk (1–500 ids; `set` needs ≥1 field). */
+export interface BulkUpdateMediaBody {
+  circleId: string;
+  ids: string[];
+  set: {
+    location?: { lat: number; lng: number; altitude?: number } | null;
+    favorite?: boolean;
+    capturedAt?: string | null;
+  };
+}
+
+/** An album row from GET /api/media/albums / POST /api/media/albums. */
+export interface AlbumSummary {
+  id: string;
+  name: string;
+  circleId?: string;
+  itemCount?: number;
+  [key: string]: unknown;
+}
+
 /** Minimal Media Workflow Automation summary (issue #144 — thin CLI surface). */
 export interface WorkflowSummary {
   id: string;
@@ -612,6 +673,21 @@ export class ApiClient {
     });
   }
 
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    return this.run(async () => {
+      const res = await this.fetchWithGate(`${this.baseUrl}${path}`, {
+        method: 'PATCH',
+        headers: {
+          ...this.authHeaders(),
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      return this.parseOk<T>(res);
+    });
+  }
+
   /**
    * PUT a raw buffer directly to a presigned URL.
    * No auth header — the URL is pre-signed, and S3 rejects extra auth headers.
@@ -642,6 +718,96 @@ export class ApiClient {
     const res = await this.get<Circle[] | { items?: Circle[] }>('/api/circles');
     if (Array.isArray(res)) return res;
     return res?.items ?? [];
+  }
+
+  // -------------------------------------------------------------------------
+  // Restore surface (issue #321) — every call here is a NORMAL user-auth
+  // endpoint (media:write / circles:write), never an /api/nodes/* route, so a
+  // `nod_` node credential can not reach any of them by design. Envelopes:
+  // parseOk already strips a `{ data }` wrapper, so each method describes the
+  // shape the controller returns underneath it.
+  // -------------------------------------------------------------------------
+
+  /** Create a circle (POST /api/circles) — returns the created circle record. */
+  createCircle(body: { name: string; description?: string }): Promise<Circle> {
+    return this.post<Circle>('/api/circles', body);
+  }
+
+  /** Fetch one media item; a 404 surfaces as ApiError(404). */
+  getMediaItem(id: string): Promise<MediaItemRecord> {
+    return this.get<MediaItemRecord>(`/api/media/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Register an uploaded StorageObject as a MediaItem (POST /api/media).
+   * `deduplicated: true` means the server matched an existing
+   * (circle_id, content_hash) row and returned it — the restore engine treats
+   * that as "already there", not an error.
+   */
+  createMediaItem(body: CreateMediaItemBody): Promise<MediaItemRecord> {
+    return this.post<MediaItemRecord>('/api/media', body);
+  }
+
+  /** Bulk set location / favorite / capturedAt on 1–500 items. */
+  bulkUpdateMedia(body: BulkUpdateMediaBody): Promise<unknown> {
+    return this.patch<unknown>('/api/media/bulk', body);
+  }
+
+  /** Bulk add/remove tag NAMES on 1–500 items (tags are found-or-created server-side). */
+  bulkTags(body: {
+    circleId: string;
+    ids: string[];
+    add?: string[];
+    remove?: string[];
+  }): Promise<unknown> {
+    return this.post<unknown>('/api/media/bulk/tags', body);
+  }
+
+  /** Bulk archive 1–500 items (PATCH /api/media/bulk/archive). */
+  bulkArchiveMedia(body: { circleId: string; ids: string[] }): Promise<unknown> {
+    return this.patch<unknown>('/api/media/bulk/archive', body);
+  }
+
+  /** List a circle's albums (paginated; the envelope is `{ items, meta }`). */
+  async listAlbums(circleId: string, page = 1, pageSize = 100): Promise<AlbumSummary[]> {
+    const res = await this.get<AlbumSummary[] | { items?: AlbumSummary[] }>(
+      `/api/media/albums?circleId=${encodeURIComponent(circleId)}` +
+        `&page=${page}&pageSize=${pageSize}`,
+    );
+    if (Array.isArray(res)) return res;
+    return res?.items ?? [];
+  }
+
+  /** Create an album in a circle; returns the created album record. */
+  createAlbum(body: {
+    circleId: string;
+    name: string;
+    description?: string;
+  }): Promise<AlbumSummary> {
+    return this.post<AlbumSummary>('/api/media/albums', body);
+  }
+
+  /** Add media items to an album (idempotent server-side, ≤500 per call). */
+  addAlbumItems(albumId: string, mediaItemIds: string[]): Promise<unknown> {
+    return this.post<unknown>(
+      `/api/media/albums/${encodeURIComponent(albumId)}/items`,
+      { mediaItemIds },
+    );
+  }
+
+  /**
+   * Manually associate a person with a media item by NAME (find-or-create,
+   * idempotent). Detected faces / bounding boxes / embeddings are NOT
+   * restorable — enrichment re-detects them.
+   */
+  addPersonToMedia(
+    mediaItemId: string,
+    body: { personId?: string; name?: string },
+  ): Promise<{ personId: string; personName: string | null; faceId: string }> {
+    return this.post<{ personId: string; personName: string | null; faceId: string }>(
+      `/api/media/${encodeURIComponent(mediaItemId)}/people`,
+      body,
+    );
   }
 
   // -------------------------------------------------------------------------

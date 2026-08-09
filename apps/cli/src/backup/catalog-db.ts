@@ -26,7 +26,7 @@ const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3') as typeof BetterSqlite3;
 
 /** Highest catalog schema version this build understands. */
-export const CATALOG_SCHEMA_VERSION = 1;
+export const CATALOG_SCHEMA_VERSION = 2;
 
 /** Thrown when the catalog was written by a newer CLI, or is not a SQLite file. */
 export class CatalogOpenError extends Error {
@@ -66,6 +66,23 @@ CREATE TABLE runs(id TEXT PRIMARY KEY, kind TEXT, status TEXT, started_at TEXT, 
 CREATE TABLE checkpoint(key TEXT PRIMARY KEY, value TEXT);
 `;
 
+/**
+ * v2 (issue #321) — restore tracking.
+ *
+ * `items.restored_media_item_id` records the MediaItem id a backed-up item was
+ * restored INTO on some server, so `memoriahub backup restore` is re-runnable:
+ * a row that already carries an id is verified (GET /api/media/:id) and skipped
+ * rather than re-uploaded. Deliberately a plain nullable column with no index —
+ * restore scans the whole catalog anyway, and every other lookup is by id.
+ *
+ * ALTER TABLE ... ADD COLUMN is the only statement here, so the migration
+ * applies cleanly to an existing v1 catalog (all data intact) and is a no-op
+ * for anything created after it.
+ */
+const DDL_V2 = `
+ALTER TABLE items ADD COLUMN restored_media_item_id TEXT;
+`;
+
 interface CatalogMigration {
   version: number;
   up: (db: BetterSqlite3.Database) => void;
@@ -76,6 +93,12 @@ const MIGRATIONS: CatalogMigration[] = [
     version: 1,
     up(db: BetterSqlite3.Database): void {
       db.exec(DDL_V1);
+    },
+  },
+  {
+    version: 2,
+    up(db: BetterSqlite3.Database): void {
+      db.exec(DDL_V2);
     },
   },
 ];

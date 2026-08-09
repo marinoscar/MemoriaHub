@@ -34,7 +34,7 @@ import {
   type BackupEngineOpts,
 } from '../../src/backup/backup-engine.js';
 import { BACKUP_EV, type ItemDonePayload } from '../../src/backup/events.js';
-import { openCatalogDb } from '../../src/backup/catalog-db.js';
+import { CATALOG_SCHEMA_VERSION, openCatalogDb } from '../../src/backup/catalog-db.js';
 import { CatalogRepo } from '../../src/backup/catalog-repo.js';
 import { absPathFor } from '../../src/backup/layout.js';
 
@@ -354,7 +354,7 @@ describe('BackupEngine.runBackup', () => {
       serverUrl: 'https://api.test',
       nodeId: 'node-1',
       nodeName: 'test-node',
-      catalogSchemaVersion: 1,
+      catalogSchemaVersion: CATALOG_SCHEMA_VERSION,
     });
     expect(manifest.checkpoint.id).toBe('f');
     expect(manifest.counts.totalItems).toBe(6);

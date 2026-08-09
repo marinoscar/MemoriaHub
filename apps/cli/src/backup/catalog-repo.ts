@@ -35,6 +35,13 @@ export interface CatalogItem {
   verifiedAt: string | null;
   lastError: string | null;
   updatedAt: string;
+  /**
+   * MediaItem id this backed-up item was restored INTO (catalog v2, issue
+   * #321), or null when it has never been restored. Set by the restore engine
+   * only — the backup engine never writes it, and upsertItemWithDims
+   * deliberately preserves it (see the COALESCE in that INSERT).
+   */
+  restoredMediaItemId?: string | null;
 }
 
 /**
@@ -84,6 +91,8 @@ interface ItemRow {
   verified_at: string | null;
   last_error: string | null;
   updated_at: string;
+  /** Present from catalog schema v2 onwards. */
+  restored_media_item_id?: string | null;
 }
 
 function rowToItem(row: ItemRow): CatalogItem {
@@ -103,6 +112,7 @@ function rowToItem(row: ItemRow): CatalogItem {
     verifiedAt: row.verified_at,
     lastError: row.last_error,
     updatedAt: row.updated_at,
+    restoredMediaItemId: row.restored_media_item_id ?? null,
   };
 }
 
@@ -157,11 +167,17 @@ export class CatalogRepo {
     const upsert = this.db.transaction(() => {
       this.db
         .prepare(
+          // INSERT OR REPLACE is a delete+insert, so restored_media_item_id
+          // (catalog v2) would be silently dropped on every backup run unless
+          // it is carried forward explicitly — hence the self-subselect. The
+          // restore engine is its only writer; backup must never clear it.
           `INSERT OR REPLACE INTO items (
              media_item_id, circle_id, rel_path, sidecar_rel_path,
              captured_at, content_hash, size, mime_type, server_updated_at,
-             status, archived, downloaded_at, verified_at, last_error, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             status, archived, downloaded_at, verified_at, last_error, updated_at,
+             restored_media_item_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             (SELECT restored_media_item_id FROM items WHERE media_item_id = ?))`,
         )
         .run(
           item.mediaItemId,
@@ -179,6 +195,7 @@ export class CatalogRepo {
           item.verifiedAt,
           item.lastError,
           new Date().toISOString(),
+          item.mediaItemId,
         );
 
       for (const table of ['item_tags', 'item_albums', 'item_people']) {
@@ -316,6 +333,87 @@ export class CatalogRepo {
            updated_at = ? WHERE media_item_id = ?`,
       )
       .run(lastError, new Date().toISOString(), mediaItemId);
+  }
+
+  // -------------------------------------------------------------------------
+  // restore (catalog v2, issue #321)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Items eligible for a restore pass, in a deterministic order.
+   *
+   * `quarantined` and `failed` rows are NEVER selectable: a quarantined file is
+   * one the server no longer lists (restoring it would resurrect deleted
+   * content), and a failed row's local bytes are known-bad. The caller passes
+   * `['present']` (the default scope — active AND archived items, since
+   * `archived` is a flag on a present row) plus `'trashed'` under
+   * `--include trashed`.
+   */
+  listForRestore(statuses: CatalogItemStatus[]): CatalogItem[] {
+    const allowed = statuses.filter((s) => s === 'present' || s === 'trashed');
+    if (allowed.length === 0) return [];
+    const placeholders = allowed.map(() => '?').join(', ');
+    const rows = this.db
+      .prepare<string[], ItemRow>(
+        `SELECT * FROM items WHERE status IN (${placeholders})
+           ORDER BY captured_at IS NULL, captured_at, media_item_id`,
+      )
+      .all(...allowed);
+    return rows.map(rowToItem);
+  }
+
+  /** Record (or clear, with null) the MediaItem id an item was restored into. */
+  setRestoredMediaItemId(mediaItemId: string, restoredId: string | null): void {
+    this.db
+      .prepare(
+        'UPDATE items SET restored_media_item_id = ?, updated_at = ? WHERE media_item_id = ?',
+      )
+      .run(restoredId, new Date().toISOString(), mediaItemId);
+  }
+
+  /** Distinct tag names attached to one item (restore reapplies all of them). */
+  tagsFor(mediaItemId: string): string[] {
+    return this.db
+      .prepare<[string], { tag: string }>(
+        'SELECT tag FROM item_tags WHERE media_item_id = ? ORDER BY tag',
+      )
+      .all(mediaItemId)
+      .map((r) => r.tag);
+  }
+
+  /**
+   * Dimension totals for a set of circles, used by the restore plan (and the
+   * `--dry-run` report): distinct album names / person names / tag names
+   * reachable from the items in scope, per source circle.
+   */
+  restoreDimensionCounts(
+    statuses: CatalogItemStatus[],
+  ): Map<string, { albums: number; people: number; tags: number }> {
+    const allowed = statuses.filter((s) => s === 'present' || s === 'trashed');
+    const out = new Map<string, { albums: number; people: number; tags: number }>();
+    if (allowed.length === 0) return out;
+    const placeholders = allowed.map(() => '?').join(', ');
+
+    const tally = (table: string, column: string, key: 'albums' | 'people' | 'tags'): void => {
+      const rows = this.db
+        .prepare<string[], { circle_id: string; n: number }>(
+          `SELECT i.circle_id AS circle_id, COUNT(DISTINCT d.${column}) AS n
+             FROM items i JOIN ${table} d ON d.media_item_id = i.media_item_id
+            WHERE i.status IN (${placeholders})
+            GROUP BY i.circle_id`,
+        )
+        .all(...allowed);
+      for (const row of rows) {
+        const entry = out.get(row.circle_id) ?? { albums: 0, people: 0, tags: 0 };
+        entry[key] = row.n;
+        out.set(row.circle_id, entry);
+      }
+    };
+
+    tally('item_albums', 'album_name', 'albums');
+    tally('item_people', 'person_name', 'people');
+    tally('item_tags', 'tag', 'tags');
+    return out;
   }
 
   /** Hard-delete an item row AND its dimension rows (prune) in one transaction. */
