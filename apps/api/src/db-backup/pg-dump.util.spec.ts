@@ -1,0 +1,263 @@
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+
+import {
+  __setSpawnForTests,
+  buildPgDumpArgs,
+  buildPgEnv,
+  buildPgRestoreListArgs,
+  resolvePgDumpPath,
+  resolvePgRestorePath,
+  spawnPgDump,
+  spawnPgRestoreList,
+  STDERR_TAIL_MAX_CHARS,
+  type PgConnectionConfig,
+} from './pg-dump.util';
+
+const PG: PgConnectionConfig = {
+  host: 'db.internal',
+  port: 5432,
+  user: 'appuser',
+  password: 'sup3r-s3cret-pw',
+  database: 'memoriahub',
+};
+
+/**
+ * Minimal ChildProcess stand-in: an EventEmitter with real streams, so the
+ * wrapper's stdout piping, stderr accumulation and close/error handling are
+ * exercised for real rather than stubbed.
+ */
+function makeFakeChild() {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: PassThrough;
+    stderr: PassThrough;
+    stdin: PassThrough;
+    kill: jest.Mock;
+  };
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.kill = jest.fn();
+  return child;
+}
+
+describe('pg-dump.util', () => {
+  afterEach(() => {
+    __setSpawnForTests(null);
+    jest.useRealTimers();
+    delete process.env.PG_DUMP_PATH;
+    delete process.env.PG_RESTORE_PATH;
+  });
+
+  // -------------------------------------------------------------------------
+  // argv
+  // -------------------------------------------------------------------------
+
+  describe('buildPgDumpArgs', () => {
+    it('emits the custom-format, no-owner, no-acl, compression-level argv', () => {
+      expect(buildPgDumpArgs(PG, 1)).toEqual([
+        '-Fc',
+        '--no-owner',
+        '--no-acl',
+        '-Z',
+        '1',
+        '-h',
+        'db.internal',
+        '-p',
+        '5432',
+        '-U',
+        'appuser',
+        '-d',
+        'memoriahub',
+      ]);
+    });
+
+    it('carries the configured compression level through', () => {
+      expect(buildPgDumpArgs(PG, 9)).toContain('9');
+    });
+
+    it('writes to stdout — no -f output-file operand', () => {
+      expect(buildPgDumpArgs(PG, 1)).not.toContain('-f');
+    });
+  });
+
+  it('buildPgRestoreListArgs reads the archive from stdin (no filename operand)', () => {
+    expect(buildPgRestoreListArgs()).toEqual(['--list']);
+  });
+
+  it('resolves binary paths from PG_DUMP_PATH / PG_RESTORE_PATH, else PATH', () => {
+    expect(resolvePgDumpPath()).toBe('pg_dump');
+    expect(resolvePgRestorePath()).toBe('pg_restore');
+    process.env.PG_DUMP_PATH = '/opt/pg16/bin/pg_dump';
+    process.env.PG_RESTORE_PATH = '/opt/pg16/bin/pg_restore';
+    expect(resolvePgDumpPath()).toBe('/opt/pg16/bin/pg_dump');
+    expect(resolvePgRestorePath()).toBe('/opt/pg16/bin/pg_restore');
+  });
+
+  // -------------------------------------------------------------------------
+  // SECURITY: PGPASSWORD in env, never argv
+  // -------------------------------------------------------------------------
+
+  describe('credential handling (security)', () => {
+    it('buildPgEnv puts the password in PGPASSWORD on top of the base env', () => {
+      const env = buildPgEnv(PG, { EXISTING: 'kept' } as NodeJS.ProcessEnv);
+      expect(env.PGPASSWORD).toBe('sup3r-s3cret-pw');
+      expect(env.EXISTING).toBe('kept');
+    });
+
+    it('the password NEVER appears in pg_dump argv — argv is world-readable via ps', () => {
+      const argv = buildPgDumpArgs(PG, 1);
+      expect(argv.join(' ')).not.toContain(PG.password);
+      for (const arg of argv) {
+        expect(arg).not.toContain(PG.password);
+        expect(arg).not.toMatch(/password/i);
+      }
+    });
+
+    it('spawnPgDump passes PGPASSWORD via the child env and not in argv', () => {
+      const child = makeFakeChild();
+      const spawnMock = jest.fn().mockReturnValue(child);
+      __setSpawnForTests(spawnMock as never);
+
+      const proc = spawnPgDump(PG, 1);
+      proc.done.catch(() => {});
+
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      const [command, args, options] = spawnMock.mock.calls[0];
+
+      expect(command).toBe('pg_dump');
+      expect((args as string[]).join('\0')).not.toContain(PG.password);
+      expect((options as { env: NodeJS.ProcessEnv }).env.PGPASSWORD).toBe(
+        PG.password,
+      );
+
+      child.emit('close', 0, null);
+    });
+
+    it('spawnPgRestoreList also keeps the password out of argv', () => {
+      const child = makeFakeChild();
+      const spawnMock = jest.fn().mockReturnValue(child);
+      __setSpawnForTests(spawnMock as never);
+
+      const proc = spawnPgRestoreList(PG);
+      proc.done.catch(() => {});
+
+      const [command, args, options] = spawnMock.mock.calls[0];
+      expect(command).toBe('pg_restore');
+      expect((args as string[]).join('\0')).not.toContain(PG.password);
+      expect((options as { env: NodeJS.ProcessEnv }).env.PGPASSWORD).toBe(
+        PG.password,
+      );
+
+      child.emit('close', 0, null);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Lifecycle
+  // -------------------------------------------------------------------------
+
+  describe('process lifecycle', () => {
+    it('exposes stdout as a live stream and resolves done on a clean exit', async () => {
+      const child = makeFakeChild();
+      __setSpawnForTests((() => child) as never);
+
+      const proc = spawnPgDump(PG, 1);
+
+      const chunks: Buffer[] = [];
+      proc.stdout.on('data', (c: Buffer) => chunks.push(c));
+
+      child.stdout.write('ARCHIVE-BYTES');
+      child.stdout.end();
+      child.emit('close', 0, null);
+
+      await expect(proc.done).resolves.toBeUndefined();
+      expect(Buffer.concat(chunks).toString()).toBe('ARCHIVE-BYTES');
+    });
+
+    it('rejects with the stderr tail on a non-zero exit', async () => {
+      const child = makeFakeChild();
+      __setSpawnForTests((() => child) as never);
+
+      const proc = spawnPgDump(PG, 1);
+      child.stderr.write('pg_dump: error: connection to server failed\n');
+      // 'close' fires only after stdio drains in the real thing; emit on the
+      // next tick so the stderr chunk has been consumed.
+      await new Promise((r) => setImmediate(r));
+      child.emit('close', 1, null);
+
+      await expect(proc.done).rejects.toThrow(
+        /pg_dump exited with code 1: .*connection to server failed/,
+      );
+    });
+
+    it('rejects when the child is killed by a signal', async () => {
+      const child = makeFakeChild();
+      __setSpawnForTests((() => child) as never);
+
+      const proc = spawnPgDump(PG, 1);
+      child.emit('close', null, 'SIGKILL');
+
+      await expect(proc.done).rejects.toThrow(/killed with signal SIGKILL/);
+    });
+
+    it('rejects on a spawn error (e.g. pg_dump not installed)', async () => {
+      const child = makeFakeChild();
+      __setSpawnForTests((() => child) as never);
+
+      const proc = spawnPgDump(PG, 1);
+      child.emit('error', new Error('spawn pg_dump ENOENT'));
+
+      await expect(proc.done).rejects.toThrow(/ENOENT/);
+    });
+
+    it('SIGKILLs and rejects once the hard timeout elapses', async () => {
+      jest.useFakeTimers();
+      const child = makeFakeChild();
+      __setSpawnForTests((() => child) as never);
+
+      const proc = spawnPgDump(PG, 1, { timeoutMs: 1000 });
+      const rejected = expect(proc.done).rejects.toThrow(
+        /pg_dump timed out after 1000ms/,
+      );
+
+      jest.advanceTimersByTime(1000);
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+      await rejected;
+    });
+
+    it('settles exactly once — the post-SIGKILL close is a no-op', async () => {
+      jest.useFakeTimers();
+      const child = makeFakeChild();
+      __setSpawnForTests((() => child) as never);
+
+      const proc = spawnPgDump(PG, 1, { timeoutMs: 500 });
+      const rejected = expect(proc.done).rejects.toThrow(/timed out/);
+
+      jest.advanceTimersByTime(500);
+      // The SIGKILLed child emits its own close afterwards; it must not turn
+      // the already-rejected promise into a resolution (or a second settle).
+      child.emit('close', null, 'SIGKILL');
+
+      await rejected;
+    });
+
+    it('bounds the retained stderr to the tail', async () => {
+      const child = makeFakeChild();
+      __setSpawnForTests((() => child) as never);
+
+      const proc = spawnPgDump(PG, 1);
+      child.stderr.write('X'.repeat(STDERR_TAIL_MAX_CHARS * 2));
+      child.stderr.write('TAIL-MARKER');
+      await new Promise((r) => setImmediate(r));
+
+      const tail = proc.stderrTail();
+      expect(tail.length).toBeLessThanOrEqual(STDERR_TAIL_MAX_CHARS);
+      expect(tail.endsWith('TAIL-MARKER')).toBe(true);
+
+      child.emit('close', 0, null);
+      await proc.done;
+    });
+  });
+});
