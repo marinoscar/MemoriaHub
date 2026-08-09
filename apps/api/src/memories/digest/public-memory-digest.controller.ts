@@ -58,7 +58,6 @@
 import {
   Controller,
   Get,
-  Header,
   Inject,
   Logger,
   NotFoundException,
