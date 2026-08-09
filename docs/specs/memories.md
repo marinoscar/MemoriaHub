@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.2 (data model + generation plumbing) |
+| **Version** | 0.3 (data model + generation plumbing + curation engine & On This Day) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302); §4–§8 and §10 are placeholders for later issues in epic #300 |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303); §5–§8 and §10 are placeholders for later issues in epic #300 |
 
 ---
 
@@ -34,7 +34,7 @@ Seven memory types ship across the epic (see [§2.1](#21-memorytype-enum)): `on_
 
 The epic is delivered incrementally, and this document grows with it. Implemented so far: the database foundation — the `MemoryType` enum and the `Memory` / `MemoryItem` / `MemoryUserState` models ([#301](https://github.com/marinoscar/MemoriaHub/issues/301), §2) — and the configuration surface plus generation plumbing: the `features.memories` flag, the `memories.*` namespace, `ai.features.memories`, and an hourly per-circle `memory_generation` job whose handler is still a deliberate **no-op** ([#302](https://github.com/marinoscar/MemoriaHub/issues/302), §3 and §9). Every later issue builds on the #301 schema without altering it.
 
-Sections 4–8 and 10 are placeholders that name the issue expected to fill them in; do not treat their absence as an oversight. Until curators land in #303–#305, an enabled deployment schedules jobs and creates **zero** memory rows — which is the intended, tested intermediate state.
+Sections 5–8 and 10 are placeholders that name the issue expected to fill them in; do not treat their absence as an oversight. With #303 landed, an enabled deployment generates real `on_this_day` memories; the remaining six types arrive with #304–#305 and plug into the §4 engine unchanged.
 
 ## 2. Data Model
 
@@ -231,7 +231,174 @@ v1's body is a log line and a return. That log line is the observability hook pr
 
 ## 4. Curation Engine
 
-Placeholder. Covered by issue [#303](https://github.com/marinoscar/MemoriaHub/issues/303) (curation engine, On This Day curator), issue [#304](https://github.com/marinoscar/MemoriaHub/issues/304) (Trips curator), and issue [#305](https://github.com/marinoscar/MemoriaHub/issues/305) (People, Theme, Seasonal & Year-in-Review curators). Expected to define: the shared base filter (`capturedAt IS NOT NULL AND deletedAt IS NULL AND archivedAt IS NULL AND socialMediaSource IS NULL`), quality scoring (favorites, sharpness, favorite-person faces), burst/duplicate best-shot collapse via `suggestedBestItemId`, time-bucket diversity, and per-type minimum item counts.
+Introduced by issue [#303](https://github.com/marinoscar/MemoriaHub/issues/303), which ships the shared engine, the curator registry, deterministic titles for all seven types, and the first real curator (On This Day). The remaining curators — Trips ([#304](https://github.com/marinoscar/MemoriaHub/issues/304)) and People / Theme / Seasonal / Year-in-Review ([#305](https://github.com/marinoscar/MemoriaHub/issues/305)) — plug into this engine and add no new machinery.
+
+The split is deliberate: **a curator owns only what is type-specific** — which slice of the library it is interested in, its `periodKey`/`subjectKey` identity, its template title, and its own retention tail. Everything else (scoring, collapse, diversity, ordering, cover choice, the idempotent write, the tombstone) belongs to `MemoryCurationService` and is therefore identical across all seven types by construction rather than by convention.
+
+| File | Role |
+|---|---|
+| `apps/api/src/memories/curation/memory-curation.types.ts` | The shared vocabulary (`MemoryCandidate`, `CuratedSelection`, `UpsertMemoryInput`/`Result`) |
+| `apps/api/src/memories/curation/memory-curation.service.ts` | The engine: candidate streaming, scoring, collapse, diversity, `upsertMemory()` |
+| `apps/api/src/memories/curation/memory-title-templates.ts` | Deterministic titles for all seven types (§4.6) |
+| `apps/api/src/memories/curators/memory-curator.interface.ts` | The `MemoryCurator` contract + the `MEMORY_CURATORS` DI token |
+| `apps/api/src/memories/curators/on-this-day.curator.ts` | The On This Day curator and the registry factory (§4.7) |
+| `apps/api/src/memories/memories-settings.util.ts` | `resolveMemoriesSettings()` — defaults filled once per job (§4.8) |
+
+### 4.1 The base filter is structural, not a convention
+
+```
+capturedAt IS NOT NULL AND deletedAt IS NULL AND archivedAt IS NULL AND socialMediaSource IS NULL
+```
+
+`memoryCandidateBaseWhere(circleId)` is applied by `loadCandidates()` **itself**, and every curator reaches the database only through `curate()`. A curator therefore cannot forget the filter, cannot partially apply it, and cannot be reviewed into forgetting it later — the only way to bypass it would be to write a second query path, which is a visible change rather than an omission.
+
+`capturedAt IS NOT NULL` deserves its own note because it is the one predicate that looks like defensive noise and is not. `MediaItem.capturedAt` is genuinely nullable — an import with no EXIF `DateTimeOriginal` is common — and **every** memory type is time-anchored (`periodStart`/`periodEnd` are `NOT NULL`, `periodKey` is a date or a year). A NULL capture date does not mean "unknown time", it means "not a candidate".
+
+The other three exclusions each encode a user intent that outranks curation: archived means "hide this from browse surfaces", trashed means "I deleted this", and a non-null `social_media_source` means "this is a re-shared TikTok, not a family memory".
+
+### 4.2 Candidate streaming — constant memory at 70k items
+
+`loadCandidates()` walks the slice with keyset pagination over `(capturedAt ASC, id ASC)`, 500 rows per page, following the `workflow_evaluate` precedent (`apps/api/src/workflows/runs/workflow-evaluate.handler.ts`). That ordering is a **total order** under the base filter — `capturedAt` is non-null there — so the cursor is exact with no `NULLS LAST` handling and no row skipped or repeated at a page boundary.
+
+Two signals cannot come from the `media_items` row itself and are resolved **per page, batched** rather than per item:
+
+| Signal | Query |
+|---|---|
+| `hasFavoritePersonFace` | one `face.findMany` per page: `mediaItemId IN (page)` joined to a `Person` with `favorite = true AND hiddenAt IS NULL AND deletedAt IS NULL` |
+| `hasAiContent` | one `mediaTag.findMany` per page: `mediaItemId IN (page) AND source = 'ai'` (OR'd in memory with a non-empty `MediaItem.description`) |
+
+So a page of 500 candidates costs three queries, not 1 001. Hidden and soft-deleted people are excluded from the favorite-person signal because hiding a person is an explicit "stop surfacing this to me" — honouring it in curation is the same reasoning that keeps them out of the People UI.
+
+`DEFAULT_MAX_CANDIDATES` (20 000) bounds the resident array. It is a **crash guard, not a tuning knob**: a cap that actually bites introduces selection bias (the scan is chronological, so truncation silently curates only the earliest slice), which is why hitting it logs a warning and sets `CuratedSelection.truncated`. A curator that routinely truncates is asking the wrong question and should narrow its slice.
+
+### 4.3 Scoring
+
+Per candidate, higher is better:
+
+| Signal | Contribution |
+|---|---|
+| `favorite = true` | `+3.0` |
+| Sharpness | `+ clamp(sharpnessScore / 1000, 0, 1)`; **NULL ⇒ 0.5 (neutral)** |
+| A face assigned to a live, non-hidden, `favorite` Person | `+1.0` |
+| A non-empty AI description **or** ≥ 1 `source='ai'` tag | `+0.25` |
+
+The NULL-sharpness rule is the load-bearing one. `sharpnessScore` is only written by the burst-detection pipeline, so videos and every pre-feature import carry NULL. Scoring "unmeasured" as `0` would read as "measured, and blurry", and would systematically push every un-analyzed item out of every memory on a library that predates the feature. Neutral `0.5` says what is actually true: we do not know.
+
+Sharpness is clamped rather than raw so an unusually crisp macro shot cannot out-vote an explicit user favorite — variance-of-Laplacian is unbounded, and an unbounded term makes every other weight decorative.
+
+**Videos carry a second, separate score.** `MemoryItem.score` persists the pure quality score above; ranking uses `selectionScore`, which subtracts `LONG_VIDEO_PENALTY` (0.5) from videos longer than 60 s or of unknown duration. Keeping them apart matters: the penalty is a *presentation preference* ("a two-minute clip is a bad thing to open a story with"), not a claim about the clip's quality, and persisting it would make the stored score lie about why an item was chosen.
+
+### 4.4 Near-duplicate collapse
+
+Candidates are bucketed by a `collapseKey()`: `b:<burstGroupId>` if set, else `d:<duplicateGroupId>` if set, else the item's own id. Each bucket contributes **exactly one** item:
+
+1. the group's `suggestedBestItemId`, **if that item is itself in the candidate set** — it may have been archived, trashed or flagged since the group formed, in which case the group must still contribute rather than vanish;
+2. otherwise the highest-`selectionScore` member, ties broken by `(capturedAt, id)`.
+
+**Burst wins over duplicate** when an item somehow carries both group ids. That is not an arbitrary tie-break — it mirrors the app-wide rule already enforced by `DuplicateDetectionService.evictFromDuplicateGroups`: a burst-grouped item is not supposed to be in a duplicate group at all, and if an upload-time race left it in both, the burst grouping is authoritative.
+
+This is also why the engine reuses these groups instead of computing its own visual cohesion: burst and duplicate groups are already CLIP/dHash-derived and already have a human-reviewable best-shot opinion. Direct embedding scoring can be added later with no schema change (`MemoryItem.score` is persisted for exactly that reason) — see §11.
+
+### 4.5 Diversity selection, ordering and cover
+
+Naive top-N-by-score returns thirty frames of whichever moment was photographed hardest. `selectDiverse()` instead:
+
+1. divides the candidate span into `min(maxItemsPerMemory, candidateCount)` equal time buckets and takes each bucket's best-ranked item;
+2. fills any remaining slots with the next-best overall.
+
+A zero-length span (every candidate at one instant) skips straight to step 2. The **3-video cap** is enforced throughout both passes, so a rejected video leaves its slot to the fill pass rather than shrinking the memory — but when videos are all that exists, the memory is legitimately shorter than the cap.
+
+Selection is **deterministic**: ties break on `(selectionScore, capturedAt, id)`, so two runs over an unchanged library produce byte-identical memories. That is what makes "re-running changes nothing" a testable claim rather than an approximate one.
+
+Final items are ordered **chronologically ascending** with contiguous `position` values. The cover is the highest-scored **non-video** item; a video is never a cover (cover art renders as a still, and a poster frame is a different — usually worse — image than any photo in the set). An all-video memory simply has `coverMediaItemId = NULL`.
+
+### 4.6 Template titles
+
+`memory-title-templates.ts` is pure, I/O-free, and covers all seven types:
+
+| Type | Title | Subtitle |
+|---|---|---|
+| `on_this_day` | `On this day — {N} year(s) ago` | `{Month D, YYYY}` |
+| `trip` | `Trip to {place}` | `{Month YYYY}`, `{Month}–{Month YYYY}`, or `{Month YYYY}–{Month YYYY}` across a year boundary |
+| `person_highlights` | `Best of {name}` (NULL name ⇒ `Best moments together`) | `{YYYY}`, or none for an all-time collection |
+| `person_over_years` | `{name} through the years` (NULL name ⇒ `Through the years`) | `{firstYear}–{lastYear}`, collapsed to one year when equal |
+| `theme` | `{Tag, title-cased}` | `{N} favorite moment(s)` |
+| `seasonal` | `{Season} {YYYY}` | — |
+| `year_in_review` | `Your {YYYY} in review` | `{N} highlight(s) from the year` |
+
+These are **not a placeholder for AI titling** — they are the permanent floor. A deployment with no `ai.features.memories` provider configured is a supported configuration (§5, and the new-install matrix in #300), so these titles render forever there and have to read like product copy.
+
+Two details are deliberate. Every formatter is pinned to `Intl.DateTimeFormat('en', { timeZone: 'UTC' })`: `periodStart` is a `timestamptz`, and formatting in the container's local zone would render "December 31, 2024" or "January 1, 2025" for the same instant depending on where the process happens to run — a title that changes on redeploy. And season labels plus the month→season mapping live in one exported table (`SEASON_LABELS` / `seasonForMonth`) so a future southern-hemisphere or locale configuration replaces one table rather than hunting month arithmetic through the seasonal curator.
+
+### 4.7 The On This Day curator
+
+**One memory per past year, not one per day.** Ten years of "on this day" are ten stories, not one 300-photo pile — and per-year identity (`subjectKey = "2019"`) is what makes per-user seen/hidden/favorite state and the tombstone meaningful: you can delete 2014's awkward party without losing 2019's beach trip.
+
+| Field | Value |
+|---|---|
+| `periodKey` | the anchor day, ISO `YYYY-MM-DD` |
+| `subjectKey` | the source year, e.g. `"2019"` |
+| `expiresAt` | start of the day **after** the anchor (exclusive bound, matching `expiresAt > now()`) |
+| `meta` | `{ yearsAgo, sourceYear, anchorMonth, anchorDay, generatorVersion }` |
+
+**Anchors are today AND tomorrow (UTC).** Generation runs on an interval (default 24 h) while notifications and the digest fire in the morning; if a circle only ever generated for "today", an 08:00 digest would race the job producing the content it announces. Pre-generating tomorrow means the morning's content already exists the evening before, whatever order the two jobs run in.
+
+**One query per anchor covers every lookback year.** Matching "same month and day, any year" is not a range, so it goes through raw SQL over `EXTRACT(MONTH/DAY FROM (captured_at AT TIME ZONE 'UTC'))` — the same expression and the same UTC pin as `MediaService.getDashboard`'s dashboard query (the cast is what makes `EXTRACT` `IMMUTABLE` and therefore indexable at all). Results are grouped by year in memory and each year's ids are handed back to `curate()` as an `id IN (…)` slice. That is **2 queries per circle per scheduled run**, not 2 × `lookbackYears`.
+
+Migration `20260809140000_memories_on_this_day_index` adds a circle-scoped partial functional index for it:
+
+```sql
+CREATE INDEX "media_items_circle_captured_md_idx"
+  ON "media_items" ("circle_id",
+                    EXTRACT(MONTH FROM ("captured_at" AT TIME ZONE 'UTC')),
+                    EXTRACT(DAY   FROM ("captured_at" AT TIME ZONE 'UTC')))
+  WHERE "deleted_at" IS NULL AND "archived_at" IS NULL AND "captured_at" IS NOT NULL;
+```
+
+The pre-existing `media_items_captured_md_idx` (migration `20260615000000_media_oncethisday_index`) has no leading `circle_id` and does not exclude archived rows, so a per-circle generation job would scan every circle's rows for the calendar day — and it cannot serve the backfill's `DISTINCT (month, day)` anchor scan at all, which needs `circle_id` as the leading key. Both indexes are kept: the dashboard still issues the un-scoped variant. Like `media_items_gallery_idx` and `media_items_map_locations_idx`, this index is hand-authored, **not** representable in Prisma's schema DSL, and is documented schema drift.
+
+**Backfill mode** (`job.payload.backfill === true`, which [#315](https://github.com/marinoscar/MemoriaHub/issues/315) sets) widens the anchor set from today+tomorrow to every `(month, day)` the circle has a candidate on — at most 366 rows from one `DISTINCT` scan. Each pair is mapped to its **next** occurrence at or after today, so a backfilled memory's `periodKey`/`expiresAt` describe a day that is still ahead rather than one already past (which would make the row born expired and immediately purge-eligible). February 29 is handled by a round-trip check rather than date arithmetic: `Date.UTC(2027, 1, 29)` silently rolls over to March 1, so a naive implementation would key three out of four "February 29" memories to March 1.
+
+**Retention tail.** `OnThisDayCurator.purge()` hard-deletes this circle's `on_this_day` rows whose `expiresAt` is more than 30 days past — **tombstoned or not**. Ignoring the tombstone here is safe rather than a contradiction of §2.5: the tombstone's job is "do not recreate this memory", and once the anchor day is a month gone the curator has no reason to generate that `periodKey` again until the date comes back around a year later, by which point the underlying library has changed and the memory is legitimately a new one. Keeping the tombstones forever would accumulate one unreadable row per (day × year) for the life of the deployment. The tail runs at the end of every generation job rather than on its own cron: the work is proportional to what generation just produced, it must not run when the feature is off, and a separate schedule would be a second thing to reason about for one batched `deleteMany`.
+
+### 4.8 Idempotent regeneration — `upsertMemory()`
+
+Every curator writes through this one method, keyed on `@@unique([circleId, type, periodKey, subjectKey])`.
+
+1. **Read the existing row first.** If `deletedAt` is set, return immediately with `skippedTombstone: true` — no write, no title computation, nothing. §2.5's contract is enforced here, and it outranks every other rule in this section.
+2. **Create** (row absent): `Memory` + `MemoryItem[]` in one transaction, `generatedAt = refreshedAt = now()`, `titleSource = 'template'`. A `P2002` from a concurrent pass falls through to the refresh path (re-reading, and re-checking the tombstone).
+3. **Refresh** (row present and live): items are **replaced** (`deleteMany` + `createMany` in one transaction) rather than diffed — `MemoryItem` carries no per-item user state and `position` shifts on nearly every refresh, so a delta computation would be strictly more code for the same result. `itemCount`, `periodStart`/`periodEnd`, cover, `meta` and `refreshedAt` are recomputed.
+
+**`MemoryUserState` is untouched by design.** It lives in its own table keyed by memory id, so a refresh that replaces every item preserves seen/hidden/favorited for every user. That is precisely why per-user state was not modeled as columns on `Memory` (§2.4).
+
+**Titles survive a minor refresh.** Membership change is measured as Jaccard **distance** on the media-item id sets; below `MATERIAL_CHANGE_THRESHOLD` (30%) the `title`/`subtitle`/`narrative`/`titleSource`/`titleModel` are all left alone. Without this, one new photo joining a ten-item memory would discard an AI title (#306) and re-pay for it on every generation run forever. At or above 30% the old title may now describe a collection that no longer exists, so it is reset to the template with `titleSource = 'template'`, `titleModel = NULL` and `narrative = NULL`, and handed back to AI re-titling on a later pass.
+
+`UpsertMemoryResult` returns `{ memoryId, created, materiallyChanged, skippedTombstone }`. `materiallyChanged` exists for [#311](https://github.com/marinoscar/MemoriaHub/issues/311)'s notification and digest producers, which need "is there anything genuinely new to tell the circle about?" without re-diffing the item set themselves.
+
+`meta.generatorVersion` (currently `1`) is stamped centrally on every write. Bump it when scoring or selection changes in a way that would produce a different item set from identical inputs — it is the only way to tell, after the fact, which algorithm produced a given memory.
+
+### 4.9 Registry and per-curator error isolation
+
+Curators are injected as an array under the `MEMORY_CURATORS` token (`memoryCuratorsProvider` in `on-this-day.curator.ts`), so #304 and #305 add a provider plus one entry in that factory and touch nothing else. `MemoryGenerationHandler` iterates it:
+
+- each curator is gated by **its own** `memories.<type>.enabled` toggle, checked via `MemoryCurator.isEnabled(settings)` rather than a stringly-typed settings key on the registry entry;
+- each `run()` is **individually try/caught**, and so is each `purge()`;
+- the retention tail runs **even when `run()` threw** — expired rows are stale regardless of whether this pass produced new ones, and a curator whose generation is broken is exactly the one whose old rows would otherwise accumulate;
+- the job **succeeds** as long as the plumbing worked, logging a structured `memory_generation.completed` summary with `created`/`refreshed`/`tombstoned`/`purged`/`failedCurators`.
+
+This is a correctness requirement, not politeness. The seven types are independent producers of independent content: a circle with malformed geo data must still get its On This Day memories, and a single throwing curator must not burn the job's retry budget or leave six other types un-generated until a human notices a red row in `/admin/settings/jobs`.
+
+One wall clock (`ctx.now`) is captured once by the handler and shared by every curator, so a run that straddles midnight cannot have one curator anchoring on today and the next on tomorrow.
+
+### 4.10 Settings resolution
+
+`resolveMemoriesSettings()` deep-merges the stored `memories.*` namespace over `DEFAULT_SYSTEM_SETTINGS.memories` **once per generation job**, so curators read `settings.onThisDay.minItems` unconditionally and never carry their own `?? 10` fallbacks. The namespace is genuinely optional on an older JSONB row — that is what makes it migration-free (§9.2) — and per-curator fallbacks would be a fourth hand-maintained copy of every default, on top of the three §9.3 already warns about.
+
+### 4.11 Known gaps
+
+- **A period that falls below `minItems` after items are removed keeps its existing memory.** Curators only upsert periods that still qualify; they do not delete a memory whose material has since been trashed. Its `MemoryItem` rows for hard-deleted media cascade away and `itemCount` is corrected on the next refresh, but a memory whose items were all *soft*-deleted lingers until read-time filtering ([#307](https://github.com/marinoscar/MemoriaHub/issues/307)) hides it. Deleting it automatically was rejected for v1: a curator silently destroying a memory a user may have favorited is a worse failure than a stale one.
+- **Backfill is unchunked.** A full On This Day backfill for a dense circle is up to 366 anchors × `lookbackYears` curations in one job, which can approach `ENRICHMENT_JOB_TIMEOUT_MS`. It is memory-safe (nothing accumulates across anchors) and restartable (every write is idempotent), but chunking the admin backfill into multiple jobs belongs to #315.
+- **Truncation is chronologically biased.** When `DEFAULT_MAX_CANDIDATES` is hit the scan keeps the earliest candidates. See §4.2 for why that is accepted as a crash guard rather than solved.
 
 ## 5. AI Titles, Subtitles & Narratives
 
@@ -342,4 +509,5 @@ Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/is
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 0.1 | August 2026 | AI Assistant | Initial specification for issue #301: the `MemoryType` enum, the `Memory`/`MemoryItem`/`MemoryUserState` data model, the `periodKey`/`subjectKey` semantics, the tombstone contract, cascade summary, and alternatives considered. Sections 3–10 are placeholders for later issues in epic #300. |
+| 0.3 | August 2026 | AI Assistant | Issue #303: filled in §4 (Curation Engine — the structural base filter, constant-memory keyset candidate streaming with per-page batched signal lookups, the scoring weights and the neutral-NULL-sharpness rule, the pure-score-vs-selectionScore split for the long-video preference, burst/duplicate collapse and its burst-wins precedence, time-bucket diversity with the 3-video cap, deterministic ordering and the never-a-video cover rule, template titles for all seven types, the On This Day curator with its today+tomorrow anchors / one-query-per-anchor design / new circle-scoped functional index / backfill anchor widening / retention tail, the `upsertMemory()` idempotency and tombstone contract with its Jaccard title-preservation rule, the curator registry and per-curator error isolation, settings resolution, and known gaps). §5–§8 and §10 remain placeholders. |
 | 0.2 | August 2026 | AI Assistant | Issue #302: filled in §3 (Generation — `MemoriesGenerationTask`'s three gates and zero-cost-when-off contract, the mandatory `skipDedup: true` rationale, the server-only `MemoryGenerationHandler` and its no-node-pair system-mode inference, job labels, and the `JobReason.backfill` deviation from the issue text) and §9 (Settings — `features.memories` + the `MEMORIES_ENABLED` kill-switch and their shared `isMemoriesEnabled()` gate, the full `memories.*` bounds/defaults table, the three-hand-maintained-copies pitfall, and `ai.features.memories` with its up-front credential validation). §4–§8 and §10 remain placeholders. |
