@@ -9,8 +9,12 @@
  *       enable backup server-side, create the root skeleton + SQLite catalog,
  *       and persist the binding locally. Engine: src/backup/init-backup.ts.
  *
- *   memoriahub backup run
- *       Stub — the sync engine lands in the next release.
+ *   memoriahub backup run [--concurrency N] [--max-mbps X] [--page-size N]
+ *                         [--json] [--strict]
+ *       Run one incremental backup sync (issue #316). The invocation goes
+ *       through the executeRun() seam (src/backup/execute-run.ts) so a later
+ *       child can reroute it over the daemon IPC channel. Rendering:
+ *       src/render/headless-backup.ts (human progress or --json NDJSON).
  *
  * All terminal output lives here; the engines never print.
  */
@@ -32,7 +36,11 @@ import {
 } from '../node/enroll.js';
 import { runDeviceLogin } from '../device-login.js';
 import { runBackupInit, BackupRootConflictError } from '../backup/init-backup.js';
+import { RunAlreadyActiveError } from '../backup/backup-engine.js';
+import { CatalogOpenError } from '../backup/catalog-db.js';
+import { executeRun, resolveBackupExitCode } from '../backup/execute-run.js';
 import { CATALOG_DB_REL_PATH } from '../backup/layout.js';
+import { renderBackupHeadless } from '../render/headless-backup.js';
 import { ui, isTTY } from '../ui.js';
 
 const require = createRequire(import.meta.url);
@@ -203,19 +211,101 @@ function initCmd(): Command {
       );
       ui.dim(`  Catalog     : ${result.root}/${CATALOG_DB_REL_PATH} (plain SQLite — query it directly)`);
       ui.blank();
-      ui.info('Run `memoriahub backup run` once the sync engine ships in the next release.');
+      ui.info('Run `memoriahub backup run` to start the first backup sync.');
     });
+}
+
+/** Parse a numeric flag, exiting with a clear message on garbage input. */
+function parseNumberFlag(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    ui.error(`Invalid value for ${flag}: ${value} (expected a non-negative number)`);
+    process.exit(1);
+  }
+  return n;
+}
+
+interface RunCmdOpts {
+  concurrency?: string;
+  maxMbps?: string;
+  pageSize?: string;
+  json?: boolean;
+  strict?: boolean;
+  reconcile?: boolean;
 }
 
 function runCmd(): Command {
   return new Command('run')
-    .description('Run a backup sync (not available yet)')
-    .action(() => {
-      ui.error(
-        '`backup run` is not available yet — the sync engine lands in the next release. ' +
-          'Use `memoriahub backup init` to prepare a backup root now.',
-      );
-      process.exit(1);
+    .description('Run an incremental backup sync into the configured backup root')
+    .option('--concurrency <n>', 'Concurrent download workers (default: backup.concurrency setting, 2)')
+    .option('--max-mbps <x>', 'Aggregate bandwidth cap in Mbps; 0 = unlimited (default: backup.maxMbps setting, 0)')
+    .option('--page-size <n>', 'Change-feed page size (default: backup.pageSize setting, 100)')
+    .option('--json', 'Emit NDJSON events instead of human output')
+    .option('--strict', 'Exit non-zero when any item failed')
+    .option('--reconcile', 'Full reconcile pass (not available yet)')
+    .action(async (opts: RunCmdOpts) => {
+      const cfg = requireConfig();
+
+      if (opts.reconcile) {
+        ui.error('`backup run --reconcile` arrives with verify/reconcile in a later release.');
+        process.exit(1);
+      }
+
+      const settings = new SettingsRepo(getDb());
+      const root = settings.backupRoot();
+      const nodeId = settings.backupNodeId();
+      if (!root || !nodeId) {
+        ui.error(
+          'No backup root is configured on this machine. Run ' +
+            '`memoriahub backup init --dest <dir>` first.',
+        );
+        process.exit(1);
+      }
+
+      const concurrency =
+        parseNumberFlag(opts.concurrency, '--concurrency') ?? settings.backupConcurrency();
+      const maxMbps = parseNumberFlag(opts.maxMbps, '--max-mbps') ?? settings.backupMaxMbps();
+      const pageSize = parseNumberFlag(opts.pageSize, '--page-size') ?? settings.backupPageSize();
+
+      let outcome;
+      try {
+        outcome = await executeRun({
+          serverUrl: cfg.serverUrl,
+          pat: cfg.pat,
+          root,
+          nodeId,
+          trigger: 'manual',
+          cliVersion: cliVersion(),
+          concurrency: Math.max(1, Math.floor(concurrency)),
+          maxMbps,
+          pageSize: Math.max(1, Math.floor(pageSize)),
+          pacingMs: settings.backupPacingMs(),
+          retry: settings.retryConfig(),
+          cooldown: settings.cooldownConfig(),
+          attachRenderer: (engine) =>
+            renderBackupHeadless(engine, { json: opts.json === true }),
+        });
+      } catch (err) {
+        if (err instanceof RunAlreadyActiveError || err instanceof CatalogOpenError) {
+          ui.error(err.message);
+          process.exit(1);
+        }
+        if (err instanceof ApiError) {
+          if (err.status === 403) {
+            ui.error(
+              'This token is not permitted to run worker-node backups (jobs:write required).',
+            );
+          } else {
+            ui.error(`Backup run failed (HTTP ${err.status}): ${err.serverMessage}`);
+          }
+          process.exit(1);
+        }
+        ui.error(`Backup run failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+
+      process.exit(resolveBackupExitCode(outcome, opts.strict === true));
     });
 }
 
