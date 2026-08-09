@@ -1,5 +1,5 @@
 // =============================================================================
-// Memory Generation Enrichment Handler (epic #300, issue #302)
+// Memory Generation Enrichment Handler (epic #300, issues #302 + #303)
 // =============================================================================
 //
 // Runs one circle's memory curation pass. Enqueued once per circle by
@@ -13,19 +13,35 @@
 // pure DB read + write pass over a whole circle with no per-item unit of work
 // to hand a node, and (from #306) needs a server-held AI credential.
 //
-// v1 SCOPE (this issue): the handler is a deliberate NO-OP. Shipping the
-// scheduling, dedup, gating and observability plumbing before any curation
-// logic exists is what lets #303–#305 add curators to a queue path that is
-// already proven end to end. Curators arrive in #303 (On This Day),
-// #304 (Trips) and #305 (People / Theme / Seasonal / Year in Review).
+// PER-CURATOR ERROR ISOLATION IS A CORRECTNESS REQUIREMENT (#303), not
+// politeness. The curators are independent producers of independent content: a
+// circle with malformed geo data must still get its On This Day memories, and a
+// single curator throwing must not cost the job its retry budget or leave the
+// other six types un-generated until a human notices. Each curator therefore
+// runs inside its own try/catch and the job SUCCEEDS as long as the plumbing
+// worked — mirroring the best-effort philosophy of the notification producers.
+// A curator that fails every run shows up in the logs, not as a red job that
+// blocks the rest of the feature.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isMemoriesEnabled } from '../common/types/settings.types';
+import { resolveMemoriesSettings } from './memories-settings.util';
+import {
+  MEMORY_CURATORS,
+  MemoryCurator,
+  MemoryCuratorContext,
+} from './curators/memory-curator.interface';
+
+/** Payload shape for a `memory_generation` job. */
+interface MemoryGenerationPayload {
+  /** Admin library backfill (#315): widen curators past "what matters today". */
+  backfill?: boolean;
+}
 
 @Injectable()
 export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit {
@@ -36,6 +52,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly systemSettings: SystemSettingsService,
+    @Inject(MEMORY_CURATORS) private readonly curators: MemoryCurator[],
   ) {}
 
   onModuleInit(): void {
@@ -66,11 +83,66 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
       return;
     }
 
-    // v1: no curators registered yet (#303–#305). The log line is the
-    // observability hook that proves the scheduling path works end to end.
-    this.logger.log(
-      `memory_generation ran for circle ${job.circleId} (job ${job.id}): ` +
-        'no curators registered yet',
-    );
+    const payload = (job.payload as unknown as MemoryGenerationPayload | null) ?? {};
+    const ctx: MemoryCuratorContext = {
+      circleId: job.circleId,
+      settings: resolveMemoriesSettings(settings.memories),
+      // ONE wall clock for the whole run: a pass that straddles midnight must
+      // not have curator A anchoring on today and curator B on tomorrow.
+      now: new Date(),
+      backfill: payload.backfill === true,
+    };
+
+    let created = 0;
+    let refreshed = 0;
+    let tombstoned = 0;
+    let purged = 0;
+    let failed = 0;
+
+    for (const curator of this.curators) {
+      if (!curator.isEnabled(ctx.settings)) continue;
+
+      try {
+        const result = await curator.run(ctx);
+        created += result.created;
+        refreshed += result.refreshed;
+        tombstoned += result.tombstoned;
+      } catch (err) {
+        failed += 1;
+        this.logger.error(
+          `Memory curator "${curator.name}" failed for circle ${ctx.circleId} ` +
+            `(job ${job.id}): ${err instanceof Error ? err.message : String(err)}`,
+          err instanceof Error ? err.stack : undefined,
+        );
+      }
+
+      // The retention tail runs even when run() threw: expired rows are stale
+      // regardless of whether this pass managed to produce new ones, and a
+      // curator whose generation is broken is exactly the one whose old rows
+      // would otherwise accumulate.
+      if (curator.purge) {
+        try {
+          purged += await curator.purge(ctx);
+        } catch (err) {
+          failed += 1;
+          this.logger.error(
+            `Memory curator "${curator.name}" purge failed for circle ${ctx.circleId}: ` +
+              (err instanceof Error ? err.message : String(err)),
+          );
+        }
+      }
+    }
+
+    this.logger.log({
+      event: 'memory_generation.completed',
+      jobId: job.id,
+      circleId: ctx.circleId,
+      backfill: ctx.backfill,
+      created,
+      refreshed,
+      tombstoned,
+      purged,
+      failedCurators: failed,
+    });
   }
 }
