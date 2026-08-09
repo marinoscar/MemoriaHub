@@ -48,6 +48,24 @@ describe('formatBytes', () => {
     expect(result).toMatch(/^1\.1[0-9] TB$/);
   });
 
+  // Backup byte counters (issue #319) are BigInt-serialized strings that can
+  // legitimately exceed Number.MAX_SAFE_INTEGER — the humanizer must parse via
+  // BigInt, never Number(), so values past 2^53 stay exact.
+  it('is exact at 2^53 (9007199254740992 bytes = 8 PB)', () => {
+    expect(formatBytes('9007199254740992')).toBe('8.00 PB');
+  });
+
+  it('handles 2^53 + 1 ("9007199254740993") via the BigInt path without precision loss', () => {
+    // Number('9007199254740993') would round to 9007199254740992; BigInt keeps
+    // the odd value intact and the division still lands on 8.00 PB.
+    expect(formatBytes('9007199254740993')).toBe('8.00 PB');
+  });
+
+  it('handles values far past 2^53 (~1024 PB stays in the PB unit, no crash)', () => {
+    // 2^60 bytes = 1024 PB — units stop at PB, so the whole part grows instead.
+    expect(formatBytes('1152921504606846976')).toBe('1024.00 PB');
+  });
+
   it('accepts a bigint directly', () => {
     expect(formatBytes(1024n)).toBe('1.00 KB');
   });
