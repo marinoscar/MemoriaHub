@@ -262,7 +262,14 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `date-infer diagnose [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Report-only: show which files have no capture date and what would be inferred from their filenames | Tools ▸ Date Inference ▸ Diagnose (report only) |
 | `date-infer apply [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Infer missing capture dates from filenames AND write them into each file via ExifTool | Tools ▸ Date Inference ▸ Infer & write dates |
 | `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
-| `backup` | `--circle <id>` / `--all` / `--dest <path>` | Pull media blobs from the server to a local directory; requires an Admin PAT | Tools ▸ Backup |
+| `backup init` | `--dest <dir>` / `--node-name <name>` / `--circles <ids>` | Bind this machine to a local backup root (see [Local backup](#local-backup-mirror-your-library)) | Tools ▸ Backup |
+| `backup run` | `--concurrency <n>` / `--max-mbps <x>` / `--page-size <n>` / `--reconcile` / `--embedded` / `--json` / `--strict` | Run an incremental (or full reconcile) backup sync | Tools ▸ Backup ▸ Run backup now |
+| `backup status` | `--json` | Merged local catalog + daemon + server backup status | Tools ▸ Backup ▸ Backup dashboard |
+| `backup verify` | `--deep` / `--concurrency <n>` / `--json` | Verify local backup integrity against the catalog (existence, size, sha256) | Tools ▸ Backup ▸ Verify backup |
+| `backup prune` | `--yes` / `--older-than <days>` / `--json` | List (and with `--yes`, permanently delete) quarantined backup files | Tools ▸ Backup |
+| `backup restore` | `--root <dir>` / `--dry-run` / `--into-circle <id>` / `--map-circle <src=dst>` / `--include <what>` / `--concurrency <n>` / `--skip-metadata` / `--json` | Rebuild a MemoriaHub library from a backup root | — |
+| `backup schedule [cron]` | `--tz <iana>` / `--show` / `--disable` | Manage the server-computed backup cron schedule | Tools ▸ Backup ▸ Backup settings |
+| `backup set-rate` | `--concurrency <n>` / `--max-mbps <x>` | Set backup throttle knobs, applied live to a running daemon | Tools ▸ Backup ▸ Backup settings |
 | `node install-deps` | `--dry-run` / `--skip-compreface` / `--compreface-port <port>` | Linux-only one-command installer for everything a machine needs to become a worker node (ffmpeg/ffprobe, npm native compute libs, tesseract OCR language data, model files, Docker + compreface-core) | — |
 | `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` / `--face-provider <compreface>` / `--compreface-url <url>` | Register this machine as a worker node (one-time, PAT-based) | — |
 | `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` / `--face-provider <compreface>` / `--compreface-url <url>` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
@@ -1129,6 +1136,107 @@ See the [Distributed Nodes spec](../../docs/specs/distributed-nodes.md) for the 
 
 ---
 
+## Local backup (mirror your library)
+
+A **backup node** turns a machine into a second, independent copy of your MemoriaHub library, kept on local disk (an internal drive, an external drive, a NAS mount — anywhere on the filesystem). It shares only the worker-node identity with the compute nodes above; a machine can be a backup node, a compute node, both, or neither. Unlike compute jobs, backup pulls **original bytes** — the destination is a plain, browsable folder tree plus a per-item JSON sidecar, and a plain SQLite catalog anyone can query directly with any `sqlite3` client. See the [Local Media Backup guide](../../docs/local-backup.md) for a task-oriented walkthrough, and the [Local Media Backup specification](../../docs/specs/local-backup.md) for the full architecture (the incremental change-feed protocol, on-disk format, and API contract).
+
+### Init: `memoriahub backup init`
+
+```bash
+memoriahub backup init --dest /path/to/backup/folder
+memoriahub backup init --dest /mnt/backup-drive/memoriahub --node-name home-server --circles 3f2a...,9b1c...
+```
+
+Binds this machine to a single backup root: registers a worker node if one isn't already configured, enables backup for it server-side, creates the folder skeleton and its `.memoriahub/backup.db` SQLite catalog, and persists the binding locally. `--circles` scopes the backup to specific circle IDs (comma-separated); omit it to back up every circle you belong to. Only one backup root is supported per machine — re-running `init` against the same `--dest` safely re-binds and refreshes it without touching the existing catalog. If the stored token is a personal access token rather than a durable `nod_` node credential, `init` offers to mint one interactively first, since backup typically runs unattended for a long time.
+
+### Run: `memoriahub backup run`
+
+```bash
+# Incremental sync into the configured root
+memoriahub backup run
+
+# Force a full reconcile pass (manifest diff against the server + quarantine)
+memoriahub backup run --reconcile
+
+# Override throttle knobs for this run only
+memoriahub backup run --concurrency 4 --max-mbps 20 --page-size 200
+
+# Machine-readable NDJSON events; exit non-zero on any per-item failure
+memoriahub backup run --json --strict
+```
+
+Runs one backup sync: pages through everything changed since the last checkpoint, downloads new/changed originals via short-lived presigned URLs (never proxied through the API), writes a sidecar next to each file, and commits the local catalog before acknowledging each page to the server — safe to interrupt (`Ctrl-C`, a crash, a lost connection) at any point and simply re-run. About once every 30 days (or immediately with `--reconcile`), the run automatically upgrades to a full reconcile pass that diffs the entire server manifest against the local catalog, quarantining anything the server no longer lists (never deleting it outright — see `backup prune` below) and flagging any content-hash drift for re-download. When a worker-node daemon (`node start --daemon`) is already running, `backup run` delegates to it over IPC automatically so the two never race each other's run lock; pass `--embedded` to force the in-process engine anyway.
+
+### Status: `memoriahub backup status`
+
+```bash
+memoriahub backup status
+memoriahub backup status --json
+```
+
+Prints three independently-sourced sections: the **local catalog** (item counts, checkpoint, last run — works fully offline), the **daemon** (a live IPC snapshot of whether a run is currently active and the effective rate, when a daemon is running), and the **server** (enabled/schedule/next-run-due, pending items+bytes behind the checkpoint, and the 5 most recent runs). Each section degrades independently and never throws — an unreachable server, for example, still leaves the local and daemon sections fully populated.
+
+### Verify: `memoriahub backup verify`
+
+```bash
+# Cheap everyday check: existence + size for everything, full hash only for unproven files
+memoriahub backup verify
+
+# Full re-hash of every file (slow on a large library; run occasionally)
+memoriahub backup verify --deep --concurrency 8
+```
+
+Checks the local backup root against the catalog. A missing file, a size mismatch, or a hash mismatch marks that item for re-download on the next `backup run` — verify itself never deletes or moves anything. Exits non-zero when any item failed.
+
+### Prune: `memoriahub backup prune`
+
+```bash
+# List what's quarantined (default — nothing is deleted)
+memoriahub backup prune
+
+# Permanently delete quarantined files older than 90 days
+memoriahub backup prune --older-than 90 --yes
+```
+
+A reconcile pass never deletes a local file it can no longer find server-side — it moves it into `<root>/_quarantine/` instead. `backup prune` is the **only** command that permanently removes those quarantined bytes, and only with `--yes` (or an interactive confirmation).
+
+### Restore: `memoriahub backup restore`
+
+```bash
+# See the full plan (circle mapping, item/byte totals) without writing anything
+memoriahub backup restore --root /mnt/backup-drive/memoriahub --dry-run
+
+# Restore for real — matches/creates circles by name
+memoriahub backup restore --root /mnt/backup-drive/memoriahub
+
+# Land everything in one existing circle instead
+memoriahub backup restore --root /mnt/backup-drive/memoriahub --into-circle 9b1c...
+
+# Also restore trashed items (they land ACTIVE — no API can put them back in Trash)
+memoriahub backup restore --root /mnt/backup-drive/memoriahub --include trashed
+```
+
+Rebuilds a MemoriaHub library from a backup root against any server — the original one, or a fresh install. Every original file is re-uploaded through the normal resumable upload path and re-registered as a brand-new item, then its tags, albums, people, description, favorite, and (if manually set) location are reapplied from its sidecar. Derived data — thumbnails, detected faces, AI tags — is **not** restored from the backup; it regenerates from the uploaded bytes via the server's own enrichment pipeline. Restore needs a normal account login or PAT (a `nod_` node credential is refused up front, since the server accepts it only on the node control plane) and is safe to interrupt and re-run — an already-restored item is detected and skipped.
+
+### Schedule and throttle: `memoriahub backup schedule` / `memoriahub backup set-rate`
+
+```bash
+memoriahub backup schedule "0 3 * * *" --tz America/Costa_Rica
+memoriahub backup schedule --show
+memoriahub backup schedule --disable
+
+memoriahub backup set-rate --max-mbps 20
+memoriahub backup set-rate --concurrency 4
+```
+
+The cron expression and timezone are validated and evaluated **server-side** — the CLI never parses cron itself. Scheduled runs fire only from a running worker-node daemon (`memoriahub node start --daemon` or `node service install`), which polls the server every minute and starts a run the moment the server-computed next-run time is due; a machine that was offline at the scheduled time self-heals on the very next poll after it comes back up. `set-rate` persists the new concurrency/bandwidth cap and, when a daemon is currently running a backup, pushes the change live over IPC so the very next page/chunk uses it — no restart required.
+
+### The TUI: Tools ▸ Backup
+
+The interactive menu's **Tools ▸ Backup** submenu offers **Backup dashboard** (live status, mirroring `backup status`), **Run backup now**, **Verify backup**, and **Backup settings** (schedule + throttle, mirroring `backup schedule`/`backup set-rate`) — the same underlying engines as the headless commands above, with live progress rendering.
+
+---
+
 ## Data locations
 
 | Path | Purpose |
@@ -1143,6 +1251,10 @@ See the [Distributed Nodes spec](../../docs/specs/distributed-nodes.md) for the 
 | `~/.memoriahub/node.sock` | Worker-node daemon IPC socket (Unix domain socket; a named pipe `\\.\pipe\memoriahub-node` on Windows) |
 | `~/.memoriahub/logs/node.log` | Worker-node JSONL structured log, size-rotated at 5 MB (`memoriahub node logs`) |
 | `~/.memoriahub/models/` | Downloaded worker-node model files (CLIP ONNX), verified against the server's sha256-pinned manifest — face detection has no model file here, it runs against a local `compreface-core` sidecar over HTTP |
+| `<backup root>/media/`, `<backup root>/archived/` | Backed-up original files, bucketed by capture month (see [Local backup](#local-backup-mirror-your-library)) |
+| `<backup root>/_quarantine/` | Backed-up files a reconcile pass could no longer find server-side; removed only by `memoriahub backup prune --yes` |
+| `<backup root>/catalog/` | `albums.json` / `people.json` / `tags.json` / `manifest.json`, written after each completed backup run |
+| `<backup root>/.memoriahub/backup.db` | The backup catalog — a plain SQLite file, query it directly with any `sqlite3` client |
 
 ---
 
@@ -1285,5 +1397,7 @@ The binary name registered in `package.json` is `memoriahub`.
 - [Date Inference specification](../../docs/specs/cli-date-inference.md)
 - [Phase 05 — CLI Importer](../../docs/plan/phase-05-cli-importer.md)
 - [Distributed Nodes specification](../../docs/specs/distributed-nodes.md)
+- [Local Media Backup guide](../../docs/local-backup.md)
+- [Local Media Backup specification](../../docs/specs/local-backup.md)
 - [API Reference](../../docs/API.md)
 - [Architecture](../../docs/ARCHITECTURE.md)
