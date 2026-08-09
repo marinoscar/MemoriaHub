@@ -16,6 +16,10 @@ import {
 
 const ALL_NOTIFICATION_TYPES = Object.values(NotificationType) as NotificationType[];
 
+/** Fixture person ids for the #307 `memories` preference namespace. */
+const PERSON_A = '11111111-1111-4111-8111-111111111111';
+const PERSON_B = '22222222-2222-4222-8222-222222222222';
+
 /**
  * Wires $transaction so `cb(tx)` runs against the same mock — mirrors
  * production tx semantics and the identical helper in
@@ -871,6 +875,144 @@ describe('UserSettingsService', () => {
       } as any);
 
       expect(result.dataTables).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // Per-user Memories preferences (issue #307, epic #300)
+  // ===========================================================================
+
+  describe('patchSettings (PATCH) — memories', () => {
+    const persistedValue = (): UserSettingsValue =>
+      (mockPrisma.userSettings.update.mock.calls[0][0] as any).data
+        .value as UserSettingsValue;
+
+    const seed = (memories?: Record<string, unknown>) => {
+      const stored: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        ...(memories ? { memories: memories as any } : {}),
+      };
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: stored as any,
+      } as any);
+      mockPrisma.userSettings.update.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.data.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+    };
+
+    it('leaves the namespace absent when absent and unpatched (absent = default)', async () => {
+      seed();
+
+      const result = await service.patchSettings(mockUserId, { theme: 'dark' });
+
+      expect(result.memories).toBeUndefined();
+      expect(persistedValue().memories).toBeUndefined();
+    });
+
+    it('persists a new namespace', async () => {
+      seed();
+
+      const result = await service.patchSettings(mockUserId, {
+        memories: { hiddenPersonIds: [PERSON_A] },
+      });
+
+      expect(result.memories).toEqual({ hiddenPersonIds: [PERSON_A] });
+    });
+
+    it('merges FIELD-WISE — an unlisted field is untouched', async () => {
+      seed({ hiddenPersonIds: [PERSON_A], emailDigestOptOut: true });
+
+      const result = await service.patchSettings(mockUserId, {
+        memories: { hiddenDateRanges: [{ from: '2024-01-01', to: '2024-01-05' }] },
+      });
+
+      expect(result.memories).toEqual({
+        hiddenPersonIds: [PERSON_A],
+        emailDigestOptOut: true,
+        hiddenDateRanges: [{ from: '2024-01-01', to: '2024-01-05' }],
+      });
+    });
+
+    it('REPLACES a listed list rather than appending — which is how un-hiding works', async () => {
+      seed({ hiddenPersonIds: [PERSON_A, PERSON_B] });
+
+      const result = await service.patchSettings(mockUserId, {
+        memories: { hiddenPersonIds: [PERSON_A] },
+      });
+
+      expect(result.memories!.hiddenPersonIds).toEqual([PERSON_A]);
+    });
+
+    it('deletes a field set to null, resetting it to its absent default', async () => {
+      seed({ hiddenPersonIds: [PERSON_A], emailDigestOptOut: true });
+
+      const result = await service.patchSettings(mockUserId, {
+        memories: { emailDigestOptOut: null },
+      });
+
+      expect(result.memories).toEqual({ hiddenPersonIds: [PERSON_A] });
+      expect('emailDigestOptOut' in result.memories!).toBe(false);
+    });
+
+    it('clears the whole namespace on `memories: null`', async () => {
+      seed({ hiddenPersonIds: [PERSON_A] });
+
+      const result = await service.patchSettings(mockUserId, { memories: null });
+
+      expect(result.memories).toBeUndefined();
+      expect(persistedValue().memories).toBeUndefined();
+    });
+
+    it('collapses an emptied namespace back to undefined rather than storing {}', async () => {
+      seed({ hiddenPersonIds: [PERSON_A] });
+
+      const result = await service.patchSettings(mockUserId, {
+        memories: { hiddenPersonIds: null },
+      });
+
+      expect(result.memories).toBeUndefined();
+    });
+
+    it('rejects an inverted date range', async () => {
+      seed();
+
+      await expect(
+        service.patchSettings(mockUserId, {
+          memories: {
+            hiddenDateRanges: [{ from: '2024-02-10', to: '2024-02-01' }],
+          },
+        } as any),
+      ).rejects.toThrow();
+    });
+
+    it('rejects a date that is not a real calendar day', async () => {
+      seed();
+
+      await expect(
+        service.patchSettings(mockUserId, {
+          memories: {
+            hiddenDateRanges: [{ from: '2024-02-31', to: '2024-03-01' }],
+          },
+        } as any),
+      ).rejects.toThrow();
+    });
+
+    it('never persists an unknown key', async () => {
+      // `.strict()` rejects one at the HTTP boundary (the zod DTO pipe); the
+      // merge is the second line of defence — it copies only known fields, so
+      // an unknown key cannot reach the stored blob even on a direct call.
+      seed();
+
+      const result = await service.patchSettings(mockUserId, {
+        memories: { hiddenPetIds: ['x'] },
+      } as any);
+
+      expect(result.memories).toBeUndefined();
+      expect(persistedValue().memories).toBeUndefined();
     });
   });
 
