@@ -79,6 +79,9 @@ model User {
   notifications               Notification[]              @relation("UserNotifications")
   // Memories relations (epic #300, issue #301)
   memoryUserStates            MemoryUserState[]
+  // PostgreSQL Database Backup & Restore relations (epic #339, issue #340)
+  databaseBackupsCreated      DatabaseBackupRun[]         @relation("DatabaseBackupCreatedBy")
+  databaseBackupsRestored     DatabaseBackupRun[]         @relation("DatabaseBackupRestoredBy")
 
   @@map("users")
 }
@@ -2236,4 +2239,98 @@ model MemoryUserState {
   @@unique([memoryId, userId])
   @@index([userId, favoritedAt])
   @@map("memory_user_state")
+}
+
+// =============================================================================
+// PostgreSQL Database Backup & Restore (epic #339, issue #340)
+// =============================================================================
+//
+// Schema-only foundation for server-managed pg_dump/pg_restore backup and
+// restore of the application's own PostgreSQL database — distinct from both
+// the S3-object `backup:run`/`backup:read` local-drive replication above and
+// the per-node Local Media Backup feature (`node_backup_configs` /
+// `node_backup_runs`), neither of which touches the database itself. No
+// service/API/CLI logic lands in this issue, mirroring the precedent set by
+// migration `20260808010000_add_backup_feed_foundations` (issue #310).
+//
+// One row per backup attempt AND, when that backup is later used to restore,
+// the audit trail of that restore lives on the SAME row rather than a
+// separate table — a restore is defined in terms of exactly one backup, so
+// there is nothing a join buys here that a nullable "restore-audit" column
+// group doesn't already give for free.
+
+enum DatabaseBackupStatus {
+  pending
+  running
+  completed
+  failed
+  stale
+}
+
+enum DatabaseBackupTrigger {
+  manual
+  scheduled
+  pre_restore
+}
+
+// SINGLE-ACTIVE-RUN GUARD — raw SQL, not representable in Prisma's schema
+// DSL (same precedent as `notifications_review_queue_live_uniq_idx` and
+// `media_items_gallery_idx`): a partial unique index on ("status") WHERE
+// status IN ('pending','running') enforces at most one backup run in flight
+// at a time app-wide. See migration `<timestamp>_add_database_backups` for
+// the actual index, named `database_backup_runs_active_uniq_idx`.
+model DatabaseBackupRun {
+  id      String                @id @default(uuid()) @db.Uuid
+  status  DatabaseBackupStatus  @default(pending)
+  trigger DatabaseBackupTrigger
+
+  startedAt       DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(6)
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at") @db.Timestamptz(6)
+
+  bytesWritten BigInt  @default(0) @map("bytes_written")
+  sizeBytes    BigInt? @map("size_bytes")
+
+  storageProvider String? @map("storage_provider")
+  storageKey      String? @map("storage_key")
+  bucket          String? @map("bucket")
+  format          String? @map("format")
+  checksumSha256  String? @map("checksum_sha256")
+
+  dbVersion     String? @map("db_version")
+  appVersion    String? @map("app_version")
+  migrationName String? @map("migration_name")
+
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  lastError  String?   @map("last_error")
+
+  createdById String? @map("created_by_id") @db.Uuid
+
+  // Restore-audit fields — populated only once this backup is used to drive
+  // a restore. Kept on the same row rather than a separate table: a restore
+  // is always defined in terms of exactly one backup, so there is no
+  // one-to-many relationship a join would need to express.
+  restoreStatus      String?   @map("restore_status")
+  restoreError       String?   @map("restore_error")
+  restoredAt         DateTime? @map("restored_at") @db.Timestamptz(6)
+  restoredById       String?   @map("restored_by_id") @db.Uuid
+  restoreScratchDb   String?   @map("restore_scratch_db")
+  restoreOldDb       String?   @map("restore_old_db")
+  swappedAt          DateTime? @map("swapped_at") @db.Timestamptz(6)
+  // Self-relation: when `restoreRollbackMode='pre_restore_dump'`, a fresh
+  // safety backup is taken immediately before a restore runs. That safety
+  // backup's own row id is recorded here on the run being restored FROM, so
+  // the pre-restore snapshot that could undo a bad restore is always
+  // traceable from the run that triggered it.
+  preRestoreBackupId String?   @map("pre_restore_backup_id") @db.Uuid
+
+  // Relations
+  createdBy          User?               @relation("DatabaseBackupCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  restoredBy         User?               @relation("DatabaseBackupRestoredBy", fields: [restoredById], references: [id], onDelete: SetNull)
+  preRestoreBackup   DatabaseBackupRun?  @relation("DatabaseBackupPreRestore", fields: [preRestoreBackupId], references: [id], onDelete: SetNull)
+  preRestoreBackupOf DatabaseBackupRun[] @relation("DatabaseBackupPreRestore")
+
+  @@index([status])
+  @@index([startedAt(sort: Desc)])
+  @@map("database_backup_runs")
 }
