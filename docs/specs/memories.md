@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.6 (data model + generation plumbing + curation engine; all seven curators; AI titles) |
+| **Version** | 0.7 (data model + generation plumbing + curation engine; all seven curators; AI titles; read/act API + per-user preferences) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306); §6–§8 and §10 are placeholders for later issues in epic #300 |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304), People / Theme / Seasonal / Year-in-Review curators (#305), AI titles / subtitles / narratives (#306), API / per-user state / delete / save-as-album / preferences (#307); §7 and §8 are placeholders for later issues in epic #300 |
 
 ---
 
@@ -737,7 +737,156 @@ No test in this feature can reach a network. The service suite drives a hand-wri
 
 ## 6. API
 
-Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307). Expected to define: list/feed/detail endpoints, per-user state (seen/hide/favorite via `MemoryUserState`), delete (the tombstone write, §2.5), save-as-album, and per-user preferences (hidden people, sensitive date ranges, digest opt-out).
+Introduced by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307). Everything lives in `apps/api/src/memories/api/` — `MemoriesController`, `MemoriesService`, the query/response DTOs, and `memory-preferences.ts` (the read-time preference compiler). The module edges this adds are `MemoriesModule → CirclesModule` (per-circle role checks) and `MemoriesModule → MediaModule` (batched thumbnail signing plus the album service that save-as-album reuses); neither points back, so there is no cycle and no `forwardRef`.
+
+### 6.1 Endpoint catalogue
+
+| Method & path | Permission + circle role | Behavior |
+|---|---|---|
+| `GET /api/memories?circleId=&type=&year=&favorite=&cursor=&pageSize=` | `media:read` + **viewer** | Keyset page of memory cards, `(generatedAt DESC, id DESC)`, no `COUNT(*)` |
+| `GET /api/memories/feed?circleId=` | `media:read` + **viewer** | Home carousel: today's `on_this_day` first, then newest unseen, then newest seen; hard cap 10 |
+| `GET /api/memories/:id` | `media:read` + **viewer** | Full detail + `narrative` + the ordered item list |
+| `POST /api/memories/:id/seen` | `media:read` + **viewer** | Idempotent `seenAt` — 204 |
+| `POST` / `DELETE /api/memories/:id/hide` | `media:read` + **viewer** | Per-user hide / un-hide — 204 |
+| `POST` / `DELETE /api/memories/:id/favorite` | `media:read` + **viewer** | Per-user favorite / un-favorite — 204 |
+| `POST /api/memories/:id/save-album` | `media:write` + **collaborator** | Creates an album from the memory's items — `201 { albumId }` |
+| `DELETE /api/memories/:id` | `media:write` + **collaborator** | Circle-level tombstone (§2.5) + a `memory:deleted` audit event — 204 |
+
+`POST /api/admin/memories/backfill` belongs to this API map but is implemented by issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315), not here.
+
+Per-user preferences are **not** endpoints of this controller at all — see §6.7.
+
+### 6.2 Three invariants every read obeys
+
+Stated once here because they are asserted in every method of `MemoriesService` and are the things a future change is most likely to break.
+
+**The tombstone.** `deletedAt IS NOT NULL` is excluded from *every* read without exception — list, feed, detail, and the `:id` lookup behind every state write and every mutation. Prisma has no global scope (§2.5), so this is application discipline; in this service it is centralised in one `activeWhere()` helper plus the identical predicate inside `loadAccessibleMemory()`, so there are exactly two places to audit rather than nine.
+
+**The active filter.** `expiresAt IS NULL OR expiresAt > now()`. Only `on_this_day` sets an expiry (start of the day after its anchor, §4.7), so this is what retires yesterday's "6 years ago" card. It applies to detail as well as to the lists: an expired anchor-day memory is genuinely over, and the `on_this_day` retention tail hard-deletes it shortly afterwards anyway, so serving it from a stale link would only produce a card that vanishes moments later.
+
+**Per-user hide is a different thing from the tombstone, and is deliberately not conflated with it.** `MemoryUserState.hiddenAt` is personal and reversible: the memory stays visible to every other member, and it stays reachable *by its own id* for the user who hid it (so the detail page can offer "un-hide"). Only the circle-level tombstone removes it for everyone, and only that is permanent.
+
+### 6.3 The feature flag is checked BEFORE any query
+
+With `features.memories` off — the default — `GET /api/memories` returns `{ items: [], meta: { pageSize, nextCursor: null, hasMore: false } }`, `GET /api/memories/feed` returns `{ items: [] }`, and every `:id` route returns **404**. Not an error, not a 403: a disabled feature is invisible, not broken, so a client that has not yet been taught about the flag degrades to an empty surface rather than an error toast.
+
+The gate runs as the *first statement* of every handler, ahead of the circle-access check. That ordering is the point: "no cron work, no jobs, no nav entry, endpoints return empty — **zero cost**" is a stated epic success criterion, and checking membership first would already have cost two queries per request on a deployment that has the feature switched off. The only work a gated-off request performs is the cached `SystemSettingsService.getSettings()` read (5 s TTL, usually a cache hit). It resolves through the shared `isMemoriesEnabled()` helper, which folds in the `MEMORIES_ENABLED` env kill-switch, so this surface can never disagree with the generation cron about what "enabled" means (§9.1).
+
+A side effect worth naming: while the flag is off, a non-member also gets an empty list rather than a 403. That is strictly less information disclosure, not more.
+
+### 6.4 `GET /api/memories` — keyset, and why the cursor comes from the raw page
+
+Keyset only. There is deliberately **no** `page` escape hatch of the kind `GET /api/media` carries: that endpoint's offset mode exists purely for legacy clients (the Android app, the CLI) that predate keyset, and nothing has ever consumed memories, so neither the dual-mode branch nor its `COUNT(*)` is inherited. Ordering is `(generatedAt DESC, id DESC)`; the `id` tiebreak is not decorative — one generation run writes a whole batch of rows with near-identical `generatedAt`, so without it the keyset would be non-deterministic exactly where it is used most.
+
+Filters:
+
+- `type` — a `MemoryType` value, passed straight through.
+- `year` — **not a column**: a memory covers a *range*, so this compiles to an overlap test against that UTC calendar year (`periodStart < Jan 1 of year+1 AND periodEnd >= Jan 1 of year`). A trip spanning New Year's Eve therefore appears under both years, which is what a user filtering "2023" expects of a photo taken on 2023‑12‑31.
+- `favorite=true` — narrows to the caller's own favorites via `userStates: { some: { userId, favoritedAt: { not: null } } }`.
+
+Per-user hidden rows are excluded **in SQL** (`NOT: { userStates: { some: { userId, hiddenAt: { not: null } } } }`), so a user who has hidden a lot still gets full pages.
+
+The preference filter (§6.7) cannot be, and runs in memory over the fetched page. That creates one subtle trap, which the implementation avoids explicitly: **`nextCursor` and `hasMore` are derived from the RAW page, before preference filtering.** Deriving them from the filtered list would make a page whose every row was preference-hidden report `nextCursor: null`, silently truncating the browsable history at the first fully-hidden page. The visible consequence is that a page may return fewer than `pageSize` items while still reporting `hasMore: true` — correct, and the standard behaviour of any post-filtered keyset.
+
+Card DTO: `{ id, type, title, subtitle, itemCount, periodStart, periodEnd, coverMediaItemId, coverThumbnailUrl, meta, myState: { seen, favorited }, generatedAt }`. `myState` on a *card* carries no `hidden`, because it would be a constant `false` there — hidden rows never reach a list. Detail's `myState` adds it.
+
+### 6.5 `GET /api/memories/feed`
+
+Ordering is: today's `on_this_day` memories with the **closest year first** ("1 year ago" before "9 years ago"), then the newest unseen, then the newest seen, capped at 10.
+
+Two bounded reads rather than one, for two independent reasons. Today's anchor memories must appear *even when they are not among the newest rows overall* — a backfill can generate a pile of trips after them — so they cannot be found by taking the newest N. And ranking them needs `meta.yearsAgo`, a JSONB field that SQL would sort badly and an in-memory sort handles trivially. `periodKey` for an `on_this_day` memory *is* the anchor day in UTC (`toIsoDateKey`, §4.7), so "today's" is an exact string match, not a range scan. The second query excludes that same `(type, periodKey)` pair so a memory can never appear twice in one feed.
+
+The non-anchor read takes `FEED_CANDIDATE_LIMIT = 60` rather than 10: hidden rows are already gone in SQL, but the preference filter runs afterwards in memory, so a user with several hidden people would otherwise get a short feed. Still one bounded read, no second round-trip.
+
+Feed cards extend the list card with `itemThumbnailUrls` — up to the first four items by `position`, for the fan effect behind the cover.
+
+### 6.6 `GET /api/memories/:id`
+
+Applies the tombstone and active filters (§6.2) but **not** the per-user preference filter and **not** the per-user hide: a direct link — from the story player, a notification, the email digest, or the user's own hidden list — must resolve. Hiding and deleting are the tools on that page, and both are offered there.
+
+A memory whose circle the caller does not belong to returns **404, not 403**, so a stranger cannot use the status code to confirm that a memory id exists. This is the same enumeration-resistant policy as the notifications `:id` routes and public shares. A *member* who merely lacks the rank — a viewer attempting a delete — does get a 403, because their membership is not a secret and the distinction is actionable to them. The whole rule lives in one helper, `MemoriesService.loadAccessibleMemory(id, userId, permissions, requiredRole)`, which deliberately does **not** call `assertCircleAccess` (that one throws 403 for a non-member, which is exactly the leak being avoided) but does reproduce its super-admin bypass.
+
+Item DTO: `{ id, mediaItemId, position, mediaType, width, height, durationMs, capturedAt, thumbnailUrl }`, ordered by `position`. There is no item pagination: a memory holds at most `memories.maxItemsPerMemory` (bounded 5–100) rows.
+
+### 6.7 Per-user preferences — the `user_settings.memories` namespace
+
+Read and written **only** through the existing `GET`/`PATCH`/`PUT /api/user-settings`. No new endpoint, no new table, no migration, no new permission — the same model as `user_settings.dataTables` (#255) and `user_settings.notifications` (#251), and the canonical schema sits beside theirs in `apps/api/src/common/schemas/settings.schema.ts`.
+
+```
+memories: {
+  hiddenPersonIds:   string uuid[]                         (<= 200),
+  hiddenDateRanges:  [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }]  (<= 50, from <= to),
+  emailDigestOptOut: boolean,
+}
+```
+
+**Absent means default**, and that rule is load-bearing exactly as it is for the other two namespaces: every field is `.optional()` with **no** `.default()` anywhere, and nothing is ever populated server-side. An absent namespace / field means "no preference" — nobody hidden, no date sensitive, digest not opted out. That is what lets the namespace ship with no data migration (every existing row simply has no namespace), and it makes any field added here later opt-**in** rather than silently applied to everyone who once saved a preference. A `.default([])` on `hiddenPersonIds` would pin a stored blob to "nothing hidden" and make it indistinguishable from "never expressed a preference".
+
+Both date bounds are validated as **real calendar days**, not just `\d{4}-\d{2}-\d{2}`: the regex alone accepts `2026-02-31`, and a bound that silently rolled into the next month would filter days the user never named.
+
+PATCH merges **field-wise**, one level deep (`UserSettingsService.mergeMemories`, shaped exactly like `mergeNotifications`): an unlisted field is untouched, a listed field is **replaced wholesale**, a field set to `null` is deleted (resetting it to its absent default rather than pinning `[]` / `false`), and `memories: null` clears the namespace. An emptied namespace collapses back to `undefined`, because the absent namespace *is* the canonical "nothing persisted" state and storing `{}` would only be noise. The lists are replace-not-append deliberately: "hide this person" and "un-hide this person" are the same PATCH from the client's point of view, and an append-only merge would leave removal inexpressible.
+
+**Read-time filtering** applies to `GET /api/memories` and `GET /api/memories/feed`, in memory, after the page is fetched — both rules are cheap column comparisons over at most 60 rows:
+
+- **hidden person** — drop memories whose `personId` is listed;
+- **sensitive dates** — drop memories whose `[periodStart, periodEnd]` **overlaps** any hidden range. Overlap, not containment: a trip that merely crosses a hidden anniversary is precisely the case the user is trying not to be shown. A range is inclusive of both endpoints, so `to` is expanded to the following UTC midnight and compared half-open.
+
+`resolveMemoryPreferences()` compiles the stored blob once per request into a `Set` of ids plus millisecond intervals, so a page of 20 rows does not re-parse the same date strings 20 times. It is deliberately defensive: the schema validates on *write*, but an older or hand-edited JSONB blob can hold anything, and a malformed preference degrades to "no filter" with a logged warning rather than 500-ing a browse page. A failed settings read degrades the same way — over-showing beats an error on a browse surface.
+
+Filtering is read-time and **never** a generation input. Generation is circle-scoped: one `Memory` row is shared by every member, so a personal preference cannot influence what gets curated without leaking one member's preferences into another member's feed. That is why the People curators ignore this namespace entirely (§4.9).
+
+**V1 limitation (from the epic, deliberate):** a memory is dropped **whole**. A hidden person removes the `person_highlights` / `person_over_years` memories keyed to them, but a trip or theme memory that merely *contains* that person among several faces is **not** scrubbed at the item level. Item-level scrubbing is listed in §11.
+
+`emailDigestOptOut` is stored and validated here; it is consumed by the digest producer in issue [#311](https://github.com/marinoscar/MemoriaHub/issues/311).
+
+### 6.8 Per-user state writes
+
+`POST /:id/seen`, `POST`/`DELETE /:id/hide`, `POST`/`DELETE /:id/favorite` — all 204, all scoped to the JWT's `userId`, all requiring circle membership only.
+
+Setting a timestamp is `COALESCE(field, now())`: re-running never moves an existing value, so `seenAt` always names the **first** view — the same idempotency contract as `POST /api/notifications/:id/read`. In Prisma that costs two statements, and both are needed: the `upsert` covers "no state row yet", and a guarded `updateMany ... WHERE field IS NULL` covers "a row already exists because the user favorited it earlier, but *this* column is still null".
+
+Clearing is `updateMany` and never an upsert: un-hiding a memory the user never hid is a no-op, and creating an all-null state row to record that nothing happened would be pure garbage.
+
+### 6.9 `DELETE /api/memories/:id` — the tombstone write
+
+Sets `deletedAt = now()`. The memory disappears for **every** member, and permanently: because `@@unique([circleId, type, periodKey, subjectKey])` spans tombstoned rows (§2.5), the next generation run's `upsertMemory` finds the tombstone and skips that natural key instead of resurrecting or duplicating it. The underlying photos are untouched — delete removes the curated collection, never the media.
+
+Writes an `audit_events` row (`action: 'memory:deleted'`, `targetType: 'memory'`) carrying the circle, type, natural key and title, so a "why did that memory vanish" question is answerable after the fact.
+
+Requires `media:write` + **collaborator**, the same bar as any other mutation of circle content. A viewer who simply wants it out of their own way has `POST /:id/hide`. A repeat delete returns 404, since the first one made the row invisible to every read — including this route's own lookup.
+
+### 6.10 `POST /api/memories/:id/save-album`
+
+Body `{ name? }`; omitted means "use the memory's title" (truncated to the 256-char album-name cap). Returns `201 { albumId }`.
+
+Every mutation goes through the **existing** album service path — `MediaService.createAlbum` → `addAlbumItems` → `updateAlbum` for the cover — rather than writing `Album`/`AlbumItem` rows directly. That is deliberate: it inherits their circle checks, their `MediaTouchService` backup-feed bookkeeping (issue #310) and their cover-membership validation for free, and it cannot drift from them. Items are added in the memory's `position` order, which `addAlbumItems`' sequential inserts preserve as `addedAt` order — the order `GET /api/media/albums/:id` reads them back in.
+
+Two details worth stating:
+
+- **Soft-deleted items are dropped first.** `addAlbumItems` rejects the *whole* batch if any id is trashed, so a memory generated before one of its photos was trashed would otherwise be permanently unsaveable. The same check governs the cover: a trashed cover is simply not carried over rather than 400-ing the save.
+- **Not idempotent, by design** (per #307): saving the same memory twice yields two albums, because a user may genuinely want a second copy to edit.
+
+This is also how v1 *shares* a memory: save it as an album, then use the existing album share flow. A native memory share target is explicitly deferred (§11).
+
+### 6.11 Thumbnail signing
+
+Every payload that carries a thumbnail — list cards, feed cards (cover **plus** up to four item thumbnails each), and detail (cover plus every item) — is signed through `MediaThumbnailService.signThumbsBatched`, in **one** call per response covering every key at once. That means a single `storageObject.findMany`, each distinct `(provider, bucket)` resolved once, and each distinct key signed once.
+
+This is a hard repo rule, not a preference: the per-item `findUnique`-per-thumbnail pattern is exactly the N+1 that caused multi-second loads and 502s on large circles, documented in `docs/audits/search-audit.md`. The feed is the most exposed surface here — ten cards times five thumbnails is fifty keys — which is why the fan's item thumbnails are folded into the same batched call as the covers rather than signed per card.
+
+### 6.12 Serialization
+
+Every timestamp is emitted as an ISO 8601 **string**, and no payload in this API contains a `BigInt` (the repo's `JSON.stringify` gotcha): the only `BigInt` column anywhere near this feature is `storage_objects.size`, which nothing here selects, and `MediaItem.durationMs` is a plain `Int?`.
+
+Handler return values are wrapped by the global `TransformInterceptor`, so a list's own pagination meta lands at `data.meta` — the same shape `GET /api/media` and `GET /api/notifications` already produce.
+
+### 6.13 Known gaps
+
+- **Preference filtering shortens pages.** Because it runs after the fetch (as specified by #307), a page can return fewer than `pageSize` items. Pushing `hiddenPersonIds` into the SQL `WHERE` as `personId: { notIn }` would fix it for the person rule; the date-range rule would still need the in-memory pass, so the asymmetry was not worth two filtering paths in v1.
+- **No item-level scrubbing** of hidden people inside mixed memories (§6.7, §11).
+- **`emailDigestOptOut` is stored but unread** until issue #311 lands the digest producer.
+- **Expired memories 404 on detail.** A user who opens an `on_this_day` story a minute before midnight will find the link dead a minute later. The alternative — serving expired memories by id — was rejected because the `on_this_day` retention tail hard-deletes them shortly afterwards anyway, so the link would break regardless, just less predictably.
+- **No cross-circle "all my memories" view.** Every read is scoped to one `circleId`, matching the rest of the media surface.
 
 ## 7. Notification Center Integration & Email Digest
 
@@ -820,7 +969,22 @@ Consumed by `MemoryTitleService` in [#306](https://github.com/marinoscar/Memoria
 
 ## 10. RBAC
 
-Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) and issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315). No new permission has been introduced by issue #301 — the data model alone grants no access; every read/write path a later issue adds is expected to reuse the existing `media:read`/`media:write`/`media:delete` permissions plus per-circle `viewer`/`collaborator` roles, following the precedent set by Workflows and Notifications (see CLAUDE.md's RBAC Model section).
+Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) for the user-facing API; the admin surface (`/admin/settings/memories`, the library backfill) arrives with issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315) and reuses `system_settings:read`/`system_settings:write` like every other admin settings page.
+
+**No new permission was introduced, and none should be.** A memory is a *derived view* over media the caller can already see — it grants access to nothing they could not reach through `GET /api/media`. `media:read` / `media:write` plus the per-circle roles express the intent exactly, so a `memories:*` permission would add a second thing to keep in sync with the media permissions for zero additional expressiveness. That was the epic's explicit decision, and it follows the precedent set by Workflows (which reuses `media:read`/`media:write`/`media:delete` + per-circle roles) and Notifications (authentication only, because every route is already user-scoped).
+
+| Capability | System permission | Per-circle role | Notes |
+|---|---|---|---|
+| List, feed, detail | `media:read` | **viewer** | Circle-scoped list/feed use `assertCircleAccess`; `:id` routes use the 404-not-403 path (§6.6) |
+| Mark seen / hide / un-hide / favorite / un-favorite | `media:read` | **viewer** | Scoped to the JWT's `userId` and touching no circle content, so membership is the real gate; `media:read` rides along because it is what the whole surface is gated on and a caller without it has no business reading the memory the state refers to |
+| Save as album | `media:write` | **collaborator** | Same bar as `POST /api/media/albums`, whose service path this reuses |
+| Delete (tombstone) | `media:write` | **collaborator** | Mutates circle content for every member; a viewer's equivalent is the personal hide |
+
+**Super-admin bypass.** A user holding `circles:manage_any`, `media:write_any` or `media:read_any` bypasses the per-circle role check entirely, exactly as `CircleMembershipService.assertCircleAccess` does elsewhere — `loadAccessibleMemory` reproduces that bypass rather than inventing a second policy. This is what lets a system Admin moderate a circle they do not belong to.
+
+**Two status-code rules.** A memory in a circle the caller is not a member of is **404** (enumeration-resistant — the caller must not be able to confirm the id exists), while a member who lacks the *rank* gets **403** (their membership is not a secret and the distinction is actionable). See §6.6.
+
+**Preferences carry no permission at all.** The `user_settings.memories` namespace (§6.7) is read and written through the existing `GET`/`PATCH`/`PUT /api/user-settings`, which is already scoped to the calling user — there is nothing an additional permission would protect, the same rationale that kept `notifications` and `dataTables` permission-free.
 
 ## 11. Future Work
 
@@ -839,6 +1003,7 @@ Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/is
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.7 | August 2026 | AI Assistant | Issue #307: filled in §6 (API — the endpoint catalogue with its permission/role column; the three read invariants and why per-user hide is deliberately not the tombstone; the flag-checked-before-any-query ordering that makes the default-off state cost zero queries and return empty lists rather than errors; keyset-only pagination, the `year` range-overlap compilation, and why `nextCursor` must come from the RAW page; the feed's two bounded reads, exact-`periodKey` anchor match and 60-row candidate window; the 404-not-403 `loadAccessibleMemory` policy and why it does not call `assertCircleAccess`; the `user_settings.memories` namespace with its absent-means-default rule, field-wise merge, overlap-not-containment date filtering and the read-time-never-generation-input rationale; COALESCE state writes and why clearing never upserts; the tombstone write and its audit event; save-as-album's reuse of the album service path plus its trashed-item and non-idempotence decisions; the one-batched-call thumbnail rule; serialization; and six known gaps) and §10 (RBAC — the no-new-permission decision, the capability table, super-admin bypass, the two status-code rules, and why preferences carry no permission). §7 and §8 remain placeholders. |
 | 0.6 | August 2026 | AI Assistant | Issue #306: filled in §5 (AI Titles, Subtitles & Narratives — the total `generate()` contract and the complete failure table with which entries avoid a provider call at all, the metadata-only prompt payload and the absent-by-construction privacy list, the one-file prompt with its per-type snapshots and the strict-JSON/length-cap contract shared between the system prompt and the parser, the 10s whole-stream timeout with its remaining-budget race and fire-and-forget iterator close plus the new optional `ChatRequest.temperature`, the per-job `MemoryTitleRun` budget and why it is a passed object rather than service state, the rate-limit stop-the-run rule and the 100-call backfill cap, the two `upsertMemory` branches that call titling and the tombstone/outside-the-transaction ordering, the no-network test strategy, and five known gaps). §6–§8 and §10 remain placeholders. |
 | 0.1 | August 2026 | AI Assistant | Initial specification for issue #301: the `MemoryType` enum, the `Memory`/`MemoryItem`/`MemoryUserState` data model, the `periodKey`/`subjectKey` semantics, the tombstone contract, cascade summary, and alternatives considered. Sections 3–10 are placeholders for later issues in epic #300. |
 | 0.5 | August 2026 | AI Assistant | Issue #305: added §4.9 (the People curators — the one shared eligibility rule and why per-user hidden people are deliberately excluded from generation, the archived-face exclusion, the grouped `(person, year)` census and why over-counting makes the pre-filter sound, the year-bucketed diversity policy and the >=3-year floor that separates the two types, the highest-confidence cover override, and the Cascade-FK delete/merge story), §4.10 (the Theme curator — the tag-vocabulary-over-clustering rationale, the three filters `source='ai'` / enabled label / denylist, ranking by distinct qualifying items with the exact per-year sum behind the all-history period, walking past a short tag under a bounded attempt cap, and why a tombstoned theme consumes its slot), and §4.11 (Seasonal & Year-in-Review — the shared per-month census, completed-seasons-only and the season-year fold with its spring-first ordinal, and the December/January window plus month bucketing). Extended §4.5 with the opt-in `selectByBuckets` calendar policy, rewrote §4.13's registry paragraph for the full seven, and added five known gaps to §4.15. Renumbered the former §4.9–§4.12 to §4.12–§4.15 so the curator sections stay together. §5–§8 and §10 remain placeholders. |
