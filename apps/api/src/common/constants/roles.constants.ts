@@ -86,6 +86,11 @@ export const PERMISSIONS = {
   // Sharing (Admin + Contributor; manage_any = Admin only)
   SHARES_MANAGE: 'shares:manage',
   SHARES_MANAGE_ANY: 'shares:manage_any',
+
+  // PostgreSQL Database Backup & Restore (Admin only, epic #339)
+  DB_BACKUP_READ: 'db_backup:read',
+  DB_BACKUP_WRITE: 'db_backup:write',
+  DB_BACKUP_RESTORE: 'db_backup:restore',
 } as const;
 
 export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
