@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import { once } from 'node:events';
+import { Readable } from 'node:stream';
 import {
   withRetry,
   DEFAULT_RETRY_CONFIG,
@@ -88,6 +91,166 @@ export interface UpdateNodeBackupConfigBody {
   circleIds?: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Node backup run/feed types (issue #316 — the backup engine data plane).
+// Shapes mirror NodeBackupService (apps/api/src/nodes/node-backup.service.ts);
+// every byte-count field crosses the wire as a STRING (BigInt-safe).
+// ---------------------------------------------------------------------------
+
+/** Change-feed keyset cursor: (updatedAt, id), both halves always together. */
+export interface BackupFeedCursor {
+  updatedAt: string;
+  id: string;
+}
+
+/** Response envelope of POST /api/nodes/:id/backup/runs (201). */
+export interface StartBackupRunResult {
+  run: {
+    id: string;
+    kind: string;
+    startedAt: string;
+    /** Snapshot of the server checkpoint at run start; halves are null when
+     * the node has never acked a page. */
+    cursorStart: { updatedAt: string | null; id: string | null };
+  };
+}
+
+export interface StartBackupRunBody {
+  kind: 'incremental' | 'reconcile';
+  trigger: 'manual' | 'scheduled';
+  cliVersion?: string;
+}
+
+/** One change-feed item from GET /api/nodes/:id/backup/changes. */
+export interface BackupChangeItem {
+  id: string;
+  circleId: string;
+  updatedAt: string;
+  createdAt: string;
+  capturedAt: string | null;
+  /** Capture-time UTC offset in MINUTES, or null. */
+  capturedAtOffset: number | null;
+  type: string;
+  deletedAt: string | null;
+  archivedAt: string | null;
+  contentHash: string | null;
+  originalFilename: string;
+  storage: {
+    objectId: string;
+    /** Byte size as a decimal STRING. */
+    size: string;
+    mimeType: string | null;
+    status: string;
+  } | null;
+  /** Presigned GET for the original bytes; null for tombstones, not-ready
+   * objects, or presign failures. Minted per page — expires. */
+  downloadUrl: string | null;
+  downloadUrlExpiresAt: string | null;
+  /** The full server-composed schemaVersion-1 sidecar document. */
+  sidecar: Record<string, unknown>;
+}
+
+/** Response of GET /api/nodes/:id/backup/changes. */
+export interface BackupChangesPage {
+  items: BackupChangeItem[];
+  /** Advances even on a partial page; null only on a zero-item page. */
+  nextCursor: BackupFeedCursor | null;
+  hasMore: boolean;
+  safetyHorizon: string;
+}
+
+/** Wire shape of the shared run stats (ack + finish finalStats). */
+export interface BackupRunStatsBody {
+  itemsDownloaded: number;
+  itemsSkipped: number;
+  sidecarsWritten: number;
+  /** Bytes as a decimal STRING (BigInt-safe). */
+  bytesDownloaded: string;
+  errors: number;
+}
+
+export interface BackupAckBody {
+  runId: string;
+  cursor: BackupFeedCursor;
+  stats: BackupRunStatsBody;
+}
+
+export interface BackupAckResult {
+  ok: true;
+  checkpoint: { updatedAt: string; id: string };
+}
+
+export interface FinishBackupRunBody {
+  status: 'completed' | 'failed' | 'aborted';
+  error?: string;
+  finalStats?: BackupRunStatsBody;
+}
+
+/** One reconcile-manifest row from GET /api/nodes/:id/backup/manifest. */
+export interface BackupManifestItem {
+  id: string;
+  contentHash: string | null;
+  updatedAt: string;
+  deletedAt: string | null;
+  archivedAt: string | null;
+}
+
+export interface BackupManifestPage {
+  items: BackupManifestItem[];
+  nextAfterId: string | null;
+  hasMore: boolean;
+}
+
+/** Response of GET /api/nodes/:id/backup/dimensions. */
+export interface BackupDimensions {
+  albums: Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    itemCount: number;
+    itemIds: string[];
+  }>;
+  people: Array<{
+    id: string;
+    name: string | null;
+    favorite: boolean;
+    faceCount: number;
+  }>;
+  tags: Array<{ name: string; itemCount: number }>;
+  generatedAt: string;
+}
+
+/** Per-attempt configuration for {@link ApiClient.getRaw}. */
+export interface GetRawAttemptConfig {
+  /** Bytes already on disk — requests `Range: bytes=N-` when > 0. */
+  rangeStart?: number;
+  /**
+   * Called once response headers arrive, before any chunk. `resumed` is true
+   * only when rangeStart > 0 AND the server honored the Range request (206);
+   * a 200 means the file is being restarted from zero (the destination is
+   * truncated).
+   */
+  onResponse?: (info: { status: number; resumed: boolean }) => void | Promise<void>;
+  /** Awaited per chunk BEFORE it is written — bandwidth capping + hashing. */
+  onChunk?: (chunk: Buffer) => void | Promise<void>;
+}
+
+export interface GetRawOptions {
+  signal?: AbortSignal;
+  /**
+   * Invoked at the start of EVERY attempt (including internal retries) so
+   * resume state (existing .part size, partial hash) is recomputed per
+   * attempt rather than captured stale from the first try.
+   */
+  attempt?: () => GetRawAttemptConfig | Promise<GetRawAttemptConfig>;
+}
+
+export interface GetRawResult {
+  status: number;
+  /** Bytes written by this call (excludes pre-existing resumed bytes). */
+  bytesWritten: number;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -96,6 +259,10 @@ export class ApiError extends Error {
     public readonly retryAfterMs: number | null = null,
     /** Forces retryability even when `status` is not normally retryable. */
     public readonly retryable: boolean = false,
+    /** Parsed JSON error body, when the response body was JSON (else undefined).
+     * Lets callers read structured error fields beyond `message` — e.g. the
+     * `activeRunId` on a backup-run 409. */
+    public readonly body: unknown = undefined,
   ) {
     super(`API error ${status}: ${serverMessage}`);
     this.name = 'ApiError';
@@ -353,7 +520,7 @@ export class ApiClient {
       }
 
       const msg = extractMessage(bodyText) || res.statusText || 'Request failed';
-      throw new ApiError(res.status, msg, retryAfterMs, bodyThrottle);
+      throw new ApiError(res.status, msg, retryAfterMs, bodyThrottle, parseJsonSafe(bodyText));
     }
 
     this.gate.recordSuccess();
@@ -498,6 +665,146 @@ export class ApiClient {
       `/api/nodes/${encodeURIComponent(nodeId)}/backup/config`,
       body,
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Node backup data plane (issue #316) — runs / changes / ack / finish /
+  // manifest / dimensions. All envelopes are TOP-LEVEL (no { data } wrapper),
+  // matching NodeBackupController; parseOk passes them through unchanged.
+  // -------------------------------------------------------------------------
+
+  /** Start a backup run. 409 (ApiError with body.activeRunId) when one is active. */
+  startNodeBackupRun(nodeId: string, body: StartBackupRunBody): Promise<StartBackupRunResult> {
+    return this.post<StartBackupRunResult>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/runs`,
+      body,
+    );
+  }
+
+  /** Fetch one keyset page of the change feed. `cursor` null = from the start. */
+  getNodeBackupChanges(
+    nodeId: string,
+    q: { runId: string; cursor?: BackupFeedCursor | null; limit?: number },
+  ): Promise<BackupChangesPage> {
+    const params = new URLSearchParams({ runId: q.runId });
+    if (q.cursor) {
+      params.set('updatedAfter', q.cursor.updatedAt);
+      params.set('afterId', q.cursor.id);
+    }
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    return this.get<BackupChangesPage>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/changes?${params.toString()}`,
+    );
+  }
+
+  /** Acknowledge a committed page, advancing the server checkpoint. */
+  ackNodeBackup(nodeId: string, body: BackupAckBody): Promise<BackupAckResult> {
+    return this.post<BackupAckResult>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/ack`,
+      body,
+    );
+  }
+
+  /** Finish a backup run with a terminal status (+ optional finalStats). */
+  finishNodeBackupRun(
+    nodeId: string,
+    runId: string,
+    body: FinishBackupRunBody,
+  ): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/runs/${encodeURIComponent(runId)}/finish`,
+      body,
+    );
+  }
+
+  /** Fetch one id-keyset page of the reconcile manifest. */
+  getNodeBackupManifest(
+    nodeId: string,
+    q: { runId: string; afterId?: string; limit?: number },
+  ): Promise<BackupManifestPage> {
+    const params = new URLSearchParams({ runId: q.runId });
+    if (q.afterId !== undefined) params.set('afterId', q.afterId);
+    if (q.limit !== undefined) params.set('limit', String(q.limit));
+    return this.get<BackupManifestPage>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/manifest?${params.toString()}`,
+    );
+  }
+
+  /** Fetch the album/person/tag dimension catalogs for the backup scope. */
+  getNodeBackupDimensions(nodeId: string): Promise<BackupDimensions> {
+    return this.get<BackupDimensions>(
+      `/api/nodes/${encodeURIComponent(nodeId)}/backup/dimensions`,
+    );
+  }
+
+  /**
+   * Stream a presigned GET to a local file (issue #316) — the download
+   * counterpart to {@link putRaw}. NO auth header (the URL is presigned; S3
+   * rejects extra auth). Routed through the shared retry + cooldown-gate
+   * machinery, so 429/503/Retry-After brake every worker sharing this client.
+   *
+   * Resume support: `opts.attempt` is re-invoked on every retry attempt so the
+   * caller can recompute the Range start (and re-hash any partial bytes)
+   * against the CURRENT on-disk state. When the attempt's rangeStart > 0 and
+   * the server honors it (206), the destination is opened in append mode;
+   * a 200 truncates and restarts from zero.
+   */
+  async getRaw(url: string, destPath: string, opts: GetRawOptions = {}): Promise<GetRawResult> {
+    return this.run(async () => {
+      if (opts.signal?.aborted) {
+        // Plain Error (not NetworkError) so an abort is never retried.
+        throw new Error('Download aborted');
+      }
+      const cfg = (await opts.attempt?.()) ?? {};
+      const rangeStart = cfg.rangeStart ?? 0;
+
+      const headers: Record<string, string> = {};
+      if (rangeStart > 0) headers['Range'] = `bytes=${rangeStart}-`;
+
+      const res = await this.fetchWithGate(url, {
+        method: 'GET',
+        headers,
+        signal: opts.signal,
+      });
+
+      const resumed = rangeStart > 0 && res.status === 206;
+      await cfg.onResponse?.({ status: res.status, resumed });
+
+      if (!res.body) {
+        throw new NetworkError('Response has no body');
+      }
+
+      const out = fs.createWriteStream(destPath, { flags: resumed ? 'a' : 'w' });
+      let bytesWritten = 0;
+      const nodeStream = Readable.fromWeb(
+        res.body as unknown as Parameters<typeof Readable.fromWeb>[0],
+      );
+
+      try {
+        for await (const chunk of nodeStream) {
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+          await cfg.onChunk?.(buf);
+          if (!out.write(buf)) {
+            await once(out, 'drain');
+          }
+          bytesWritten += buf.length;
+        }
+        out.end();
+        await once(out, 'close');
+      } catch (err) {
+        out.destroy();
+        if (opts.signal?.aborted) {
+          throw new Error('Download aborted');
+        }
+        // Mid-stream transport failures are retryable; the next attempt
+        // recomputes its Range from the bytes that DID land on disk.
+        throw err instanceof Error && (err as Partial<NetworkError>).isNetworkError
+          ? err
+          : new NetworkError(err instanceof Error ? err.message : String(err));
+      }
+
+      return { status: res.status, bytesWritten };
+    });
   }
 
   /** Fetch live job queue insights. windowDays defaults to 7 on the server. */
@@ -653,6 +960,16 @@ export class ApiClient {
     }
 
     return parsed as T;
+  }
+}
+
+/** Parse a body as JSON, returning undefined for empty/non-JSON text. */
+function parseJsonSafe(bodyText: string): unknown {
+  if (!bodyText) return undefined;
+  try {
+    return JSON.parse(bodyText) as unknown;
+  } catch {
+    return undefined;
   }
 }
 

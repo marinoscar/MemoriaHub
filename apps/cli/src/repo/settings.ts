@@ -135,6 +135,31 @@ export class SettingsRepo {
   }
 
   // ---------------------------------------------------------------------------
+  // Backup engine throttle knobs (issue #316 — all overridable per-run by
+  // `backup run` flags; these are the persistent machine defaults)
+  // ---------------------------------------------------------------------------
+
+  /** Concurrent backup download workers (default: 2). */
+  backupConcurrency(): number {
+    return this.get<number>('backup.concurrency', 2);
+  }
+
+  /** Aggregate download bandwidth cap in Mbps; 0 = unlimited (default: 0). */
+  backupMaxMbps(): number {
+    return this.get<number>('backup.maxMbps', 0);
+  }
+
+  /** Change-feed page size (default: 100; server clamps to backup.maxPageSize). */
+  backupPageSize(): number {
+    return this.get<number>('backup.pageSize', 100);
+  }
+
+  /** Inter-page pacing delay in ms (default: 250). */
+  backupPacingMs(): number {
+    return this.get<number>('backup.pacingMs', 250);
+  }
+
+  // ---------------------------------------------------------------------------
   // Update-check throttle cache (keys: update_check_last_at, update_check_latest_version)
   // ---------------------------------------------------------------------------
 

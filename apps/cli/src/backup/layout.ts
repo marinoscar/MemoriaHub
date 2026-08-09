@@ -301,7 +301,7 @@ export function planTreeTransition(currentRelPath: string, archivedAt: string | 
 }
 
 /** Rename with a cross-device (EXDEV) fallback to copy + unlink. */
-function renameWithFallback(from: string, to: string): void {
+export function renameWithFallback(from: string, to: string): void {
   try {
     fs.renameSync(from, to);
   } catch (err) {
