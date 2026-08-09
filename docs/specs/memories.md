@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 0.3 (data model + generation plumbing + curation engine & On This Day) |
+| **Version** | 0.4 (data model + generation plumbing + curation engine, On This Day & Trips) |
 | **Last Updated** | August 2026 |
-| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303); §5–§8 and §10 are placeholders for later issues in epic #300 |
+| **Status** | Partial — Data Model (#301), Generation plumbing & Settings (#302), Curation engine / On This Day / template titles (#303), Trips curator (#304); §5–§8 and §10 are placeholders for later issues in epic #300 |
 
 ---
 
@@ -361,7 +361,98 @@ The pre-existing `media_items_captured_md_idx` (migration `20260615000000_media_
 
 **Retention tail.** `OnThisDayCurator.purge()` hard-deletes this circle's `on_this_day` rows whose `expiresAt` is more than 30 days past — **tombstoned or not**. Ignoring the tombstone here is safe rather than a contradiction of §2.5: the tombstone's job is "do not recreate this memory", and once the anchor day is a month gone the curator has no reason to generate that `periodKey` again until the date comes back around a year later, by which point the underlying library has changed and the memory is legitimately a new one. Keeping the tombstones forever would accumulate one unreadable row per (day × year) for the life of the deployment. The tail runs at the end of every generation job rather than on its own cron: the work is proportional to what generation just produced, it must not run when the feature is off, and a separate schedule would be a second thing to reason about for one batched `deleteMany`.
 
-### 4.8 Idempotent regeneration — `upsertMemory()`
+### 4.8 The Trips curator
+
+Issue [#304](https://github.com/marinoscar/MemoriaHub/issues/304). Trips are the only memory type that requires real clustering, and the only one that needs a fact the library has never held: where **home** is. Everything below follows from inferring that one fact and then asking, day by day, "were we away?".
+
+The decision algebra is pure and lives in `apps/api/src/memories/curators/trip-clustering.ts` (no Prisma, no Nest, no clock); `trip.curator.ts` is the I/O half — one streaming scan in, curated memories out.
+
+| Field | Value |
+|---|---|
+| `periodKey` | trip start date, ISO `YYYY-MM-DD` |
+| `subjectKey` | slugified dominant locality (ASCII-folded, dash-separated, e.g. `guanacaste`); `''` when nothing was reverse-geocoded |
+| `expiresAt` | `NULL` — unlike On This Day, a trip stays interesting |
+| `meta` | `{ locality, admin1, country, distanceKm, dayCount, startDate, endDate, homePlace, homeLevel, generatorVersion }` |
+
+#### Home inference
+
+Over the circle's coordinate-bearing candidates from a **fixed 24-month window**, the modal `geoLocality` holding a **>= 30% share** is home, and its mean lat/lng is the home centroid.
+
+The window is deliberately **not** a setting and is deliberately not `trips.lookbackMonths`. Home is a slow-moving fact about a family, while the lookback answers "how far back do we look for trips?"; tying them together would mean an admin narrowing the trip window to three months silently re-infers home from one quarter's photos — exactly the case where a long vacation can outvote the house. Two years is long enough that no single trip can be modal, short enough to follow a real relocation.
+
+**Locality first, `geoAdmin1` as a fallback at the same 30% floor.** `geoLocality` is the level a person would name, but it is also the level most likely to be sparse: offline reverse geocoding frequently resolves a region and not a town, and a rural library can have `geoAdmin1` on nearly everything and `geoLocality` on almost nothing. Trying locality alone would report "home unknown" for a circle whose home is obvious one level up. The fallback keeps the *same* floor rather than a looser one — a coarser geography is easier to be modal in, so failing to clear 30% even there means there is genuinely no home here.
+
+**No home ⇒ no trips, and that is a normal outcome, not an error.** A travel-only archive, a circle spanning three countries, or a library that was never geocoded has no center of gravity, and every day would read as "away from" a place that is not home — a wall of bogus trips. The curator logs at `debug` and returns an empty result, satisfying the epic's failure-mode row "no geo data ⇒ trips curator skips, all other types unaffected". There is no `memories.trips.homeOverride` in v1; modal inference is zero-config and new-install friendly, and an override can be added later with no schema change.
+
+#### Away-day classification
+
+Candidates in the trip window are grouped by **UTC calendar day**, and each day gets one of three verdicts against home:
+
+| Verdict | Condition | Effect on a run |
+|---|---|---|
+| `away` | >= 3 candidates **and** the day's **median** coordinate is farther than `trips.minDistanceKm` from home — or, with no coordinates at all, >= 3 candidates whose modal `geoAdmin1` differs from home's | anchors/extends a run |
+| `home` | >= 3 candidates and the median is within `minDistanceKm` | **terminates** a run |
+| `neutral` | anything else (too few candidates, no usable signal) | consumes gap budget, never splits |
+
+**The median, not the mean.** One mis-geotagged frame — a phone that cached a stale fix, a scan with a hand-entered coordinate — would drag a mean hundreds of kilometers and invent a trip. Latitude and longitude are taken independently (a *marginal* median): not the geometric median, but O(n log n), dependency-free, and identical for the compact same-day clusters this actually sees.
+
+**A thin day is neutral even when it is far away.** One airport-layover photo should not open a trip, and one photo taken at home mid-vacation should not close one. Requiring evidence in both directions is what makes the classification stable.
+
+**The coordinate-less fallback can only ever ADD an away day.** A matching `geoAdmin1` is weak evidence of being home (adjacent regions are minutes apart) while a differing one is strong evidence of being away, so a mismatch classifies `away` and everything else stays `neutral` — never `home`.
+
+#### Trip assembly
+
+Away days merge into runs tolerating **one** gap day. A single photo-less day mid-week is a day you did not take pictures, not the end of the trip.
+
+A `home` day inside that tolerance still **terminates** the run: it is positive evidence the trip ended, not merely an absence of evidence. Treating it as a gap would fuse a weekend away, a quiet week at home, and the next weekend away into one eleven-day "trip". Runs are also trimmed to away days at both ends, so a trip never reports a start date on which nothing said "away".
+
+A run becomes a memory when it spans >= `trips.minDays` calendar days **and** yields >= `trips.minItems` items after curation. Two cheap floors are checked before any query — span, and raw candidate count across the run's days — so a run that cannot possibly qualify never pays for a curation pass. Item selection itself is entirely §4.2–§4.5's shared engine: same base filter, same scoring, same burst/duplicate collapse, same diversity buckets, same 3-video cap, same `maxItemsPerMemory`.
+
+The **dominant place** (locality → admin1 → country) is resolved from the run's day aggregates — every candidate in range — rather than from the curated items. A 30-item selection is a quality sample, not a geographic one, and naming a trip after whichever town contributed the sharpest photos would be arbitrary.
+
+#### Identity and refresh stability
+
+This is the subtle part. A trip's detected boundaries **move** when new uploads land: a second camera's photos can reveal that the trip started two days earlier. Because `periodKey` is the start date, the identity keys move with them — so matching a re-detected trip to its existing memory **by key equality would mint a duplicate on every late import**.
+
+Instead, a re-detected run is paired with the existing `trip` memory whose **day range it overlaps by >= 50%**, and that row is **re-keyed in place** (`UPDATE`, not a competing insert — the unique index permits it, since the row already owns the old slot).
+
+The denominator is the load-bearing detail: overlap is measured against the **shorter** of the two spans, not their union. A 3-day trip growing into a 10-day one scores `3/3 = 1.0` and refreshes; Jaccard would score it `3/10 = 0.30` and create the duplicate this rule exists to prevent. The trade — a short range fully inside a much longer one always matches — is accepted, because a 2-day run inside an existing 30-day trip really is part of that trip. Matching is greedy in descending overlap order and one-to-one on both sides, so neither a run nor a memory is ever claimed twice, and the better fit wins over whichever run happened to be chronologically first.
+
+Overlap is computed against `meta.startDate`/`meta.endDate` — the **detected** day range — rather than `periodStart`/`periodEnd`, which describe the curated item set and are often narrower (a trip's first and last day frequently lose their photos to the diversity cap). Rows written before those meta keys existed fall back to the period columns.
+
+**Tombstoned trips take part in matching.** This is what makes §2.5's contract hold here at all: `upsertMemory`'s own tombstone check is keyed on `(periodKey, subjectKey)`, and a shifted boundary carries *different* keys, so a key-only check would sail straight past a deleted trip and insert a fresh one. A run overlapping a tombstone is refused before any curation work.
+
+**A drifted subject re-titles.** When a better reverse-geocode changes the dominant locality, the row is re-keyed *and* `upsertMemory` is called with `retitle: true` — an optional flag (default `false`, so every other caller is unchanged) added for exactly this case. §4.9's anti-churn rule exists to protect a title that is still accurate; a memory keyed `playa-grande` and titled "Trip to Tamarindo" is not aged, it is falsified. An ordinary refresh — one photo joining — still preserves the title, AI ones included.
+
+If the slot a re-key would move into is already held by a *different* memory, the row keeps its current identity and refreshes there instead. The keys are an identity, not data: a stale-but-stable one beats either a failed unique-index write or deleting a memory a user may have favorited.
+
+#### Backfill
+
+`payload.backfill === true` drops `lookbackMonths` and sweeps the whole library; the home window stays fixed at 24 months either way. This is a single in-memory pass per circle, the same precedent as the `location_inference` sweep.
+
+**Memory is flat in library size** because the scan aggregates as it streams and **never retains media-item ids**: a qualifying run re-selects its items through `curate()` with a date-range `where` afterwards, so the ~95% of days spent at home cost two floats and a few tallies each. `MAX_SCAN_ROWS` (500 000) is a crash guard on the per-day coordinate samples, not a tuning knob.
+
+#### Query plan — no new index
+
+Verified with `EXPLAIN (ANALYZE, BUFFERS)` over a seeded 30 000-item circle: the scan is served by the **existing** `media_items_gallery_idx` (`(circle_id, captured_at DESC, id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL`, migration `20260716000000_media_gallery_index`) as an `Index Scan Backward` with **no sort node** — a btree scans either direction, so the index's `DESC` declaration costs nothing here — leaving only `social_media_source IS NULL` as a cheap filter:
+
+```
+Limit (actual time=0.065..4.324 rows=1000)
+  ->  Index Scan Backward using media_items_gallery_idx on media_items
+        Index Cond: ((circle_id = $1) AND (captured_at IS NOT NULL) AND (captured_at >= $2))
+        Filter: (social_media_source IS NULL)
+```
+
+So #304 adds **no migration**. The one known cost is inherited from §4.2's `loadCandidates`: Prisma's typed `where` cannot express a row-value comparison `(captured_at, id) > ($1, $2)`, so the keyset predicate is emitted as an `OR` and lands as a `Filter` rather than an `Index Cond` — page *N* re-walks the pages before it. It is bounded (~2.5 M index-entry visits across a 70 000-item circle, low seconds inside a daily background job) and dropping to raw SQL to avoid it would also give up the structural guarantee that `memoryCandidateBaseWhere()` is applied by the engine rather than by the caller.
+
+#### Known gaps
+
+- **A day straddling the ±180° antimeridian gets a meaningless median longitude**, and the home centroid has the same weakness (it is a plain mean). Both would misclassify a Fiji/Kiribati-area day. Documented rather than solved: the fix is circular-mean arithmetic like `interpolateLng`'s in the location-inference engine, and it is not worth the complexity until someone is affected.
+- **A day whose photos are split ~50/50 between home and a destination** can produce a marginal median that is at neither — a phantom point built from one cluster's latitude and the other's longitude. Real travel days are not bimodal; a fixture of ours was, which is how this surfaced.
+- **A trip that no longer detects is not deleted**, per §4.12's general rule — the curator only upserts runs that still qualify.
+- **`trips.minItems` above `maxItemsPerMemory`** can never be satisfied, since curation caps the selection first. Both are admin-settable within their own bounds and the combination is not cross-validated.
+
+### 4.9 Idempotent regeneration — `upsertMemory()`
 
 Every curator writes through this one method, keyed on `@@unique([circleId, type, periodKey, subjectKey])`.
 
@@ -377,9 +468,9 @@ Every curator writes through this one method, keyed on `@@unique([circleId, type
 
 `meta.generatorVersion` (currently `1`) is stamped centrally on every write. Bump it when scoring or selection changes in a way that would produce a different item set from identical inputs — it is the only way to tell, after the fact, which algorithm produced a given memory.
 
-### 4.9 Registry and per-curator error isolation
+### 4.10 Registry and per-curator error isolation
 
-Curators are injected as an array under the `MEMORY_CURATORS` token (`memoryCuratorsProvider` in `on-this-day.curator.ts`), so #304 and #305 add a provider plus one entry in that factory and touch nothing else. `MemoryGenerationHandler` iterates it:
+Curators are injected as an array under the `MEMORY_CURATORS` token (`memoryCuratorsProvider`, which moved to its own `curators/memory-curators.provider.ts` in #304 once it imported more than one curator — a file that also *defines* a curator importing its siblings is a needless coupling and an easy way to grow an import cycle), so #305 adds a provider plus one entry in that factory and touches nothing else. Order is execution order, cheapest-first: On This Day runs two bounded functional-index queries, Trips streams the circle's geo history. `MemoryGenerationHandler` iterates it:
 
 - each curator is gated by **its own** `memories.<type>.enabled` toggle, checked via `MemoryCurator.isEnabled(settings)` rather than a stringly-typed settings key on the registry entry;
 - each `run()` is **individually try/caught**, and so is each `purge()`;
@@ -390,11 +481,11 @@ This is a correctness requirement, not politeness. The seven types are independe
 
 One wall clock (`ctx.now`) is captured once by the handler and shared by every curator, so a run that straddles midnight cannot have one curator anchoring on today and the next on tomorrow.
 
-### 4.10 Settings resolution
+### 4.11 Settings resolution
 
 `resolveMemoriesSettings()` deep-merges the stored `memories.*` namespace over `DEFAULT_SYSTEM_SETTINGS.memories` **once per generation job**, so curators read `settings.onThisDay.minItems` unconditionally and never carry their own `?? 10` fallbacks. The namespace is genuinely optional on an older JSONB row — that is what makes it migration-free (§9.2) — and per-curator fallbacks would be a fourth hand-maintained copy of every default, on top of the three §9.3 already warns about.
 
-### 4.11 Known gaps
+### 4.12 Known gaps
 
 - **A period that falls below `minItems` after items are removed keeps its existing memory.** Curators only upsert periods that still qualify; they do not delete a memory whose material has since been trashed. Its `MemoryItem` rows for hard-deleted media cascade away and `itemCount` is corrected on the next refresh, but a memory whose items were all *soft*-deleted lingers until read-time filtering ([#307](https://github.com/marinoscar/MemoriaHub/issues/307)) hides it. Deleting it automatically was rejected for v1: a curator silently destroying a memory a user may have favorited is a worse failure than a stale one.
 - **Backfill is unchunked.** A full On This Day backfill for a dense circle is up to 366 anchors × `lookbackYears` curations in one job, which can approach `ENRICHMENT_JOB_TIMEOUT_MS`. It is memory-safe (nothing accumulates across anchors) and restartable (every write is idempotent), but chunking the admin backfill into multiple jobs belongs to #315.
@@ -509,5 +600,6 @@ Placeholder. Covered by issue [#307](https://github.com/marinoscar/MemoriaHub/is
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 0.1 | August 2026 | AI Assistant | Initial specification for issue #301: the `MemoryType` enum, the `Memory`/`MemoryItem`/`MemoryUserState` data model, the `periodKey`/`subjectKey` semantics, the tombstone contract, cascade summary, and alternatives considered. Sections 3–10 are placeholders for later issues in epic #300. |
+| 0.4 | August 2026 | AI Assistant | Issue #304: added §4.8 (the Trips curator — fixed-24-month home inference with the 30% modal-share floor and the same-floor `geoAdmin1` fallback, median-based three-way away/home/neutral day classification and the coordinate-less metadata fallback that can only add an away day, gap-tolerant run merging where a home day terminates rather than bridges, the >=50%-of-the-SHORTER-span overlap matching that re-keys a boundary-shifted trip in place instead of duplicating it, tombstone participation in that matching, the `retitle` flag for a drifted subject, backfill and its flat-memory streaming aggregation, the EXPLAIN-verified reuse of `media_items_gallery_idx` with no new migration, and known gaps). Renumbered the former §4.8–§4.11 to §4.9–§4.12 so the curator sections sit together. §5–§8 and §10 remain placeholders. |
 | 0.3 | August 2026 | AI Assistant | Issue #303: filled in §4 (Curation Engine — the structural base filter, constant-memory keyset candidate streaming with per-page batched signal lookups, the scoring weights and the neutral-NULL-sharpness rule, the pure-score-vs-selectionScore split for the long-video preference, burst/duplicate collapse and its burst-wins precedence, time-bucket diversity with the 3-video cap, deterministic ordering and the never-a-video cover rule, template titles for all seven types, the On This Day curator with its today+tomorrow anchors / one-query-per-anchor design / new circle-scoped functional index / backfill anchor widening / retention tail, the `upsertMemory()` idempotency and tombstone contract with its Jaccard title-preservation rule, the curator registry and per-curator error isolation, settings resolution, and known gaps). §5–§8 and §10 remain placeholders. |
 | 0.2 | August 2026 | AI Assistant | Issue #302: filled in §3 (Generation — `MemoriesGenerationTask`'s three gates and zero-cost-when-off contract, the mandatory `skipDedup: true` rationale, the server-only `MemoryGenerationHandler` and its no-node-pair system-mode inference, job labels, and the `JobReason.backfill` deviation from the issue text) and §9 (Settings — `features.memories` + the `MEMORIES_ENABLED` kill-switch and their shared `isMemoriesEnabled()` gate, the full `memories.*` bounds/defaults table, the three-hand-maintained-copies pitfall, and `ai.features.memories` with its up-front credential validation). §4–§8 and §10 remain placeholders. |

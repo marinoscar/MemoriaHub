@@ -15,7 +15,7 @@
 // visits to the same beach a year apart are two trips, and one road trip across
 // four towns is one. Day-run merging models that directly, is explainable to a
 // user ("you were away from March 12 to March 17"), matches how Apple's Trips
-// behave, and adds no dependency. See docs/specs/memories.md §4.12.
+// behave, and adds no dependency. See docs/specs/memories.md §4.8.
 // =============================================================================
 
 import { haversineKm } from '../../common/geo/haversine.util';
@@ -336,7 +336,7 @@ export interface ClassifiedDay extends DayAggregate {
  *
  * KNOWN GAP: a day whose photos straddle the ±180° antimeridian gets a
  * meaningless median longitude. Documented rather than solved — see
- * docs/specs/memories.md §4.12.
+ * docs/specs/memories.md §4.8.
  */
 export function classifyDay(
   day: DayAggregate,

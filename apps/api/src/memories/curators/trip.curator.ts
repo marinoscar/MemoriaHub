@@ -235,6 +235,18 @@ export class TripCurator implements MemoryCurator {
    *
    * Ordering is `(capturedAt ASC, id ASC)`, a total order under the base filter
    * (`capturedAt IS NOT NULL`), so the cursor never skips or repeats a row.
+   *
+   * NO NEW INDEX IS NEEDED, verified with EXPLAIN ANALYZE over a seeded 30k-item
+   * circle: the existing `media_items_gallery_idx` — `(circle_id, captured_at
+   * DESC, id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL` — serves
+   * this as an `Index Scan Backward` with NO sort node (a btree scans either
+   * direction, so its DESC declaration costs nothing here), leaving only
+   * `social_media_source IS NULL` as a cheap filter. See docs/specs/memories.md
+   * §4.8 for the plan and for the one known cost: Prisma's OR-form keyset
+   * predicate lands as a Filter rather than an Index Cond, so page N re-walks
+   * the pages before it. That is inherited from `loadCandidates`, is bounded
+   * (~2.5M index-entry visits over a 70k-item circle, low seconds in a daily
+   * background job), and is not worth diverging into raw SQL to avoid.
    */
   private async scan(
     circleId: string,
