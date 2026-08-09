@@ -77,6 +77,8 @@ model User {
   reviewRunsStarted           ReviewRun[]                 @relation("ReviewRunStartedBy")
   // Notification Center relations (epic #240, issue #244; schema-only)
   notifications               Notification[]              @relation("UserNotifications")
+  // Memories relations (epic #300, issue #301)
+  memoryUserStates            MemoryUserState[]
 
   @@map("users")
 }
@@ -415,6 +417,8 @@ model Circle {
   reviewRuns            ReviewRun[]
   // Notification Center relations (epic #240, issue #244; schema-only)
   notifications         Notification[]        @relation("CircleNotifications")
+  // Memories relations (epic #300, issue #301)
+  memories              Memory[]
 
   @@index([ownerId])
   @@map("circles")
@@ -584,6 +588,9 @@ model MediaItem {
   workflowRunItems       WorkflowRunItem[]
   // Empty Trash at Scale relations
   trashEmptyRunItems     TrashEmptyRunItem[]
+  // Memories relations (epic #300, issue #301)
+  memoryItems            MemoryItem[]
+  coverForMemories       Memory[]             @relation("MemoryCover")
 
   @@index([circleId])
   @@index([addedById])
@@ -790,6 +797,8 @@ model Person {
   mergedInto       Person?    @relation("PersonMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
   mergedFrom       Person[]   @relation("PersonMerge")
   faces            Face[]     @relation("PersonFaces")
+  // Memories relations (epic #300, issue #301)
+  memories         Memory[]
 
   @@index([circleId])
   @@index([circleId, favorite])
@@ -2080,4 +2089,151 @@ model Notification {
   // a raw-SQL-only partial unique index, is added in migration
   // 20260805000000_add_notifications and is NOT representable here.
   @@map("notifications")
+}
+
+// =============================================================================
+// Memories (epic #300, issue #301)
+// =============================================================================
+//
+// Persisted, pre-generated memory collections (the Immich model — computing
+// trip clustering, scoring, and AI titles on read is infeasible at 70k
+// photos). Memory is circle-scoped CONTENT; MemoryUserState is PERSONAL
+// (seen/hidden/favorite) — per-user Memory rows were rejected (N-user
+// duplication of item lists, generation cost multiplied). See
+// docs/specs/memories.md for the full design; this schema is issue #301,
+// the data-model foundation every later epic #300 issue builds on.
+
+// MemoryType selects which curator produced a Memory and therefore how its
+// periodKey/subjectKey pair (below) is interpreted. subjectKey defaults to
+// "" rather than being nullable specifically so the unique index below stays
+// effective for types that don't use it (seasonal, year_in_review) — see the
+// Memory model's periodKey/subjectKey comment for why.
+enum MemoryType {
+  on_this_day // periodKey = anchor date "2026-08-08" (the day being resurfaced); subjectKey = source year "2019" (year of the underlying photos)
+  trip // periodKey = trip start date "2023-03-12"; subjectKey = dominant locality slug
+  person_highlights // periodKey = year "2025" or "all"; subjectKey = personId
+  person_over_years // periodKey = "all"; subjectKey = personId
+  theme // periodKey = year "2025" or "all"; subjectKey = tag name (lowercased)
+  seasonal // periodKey = e.g. "2025-summer"; subjectKey = "" (unused)
+  year_in_review // periodKey = "2025"; subjectKey = "" (unused)
+}
+
+// One row per generated memory collection. `deletedAt` is a TOMBSTONE, not a
+// soft-delete in the usual sense: `@@unique([circleId, type, periodKey,
+// subjectKey])` deliberately spans both live and tombstoned rows, so a
+// deleted memory keeps occupying its dedup slot forever and the curator's
+// idempotent upsert can never recreate it. Every curator/read path MUST
+// filter `deletedAt IS NOT NULL` explicitly — Prisma has no row-level
+// default filter, so this is an application-code discipline, not a schema
+// guarantee (same posture as MediaItem.deletedAt / Person.deletedAt
+// elsewhere in this file).
+model Memory {
+  id       String     @id @default(uuid()) @db.Uuid
+  circleId String     @map("circle_id") @db.Uuid
+  type     MemoryType
+
+  // periodKey/subjectKey together form the idempotent-regeneration identity
+  // for a memory within (circleId, type) — see the MemoryType enum comment
+  // above for what each holds per type. subjectKey is `@default("")` and
+  // NEVER nullable: Postgres unique indexes treat every NULL as distinct
+  // from every other NULL, which would silently defeat @@unique below for
+  // every type that doesn't use subjectKey (seasonal, year_in_review) — the
+  // same pitfall documented on notifications_review_queue_live_uniq_idx.
+  periodKey  String @map("period_key")
+  subjectKey String @default("") @map("subject_key")
+
+  // Set for person_highlights / person_over_years only. Cascade: deleting or
+  // merging a Person removes their memories outright (never left dangling);
+  // the next generation run regenerates fresh ones under the surviving
+  // person on a merge.
+  personId String? @map("person_id") @db.Uuid
+
+  title       String
+  subtitle    String?
+  narrative   String? // optional AI-written short blurb shown in the story player / email
+  titleSource String  @map("title_source") // 'template' | 'ai'
+  titleModel  String? @map("title_model") // AI model id when titleSource='ai' (audit)
+
+  // SetNull (not Cascade): a hard-deleted cover photo must not take the
+  // whole memory down with it — the memory just loses its cover image and a
+  // curator refresh can pick a new one.
+  coverMediaItemId String? @map("cover_media_item_id") @db.Uuid
+
+  periodStart DateTime @map("period_start") @db.Timestamptz // covered capture range start
+  periodEnd   DateTime @map("period_end") @db.Timestamptz // covered capture range end; together these power per-user sensitive-date filtering
+  itemCount   Int      @map("item_count") // denormalized for card rendering
+
+  meta Json? @db.JsonB // per-type extras: { yearsAgo, locality, country, tag, season, generatorVersion }
+
+  generatedAt DateTime  @map("generated_at") @db.Timestamptz // first creation
+  refreshedAt DateTime  @map("refreshed_at") @db.Timestamptz // last curator refresh
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz // on_this_day only: end of the anchor day (UTC); others NULL. Active = expiresAt IS NULL OR expiresAt > now()
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz // user-delete tombstone — see model comment above
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  circle         Circle            @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  person         Person?           @relation(fields: [personId], references: [id], onDelete: Cascade)
+  coverMediaItem MediaItem?        @relation("MemoryCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
+  items          MemoryItem[]
+  userStates     MemoryUserState[]
+
+  // THE idempotent-regeneration dedup key — spans live and tombstoned rows
+  // (see model comment above), which is exactly what makes the tombstone
+  // effective.
+  @@unique([circleId, type, periodKey, subjectKey])
+  // feed/list: active, non-expired memories newest-first
+  @@index([circleId, deletedAt, expiresAt, generatedAt(sort: Desc)])
+  @@index([circleId, type])
+  @@index([personId])
+  @@index([coverMediaItemId])
+  @@map("memories")
+}
+
+// One row per media item included in a Memory. `position` is curator-
+// assigned, chronological ascending — the story player plays time-forward.
+// `score` is the curation score kept for debugging/refresh diffing, not
+// re-derived on read.
+model MemoryItem {
+  id          String @id @default(uuid()) @db.Uuid
+  memoryId    String @map("memory_id") @db.Uuid
+  mediaItemId String @map("media_item_id") @db.Uuid
+  position    Int
+  score       Float?
+
+  // Relations
+  memory    Memory    @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+  // Cascade: a hard-deleted photo silently leaves the memory; a curator
+  // refresh subsequently fixes Memory.itemCount to match.
+  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+  @@unique([memoryId, mediaItemId])
+  @@index([memoryId, position])
+  @@index([mediaItemId])
+  @@map("memory_items")
+}
+
+// Per-user state against a Memory: seen/hidden/favorite. Deliberately
+// separate from Memory itself — see this section's header comment for the
+// circle-scoped-content-vs-personal-state rationale. `hiddenAt` here is
+// per-user and distinct from `Memory.deletedAt`, which is circle-wide.
+model MemoryUserState {
+  id          String    @id @default(uuid()) @db.Uuid
+  memoryId    String    @map("memory_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  seenAt      DateTime? @map("seen_at") @db.Timestamptz
+  hiddenAt    DateTime? @map("hidden_at") @db.Timestamptz
+  favoritedAt DateTime? @map("favorited_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  memory Memory @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([memoryId, userId])
+  @@index([userId, favoritedAt])
+  @@map("memory_user_state")
 }
