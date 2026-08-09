@@ -31,6 +31,7 @@ import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.regi
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isMemoriesEnabled } from '../common/types/settings.types';
 import { resolveMemoriesSettings } from './memories-settings.util';
+import { parseMemoryGenerationPayload } from './memory-generation.payload';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
 import { MemoryTitleService } from './titles/memory-title.service';
 import {
@@ -38,12 +39,6 @@ import {
   MemoryCurator,
   MemoryCuratorContext,
 } from './curators/memory-curator.interface';
-
-/** Payload shape for a `memory_generation` job. */
-interface MemoryGenerationPayload {
-  /** Admin library backfill (#315): widen curators past "what matters today". */
-  backfill?: boolean;
-}
 
 @Injectable()
 export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit {
@@ -87,16 +82,20 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
       return;
     }
 
-    const payload = (job.payload as unknown as MemoryGenerationPayload | null) ?? {};
+    const payload = parseMemoryGenerationPayload(job.payload);
     const memoriesSettings = resolveMemoriesSettings(settings.memories);
     // ONE titling budget for the whole job (#306), shared by every curator: a
     // provider rate limit must stop titling for the rest of the run, and a
-    // backfill's 100-call cap is job-wide, not per curator. It is created here
+    // backfill's call cap is job-wide, not per curator. It is created here
     // rather than held on MemoryTitleService because that service is a
     // singleton and several `memory_generation` jobs can run concurrently.
+    //
+    // `payload.aiTitleCap` is #315's shard slice of that cap: a backfill split
+    // across N jobs would otherwise multiply the per-job ceiling by N.
     const titling = this.titles.beginRun({
       backfill: payload.backfill === true,
       aiTitlesEnabled: memoriesSettings.aiTitles.enabled,
+      ...(payload.aiTitleCap !== undefined ? { maxAiCalls: payload.aiTitleCap } : {}),
     });
     const ctx: MemoryCuratorContext = {
       circleId: job.circleId,
@@ -106,7 +105,24 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
       // not have curator A anchoring on today and curator B on tomorrow.
       now: new Date(),
       backfill: payload.backfill === true,
+      ...(payload.anchorMonths ? { anchorMonths: payload.anchorMonths } : {}),
     };
+
+    // #315 sharding: a backfill is split into bounded jobs, each naming the
+    // curators it owns. An absent/empty list means "every enabled curator",
+    // which is what every scheduled run does. An unknown name matches nothing
+    // and is logged rather than thrown — a payload written by another release
+    // must never poison the queue.
+    const selected = payload.curators
+      ? this.curators.filter((curator) => payload.curators!.includes(curator.name))
+      : this.curators;
+    if (payload.curators && selected.length === 0) {
+      this.logger.warn(
+        `memory_generation job ${job.id} names no known curator ` +
+          `(${payload.curators.join(', ')}); nothing to run`,
+      );
+      return;
+    }
 
     let created = 0;
     let refreshed = 0;
@@ -114,7 +130,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
     let purged = 0;
     let failed = 0;
 
-    for (const curator of this.curators) {
+    for (const curator of selected) {
       if (!curator.isEnabled(ctx.settings)) continue;
 
       try {
@@ -178,6 +194,10 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
       jobId: job.id,
       circleId: ctx.circleId,
       backfill: ctx.backfill,
+      // #315: which shard of a sharded backfill this row was. Absent on a
+      // scheduled run, which always runs the whole registry.
+      curators: payload.curators ?? null,
+      anchorMonths: payload.anchorMonths ?? null,
       created,
       refreshed,
       tombstoned,

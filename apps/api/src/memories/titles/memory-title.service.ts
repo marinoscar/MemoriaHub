@@ -194,11 +194,24 @@ export class MemoryTitleService {
    * the run, so a disabled feature costs neither a settings read nor a provider
    * call per memory.
    */
-  beginRun(options: { backfill: boolean; aiTitlesEnabled: boolean }): MemoryTitleRun {
+  beginRun(options: {
+    backfill: boolean;
+    aiTitlesEnabled: boolean;
+    /**
+     * Override for the backfill ceiling (#315). A sharded library backfill
+     * divides `BACKFILL_AI_TITLE_CAP` across its shards, because the cap is
+     * per JOB and N shards would otherwise multiply the bill by N. Ignored
+     * outside backfill, where the budget is deliberately unbounded, and capped
+     * at `BACKFILL_AI_TITLE_CAP` so a payload can only ever lower it.
+     */
+    maxAiCalls?: number;
+  }): MemoryTitleRun {
     return {
       enabled: options.aiTitlesEnabled,
       backfill: options.backfill,
-      maxAiCalls: options.backfill ? BACKFILL_AI_TITLE_CAP : Number.POSITIVE_INFINITY,
+      maxAiCalls: options.backfill
+        ? Math.min(options.maxAiCalls ?? BACKFILL_AI_TITLE_CAP, BACKFILL_AI_TITLE_CAP)
+        : Number.POSITIVE_INFINITY,
       aiCalls: 0,
       stopped: false,
       stopReason: null,
