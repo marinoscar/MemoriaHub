@@ -894,7 +894,124 @@ Placeholder. Covered by issue [#311](https://github.com/marinoscar/MemoriaHub/is
 
 ## 8. Web UI
 
-Placeholder. Covered by issue [#309](https://github.com/marinoscar/MemoriaHub/issues/309) (Home carousel & `/memories` hub) and issue [#313](https://github.com/marinoscar/MemoriaHub/issues/313) (full-screen story player, save-as-album, share, and memory preferences UI).
+Introduced by issue [#309](https://github.com/marinoscar/MemoriaHub/issues/309): the Home carousel, the `/memories` hub, the `/memories/:id` detail page, and the client plumbing all three share. The full-screen story player, the save-as-album dialog, sharing, and the per-user memory-preferences UI are issue [#313](https://github.com/marinoscar/MemoriaHub/issues/313) — see §8.9 for exactly where the seam falls.
+
+### 8.1 File map
+
+| Path | Role |
+|---|---|
+| `apps/web/src/types/memories.ts` | DTO types mirroring `memory-response.dto.ts` |
+| `apps/web/src/services/memories.ts` | One function per §6.1 endpoint |
+| `apps/web/src/hooks/useMemoriesEnabled.ts` | The feature gate — `true \| false \| null` |
+| `apps/web/src/hooks/useMemoriesFeed.ts` | Carousel feed |
+| `apps/web/src/hooks/useMemories.ts` | Hub list, cursor-paginated |
+| `apps/web/src/hooks/useMemory.ts` | Detail, with `notFound` separated from `error` |
+| `apps/web/src/hooks/useMemoryActions.ts` | Optimistic seen/favorite/hide/delete |
+| `apps/web/src/hooks/useMemoryListState.ts` | The list mutators both list hooks share |
+| `apps/web/src/hooks/useLongPress.ts` | Touch entry point to the card action menu |
+| `apps/web/src/components/memories/MemoryCard.tsx` | The one card, `size: 'compact' \| 'large'` |
+| `apps/web/src/components/memories/MemoriesCarousel.tsx` | The Home row |
+| `apps/web/src/components/memories/MemoryActionMenu.tsx` | Kebab / long-press menu |
+| `apps/web/src/components/memories/DeleteMemoryDialog.tsx` | Tombstone confirm |
+| `apps/web/src/components/memories/memoryTypeMeta.tsx` | Per-type icon + labels |
+| `apps/web/src/components/memories/memoryFormat.ts` | Period, month-group and a11y-label formatting |
+| `apps/web/src/pages/Memories/MemoriesPage.tsx` | `/memories` |
+| `apps/web/src/pages/Memories/MemoryDetailPage.tsx` | `/memories/:id` |
+
+Routes are registered in `App.tsx` (lazily, like every other page) and the sidebar entry sits in `primaryItems` directly under Photos.
+
+### 8.2 The gate is strict-true, and it is checked in three places
+
+`useMemoriesEnabled()` reads `GET /api/features` through the existing `useFeatureFlags()` module cache — **not** `GET /api/system-settings`, which requires the Admin-only `system_settings:read` and would 403 for an ordinary circle member. It returns `boolean | null`, where `null` means "not resolved yet", and every consumer gates on `=== true`.
+
+That is not stylistic. A truthy check has two distinct failure modes here, both of which the sidebar's picture-enhancer entry already documents: the nav item or carousel row **flashes in** for one render while the flags load and then disappears, and a flags *outage* — which leaves `features` at `null` rather than throwing — would be indistinguishable from "off" only by accident. Strict-true makes both cases render nothing.
+
+Three surfaces gate on it, for three different reasons:
+
+- **Sidebar** — no nav entry when off. The hook adds no second request; it reads the same module-level cache the enhancer entry does.
+- **`MemoriesCarousel`** — renders `null` when off, and passes `enabled: false` into `useMemoriesFeed`, so **no request is issued at all**. Rendering conditionally would have been enough to hide it and *not* enough to satisfy the epic's zero-cost criterion, which is why the flag is threaded into the hook rather than wrapped around the component.
+- **`MemoriesPage` / `MemoryDetailPage`** — the routes always resolve (a bookmark must not 404) and the page renders a short "Memories are turned off for this installation" notice instead, with a link to `/admin/settings/memories` for an admin only.
+
+The `MEMORIES_ENABLED` env kill-switch is **not** folded into the client flag. `getPublicFeatures()` returns the raw `features` record, so a deployment that leaves the setting on while disabling the env var will show the nav entry against an API that returns empty lists. That degrades to a clean empty state rather than an error (§6.3), which is the intended shape of every "off" path in this feature, and is recorded here rather than fixed on the client — the server-side helper is the single source of truth and the fix, if one is ever wanted, belongs in `getPublicFeatures()`.
+
+### 8.3 The carousel is self-hiding by contract
+
+`<MemoriesCarousel>` sits at the top of `HomePage` and renders `null` — contributing no heading, no spacing, no empty state — whenever the flag is not strictly on, there is no active circle, the feed resolved empty, **or the feed request failed**.
+
+This is load-bearing rather than tidy. `HomePage`'s own header comment records that dashboard clutter was deliberately removed in issue #250, and the epic requires a brand-new install to look exactly as it does today. A "no memories yet" placeholder on Home would violate both, and an error row would make a transient API failure look like a broken product on the app's busiest route. The hub is where the empty state belongs, because a user who navigates to `/memories` asked to see it.
+
+The one visible state before data arrives is a skeleton row with the exact card geometry, shown only on the first load. Once loading settles with nothing to show, the row disappears for good.
+
+There is deliberately **no polling**. Memories are regenerated by an hourly cron at most (§3.1), so a poll would spend requests observing a value that cannot have changed; the feed refetches on circle switch only.
+
+### 8.4 One card, two sizes
+
+`MemoryCard` is the single component behind both surfaces, so their anatomy cannot drift:
+
+- Cover thumbnail filling the card (`object-fit: cover`), with a bottom gradient scrim carrying a 2-line-clamped title and a subtitle.
+- A frosted type badge top-left (`backdrop-filter: blur(8px)`) with the per-type icon from `memoryTypeMeta`.
+- **Unseen ring** — a 2.5px primary→secondary gradient, the story-app convention. It is drawn as a gradient-filled *padding box* around the cover rather than a `border`, because a CSS gradient cannot be a border and stay crisp at arbitrary DPR. A seen card loses the ring and is slightly desaturated.
+- `size: 'large'` additionally fans up to four item thumbnails behind the cover and shows an item-count chip.
+
+**The fan only appears on the carousel, and that is a DTO fact rather than a bug.** `itemThumbnailUrls` ships on the *feed* card (§6.5) and not on the list card, so the hub's large tiles render without it. The component branches on the field's presence rather than on which surface it is mounted in, so if the list DTO ever grows the field the fan appears there with no code change.
+
+Two colours in this file are literal `rgba()` rather than theme tokens — the scrim and the frosted-chip fill. That is the documented exception: a caption laid over an arbitrary user photo has to stay legible against *both* themes and against whatever the photo happens to be, which no palette token can express. Everything else comes from the MUI theme.
+
+### 8.5 Motion is opt-out, and hover is pointer-only
+
+Two animations exist: a 200ms `cubic-bezier(0.2,0,0,1)` scale-and-lift on the card, and a slow 6s Ken Burns zoom on the cover. Both are gated on `useMediaQuery('(prefers-reduced-motion: reduce)')` being false, and additionally on an `md`+ viewport, so a touch device never acquires a sticky hover state it has no way to leave. Smooth scrolling on the carousel chevrons falls back to `behavior: 'auto'` under the same preference.
+
+Focus visibility is **not** gated on the motion preference — the shadow lift still applies on `:focus-within` regardless, because that one is an accessibility affordance rather than decoration.
+
+### 8.6 Seen tracking
+
+A card fires `POST /api/memories/:id/seen` once it has been **≥90% visible for a full second**, or immediately when opened. The dwell timer is what separates "the user looked at this" from "this scrolled past at speed"; without it, one flick through the carousel would mark every card seen.
+
+`MemoryCard` owns the observation but never calls the API — it invokes an `onSeen` callback, and the owning surface decides what seen means. The write itself lives in `useMemoryActions.markSeen`, which dedups against a **module-scoped** `Set`. Module scope, not hook state, because the carousel and the hub observe the same cards: a user who sees a card on Home, opens the hub, and sees it again would otherwise POST twice for a value the server pins to the first view anyway. A failed report removes the id from the set, so the next view retries rather than losing the write permanently.
+
+The ring updates optimistically. `markSeen` is the one action in this feature that is fire-and-forget: a lost seen write costs nothing beyond a ring that clears on the next view, so it does not roll back or surface an error.
+
+### 8.7 Optimistic actions, and what rollback has to restore
+
+Favorite, hide and delete all flip the caller's local state first, issue the request, and revert **that exact flip** on failure. Two details make the difference between a correct rollback and a plausible-looking one:
+
+- **`patchMyState` merges, it does not replace.** Favoriting a card must not clear its `seen` flag, and a whole-object patch is precisely how that bug happens. The shared `useMemoryListState` hook exposes a merge-only mutator so no caller can get this wrong.
+- **`restoreItem` puts a card back at its original index.** `removeItem` snapshots `{ index, item }` before dropping the row; rolling a refused hide or delete back to the *end* of the list would read to the user as a different, wrong outcome.
+
+Both list hooks (`useMemories`, `useMemoriesFeed`) get these mutators from the same place, so the two surfaces cannot diverge on rollback semantics.
+
+### 8.8 The hub
+
+**URL-driven filters.** `?type=`, `?year=` and `?favorite=` *are* the page's state, so a filtered view is shareable, survives reload, and steps through the back button. Every value read out of the URL is coerced against what the API accepts (the `parseSortBy` pattern from `BurstsPage`) — a hand-edited query string is untrusted input, and an unrecognised `type` or an out-of-range `year` is dropped rather than forwarded.
+
+The `person_highlights` and `person_over_years` kinds share **one** filter chip ("People"), which filters by `person_highlights`. `GET /api/memories` takes a single-valued `type`, so an OR across the two is not expressible; this is a known narrowing rather than an oversight.
+
+**Layout.** A CSS grid of `repeat(auto-fill, minmax(240px, 1fr))` — the column count is decided by the container, not a breakpoint table, so a phone gets one column and an ultrawide gets many with no extra code. `trip` and `year_in_review` tiles span two columns from `md` up for visual rhythm; they are *not* widened at `xs`, where a `span 2` in a one-column grid would either overflow the track or silently collapse. Every tile reserves its box with `aspect-ratio` before its image loads, and all imagery is `loading="lazy"`, so the grid never shifts under a scrolling user.
+
+**Grouping.** Month headers are keyed on `generatedAt` — when curation created the memory — not on the period it covers, because the list is ordered newest-generated-first and grouping by anything else would produce headers that repeat as the user scrolls. The group key is `YYYY-MM` so two Augusts never collide by label.
+
+**Infinite scroll** reuses the existing `useIntersectionObserver` with a 400px `rootMargin`, disabled while a page is in flight or the cursor is exhausted.
+
+**Actions** are reachable two ways — a kebab on the card (pointer) and a long-press (touch) — both opening the same `MemoryActionMenu`, so the two entry points cannot offer different actions. The long-press cancels if the finger moves more than ~10px, which is the single most common false positive in a scrollable grid. Delete is **omitted rather than disabled** for a viewer: a disabled destructive item advertises a capability the user does not have and invites them to go hunting for the permission. The API enforces the same rule independently (`media:write` + collaborator), so this is presentation of an authorization decision, never the decision itself.
+
+**Empty states** distinguish the two cases that look identical and mean opposite things. Flag on with zero memories is the *new-install* state and reads as "nothing here yet" — "Your memories will appear here — MemoriaHub curates them automatically as your library grows" — with an admin-only hint linking to the backfill. A filtered-empty result reads "No {type} memories yet." instead, so a user never mistakes an over-narrow filter for an empty library.
+
+### 8.9 Delete says what it does
+
+`DELETE /api/memories/:id` is a circle-level tombstone whose natural key curation checks on every future run (§2.5). The memory is therefore not "deleted until it regenerates" — it can never come back, and it disappears for every other member of the circle at the same moment. `DeleteMemoryDialog` states both facts literally ("It won't be created again", "This can't be undone"), clarifies that the underlying photos are untouched, and offers **per-user hide as an in-dialog alternative**, because "I don't want to see this" is by far the more common intent and a user who arrives here by that route should not have to guess that a reversible option exists elsewhere in the menu.
+
+### 8.10 What #309 stops at
+
+- **Play** opens `/memories/:id`. The full-screen auto-advancing story player is #313; the detail page's Play button is its entry point and currently says so.
+- **Save as album** is wired end-to-end (`POST /api/memories/:id/save-album` with the memory's own title, then a snackbar linking to the new album) because #309's acceptance criteria require it to work. The *dialog* — custom naming, then the share hand-off — is #313.
+- **Per-user memory preferences** (hidden people, sensitive date ranges, digest opt-out) have no UI at all yet; the API is §6.7 and the UI is #313.
+- **The detail page renders its own item tile**, not a gallery tile. `MemoryDetailItem` is a deliberately narrow projection (id, media type, dimensions, duration, signed thumbnail) and is *not* a `MediaItem`; adapting one to the other would mean inventing the fields `MediaGallery`'s tile needs and cannot get, and every one of them would be a lie. This is a real duplication and is accepted knowingly.
+
+### 8.11 Retired with this issue
+
+`components/home/OnThisDay.tsx`, `components/home/MemoryHighlights.tsx`, `components/home/QuickActions.tsx` and `hooks/useDashboard.ts` were deleted. All four were orphaned by the issue #250 Notification Center cutover — nothing had imported them since — and this epic replaces that generation of UI outright; leaving them would have left a second, unreachable memories surface in the tree. `GET /api/media/dashboard` and its `getDashboard()` client remain, still used elsewhere.
+
+A side effect worth naming: `HomePage`'s "review-queue banners removed" regression guard used to work by mocking `useDashboard` with non-zero counts. With the hook gone, that guard is now the *compiler* — there is no module left to import — and the suite's remaining assertions cover the rendered shape instead.
 
 ## 9. Settings
 
@@ -1003,6 +1120,7 @@ Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) f
 
 | Version | Date | Author | Changes |
 |---|---|---|---|
+| 0.8 | August 2026 | AI Assistant | Issue #309: filled in §8 (Web UI — the file map; the strict-true `useMemoriesEnabled()` gate, its three consumers, why the flag is threaded INTO the feed hook rather than wrapped around the component, and the deliberately unfolded `MEMORIES_ENABLED` env kill-switch; the carousel's self-hiding contract including the failed-request case and why Home carries no empty state or poll; the one-card/two-sizes anatomy, the gradient-padding-box unseen ring, the fan's DTO-driven absence on the hub, and the two literal-rgba exceptions; motion as opt-out with pointer-only hover and ungated focus; the ≥90%-for-1s seen dwell and its module-scoped cross-surface dedup; the merge-not-replace and index-preserving-restore rollback rules; the hub's URL-coerced filters, the single People chip narrowing, the auto-fill grid with `md`-only wide spans, `generatedAt` month grouping, dual kebab/long-press action entry, omitted-not-disabled Delete, and the two distinct empty states; the delete dialog's permanence copy and in-dialog hide alternative; the #313 seam; and the retired dashboard components). §7 remains a placeholder. |
 | 0.7 | August 2026 | AI Assistant | Issue #307: filled in §6 (API — the endpoint catalogue with its permission/role column; the three read invariants and why per-user hide is deliberately not the tombstone; the flag-checked-before-any-query ordering that makes the default-off state cost zero queries and return empty lists rather than errors; keyset-only pagination, the `year` range-overlap compilation, and why `nextCursor` must come from the RAW page; the feed's two bounded reads, exact-`periodKey` anchor match and 60-row candidate window; the 404-not-403 `loadAccessibleMemory` policy and why it does not call `assertCircleAccess`; the `user_settings.memories` namespace with its absent-means-default rule, field-wise merge, overlap-not-containment date filtering and the read-time-never-generation-input rationale; COALESCE state writes and why clearing never upserts; the tombstone write and its audit event; save-as-album's reuse of the album service path plus its trashed-item and non-idempotence decisions; the one-batched-call thumbnail rule; serialization; and six known gaps) and §10 (RBAC — the no-new-permission decision, the capability table, super-admin bypass, the two status-code rules, and why preferences carry no permission). §7 and §8 remain placeholders. |
 | 0.6 | August 2026 | AI Assistant | Issue #306: filled in §5 (AI Titles, Subtitles & Narratives — the total `generate()` contract and the complete failure table with which entries avoid a provider call at all, the metadata-only prompt payload and the absent-by-construction privacy list, the one-file prompt with its per-type snapshots and the strict-JSON/length-cap contract shared between the system prompt and the parser, the 10s whole-stream timeout with its remaining-budget race and fire-and-forget iterator close plus the new optional `ChatRequest.temperature`, the per-job `MemoryTitleRun` budget and why it is a passed object rather than service state, the rate-limit stop-the-run rule and the 100-call backfill cap, the two `upsertMemory` branches that call titling and the tombstone/outside-the-transaction ordering, the no-network test strategy, and five known gaps). §6–§8 and §10 remain placeholders. |
 | 0.1 | August 2026 | AI Assistant | Initial specification for issue #301: the `MemoryType` enum, the `Memory`/`MemoryItem`/`MemoryUserState` data model, the `periodKey`/`subjectKey` semantics, the tombstone contract, cascade summary, and alternatives considered. Sections 3–10 are placeholders for later issues in epic #300. |
