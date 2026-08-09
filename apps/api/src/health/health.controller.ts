@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import {
   HealthCheck,
@@ -6,6 +6,8 @@ import {
   HealthCheckResult,
 } from '@nestjs/terminus';
 import { Public } from '../auth/decorators/public.decorator';
+import { AllowDuringMaintenance } from '../common/maintenance/allow-during-maintenance.decorator';
+import { MaintenanceModeService } from '../common/maintenance/maintenance-mode.service';
 import { DatabaseHealthIndicator } from './indicators/database.indicator';
 
 @ApiTags('Health')
@@ -14,10 +16,14 @@ export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly db: DatabaseHealthIndicator,
+    private readonly maintenance: MaintenanceModeService,
   ) {}
 
   @Get('live')
   @Public()
+  // Liveness must stay 200 even during maintenance — a 503 here would make an
+  // orchestrator kill the very container the admin is upgrading (issue #348).
+  @AllowDuringMaintenance()
   @ApiOperation({
     summary: 'Liveness probe',
     description: 'Checks if the application process is running. Used by orchestrators to detect hung processes.',
@@ -42,6 +48,10 @@ export class HealthController {
 
   @Get('ready')
   @Public()
+  // Readiness is exempt from the blanket maintenance 503 so it can answer at
+  // all — but it deliberately reports NOT ready while maintenance is active,
+  // so load balancers drain this instance (issue #348). See readiness() below.
+  @AllowDuringMaintenance()
   @HealthCheck()
   @ApiOperation({
     summary: 'Readiness probe',
@@ -93,6 +103,24 @@ export class HealthController {
     },
   })
   async readiness(): Promise<HealthCheckResult & { timestamp: string }> {
+    // Maintenance mode (issue #348): report NOT ready so orchestrators and
+    // load balancers stop routing traffic here, while /health/live stays 200
+    // so nothing kills the container mid-upgrade. Checked BEFORE the database
+    // probe on purpose — during #344's swap window the database is legitimately
+    // unreachable, and the honest answer is still "in maintenance".
+    if (await this.maintenance.isActive()) {
+      throw new ServiceUnavailableException({
+        status: 'error',
+        error: {
+          maintenance: {
+            status: 'down',
+            message: 'Application is in maintenance mode',
+          },
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     const result = await this.health.check([
       () => this.db.isHealthy('database'),
     ]);
@@ -105,6 +133,7 @@ export class HealthController {
 
   @Get()
   @Public()
+  @AllowDuringMaintenance()
   @HealthCheck()
   @ApiOperation({
     summary: 'Full health check',

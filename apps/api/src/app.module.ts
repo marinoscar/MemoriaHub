@@ -2,7 +2,7 @@ import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { PrismaModule } from './prisma/prisma.module';
@@ -40,6 +40,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
 import { MemoriesModule } from './memories/memories.module';
+import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
@@ -48,6 +49,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { MaintenanceGuard } from './common/maintenance/maintenance.guard';
 
 import configuration from './config/configuration';
 
@@ -107,6 +109,7 @@ import configuration from './config/configuration';
     NotificationsModule,
     NotificationsReconcileModule,
     MemoriesModule,
+    MaintenanceModule,
 
     // Test modules (non-production only)
     ...(process.env.NODE_ENV !== 'production' ? [TestAuthModule] : []),
@@ -158,6 +161,21 @@ import configuration from './config/configuration';
     {
       provide: APP_INTERCEPTOR,
       useClass: TransformInterceptor,
+    },
+    // Global maintenance-mode guard (issue #348).
+    //
+    // This is the application's ONLY global guard — authentication is still
+    // applied per-route via @Auth()/JwtAuthGuard. That ordering matters: a
+    // global guard runs BEFORE route guards, so `request.user` is not yet
+    // populated when MaintenanceGuard runs, which is why it resolves the
+    // admin role from the bearer JWT itself. See maintenance.guard.ts.
+    //
+    // Routes carrying @AllowDuringMaintenance() are exempt — including the
+    // maintenance toggle endpoints themselves, without which enabling
+    // maintenance would lock the admin out of disabling it again.
+    {
+      provide: APP_GUARD,
+      useClass: MaintenanceGuard,
     },
   ],
 })

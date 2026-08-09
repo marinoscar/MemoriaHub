@@ -15,6 +15,13 @@ interface ErrorResponse {
   error?: string;
   /** RFC 8628 / OAuth 2.0 human-readable error description */
   error_description?: string;
+  /**
+   * Maintenance-mode 503 only (issue #348): when maintenance was enabled.
+   * Propagated verbatim, same mechanism as the RFC 8628 fields above, so the
+   * frontend gets the documented `{ error: 'maintenance', message, startedAt }`
+   * body shape at the TOP level rather than buried inside `details`.
+   */
+  startedAt?: string | null;
   details?: unknown;
   timestamp: string;
   path: string;
@@ -35,6 +42,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let details: unknown;
     let rfcError: string | undefined;
     let rfcErrorDescription: string | undefined;
+    let maintenanceStartedAt: string | null | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -53,6 +61,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         }
         if (typeof resp.error_description === 'string') {
           rfcErrorDescription = resp.error_description;
+        }
+        // Only ever present on the maintenance-mode 503 (see MaintenanceGuard).
+        if ('startedAt' in resp) {
+          maintenanceStartedAt = resp.startedAt as string | null;
         }
       }
 
@@ -78,6 +90,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
     if (rfcErrorDescription !== undefined) {
       errorResponse.error_description = rfcErrorDescription;
+    }
+    if (maintenanceStartedAt !== undefined) {
+      errorResponse.startedAt = maintenanceStartedAt;
     }
     if (details) {
       errorResponse.details = details;
