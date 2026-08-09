@@ -134,6 +134,12 @@ export function renderBackupHeadless(engine: BackupEngine, opts: RenderBackupOpt
     renderProgress();
   });
 
+  engine.on(BACKUP_EV.PAGE_COMMITTED, () => {
+    // Non-TTY: one progress line per committed page keeps logs readable
+    // without flooding them per item.
+    if (!isTTY && state.done > 0) write(`${progressLine()}\n`);
+  });
+
   engine.on(BACKUP_EV.THROTTLE, (p: ThrottlePayload) => {
     const secs = (p.delayMs / 1000).toFixed(1);
     if (isTTY) write('\r\x1b[2K');
