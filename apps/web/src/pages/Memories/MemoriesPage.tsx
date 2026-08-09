@@ -39,7 +39,8 @@ import {
   MEMORY_FILTER_TYPES,
   memoryTypeMeta,
 } from '../../components/memories/memoryTypeMeta';
-import { saveMemoryAsAlbum } from '../../services/memories';
+import { MemoryAlbumDialogs } from '../../components/memories/MemoryAlbumDialogs';
+import type { MemoryAlbumMode } from '../../components/memories/MemoryAlbumDialogs';
 import type { MemoryCard as MemoryCardDto, MemoryType } from '../../types/memories';
 
 // ---------------------------------------------------------------------------
@@ -129,7 +130,10 @@ export default function MemoriesPage() {
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MemoryCardDto | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [savingAlbum, setSavingAlbum] = useState(false);
+  const [albumTarget, setAlbumTarget] = useState<{
+    memory: MemoryCardDto;
+    mode: MemoryAlbumMode;
+  } | null>(null);
   const [toast, setToast] = useState<{ message: string; albumId?: string } | null>(null);
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -148,6 +152,7 @@ export default function MemoriesPage() {
     [searchParams, setSearchParams],
   );
 
+  /** Browse: the hub's card click opens the grid, not the story. */
   const openMemory = useCallback(
     (memory: MemoryCardDto) => {
       actions.markSeen(memory.id);
@@ -156,19 +161,25 @@ export default function MemoriesPage() {
     [actions, navigate],
   );
 
+  /**
+   * Play: hand off to the detail route with `?play=1`, which is the single
+   * owner of the story player (see `MemoryDetailPage`). The hub deliberately
+   * does not mount a second player of its own.
+   */
+  const playMemory = useCallback(
+    (memory: MemoryCardDto) => {
+      actions.markSeen(memory.id);
+      navigate(`/memories/${memory.id}?play=1`);
+    },
+    [actions, navigate],
+  );
+
   const closeMenu = useCallback(() => setMenuTarget(null), []);
 
-  const handleSaveAsAlbum = useCallback(async (memory: MemoryCardDto) => {
-    setSavingAlbum(true);
-    try {
-      const result = await saveMemoryAsAlbum(memory.id);
-      setToast({ message: 'Saved as an album', albumId: result.albumId });
-    } catch (err) {
-      setToast({
-        message: err instanceof Error ? err.message : 'Could not save this album',
-      });
-    } finally {
-      setSavingAlbum(false);
+  const handleSaved = useCallback((albumId: string, mode: MemoryAlbumMode) => {
+    if (mode === 'save') {
+      setToast({ message: 'Saved as an album', albumId });
+      setAlbumTarget(null);
     }
   }, []);
 
@@ -377,12 +388,11 @@ export default function MemoriesPage() {
           anchorPosition={menuTarget.anchorPosition}
           favorited={menuTarget.memory.myState.favorited}
           canDelete={isCollaborator}
-          savingAlbum={savingAlbum}
           onClose={closeMenu}
           onPlay={() => {
             const target = menuTarget.memory;
             closeMenu();
-            openMemory(target);
+            playMemory(target);
           }}
           onToggleFavorite={() => {
             const target = menuTarget.memory;
@@ -397,13 +407,28 @@ export default function MemoriesPage() {
           onSaveAsAlbum={() => {
             const target = menuTarget.memory;
             closeMenu();
-            void handleSaveAsAlbum(target);
+            setAlbumTarget({ memory: target, mode: 'save' });
+          }}
+          onShare={() => {
+            const target = menuTarget.memory;
+            closeMenu();
+            setAlbumTarget({ memory: target, mode: 'share' });
           }}
           onDelete={() => {
             const target = menuTarget.memory;
             closeMenu();
             setDeleteTarget(target);
           }}
+        />
+      )}
+
+      {albumTarget && (
+        <MemoryAlbumDialogs
+          mode={albumTarget.mode}
+          memoryId={albumTarget.memory.id}
+          memoryTitle={albumTarget.memory.title}
+          onClose={() => setAlbumTarget(null)}
+          onSaved={handleSaved}
         />
       )}
 
