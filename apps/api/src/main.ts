@@ -11,6 +11,7 @@ import { Logger } from '@nestjs/common';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
+import { fastifyAdapterOptions } from './common/fastify-setup';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -20,6 +21,10 @@ async function bootstrap() {
     throw new Error('TEST_AUTH_ENABLED must not be true in production');
   }
 
+  // Options live in common/fastify-setup.ts so the integration harness boots
+  // the SAME server — see that file's header for the 414 bug the split hid.
+  const adapter = new FastifyAdapter(fastifyAdapterOptions({ logger: true }));
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     // SECURITY: do not add `http2: true` here without reading
@@ -27,7 +32,7 @@ async function bootstrap() {
     // dependency (via @nestjs/platform-fastify) carries an accepted,
     // documented HTTP/2 DDoS advisory (GHSA-c96f-x56v-gq3h) that is only
     // inert because HTTP/2 is off. Enabling HTTP/2 reactivates it.
-    new FastifyAdapter({ logger: true }),
+    adapter,
   );
 
   // Register cookie plugin

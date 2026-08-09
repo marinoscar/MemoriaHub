@@ -79,7 +79,8 @@ type FeatureFlagKey =
   | 'duplicateDetection'
   | 'locationInference'
   | 'pictureEnhancement'
-  | 'workflows';
+  | 'workflows'
+  | 'memories';
 
 interface NotificationTypeDescriptor {
   type: NotificationType;
@@ -153,6 +154,13 @@ const ACTIVITY_TYPES: NotificationTypeDescriptor[] = [
     type: 'share_expiring',
     label: 'Expiring shares',
     description: 'A public share link you created is about to expire.',
+  },
+  {
+    type: 'memories_ready',
+    label: 'New memories',
+    description:
+      'Newly curated memories — On This Day, trips, people and themes — are ready to relive.',
+    flag: 'memories',
   },
 ];
 

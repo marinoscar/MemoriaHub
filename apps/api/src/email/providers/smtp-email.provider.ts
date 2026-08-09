@@ -76,6 +76,8 @@ export class SmtpEmailProvider implements EmailProvider {
         subject: msg.subject,
         html: msg.html,
         text: msg.text,
+        // Extra RFC 5322 headers (the digest's List-Unsubscribe pair).
+        ...(msg.headers ? { headers: msg.headers } : {}),
       });
       return { success: true, messageId: info.messageId };
     } catch (err) {

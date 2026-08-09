@@ -5,6 +5,7 @@ import {
 } from '@nestjs/platform-fastify';
 import fastifyCookie from '@fastify/cookie';
 import { AppModule } from '../../src/app.module';
+import { fastifyAdapterOptions } from '../../src/common/fastify-setup';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { prismaMock } from '../mocks/prisma.mock';
 import { OfflineGeoLocationProvider } from '../../src/media/geo/offline-geo-location.provider';
@@ -109,9 +110,12 @@ export async function createTestApp(
     moduleFixture = await builder.compile();
   }
 
-  const app = moduleFixture.createNestApplication<NestFastifyApplication>(
-    new FastifyAdapter(),
-  );
+  // Same adapter options as main.ts, from the one shared source — an
+  // integration test that boots a differently-configured server is not testing
+  // the server users get. See common/fastify-setup.ts for the 414 bug that made
+  // this shared.
+  const adapter = new FastifyAdapter(fastifyAdapterOptions());
+  const app = moduleFixture.createNestApplication<NestFastifyApplication>(adapter);
 
   // Register cookie plugin for auth tests
   await app.register(fastifyCookie, {

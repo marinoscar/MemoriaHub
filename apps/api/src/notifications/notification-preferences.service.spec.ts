@@ -70,14 +70,19 @@ describe('resolveNotificationPreferences()', () => {
     expect(resolved.workflowMicroRuns).toBe(false);
   });
 
-  it('a partially-populated types map disables only the listed type — the other seven stay enabled', () => {
+  it('a partially-populated types map disables only the listed type — every other type stays enabled', () => {
     const resolved = resolveNotificationPreferences({
       types: { upload_completed: false },
     });
 
     expect(resolved.types.upload_completed).toBe(false);
     const others = ALL_TYPES.filter((t) => t !== 'upload_completed');
-    expect(others.length).toBe(7);
+    // Derived from the live enum, not a hard-coded count: adding a
+    // NotificationType (`memories_ready`, epic #300) must extend this test's
+    // coverage automatically rather than fail it on an arithmetic assertion
+    // that was never the point.
+    expect(others.length).toBe(ALL_TYPES.length - 1);
+    expect(others.length).toBeGreaterThan(0);
     for (const type of others) {
       expect(resolved.types[type]).toBe(true);
     }

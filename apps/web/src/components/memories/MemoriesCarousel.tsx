@@ -80,8 +80,12 @@ export function MemoriesCarousel({ circleId }: MemoriesCarouselProps) {
     (memory: MemoryCardDto) => {
       // Opening counts as seen even if the card never dwelled in view.
       markSeen(memory.id);
-      // Until the story player lands (#313) this is the detail route.
-      navigate(`/memories/${memory.id}`);
+      // On Home, tapping a memory PLAYS it — this row is the emotional surface
+      // of the product, and the browse grid is one link away in the header.
+      // `?play=1` is consumed by MemoryDetailPage, the single owner of the
+      // story player, so closing the story leaves the user on the detail page
+      // rather than bouncing them back to Home mid-scroll.
+      navigate(`/memories/${memory.id}?play=1`);
     },
     [markSeen, navigate],
   );

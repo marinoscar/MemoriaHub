@@ -41,6 +41,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
 import { MemoriesModule } from './memories/memories.module';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
+import { DbBackupModule } from './db-backup/db-backup.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
@@ -110,6 +111,7 @@ import configuration from './config/configuration';
     NotificationsReconcileModule,
     MemoriesModule,
     MaintenanceModule,
+    DbBackupModule,
 
     // Test modules (non-production only)
     ...(process.env.NODE_ENV !== 'production' ? [TestAuthModule] : []),

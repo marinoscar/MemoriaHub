@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'crypto';
 
 // =============================================================================
 // AES-256-GCM Secret Cipher
@@ -71,4 +71,49 @@ export function decryptSecret(payload: string): string {
   decipher.setAuthTag(authTag);
 
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
+
+// =============================================================================
+// Purpose-bound sub-key derivation
+// =============================================================================
+
+/** Derived sub-keys are pure functions of the master key + purpose; cache them. */
+const derivedKeys = new Map<string, Buffer>();
+
+/**
+ * Derive a 32-byte, purpose-bound sub-key from `SECRETS_ENCRYPTION_KEY`.
+ *
+ * Used for signing (not encrypting) values that leave the deployment — e.g. the
+ * Memories email digest's stateless image and unsubscribe tokens (issue #311).
+ *
+ * TWO PROPERTIES MATTER, and both come from binding the purpose into the
+ * derivation rather than reusing the master key directly:
+ *
+ *   1. DOMAIN SEPARATION. Two different purposes get two independent keys, so a
+ *      token minted for one route can never be replayed against another even if
+ *      an attacker finds a payload shape both would accept. Signing everything
+ *      with the master key would make that a payload-parsing question rather
+ *      than a cryptographic one.
+ *   2. NO MASTER-KEY REUSE. The master key's job is AES-256-GCM encryption of
+ *      credentials at rest. Handing the same bytes to a signing routine whose
+ *      outputs are published in emails needlessly widens what an oracle against
+ *      one primitive could say about the other.
+ *
+ * HMAC-SHA256 over a fixed label is a standard KDF construction (the extract
+ * step of HKDF) and is sufficient here because the master key is already
+ * full-entropy random, not a password.
+ *
+ * Throws the same error as encrypt/decrypt when the master key is missing or
+ * malformed — fail loudly at first use rather than silently signing with a
+ * degenerate key.
+ */
+export function deriveSubKey(purpose: string): Buffer {
+  const cached = derivedKeys.get(purpose);
+  if (cached) return cached;
+
+  const derived = createHmac('sha256', getKey())
+    .update(`memoriahub:subkey:v1:${purpose}`)
+    .digest();
+  derivedKeys.set(purpose, derived);
+  return derived;
 }

@@ -3,6 +3,7 @@ import {
   DeleteOutlined as DeleteIcon,
   Favorite as FavoriteIcon,
   FavoriteBorder as FavoriteBorderIcon,
+  IosShare as IosShareIcon,
   PhotoAlbum as PhotoAlbumIcon,
   PlayArrow as PlayArrowIcon,
   VisibilityOff as VisibilityOffIcon,
@@ -16,12 +17,17 @@ export interface MemoryActionMenuProps {
   favorited: boolean;
   /** Delete is collaborator-only; a viewer never sees the item at all. */
   canDelete: boolean;
-  savingAlbum?: boolean;
   onClose: () => void;
   onPlay: () => void;
   onToggleFavorite: () => void;
   onHide: () => void;
   onSaveAsAlbum: () => void;
+  /**
+   * Share hand-off (issue #313). Optional so a surface that has not wired the
+   * album-chaining dialogs simply omits the item rather than showing one that
+   * does nothing.
+   */
+  onShare?: () => void;
   onDelete: () => void;
 }
 
@@ -41,12 +47,12 @@ export function MemoryActionMenu({
   open,
   favorited,
   canDelete,
-  savingAlbum = false,
   onClose,
   onPlay,
   onToggleFavorite,
   onHide,
   onSaveAsAlbum,
+  onShare,
   onDelete,
 }: MemoryActionMenuProps) {
   return (
@@ -83,12 +89,25 @@ export function MemoryActionMenu({
         <ListItemText>Hide for me</ListItemText>
       </MenuItem>
 
-      <MenuItem onClick={onSaveAsAlbum} disabled={savingAlbum}>
+      <MenuItem onClick={onSaveAsAlbum}>
         <ListItemIcon>
           <PhotoAlbumIcon fontSize="small" />
         </ListItemIcon>
-        <ListItemText>{savingAlbum ? 'Saving…' : 'Save as album'}</ListItemText>
+        <ListItemText>Save as album</ListItemText>
       </MenuItem>
+
+      {onShare && (
+        <MenuItem onClick={onShare}>
+          <ListItemIcon>
+            <IosShareIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText
+            primary="Share"
+            secondary="Creates a shareable album"
+            slotProps={{ secondary: { variant: 'caption' } }}
+          />
+        </MenuItem>
+      )}
 
       {canDelete && [
         <Divider key="divider" />,
