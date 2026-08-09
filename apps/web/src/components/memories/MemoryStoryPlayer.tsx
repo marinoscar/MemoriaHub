@@ -488,8 +488,11 @@ export function MemoryStoryPlayer({
     } else {
       // Autoplay can be refused (a hostile policy, a decode failure). The story
       // keeps its own clock, so a refused play degrades to a still poster that
-      // still advances on time rather than to a frozen story.
-      void video.play().catch(() => undefined);
+      // still advances on time rather than to a frozen story. `play()` predates
+      // its own promise and returns `undefined` in some environments, hence the
+      // guard rather than a bare `.catch`.
+      const played = video.play() as Promise<void> | undefined;
+      played?.catch(() => undefined);
     }
   }, [paused, index]);
 
@@ -513,10 +516,13 @@ export function MemoryStoryPlayer({
       fullScreen
       open={open}
       onClose={onClose}
-      aria-label={`${memory.title} — memory story`}
       transitionDuration={reduceMotion ? 0 : 220}
       slotProps={{
         paper: {
+          // The accessible name has to sit on the node that carries
+          // `role="dialog"` — MUI's Paper — not on the Modal root, or a screen
+          // reader announces an unnamed dialog.
+          'aria-label': `${memory.title} — memory story`,
           sx: {
             backgroundColor: '#000',
             overflow: 'hidden',
