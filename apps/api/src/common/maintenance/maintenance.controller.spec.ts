@@ -1,6 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MaintenanceController } from './maintenance.controller';
 import { MaintenanceModeService, MaintenanceState } from './maintenance-mode.service';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 
 const state = (over: Partial<MaintenanceState> = {}): MaintenanceState => ({
   active: false,
@@ -28,9 +31,14 @@ describe('MaintenanceController', () => {
       controllers: [MaintenanceController],
       providers: [{ provide: MaintenanceModeService, useValue: service }],
     })
-      // The controller's @Auth() decorator pulls in JwtAuthGuard; guards are
-      // not exercised here, only the controller-to-service contract.
-      .overrideGuard(class {})
+      // The controller's @Auth() decorator applies JwtAuthGuard, RolesGuard,
+      // and PermissionsGuard; all three are stubbed here because this spec
+      // covers only the controller-to-service contract, not authorization.
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(PermissionsGuard)
       .useValue({ canActivate: () => true })
       .compile();
 
