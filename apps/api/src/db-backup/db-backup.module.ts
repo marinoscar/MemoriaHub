@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
+import { MaintenanceModule } from '../common/maintenance/maintenance.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { DatabaseBackupRetentionService } from './database-backup-retention.service';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
 import { DatabaseBackupAdminService } from './db-backup-admin.service';
+import { DatabaseRestoreService } from './database-restore.service';
 import { DatabaseBackupScheduleTask } from './db-backup-schedule.task';
 import { DatabaseBackupController } from './db-backup.controller';
 
@@ -38,14 +40,29 @@ import { DatabaseBackupController } from './db-backup.controller';
  *     growing a second retention policy.
  */
 @Module({
-  imports: [PrismaModule, SettingsModule, StorageProvidersModule],
+  imports: [
+    PrismaModule,
+    SettingsModule,
+    StorageProvidersModule,
+    // #344's swap consumes #348's maintenance mode rather than building a
+    // second mechanism — specifically its IN-MEMORY override, the only layer
+    // that still works while the database holding the persisted flag is being
+    // renamed. The edge points OUT of MaintenanceModule and nothing there
+    // imports this module, so no cycle.
+    MaintenanceModule,
+  ],
   controllers: [DatabaseBackupController],
   providers: [
     DatabaseBackupRunnerService,
     DatabaseBackupAdminService,
     DatabaseBackupRetentionService,
     DatabaseBackupScheduleTask,
+    DatabaseRestoreService,
   ],
-  exports: [DatabaseBackupRunnerService, DatabaseBackupRetentionService],
+  exports: [
+    DatabaseBackupRunnerService,
+    DatabaseBackupRetentionService,
+    DatabaseRestoreService,
+  ],
 })
 export class DbBackupModule {}
