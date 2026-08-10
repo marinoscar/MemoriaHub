@@ -504,7 +504,6 @@ function DbBackupPageContent() {
               </Link>
             </Alert>
           )}
-          {conflictRunId === null && !activeRunId && starting === false && null}
 
           {activeRunId && activeRun ? (
             <Box>
