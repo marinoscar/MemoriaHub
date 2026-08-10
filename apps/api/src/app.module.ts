@@ -26,6 +26,7 @@ import { InsightsModule } from './insights/insights.module';
 import { BurstModule } from './burst/burst.module';
 import { DedupModule } from './dedup/dedup.module';
 import { LocationGroupsModule } from './location-groups/location-groups.module';
+import { LocationGroupsAdminModule } from './location-groups/location-groups-admin.module';
 import { LocationInferenceModule } from './location-inference/location-inference.module';
 import { ReviewRunsModule } from './review-runs/review-runs.module';
 import { MetadataModule } from './metadata/metadata.module';
@@ -96,6 +97,7 @@ import configuration from './config/configuration';
     BurstModule,
     DedupModule,
     LocationGroupsModule,
+    LocationGroupsAdminModule,
     LocationInferenceModule,
     ReviewRunsModule,
     MetadataModule,

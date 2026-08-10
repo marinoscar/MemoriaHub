@@ -65,9 +65,28 @@ export function whereTag(tag: string): Prisma.MediaItemWhereInput {
   return { mediaTags: { some: { tag: { name: { equals: tag, mode: 'insensitive' } } } } };
 }
 
+// -----------------------------------------------------------------------------
+// Geo filters — canonical OR raw (Location Grouping, issue #374)
+// -----------------------------------------------------------------------------
+//
+// Each geo filter matches BOTH the canonical column and its raw counterpart.
+// Canonical alone would be tempting (§3.4's invariant guarantees it is
+// populated whenever the raw column is), but it would silently break every
+// pre-existing deep link, bookmark, saved workflow condition and Android/CLI
+// client that passes a raw name: once "Heredia Province" has been folded into
+// the group "Heredia", a canonical-only filter for "Heredia Province" matches
+// nothing at all. Matching either side keeps the old name working as a synonym.
+//
+// Emitting a top-level `OR` from a builder is safe here because
+// `buildMediaWhere` (below) composes every fragment into a shared `AND: []`
+// array precisely so two fragments that each emit an `OR` cannot clobber each
+// other. `wherePlace` is unchanged — `geo_place_name` deliberately does not
+// participate in grouping (see the Location Grouping spec's non-goals).
+
 export function whereCountry(country: string): Prisma.MediaItemWhereInput {
   return {
     OR: [
+      { geoCanonicalCountry: { contains: country, mode: 'insensitive' as const } },
       { geoCountry: { contains: country, mode: 'insensitive' as const } },
       { geoCountryCode: { equals: country, mode: 'insensitive' as const } },
     ],
@@ -75,11 +94,21 @@ export function whereCountry(country: string): Prisma.MediaItemWhereInput {
 }
 
 export function whereRegion(region: string): Prisma.MediaItemWhereInput {
-  return { geoAdmin1: { contains: region, mode: 'insensitive' as const } };
+  return {
+    OR: [
+      { geoCanonicalAdmin1: { contains: region, mode: 'insensitive' as const } },
+      { geoAdmin1: { contains: region, mode: 'insensitive' as const } },
+    ],
+  };
 }
 
 export function whereLocality(locality: string): Prisma.MediaItemWhereInput {
-  return { geoLocality: { contains: locality, mode: 'insensitive' as const } };
+  return {
+    OR: [
+      { geoCanonicalLocality: { contains: locality, mode: 'insensitive' as const } },
+      { geoLocality: { contains: locality, mode: 'insensitive' as const } },
+    ],
+  };
 }
 
 export function wherePlace(place: string): Prisma.MediaItemWhereInput {
@@ -89,9 +118,12 @@ export function wherePlace(place: string): Prisma.MediaItemWhereInput {
 export function whereLocation(location: string): Prisma.MediaItemWhereInput {
   return {
     OR: [
+      { geoCanonicalCountry: { contains: location, mode: 'insensitive' as const } },
       { geoCountry: { contains: location, mode: 'insensitive' as const } },
       { geoCountryCode: { contains: location, mode: 'insensitive' as const } },
+      { geoCanonicalAdmin1: { contains: location, mode: 'insensitive' as const } },
       { geoAdmin1: { contains: location, mode: 'insensitive' as const } },
+      { geoCanonicalLocality: { contains: location, mode: 'insensitive' as const } },
       { geoLocality: { contains: location, mode: 'insensitive' as const } },
       { geoPlaceName: { contains: location, mode: 'insensitive' as const } },
     ],

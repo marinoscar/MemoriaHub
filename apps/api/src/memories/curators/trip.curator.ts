@@ -98,7 +98,15 @@ const MAX_SCAN_ROWS = 500_000;
  */
 const MAX_EXISTING_TRIPS = 10_000;
 
-/** Exactly the columns the scan selects. */
+/**
+ * Exactly the columns the scan selects.
+ *
+ * Location Grouping (issue #374): both the canonical and the raw column are
+ * selected, and every place tally below reads `canonical ?? raw`. A trip
+ * spanning "Conroe", "Shenandoah" and "The Woodlands" therefore gets ONE modal
+ * place and reads "The Woodlands" instead of splitting three ways and picking
+ * whichever suburb happened to have the most photos.
+ */
 interface ScanRow {
   capturedAt: Date | null;
   takenLat: number | null;
@@ -106,6 +114,9 @@ interface ScanRow {
   geoLocality: string | null;
   geoAdmin1: string | null;
   geoCountry: string | null;
+  geoCanonicalLocality: string | null;
+  geoCanonicalAdmin1: string | null;
+  geoCanonicalCountry: string | null;
   id: string;
 }
 
@@ -293,6 +304,9 @@ export class TripCurator implements MemoryCurator {
           geoLocality: true,
           geoAdmin1: true,
           geoCountry: true,
+          geoCanonicalLocality: true,
+          geoCanonicalAdmin1: true,
+          geoCanonicalCountry: true,
         },
       });
       if (rows.length === 0) break;
@@ -310,12 +324,19 @@ export class TripCurator implements MemoryCurator {
         const capturedAt = row.capturedAt as Date;
         const hasCoords = row.takenLat != null && row.takenLng != null;
 
+        // Canonical names throughout — see the ScanRow doc. `?? raw` is
+        // belt-and-braces: the canonical column is populated whenever the raw
+        // one is.
+        const locality = row.geoCanonicalLocality ?? row.geoLocality;
+        const admin1 = row.geoCanonicalAdmin1 ?? row.geoAdmin1;
+        const country = row.geoCanonicalCountry ?? row.geoCountry;
+
         if (hasCoords && capturedAt >= homeWindowStart) {
           accumulateHomeSample(home, {
             lat: row.takenLat!,
             lng: row.takenLng!,
-            geoLocality: row.geoLocality,
-            geoAdmin1: row.geoAdmin1,
+            geoLocality: locality,
+            geoAdmin1: admin1,
           });
         }
 
@@ -332,9 +353,9 @@ export class TripCurator implements MemoryCurator {
           day.lats.push(row.takenLat!);
           day.lngs.push(row.takenLng!);
         }
-        tally(day.localityCounts, row.geoLocality);
-        tally(day.admin1Counts, row.geoAdmin1);
-        tally(day.countryCounts, row.geoCountry);
+        tally(day.localityCounts, locality);
+        tally(day.admin1Counts, admin1);
+        tally(day.countryCounts, country);
       }
 
       if (truncated) {

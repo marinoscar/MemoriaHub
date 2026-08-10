@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
-| **Last Updated** | July 2026 |
+| **Version** | 1.1 |
+| **Last Updated** | August 2026 |
 | **Status** | Implemented |
 
 ---
@@ -86,7 +86,11 @@ Both endpoints share a single private helper, `MediaService.fetchGeoGroupRows`, 
 
 ```typescript
 this.prisma.mediaItem.groupBy({
-  by: ['geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality'],
+  by: [
+    'geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality',
+    // Location Grouping (issue #374)
+    'geoCanonicalCountry', 'geoCanonicalAdmin1', 'geoCanonicalLocality',
+  ],
   where: { circleId, deletedAt: null, archivedAt: null, geoCountry: { not: null } },
   _count: { _all: true },
 });
@@ -101,6 +105,17 @@ this.prisma.mediaItem.groupBy({
 
 This is the efficiency property referenced in the CLAUDE.md endpoint bullets: "counts come from a single groupBy and covers from bounded per-group lookups rather than a full metadata scan."
 
+### 3.1 Canonical grouping keys (Location Grouping, issue #374)
+
+Regions and cities fold on the **canonical** column (`geoCanonicalAdmin1` / `geoCanonicalLocality`), so an admin-curated [location group](location-grouping.md) collapses "Heredia", "Heredia Province" and "Provincia de Heredia" into ONE tier entry with summed counts. The cover `findFirst` uses the canonical column too, for the same reason.
+
+Two properties of that change are worth stating explicitly:
+
+- **The canonical columns are ADDED to `by:`, not swapped in for the raw ones.** Prisma's `groupBy` cannot express a `COALESCE(canonical, raw)` projection, so the canonical column has to be a real grouping key; the fold then keys on it in application code. Keeping the raw columns alongside costs nothing in practice — the canonical column is populated whenever the raw one is (the #372 migration seeded `canonical = raw` for every existing row, and the resolver is the identity function when the feature is off), so row cardinality is unchanged.
+- **Countries still key on `geoCountryCode`** (see §6). A country group therefore renames only the DISPLAY name; the grouping key stays the ISO code.
+
+**With no groups defined this is a no-op.** Canonical equals raw byte-for-byte, so every tier entry, count and ordering is identical to the pre-#374 behaviour — asserted directly in `apps/api/src/media/media.service.location-grouping.spec.ts`.
+
 ---
 
 ## 4. Archived-Item Exclusion Rationale
@@ -114,6 +129,17 @@ This is a deliberate divergence from `GET /api/media/facets/locations`, which do
 ## 5. Cover Thumbnail Signing
 
 Cover images are resolved from the `metadata` column of the single item returned by each group's `findFirst` lookup (most-recently-captured item in the group), then passed through the same `signThumb` helper used elsewhere in `MediaService` to produce a signed, time-limited thumbnail URL. If a group's cover item has no thumbnail metadata (e.g. still processing), `coverThumbnailUrl` is `null` and the frontend renders a `PlaceIcon` fallback tile instead of an image.
+
+### 5.1 Explicit group covers override the heuristic (Location Grouping, issue #374)
+
+Before the `findFirst` runs, `buildLocationLevel` looks the tier's entries up in `location_groups` — **ONE read for the whole tier**, keyed by `(countryCode, normalizedName)`, never one lookup per entry. A matching enabled group carrying a `coverMediaItemId` supplies the cover directly and the `findFirst` for that entry is **skipped entirely** rather than run and discarded. Everything else is unchanged, so a tier with no groups performs exactly the queries it always did.
+
+Two rules the override obeys:
+
+- **A soft-deleted cover falls back to the heuristic.** `LocationGroup.coverMediaItemId`'s FK is `ON DELETE SET NULL`, which only fires on a HARD delete — without an explicit `deletedAt` check a trashed photo would keep being served as a group cover after the user removed it.
+- **The cover is deliberately NOT circle-scoped.** A group is global (a place name is a fact about the world, not about one circle), so its chosen cover may live in a different circle than the one being browsed. Per-circle covers are an explicit v1 non-goal.
+
+An unscoped group (`countryCode = ''`) supplies a cover for a matching entry in any country, applied only after the exactly-scoped lookup misses — the same "more specific wins" precedence the resolver uses.
 
 ---
 
@@ -180,3 +206,4 @@ The new tiered endpoints are intentionally **flat per tier**, not a nested casca
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 1.0 | July 2026 | AI Assistant | Initial specification matching shipped implementation |
+| 1.1 | August 2026 | AI Assistant | Location Grouping (#374): canonical grouping keys in §3.1, explicit group-cover override in §5.1 |

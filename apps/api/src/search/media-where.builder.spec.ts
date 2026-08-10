@@ -106,12 +106,20 @@ describe('buildMediaWhere', () => {
   });
 
   describe('locality filter', () => {
-    it('produces geoLocality contains clause', () => {
+    it('produces a canonical-OR-raw geoLocality clause', () => {
       const where = buildMediaWhere(CIRCLE_ID, { locality: 'San José' });
-      // AND-composition: geoLocality lives inside where.AND[0]
-      expect(inAnd(where, 'geoLocality')).toMatchObject({
-        geoLocality: { contains: 'San José', mode: 'insensitive' },
-      });
+      // AND-composition: the locality fragment lives inside where.AND[0], and
+      // since Location Grouping (issue #374) it is an OR over the canonical
+      // column AND the raw one — so a bookmark carrying the pre-grouping name
+      // keeps matching after the name has been folded into a group.
+      const and = (where as any).AND as any[];
+      const clause = and.find(
+        (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoLocality' in e),
+      );
+      expect(clause.OR).toEqual([
+        { geoCanonicalLocality: { contains: 'San José', mode: 'insensitive' } },
+        { geoLocality: { contains: 'San José', mode: 'insensitive' } },
+      ]);
     });
   });
 
@@ -264,17 +272,23 @@ describe('buildMediaWhere', () => {
       });
     });
 
-    it('whereCountry returns OR with geoCountry and geoCountryCode', () => {
+    it('whereCountry returns OR with the canonical column, geoCountry and geoCountryCode', () => {
       const fragment = whereCountry('Costa Rica');
       const or = (fragment as any).OR as Array<Record<string, unknown>>;
-      expect(or).toHaveLength(2);
-      expect(or[0]).toHaveProperty('geoCountry');
-      expect(or[1]).toHaveProperty('geoCountryCode');
+      expect(or).toHaveLength(3);
+      expect(or[0]).toHaveProperty('geoCanonicalCountry');
+      expect(or[1]).toHaveProperty('geoCountry');
+      expect(or[2]).toHaveProperty('geoCountryCode');
     });
 
-    it('whereLocality returns geoLocality contains', () => {
+    it('whereLocality returns canonical OR raw geoLocality contains', () => {
       const fragment = whereLocality('Heredia');
-      expect(fragment).toEqual({ geoLocality: { contains: 'Heredia', mode: 'insensitive' } });
+      expect(fragment).toEqual({
+        OR: [
+          { geoCanonicalLocality: { contains: 'Heredia', mode: 'insensitive' } },
+          { geoLocality: { contains: 'Heredia', mode: 'insensitive' } },
+        ],
+      });
     });
 
     it('whereFavorite returns favorite flag', () => {
@@ -330,7 +344,14 @@ describe('buildWhereFromFields', () => {
 
   it('applies locality filter via registry', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { locality: 'San José' });
-    expect(inAnd(where, 'geoLocality').geoLocality).toBeDefined();
+    const and = (where as any).AND as any[];
+    const clause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoLocality' in e),
+    );
+    expect(clause).toBeDefined();
+    // The registry delegates straight to whereLocality, so it inherits
+    // canonical matching for free (Location Grouping, issue #374).
+    expect(clause.OR.some((e: any) => 'geoCanonicalLocality' in e)).toBe(true);
   });
 
   it('applies type filter via registry', () => {
@@ -565,12 +586,12 @@ describe('buildWhereFromFields — AND-composition collision survival', () => {
     expect(Array.isArray(and)).toBe(true);
     expect(and).toHaveLength(2);
 
-    // Country clause: OR with geoCountry and geoCountryCode
+    // Country clause: OR with the canonical column, geoCountry and geoCountryCode
     const countryClause = and.find(
       (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoCountry' in e),
     );
     expect(countryClause).toBeDefined();
-    expect(countryClause.OR).toHaveLength(2);
+    expect(countryClause.OR).toHaveLength(3);
 
     // missingCamera:false clause: OR with cameraMake/cameraModel not-null checks
     const cameraClause = and.find(
@@ -584,11 +605,11 @@ describe('buildWhereFromFields — AND-composition collision survival', () => {
     const where = buildWhereFromFields(CIRCLE_ID, { country: 'Costa Rica', missingCamera: false });
     const and = (where as any).AND as any[];
 
-    // country OR must have exactly 2 entries
+    // country OR must have exactly 3 entries (canonical + raw + code)
     const countryClause = and.find(
       (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoCountry' in e),
     );
-    expect(countryClause.OR).toHaveLength(2);
+    expect(countryClause.OR).toHaveLength(3);
 
     // camera OR must have exactly 2 entries
     const cameraClause = and.find(
@@ -598,8 +619,11 @@ describe('buildWhereFromFields — AND-composition collision survival', () => {
   });
 
   it('two geo OR-emitting filters (country + location) both survive', () => {
-    // country: { OR: [geoCountry, geoCountryCode] }        — 2 entries
-    // location: { OR: [geoCountry, geoCountryCode, geoAdmin1, geoLocality, geoPlaceName] } — 5 entries
+    // Clauses are identified by a DISTINGUISHING KEY rather than by OR length:
+    // Location Grouping (issue #374) widened both fragments (country 2→3,
+    // location 5→8), and an assertion keyed on length would have to be rewritten
+    // again the next time a geo column is added. `geoPlaceName` appears only in
+    // the location fragment, so it is a stable discriminator.
     const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR', location: 'San José' });
     const and = (where as any).AND as any[];
     expect(Array.isArray(and)).toBe(true);
@@ -608,16 +632,19 @@ describe('buildWhereFromFields — AND-composition collision survival', () => {
     const countryClause = and.find(
       (c: any) =>
         Array.isArray(c.OR) &&
-        c.OR.length === 2 &&
+        !c.OR.some((e: any) => 'geoPlaceName' in e) &&
         c.OR.some((e: any) => 'geoCountry' in e) &&
+        c.OR.some((e: any) => 'geoCanonicalCountry' in e) &&
         c.OR.some((e: any) => 'geoCountryCode' in e),
     );
     expect(countryClause).toBeDefined();
 
     const locationClause = and.find(
-      (c: any) => Array.isArray(c.OR) && c.OR.length === 5,
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoPlaceName' in e),
     );
     expect(locationClause).toBeDefined();
+    // Every geo tier participates, canonical and raw alike.
+    expect(locationClause.OR).toHaveLength(8);
   });
 
   it('single filter still works — AND array has exactly one entry', () => {
@@ -659,16 +686,18 @@ describe('buildMediaWhere — AND-composition collision survival', () => {
     const and = (where as any).AND as any[];
     expect(Array.isArray(and)).toBe(true);
 
+    // Discriminated by geoPlaceName (location-only), not by OR length — see the
+    // buildWhereFromFields twin above.
     const countryClause = and.find(
       (c: any) =>
         Array.isArray(c.OR) &&
-        c.OR.length === 2 &&
+        !c.OR.some((e: any) => 'geoPlaceName' in e) &&
         c.OR.some((e: any) => 'geoCountry' in e),
     );
     expect(countryClause).toBeDefined();
 
     const locationClause = and.find(
-      (c: any) => Array.isArray(c.OR) && c.OR.length === 5,
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoPlaceName' in e),
     );
     expect(locationClause).toBeDefined();
   });

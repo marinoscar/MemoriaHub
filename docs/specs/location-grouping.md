@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | August 2026 |
-| **Status** | Specification (not yet implemented) |
+| **Status** | **Backend implemented** (issues #372 schema, #373 resolver/write path/rebuild job, #374 management API + read-path migration). **Frontend not yet built** — §12 remains a specification pending issue #375. |
 
 ---
 
@@ -294,7 +294,15 @@ export function whereRegion(region: string) {
 
 > Emitting an `OR` from a where-builder is safe here: `buildMediaWhere` composes every fragment into a shared `AND: []` array precisely so that two fragments each emitting a top-level `OR` cannot clobber each other.
 
-`workflows/registry/media-item-fields.ts` and `search/searchable-fields.registry.ts` need **no change** — both delegate to these builders, so the workflow condition catalog and agentic-search tool inherit canonical matching for free.
+`workflows/registry/media-item-fields.ts` and `search/searchable-fields.registry.ts` need **no change** — both delegate to these builders, so the workflow condition catalog and agentic-search tool inherit canonical matching for free. (Verified: both import `whereCountry`/`whereRegion`/`whereLocality`/`whereLocation` directly and call them from their `buildWhere` closures.)
+
+### 7.1 As implemented (issue #374)
+
+Three details the implementation settled that the plan above left open:
+
+- **The canonical columns are ADDED to each `groupBy`'s `by:` list, not swapped in for the raw ones.** `fetchGeoGroupRows` and `facetsLocations` now group by all seven geo columns and fold on the canonical value in application code. Keeping the raw columns costs nothing in practice (canonical equals raw for every ungrouped value, so the row cardinality is unchanged) and leaves the raw spelling available to any later consumer of those rows.
+- **Countries remain keyed by `geoCountryCode`.** Renaming a country group changes only the DISPLAY name; the grouping key stays the ISO code, since a code is already canonical and two spellings of one country were never two entries.
+- **A SOFT-deleted group cover falls back to the capturedAt heuristic.** `LocationGroup.coverMediaItemId`'s SetNull FK only fires on a HARD delete, so a trashed photo would otherwise keep being served as a group cover after the user removed it. The cover-override read filters `deletedAt` explicitly. It is deliberately NOT circle-scoped: a group is global, so its chosen cover may live in a different circle than the one being browsed.
 
 ---
 
@@ -399,6 +407,14 @@ Query: `level`, `limit`. Returns clusters of two or more *ungrouped* raw values 
 
 Body `{ circleId?, groupIds? }` → `{ data: { jobId, status } }`. (`geo_settings:write`)
 
+### 9.10 As implemented (issue #374)
+
+- **Module split.** The controllers and `LocationGroupsService` live in a SEPARATE `LocationGroupsAdminModule`, not in `LocationGroupsModule`. Signing a group's cover thumbnail needs `MediaThumbnailService`, and `MediaModule` already imports `LocationGroupsModule` for the resolver on its write paths — so importing `MediaModule` into the leaf module would close a cycle. Edge direction is one-way: `LocationGroupsAdminModule → MediaModule → LocationGroupsModule`, no `forwardRef`. This is the `NotificationsReconcileModule` precedent.
+- **Mutations enqueue a FULL rebuild (`{}`), never `{ groupIds: [id] }`.** The job's RESET pass always runs over the whole scope and only the listed groups are re-applied afterwards, so a group-scoped rebuild would strand every OTHER group's canonical names at their raw values. `groupIds` is exposed only on §9.9, where the caller owns that tradeoff; the Swagger description says so.
+- **The cover-item check is evaluated against the group's MEMBER SET, not the materialised `geo_canonical_*` column.** The rebuild is asynchronous, so checking the column alone would reject every cover an admin picks in the seconds right after creating a group — which is exactly when they pick one. Both the canonical and the raw value are folded and tested against the group's aliases plus its own normalized name, so an item the rebuild has already claimed and one it has not both pass. Country scope is checked separately.
+- **Conflict detection covers a group's own canonical name, not only alias rows.** A group's canonical name always resolves to itself, so claiming it for a second group is just as ambiguous as claiming an alias — even though the alias unique index would not catch it.
+- **`GET /values` and `GET /suggestions` are capped, not paginated** (`limit`, default 500 / 50), ordered by item count descending. Both are app-wide by design: groups are global, so neither takes a `circleId`.
+
 ---
 
 ## 10. RBAC
@@ -439,6 +455,11 @@ Non-admin users are unaffected: they see canonical names on every browse surface
 ---
 
 ## 12. Frontend
+
+> **Not yet implemented (issue #375).** Everything in this section is still
+> specification; the backend it consumes shipped with #374. `apps/web/` was
+> deliberately untouched by #374 so the read-path migration could land — and be
+> proven neutral — without any UI change riding along.
 
 ### 12.1 Admin page
 
@@ -546,3 +567,4 @@ Under `apps/web/src/__tests__/`, mirroring the source tree: the admin page rende
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | August 2026 | AI Assistant | Initial specification for the Location Grouping epic |
+| 1.1 | August 2026 | AI Assistant | Status → backend implemented (#372/#373/#374). Marked §12 Frontend as still pending (#375); recorded the implementation notes for §9's management API and §7's read-path migration below |

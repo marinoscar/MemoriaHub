@@ -768,10 +768,16 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      // AND-composition: geoAdmin1 lives inside where.AND[n]
-      expect(inAnd(call[0].where, 'geoAdmin1')).toMatchObject({
-        geoAdmin1: { contains: 'California', mode: 'insensitive' },
-      });
+      // AND-composition: the region fragment lives inside where.AND[n]. Since
+      // Location Grouping (issue #374) it is an OR over the canonical AND raw
+      // column, so an old deep link carrying a pre-grouping name still matches.
+      const regionClause = (call[0].where.AND as any[]).find(
+        (c) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoAdmin1' in e),
+      );
+      expect(regionClause.OR).toEqual([
+        { geoCanonicalAdmin1: { contains: 'California', mode: 'insensitive' } },
+        { geoAdmin1: { contains: 'California', mode: 'insensitive' } },
+      ]);
     });
 
     it('filters by locality (geoLocality contains, case-insensitive)', async () => {
@@ -782,10 +788,14 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      // AND-composition: geoLocality lives inside where.AND[n]
-      expect(inAnd(call[0].where, 'geoLocality')).toMatchObject({
-        geoLocality: { contains: 'San Jose', mode: 'insensitive' },
-      });
+      // AND-composition: canonical-OR-raw since Location Grouping (issue #374).
+      const localityClause = (call[0].where.AND as any[]).find(
+        (c) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoLocality' in e),
+      );
+      expect(localityClause.OR).toEqual([
+        { geoCanonicalLocality: { contains: 'San Jose', mode: 'insensitive' } },
+        { geoLocality: { contains: 'San Jose', mode: 'insensitive' } },
+      ]);
     });
 
     it('filters by place (geoPlaceName contains, case-insensitive)', async () => {
@@ -2333,15 +2343,19 @@ describe('MediaService', () => {
 
     // ----- Select: minimal fields -----
 
-    it('selects only the 5 required fields (id, takenLat, takenLng, capturedAt, geoLocality) — no metadata', async () => {
+    it('selects only the required pin fields — no metadata', async () => {
       await service.listLocations(emptyLocQuery, 'user-1', ownPerms);
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      // geoCanonicalLocality joins the select for the pin LABEL (Location
+      // Grouping, issue #374); `metadata` stays out, which is the point of
+      // this assertion — per-row thumbnail signing was removed deliberately.
       expect(call[0].select).toEqual({
         id: true,
         takenLat: true,
         takenLng: true,
         capturedAt: true,
         geoLocality: true,
+        geoCanonicalLocality: true,
       });
     });
 

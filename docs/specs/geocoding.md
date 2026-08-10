@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
-| **Last Updated** | June 2026 |
+| **Version** | 1.1 |
+| **Last Updated** | August 2026 |
 | **Status** | Specification |
 
 ---
@@ -105,7 +105,20 @@ Calls `https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key=
 2. Upsert `media_geocode_status` to `processing`.
 3. Call `GeoLocationService.reverseGeocode(takenLat, takenLng)` — provider is resolved dynamically.
 4. If a result is returned, write `geoCountry`, `geoCountryCode`, `geoAdmin1`, `geoAdmin2`, `geoLocality`, `geoPlaceName`, `geoSource`, and `geocodedAt` directly to `media_items`.
-5. Upsert `media_geocode_status` to `processed`.
+5. **Resolve and write the three canonical columns** — see §3.2.1 below.
+6. Upsert `media_geocode_status` to `processed`.
+
+#### 3.2.1 The canonical write (Location Grouping, issue #373/#374)
+
+Every write path that touches a raw geo tier also writes its `geo_canonical_*` counterpart, resolved through `LocationGroupResolverService` — **the single component in the codebase allowed to compute a canonical name**. This applies to `GeocodeHandler` here, to `applyLocation()`, and to `MediaMetadataSyncService`'s EXIF path alike; no caller derives a canonical value itself.
+
+The invariant is: **whenever a raw tier is non-null, its canonical counterpart is non-null too** — the matching [location group](location-grouping.md)'s `canonicalName` when one claims the value, else the raw value copied VERBATIM. A null raw tier yields a null canonical tier.
+
+That invariant exists for a specific read-path reason: `explore/locations` and `facets/locations` group with Prisma `groupBy`, which cannot express a `COALESCE(canonical, raw)` projection, so the canonical column has to already hold the display value rather than being resolved at read time. See [places-browsing.md §3.1](places-browsing.md#31-canonical-grouping-keys-location-grouping-issue-374).
+
+When Location Grouping is disabled (`features.locationGrouping` off, or the `LOCATION_GROUPING_ENABLED` env kill-switch set to `false`) the resolver is the **identity function**: canonical columns are still written, verbatim, so the invariant holds in both states and turning the feature off is one `location_group_rebuild` away from being fully reverted.
+
+**`geoSource` is unaffected.** It records the reverse-geocode provider/trigger and is overwritten on every geocode run; it says nothing about grouping. The raw geocoder columns are likewise never rewritten by grouping — they remain exactly what the provider returned.
 
 On any uncaught error, mark status `failed` with `lastError` and re-throw so the worker applies standard retry logic.
 
@@ -438,3 +451,4 @@ Forward geocoding (`GET /api/media/geo/search`) is a separate feature and uses `
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
+| 1.1 | August 2026 | AI Assistant | Documented the canonical `geo_canonical_*` write in §3.2.1 (Location Grouping, #373/#374) |
