@@ -1,11 +1,14 @@
 import { Reflector } from '@nestjs/core';
 import {
+  ArgumentsHost,
   BadRequestException,
   ConflictException,
   ExecutionContext,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+
+import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
 
 import {
   DatabaseRestoreAlreadyRunningError,
@@ -31,6 +34,32 @@ import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
  */
 
 type Handler = keyof DatabaseBackupController;
+
+/**
+ * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
+ * return the body the client would actually receive. The filter rebuilds the
+ * response from a fixed key allowlist, so asserting `getResponse()` alone
+ * cannot prove a custom field survives to the wire. Mirrors the harness in
+ * `common/filters/http-exception.filter.spec.ts`.
+ */
+function sendThroughFilter(exception: unknown): any {
+  const response = {
+    code: jest.fn().mockReturnThis(),
+    send: jest.fn().mockReturnThis(),
+  };
+  const host = {
+    switchToHttp: () => ({
+      getResponse: () => response,
+      getRequest: () => ({
+        url: '/api/admin/db-backup/runs/run-1/restore',
+        method: 'POST',
+      }),
+    }),
+  } as unknown as ArgumentsHost;
+
+  new HttpExceptionFilter().catch(exception, host);
+  return response.send.mock.calls[0][0];
+}
 
 const READ_ROUTES: Handler[] = ['getConfig', 'listRuns', 'getRun', 'download'];
 const WRITE_ROUTES: Handler[] = [
@@ -231,9 +260,27 @@ describe('DatabaseBackupController (delegation)', () => {
     restoreService.startRestore.mockRejectedValue(
       new DatabaseRestoreAlreadyRunningError('run-other'),
     );
-    await expect(
-      controller.restore('run-1', { confirmation: 'RESTORE' } as any, user),
-    ).rejects.toBeInstanceOf(ConflictException);
+
+    let thrown: any;
+    try {
+      await controller.restore('run-1', { confirmation: 'RESTORE' } as any, user);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(ConflictException);
+    // Inside `details`, because that is the only nesting the app-wide
+    // HttpExceptionFilter forwards — a top-level `activeRunId` is stripped.
+    expect(thrown.getResponse()).toMatchObject({
+      details: { activeRunId: 'run-other' },
+    });
+
+    const body = sendThroughFilter(thrown);
+    expect(body).toMatchObject({
+      statusCode: 409,
+      code: 'CONFLICT',
+      details: { activeRunId: 'run-other' },
+    });
   });
 
   it('maps an unknown run onto 404 and a disallowed run onto 400', async () => {
