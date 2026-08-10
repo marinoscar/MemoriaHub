@@ -17,9 +17,10 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
  *   - `storageProvider` is checked against the CONFIGURED, ENABLED providers
  *
  * Deliberately NO top-level `.default({})`: an empty body is a legitimate no-op
- * here (unlike `TriggerBackupSchema`, whose refine makes one invalid), and the
- * app-wide rule in `app.module.ts` only requires a default where an all-optional
- * body must be accepted when absent — this route always receives a body.
+ * here (unlike a schema whose top-level refine is what makes an empty body
+ * invalid — see `app.module.ts` Caveat 2), and the app-wide rule in
+ * `app.module.ts` only requires a default where an all-optional body must be
+ * accepted when absent — this route always receives a body.
  */
 export const UpdateDatabaseBackupConfigSchema = z
   .object({

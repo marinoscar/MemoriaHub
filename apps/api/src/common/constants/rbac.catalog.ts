@@ -79,9 +79,6 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
   { name: PERMISSIONS.CIRCLES_WRITE, description: 'Create and manage own circles' },
   { name: PERMISSIONS.CIRCLES_MANAGE_ANY, description: 'Admin: manage any circle' },
 
-  // Backup (admin-only: local-drive backup/replication)
-  { name: PERMISSIONS.BACKUP_RUN, description: 'Admin: trigger local-drive backup job' },
-  { name: PERMISSIONS.BACKUP_READ, description: 'Admin: read backup status and manifests' },
 
   // AI Settings
   { name: PERMISSIONS.AI_SETTINGS_READ, description: 'Read AI provider settings and status' },
@@ -177,9 +174,6 @@ export const ROLE_PERMISSION_MATRIX: Record<RoleName, readonly PermissionName[]>
     PERMISSIONS.CIRCLES_READ,
     PERMISSIONS.CIRCLES_WRITE,
     PERMISSIONS.CIRCLES_MANAGE_ANY,
-    // Backup: admin-only
-    PERMISSIONS.BACKUP_RUN,
-    PERMISSIONS.BACKUP_READ,
     // AI: admin-only credential management
     PERMISSIONS.AI_SETTINGS_READ,
     PERMISSIONS.AI_SETTINGS_WRITE,

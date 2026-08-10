@@ -52,9 +52,6 @@ export const PERMISSIONS = {
   CIRCLES_WRITE: 'circles:write',
   CIRCLES_MANAGE_ANY: 'circles:manage_any', // Admin: manage any circle
 
-  // Backup (admin-only: local-drive backup/replication)
-  BACKUP_RUN: 'backup:run',
-  BACKUP_READ: 'backup:read',
 
   // AI Settings
   AI_SETTINGS_READ: 'ai_settings:read',

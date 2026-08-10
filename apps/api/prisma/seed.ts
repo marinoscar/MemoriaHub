@@ -61,9 +61,6 @@ const PERMISSIONS = [
   { name: 'circles:write', description: 'Create and manage own circles' },
   { name: 'circles:manage_any', description: 'Admin: manage any circle' },
 
-  // Backup (admin-only: local-drive backup/replication)
-  { name: 'backup:run', description: 'Admin: trigger local-drive backup job' },
-  { name: 'backup:read', description: 'Admin: read backup status and manifests' },
 
   // AI Settings
   { name: 'ai_settings:read', description: 'Read AI provider settings and status' },
@@ -127,9 +124,6 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'circles:read',
     'circles:write',
     'circles:manage_any',
-    // Backup: admin-only
-    'backup:run',
-    'backup:read',
     // AI: admin-only credential management
     'ai_settings:read',
     'ai_settings:write',

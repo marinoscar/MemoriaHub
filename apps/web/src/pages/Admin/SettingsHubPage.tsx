@@ -21,7 +21,6 @@ import {
   Storage as StorageIcon,
   Insights as InsightsIcon,
   WorkHistory as WorkHistoryIcon,
-  Backup as BackupIcon,
   Archive as ArchiveIcon,
   QueryStats as QueryStatsIcon,
   Public as PublicIcon,
@@ -216,13 +215,6 @@ export default function SettingsHubPage() {
           icon: <HubIcon sx={{ fontSize: 40 }} color="primary" />,
           path: '/admin/settings/nodes',
           permission: 'jobs:read',
-        },
-        {
-          title: 'Backup',
-          description: 'Trigger backup runs, view run history, and browse backup objects.',
-          icon: <BackupIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/backup',
-          permission: 'backup:read',
         },
         {
           title: 'Database Backup',

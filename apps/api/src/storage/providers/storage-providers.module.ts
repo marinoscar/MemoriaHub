@@ -11,8 +11,8 @@ import { SettingsModule } from '../../settings/settings.module';
  * Provides dependency injection for storage provider implementations.
  *
  * The legacy STORAGE_PROVIDER token is kept for backward compatibility with
- * BackupService and any other callers that inject it directly.  The active
- * provider is still selected at startup via the STORAGE_PROVIDER env var:
+ * any callers that inject it directly.  The active provider is still selected
+ * at startup via the STORAGE_PROVIDER env var:
  *   STORAGE_PROVIDER=s3    → S3StorageProvider (default)
  *   STORAGE_PROVIDER=local → LocalDiskStorageProvider
  *
@@ -21,8 +21,8 @@ import { SettingsModule } from '../../settings/settings.module';
  * from system settings (active provider) and from the StorageObject row
  * (per-object provider + bucket recorded at upload time).
  *
- * Both concrete provider classes are always registered so that BackupService
- * can inject LocalDiskStorageProvider directly regardless of the active provider.
+ * Both concrete provider classes are always registered so that a caller can
+ * inject LocalDiskStorageProvider directly regardless of the active provider.
  */
 @Module({
   imports: [

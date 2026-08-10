@@ -82,6 +82,14 @@ export default () => {
     ).split(','),
     signedUrlExpiry: parseInt(process.env.SIGNED_URL_EXPIRY || '3600', 10), // 1 hour default
     partSize: parseInt(process.env.STORAGE_PART_SIZE || '10485760', 10), // 10MB default
+    // HISTORICAL NAME — this key is now consumed SOLELY by
+    // LocalDiskStorageProvider as the filesystem root for the `local` storage
+    // provider (STORAGE_PROVIDER=local / storage.activeProvider='local'). Its
+    // `backup` name dates from the v0 server-side media backup feature, which
+    // has been retired; it has nothing to do with backups any more. Do NOT
+    // rename it or the BACKUP_LOCAL_PATH env var without a migration plan —
+    // doing so silently relocates the storage root of every deployment running
+    // on the local provider, which is a data-availability change.
     backup: {
       localPath: process.env.BACKUP_LOCAL_PATH || '/tmp/memoriahub-backup',
     },

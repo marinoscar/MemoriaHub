@@ -28,7 +28,7 @@ You need three things before you touch Postgres: the `.dump` file itself, its re
 
 ### 1.1 Via the admin UI (app is reachable)
 
-If the API and admin UI are up, use the download action on the run's row at `/admin/settings/backup` (`GET /api/admin/db-backup/runs/:id/download?expiresIn=<seconds>`, `db_backup:read`). This returns a short-lived signed URL — download it with `curl`:
+If the API and admin UI are up, use the download action on the run's row at `/admin/settings/db-backup` (`GET /api/admin/db-backup/runs/:id/download?expiresIn=<seconds>`, `db_backup:read`). This returns a short-lived signed URL — download it with `curl`:
 
 ```bash
 curl -sS -o db-backup.dump "<signed-url-from-the-admin-ui>"

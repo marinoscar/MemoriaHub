@@ -54,7 +54,7 @@ export interface S3ProviderConfig {
  * runtime without going through the NestJS DI container.
  *
  * When the explicit config is absent, the provider falls back to the existing
- * ConfigService-based behaviour so existing DI registrations, BackupService
+ * ConfigService-based behaviour so existing DI registrations, direct token
  * injection, and all existing tests continue to work unchanged.
  */
 @Injectable()

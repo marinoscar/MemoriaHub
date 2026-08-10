@@ -98,7 +98,6 @@ describe('SettingsHubPage', () => {
           'face_settings:read',
           'storage_settings:read',
           'jobs:read',
-          'backup:read',
         ]) as any,
       );
 
@@ -119,7 +118,7 @@ describe('SettingsHubPage', () => {
           'face_settings:read',
           'storage_settings:read',
           'jobs:read',
-          'backup:read',
+          'db_backup:read',
         ]) as any,
       );
     });
@@ -189,10 +188,15 @@ describe('SettingsHubPage', () => {
       expect(screen.getByText('Job Queue Insights')).toBeInTheDocument();
     });
 
-    it('renders Backup card', () => {
+    // The v0 "Backup" card was removed with the feature (#367). "Worker Nodes"
+    // (epic #308's Local Media Backup lives behind it) and "Database Backup"
+    // (#339) are different features and must stay.
+    it('does not render a v0 Backup card, and leaves Worker Nodes / Database Backup intact', () => {
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.getByText('Backup')).toBeInTheDocument();
+      expect(screen.queryByText('Backup')).not.toBeInTheDocument();
+      expect(screen.getByText('Worker Nodes')).toBeInTheDocument();
+      expect(screen.getByText('Database Backup')).toBeInTheDocument();
     });
   });
 
@@ -258,7 +262,6 @@ describe('SettingsHubPage', () => {
           'face_settings:read',
           'storage_settings:read',
           'jobs:read',
-          'backup:read',
         ]) as any,
       );
     });

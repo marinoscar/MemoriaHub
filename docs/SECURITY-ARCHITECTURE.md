@@ -322,8 +322,6 @@ erDiagram
 | `circles:read` | Access circles API endpoints | ✅ | ✅ | ✅ |
 | `circles:write` | Create circles, manage own circles | ✅ | ✅ | ✅ |
 | `circles:manage_any` | Manage any circle (super-admin bypass) | ✅ | ❌ | ❌ |
-| `backup:run` | Trigger local-drive backup job | ✅ | ❌ | ❌ |
-| `backup:read` | View backup run history and status | ✅ | ❌ | ❌ |
 
 **Important distinction:** `circles:read` and `circles:write` grant access to the circles API endpoints; they do **not** grant access to specific circles. Within a circle, the per-circle role (`circle_admin | collaborator | viewer`) controls what the user can do. The global `circles:manage_any` permission is the super-admin bypass that skips per-circle membership checks entirely.
 

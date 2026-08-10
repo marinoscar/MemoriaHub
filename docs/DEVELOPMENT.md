@@ -375,7 +375,7 @@ npx tsx prisma/seed.ts
 
 **What Gets Seeded:**
 - RBAC roles (admin, contributor, viewer)
-- RBAC permissions (users:read, users:write, system_settings:read, circles:read, circles:write, circles:manage_any, backup:run, backup:read, etc.)
+- RBAC permissions (users:read, users:write, system_settings:read, circles:read, circles:write, circles:manage_any, etc.)
 - Role-permission assignments (Admin gets all permissions; Contributor and Viewer both get circles:read + circles:write)
 - Default system settings
 
