@@ -225,6 +225,14 @@ export default function SettingsHubPage() {
           permission: 'backup:read',
         },
         {
+          title: 'Database Backup',
+          description:
+            'Schedule and run PostgreSQL dumps to object storage; browse, download, and delete backups.',
+          icon: <StorageIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/db-backup',
+          permission: 'db_backup:read',
+        },
+        {
           title: 'Public Sharing',
           description: 'View and manage all public share links; revoke or set expirations in bulk.',
           icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
