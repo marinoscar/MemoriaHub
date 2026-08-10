@@ -53,6 +53,8 @@ interface ClusterOptions {
   connectThrows?: boolean;
   /** Fail the second rename, exercising the mid-swap recovery path. */
   failSecondRename?: boolean;
+  /** Whether the retained pre-swap database still exists (rollback path). */
+  oldDbExists?: boolean;
 }
 
 interface Harness {
@@ -104,6 +106,9 @@ function installFakeCluster(h: Harness): void {
         }
         if (s.includes('count(DISTINCT client_addr)')) {
           return { rows: [{ count: h.cluster.distinctClients } as any] };
+        }
+        if (s.includes('FROM pg_database')) {
+          return { rows: [{ ok: h.cluster.oldDbExists !== false } as any] };
         }
         if (s.includes('pg_terminate_backend')) return { rows: [] };
         if (s.startsWith('ALTER DATABASE')) {
@@ -276,7 +281,27 @@ function build(overrides: {
   );
   service.__setExitHookForTests(exit);
 
-  return { service, prisma, maintenance, backupRunner, exit, h, providerResolver };
+  // `startRestore` DETACHES the multi-hour restore deliberately (it must
+  // outlive the HTTP request), which in a test means a pre-flight case would
+  // leave a real restore running into the NEXT test — and, because the fake
+  // cluster factory is process-global, spraying its statements into that
+  // test's event log. So the instance method is stubbed by default and the
+  // real one handed back for the tests that actually exercise it.
+  const realExecute = (service as any).executeRestore.bind(service);
+  const executeSpy = jest.fn().mockResolvedValue(undefined);
+  (service as any).executeRestore = executeSpy;
+
+  return {
+    service,
+    prisma,
+    maintenance,
+    backupRunner,
+    exit,
+    h,
+    providerResolver,
+    realExecute,
+    executeSpy,
+  };
 }
 
 const CTX = {
@@ -370,6 +395,7 @@ describe('pre-flight gates', () => {
       overrideSchemaCheck: true,
     });
     expect(second.mode).toBe('running');
+    expect(overridden.executeSpy).toHaveBeenCalled();
   });
 
   it('DOWNGRADES retain_database to pre_restore_dump when disk is short, and reports it', async () => {
@@ -441,10 +467,7 @@ describe('restore execution and swap', () => {
     harness: ReturnType<typeof build>,
     rollbackMode: 'retain_database' | 'pre_restore_dump' = 'retain_database',
   ) {
-    return (harness.service as any).executeRestore('run-1', {
-      ...CTX,
-      rollbackMode,
-    });
+    return harness.realExecute('run-1', { ...CTX, rollbackMode });
   }
 
   it('creates the scratch database, restores into it, and swaps in order', async () => {
@@ -579,10 +602,7 @@ describe('mid-restore failure', () => {
     const harness = build();
 
     await expect(
-      (harness.service as any).executeRestore('run-1', {
-        ...CTX,
-        rollbackMode: 'retain_database',
-      }),
+      harness.realExecute('run-1', { ...CTX, rollbackMode: 'retain_database' }),
     ).rejects.toThrow();
 
     // Nothing renamed, nothing terminated, no maintenance window: the live
@@ -608,10 +628,7 @@ describe('mid-restore failure', () => {
     const harness = build({ run: { checksumSha256: 'deadbeef' } });
 
     await expect(
-      (harness.service as any).executeRestore('run-1', {
-        ...CTX,
-        rollbackMode: 'retain_database',
-      }),
+      harness.realExecute('run-1', { ...CTX, rollbackMode: 'retain_database' }),
     ).rejects.toThrow(/checksum mismatch/i);
 
     expect(harness.h.events).not.toContain('create-database');
@@ -673,6 +690,19 @@ describe('rollback', () => {
       userId: 'admin-1',
       overrideSchemaCheck: true,
     });
+  });
+
+  it('refuses when the retained database has already been reaped', async () => {
+    const harness = build({
+      cluster: { oldDbExists: false },
+      run: {
+        restoreStatus: 'completed',
+        restoreOldDb: `${LIVE_DB}_old_20260810000000`,
+      },
+    });
+    await expect(
+      harness.service.rollback('run-1', { userId: 'admin-1' }),
+    ).rejects.toBeInstanceOf(DatabaseRestoreNotAllowedError);
   });
 
   it('reports `unavailable` when neither a retained database nor a dump exists', async () => {
