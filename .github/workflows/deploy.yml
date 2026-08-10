@@ -107,6 +107,44 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
 
+      - name: Postgres client version gate (inside the API image)
+        # Issue #364: the database backup engine shells out to pg_dump/pg_restore,
+        # and pg_dump REFUSES to dump a server newer than itself — so the image
+        # must ship a client whose major is >= the deployed server's (17).
+        # Previously that requirement lived only in a Dockerfile comment, and the
+        # pin drifted to 16 against a 17.10 server: the build broke outright, and
+        # had it not, every backup run would have failed instead.
+        #
+        # Asserted inside the real artifact (same posture as the REQUIRE_HEIC_DECODE
+        # gate below) because that is the only thing that proves what actually
+        # shipped, rather than what the Dockerfile appears to say.
+        #
+        # A FLOOR, not an equality check: a client NEWER than the server is fully
+        # supported, so a future bump to 18 must not fail here. Keep the floor in
+        # lockstep with MIN_PG_CLIENT_MAJOR in
+        # apps/api/src/db-backup/pg-version.util.ts, which gates the same
+        # invariant at run time against the LIVE server version.
+        env:
+          MIN_PG_CLIENT_MAJOR: '17'
+        run: |
+          set -euo pipefail
+          for bin in pg_dump pg_restore; do
+            version="$(docker run --rm --entrypoint "$bin" memoriahub-api:parity-gate --version)"
+            echo "$version"
+            major="$(printf '%s' "$version" | sed -nE 's/.*\(PostgreSQL\) ([0-9]+).*/\1/p')"
+            if [ -z "$major" ]; then
+              echo "FATAL: could not parse a major version out of '$version'"
+              exit 1
+            fi
+            if [ "$major" -lt "$MIN_PG_CLIENT_MAJOR" ]; then
+              echo "FATAL: $bin major $major is older than the PostgreSQL $MIN_PG_CLIENT_MAJOR server."
+              echo "       pg_dump cannot dump a server newer than itself; database backups would fail on every run."
+              echo "       Fix the postgresql-client-NN pin in apps/api/Dockerfile."
+              exit 1
+            fi
+            echo "OK: $bin major $major >= $MIN_PG_CLIENT_MAJOR"
+          done
+
       - name: Golden-vector parity gate (inside the API image)
         # Enforces AC#4 of issue #128: the parity test passes IDENTICALLY inside
         # the API image and the worker image, proving both build sharp against the
