@@ -32,6 +32,7 @@ import {
   type AdminClientLike,
 } from './admin-connection.util';
 import { __setSpawnForTests } from './pg-dump.util';
+import { __resetPgVersionCacheForTests } from './pg-version.util';
 import {
   DatabaseRestoreAlreadyRunningError,
   DatabaseRestoreNotAllowedError,
@@ -166,6 +167,46 @@ function installFakeSpawn(opts: { restoreExitCode?: number } = {}): jest.Mock {
   });
   __setSpawnForTests(spawn as any);
   return spawn;
+}
+
+/**
+ * Installs a fake low-level spawn that answers ONLY `<binary> --version`
+ * probes (issue #364's `readPgClientMajor`, used by `checkPgClientVersion`)
+ * with the given stdout text and exit code. `preflight()` never invokes
+ * `pg_restore --list` or a full restore — those happen later, in the async
+ * execute phase — so during a preflight-only test this is the only spawn that
+ * can occur; no need to also special-case `--list` the way `installFakeSpawn`
+ * above does.
+ */
+function installClientVersionSpawn(output: string, exitCode = 0): void {
+  __setSpawnForTests((() => {
+    const child = makeFakeChild();
+    setImmediate(() => {
+      if (output) child.stdout.write(output);
+      child.emit('close', exitCode, null);
+    });
+    return child;
+  }) as never);
+}
+
+/** Routes a harness's `prisma.$queryRaw` server_version_num probe to a
+ * specific value while preserving the `_prisma_migrations` handling `build()`
+ * already wires up (so schema compatibility keeps working normally). */
+function mockServerVersionNum(
+  prisma: { $queryRaw: jest.Mock },
+  num: number | null,
+  liveMigration = 'm_current',
+): void {
+  prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+    const sql = Array.isArray(strings) ? strings.join(' ') : String(strings);
+    if (sql.includes('server_version_num')) {
+      return Promise.resolve(num === null ? [] : [{ num }]);
+    }
+    if (sql.includes('_prisma_migrations')) {
+      return Promise.resolve([{ migration_name: liveMigration }]);
+    }
+    return Promise.resolve([]);
+  });
 }
 
 const COMPLETED_RUN = {
@@ -720,5 +761,87 @@ describe('rollback', () => {
     await expect(
       harness.service.rollback('run-1', { userId: 'admin-1' }),
     ).rejects.toBeInstanceOf(DatabaseRestoreNotAllowedError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PostgreSQL client/server version guard (issue #364)
+// ---------------------------------------------------------------------------
+
+describe('pg client/server version guard (issue #364)', () => {
+  beforeEach(() => {
+    // The memo is keyed by resolved binary path and lives for the whole
+    // file (module state is not reset between tests) — without this, a
+    // prior test's probe (real or faked) would answer this one too.
+    __resetPgVersionCacheForTests();
+  });
+
+  afterEach(() => {
+    __resetPgVersionCacheForTests();
+  });
+
+  it('a client OLDER than the server BLOCKS capability.pg_client_version, forcing guided mode', async () => {
+    installClientVersionSpawn('pg_dump (PostgreSQL) 16.4');
+    const { service, prisma } = build();
+    mockServerVersionNum(prisma, 170010); // server major 17
+
+    const result = await service.startRestore('run-1', { userId: 'admin-1' });
+
+    expect(result.mode).toBe('guided');
+    if (result.mode !== 'guided') throw new Error('unreachable');
+    const check = result.preflight.checks.find(
+      (c) => c.key === 'capability.pg_client_version',
+    );
+    expect(check?.status).toBe('blocked');
+    expect(check?.message).toContain('16.x');
+    expect(check?.message).toContain('17.x');
+  });
+
+  it('an UNKNOWN verdict (client unreadable) WARNS but does NOT force guided mode', async () => {
+    installClientVersionSpawn('', 1); // non-zero exit -> unparseable/null client major
+    const { service, prisma } = build();
+    mockServerVersionNum(prisma, 170010);
+
+    const result = await service.startRestore('run-1', { userId: 'admin-1' });
+
+    expect(result.mode).toBe('running');
+    if (result.mode !== 'running') throw new Error('unreachable');
+    const check = result.preflight.checks.find(
+      (c) => c.key === 'capability.pg_client_version',
+    );
+    expect(check?.status).toBe('warning');
+  });
+
+  it('client >= server is status: ok', async () => {
+    installClientVersionSpawn('pg_restore (PostgreSQL) 17.4');
+    const { service, prisma } = build();
+    mockServerVersionNum(prisma, 170010);
+
+    const result = await service.startRestore('run-1', { userId: 'admin-1' });
+
+    expect(result.mode).toBe('running');
+    if (result.mode !== 'running') throw new Error('unreachable');
+    const check = result.preflight.checks.find(
+      (c) => c.key === 'capability.pg_client_version',
+    );
+    expect(check?.status).toBe('ok');
+  });
+
+  it('is present EXACTLY ONCE even when the cluster admin connection throws — it runs OUTSIDE withAdminConnection, so a connection failure can neither swallow nor duplicate it', async () => {
+    installClientVersionSpawn('pg_dump (PostgreSQL) 17.4');
+    const { service, prisma } = build({ cluster: { connectThrows: true } });
+    mockServerVersionNum(prisma, 170010);
+
+    const result = await service.startRestore('run-1', { userId: 'admin-1' });
+
+    // The admin-connection failure alone already forces guided mode; this
+    // test's point is the COUNT of the version check, not the outer mode.
+    expect(result.mode).toBe('guided');
+    if (result.mode !== 'guided') throw new Error('unreachable');
+    const matches = result.preflight.checks.filter(
+      (c) => c.key === 'capability.pg_client_version',
+    );
+    expect(matches).toHaveLength(1);
+    expect(matches[0].status).toBe('ok');
   });
 });

@@ -14,6 +14,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { DoctorService } from './doctor.service';
 import { DoctorCheck, DoctorReport } from './doctor.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,6 +27,8 @@ import { StorageSettingsService } from '../storage-settings/storage-settings.ser
 import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
+import { __setSpawnForTests } from '../db-backup/pg-dump.util';
+import { __resetPgVersionCacheForTests } from '../db-backup/pg-version.util';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -66,6 +70,42 @@ function mockNoWorkerNodes(prisma: MockPrismaService): void {
   (prisma.workerNode.count as jest.Mock).mockResolvedValue(0);
   (prisma.workerNode.findMany as jest.Mock).mockResolvedValue([]);
   (prisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
+}
+
+/**
+ * ChildProcess stand-in for the LOW-LEVEL `--version` probe (issue #364's
+ * `readPgClientMajor`, consumed here via `core.pgClientVersion`) — matches
+ * `pg-dump.util.spec.ts`'s helper. `pg-version.util.ts` has no Nest provider
+ * of its own (see doctor.service.ts's import comment), so there is no DI seam
+ * to mock it through; faking the low-level spawn is the only seam available,
+ * and it's also the only way to get a deterministic answer regardless of
+ * whatever `pg_dump` happens to be on the host running these tests.
+ */
+function makeFakeVersionChild() {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: PassThrough;
+    stderr: PassThrough;
+    stdin: PassThrough;
+    kill: jest.Mock;
+  };
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.kill = jest.fn();
+  return child;
+}
+
+/** Installs a fake low-level spawn that answers `<binary> --version` with the
+ * given stdout text and exit code — used to control `readPgClientMajor()`. */
+function installClientVersionSpawn(output: string, exitCode = 0): void {
+  __setSpawnForTests((() => {
+    const child = makeFakeVersionChild();
+    setImmediate(() => {
+      if (output) child.stdout.write(output);
+      child.emit('close', exitCode, null);
+    });
+    return child;
+  }) as never);
 }
 
 function healthyQueryRawHandlers(): Array<[string, unknown]> {
@@ -278,7 +318,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 28 documented checks across the 9 sections', async () => {
+    it('includes all 30 documented checks across the 9 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -286,6 +326,7 @@ describe('DoctorService', () => {
         'core.database',
         'core.migrations',
         'core.pgvector',
+        'core.pgClientVersion',
         'core.secretsKey',
         'core.appUrl',
         'auth.jwt',
@@ -355,7 +396,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(29);
+      expect(report.summary.total).toBe(30);
     });
   });
 
@@ -395,7 +436,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(29);
+        expect(report.summary.total).toBe(30);
       } finally {
         jest.useRealTimers();
       }
@@ -799,6 +840,108 @@ describe('DoctorService', () => {
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'core.pgvector').status).toBe('ok');
+    });
+  });
+
+  // =========================================================================
+  // 7. core.pgClientVersion — issue #364
+  // =========================================================================
+
+  describe('core.pgClientVersion', () => {
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockNoWorkerNodes(mockPrisma);
+      // The memo is keyed by resolved binary path and lives for the whole
+      // file (module state is not reset between tests) — without this, a
+      // prior test's probe (real or faked) would answer this one too.
+      __resetPgVersionCacheForTests();
+    });
+
+    afterEach(() => {
+      __setSpawnForTests(null);
+      __resetPgVersionCacheForTests();
+    });
+
+    /** Layers a `server_version_num` handler in FRONT of the generic 'SELECT 1'
+     * fallback — same ordering discipline `face.pgvector`'s handler comment
+     * above documents, since the more specific needle must win the substring
+     * match. */
+    function withServerVersion(num: number | null): void {
+      mockQueryRawByText(mockPrisma, [
+        ['_prisma_migrations', [{ n: 0 }]],
+        ['pg_extension', [{ ok: 1 }]],
+        ['to_regclass', [{ t: 'media_item_embedding' }]],
+        ['server_version_num', num === null ? [] : [{ num }]],
+        ['SELECT 1', [{ '?column?': 1 }]],
+      ]);
+    }
+
+    it('is status:warning ("unavailable", not error) when pg_dump is unreadable', async () => {
+      installClientVersionSpawn('', 1); // non-zero exit -> unparseable/null client major
+      withServerVersion(170010);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'core.pgClientVersion');
+
+      expect(check.status).toBe('warning');
+      expect(check.message).toContain('Database backup and restore are unavailable');
+    });
+
+    it('is status:error when the client is older than the server', async () => {
+      installClientVersionSpawn('pg_dump (PostgreSQL) 16.4');
+      withServerVersion(170010); // server major 17
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'core.pgClientVersion');
+
+      expect(check.status).toBe('error');
+      expect(check.message).toContain('16.x');
+      expect(check.message).toContain('17.x');
+    });
+
+    it('is status:ok when the client major is >= the server major', async () => {
+      installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
+      withServerVersion(170010);
+
+      const report = await service.runDiagnostics();
+      expect(findCheck(report, 'core.pgClientVersion').status).toBe('ok');
+    });
+
+    it('is status:warning (deliberately NOT a second error) when the server major cannot be read but the client is fine — core.database already reports that failure', async () => {
+      installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
+      withServerVersion(null);
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'core.pgClientVersion');
+
+      expect(check.status).toBe('warning');
+    });
+
+    it('appears exactly once in the rendered "core" SECTION — proves it was added to that section\'s checkKeys, not merely to the internal check catalog', async () => {
+      installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
+      withServerVersion(170010);
+
+      const report = await service.runDiagnostics();
+      const coreSection = report.sections.find((s) => s.key === 'core');
+      expect(coreSection).toBeDefined();
+
+      const matches = coreSection!.checks.filter(
+        (c) => c.key === 'core.pgClientVersion',
+      );
+      expect(matches).toHaveLength(1);
+      expect(matches[0].status).toBe('ok');
     });
   });
 

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,7 +13,8 @@ import {
   buildStorageKey,
 } from './database-backup-runner.service';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
-import { spawnPgDump, spawnPgRestoreList } from './pg-dump.util';
+import { __setSpawnForTests, spawnPgDump, spawnPgRestoreList } from './pg-dump.util';
+import { __resetPgVersionCacheForTests } from './pg-version.util';
 
 // The two spawn entry points are mocked; everything else in the util (argv
 // builders, env builder) stays real so the runner is wired against the true
@@ -63,6 +65,42 @@ function makeFakeProc(): FakeProc {
     stderrTail: () => '',
     kill: jest.fn(),
   };
+}
+
+/**
+ * ChildProcess stand-in for the LOW-LEVEL `--version` probe (issue #364) —
+ * matches `pg-dump.util.spec.ts`'s helper. This is a different layer than
+ * `FakeProc` above: `spawnPgDump`/`spawnPgRestoreList` are mocked wholesale in
+ * this file, but `readPgClientMajor` goes through the real (unmocked)
+ * `spawnPgProcess`, which spawns via `pg-dump.util.ts`'s own `__setSpawnForTests`
+ * seam — so faking the client-version probe means faking at THAT seam, with a
+ * real ChildProcess-shaped EventEmitter, not a `FakeProc`.
+ */
+function makeFakeVersionChild() {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: PassThrough;
+    stderr: PassThrough;
+    stdin: PassThrough;
+    kill: jest.Mock;
+  };
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.kill = jest.fn();
+  return child;
+}
+
+/** Installs a fake low-level spawn that answers `<binary> --version` with the
+ * given stdout text and exit code — used to control `readPgClientMajor()`. */
+function installClientVersionSpawn(output: string, exitCode = 0): void {
+  __setSpawnForTests((() => {
+    const child = makeFakeVersionChild();
+    setImmediate(() => {
+      if (output) child.stdout.write(output);
+      child.emit('close', exitCode, null);
+    });
+    return child;
+  }) as never);
 }
 
 /** A pg_restore --list stand-in: echoes a TOC once its stdin closes. */
@@ -594,6 +632,114 @@ describe('DatabaseBackupRunnerService', () => {
       const earlier = buildStorageKey(RUN_ID, new Date('2026-08-09T02:00:00Z'));
       const later = buildStorageKey(RUN_ID, new Date('2026-08-10T02:00:00Z'));
       expect([later, earlier].sort()).toEqual([earlier, later]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // PostgreSQL client/server version guard (issue #364)
+  // -------------------------------------------------------------------------
+
+  describe('pg client/server version guard (issue #364)', () => {
+    beforeEach(() => {
+      // The memo is keyed by resolved binary path and lives for the whole
+      // file (module state is not reset between tests) — without this, a
+      // prior test's probe (real or faked) would answer this one too.
+      __resetPgVersionCacheForTests();
+    });
+
+    afterEach(() => {
+      __setSpawnForTests(null);
+      __resetPgVersionCacheForTests();
+    });
+
+    /** Routes prisma.$queryRaw's server_version_num query to a specific
+     * value, layered on top of the same version()/_prisma_migrations
+     * handling the top-level beforeEach's default mock provides. */
+    function mockServerVersionNum(num: number | null): void {
+      prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+        const sql = Array.isArray(strings) ? strings.join(' ') : String(strings);
+        if (sql.includes('server_version_num')) {
+          return Promise.resolve(num === null ? [] : [{ num }]);
+        }
+        if (sql.includes('version()')) {
+          return Promise.resolve([{ version: 'PostgreSQL 16.4 (Debian)' }]);
+        }
+        if (sql.includes('_prisma_migrations')) {
+          return Promise.resolve([
+            { migration_name: '20260809150000_add_database_backups' },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    it('client older than server: executeRun throws BEFORE dumpAndUpload runs, and the run row ends failed with an actionable lastError', async () => {
+      installClientVersionSpawn('pg_dump (PostgreSQL) 16.4');
+      mockServerVersionNum(170010); // server major 17
+
+      await expect(service.runBackup({ trigger: 'manual' })).rejects.toThrow(
+        /pg_dump\/pg_restore is PostgreSQL 16\.x but the database server is 17\.x/,
+      );
+
+      // The whole point of running the guard first: no byte of the dump is
+      // ever spawned once the mismatch is positively established.
+      expect(spawnPgDumpMock).not.toHaveBeenCalled();
+
+      const failure = lastUpdateData();
+      expect(failure.status).toBe('failed');
+      expect(String(failure.lastError)).toContain(
+        'Rebuild the API image with postgresql-client-17',
+      );
+    });
+
+    it('client >= server: proceeds normally (happy path unaffected)', async () => {
+      installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
+      mockServerVersionNum(170010); // server major 17
+      mockSuccessfulDump();
+
+      const result = await service.runBackup({ trigger: 'manual' });
+
+      expect(result.runId).toBe(RUN_ID);
+      expect(spawnPgDumpMock).toHaveBeenCalledTimes(1);
+      expect(lastUpdateData().status).toBe('completed');
+    });
+
+    it('unknown verdict (client unreadable) PROCEEDS with the backup — the deliberate availability policy', async () => {
+      installClientVersionSpawn('', 1); // non-zero exit -> unparseable/null client major
+      mockServerVersionNum(170010);
+      mockSuccessfulDump();
+
+      const result = await service.runBackup({ trigger: 'manual' });
+
+      expect(result.runId).toBe(RUN_ID);
+      expect(spawnPgDumpMock).toHaveBeenCalledTimes(1);
+      expect(lastUpdateData().status).toBe('completed');
+    });
+
+    it('unknown verdict (server_version_num read throws) also PROCEEDS with the backup', async () => {
+      installClientVersionSpawn('pg_dump (PostgreSQL) 16.4');
+      prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+        const sql = Array.isArray(strings) ? strings.join(' ') : String(strings);
+        if (sql.includes('server_version_num')) {
+          return Promise.reject(new Error('connection reset'));
+        }
+        if (sql.includes('version()')) {
+          return Promise.resolve([{ version: 'PostgreSQL 16.4 (Debian)' }]);
+        }
+        if (sql.includes('_prisma_migrations')) {
+          return Promise.resolve([
+            { migration_name: '20260809150000_add_database_backups' },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+      mockSuccessfulDump();
+
+      const result = await service.runBackup({ trigger: 'manual' });
+
+      expect(result.runId).toBe(RUN_ID);
+      expect(spawnPgDumpMock).toHaveBeenCalledTimes(1);
+      expect(lastUpdateData().status).toBe('completed');
     });
   });
 });

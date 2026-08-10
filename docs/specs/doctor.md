@@ -124,7 +124,7 @@ Example response (`POST /api/admin/doctor/run`):
 
 ## 4. Check Catalog
 
-Twenty-six checks across eight sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
+Thirty checks across nine sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
 
 ### Core (`core`)
 
