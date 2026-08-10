@@ -191,6 +191,15 @@ export function useSuggestLocation(mediaId: string, onRefresh: () => void) {
 }
 
 // ---------------------------------------------------------------------------
+// useItemLocationCandidate — resolves the PENDING LocationSuggestion for one
+// item so a location picker can OPEN framed on the inferred candidate rather
+// than a world view. Read-only: it never accepts the suggestion, it only
+// borrows its coordinates as a map-framing hint. Uses the same `mediaItemId`
+// query param as useItemAutoAppliedSuggestion below (an exact, server-side
+// lookup — no client-side scanning), just with status='pending'.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // useItemAutoAppliedSuggestion — resolves the LocationSuggestion row backing
 // an item whose coordSource === 'inferred', so the drawer's Revert action can
 // call POST /location-suggestions/:id/revert (the id there is the SUGGESTION
@@ -198,6 +207,39 @@ export function useSuggestLocation(mediaId: string, onRefresh: () => void) {
 // GET /media/location-suggestions for an exact, server-side lookup — no
 // client-side scanning of a bounded page of results.
 // ---------------------------------------------------------------------------
+
+export function useItemLocationCandidate(circleId: string, mediaItemId: string, enabled: boolean) {
+  const [candidate, setCandidate] = useState<{ lat: number; lng: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!enabled || !circleId || !mediaItemId) {
+      setCandidate(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    listLocationSuggestions({ circleId, mediaItemId, status: 'pending', page: 1, pageSize: 1 })
+      .then((result) => {
+        if (cancelled) return;
+        const suggestion = result.items[0];
+        setCandidate(suggestion ? { lat: suggestion.lat, lng: suggestion.lng } : null);
+      })
+      .catch(() => {
+        // A missing candidate is not an error — the caller just falls through
+        // to the next rung of its framing ladder.
+        if (!cancelled) setCandidate(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [circleId, mediaItemId, enabled]);
+
+  return { candidate, loading };
+}
 
 export function useItemAutoAppliedSuggestion(circleId: string, mediaItemId: string, enabled: boolean) {
   const [suggestionId, setSuggestionId] = useState<string | null>(null);

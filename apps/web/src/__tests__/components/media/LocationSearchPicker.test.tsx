@@ -17,23 +17,29 @@ import { LocationSearchPicker } from '../../../components/media/LocationSearchPi
 // Mock LocationPickerMap — exposes a button to simulate pin placement
 // ---------------------------------------------------------------------------
 vi.mock('../../../components/media/LocationPickerMap', () => ({
-  LocationPickerMap: ({
-    onChange,
-  }: {
-    value: { lat: number; lng: number } | null;
-    onChange: (latlng: { lat: number; lng: number }) => void;
-    height?: number;
-    center?: [number, number];
-  }) => (
-    <div data-testid="location-picker-map">
-      <button
-        type="button"
-        data-testid="set-pin"
-        onClick={() => onChange({ lat: 9.9281, lng: -84.0907 })}
-      >
-        Set Pin
-      </button>
-    </div>
+  LocationPickerMap: vi.fn(
+    ({
+      onChange,
+    }: {
+      value: { lat: number; lng: number } | null;
+      onChange: (latlng: { lat: number; lng: number }) => void;
+      height?: number;
+      center?: [number, number];
+      initialCenter?: { lat: number; lng: number };
+      scrollWheelZoom?: boolean;
+      geolocateSetsValue?: boolean;
+      showPlaceholderMarker?: boolean;
+    }) => (
+      <div data-testid="location-picker-map">
+        <button
+          type="button"
+          data-testid="set-pin"
+          onClick={() => onChange({ lat: 9.9281, lng: -84.0907 })}
+        >
+          Set Pin
+        </button>
+      </div>
+    ),
   ),
 }));
 
@@ -46,18 +52,33 @@ vi.mock('../../../services/media', () => ({
 }));
 
 import { searchPlaces, reverseGeocode } from '../../../services/media';
+import { LocationPickerMap } from '../../../components/media/LocationPickerMap';
 
 const mockSearchPlaces = vi.mocked(searchPlaces);
 const mockReverseGeocode = vi.mocked(reverseGeocode);
+const mockLocationPickerMap = vi.mocked(LocationPickerMap);
 
-const geoResult = {
-  country: 'Costa Rica',
-  countryCode: 'CR',
-  admin1: 'Alajuela',
-  admin2: null,
-  locality: 'La Fortuna',
-  placeName: 'Arenal',
-};
+/** Reverse-geocode result factory — override any field, `null` blanks it. */
+function makeGeoResult(overrides: Partial<Record<string, string | null>> = {}) {
+  return {
+    country: 'Costa Rica',
+    countryCode: 'CR',
+    admin1: 'Alajuela',
+    admin2: null,
+    locality: 'La Fortuna',
+    placeName: 'Arenal',
+    ...overrides,
+  } as never;
+}
+
+const geoResult = makeGeoResult();
+
+/** Props the stubbed LocationPickerMap was last rendered with. */
+function lastMapProps(): Record<string, unknown> {
+  const calls = mockLocationPickerMap.mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1]![0] as unknown as Record<string, unknown>;
+}
 
 describe('LocationSearchPicker', () => {
   beforeEach(() => {
@@ -156,8 +177,107 @@ describe('LocationSearchPicker', () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText(/pin:/i)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('location-confirm-row')).not.toBeInTheDocument();
     });
     expect(mockReverseGeocode).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #376 fix 4 — the confirm row
+  // -------------------------------------------------------------------------
+  describe('confirm row', () => {
+    it('shows the resolving state while the address lookup is in flight', async () => {
+      // Never settles — holds the component in the resolving state.
+      mockReverseGeocode.mockReturnValue(new Promise(() => {}) as never);
+
+      render(
+        <LocationSearchPicker value={{ lat: 9.9281, lng: -84.0907 }} onChange={vi.fn()} />,
+      );
+
+      expect(await screen.findByText(/finding address/i)).toBeInTheDocument();
+      expect(screen.getByTestId('location-confirm-row')).toBeInTheDocument();
+      expect(screen.queryByText(/use this location/i)).not.toBeInTheDocument();
+    });
+
+    it('reads "Use this location: <address>" once resolved', async () => {
+      render(
+        <LocationSearchPicker value={{ lat: 9.9281, lng: -84.0907 }} onChange={vi.fn()} />,
+      );
+
+      expect(
+        await screen.findByText(/use this location: La Fortuna, Alajuela, Costa Rica/i),
+      ).toBeInTheDocument();
+      // The raw coordinate stays visible underneath.
+      expect(screen.getByText(/9\.92810, -84\.09070/)).toBeInTheDocument();
+    });
+
+    it('falls back to "Coordinates only" when the lookup returns no address parts', async () => {
+      mockReverseGeocode.mockResolvedValue(
+        makeGeoResult({ locality: null, admin1: null, country: null }),
+      );
+
+      render(
+        <LocationSearchPicker value={{ lat: 9.9281, lng: -84.0907 }} onChange={vi.fn()} />,
+      );
+
+      expect(
+        await screen.findByText(/coordinates only — no address found/i),
+      ).toBeInTheDocument();
+    });
+
+    it('falls back to "Coordinates only" when the lookup fails outright', async () => {
+      mockReverseGeocode.mockRejectedValue(new Error('boom'));
+
+      render(
+        <LocationSearchPicker value={{ lat: 9.9281, lng: -84.0907 }} onChange={vi.fn()} />,
+      );
+
+      expect(
+        await screen.findByText(/coordinates only — no address found/i),
+      ).toBeInTheDocument();
+    });
+
+    it('renders no confirm row at all when there is no coordinate yet', () => {
+      render(<LocationSearchPicker value={null} onChange={vi.fn()} />);
+      expect(screen.queryByTestId('location-confirm-row')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #376 fixes 1 + 3 + 4 — props forwarded to the map
+  // -------------------------------------------------------------------------
+  describe('map props', () => {
+    it('forwards initialCenter to the map', () => {
+      render(
+        <LocationSearchPicker
+          value={null}
+          onChange={vi.fn()}
+          initialCenter={{ lat: 48.8566, lng: 2.3522 }}
+        />,
+      );
+      expect(lastMapProps().initialCenter).toEqual({ lat: 48.8566, lng: 2.3522 });
+    });
+
+    it('enables all three behavioural additions by default', () => {
+      render(<LocationSearchPicker value={null} onChange={vi.fn()} />);
+      expect(lastMapProps().scrollWheelZoom).toBe(true);
+      expect(lastMapProps().geolocateSetsValue).toBe(true);
+      expect(lastMapProps().showPlaceholderMarker).toBe(true);
+    });
+
+    it('lets the caller turn all three off', () => {
+      render(
+        <LocationSearchPicker
+          value={null}
+          onChange={vi.fn()}
+          scrollWheelZoom={false}
+          geolocateSetsValue={false}
+          showPlaceholderMarker={false}
+        />,
+      );
+      expect(lastMapProps().scrollWheelZoom).toBe(false);
+      expect(lastMapProps().geolocateSetsValue).toBe(false);
+      expect(lastMapProps().showPlaceholderMarker).toBe(false);
+    });
   });
 });

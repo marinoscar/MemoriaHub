@@ -229,6 +229,14 @@ export function ConditionValueEditor({
           value={pin}
           onChange={(latlng) => onChange({ ...latlng, radiusKm })}
           height={220}
+          // A workflow condition value must only change on a deliberate pin
+          // placement; wheel-zoom would hijack the builder's scrolling; and
+          // the placeholder pin would read as an already-chosen centre for a
+          // map-radius condition that is still unset. This surface stays
+          // visually and behaviourally unchanged (issue #376).
+          geolocateSetsValue={false}
+          scrollWheelZoom={false}
+          showPlaceholderMarker={false}
         />
         <Typography variant="body2" sx={{ mt: 1 }}>
           Radius: {radiusKm} km

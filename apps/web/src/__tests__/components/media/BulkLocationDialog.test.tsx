@@ -161,6 +161,9 @@ describe('BulkLocationDialog', () => {
       });
     });
 
+    // Issue #376 fix 4 promoted the faint "Pin: <lat>, <lng>" caption into a
+    // bordered confirm row; the raw coordinate is still shown, now without the
+    // "Pin:" prefix and beneath the address being committed.
     it('shows pin coordinates after pin is set', async () => {
       const user = userEvent.setup();
       render(<BulkLocationDialog {...defaultProps} />);
@@ -168,8 +171,9 @@ describe('BulkLocationDialog', () => {
       await user.click(screen.getByTestId('set-pin'));
 
       await waitFor(() => {
-        expect(screen.getByText(/pin:/i)).toBeInTheDocument();
+        expect(screen.getByTestId('location-confirm-row')).toBeInTheDocument();
       });
+      expect(screen.getByText(/9\.92810, -84\.09070/)).toBeInTheDocument();
     });
 
     it('shows geocoded location label after reverse geocode', async () => {
@@ -179,7 +183,7 @@ describe('BulkLocationDialog', () => {
       await user.click(screen.getByTestId('set-pin'));
 
       await waitFor(() => {
-        expect(screen.getByText(/La Fortuna/)).toBeInTheDocument();
+        expect(screen.getByText(/use this location: .*La Fortuna/i)).toBeInTheDocument();
       });
     });
   });

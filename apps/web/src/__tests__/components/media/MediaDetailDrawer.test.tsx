@@ -162,17 +162,23 @@ vi.mock('../../../components/media/TagAutocomplete', () => ({
 vi.mock('../../../hooks/useLocationSuggestions', () => ({
   useSuggestLocation: vi.fn(),
   useItemAutoAppliedSuggestion: vi.fn(),
+  useItemLocationCandidate: vi.fn(),
 }));
 
 vi.mock('../../../services/locationSuggestions', () => ({
   revertLocationSuggestion: vi.fn(),
 }));
 
-import { useSuggestLocation, useItemAutoAppliedSuggestion } from '../../../hooks/useLocationSuggestions';
+import {
+  useSuggestLocation,
+  useItemAutoAppliedSuggestion,
+  useItemLocationCandidate,
+} from '../../../hooks/useLocationSuggestions';
 import { revertLocationSuggestion } from '../../../services/locationSuggestions';
 
 const mockUseSuggestLocation = vi.mocked(useSuggestLocation);
 const mockUseItemAutoAppliedSuggestion = vi.mocked(useItemAutoAppliedSuggestion);
+const mockUseItemLocationCandidate = vi.mocked(useItemLocationCandidate);
 const mockRevertLocationSuggestion = vi.mocked(revertLocationSuggestion);
 
 // ---------------------------------------------------------------------------
@@ -272,6 +278,7 @@ describe('MediaDetailDrawer', () => {
     // Default: no active suggest/revert state for location-inference affordances
     mockUseSuggestLocation.mockReturnValue({ suggest: vi.fn(), loading: false, error: null });
     mockUseItemAutoAppliedSuggestion.mockReturnValue({ suggestionId: null, loading: false });
+    mockUseItemLocationCandidate.mockReturnValue({ candidate: null, loading: false });
     mockRevertLocationSuggestion.mockResolvedValue({ id: 'suggestion-1', status: 'reverted' });
     mockRerunThumbnail.mockResolvedValue({ status: 'ready' });
   });

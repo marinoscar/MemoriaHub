@@ -256,6 +256,14 @@ export function ActionParamEditor({
             value={pin}
             onChange={(latlng) => set({ lat: latlng.lat, lng: latlng.lng })}
             height={220}
+            // A workflow action param must only change on a deliberate pin
+            // placement; wheel-zoom would hijack the builder's scrolling; and
+            // the placeholder pin would read as an already-chosen location for
+            // a param that is still unset. This surface stays visually and
+            // behaviourally unchanged (issue #376).
+            geolocateSetsValue={false}
+            scrollWheelZoom={false}
+            showPlaceholderMarker={false}
           />
           {pin && (
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
