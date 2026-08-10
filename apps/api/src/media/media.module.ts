@@ -8,6 +8,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MediaTouchModule } from './media-touch.module';
+import { LocationGroupsModule } from '../location-groups/location-groups.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
@@ -88,6 +89,9 @@ import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute
     EnrichmentModule,
     NotificationsModule,
     MediaTouchModule,
+    // Location Grouping (issue #373) — MediaService.bulkUpdateMedia and
+    // MediaMetadataSyncService both need the canonical-name resolver.
+    LocationGroupsModule,
   ],
   controllers: [
     MediaController,

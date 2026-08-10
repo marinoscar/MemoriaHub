@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { LocationGroupResolverService } from '../../location-groups/location-group-resolver.service';
 import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
@@ -56,7 +57,10 @@ import {
 export class MediaMetadataSyncService {
   private readonly logger = new Logger(MediaMetadataSyncService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly locationGroupResolver: LocationGroupResolverService,
+  ) {}
 
   /**
    * Core sync logic: reads processor metadata from the StorageObject and copies
@@ -242,6 +246,40 @@ export class MediaMetadataSyncService {
       }
       if (typeof geocodeMeta['geocodedAt'] === 'string') {
         update.geocodedAt = new Date(geocodeMeta['geocodedAt']);
+      }
+
+      // --- Location Grouping (issue #373) ---
+      //
+      // ⚠️ PRESENT-ONLY, matching this service's semantics everywhere else: a
+      // canonical column is set ONLY for a tier this run actually supplied, and
+      // an absent tier is left completely untouched rather than nulled. That is
+      // deliberately UNLIKE GeocodeHandler.persistGeocode, which is
+      // overwrite-all. Both write canonical columns using their OWN existing
+      // semantics — do NOT unify them.
+      //
+      // This is the hook that makes grouping apply to FUTURE uploads: the
+      // upload pipeline's geocode processor lands here, not in the geocode job.
+      const canonical = await this.locationGroupResolver.resolve(
+        {
+          geoCountry: typeof geocodeMeta['country'] === 'string' ? geocodeMeta['country'] : null,
+          geoCountryCode:
+            typeof geocodeMeta['countryCode'] === 'string' ? geocodeMeta['countryCode'] : null,
+          geoAdmin1: typeof geocodeMeta['admin1'] === 'string' ? geocodeMeta['admin1'] : null,
+          geoLocality: typeof geocodeMeta['locality'] === 'string' ? geocodeMeta['locality'] : null,
+        },
+        typeof update.takenLat === 'number' && typeof update.takenLng === 'number'
+          ? { lat: update.takenLat, lng: update.takenLng }
+          : null,
+      );
+
+      if (canonical.geoCanonicalCountry !== null) {
+        update.geoCanonicalCountry = canonical.geoCanonicalCountry;
+      }
+      if (canonical.geoCanonicalAdmin1 !== null) {
+        update.geoCanonicalAdmin1 = canonical.geoCanonicalAdmin1;
+      }
+      if (canonical.geoCanonicalLocality !== null) {
+        update.geoCanonicalLocality = canonical.geoCanonicalLocality;
       }
     }
 

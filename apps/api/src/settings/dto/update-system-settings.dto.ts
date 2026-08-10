@@ -172,6 +172,17 @@ export const patchSystemSettingsSchema = z.object({
       maxImpliedSpeedKmh: z.number().min(10).max(1000).optional(),
     })
     .optional(),
+  // Location Grouping (issue #373). THIS COPY IS LOAD-BEARING: this schema is
+  // what nestjs-zod validates the PATCH body against, and it STRIPS UNKNOWN
+  // KEYS — a namespace present in settings.schema.ts but missing here validates
+  // and merges perfectly in unit tests while every real PATCH silently no-ops.
+  locationGrouping: z
+    .object({
+      radiusCaptureEnabled: z.boolean().optional(),
+      maxRadiusKm: z.number().min(0.5).max(200).optional(),
+      suggestionMinItems: z.number().int().min(1).max(1000).optional(),
+    })
+    .optional(),
   socialMedia: z
     .object({
       ocrEnabled: z.boolean().optional(),

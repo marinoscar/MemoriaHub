@@ -132,6 +132,7 @@ export interface SystemSettingsValue {
    *   - pictureEnhancement: AI picture enhancer
    *   - workflows: media workflow automation
    *   - memories: curated memory collections (On This Day, Trips, People, …)
+   *   - locationGrouping: merge raw geocoder location strings into admin-curated canonical groups
    */
   features: {
     [key: string]: boolean;
@@ -214,6 +215,18 @@ export interface SystemSettingsValue {
     maxAnchorDistanceKm: number;
     maxImpliedSpeedKmh: number;
     bulkAcceptThreshold: number;
+  };
+  /** Location Grouping (issue #373) — canonical location groups. */
+  locationGrouping?: {
+    /**
+     * Whether a group carrying a center + radius may claim a media item by
+     * geographic containment. When false, ONLY explicit aliases resolve.
+     */
+    radiusCaptureEnabled: boolean;
+    /** Upper bound (km) clamped onto any group's declared radius at match time. */
+    maxRadiusKm: number;
+    /** Minimum distinct items before a raw value is proposed as a group (issue #374). */
+    suggestionMinItems: number;
   };
   socialMedia?: {
     ocrEnabled: boolean;
@@ -497,6 +510,31 @@ export function isMemoriesEnabled(settings: {
 }
 
 /**
+ * Resolve whether the Location Grouping feature is active: the
+ * `features.locationGrouping` system-setting toggle must be on AND the
+ * `LOCATION_GROUPING_ENABLED` env kill-switch must not be explicitly set to
+ * 'false'.
+ *
+ * Single source of truth shared by LocationGroupResolverService (the ONE
+ * component that computes canonical names) and every later Location Grouping
+ * surface in issue #373/#374, so no caller can drift from the others on what
+ * "enabled" means. Mirrors isMemoriesEnabled / isWorkflowsEnabled /
+ * isPictureEnhancementEnabled above.
+ *
+ * When this resolves false the resolver becomes the IDENTITY FUNCTION —
+ * canonical columns still get written, verbatim from their raw counterparts,
+ * so the "raw non-null ⇒ canonical non-null" invariant holds either way.
+ */
+export function isLocationGroupingEnabled(settings: {
+  features?: Record<string, boolean>;
+}): boolean {
+  return (
+    settings.features?.[FEATURE_KEYS.LOCATION_GROUPING] === true &&
+    process.env['LOCATION_GROUPING_ENABLED'] !== 'false'
+  );
+}
+
+/**
  * Default for jobs.stuckThresholdMinutes: the legacy ENRICHMENT_STUCK_MINUTES
  * env var when set to a valid positive integer (clamped to the 1–120 setting
  * bounds), else 3 minutes.
@@ -556,6 +594,7 @@ export const FEATURE_KEYS = {
   PICTURE_ENHANCEMENT: 'pictureEnhancement',
   WORKFLOWS: 'workflows',
   MEMORIES: 'memories',
+  LOCATION_GROUPING: 'locationGrouping',
 } as const;
 
 /**
@@ -589,6 +628,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     [FEATURE_KEYS.PICTURE_ENHANCEMENT]: false,
     [FEATURE_KEYS.WORKFLOWS]: false,
     [FEATURE_KEYS.MEMORIES]: false,
+    [FEATURE_KEYS.LOCATION_GROUPING]: false,
   },
   ai: {
     features: {
@@ -635,6 +675,11 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     maxAnchorDistanceKm: 2,
     maxImpliedSpeedKmh: 150,
     bulkAcceptThreshold: 80,
+  },
+  locationGrouping: {
+    radiusCaptureEnabled: true,
+    maxRadiusKm: 50,
+    suggestionMinItems: 1,
   },
   socialMedia: {
     ocrEnabled: true,

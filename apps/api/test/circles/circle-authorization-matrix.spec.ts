@@ -16,6 +16,8 @@ import { UploadNotificationService } from '../../src/notifications/producers/upl
 import { MediaTouchService } from '../../src/media/media-touch.service';
 import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
 import { randomUUID } from 'crypto';
+import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -155,6 +157,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.

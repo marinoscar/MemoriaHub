@@ -23,6 +23,8 @@ import {
   ObjectProcessedEvent,
   OBJECT_PROCESSED_EVENT,
 } from '../../src/storage/processing/events/object-processed.event';
+import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -152,6 +154,8 @@ describe('MediaMetadataSyncService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaMetadataSyncService,
         {
           provide: PrismaService,

@@ -31,6 +31,7 @@ export interface ResolvedSettings {
   burst: SystemSettingsValue['burst'];
   dedup: SystemSettingsValue['dedup'];
   locationInference: SystemSettingsValue['locationInference'];
+  locationGrouping: SystemSettingsValue['locationGrouping'];
   socialMedia: SystemSettingsValue['socialMedia'];
   geo: SystemSettingsValue['geo'];
   email: SystemSettingsValue['email'];
@@ -142,6 +143,7 @@ export class SystemSettingsService {
       burst: value.burst,
       dedup: value.dedup,
       locationInference: value.locationInference,
+      locationGrouping: value.locationGrouping,
       socialMedia: value.socialMedia,
       geo: value.geo,
       email: value.email,
@@ -242,6 +244,7 @@ export class SystemSettingsService {
       burst: value.burst,
       dedup: value.dedup,
       locationInference: value.locationInference,
+      locationGrouping: value.locationGrouping,
       socialMedia: value.socialMedia,
       geo: value.geo,
       email: value.email,
@@ -415,6 +418,23 @@ export class SystemSettingsService {
           (dto as any).locationInference?.bulkAcceptThreshold ??
           (current as any).locationInference?.bulkAcceptThreshold ??
           80,
+      },
+      // Location Grouping (issue #373). Hand-merged like every other namespace
+      // — patchSettings has no generic deep merge, so a namespace omitted here
+      // is stored but never returned.
+      locationGrouping: {
+        radiusCaptureEnabled:
+          (dto as any).locationGrouping?.radiusCaptureEnabled ??
+          (current as any).locationGrouping?.radiusCaptureEnabled ??
+          true,
+        maxRadiusKm:
+          (dto as any).locationGrouping?.maxRadiusKm ??
+          (current as any).locationGrouping?.maxRadiusKm ??
+          50,
+        suggestionMinItems:
+          (dto as any).locationGrouping?.suggestionMinItems ??
+          (current as any).locationGrouping?.suggestionMinItems ??
+          1,
       },
       socialMedia: {
         ocrEnabled:
@@ -851,6 +871,7 @@ export class SystemSettingsService {
       burst: value.burst,
       dedup: value.dedup,
       locationInference: value.locationInference,
+      locationGrouping: value.locationGrouping,
       socialMedia: value.socialMedia,
       geo: value.geo,
       email: value.email,

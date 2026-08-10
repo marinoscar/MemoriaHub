@@ -70,6 +70,9 @@ const changeFeedSelect = {
   geoCountry: true,
   geoCountryCode: true,
   geoAdmin1: true,
+  geoCanonicalCountry: true,
+  geoCanonicalAdmin1: true,
+  geoCanonicalLocality: true,
   geoAdmin2: true,
   geoLocality: true,
   geoPlaceName: true,
@@ -156,6 +159,12 @@ export interface BackupSidecar {
     locality: string | null;
     placeName: string | null;
     geoSource: string | null;
+    // Location Grouping (issue #373). PURELY ADDITIVE and therefore OPTIONAL —
+    // NO schemaVersion bump: an older node ignores unknown keys, and a newer
+    // node must still read sidecars written before these existed.
+    canonicalCountry?: string | null;
+    canonicalAdmin1?: string | null;
+    canonicalLocality?: string | null;
   };
   tags: Array<{ name: string; source: string }>;
   albums: Array<{ id: string; name: string }>;
@@ -308,6 +317,9 @@ export class NodeBackupQueryService {
         locality: item.geoLocality,
         placeName: item.geoPlaceName,
         geoSource: item.geoSource,
+        canonicalCountry: item.geoCanonicalCountry,
+        canonicalAdmin1: item.geoCanonicalAdmin1,
+        canonicalLocality: item.geoCanonicalLocality,
       },
       tags: item.mediaTags.map((mt) => ({
         name: mt.tag.name,

@@ -25,6 +25,7 @@ import { TaggingModule } from './tagging/tagging.module';
 import { InsightsModule } from './insights/insights.module';
 import { BurstModule } from './burst/burst.module';
 import { DedupModule } from './dedup/dedup.module';
+import { LocationGroupsModule } from './location-groups/location-groups.module';
 import { LocationInferenceModule } from './location-inference/location-inference.module';
 import { ReviewRunsModule } from './review-runs/review-runs.module';
 import { MetadataModule } from './metadata/metadata.module';
@@ -94,6 +95,7 @@ import configuration from './config/configuration';
     DoctorModule,
     BurstModule,
     DedupModule,
+    LocationGroupsModule,
     LocationInferenceModule,
     ReviewRunsModule,
     MetadataModule,

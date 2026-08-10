@@ -8,6 +8,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from '../media/geo/geo-location-provider.interface';
 import { applyLocation } from '../media/geo/apply-location.util';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
@@ -24,6 +25,7 @@ export class LocationSuggestionService {
     private readonly resolver: StorageProviderResolver,
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
     private readonly mediaThumbnailService: MediaThumbnailService,
+    private readonly locationGroupResolver: LocationGroupResolverService,
   ) {}
 
   private async createAuditEvent(
@@ -148,7 +150,14 @@ export class LocationSuggestionService {
     const adjusted = useLat !== suggestion.lat || useLng !== suggestion.lng;
     const coordSource = adjusted ? 'manual' : 'inferred';
 
-    const patch = await applyLocation(this.geoProvider, useLat, useLng, null, coordSource);
+    const patch = await applyLocation(
+      this.geoProvider,
+      useLat,
+      useLng,
+      null,
+      coordSource,
+      this.locationGroupResolver,
+    );
 
     await this.prisma.$transaction([
       this.prisma.mediaItem.update({ where: { id: suggestion.mediaItemId }, data: patch }),

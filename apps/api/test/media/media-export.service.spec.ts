@@ -38,6 +38,8 @@ import { UploadNotificationService } from '../../src/notifications/producers/upl
 import { MediaTouchService } from '../../src/media/media-touch.service';
 import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
 import { randomUUID } from 'crypto';
+import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -181,6 +183,8 @@ describe('MediaService.streamExport', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService to satisfy the constructor dependency;
         // streamExport does not sign thumbnails so its incomplete storage

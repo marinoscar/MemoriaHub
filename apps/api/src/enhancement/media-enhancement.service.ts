@@ -614,6 +614,9 @@ export class MediaEnhancementService {
         geoCountry: true,
         geoCountryCode: true,
         geoAdmin1: true,
+        geoCanonicalCountry: true,
+        geoCanonicalAdmin1: true,
+        geoCanonicalLocality: true,
         geoAdmin2: true,
         geoLocality: true,
         geoPlaceName: true,
@@ -700,6 +703,13 @@ export class MediaEnhancementService {
         geoCountry: source.geoCountry,
         geoCountryCode: source.geoCountryCode,
         geoAdmin1: source.geoAdmin1,
+        // Location Grouping (issue #373): the canonical columns are copied
+        // alongside their raw counterparts, not re-resolved — the new item is a
+        // byte-for-byte location clone of the source, so re-running the resolver
+        // could only introduce a divergence between two items that must agree.
+        geoCanonicalCountry: source.geoCanonicalCountry,
+        geoCanonicalAdmin1: source.geoCanonicalAdmin1,
+        geoCanonicalLocality: source.geoCanonicalLocality,
         geoAdmin2: source.geoAdmin2,
         geoLocality: source.geoLocality,
         geoPlaceName: source.geoPlaceName,

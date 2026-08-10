@@ -95,6 +95,8 @@ model User {
   databaseBackupsRestored     DatabaseBackupRun[]         @relation("DatabaseBackupRestoredBy")
   // Profile picture management relations (issue #354)
   linkedPerson                Person?                     @relation("UserLinkedPerson", fields: [linkedPersonId], references: [id], onDelete: SetNull)
+  // Location Grouping relations (issue #373)
+  locationGroups              LocationGroup[]
 
   @@index([linkedPersonId])
   @@map("users")
@@ -558,6 +560,20 @@ model MediaItem {
   coordSource       String?   @map("coord_source") // provenance of taken_lat/taken_lng: 'exif' | 'manual' | 'inferred'; null = no coordinates
   socialMediaSource String?   @map("social_media_source") // detected re-upload source: 'tiktok' | 'instagram' | 'facebook' | 'other'; null = clean/unknown. Written only by the social_media_detection handler; used to gate video enrichment.
 
+  // --- Location Grouping (issue #373) ---
+  // INVARIANT: whenever the raw geoCountry/geoAdmin1/geoLocality column is
+  // non-null, its geoCanonical* counterpart is non-null too. The canonical
+  // value is the matching LocationGroup's canonicalName when the raw value
+  // resolves to a group (directly or via a LocationGroupAlias), otherwise it
+  // is the raw value copied verbatim — never left null and never resolved
+  // with a read-time fallback. This is deliberate: the read path that
+  // populates these columns (fetchGeoGroupRows) is a Prisma `groupBy`, and
+  // `groupBy` cannot express a COALESCE(canonical, raw) projection, so the
+  // canonical column must always already hold the right display value.
+  geoCanonicalCountry  String? @map("geo_canonical_country")
+  geoCanonicalAdmin1   String? @map("geo_canonical_admin1")
+  geoCanonicalLocality String? @map("geo_canonical_locality")
+
   // --- Burst Detection ---
   perceptualHash String? @map("perceptual_hash") // 64-bit dHash stored as unsigned decimal string
   sharpnessScore Float?  @map("sharpness_score") // variance-of-Laplacian
@@ -608,6 +624,8 @@ model MediaItem {
   // Memories relations (epic #300, issue #301)
   memoryItems            MemoryItem[]
   coverForMemories       Memory[]             @relation("MemoryCover")
+  // Location Grouping relations (issue #373)
+  locationGroupCovers    LocationGroup[]      @relation("LocationGroupCover")
 
   @@index([circleId])
   @@index([addedById])
@@ -621,6 +639,9 @@ model MediaItem {
   @@index([geoCountryCode])
   @@index([geoAdmin1])
   @@index([geoLocality])
+  @@index([geoCanonicalCountry])
+  @@index([geoCanonicalAdmin1])
+  @@index([geoCanonicalLocality])
   @@index([burstUuid])
   @@index([burstGroupId])
   @@index([duplicateGroupId])
@@ -1261,6 +1282,95 @@ model MediaGeocodeStatus {
   @@index([circleId])
   @@index([status])
   @@map("media_geocode_status")
+}
+
+// =============================================================================
+// Location Grouping (issue #373)
+// =============================================================================
+// Merges the raw, ungoverned strings a reverse-geocoder produces (geoCountry
+// / geoAdmin1 / geoLocality on MediaItem) into a small set of admin-curated
+// canonical groups — e.g. "NYC" / "New York City" / "Manhattan, NY" all
+// resolving to one "New York City" group — so browsing-by-location isn't
+// fragmented by geocoder spelling variance. A group's aliases are the raw
+// strings that resolve to it; a raw string with no alias resolves to itself
+// (the geoCanonical* columns on MediaItem still get populated per the
+// invariant documented on those columns above).
+
+enum LocationGroupLevel {
+  country
+  region
+  locality
+}
+
+model LocationGroup {
+  id String @id @default(uuid()) @db.Uuid
+
+  level          LocationGroupLevel
+  canonicalName  String             @map("canonical_name")
+  normalizedName String             @map("normalized_name")
+
+  // NOT NULL, DEFAULT '' — never nullable. Postgres unique indexes treat
+  // every NULL as distinct from every other NULL, so a nullable scope column
+  // here would silently permit two country-level groups both named
+  // "Georgia" (the country vs. the US state normalizing the same) to
+  // coexist under @@unique below instead of being caught — the same pitfall
+  // documented on Memory.subjectKey and notifications_review_queue_live_uniq_idx.
+  countryCode String @default("") @map("country_code")
+
+  // SetNull (not Cascade): a hard-deleted cover photo must not take the
+  // whole group down with it — mirrors Album.coverMediaItemId /
+  // Memory.coverMediaItemId.
+  coverMediaItemId String? @map("cover_media_item_id") @db.Uuid
+
+  centerLat Float? @map("center_lat")
+  centerLng Float? @map("center_lng")
+  radiusKm  Float? @map("radius_km")
+
+  enabled Boolean @default(true)
+  notes   String?
+
+  createdById String? @map("created_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  coverMediaItem MediaItem?           @relation("LocationGroupCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
+  createdBy      User?                @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  aliases        LocationGroupAlias[]
+
+  @@unique([level, countryCode, normalizedName])
+  @@index([level, enabled])
+  @@index([coverMediaItemId])
+  @@map("location_groups")
+}
+
+model LocationGroupAlias {
+  id      String @id @default(uuid()) @db.Uuid
+  groupId String @map("group_id") @db.Uuid
+
+  // Denormalized from the parent LocationGroup; never independently edited —
+  // an alias always describes the group it belongs to, so re-deriving these
+  // per row (instead of joining) is what lets the unique constraint below
+  // scope resolution by (level, countryCode) without a join.
+  level       LocationGroupLevel
+  countryCode String             @default("") @map("country_code")
+
+  rawValue        String @map("raw_value") // the geocoder string exactly as it was stored on media_items
+  normalizedValue String @map("normalized_value")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Relations
+  group LocationGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  // LOAD-BEARING: a raw value belongs to at most one group. Without this,
+  // resolution of a raw geocoder string to a group would be ambiguous
+  // whenever two admins (or the same admin twice) aliased the same raw
+  // string to different groups.
+  @@unique([level, countryCode, normalizedValue])
+  @@index([groupId])
+  @@map("location_group_aliases")
 }
 
 // =============================================================================

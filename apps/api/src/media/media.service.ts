@@ -35,6 +35,7 @@ import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
@@ -87,6 +88,7 @@ export class MediaService {
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly uploadNotificationService: UploadNotificationService,
     private readonly mediaTouch: MediaTouchService,
+    private readonly locationGroupResolver: LocationGroupResolverService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -261,6 +263,7 @@ export class MediaService {
             dto.takenLng,
             dto.takenAltitude ?? null,
             'manual',
+            this.locationGroupResolver,
           );
           await this.prisma.mediaItem.update({
             where: { id: mediaItem.id },
@@ -1976,7 +1979,17 @@ export class MediaService {
       Object.assign(data, GEO_CLEAR_COLUMNS);
     } else if (dto.set.location !== undefined) {
       const { lat, lng, altitude } = dto.set.location;
-      Object.assign(data, await applyLocation(this.geoProvider, lat, lng, altitude, 'manual'));
+      Object.assign(
+        data,
+        await applyLocation(
+          this.geoProvider,
+          lat,
+          lng,
+          altitude,
+          'manual',
+          this.locationGroupResolver,
+        ),
+      );
     }
 
     if (dto.set.capturedAt !== undefined) {
