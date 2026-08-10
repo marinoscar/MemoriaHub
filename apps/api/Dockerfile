@@ -36,14 +36,33 @@ WORKDIR /app
 #   interpreter must be on PATH or the EXIF carryover stamp applied to AI-enhanced
 #   images (ExifCarryoverService) silently degrades to a no-op. Must stay in
 #   lockstep with apps/cli/Dockerfile, which installs perl for the same reason.
-# postgresql-client-16: provides pg_dump / pg_restore for the PostgreSQL
-#   database backup engine (epic #339, issue #341). The MAJOR VERSION IS PINNED
-#   to match the pgvector/pgvector:pg16 server — pg_dump refuses to dump a
-#   server newer than itself, so client >= server is a hard requirement and
-#   taking whatever unversioned `postgresql-client` happens to resolve to would
-#   silently break the moment Debian's default moves. Must be bumped in lockstep
-#   with the server image. RUNTIME dependency: the `production` stage is
-#   FROM base, and the backup runner spawns these binaries at run time.
+# postgresql-client-17 (from PGDG): provides pg_dump / pg_restore for the
+#   PostgreSQL database backup engine (epic #339, issue #341). RUNTIME
+#   dependency — the `production` stage is FROM base and the backup runner
+#   spawns these binaries at run time.
+#
+#   THE INVARIANT is `client major >= server major`: pg_dump refuses to dump a
+#   server newer than itself. A NEWER client is fine; an OLDER one can never
+#   back this server up. The pin tracks the pgvector/pgvector:pg17 server.
+#
+#   Installed from apt.postgresql.org (PGDG) rather than the stock Debian
+#   archive because the stock archive only ever carries the CURRENT default
+#   major for that release — so a pinned `postgresql-client-NN` is guaranteed
+#   to vanish on the next base-image bump (issue #364: the `-16` pin broke the
+#   build outright when node:*-slim moved to trixie, whose default is 17).
+#   PGDG publishes every supported major for the current Debian release, which
+#   decouples this pin from base-image drift. Taking an unversioned
+#   `postgresql-client` instead would make the shipped major non-deterministic
+#   across rebuilds.
+#
+#   The lockstep requirement is NO LONGER enforced by this comment alone — see
+#   src/db-backup/pg-version.util.ts, which gates the backup runner, the
+#   restore pre-flight, and the Doctor `core.pgClientVersion` check against the
+#   LIVE server version, plus the CI gate in .github/workflows/deploy.yml.
+#
+#   wget + ca-certificates are installed in a first pass so the PGDG signing key
+#   can be fetched; the armored .asc is consumed directly via apt's `signed-by=`,
+#   so no gnupg (and no separate curl) is needed.
 # libvips42t64 + libheif1 + libde265-0 + libheif-plugin-libde265: a HEIF-enabled
 #   system libvips so sharp (rebuilt from source against it in the deps stage via
 #   SHARP_FORCE_GLOBAL_LIBVIPS) decodes HEIC/HEIF NATIVELY instead of falling back
@@ -56,8 +75,15 @@ WORKDIR /app
 #   apps/cli/Dockerfile so both executors decode HEIC via the identical libvips
 #   build (cross-executor embedding parity — see #128/#108).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      openssl ffmpeg wget ca-certificates perl \
-      postgresql-client-16 \
+      wget ca-certificates \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && wget -qO /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+         https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" \
+         > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      openssl ffmpeg perl \
+      postgresql-client-17 \
       libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 \
     && rm -rf /var/lib/apt/lists/*
 
