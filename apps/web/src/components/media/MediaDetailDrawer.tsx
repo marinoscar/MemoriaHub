@@ -146,9 +146,12 @@ function metadataStatusChipProps(status: MediaMetadataStatusType | undefined): {
 function MetaRow({
   label,
   value,
+  secondary,
 }: {
   label: string;
   value: string | number | null | undefined;
+  /** Optional dimmer line under the value (e.g. the raw pre-grouping name). */
+  secondary?: string | null;
 }) {
   if (value === null || value === undefined || value === '') return null;
   return (
@@ -160,11 +163,38 @@ function MetaRow({
       >
         {label}
       </Typography>
-      <Typography variant="caption" sx={{ wordBreak: 'break-word' }}>
-        {String(value)}
-      </Typography>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="caption" sx={{ wordBreak: 'break-word', display: 'block' }}>
+          {String(value)}
+        </Typography>
+        {secondary && (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ wordBreak: 'break-word', display: 'block', fontStyle: 'italic' }}
+          >
+            from &quot;{secondary}&quot;
+          </Typography>
+        )}
+      </Box>
     </Box>
   );
+}
+
+/**
+ * Location Grouping (epic #373, issue #375): the drawer shows the CANONICAL
+ * name, keeping the raw geocoder value as secondary text only when the two
+ * genuinely differ — so a grouped "Provincia de Heredia" reads as
+ * `Heredia` / *from "Provincia de Heredia"*, while an ungrouped value (where
+ * the canonical column simply mirrors the raw one) is unchanged.
+ */
+function geoDisplay(
+  canonical: string | null | undefined,
+  raw: string | null | undefined,
+): { value: string | null; secondary: string | null } {
+  const value = canonical ?? raw ?? null;
+  const secondary = canonical && raw && canonical !== raw ? raw : null;
+  return { value, secondary };
 }
 
 // ---------------------------------------------------------------------------
@@ -861,10 +891,19 @@ export function MediaDetailDrawer({
             >
               Location
             </Typography>
-            <MetaRow label="Country" value={item.geoCountry} />
-            <MetaRow label="Region" value={item.geoAdmin1} />
+            <MetaRow
+              label="Country"
+              {...geoDisplay(item.geoCanonicalCountry, item.geoCountry)}
+            />
+            <MetaRow
+              label="Region"
+              {...geoDisplay(item.geoCanonicalAdmin1, item.geoAdmin1)}
+            />
             <MetaRow label="Sub-region" value={item.geoAdmin2} />
-            <MetaRow label="City" value={item.geoLocality} />
+            <MetaRow
+              label="City"
+              {...geoDisplay(item.geoCanonicalLocality, item.geoLocality)}
+            />
             <MetaRow label="Place" value={item.geoPlaceName} />
             <MetaRow label="Geo Source" value={item.geoSource} />
           </>

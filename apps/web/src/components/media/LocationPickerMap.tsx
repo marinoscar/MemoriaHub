@@ -27,7 +27,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultIcon } from '../../lib/leaflet-setup';
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap } from 'react-leaflet';
 import type { LeafletMouseEvent } from 'leaflet';
 import { Box, IconButton, Snackbar, Alert } from '@mui/material';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
@@ -62,6 +62,14 @@ interface LocationPickerMapProps {
    * where a null value renders no marker at all.
    */
   showPlaceholderMarker?: boolean;
+  /**
+   * Draw a translucent radius overlay around the current pin, in METRES
+   * (Leaflet's `<Circle radius>` unit). Null/undefined — the default — renders
+   * nothing at all, so every pre-existing call site is untouched. Used by the
+   * Location Groups editor's Area block (issue #375), whose slider is bounded
+   * by the loaded `locationGrouping.maxRadiusKm` setting.
+   */
+  radiusMeters?: number | null;
 }
 
 /** Opacity applied to the placeholder pin so it reads as "not set yet". */
@@ -158,6 +166,7 @@ export function LocationPickerMap({
   geolocateSetsValue = true,
   scrollWheelZoom = true,
   showPlaceholderMarker = true,
+  radiusMeters = null,
 }: LocationPickerMapProps) {
   const { geoCenter, requestLocation } = useGeoLocation();
   const [geoError, setGeoError] = useState<string | null>(null);
@@ -216,6 +225,13 @@ export function LocationPickerMap({
         <ClickHandler onChange={onChange} />
         {center && <MapRecenterer center={center} />}
         {!value && !center && !initialCenter && geoCenter && <MapRecenterer center={geoCenter} />}
+        {value && radiusMeters != null && radiusMeters > 0 && (
+          <Circle
+            center={[value.lat, value.lng]}
+            radius={radiusMeters}
+            pathOptions={{ color: '#1976d2', fillColor: '#1976d2', fillOpacity: 0.15 }}
+          />
+        )}
         {value ? (
           <Marker
             position={[value.lat, value.lng]}
