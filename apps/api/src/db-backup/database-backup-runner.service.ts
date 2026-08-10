@@ -76,6 +76,16 @@ export interface DatabaseBackupResult {
 export class DatabaseBackupRunnerService {
   private readonly logger = new Logger(DatabaseBackupRunnerService.name);
 
+  /**
+   * Runs currently streaming IN THIS PROCESS, keyed by run id.
+   *
+   * Deliberately process-local rather than a DB flag: the only thing that can
+   * actually stop a `pg_dump` is a signal to the child, and only the process
+   * that spawned it can send one. The DB row remains the cross-replica source
+   * of truth for run STATE; this map is purely the handle needed to interrupt.
+   */
+  private readonly activeRuns = new Map<string, { abort: (err: Error) => void }>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -98,14 +108,78 @@ export class DatabaseBackupRunnerService {
    *   multi-GB dump is the wrong default.
    */
   async runBackup(opts: StartBackupOptions): Promise<DatabaseBackupResult> {
+    const { completion } = await this.startBackup(opts);
+    return completion;
+  }
+
+  /**
+   * Claim the run slot and START the backup WITHOUT waiting for it to finish.
+   *
+   * Exists for #343's `POST /api/admin/db-backup/runs`, which must answer with
+   * a `runId` in well under a second while a dump that takes tens of minutes
+   * carries on in the background — the same posture as
+   * `POST /api/nodes/:id/backup/runs`. The claim itself IS awaited, so the
+   * caller either gets a real id or the `DatabaseBackupAlreadyRunningError`
+   * that turns into a 409; only the dump is detached.
+   *
+   * `completion` carries the same success/failure semantics as `runBackup`
+   * (including the failure path that deletes the partial object). A caller that
+   * detaches MUST attach a `.catch()` to it — an unobserved rejection here would
+   * be an unhandled rejection, which under Node's default kills the process.
+   *
+   * @throws DatabaseBackupAlreadyRunningError when another run holds the slot.
+   */
+  async startBackup(
+    opts: StartBackupOptions,
+  ): Promise<{ runId: string; completion: Promise<DatabaseBackupResult> }> {
     const runId = await this.claimRun(opts);
 
-    try {
-      return await this.executeRun(runId);
-    } catch (err) {
-      await this.markFailed(runId, err);
-      throw err;
+    const completion = (async () => {
+      try {
+        return await this.executeRun(runId);
+      } catch (err) {
+        await this.markFailed(runId, err);
+        throw err;
+      }
+    })();
+
+    return { runId, completion };
+  }
+
+  /**
+   * Cooperatively cancel a run.
+   *
+   * When the run is executing IN THIS PROCESS, the registered aborter kills the
+   * `pg_dump` child and destroys the metering stream, which tears the upload
+   * down; the run then travels its ordinary failure path — which is what
+   * deletes the partial storage object and writes `status='failed'`. Nothing
+   * about cancellation is a second, parallel teardown.
+   *
+   * When it is NOT in this process (another replica, or a row orphaned by a
+   * crash), there is no child to signal, so the same terminal bookkeeping is
+   * applied directly: `markFailed` deletes whatever partial object the row
+   * points at and marks it failed. This is the honest best effort — a dump
+   * running on another replica keeps running there until its own upload fails
+   * or its heartbeat goes stale.
+   *
+   * @returns `signalled: true` when an in-process run was aborted.
+   */
+  async cancelRun(runId: string): Promise<{ signalled: boolean }> {
+    const entry = this.activeRuns.get(runId);
+    if (entry) {
+      this.logger.warn(`Cancelling in-flight database backup ${runId}`);
+      entry.abort(new Error('Database backup cancelled by an administrator'));
+      return { signalled: true };
     }
+
+    this.logger.warn(
+      `Cancelling database backup ${runId} with no in-process handle; marking failed`,
+    );
+    await this.markFailed(
+      runId,
+      new Error('Database backup cancelled by an administrator'),
+    );
+    return { signalled: false };
   }
 
   // -------------------------------------------------------------------------
@@ -293,6 +367,16 @@ export class DatabaseBackupRunnerService {
 
     const heartbeat = this.startHeartbeat(runId, () => bytes);
 
+    // Publish the abort handle for `cancelRun`. Killing the child and
+    // destroying the meter is exactly what the failure path below already
+    // reacts to, so a cancellation needs no separate teardown.
+    this.activeRuns.set(runId, {
+      abort: (err: Error) => {
+        dump.kill();
+        meter.destroy(err);
+      },
+    });
+
     try {
       const uploadPromise = provider.upload(storageKey, meter as Readable, {
         mimeType: 'application/octet-stream',
@@ -309,8 +393,10 @@ export class DatabaseBackupRunnerService {
       meter.destroy();
       throw err;
     } finally {
-      // Non-negotiable: the interval must not outlive the run, in any path.
+      // Non-negotiable: neither the interval nor the abort handle may outlive
+      // the run, in any path.
       heartbeat.stop();
+      this.activeRuns.delete(runId);
     }
 
     // Final progress write so a UI polling `bytesWritten` lands on the true
