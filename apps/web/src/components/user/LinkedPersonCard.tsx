@@ -23,8 +23,19 @@ import { listPeople } from '../../services/face';
 import type { PersonListItem } from '../../services/face';
 import type { UserProfile } from '../../services/userProfile';
 
-/** Upper bound on people loaded per circle — enough to search, bounded per request. */
-const PEOPLE_PAGE_SIZE = 200;
+/**
+ * Rows per request. This is the API's hard cap (`listPeopleQuerySchema` in
+ * `apps/api/src/face/dto/people.dto.ts` rejects anything above 100) — asking
+ * for more is a 400, not a larger page.
+ */
+const PEOPLE_PAGE_SIZE = 100;
+
+/**
+ * Ceiling on people loaded per circle across all pages. The Autocomplete
+ * filters client-side, so stopping at one page would let a user search only the
+ * first 100 names and quietly conclude the person does not exist.
+ */
+const PEOPLE_MAX_PER_CIRCLE = 500;
 
 interface PersonOption {
   person: PersonListItem;
@@ -32,6 +43,31 @@ interface PersonOption {
   circleName: string;
   /** Pre-resolved label so Autocomplete's default filter can match on it. */
   label: string;
+}
+
+/**
+ * Every person in one circle, paged at the API's cap and bounded by
+ * `PEOPLE_MAX_PER_CIRCLE`. Stops as soon as the server reports the last page,
+ * so the common single-page circle still costs exactly one request.
+ */
+async function loadCirclePeople(circleId: string): Promise<PersonListItem[]> {
+  const items: PersonListItem[] = [];
+  let page = 1;
+  for (;;) {
+    const resp = await listPeople(circleId, {
+      page,
+      pageSize: PEOPLE_PAGE_SIZE,
+    });
+    items.push(...resp.items);
+    if (
+      resp.items.length === 0 ||
+      page >= resp.meta.totalPages ||
+      items.length >= PEOPLE_MAX_PER_CIRCLE
+    ) {
+      return items;
+    }
+    page += 1;
+  }
 }
 
 interface LinkedPersonCardProps {
@@ -82,23 +118,18 @@ export function LinkedPersonCard({
       // One request per circle, tolerated individually: a single circle failing
       // (e.g. a permission edge) must not blank out the whole picker.
       const results = await Promise.allSettled(
-        circles.map((circle) =>
-          listPeople(circle.id, { pageSize: PEOPLE_PAGE_SIZE }).then((resp) => ({
-            circle,
-            items: resp.items,
-          })),
-        ),
+        circles.map((circle) => loadCirclePeople(circle.id)),
       );
 
       const collected: PersonOption[] = [];
-      let anyFailed = false;
-      for (const result of results) {
+      let firstFailure: unknown = null;
+      for (const [index, result] of results.entries()) {
         if (result.status === 'rejected') {
-          anyFailed = true;
+          if (firstFailure === null) firstFailure = result.reason;
           continue;
         }
-        const { circle, items } = result.value;
-        for (const person of items) {
+        const circle = circles[index];
+        for (const person of result.value) {
           collected.push({
             person,
             circleId: circle.id,
@@ -109,8 +140,14 @@ export function LinkedPersonCard({
       }
 
       setPeople(collected);
-      if (anyFailed && collected.length === 0) {
-        setLoadError('Failed to load people.');
+      if (firstFailure !== null && collected.length === 0) {
+        // Surface what actually failed. The previous hard-coded string hid an
+        // API validation error behind an unactionable "Failed to load people."
+        setLoadError(
+          firstFailure instanceof Error
+            ? `Failed to load people: ${firstFailure.message}`
+            : 'Failed to load people.',
+        );
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load people');
