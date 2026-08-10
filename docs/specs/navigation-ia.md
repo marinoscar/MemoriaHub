@@ -1,6 +1,6 @@
 # Navigation Information Architecture
 
-> **Status:** Proposed (epic pending). Nothing in this document is implemented yet.
+> **Status:** Proposed — tracked by epic [#388](https://github.com/marinoscar/MemoriaHub/issues/388) (issues [#389](https://github.com/marinoscar/MemoriaHub/issues/389), [#390](https://github.com/marinoscar/MemoriaHub/issues/390), [#391](https://github.com/marinoscar/MemoriaHub/issues/391), [#392](https://github.com/marinoscar/MemoriaHub/issues/392)). Nothing in this document is implemented yet.
 > **Interactive mockups:** [`assets/navigation-ia-mockups.html`](assets/navigation-ia-mockups.html) — open in a browser; the three breakpoint layouts are drawn to relative scale.
 
 This spec replaces MemoriaHub's single 22-row navigation drawer with **four primary
@@ -367,12 +367,18 @@ Non-negotiable, and part of each issue's acceptance criteria:
 Each phase stands alone and is independently revertible. Phase 1 removes eight rows without
 adding a single page.
 
-| Phase | Issue | Delivers | Net rows |
+Tracked by epic [#388](https://github.com/marinoscar/MemoriaHub/issues/388).
+
+| Phase | Issue | Delivers | Rows |
 |---|---|---|---|
-| 1 | Console mode + duplicate removal + circle chip | No new routes, no new API | −8 |
-| 2 | The Review hub | One new route wrapping existing pages | −5 |
-| 3 | The Collections hub | One new route; the riskiest phase (§6.1) | −6 |
-| 4 | Rail, bottom bar, pinning | Replaces the drawer; adds `user_settings.navigation` | chrome |
+| 1 | [#389](https://github.com/marinoscar/MemoriaHub/issues/389) | Console mode, duplicate removal, top-bar circle chip — no new routes, no new API | 22 → 14 |
+| 2 | [#390](https://github.com/marinoscar/MemoriaHub/issues/390) | The Review hub — one new route wrapping existing pages | 14 → 9 |
+| 3 | [#391](https://github.com/marinoscar/MemoriaHub/issues/391) | The Collections hub — one new route; the riskiest phase (§6.1) | 9 → 4 |
+| 4 | [#392](https://github.com/marinoscar/MemoriaHub/issues/392) | Rail, bottom bar, pinning — replaces the drawer; adds `user_settings.navigation` | chrome |
+
+**If scope must shrink:** Phase 1 alone is a clean win. Phases 1 + 2 + 4 deliver the full
+three-breakpoint chrome and skip the risky hub. Phase 3 is the only one that can make the
+app *worse* if executed poorly — see the bar it must clear in §6.1.
 
 ---
 
