@@ -26,6 +26,7 @@ const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
 const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
 const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
+const DbBackupPage = lazy(() => import('./pages/Admin/DbBackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
@@ -141,6 +142,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/doctor" element={<DoctorPage />} />
                 <Route path="/admin/settings/workflows" element={<WorkflowsSettingsPage />} />
                 <Route path="/admin/settings/backup" element={<BackupPage />} />
+                <Route path="/admin/settings/db-backup" element={<DbBackupPage />} />
                 <Route path="/admin/settings/sharing" element={<PublicSharesPage />} />
                 {/* Legacy admin route redirects */}
                 <Route path="/admin/users" element={<Navigate to="/admin/settings/users" replace />} />
