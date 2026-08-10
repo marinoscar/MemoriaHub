@@ -22,9 +22,17 @@ import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
 import { MediaModule } from '../media/media.module';
 import { MediaTouchModule } from '../media/media-touch.module';
+import { UsersModule } from '../users/users.module';
 
+/**
+ * UsersModule is imported for issue #354: PeopleService propagates a person's
+ * profile-picture change to any account linked to that person, and carries the
+ * link over on merge. The edge points FaceModule -> UsersModule; UsersModule
+ * imports only StorageProvidersModule / CirclesModule / SettingsModule, so no
+ * cycle is closed and no forwardRef is needed.
+ */
 @Module({
-  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule],
+  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule, UsersModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,

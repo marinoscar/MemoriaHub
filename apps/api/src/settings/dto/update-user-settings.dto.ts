@@ -14,7 +14,14 @@ export const updateUserSettingsSchema = z.object({
   theme: z.enum(['light', 'dark', 'system']),
   profile: z.object({
     displayName: z.string().max(100).optional(),
+    /**
+     * @deprecated (issue #354) No-op. Avatar selection moved to the user row
+     * (`User.avatarSource` / `avatarStorageKey` / `linkedPersonId`), written
+     * only by UserAvatarService. Kept on the wire so older clients that still
+     * send these keys are not rejected — nothing reads them.
+     */
     useProviderImage: z.boolean(),
+    /** @deprecated (issue #354) No-op — see useProviderImage above. */
     customImageUrl: z.string().url().nullable().optional(),
   }),
   search: z.object({
@@ -44,7 +51,9 @@ export const patchUserSettingsSchema = z.object({
   profile: z
     .object({
       displayName: z.string().max(100).optional(),
+      /** @deprecated (issue #354) No-op — see updateUserSettingsSchema above. */
       useProviderImage: z.boolean().optional(),
+      /** @deprecated (issue #354) No-op — see updateUserSettingsSchema above. */
       customImageUrl: z.string().url().nullable().optional(),
     })
     .optional(),

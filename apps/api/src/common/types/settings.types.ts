@@ -79,7 +79,15 @@ export interface UserSettingsValue {
   theme: 'light' | 'dark' | 'system';
   profile: {
     displayName?: string;
+    /**
+     * @deprecated (issue #354) No-op. Avatar selection moved to the user row —
+     * `User.avatarSource` / `avatarStorageKey` / `linkedPersonId`, written only
+     * by UserAvatarService and resolved into `User.profileImageUrl`. Nothing in
+     * the API reads this key; it is retained so stored settings blobs and older
+     * clients keep validating.
+     */
     useProviderImage: boolean;
+    /** @deprecated (issue #354) No-op — see useProviderImage above. */
     customImageUrl?: string | null;
   };
   search?: {
