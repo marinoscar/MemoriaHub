@@ -1,4 +1,5 @@
 import {
+  ArgumentsHost,
   BadRequestException,
   ConflictException,
   NotFoundException,
@@ -10,6 +11,33 @@ import {
   toRunDto,
 } from './db-backup-admin.service';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
+import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+
+/**
+ * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
+ * return the body the client would actually receive.
+ *
+ * This is the load-bearing assertion for issue #343's "409 with the active
+ * runId" requirement: the filter rebuilds the response from a fixed allowlist
+ * (message, code, details, error, error_description, startedAt), so a payload
+ * field asserted only via `getResponse()` can still be silently dropped on the
+ * wire. Mirrors the harness in `common/filters/http-exception.filter.spec.ts`.
+ */
+function sendThroughFilter(exception: unknown): any {
+  const response = {
+    code: jest.fn().mockReturnThis(),
+    send: jest.fn().mockReturnThis(),
+  };
+  const host = {
+    switchToHttp: () => ({
+      getResponse: () => response,
+      getRequest: () => ({ url: '/api/admin/db-backup/runs', method: 'POST' }),
+    }),
+  } as unknown as ArgumentsHost;
+
+  new HttpExceptionFilter().catch(exception, host);
+  return response.send.mock.calls[0][0];
+}
 
 const BASE_CONFIG = {
   enabled: true,
@@ -226,8 +254,34 @@ describe('DatabaseBackupAdminService', () => {
       try {
         await service.startRun('u1');
       } catch (err: any) {
-        expect(err.getResponse()).toMatchObject({ activeRunId: 'run-live' });
+        expect(err.getResponse()).toMatchObject({
+          details: { activeRunId: 'run-live' },
+        });
       }
+    });
+
+    it('carries the active run id THROUGH the real HttpExceptionFilter', async () => {
+      // The regression this guards (issue #343): the id used to be a top-level
+      // field on the ConflictException payload, which the filter's allowlist
+      // strips — the client got a 409 with no way to identify the live run.
+      runner.startBackup.mockRejectedValue(
+        new DatabaseBackupAlreadyRunningError('run-live'),
+      );
+
+      let thrown: unknown;
+      try {
+        await service.startRun('u1');
+      } catch (err) {
+        thrown = err;
+      }
+
+      const body = sendThroughFilter(thrown);
+      expect(body).toMatchObject({
+        statusCode: 409,
+        code: 'CONFLICT',
+        message: 'A database backup run is already in progress',
+        details: { activeRunId: 'run-live' },
+      });
     });
 
     it('still 409s when the winning run finished before it could be looked up', async () => {
@@ -239,7 +293,9 @@ describe('DatabaseBackupAdminService', () => {
         fail('expected a conflict');
       } catch (err: any) {
         expect(err).toBeInstanceOf(ConflictException);
-        expect(err.getResponse()).toMatchObject({ activeRunId: null });
+        expect(err.getResponse()).toMatchObject({
+          details: { activeRunId: null },
+        });
       }
     });
   });
