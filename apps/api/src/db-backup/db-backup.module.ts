@@ -4,7 +4,9 @@ import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { DatabaseBackupRetentionService } from './database-backup-retention.service';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
+import { DatabaseBackupAdminService } from './db-backup-admin.service';
 import { DatabaseBackupScheduleTask } from './db-backup-schedule.task';
+import { DatabaseBackupController } from './db-backup.controller';
 
 /**
  * DbBackupModule — PostgreSQL Database Backup & Restore (epic #339, issue #341).
@@ -37,8 +39,10 @@ import { DatabaseBackupScheduleTask } from './db-backup-schedule.task';
  */
 @Module({
   imports: [PrismaModule, SettingsModule, StorageProvidersModule],
+  controllers: [DatabaseBackupController],
   providers: [
     DatabaseBackupRunnerService,
+    DatabaseBackupAdminService,
     DatabaseBackupRetentionService,
     DatabaseBackupScheduleTask,
   ],
