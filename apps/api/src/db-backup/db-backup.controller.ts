@@ -46,11 +46,12 @@ import {
  * The admin HTTP surface for the PostgreSQL logical backup: schedule config,
  * manual trigger, run history and progress, signed download, delete, cancel.
  *
- * NOT to be confused with the two other backup features in this repo — see
+ * NOT to be confused with the other backup feature in this repo — see
  * CLAUDE.md's "Admin: Database Backup" section:
- *   - `/api/admin/backup/*`        media replication, S3 → server local disk
  *   - `/api/nodes/:id/backup/*`    Local Media Backup, node pull-mirror
- * This one is the only feature that backs up the DATABASE.
+ * That one backs up MEDIA; this one is the only feature that backs up the
+ * DATABASE. (A third surface, `/api/admin/backup/*` — server-side media
+ * replication to the API host's own disk — was retired in issue #367.)
  *
  * Restore and rollback (`POST /runs/:id/restore`, `POST /runs/:id/rollback`,
  * #344) live at the bottom of this controller, behind `db_backup:restore` —

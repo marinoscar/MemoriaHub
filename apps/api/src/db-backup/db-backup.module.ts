@@ -13,12 +13,14 @@ import { DatabaseBackupController } from './db-backup.controller';
 /**
  * DbBackupModule — PostgreSQL Database Backup & Restore (epic #339, issue #341).
  *
- * A top-level module (matching `memories/`, `nodes/`, `enhancement/`) rather
- * than a sub-module of the existing `jobs/backup` — the three backup features
- * in this repo are deliberately kept apart by name and location:
- *   - `apps/api/src/jobs/backup/`  "Admin: Backup"  (S3 → server local disk)
+ * A top-level module (matching `memories/`, `nodes/`, `enhancement/`) — the
+ * backup features in this repo are deliberately kept apart by name and
+ * location:
  *   - `/api/nodes/:id/backup/*`    "Local Media Backup" (node pull-mirror)
  *   - `apps/api/src/db-backup/`    THIS: the PostgreSQL logical backup
+ *
+ * (A v0 "Admin: Backup" at `apps/api/src/jobs/backup/`, replicating S3 to the
+ * API host's own disk, was retired in issue #367.)
  *
  * Imports:
  *   - PrismaModule: the `DatabaseBackupRun` state machine (#340).
