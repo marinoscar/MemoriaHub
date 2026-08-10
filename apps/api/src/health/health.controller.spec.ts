@@ -2,11 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HealthCheckService, HealthCheckResult } from '@nestjs/terminus';
 import { HealthController } from './health.controller';
 import { DatabaseHealthIndicator } from './indicators/database.indicator';
+import { MaintenanceModeService } from '../common/maintenance/maintenance-mode.service';
 
 describe('HealthController', () => {
   let controller: HealthController;
   let mockHealthCheckService: jest.Mocked<HealthCheckService>;
   let mockDatabaseIndicator: jest.Mocked<DatabaseHealthIndicator>;
+  let mockMaintenance: jest.Mocked<MaintenanceModeService>;
 
   beforeEach(async () => {
     mockHealthCheckService = {
@@ -17,11 +19,18 @@ describe('HealthController', () => {
       isHealthy: jest.fn(),
     } as any;
 
+    // Maintenance mode off by default (issue #348); the readiness-while-active
+    // behavior is covered separately below.
+    mockMaintenance = {
+      isActive: jest.fn().mockResolvedValue(false),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [HealthController],
       providers: [
         { provide: HealthCheckService, useValue: mockHealthCheckService },
         { provide: DatabaseHealthIndicator, useValue: mockDatabaseIndicator },
+        { provide: MaintenanceModeService, useValue: mockMaintenance },
       ],
     }).compile();
 
@@ -149,6 +158,43 @@ describe('HealthController', () => {
       expect(result.timestamp).toBeDefined();
       const timestamp = new Date(result.timestamp);
       expect(timestamp.toISOString()).toBe(result.timestamp);
+    });
+  });
+
+  describe('readiness during maintenance mode (issue #348)', () => {
+    it('reports NOT ready (503) while maintenance is active', async () => {
+      mockMaintenance.isActive.mockResolvedValue(true);
+
+      await expect(controller.readiness()).rejects.toMatchObject({
+        status: 503,
+      });
+
+      // The DB probe must not even run — during #344's swap window the
+      // database is legitimately unreachable and "in maintenance" is the
+      // honest answer regardless.
+      expect(mockHealthCheckService.check).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a maintenance marker in the not-ready payload', async () => {
+      mockMaintenance.isActive.mockResolvedValue(true);
+
+      try {
+        await controller.readiness();
+        throw new Error('expected readiness() to throw');
+      } catch (err: any) {
+        expect(err.getResponse()).toMatchObject({
+          status: 'error',
+          error: { maintenance: { status: 'down' } },
+        });
+      }
+    });
+
+    it('liveness still returns 200 while maintenance is active', async () => {
+      mockMaintenance.isActive.mockResolvedValue(true);
+
+      // Liveness must never fail during maintenance — a 503 here would make
+      // an orchestrator kill the container mid-upgrade.
+      expect(controller.liveness()).toMatchObject({ status: 'ok' });
     });
   });
 

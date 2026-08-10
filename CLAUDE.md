@@ -854,9 +854,14 @@ Auto-curated memory collections — On This Day, Trips, Best of {Person}, {Perso
 
 > **Public routes (no auth):** `GET /api/public/memories/digest-image/:token` streams a digest email's cover thumbnail bytes, and `GET`/`POST /api/public/memories/digest-unsubscribe/:token` render/confirm a one-click, no-login unsubscribe (RFC 8058 `List-Unsubscribe-Post`), each gated by an HMAC-signed capability token (not RBAC), never a database row — see the [Memories spec §7.7-7.8](docs/specs/memories.md#77-stateless-signed-capabilities) for the full security design.
 
+### Admin: Maintenance Mode (Admin role + system_settings:read / system_settings:write)
+Admin-controlled app-wide maintenance mode (issue #348) — see the [Maintenance Mode runbook](docs/runbooks/maintenance-mode.md) for the recommended upgrade sequence, lockout recovery, and an nginx-level fallback for when the API itself won't start. A global `MaintenanceGuard` (`apps/api/src/common/maintenance/`) blocks non-exempt requests with a `503` carrying a stable `{error:'maintenance', message, startedAt}` marker (`MAINTENANCE_ERROR_MARKER`) and a `Retry-After: 120` header; `@AllowDuringMaintenance()`-tagged routes (health probes, sign-in routes, and the maintenance endpoints themselves) stay reachable. **No new permission was added** — this is a system setting like any other, and the existing `system_settings:read`/`system_settings:write` pair already means "can change global app behavior," so a dedicated maintenance permission would protect nothing a new grant of that pair doesn't already cover. State resolves as `env override ?? in-memory override ?? persisted setting`; the in-memory layer exists only for issue #344's database-rename swap window, when the persisted flag briefly lives in an unreadable database.
+- `GET /api/admin/maintenance` (system_settings:read) - Return the effective maintenance state plus each contributing layer: `{ active, message, allowAdmins, startedAt, startedById, persistedEnabled, inMemoryOverride, envOverride }`
+- `PUT /api/admin/maintenance` body `{ enabled: boolean, message?, allowAdmins? }` (system_settings:write) - Enable/disable maintenance; persists to `system_settings.maintenance.*` (surviving the restart it was enabled for) and writes an `AuditEvent` (`maintenance:enabled`/`maintenance:disabled`); `allowAdmins:false` blocks even Admin sessions from the UI (recover via the `MAINTENANCE_MODE=false` env break-glass — see the runbook); a `MAINTENANCE_MODE` env override still wins over whatever is written here, in both directions
+
 ### Health
-- `GET /api/health/live` - Liveness check
-- `GET /api/health/ready` - Readiness check (includes DB)
+- `GET /api/health/live` - Liveness check; stays 200 during maintenance mode so orchestrators don't kill the container mid-upgrade
+- `GET /api/health/ready` - Readiness check (includes DB); reports not-ready (503) during maintenance mode so load balancers drain the instance, checked before the DB probe so it still answers correctly during the #344 database-swap window
 
 ## RBAC Model
 
@@ -1023,6 +1028,7 @@ Key variables (see `infra/compose/.env.example` for full list):
 - `NODE_ENV` - Environment (development/production)
 - `PORT` - API port (default: 3000)
 - `APP_URL` - Base URL (default: http://localhost:3535)
+- `MAINTENANCE_MODE` - Break-glass override for admin-controlled maintenance mode (issue #348): `true` forces maintenance ON at boot (works even with an unreadable database), `false` forces it OFF (the documented recovery from a bad `allowAdmins: false` lockout); unset or any other value means "no override — the persisted `maintenance.enabled` setting governs." Re-read on every request; wins over the persisted setting in both directions. See the [Maintenance Mode runbook](docs/runbooks/maintenance-mode.md)
 
 **Database (individual connection parameters):**
 - `POSTGRES_HOST` - Database hostname (default: localhost)
@@ -1330,6 +1336,15 @@ The full `memories.*` namespace ships with generation (issue #302), not just the
 - `memories.digest.enabled` (bool, default true) / `.frequency` (enum `off`\|`daily`\|`weekly`\|`monthly`, default `weekly`) / `.sendHourUtc` (int 0–23, default 8) / `.imageTokenTtlDays` (int 7–90, default 30) — the digest cron ticks hourly and gates on this cadence + "genuinely new content since the watermark"; see the `memory_digest` job-type paragraph under Database Tables above
 
 **Three hand-maintained copies, a real pitfall.** This repo duplicates every settings namespace by hand across three files that must all be edited together: `systemSettingsSchema` (validation + defaults), `systemSettingsPatchSchema` (all-optional twin), both in `common/schemas/settings.schema.ts`, and — the trap — `patchSystemSettingsSchema` in `settings/dto/update-system-settings.dto.ts`, **the wire DTO** that `nestjs-zod` validates the request body against and which **strips unknown keys**. A namespace present only in the first two validates and merges perfectly in unit tests while every real `PATCH` silently no-ops. `memories` is present in all three (unlike `workflows.*`/`backup.*`, which are schema-complete but absent from the wire DTO as of this writing). `SystemSettingsService.patchSettings` also merges each key by hand (no generic deep merge), so a new namespace must be added there too or it is stored but never returned.
+
+**Maintenance Mode (issue #348):**
+
+The `maintenance.*` namespace (no dedicated admin settings-page panel as of this writing — managed via `GET`/`PUT /api/admin/maintenance` above, not the generic system-settings JSON) is the persisted layer of the two-layer state model `MaintenanceModeService` resolves against; see the [Maintenance Mode runbook](docs/runbooks/maintenance-mode.md) for the full model, the upgrade sequence, and lockout recovery.
+- `maintenance.enabled` — boolean, default false; whether the app is currently in maintenance mode. Persisting this (rather than an in-memory-only flag) is the point: it survives the very container restart an admin enables it for
+- `maintenance.message` — string, max 500 chars, default `''`; operator-facing message shown to blocked users, e.g. `"Upgrading to v2.4, back by 03:00 UTC"`
+- `maintenance.allowAdmins` — boolean, default true; when true, a request carrying a valid JWT with the Admin role bypasses the block entirely. Defaults true so an admin can exercise the upgraded app before flipping maintenance off; setting it false blocks even Admin sessions and is the one path that can lock an admin out of the UI (though `PUT /api/admin/maintenance` itself stays reachable by direct API call — see the runbook)
+- `maintenance.startedAt` — ISO timestamp, nullable, default null; set when maintenance was last enabled, cleared on disable
+- `maintenance.startedById` — string (user id), nullable, default null; the user who enabled maintenance, cleared on disable
 
 ## Common Patterns
 
