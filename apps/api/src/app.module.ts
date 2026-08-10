@@ -17,7 +17,6 @@ import { StorageModule } from './storage/storage.module';
 import { PatModule } from './pat/pat.module';
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
-import { BackupModule } from './jobs/backup/backup.module';
 import { AiModule } from './ai/ai.module';
 import { FaceModule } from './face/face.module';
 import { EnrichmentModule } from './enrichment/enrichment.module';
@@ -86,7 +85,6 @@ import configuration from './config/configuration';
     PatModule,
     MediaModule,
     CirclesModule,
-    BackupModule,
     AiModule,
     FaceModule,
     EnrichmentModule,
@@ -142,9 +140,16 @@ import configuration from './config/configuration';
     // equivalent to `{}`; see metadata/admin-metadata.controller.ts.
     //
     // Caveat 2: `.default({})` BYPASSES a top-level `.refine()` for the default
-    // value — the refine never runs for a bodyless request. So it must not be
-    // added to a schema whose refine is what makes an empty body invalid; see
-    // jobs/backup/dto/trigger-backup.dto.ts for the one deliberate exclusion.
+    // value — Zod short-circuits and hands back that `{}` without running the
+    // refine at all. So it must NOT be added to a schema whose top-level refine
+    // is precisely what makes an empty body invalid (e.g. "at least one of these
+    // optional fields is required"): the schema would still pattern-match the
+    // #289 fix — every field optional — while silently ACCEPTING the bodyless
+    // request it is supposed to reject. Such a schema is a deliberate exclusion
+    // from the rule above and must keep throwing on `parse(undefined)`. (The
+    // repo's only worked example of this, the v0 backup trigger DTO, was
+    // removed when that feature was retired; the rule still holds for any
+    // future refine-guarded all-optional body schema.)
     {
       provide: APP_PIPE,
       useClass: ZodValidationPipe,

@@ -37,9 +37,15 @@
  * spread: a plain `.default({})` case, a `.strict()` case, a `.refine()`
  * case, a nested/complex settings-patch case, and (via the pipe-level
  * companion file) the one case that additionally needed `.prefault({})`
- * because it has its own inner field default. It also pins the ONE
- * deliberate exclusion (`TriggerBackupSchema`) as a guard against a future
- * sweep "helpfully" adding `.default({})` there.
+ * because it has its own inner field default.
+ *
+ * NOTE: this file previously also pinned the repo's ONE deliberate exclusion
+ * from the rule — an all-optional schema whose top-level `.refine()` is what
+ * makes an empty body invalid, and which therefore must NOT carry
+ * `.default({})`. That schema belonged to the v0 server-side backup feature
+ * and went away when the feature was retired. The rule itself still stands
+ * (see `app.module.ts`, Caveat 2); if such a schema is introduced again, add
+ * its `parse(undefined)` must-still-throw guard back here.
  */
 
 import { randomUUID } from 'crypto';
@@ -49,7 +55,6 @@ import { updatePersonSchema, UpdatePersonDto } from '../../face/dto/people.dto';
 import { ReprocessFailedBodyDto } from '../../media/media-reprocess.controller';
 import { patchUserSettingsSchema, PatchUserSettingsDto } from '../../settings/dto/update-user-settings.dto';
 import { AcceptLocationSuggestionDto } from '../../location-inference/dto/accept-location-suggestion.dto';
-import { TriggerBackupSchema } from '../../jobs/backup/dto/trigger-backup.dto';
 
 describe('issue #289 — top-level .default({}) contract on all-optional Zod body schemas', () => {
   // ===========================================================================
@@ -284,36 +289,6 @@ describe('issue #289 — top-level .default({}) contract on all-optional Zod bod
     it('an invalid field value still throws', () => {
       expect(() => schema.parse({ lat: 999 })).toThrow(); // max(90)
       expect(() => schema.parse({ lng: -999 })).toThrow(); // min(-180)
-    });
-  });
-
-  // ===========================================================================
-  // TriggerBackupSchema — the DELIBERATE EXCLUSION guard.
-  //
-  // Every key on this schema is optional, so it pattern-matches every other
-  // schema fixed in this sweep — but its top-level `.refine()` is what makes a
-  // bodyless request semantically INVALID (a backup must name a circle or
-  // opt into "all"), and `.default({})` BYPASSES a top-level `.refine()` for
-  // the default value it substitutes in. Adding `.default({})` here would
-  // therefore silently ACCEPT an empty body that this endpoint must reject.
-  //
-  // This test is the guardrail: it fails loudly if a future "helpful" sweep
-  // adds `.default({})` to TriggerBackupSchema, because a bodyless request
-  // must keep throwing.
-  // ===========================================================================
-  describe('TriggerBackupSchema (apps/api/src/jobs/backup/dto/trigger-backup.dto.ts) — deliberately excluded', () => {
-    it('parse(undefined) still throws — do NOT add .default({}) here (see file-level comment)', () => {
-      expect(() => TriggerBackupSchema.parse(undefined)).toThrow();
-    });
-
-    it('parse({}) still throws — the refine (circleId or all:true required) is not bypassable', () => {
-      expect(() => TriggerBackupSchema.parse({})).toThrow(/Provide either circleId or all/);
-    });
-
-    it('a body satisfying the refine still parses correctly', () => {
-      expect(TriggerBackupSchema.parse({ all: true })).toEqual({ all: true });
-      const circleId = randomUUID();
-      expect(TriggerBackupSchema.parse({ circleId })).toEqual({ circleId });
     });
   });
 });
