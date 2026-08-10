@@ -39,6 +39,17 @@ vi.mock('../../services/dbBackup', () => ({
   getDbBackupDownloadUrl: vi.fn(),
   deleteDbBackupRun: vi.fn(),
   cancelDbBackupRun: vi.fn(),
+  startDbRestore: vi.fn(),
+  rollbackDbRestore: vi.fn(),
+  // Constants are re-exported verbatim: the page and dialog import them for
+  // display and for the confirmation literal, and stubbing them with different
+  // values would make the tests assert against strings the app never uses.
+  RESTORE_CONFIRMATION: 'RESTORE',
+  ROLLBACK_CONFIRMATION: 'ROLLBACK',
+  RESTORE_RUNBOOK_PATH: 'docs/runbooks/database-restore.md',
+  RESTORE_RUNBOOK_URL:
+    'https://github.com/marinoscar/MemoriaHub/blob/main/docs/runbooks/database-restore.md',
+  RESTORE_ACTIVE_STATUSES: ['restoring', 'verifying', 'swapping'],
 }));
 
 vi.mock('../../services/storage-providers', () => ({
@@ -56,6 +67,7 @@ vi.mock('../../components/datatable', () => ({
               key={action.id}
               type="button"
               disabled={action.disabled ? action.disabled(row) : false}
+              onClick={() => action.onClick(row)}
             >
               {action.label}
             </button>
@@ -79,6 +91,7 @@ import {
   startDbBackupRun,
   listDbBackupRuns,
   getDbBackupRun,
+  startDbRestore,
 } from '../../services/dbBackup';
 import { getStorageSettings } from '../../services/storage-providers';
 
@@ -89,6 +102,7 @@ const mockStartRun = vi.mocked(startDbBackupRun);
 const mockListRuns = vi.mocked(listDbBackupRuns);
 const mockGetRun = vi.mocked(getDbBackupRun);
 const mockGetStorageSettings = vi.mocked(getStorageSettings);
+const mockStartRestore = vi.mocked(startDbRestore);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -460,9 +474,7 @@ describe('DbBackupPage', () => {
   // Row actions
   // -------------------------------------------------------------------------
 
-  it('offers Download on a completed run and disables Restore pending #344', async () => {
-    // Restore permission GRANTED — the action is still unavailable, because the
-    // endpoint itself does not exist yet.
+  it('enables Restore on a completed run for a holder of db_backup:restore', async () => {
     mockUsePermissions.mockReturnValue(
       adminPermissions(['db_backup:read', 'db_backup:write', 'db_backup:restore']),
     );
@@ -471,11 +483,9 @@ describe('DbBackupPage', () => {
 
     expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeEnabled();
-
-    const restore = screen.getByRole('button', {
-      name: 'Restore (not yet available)',
-    });
-    expect(restore).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Restore — completed backups only' }),
+    ).toBeEnabled();
   });
 
   it('labels Restore with the missing permission when db_backup:restore is absent', async () => {
@@ -483,12 +493,35 @@ describe('DbBackupPage', () => {
     render(<DbBackupPage />);
     await screen.findByTestId('row-run-1111-2222');
 
+    // Disabled AND carrying the reason: an admin must be able to tell a missing
+    // grant apart from a broken button without reading the docs.
     expect(
-      screen.getByRole('button', { name: 'Restore (requires db_backup:restore)' }),
+      screen.getByRole('button', {
+        name: 'Restore — requires the db_backup:restore permission',
+      }),
     ).toBeDisabled();
     // Read-only admins cannot delete or trigger.
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Back up now' })).toBeDisabled();
+  });
+
+  it('disables Restore with a reason for a run that never completed', async () => {
+    mockUsePermissions.mockReturnValue(
+      adminPermissions(['db_backup:read', 'db_backup:write', 'db_backup:restore']),
+    );
+    mockListRuns.mockResolvedValue(
+      runsResponse([
+        makeRun({ id: 'run-failed', status: 'failed', sizeBytes: null }),
+      ]),
+    );
+    render(<DbBackupPage />);
+    await screen.findByTestId('row-run-failed');
+
+    // The per-row gate: the label names the rule, `disabled` enforces it, so a
+    // confirmation is never reachable for a run the API would 400 on.
+    expect(
+      screen.getByRole('button', { name: 'Restore — completed backups only' }),
+    ).toBeDisabled();
   });
 
   it('disables Download for a run that produced no archive', async () => {
@@ -506,5 +539,252 @@ describe('DbBackupPage', () => {
     render(<DbBackupPage />);
     await screen.findByTestId('row-run-failed');
     expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Restore (#344)
+  // -------------------------------------------------------------------------
+
+  describe('restore', () => {
+    const restorePermissions = () =>
+      adminPermissions(['db_backup:read', 'db_backup:write', 'db_backup:restore']);
+
+    function preflight(overrides: Record<string, unknown> = {}) {
+      return {
+        status: 'ok',
+        checks: [
+          {
+            key: 'cluster.createdb',
+            label: 'CREATEDB privilege',
+            status: 'ok',
+            message: 'The connection role can create databases.',
+          },
+          {
+            key: 'cluster.disk',
+            label: 'Free disk',
+            status: 'ok',
+            message: '412 GB free; the scratch copy needs ~90 GB.',
+          },
+        ],
+        rollbackMode: 'retain_database',
+        rollbackModeRequested: 'retain_database',
+        rollbackModeDowngraded: false,
+        downgradeReason: null,
+        scratchDatabase: 'memoriahub_restore_20260810',
+        oldDatabase: 'memoriahub_old_20260810',
+        ...overrides,
+      } as any;
+    }
+
+    async function openRestoreDialog() {
+      mockUsePermissions.mockReturnValue(restorePermissions());
+      const user = userEvent.setup();
+      render(<DbBackupPage />);
+      await screen.findByTestId('row-run-1111-2222');
+      await user.click(
+        screen.getByRole('button', { name: 'Restore — completed backups only' }),
+      );
+      await screen.findByText('Restore the database from this backup');
+      return user;
+    }
+
+    it('states the corrected expectations and the rollback plan before confirming', async () => {
+      await openRestoreDialog();
+
+      // The scratch-database design means the app is UP for the long phase —
+      // the hours-of-downtime warning belonged to the rejected in-place design.
+      expect(
+        screen.getByText('The app stays online while this runs'),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/database swap and process restart/i)).toBeInTheDocument();
+
+      // The recovery guarantee for the configured mode, stated up front.
+      expect(screen.getByText('If you need to undo this')).toBeInTheDocument();
+      expect(screen.getByText(/roll back in/i)).toBeInTheDocument();
+
+      // Pre-flight readiness renders before the confirmation is usable.
+      expect(screen.getByTestId('restore-readiness-checks')).toBeInTheDocument();
+    });
+
+    it('keeps the confirm button disabled until the literal is typed', async () => {
+      const user = await openRestoreDialog();
+
+      const confirmButton = screen.getByRole('button', {
+        name: 'Run pre-flight and restore',
+      });
+      expect(confirmButton).toBeDisabled();
+
+      await user.type(screen.getByLabelText('Restore confirmation'), 'RESTORE');
+      expect(confirmButton).toBeEnabled();
+    });
+
+    it('renders the guided command block when a capability check fails', async () => {
+      mockStartRestore.mockResolvedValue({
+        mode: 'guided',
+        runId: 'run-1111-2222',
+        preflight: preflight({
+          status: 'guided',
+          checks: [
+            {
+              key: 'cluster.createdb',
+              label: 'CREATEDB privilege',
+              status: 'blocked',
+              message: 'The connection role cannot create databases.',
+              actionItem: 'Grant CREATEDB or run the restore manually.',
+            },
+          ],
+        }),
+        guided: {
+          reason: 'This deployment cannot create a scratch database.',
+          runbook: 'docs/runbooks/database-restore.md',
+          commands: ['createdb memoriahub_restore', 'pg_restore -d memoriahub_restore dump'],
+          notes: ['Run these as a superuser.'],
+        },
+      } as any);
+
+      const user = await openRestoreDialog();
+      await user.type(screen.getByLabelText('Restore confirmation'), 'RESTORE');
+      await user.click(
+        screen.getByRole('button', { name: 'Run pre-flight and restore' }),
+      );
+
+      // A designed path, not an error state: the commands are shown, the failed
+      // check is NAMED, and there is deliberately no "try anyway" — no amount of
+      // admin intent conjures a CREATEDB privilege.
+      const block = await screen.findByTestId('guided-restore-block');
+      expect(block).toHaveTextContent('createdb memoriahub_restore');
+      expect(block).toHaveTextContent('CREATEDB privilege');
+      expect(
+        screen.queryByRole('button', { name: /Run pre-flight and restore/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('blocks on a schema mismatch and only re-enables behind an explicit override', async () => {
+      mockStartRestore.mockResolvedValue({
+        mode: 'blocked',
+        runId: 'run-1111-2222',
+        reason: 'The archive predates the running code.',
+        preflight: preflight({
+          status: 'blocked',
+          checks: [
+            {
+              key: 'schema.compatibility',
+              label: 'Schema compatibility',
+              status: 'blocked',
+              message: 'Archive migration differs from the live database.',
+            },
+          ],
+        }),
+      } as any);
+
+      const user = await openRestoreDialog();
+      await user.type(screen.getByLabelText('Restore confirmation'), 'RESTORE');
+      await user.click(
+        screen.getByRole('button', { name: 'Run pre-flight and restore' }),
+      );
+
+      await screen.findByTestId('restore-schema-blocked');
+      const retry = screen.getByRole('button', { name: 'Restore anyway' });
+      expect(retry).toBeDisabled();
+
+      await user.click(
+        screen.getByLabelText('Override the schema compatibility check'),
+      );
+      expect(retry).toBeEnabled();
+    });
+
+    it('renders the auto-downgrade notice when the disk pre-flight forced one', async () => {
+      mockStartRestore.mockResolvedValue({
+        mode: 'running',
+        runId: 'run-1111-2222',
+        scratchDatabase: 'memoriahub_restore_20260810',
+        oldDatabase: 'memoriahub_old_20260810',
+        rollbackMode: 'pre_restore_dump',
+        rollbackModeDowngraded: true,
+        preflight: preflight({
+          rollbackMode: 'pre_restore_dump',
+          rollbackModeRequested: 'retain_database',
+          rollbackModeDowngraded: true,
+          downgradeReason: 'Only 40 GB free; retaining the old database needs 90 GB.',
+        }),
+      } as any);
+
+      const user = await openRestoreDialog();
+      await user.type(screen.getByLabelText('Restore confirmation'), 'RESTORE');
+      await user.click(
+        screen.getByRole('button', { name: 'Run pre-flight and restore' }),
+      );
+
+      // The admin chose "roll back in seconds"; the server silently gave them
+      // "roll back in hours". That change of guarantee has to be said out loud.
+      const notice = await screen.findByTestId('rollback-downgrade');
+      expect(notice).toHaveTextContent('Rollback mode was downgraded automatically');
+      expect(notice).toHaveTextContent(
+        'Your recovery guarantee has changed from seconds to hours.',
+      );
+      expect(notice).toHaveTextContent('Only 40 GB free');
+    });
+
+    it('renders a failing phase-2 poll as "restarting", not an error', async () => {
+      mockUsePermissions.mockReturnValue(restorePermissions());
+      mockListRuns.mockResolvedValue(
+        runsResponse([
+          makeRun({
+            restoreStatus: 'swapping',
+            restoreScratchDb: 'memoriahub_restore_20260810',
+          }),
+        ]),
+      );
+      // The API renames the live database and exits here, so the poll MUST
+      // fail. That is the swap working, not a broken restore.
+      mockGetRun.mockRejectedValue(new Error('Network Error'));
+
+      render(<DbBackupPage />);
+
+      const restarting = await screen.findByTestId('restore-restarting');
+      expect(restarting).toHaveTextContent('Restarting…');
+      expect(restarting).toHaveTextContent('this is not an error');
+      // Both phases stay distinguishable — one bar would misrepresent both.
+      expect(screen.getByText(/Swapping databases and restarting/)).toBeInTheDocument();
+      expect(screen.getByText(/Restoring into the scratch database/)).toBeInTheDocument();
+    });
+
+    it('surfaces the retained database and its expiry with a Roll back action', async () => {
+      mockUsePermissions.mockReturnValue(restorePermissions());
+      mockListRuns.mockResolvedValue(
+        runsResponse([
+          makeRun({
+            restoreStatus: 'completed',
+            restoredAt: '2026-08-10T04:00:00.000Z',
+            swappedAt: '2026-08-10T04:00:00.000Z',
+            restoreOldDb: 'memoriahub_old_20260810',
+          }),
+        ]),
+      );
+
+      render(<DbBackupPage />);
+
+      const surface = await screen.findByTestId('rollback-surface');
+      expect(surface).toHaveTextContent('memoriahub_old_20260810');
+      expect(surface).toHaveTextContent('seconds');
+      // 168h after the swap, per the config fixture's oldDatabaseRetentionHours.
+      expect(surface).toHaveTextContent(
+        new Date('2026-08-17T04:00:00.000Z').toLocaleString(),
+      );
+      expect(screen.getByRole('button', { name: 'Roll back' })).toBeEnabled();
+    });
+
+    it('keeps the runbook link visible without opening any dialog', async () => {
+      mockUsePermissions.mockReturnValue(restorePermissions());
+      render(<DbBackupPage />);
+
+      const link = await screen.findByRole('link', {
+        name: 'Database restore runbook',
+      });
+      expect(link).toHaveAttribute(
+        'href',
+        'https://github.com/marinoscar/MemoriaHub/blob/main/docs/runbooks/database-restore.md',
+      );
+    });
   });
 });

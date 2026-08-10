@@ -16,13 +16,22 @@
  *     interferes with it.
  *   - Run history — the shared DataTable with Download / Delete row actions.
  *
- * ## Restore is #344 and is NOT built here
+ *   - Restore (#344) — the Restore row action opens `DbBackupRestoreDialog`,
+ *     and this page owns the three surfaces that outlive that dialog: the
+ *     always-visible runbook link, the two-phase restore progress, and the
+ *     post-restore rollback affordance with its expiry.
  *
- * `POST /runs/:id/restore` and `POST /runs/:id/rollback` do not exist yet. The
- * Restore row action is rendered but permanently disabled with a reason, and
- * the restore dialog, pre-flight display, two-phase progress, rollback
- * surfacing, and guided-fallback command block are all deferred — see the
- * `TODO(#344)` below. Nothing here guesses at that API's shape.
+ * ## Why restore progress is two phases and not one bar
+ *
+ * Phase 1 rebuilds into a scratch database for hours with the app fully ONLINE
+ * and heartbeating. Phase 2 renames the database and exits the process: seconds
+ * long, and the app IS briefly down. A single undifferentiated bar would
+ * misrepresent both — it would imply the app is down for hours, and it would
+ * give no warning before the one moment that actually interrupts service.
+ *
+ * During phase 2 the poll is EXPECTED to fail (the API deliberately exits), so
+ * the hook reports `restarting` and this page renders that as a restart in
+ * progress rather than an error.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -75,6 +84,11 @@ import {
   buildDbBackupRunColumns,
   displayStatus,
 } from './dbBackupTable';
+import DbBackupRestoreDialog, {
+  RunbookLink,
+  restoreBlockedReason,
+} from './DbBackupRestoreDialog';
+import { RESTORE_ACTIVE_STATUSES } from '../../services/dbBackup';
 import { formatBytes, formatDuration, relativeTime } from '../../utils/formatBytes';
 
 // ---------------------------------------------------------------------------
@@ -169,6 +183,57 @@ export function heartbeatFreshness(
   };
 }
 
+/**
+ * The most recent run whose restore COMPLETED — i.e. the one a rollback would
+ * undo.
+ *
+ * Rollback is the single reason this restore design is safe to attempt at all,
+ * so it has to be visible on the page rather than buried behind a row's
+ * overflow menu. Only one restore can ever be the current state of the
+ * database, so "most recent completed" is not a heuristic — it is the answer.
+ */
+export function findRollbackTarget(runs: DbBackupRunDto[]): DbBackupRunDto | null {
+  const candidates = runs.filter(
+    (r) => r.restoreStatus === 'completed' && (r.restoreOldDb || r.preRestoreBackupId),
+  );
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, r) =>
+    new Date(r.restoredAt ?? r.swappedAt ?? 0).getTime() >
+    new Date(best.restoredAt ?? best.swappedAt ?? 0).getTime()
+      ? r
+      : best,
+  );
+}
+
+/**
+ * When the retained pre-swap database is dropped, after which a rollback stops
+ * being a seconds-long rename and becomes another multi-hour restore.
+ *
+ * Null in `pre_restore_dump` mode: there is no retained database to expire, and
+ * showing a countdown there would imply a fast path that does not exist.
+ */
+export function rollbackExpiry(
+  run: DbBackupRunDto,
+  retentionHours: number,
+): Date | null {
+  if (!run.restoreOldDb || !run.swappedAt) return null;
+  return new Date(new Date(run.swappedAt).getTime() + retentionHours * 3_600_000);
+}
+
+/**
+ * Which of the two restore phases a status belongs to.
+ *
+ * `restoring`/`verifying` are the long, online phase; `swapping` is the brief
+ * offline cutover. The split is the whole reason this is not one progress bar.
+ */
+export function restorePhase(
+  status: string | null,
+): 'rebuilding' | 'swapping' | null {
+  if (status === 'restoring' || status === 'verifying') return 'rebuilding';
+  if (status === 'swapping') return 'swapping';
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Small display helper
 // ---------------------------------------------------------------------------
@@ -214,6 +279,10 @@ function DbBackupPageContent() {
     cancelRun,
     deleteRun,
     downloadRun,
+    restoringRun,
+    restorePollState,
+    startRestore,
+    rollbackRestore,
   } = useDbBackup();
 
   const { hasPermission } = usePermissions();
@@ -364,6 +433,43 @@ function DbBackupPageContent() {
     [deleteRun],
   );
 
+  // --- Restore ---------------------------------------------------------------
+  const [restoreTarget, setRestoreTarget] = useState<DbBackupRunDto | null>(null);
+
+  const restoreInFlight =
+    !!restoringRun?.restoreStatus &&
+    RESTORE_ACTIVE_STATUSES.includes(restoringRun.restoreStatus);
+
+  const rollbackTarget = useMemo(() => findRollbackTarget(runs), [runs]);
+  const [rollbackBusy, setRollbackBusy] = useState(false);
+  const [rollbackNotice, setRollbackNotice] = useState<string | null>(null);
+
+  const handleRollback = useCallback(
+    async (run: DbBackupRunDto) => {
+      setActionError(null);
+      setRollbackBusy(true);
+      try {
+        const result = await rollbackRestore(run.id);
+        if (result.mode === 'renamed') {
+          setRollbackNotice(
+            `Rolled back to ${result.restoredDatabase}. The app is restarting — this page will reconnect on its own.`,
+          );
+        } else if (result.mode === 'restore_started') {
+          setRollbackNotice(
+            'No retained database exists in this mode, so a full restore of the pre-restore backup was started instead. This takes hours; progress is shown above.',
+          );
+        } else {
+          setActionError(result.reason);
+        }
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'Rollback failed');
+      } finally {
+        setRollbackBusy(false);
+      }
+    },
+    [rollbackRestore],
+  );
+
   const rowActions = useMemo<DataTableRowAction<DbBackupRunDto>[]>(
     () => [
       {
@@ -378,22 +484,22 @@ function DbBackupPageContent() {
       },
       {
         id: 'restore',
-        label: canRestore
-          ? 'Restore (not yet available)'
-          : 'Restore (requires db_backup:restore)',
+        // `DataTableRowAction.label` is a plain string, not a per-row function,
+        // so the label carries the two REASONS that are page-level (permission,
+        // exclusivity) and names the per-row gate for the rest. A disabled
+        // control that doesn't say why sends an admin hunting through docs.
+        label: !canRestore
+          ? 'Restore — requires the db_backup:restore permission'
+          : restoreInFlight
+            ? 'Restore — unavailable: another restore is already in progress'
+            : 'Restore — completed backups only',
         icon: <RestoreIcon fontSize="small" />,
-        // TODO(#344): attach the restore dialog here — pre-flight results
-        // (CREATEDB, free disk vs. the selected rollback mode, pgvector,
-        // artifact verified, schema compatibility), the two-phase progress
-        // (long scratch-DB rebuild with the app ONLINE, then the brief swap +
-        // restart during which polling is EXPECTED to fail), the active
-        // rollback plan stated before confirming, the post-restore rollback
-        // surface with its expiry, and the guided command block for a failed
-        // capability check. `POST /runs/:id/restore` does not exist yet, so
-        // the action stays disabled rather than opening a dialog that could
-        // only fail.
-        disabled: () => true,
-        onClick: () => undefined,
+        // Gated on `db_backup:restore`, which is deliberately separate from
+        // `db_backup:write`: scheduling a backup is routine, whereas this
+        // renames the live database and restarts the process.
+        disabled: (run) =>
+          restoreBlockedReason(run, { canRestore, restoreInFlight }) !== null,
+        onClick: (run) => setRestoreTarget(run),
       },
       {
         id: 'delete',
@@ -413,7 +519,7 @@ function DbBackupPageContent() {
         onClick: (run) => void handleDelete(run),
       },
     ],
-    [canWrite, canRestore, handleDownload, handleDelete],
+    [canWrite, canRestore, restoreInFlight, handleDownload, handleDelete],
   );
 
   const columns = useMemo(() => buildDbBackupRunColumns(), []);
@@ -589,6 +695,198 @@ function DbBackupPageContent() {
                 ? ` Next scheduled run: ${new Date(nextRunAt).toLocaleString()}.`
                 : ' No run is scheduled.'}
             </Typography>
+          )}
+        </Paper>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Restore & rollback                                                  */}
+        {/* ------------------------------------------------------------------ */}
+        <Paper variant="outlined" sx={{ p: 2.5, mb: 3 }} id="db-backup-restore">
+          <Typography variant="h6" component="h2" sx={{ mb: 1 }}>
+            Restore
+          </Typography>
+
+          {/* Prominent, unconditionally — the scenario this document exists for
+              is the one where this page cannot be reached, so it has to have
+              been seen before then. */}
+          <RunbookLink sx={{ mb: 2 }} />
+
+          {restoreInFlight && restoringRun ? (
+            (() => {
+              const phase = restorePhase(restoringRun.restoreStatus);
+              const swapping =
+                phase === 'swapping' || restorePollState === 'restarting';
+              return (
+                <Box data-testid="restore-progress">
+                  {/* Phase 1 — long, and the app is UP. */}
+                  <Box sx={{ mb: 2 }}>
+                    <Box
+                      sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}
+                    >
+                      <Chip
+                        size="small"
+                        label="1"
+                        color={swapping ? 'success' : 'info'}
+                      />
+                      <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
+                        Restoring into the scratch database
+                        {restoringRun.restoreScratchDb
+                          ? ` (${restoringRun.restoreScratchDb})`
+                          : ''}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color="success"
+                        label="app online"
+                      />
+                    </Box>
+                    <LinearProgress
+                      variant={swapping ? 'determinate' : 'indeterminate'}
+                      value={swapping ? 100 : undefined}
+                      color={swapping ? 'success' : 'primary'}
+                    />
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ mt: 0.5 }}
+                    >
+                      {swapping
+                        ? 'Rebuild finished.'
+                        : `Every vector index is rebuilt from scratch, so this phase runs for hours. MemoriaHub keeps serving from the current database throughout, and cancelling now changes nothing — your live data has not been touched yet.${
+                            restoringRun.restoreStatus === 'verifying'
+                              ? ' Currently verifying the restored copy.'
+                              : ''
+                          }`}
+                    </Typography>
+                  </Box>
+
+                  {/* Phase 2 — seconds, and the app is DOWN. */}
+                  <Box>
+                    <Box
+                      sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}
+                    >
+                      <Chip
+                        size="small"
+                        label="2"
+                        color={swapping ? 'warning' : 'default'}
+                      />
+                      <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>
+                        Swapping databases and restarting
+                      </Typography>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color={swapping ? 'warning' : 'default'}
+                        label="app offline briefly"
+                      />
+                    </Box>
+                    {swapping && <LinearProgress color="warning" />}
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ mt: 0.5 }}
+                    >
+                      {swapping
+                        ? 'Two database renames and a process restart — seconds, not hours.'
+                        : 'Has not started yet.'}
+                    </Typography>
+                  </Box>
+
+                  {/*
+                    The API renames the live database and calls `process.exit(0)`
+                    here, so the poll MUST fail for the length of the restart.
+                    Rendering that as an error would report a failure at the
+                    precise moment the restore is succeeding.
+                  */}
+                  {restorePollState === 'restarting' && (
+                    <Alert severity="info" sx={{ mt: 2 }} data-testid="restore-restarting">
+                      <AlertTitle>Restarting…</AlertTitle>
+                      The server is swapping the database and restarting. It is
+                      expected to be unreachable for a few seconds — this is not
+                      an error. This page keeps checking and will reconnect on
+                      its own.
+                    </Alert>
+                  )}
+
+                  {restoringRun.restoreError && (
+                    <Alert severity="error" sx={{ mt: 2 }}>
+                      {restoringRun.restoreError}
+                    </Alert>
+                  )}
+                </Box>
+              );
+            })()
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No restore is in progress. Start one from the Restore action on a
+              completed backup below.
+            </Typography>
+          )}
+
+          {/* The rollback affordance is the main reason this design is safe to
+              use, so it lives here rather than inside a row menu. */}
+          {rollbackTarget && !restoreInFlight && (
+            <Box sx={{ mt: 2 }} data-testid="rollback-surface">
+              <Divider sx={{ mb: 2 }} />
+              <Alert
+                severity="success"
+                action={
+                  <Button
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    disabled={!canRestore || rollbackBusy}
+                    onClick={() => void handleRollback(rollbackTarget)}
+                  >
+                    {rollbackBusy ? 'Rolling back…' : 'Roll back'}
+                  </Button>
+                }
+              >
+                <AlertTitle>
+                  Restored from backup {rollbackTarget.id.slice(0, 8)}
+                  {rollbackTarget.restoredAt
+                    ? ` on ${new Date(rollbackTarget.restoredAt).toLocaleString()}`
+                    : ''}
+                </AlertTitle>
+                {rollbackTarget.restoreOldDb ? (
+                  <>
+                    Your previous database is retained as{' '}
+                    <code>{rollbackTarget.restoreOldDb}</code>. Rolling back is a
+                    rename plus a restart — <strong>seconds</strong>.
+                    {(() => {
+                      const expiry = rollbackExpiry(
+                        rollbackTarget,
+                        config?.oldDatabaseRetentionHours ?? 168,
+                      );
+                      return expiry ? (
+                        <>
+                          {' '}
+                          It is dropped at{' '}
+                          <strong>{expiry.toLocaleString()}</strong>, after which
+                          rolling back means a full multi-hour restore.
+                        </>
+                      ) : null;
+                    })()}
+                  </>
+                ) : (
+                  <>
+                    No database was retained in this mode. A pre-restore backup
+                    was taken instead, so rolling back runs a full restore —{' '}
+                    <strong>hours</strong>, not seconds.
+                  </>
+                )}
+              </Alert>
+              {rollbackNotice && (
+                <Alert
+                  severity="info"
+                  sx={{ mt: 1 }}
+                  onClose={() => setRollbackNotice(null)}
+                >
+                  {rollbackNotice}
+                </Alert>
+              )}
+            </Box>
           )}
         </Paper>
 
@@ -843,6 +1141,15 @@ function DbBackupPageContent() {
           csvExport={{ filename: 'db-backup-runs' }}
         />
       </Box>
+
+      <DbBackupRestoreDialog
+        open={!!restoreTarget}
+        run={restoreTarget}
+        config={config}
+        restoreInFlight={restoreInFlight}
+        onClose={() => setRestoreTarget(null)}
+        onStart={startRestore}
+      />
 
       <Snackbar
         open={!!successMessage}
