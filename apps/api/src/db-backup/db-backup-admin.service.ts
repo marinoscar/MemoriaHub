@@ -222,9 +222,14 @@ export class DatabaseBackupAdminService {
       return { runId, status: 'running' };
     } catch (err) {
       if (err instanceof DatabaseBackupAlreadyRunningError) {
+        // `activeRunId` MUST go inside `details`. The app-wide
+        // `HttpExceptionFilter` rebuilds the response body from a fixed
+        // allowlist (message, code, details, error, error_description,
+        // startedAt) — a top-level custom field on the payload is silently
+        // dropped and never reaches the client.
         throw new ConflictException({
           message: 'A database backup run is already in progress',
-          activeRunId: err.activeRunId,
+          details: { activeRunId: err.activeRunId },
         });
       }
       throw err;

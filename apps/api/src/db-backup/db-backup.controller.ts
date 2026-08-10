@@ -120,7 +120,17 @@ export class DatabaseBackupController {
   @ApiResponse({
     status: 409,
     description:
-      'A run is already in progress; the body carries the active `runId`.',
+      'A run is already in progress. The active run id is carried in the standard error envelope as `details.activeRunId` (string, or null when the winning run finished before it could be looked up).',
+    schema: {
+      example: {
+        statusCode: 409,
+        code: 'CONFLICT',
+        message: 'A database backup run is already in progress',
+        details: { activeRunId: '3f8d…' },
+        timestamp: '2026-08-10T12:00:00.000Z',
+        path: '/api/admin/db-backup/runs',
+      },
+    },
   })
   async startRun(@CurrentUser() user: RequestUser) {
     return this.service.startRun(user.id);
@@ -232,7 +242,18 @@ export class DatabaseBackupController {
   @ApiResponse({ status: 404, description: 'Run not found.' })
   @ApiResponse({
     status: 409,
-    description: 'Another restore is already in progress.',
+    description:
+      'Another restore is already in progress. The active run id is carried in the standard error envelope as `details.activeRunId`.',
+    schema: {
+      example: {
+        statusCode: 409,
+        code: 'CONFLICT',
+        message: 'A database restore is already in progress (runId=3f8d…)',
+        details: { activeRunId: '3f8d…' },
+        timestamp: '2026-08-10T12:00:00.000Z',
+        path: '/api/admin/db-backup/runs/{id}/restore',
+      },
+    },
   })
   async restore(
     @Param('id', ParseUUIDPipe) id: string,
@@ -290,9 +311,13 @@ function toHttpError(err: unknown): unknown {
     return new NotFoundException(err.message);
   }
   if (err instanceof DatabaseRestoreAlreadyRunningError) {
+    // Inside `details`, not at the top level — see the note on
+    // `DatabaseBackupAdminService.startRun`: `HttpExceptionFilter` forwards
+    // only a fixed set of payload keys, so a top-level `activeRunId` never
+    // reaches the client.
     return new ConflictException({
       message: err.message,
-      activeRunId: err.activeRunId,
+      details: { activeRunId: err.activeRunId },
     });
   }
   if (err instanceof DatabaseRestoreNotAllowedError) {
