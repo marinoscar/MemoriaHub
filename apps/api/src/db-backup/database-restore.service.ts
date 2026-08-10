@@ -113,6 +113,13 @@ import {
   spawnPgRestore,
   spawnPgRestoreListFile,
 } from './pg-restore.util';
+import {
+  compareClientToServer,
+  PG_VERSION_ACTION_ITEM,
+  pgVersionMismatchMessage,
+  readPgClientMajor,
+  readServerMajor,
+} from './pg-version.util';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -512,6 +519,20 @@ export class DatabaseRestoreService {
 
     let capabilityFailed = false;
 
+    // --- capability: pg client version -------------------------------------
+    // DELIBERATELY OUTSIDE the `withAdminConnection` callback below. That
+    // callback's catch treats ANY throw as a blanket admin-connection failure
+    // and pushes a single `capability.admin_connection` check, so a probe run
+    // inside it would be silently swallowed — or, worse, pushed twice on a
+    // partial failure. Run once, here, where it is guaranteed to land exactly
+    // once regardless of whether the cluster is reachable; the server version
+    // comes from `this.prisma` (the app's own live connection) rather than the
+    // admin client, so this stays meaningful even when the maintenance database
+    // is unreachable, which is exactly the case that produces `guided` mode.
+    const versionCheck = await this.checkPgClientVersion();
+    checks.push(versionCheck);
+    if (versionCheck.status === 'blocked') capabilityFailed = true;
+
     try {
       await withAdminConnection(ctx.pg, async (client) => {
         // --- capability: CREATEDB -------------------------------------------
@@ -676,6 +697,77 @@ export class DatabaseRestoreService {
         actionItem: ok ? undefined : 'Free space on the Postgres volume.',
       },
     };
+  }
+
+  /**
+   * `pg_restore` must not be OLDER than the server it writes to (issue #364) —
+   * the same invariant that made the backup side unable to produce an archive
+   * at all on the `postgresql-client-16` image.
+   *
+   * A positively established mismatch is `blocked` AND sets `capabilityFailed`
+   * at the call site, which routes the request into the EXISTING `guided` mode:
+   * the app genuinely cannot drive this restore with the binaries it has, but a
+   * human with a correctly-versioned `pg_restore` still can, and `guided`
+   * already emits exactly that paste-ready command block plus the runbook link.
+   * Inventing a new response shape for it would be a worse outcome than reusing
+   * the one built for "the app can't do it, here is how you do it".
+   *
+   * An `unknown` verdict is a WARNING that does NOT set `capabilityFailed` —
+   * see `pg-version.util.ts`'s policy note: an unreadable version string must
+   * never be the reason a mid-incident restore is refused.
+   */
+  private async checkPgClientVersion(): Promise<PreflightCheck> {
+    const [clientMajor, serverMajor] = await Promise.all([
+      readPgClientMajor(),
+      this.readServerVersionMajor(),
+    ]);
+
+    const verdict = compareClientToServer(clientMajor, serverMajor);
+
+    if (verdict === 'client_older') {
+      return {
+        key: 'capability.pg_client_version',
+        label: 'PostgreSQL client version',
+        status: 'blocked',
+        message: pgVersionMismatchMessage(clientMajor!, serverMajor!),
+        actionItem: PG_VERSION_ACTION_ITEM,
+      };
+    }
+
+    if (verdict === 'unknown') {
+      return {
+        key: 'capability.pg_client_version',
+        label: 'PostgreSQL client version',
+        status: 'warning',
+        message:
+          `Could not compare pg_restore and server major versions (client=${clientMajor ?? 'unknown'}, ` +
+          `server=${serverMajor ?? 'unknown'}); proceeding — pg_restore reports its own error if they are incompatible.`,
+        actionItem: PG_VERSION_ACTION_ITEM,
+      };
+    }
+
+    return {
+      key: 'capability.pg_client_version',
+      label: 'PostgreSQL client version',
+      status: 'ok',
+      message: `pg_restore major ${clientMajor} >= server major ${serverMajor}`,
+    };
+  }
+
+  /**
+   * `server_version_num` (e.g. 170010) reduced to its major, via the app's own
+   * Prisma connection rather than the admin client — see the call site's note.
+   * Any failure degrades to `null`, i.e. an `unknown` verdict.
+   */
+  private async readServerVersionMajor(): Promise<number | null> {
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ num: number }>>`
+        SELECT current_setting('server_version_num')::int AS num
+      `;
+      return readServerMajor(rows?.[0]?.num ?? null);
+    } catch {
+      return null;
+    }
   }
 
   private async checkReplicas(

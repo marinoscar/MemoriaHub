@@ -95,7 +95,7 @@ Read this section in full before running any restore command. Each item below pr
 
 The dump contains `CREATE EXTENSION vector` (and, for the `faces` table, a `vector(128)` column plus HNSW indexes; for `media_item_embedding`, `vector(1536)`; for `media_visual_embedding`, `vector(512)`). Restoring into a vanilla `postgres` Docker image or a managed Postgres instance without the pgvector extension **fails outright** on the `CREATE EXTENSION vector` statement, and `pg_restore` will report errors for every downstream object that depends on a `vector` column type.
 
-**Your restore target must be `pgvector/pgvector:pg16` (the same image this repo's Docker Compose uses for its own database) or a managed Postgres offering that has pgvector pre-installed/enabled** (e.g. AWS RDS for PostgreSQL 16 with the `vector` extension allow-listed, Supabase, Neon with the pgvector add-on). Check before you start, not after a partial restore:
+**Your restore target must be `pgvector/pgvector:pg17` (the same image this repo's Docker Compose uses for its own database) or a managed Postgres offering that has pgvector pre-installed/enabled** (e.g. AWS RDS for PostgreSQL 17 with the `vector` extension allow-listed, Supabase, Neon with the pgvector add-on). Check before you start, not after a partial restore:
 
 ```bash
 psql "<target-connection-string>" -c "SELECT * FROM pg_available_extensions WHERE name = 'vector';"
@@ -105,14 +105,14 @@ If that returns zero rows, stop — you have the wrong target image/instance.
 
 ### 2.2 Client version must be >= server version
 
-The server is Postgres 16 (`pgvector/pgvector:pg16`). Use `pg_restore` from a **16.x or newer** client toolset. Restoring with an older client against a newer server is unsupported by Postgres and can fail in confusing, partial ways. Check your client version:
+The server is Postgres 17 (`pgvector/pgvector:pg17`). Use `pg_restore` from a **17.x or newer** client toolset. Restoring with an older client against a newer server is unsupported by Postgres and can fail in confusing, partial ways. Check your client version:
 
 ```bash
 pg_restore --version
-# Expect: pg_restore (PostgreSQL) 16.x or newer
+# Expect: pg_restore (PostgreSQL) 17.x or newer
 ```
 
-If you're missing it, install `postgresql-client-16` (Debian/Ubuntu) or the equivalent for your OS, or run `pg_restore` from inside a `pgvector/pgvector:pg16` container against the target host.
+If you're missing it, install `postgresql-client-17` (Debian/Ubuntu, via the PGDG apt repo — Debian's own archive only ever carries the current default major) or the equivalent for your OS, or run `pg_restore` from inside a `pgvector/pgvector:pg17` container against the target host.
 
 ### 2.3 The restore will take far longer than the backup did
 

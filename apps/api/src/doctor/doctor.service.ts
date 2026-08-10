@@ -24,6 +24,15 @@ import { resolveWorkerMode } from '../enrichment/enrichment-job.worker';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import { DEFAULT_FACE_VECTOR_BACKEND } from '../face/face-matching.service';
+// Pure utility import — `pg-version.util.ts` has no Nest providers and no
+// module of its own, so this adds NO module edge and DoctorModule is unchanged.
+import {
+  compareClientToServer,
+  PG_VERSION_ACTION_ITEM,
+  pgVersionMismatchMessage,
+  readPgClientMajor,
+  readServerMajor,
+} from '../db-backup/pg-version.util';
 import {
   DoctorCheck,
   DoctorCheckStatus,
@@ -96,6 +105,11 @@ export class DoctorService {
       { key: 'core.database', label: 'Database connectivity', fn: () => this.checkDatabase() },
       { key: 'core.migrations', label: 'Migrations applied', fn: () => this.checkMigrations() },
       { key: 'core.pgvector', label: 'pgvector extension', fn: () => this.checkPgvector() },
+      {
+        key: 'core.pgClientVersion',
+        label: 'PostgreSQL client version',
+        fn: () => this.checkPgClientVersion(),
+      },
       { key: 'core.secretsKey', label: 'Secrets encryption key', fn: () => this.checkSecretsKey() },
       { key: 'core.appUrl', label: 'App URL', fn: () => this.checkAppUrl() },
       // Auth
@@ -196,7 +210,14 @@ export class DoctorService {
       {
         key: 'core',
         label: 'Core',
-        checkKeys: ['core.database', 'core.migrations', 'core.pgvector', 'core.secretsKey', 'core.appUrl'],
+        checkKeys: [
+          'core.database',
+          'core.migrations',
+          'core.pgvector',
+          'core.pgClientVersion',
+          'core.secretsKey',
+          'core.appUrl',
+        ],
       },
       {
         key: 'auth',
@@ -405,6 +426,73 @@ export class DoctorService {
       return { status: 'ok', message: 'pgvector extension and embedding table present.' };
     } catch (err) {
       return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * `pg_dump`/`pg_restore` must not be OLDER than the server (issue #364).
+   *
+   * This check exists because the invariant was previously enforced only by a
+   * comment in `apps/api/Dockerfile`, which is how an image pinned to
+   * `postgresql-client-16` shipped against a 17.10 server — leaving the whole
+   * database-backup engine unable to produce a single archive, with nothing
+   * anywhere reporting why. Surfacing it here means an operator finds it on a
+   * routine sweep instead of during a restore they urgently need.
+   */
+  private async checkPgClientVersion(): Promise<CheckOutcome> {
+    const [clientMajor, serverMajor] = await Promise.all([
+      readPgClientMajor(),
+      this.readServerVersionMajor(),
+    ]);
+
+    // No readable client binary: database backup/restore cannot run, but the
+    // application itself is entirely unaffected — hence a warning rather than
+    // an error, and a message that says so explicitly so nobody escalates it.
+    if (clientMajor === null) {
+      return {
+        status: 'warning',
+        message:
+          'Could not read the pg_dump version (binary missing from PATH or unreadable). ' +
+          'Database backup and restore are unavailable; nothing else is affected.',
+        actionItem: PG_VERSION_ACTION_ITEM,
+      };
+    }
+
+    const verdict = compareClientToServer(clientMajor, serverMajor);
+
+    if (verdict === 'client_older') {
+      return {
+        status: 'error',
+        message: pgVersionMismatchMessage(clientMajor, serverMajor!),
+        actionItem: PG_VERSION_ACTION_ITEM,
+      };
+    }
+
+    // Client readable but the server major was not — the app's own database
+    // connection is failing, which `core.database` already reports; do not
+    // duplicate that as a second error here.
+    if (verdict === 'unknown') {
+      return {
+        status: 'warning',
+        message: `pg_dump is PostgreSQL ${clientMajor}, but the server version could not be read for comparison.`,
+      };
+    }
+
+    return {
+      status: 'ok',
+      message: `pg_dump ${clientMajor} >= server ${serverMajor}.`,
+    };
+  }
+
+  /** `server_version_num` (e.g. 170010) reduced to its major; null on failure. */
+  private async readServerVersionMajor(): Promise<number | null> {
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ num: number }>>`
+        SELECT current_setting('server_version_num')::int AS num
+      `;
+      return readServerMajor(rows[0]?.num ?? null);
+    } catch {
+      return null;
     }
   }
 

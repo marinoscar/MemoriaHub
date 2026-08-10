@@ -306,7 +306,7 @@ each laptop → 1 server + 2 + 2 = 5 concurrent workers, all coordinated safely 
   thumbnail upload PUT). Never add an S3 client to the CLI.
 - **AI-proxy types (auto_tagging/geocode)** offload little server CPU (the cost is the external
   provider call the API still makes). Treat them as server-preferred / opt-in.
-- **pgvector required** — the DB must be the `pgvector/pgvector:pg16` image for the 512-d/1024-d
+- **pgvector required** — the DB must be the `pgvector/pgvector:pg17` image for the 512-d/1024-d
   embedding columns and KNN.
 
 ---

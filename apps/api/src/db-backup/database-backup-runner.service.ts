@@ -15,6 +15,13 @@ import {
   spawnPgDump,
   spawnPgRestoreList,
 } from './pg-dump.util';
+import {
+  compareClientToServer,
+  PG_VERSION_ACTION_ITEM,
+  pgVersionMismatchMessage,
+  readPgClientMajor,
+  readServerMajor,
+} from './pg-version.util';
 
 /**
  * How often the run's `lastHeartbeatAt` / `bytesWritten` are refreshed while
@@ -252,6 +259,12 @@ export class DatabaseBackupRunnerService {
     });
 
     const pg = this.pgConnection();
+
+    // Step 4a — fail fast on an incompatible client (issue #364). Cheap, and it
+    // runs BEFORE a single byte is dumped: without it the same mismatch surfaces
+    // as an opaque `pg_dump exited with code 1` after a storage key has already
+    // been claimed and a partial object possibly written.
+    await this.assertPgClientNotOlderThanServer();
 
     const { sizeBytes, checksumSha256 } = await this.dumpAndUpload({
       runId,
@@ -573,6 +586,69 @@ export class DatabaseBackupRunnerService {
   // -------------------------------------------------------------------------
   // Metadata helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Guard the `client major >= server major` invariant `pg_dump` enforces
+   * (issue #364).
+   *
+   * THROWS on a positively established mismatch. `executeRun`'s caller in
+   * `startBackup` routes any throw through `markFailed`, which truncates the
+   * message into `DatabaseBackupRun.lastError` — so the actionable "rebuild the
+   * image" text is what an admin sees on the run row, rather than pg_dump's
+   * terse exit code.
+   *
+   * An `unknown` verdict WARNS AND PROCEEDS, per `pg-version.util.ts`'s policy:
+   * an unparseable version string must never be the reason a backup did not
+   * happen, and a genuinely incompatible pair still fails loudly inside
+   * `pg_dump` moments later.
+   */
+  private async assertPgClientNotOlderThanServer(): Promise<void> {
+    const [clientMajor, serverMajor] = await Promise.all([
+      readPgClientMajor(),
+      this.readServerVersionMajor(),
+    ]);
+
+    const verdict = compareClientToServer(clientMajor, serverMajor);
+
+    if (verdict === 'client_older') {
+      throw new Error(
+        `${pgVersionMismatchMessage(clientMajor!, serverMajor!)} ${PG_VERSION_ACTION_ITEM}`,
+      );
+    }
+
+    if (verdict === 'unknown') {
+      this.logger.warn(
+        'Could not compare pg_dump and server major versions ' +
+          `(client=${clientMajor ?? 'unknown'}, server=${serverMajor ?? 'unknown'}); ` +
+          'proceeding with the backup — pg_dump reports its own error if they are incompatible.',
+      );
+      return;
+    }
+
+    this.logger.debug(
+      `pg_dump major ${clientMajor} >= server major ${serverMajor}`,
+    );
+  }
+
+  /**
+   * `server_version_num` (e.g. 170010) reduced to its major.
+   *
+   * Same shape as {@link readDbVersion}: any failure degrades to `null`, which
+   * the comparison above treats as `unknown` rather than as a reason to fail.
+   */
+  private async readServerVersionMajor(): Promise<number | null> {
+    try {
+      const rows = await this.prisma.$queryRaw<Array<{ num: number }>>`
+        SELECT current_setting('server_version_num')::int AS num
+      `;
+      return readServerMajor(rows?.[0]?.num ?? null);
+    } catch (err) {
+      this.logger.warn(
+        `Could not read server_version_num: ${errorMessage(err)}`,
+      );
+      return null;
+    }
+  }
 
   /** `SELECT version()` — records which server produced the archive. */
   private async readDbVersion(): Promise<string | null> {

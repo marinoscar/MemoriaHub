@@ -124,7 +124,7 @@ Example response (`POST /api/admin/doctor/run`):
 
 ## 4. Check Catalog
 
-Twenty-five checks across eight sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
+Thirty checks across nine sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
 
 ### Core (`core`)
 
@@ -132,7 +132,8 @@ Twenty-five checks across eight sections, defined in `DoctorService.runDiagnosti
 |-----------|-------|-------------------|----------------------------------|
 | `core.database` | Database connectivity | `SELECT 1` against Postgres via Prisma | `error` — "Verify POSTGRES_* env vars and that the database is reachable." |
 | `core.migrations` | Migrations applied | `_prisma_migrations` has no row with `finished_at IS NULL` | `error` — "Run `npx prisma migrate deploy`." |
-| `core.pgvector` | pgvector extension | `pg_extension` contains `vector` AND `to_regclass('public.media_item_embedding')` resolves | `error` — "Use a pgvector-capable Postgres image (pgvector/pgvector:pg16) and re-run migrations; semantic search is unavailable without it." |
+| `core.pgvector` | pgvector extension | `pg_extension` contains `vector` AND `to_regclass('public.media_item_embedding')` resolves | `error` — "Use a pgvector-capable Postgres image (pgvector/pgvector:pg17) and re-run migrations; semantic search is unavailable without it." |
+| `core.pgClientVersion` | PostgreSQL client version | `pg_dump --version` major vs. `server_version_num` major — `pg_dump` refuses to dump a server newer than itself (issue #364) | `error` when the client is positively older than the server; `warning` when `pg_dump` is missing from PATH (backup/restore unavailable, nothing else affected) or the server version could not be read; action item — "Rebuild the API image with postgresql-client-17 (or newer) — see apps/api/Dockerfile." |
 | `core.secretsKey` | Secrets encryption key | `SECRETS_ENCRYPTION_KEY` is set and base64-decodes to exactly 32 bytes | `error` — "Set SECRETS_ENCRYPTION_KEY to a base64-encoded 32-byte key (openssl rand -base64 32)." |
 | `core.appUrl` | App URL | `APP_URL` is set; warns if it still contains `localhost` while `NODE_ENV=production` | `warning` (both branches — unset, or localhost-in-prod) |
 

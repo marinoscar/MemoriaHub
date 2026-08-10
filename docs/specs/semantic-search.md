@@ -38,7 +38,7 @@ Semantic search is **optional and additive**:
 
 ## 2. Infrastructure Prerequisite
 
-Semantic search requires the **pgvector** Postgres extension. The database image must be `pgvector/pgvector:pg16` (or equivalent) rather than the stock `postgres:16-alpine`.
+Semantic search requires the **pgvector** Postgres extension. The database image must be `pgvector/pgvector:pg17` (or equivalent) rather than the stock `postgres:17-alpine`.
 
 The `infra/compose/test.compose.yml` was updated to use this image for the integration test database. The development and production compose files must also use a pgvector-capable image before enabling the embedding feature.
 
