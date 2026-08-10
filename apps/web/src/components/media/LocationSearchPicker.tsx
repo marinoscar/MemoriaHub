@@ -2,10 +2,16 @@
  * LocationSearchPicker — a self-contained location picker that bundles:
  *   1. A debounced place-search Autocomplete (with a graceful 503 fallback).
  *   2. An interactive LocationPickerMap for dropping/dragging a pin.
- *   3. A reverse-geocode preview box for the currently selected coordinate.
+ *   3. A reverse-geocode CONFIRM ROW for the currently selected coordinate.
  *
  * It is a controlled component: the parent owns the `value` coordinate and is
- * notified of changes through `onChange`. All search + preview state is internal.
+ * notified of changes through `onChange`. All search + confirm state is internal.
+ *
+ * The confirm row is a PRESENTATION layer over the reverse-geocode state that
+ * already existed here (same single lookup, same `lastGeocodedRef` guard): it
+ * promotes what used to be a faint caption into a bordered row that names the
+ * address being committed, with an explicit resolving state and an explicit
+ * "no address found" fallback so a coordinate-only pin never looks broken.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -18,7 +24,7 @@ import {
   InputAdornment,
   TextField,
 } from '@mui/material';
-import { Search as SearchIcon } from '@mui/icons-material';
+import { Search as SearchIcon, Place as PlaceIcon } from '@mui/icons-material';
 import { LocationPickerMap } from './LocationPickerMap';
 import { searchPlaces, reverseGeocode } from '../../services/media';
 import type { GeoSearchResult, GeoReverseResult } from '../../types/media';
@@ -30,7 +36,18 @@ interface LocationSearchPickerProps {
   center?: [number, number]; // recenters map when a search result is picked
   height?: number; // map height, default 280
   disabled?: boolean; // disables the autocomplete during save
-  showPreview?: boolean; // reverse-geocode preview box, default true
+  showPreview?: boolean; // reverse-geocode confirm row, default true
+  /**
+   * Where the map should OPEN when `value` is null (the caller's best guess:
+   * the item's own coords, an inferred candidate, …). Framing hint only.
+   */
+  initialCenter?: { lat: number; lng: number };
+  /** Mouse-wheel zoom on the map. Default true for this picker. */
+  scrollWheelZoom?: boolean;
+  /** Explicit "Use my location" also sets the coordinate. Default true. */
+  geolocateSetsValue?: boolean;
+  /** Muted draggable pin at the map centre while no coordinate is set. Default true. */
+  showPlaceholderMarker?: boolean;
 }
 
 export function LocationSearchPicker({
@@ -40,6 +57,10 @@ export function LocationSearchPicker({
   height = 280,
   disabled = false,
   showPreview = true,
+  initialCenter,
+  scrollWheelZoom = true,
+  geolocateSetsValue = true,
+  showPlaceholderMarker = true,
 }: LocationSearchPickerProps) {
   const [inputValue, setInputValue] = useState('');
   const [options, setOptions] = useState<GeoSearchResult[]>([]);
@@ -214,24 +235,58 @@ export function LocationSearchPicker({
         onChange={onChange}
         height={height}
         center={mapCenter ?? undefined}
+        initialCenter={initialCenter}
+        scrollWheelZoom={scrollWheelZoom}
+        geolocateSetsValue={geolocateSetsValue}
+        showPlaceholderMarker={showPlaceholderMarker}
       />
 
-      {/* Reverse geocode preview */}
-      {showPreview && (geoLoading || geoLabel || value) && (
-        <Box sx={{ mt: 1.5, p: 1.5, backgroundColor: 'action.hover', borderRadius: 1 }}>
+      {/* Confirm row — names the address about to be committed. */}
+      {showPreview && (geoLoading || value) && (
+        <Box
+          data-testid="location-confirm-row"
+          sx={{
+            mt: 1.5,
+            p: 1.5,
+            border: 1,
+            borderColor: 'divider',
+            borderRadius: 1,
+            backgroundColor: 'action.hover',
+            maxWidth: '100%',
+            overflow: 'hidden',
+          }}
+        >
           {geoLoading ? (
             <Stack direction="row" sx={{ alignItems: 'center' }} spacing={1}>
-              <CircularProgress size={14} />
-              <Typography variant="caption">Looking up location...</Typography>
-            </Stack>
-          ) : value ? (
-            <>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                Pin: {value.lat.toFixed(5)}, {value.lng.toFixed(5)}
+              <CircularProgress size={16} />
+              <Typography variant="body2" color="text.secondary">
+                Finding address…
               </Typography>
-              {geoLabel && <Typography variant="body2" sx={{ fontWeight: 500 }}>{geoLabel}</Typography>}
-            </>
-          ) : null}
+            </Stack>
+          ) : (
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start', minWidth: 0 }}>
+              <PlaceIcon fontSize="small" color="primary" sx={{ mt: '2px', flexShrink: 0 }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography
+                  variant="body2"
+                  sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}
+                >
+                  {geoLabel
+                    ? `Use this location: ${geoLabel}`
+                    : 'Coordinates only — no address found'}
+                </Typography>
+                {value && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', overflowWrap: 'anywhere' }}
+                  >
+                    {value.lat.toFixed(5)}, {value.lng.toFixed(5)}
+                  </Typography>
+                )}
+              </Box>
+            </Stack>
+          )}
         </Box>
       )}
     </Box>

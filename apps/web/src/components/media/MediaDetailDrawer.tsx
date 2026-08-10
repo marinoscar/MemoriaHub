@@ -70,7 +70,11 @@ import type { MediaTagStatusType } from '../../services/tagging';
 import { useMediaMetadata } from '../../hooks/useMediaMetadata';
 import type { MediaMetadataStatusType } from '../../services/metadata';
 import { rerunThumbnail } from '../../services/thumbnail';
-import { useSuggestLocation, useItemAutoAppliedSuggestion } from '../../hooks/useLocationSuggestions';
+import {
+  useSuggestLocation,
+  useItemAutoAppliedSuggestion,
+  useItemLocationCandidate,
+} from '../../hooks/useLocationSuggestions';
 import { revertLocationSuggestion } from '../../services/locationSuggestions';
 
 // ---------------------------------------------------------------------------
@@ -484,6 +488,17 @@ export function MediaDetailDrawer({
     item?.circleId ?? '',
     item?.id ?? '',
     isInferred,
+  );
+
+  // Framing hint for the inline location picker. Only fetched while the picker
+  // is actually open AND the item has no coordinates of its own — the rung
+  // above this one in the ladder.
+  const itemHasCoords =
+    (fullItem ?? item)?.takenLat !== null && (fullItem ?? item)?.takenLng !== null;
+  const { candidate: inferredCandidate } = useItemLocationCandidate(
+    item?.circleId ?? '',
+    item?.id ?? '',
+    locationEditOpen && !itemHasCoords,
   );
 
   const handleSuggestLocation = useCallback(() => {
@@ -906,6 +921,20 @@ export function MediaDetailDrawer({
                 displayItem.takenLat !== null && displayItem.takenLng !== null
                   ? [displayItem.takenLat, displayItem.takenLng]
                   : undefined
+              }
+              /*
+               * Opening frame, in priority order:
+               *   1. the item's own coordinates,
+               *   2. its pending Location-Inference candidate,
+               *   3. navigator.geolocation — handled inside LocationPickerMap's
+               *      recenter-only on-mount probe, which runs precisely when
+               *      neither of the above is supplied,
+               *   4. the map's existing world-view default.
+               */
+              initialCenter={
+                displayItem.takenLat !== null && displayItem.takenLng !== null
+                  ? { lat: displayItem.takenLat, lng: displayItem.takenLng }
+                  : inferredCandidate ?? undefined
               }
             />
             {locationError && <Alert severity="error" sx={{ mt: 1 }}>{locationError}</Alert>}

@@ -49,7 +49,7 @@ vi.mock('leaflet', () => {
 vi.mock('react-leaflet', () => {
   // Marker exposes the icon html as a data attribute so the icon-SVG suite
   // can verify SVG content without a real Leaflet DOM.
-  const Marker = ({ position, icon, children, draggable, eventHandlers }: any) => {
+  const Marker = ({ position, icon, children, draggable, opacity, eventHandlers }: any) => {
     const iconHtml =
       icon && icon.options && typeof icon.options.html === 'string'
         ? icon.options.html
@@ -60,18 +60,25 @@ vi.mock('react-leaflet', () => {
         data-position={JSON.stringify(position)}
         data-icon-html={iconHtml}
         data-draggable={draggable ? 'true' : 'false'}
+        data-opacity={opacity === undefined ? '' : String(opacity)}
         onClick={() => eventHandlers?.click?.()}
+        // Double-click stands in for a Leaflet dragend so tests can exercise
+        // the drag path without a real Leaflet DOM.
+        onDoubleClick={() =>
+          eventHandlers?.dragend?.({ target: { getLatLng: () => ({ lat: 40.7, lng: -74 }) } })
+        }
       >
         {children}
       </div>
     );
   };
 
-  const MapContainer = ({ children, center, zoom, style }: any) => (
+  const MapContainer = ({ children, center, zoom, style, scrollWheelZoom }: any) => (
     <div
       data-testid="map-container"
       data-center={JSON.stringify(center)}
       data-zoom={zoom}
+      data-scroll-wheel-zoom={String(scrollWheelZoom)}
       style={style}
     >
       {children}
@@ -139,10 +146,75 @@ describe('LocationPickerMap', () => {
       expect(tile.getAttribute('data-url')).toContain('openstreetmap.org');
     });
 
-    it('should NOT render a Marker when value is null', () => {
+    // Issue #376 fix 2: a null value used to render NO marker at all, leaving
+    // nothing to grab and the click affordance undiscoverable.
+    it('should render a muted DRAGGABLE placeholder Marker when value is null', () => {
       const onChange = vi.fn();
       render(<LocationPickerMap value={null} onChange={onChange} />);
+      const marker = screen.getByTestId('marker');
+      expect(marker).toBeInTheDocument();
+      expect(marker.getAttribute('data-draggable')).toBe('true');
+      // Muted styling — an opacity below 1 marks it as "not chosen yet".
+      const opacity = Number(marker.getAttribute('data-opacity'));
+      expect(opacity).toBeGreaterThan(0);
+      expect(opacity).toBeLessThan(1);
+    });
+
+    it('should place the placeholder Marker at the map centre when value is null', () => {
+      const onChange = vi.fn();
+      render(
+        <LocationPickerMap
+          value={null}
+          onChange={onChange}
+          initialCenter={{ lat: 9.93, lng: -84.09 }}
+        />,
+      );
+      const marker = screen.getByTestId('marker');
+      expect(JSON.parse(marker.getAttribute('data-position') ?? '[]')).toEqual([9.93, -84.09]);
+    });
+
+    it('should report a coordinate when the placeholder Marker is dragged', async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<LocationPickerMap value={null} onChange={onChange} />);
+
+      await user.dblClick(screen.getByTestId('marker'));
+
+      expect(onChange).toHaveBeenCalledWith({ lat: 40.7, lng: -74 });
+    });
+
+    it('should render the placeholder Marker with the inline-SVG defaultIcon', () => {
+      const onChange = vi.fn();
+      render(<LocationPickerMap value={null} onChange={onChange} />);
+      const iconHtml = screen.getByTestId('marker').getAttribute('data-icon-html') ?? '';
+      expect(iconHtml).toContain('<svg');
+      expect(iconHtml).not.toContain('.png');
+    });
+
+    // The three non-picker call sites (SearchPanel, ActionParamEditor,
+    // ConditionValueEditor) opt out, restoring the pre-#376 "no marker at all"
+    // look so they stay visually unchanged.
+    it('should render NO Marker when value is null and showPlaceholderMarker is false', () => {
+      const onChange = vi.fn();
+      render(
+        <LocationPickerMap value={null} onChange={onChange} showPlaceholderMarker={false} />,
+      );
       expect(screen.queryByTestId('marker')).not.toBeInTheDocument();
+    });
+
+    it('should still render the real Marker when a value exists and the placeholder is off', () => {
+      const onChange = vi.fn();
+      render(
+        <LocationPickerMap
+          value={{ lat: 9.93, lng: -84.09 }}
+          onChange={onChange}
+          showPlaceholderMarker={false}
+        />,
+      );
+      const marker = screen.getByTestId('marker');
+      expect(JSON.parse(marker.getAttribute('data-position') ?? '[]')).toEqual([9.93, -84.09]);
+      // The real pin is never muted.
+      expect(marker.getAttribute('data-opacity')).toBe('');
     });
 
     it('should render a Marker when value is provided', () => {
@@ -233,6 +305,162 @@ describe('LocationPickerMap', () => {
       );
       const mapEl = container.querySelector('[style*="height"]');
       expect(mapEl?.getAttribute('style')).toContain('500px');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #376 fix 3 — initialCenter framing hint
+  // -------------------------------------------------------------------------
+  describe('initialCenter', () => {
+    it('opens on initialCenter (zoomed in) when there is no value', () => {
+      const onChange = vi.fn();
+      render(
+        <LocationPickerMap
+          value={null}
+          onChange={onChange}
+          initialCenter={{ lat: 48.8566, lng: 2.3522 }}
+        />,
+      );
+      const container = screen.getByTestId('map-container');
+      expect(JSON.parse(container.getAttribute('data-center') ?? '[]')).toEqual([48.8566, 2.3522]);
+      expect(container.getAttribute('data-zoom')).not.toBe('2');
+    });
+
+    it('is outranked by an actual value', () => {
+      const onChange = vi.fn();
+      render(
+        <LocationPickerMap
+          value={{ lat: 10, lng: 20 }}
+          onChange={onChange}
+          initialCenter={{ lat: 48.8566, lng: 2.3522 }}
+        />,
+      );
+      const container = screen.getByTestId('map-container');
+      expect(JSON.parse(container.getAttribute('data-center') ?? '[]')).toEqual([10, 20]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #376 fix 4 — scrollWheelZoom is a prop, default on
+  // -------------------------------------------------------------------------
+  describe('scrollWheelZoom', () => {
+    it('defaults to true', () => {
+      render(<LocationPickerMap value={null} onChange={vi.fn()} />);
+      expect(screen.getByTestId('map-container').getAttribute('data-scroll-wheel-zoom')).toBe(
+        'true',
+      );
+    });
+
+    it('can be turned off by the caller', () => {
+      render(<LocationPickerMap value={null} onChange={vi.fn()} scrollWheelZoom={false} />);
+      expect(screen.getByTestId('map-container').getAttribute('data-scroll-wheel-zoom')).toBe(
+        'false',
+      );
+    });
+  });
+});
+
+// ============================================================================
+// Issue #376 fix 1 — "Use my location"
+// ============================================================================
+
+describe('LocationPickerMap — Use my location', () => {
+  const getCurrentPosition = vi.fn();
+
+  /** Position fixture used by the stubbed geolocation API. */
+  function makePosition(overrides: Partial<{ latitude: number; longitude: number }> = {}) {
+    return { coords: { latitude: 9.9281, longitude: -84.0907, ...overrides } };
+  }
+
+  /** GeolocationPositionError-shaped fixture. */
+  function makeGeoError(overrides: Partial<{ code: number }> = {}) {
+    return { code: 1, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3, ...overrides };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCurrentPosition.mockImplementation((success: (p: unknown) => void) => {
+      success(makePosition());
+    });
+    Object.defineProperty(globalThis.navigator, 'geolocation', {
+      value: { getCurrentPosition },
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  it('does NOT call onChange from the on-mount auto-locate', () => {
+    const onChange = vi.fn();
+    render(<LocationPickerMap value={null} onChange={onChange} />);
+
+    // The recenter-only probe ran…
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    // …but must never overwrite/author a coordinate.
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('calls onChange on an explicit press when geolocateSetsValue is true (default)', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<LocationPickerMap value={null} onChange={onChange} />);
+
+    await user.click(screen.getByRole('button', { name: /use my location/i }));
+
+    expect(onChange).toHaveBeenCalledWith({ lat: 9.9281, lng: -84.0907 });
+  });
+
+  it('does NOT call onChange on an explicit press when geolocateSetsValue is false', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <LocationPickerMap value={null} onChange={onChange} geolocateSetsValue={false} />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /use my location/i }));
+
+    // Still recentered (the probe ran) but the value is untouched.
+    expect(getCurrentPosition).toHaveBeenCalledTimes(2);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('surfaces MapControls-style copy when permission is denied', async () => {
+    const user = userEvent.setup();
+    getCurrentPosition.mockImplementation(
+      (_success: unknown, failure: (e: unknown) => void) => {
+        failure(makeGeoError({ code: 1 }));
+      },
+    );
+    render(<LocationPickerMap value={null} onChange={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: /use my location/i }));
+
+    expect(await screen.findByText(/location permission denied/i)).toBeInTheDocument();
+  });
+
+  it('surfaces the generic failure copy for a non-permission error', async () => {
+    const user = userEvent.setup();
+    getCurrentPosition.mockImplementation(
+      (_success: unknown, failure: (e: unknown) => void) => {
+        failure(makeGeoError({ code: 3 }));
+      },
+    );
+    render(<LocationPickerMap value={null} onChange={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: /use my location/i }));
+
+    expect(await screen.findByText(/could not determine your location/i)).toBeInTheDocument();
+  });
+
+  it('stays silent when the on-mount probe fails', async () => {
+    getCurrentPosition.mockImplementation(
+      (_success: unknown, failure: (e: unknown) => void) => {
+        failure(makeGeoError({ code: 1 }));
+      },
+    );
+    render(<LocationPickerMap value={null} onChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/location permission denied/i)).not.toBeInTheDocument();
     });
   });
 });

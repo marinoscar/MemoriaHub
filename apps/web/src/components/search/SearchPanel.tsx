@@ -404,6 +404,16 @@ export function SearchPanel({ open, onClose, circleId, onSubmit }: SearchPanelPr
                     value={pinLocation}
                     onChange={(latlng) => setPinLocation(latlng)}
                     height={260}
+                    // Search filters must only change when the user places a
+                    // pin, never as a side effect of "Use my location", and
+                    // wheel-zoom would hijack scrolling inside this panel.
+                    // The placeholder pin is suppressed too: this panel must
+                    // stay visually identical (issue #376), and its own
+                    // "Click the map to drop a pin" caption already carries
+                    // the affordance.
+                    geolocateSetsValue={false}
+                    scrollWheelZoom={false}
+                    showPlaceholderMarker={false}
                   />
                   {!pinLocation && (
                     <Typography

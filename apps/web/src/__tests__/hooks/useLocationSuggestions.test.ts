@@ -36,6 +36,7 @@ import {
   useLocationSuggestions,
   useSuggestLocation,
   useItemAutoAppliedSuggestion,
+  useItemLocationCandidate,
 } from '../../hooks/useLocationSuggestions';
 
 // ---------------------------------------------------------------------------
@@ -758,5 +759,76 @@ describe('useItemAutoAppliedSuggestion', () => {
 
       expect(result.current.suggestionId).toBe('suggestion-b');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useItemLocationCandidate (issue #376) — read-only framing hint for the
+// location picker: resolves the item's PENDING suggestion coordinates so the
+// map can open on them instead of a world view. It must never accept anything.
+// ---------------------------------------------------------------------------
+
+describe('useItemLocationCandidate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('queries the pending suggestion for the item and exposes its coordinates', async () => {
+    mockListLocationSuggestions.mockResolvedValue(makeListResponse([makeSummary()]));
+
+    const { result } = renderHook(() =>
+      useItemLocationCandidate('circle-1', 'media-1', true),
+    );
+
+    await waitFor(() => {
+      expect(result.current.candidate).toEqual({ lat: 9.9281, lng: -84.0907 });
+    });
+    expect(mockListLocationSuggestions).toHaveBeenCalledWith({
+      circleId: 'circle-1',
+      mediaItemId: 'media-1',
+      status: 'pending',
+      page: 1,
+      pageSize: 1,
+    });
+    // Read-only: nothing is accepted, rejected, or reverted.
+    expect(mockAcceptLocationSuggestion).not.toHaveBeenCalled();
+    expect(mockRejectLocationSuggestion).not.toHaveBeenCalled();
+  });
+
+  it('resolves to null when the item has no pending suggestion', async () => {
+    mockListLocationSuggestions.mockResolvedValue(makeListResponse([]));
+
+    const { result } = renderHook(() =>
+      useItemLocationCandidate('circle-1', 'media-1', true),
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.candidate).toBeNull();
+  });
+
+  it('does not query at all when disabled or when an id is missing', () => {
+    const { result } = renderHook(() =>
+      useItemLocationCandidate('circle-1', 'media-1', false),
+    );
+    expect(mockListLocationSuggestions).not.toHaveBeenCalled();
+    expect(result.current.candidate).toBeNull();
+
+    renderHook(() => useItemLocationCandidate('', 'media-1', true));
+    expect(mockListLocationSuggestions).not.toHaveBeenCalled();
+  });
+
+  it('swallows a failed lookup — a missing hint is not an error', async () => {
+    mockListLocationSuggestions.mockRejectedValue(new Error('boom'));
+
+    const { result } = renderHook(() =>
+      useItemLocationCandidate('circle-1', 'media-1', true),
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.candidate).toBeNull();
   });
 });
