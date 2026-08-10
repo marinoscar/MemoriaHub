@@ -400,6 +400,20 @@ export const systemSettingsSchema = z.object({
     maxImpliedSpeedKmh: 150,
     bulkAcceptThreshold: 80,
   }),
+  // Location Grouping (issue #373). Merges raw geocoder location strings into
+  // admin-curated canonical groups. `features.locationGrouping` (+ the
+  // LOCATION_GROUPING_ENABLED env kill-switch) is the master toggle; these are
+  // the tuning knobs read by LocationGroupResolverService and, for
+  // suggestionMinItems, by the group-suggestions endpoint (issue #374).
+  locationGrouping: z.object({
+    radiusCaptureEnabled: z.boolean().default(true),
+    maxRadiusKm: z.number().min(0.5).max(200).default(50),
+    suggestionMinItems: z.number().int().min(1).max(1000).default(1),
+  }).optional().default({
+    radiusCaptureEnabled: true,
+    maxRadiusKm: 50,
+    suggestionMinItems: 1,
+  }),
   socialMedia: z.object({
     ocrEnabled: z.boolean().default(true),
     ocrLanguages: z.array(z.string().min(1)).min(1).max(5).default(['eng']),
@@ -735,6 +749,12 @@ export const systemSettingsPatchSchema = z.object({
     maxAnchorDistanceKm: z.number().min(0.1).max(100).optional(),
     maxImpliedSpeedKmh: z.number().min(10).max(1000).optional(),
     bulkAcceptThreshold: z.number().int().min(0).max(100).optional(),
+  }).optional(),
+  // Location Grouping (issue #373) — all-optional twin of the namespace above.
+  locationGrouping: z.object({
+    radiusCaptureEnabled: z.boolean().optional(),
+    maxRadiusKm: z.number().min(0.5).max(200).optional(),
+    suggestionMinItems: z.number().int().min(1).max(1000).optional(),
   }).optional(),
   socialMedia: z.object({
     ocrEnabled: z.boolean().optional(),

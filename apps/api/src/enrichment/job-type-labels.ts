@@ -54,6 +54,9 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   // circle: generation curates, digest mails the result out.
   memory_generation: 'Memory generation',
   memory_digest: 'Memory email digest',
+  // Location Grouping (issue #373) — server-only global rebuild of the
+  // media_items.geo_canonical_* columns after a group/alias mutation.
+  location_group_rebuild: 'Location Group Rebuild',
 };
 
 /**

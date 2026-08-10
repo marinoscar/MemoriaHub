@@ -17,6 +17,7 @@ import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.regi
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,12 +58,23 @@ describe('GeocodeHandler', () => {
   let handler: GeocodeHandler;
   let mockPrisma: MockPrismaService;
   let mockGeoLocationService: { reverseGeocode: jest.Mock };
+  let mockLocationGroupResolver: { resolve: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
     mockPrisma = createMockPrismaService();
     mockGeoLocationService = { reverseGeocode: jest.fn() };
+    // Default: the identity resolver (feature off / no groups configured).
+    mockLocationGroupResolver = {
+      resolve: jest.fn().mockImplementation((raw) =>
+        Promise.resolve({
+          geoCanonicalCountry: raw.geoCountry,
+          geoCanonicalAdmin1: raw.geoAdmin1,
+          geoCanonicalLocality: raw.geoLocality,
+        }),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -70,6 +82,7 @@ describe('GeocodeHandler', () => {
         EnrichmentHandlerRegistry,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: GeoLocationService, useValue: mockGeoLocationService },
+        { provide: LocationGroupResolverService, useValue: mockLocationGroupResolver },
       ],
     }).compile();
 
@@ -101,6 +114,7 @@ describe('GeocodeHandler', () => {
           EnrichmentHandlerRegistry,
           { provide: PrismaService, useValue: mockPrisma },
           { provide: GeoLocationService, useValue: mockGeoLocationService },
+        { provide: LocationGroupResolverService, useValue: mockLocationGroupResolver },
         ],
       }).compile();
 
@@ -479,7 +493,15 @@ describe('GeocodeHandler', () => {
 
       expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith({
         where: { id: 'media-1' },
-        select: { id: true, circleId: true, deletedAt: true },
+        select: {
+          id: true,
+          circleId: true,
+          deletedAt: true,
+          // Location Grouping (issue #373): coordinates are loaded so the
+          // resolver can apply radius capture on the node-result path too.
+          takenLat: true,
+          takenLng: true,
+        },
       });
     });
 
@@ -590,6 +612,117 @@ describe('GeocodeHandler', () => {
 
       await expect(handler.persistNodeResult(job, { country: 123 })).rejects.toThrow();
       expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Location Grouping (issue #373)
+  // -------------------------------------------------------------------------
+
+  describe('canonical location columns', () => {
+    beforeEach(() => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        id: 'media-1',
+        circleId: 'circle-1',
+        deletedAt: null,
+        takenLat: 9.93,
+        takenLng: -84.08,
+      } as never);
+      mockPrisma.mediaItem.update.mockResolvedValue({} as never);
+      mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as never);
+    });
+
+    const result = {
+      country: 'Costa Rica',
+      countryCode: 'CR',
+      admin1: 'Provincia de Heredia',
+      admin2: null,
+      locality: 'SAN JOSE',
+      placeName: null,
+      source: 'google',
+    };
+
+    it('writes canonical columns in the SAME update as the raw ones', async () => {
+      mockLocationGroupResolver.resolve.mockResolvedValue({
+        geoCanonicalCountry: 'Costa Rica',
+        geoCanonicalAdmin1: 'Heredia',
+        geoCanonicalLocality: 'San José',
+      });
+
+      await handler.persistGeocode(makeJob(), result);
+
+      const data = mockPrisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.geoCanonicalCountry).toBe('Costa Rica');
+      expect(data.geoCanonicalAdmin1).toBe('Heredia');
+      expect(data.geoCanonicalLocality).toBe('San José');
+    });
+
+    it('NEVER writes a canonical name into a raw column', async () => {
+      mockLocationGroupResolver.resolve.mockResolvedValue({
+        geoCanonicalCountry: 'Costa Rica',
+        geoCanonicalAdmin1: 'Heredia',
+        geoCanonicalLocality: 'San José',
+      });
+
+      await handler.persistGeocode(makeJob(), result);
+
+      // The raw columns keep the geocoder's own strings verbatim. This is the
+      // whole reason canonical names live in separate columns: persistGeocode
+      // is overwrite-all, so a canonical name in geo_admin1 would be silently
+      // reverted on the very next re-geocode.
+      const data = mockPrisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.geoAdmin1).toBe('Provincia de Heredia');
+      expect(data.geoLocality).toBe('SAN JOSE');
+    });
+
+    it('a geocode RERUN after a rebuild leaves the canonical names intact', async () => {
+      mockLocationGroupResolver.resolve.mockResolvedValue({
+        geoCanonicalCountry: 'Costa Rica',
+        geoCanonicalAdmin1: 'Heredia',
+        geoCanonicalLocality: 'San José',
+      });
+
+      // First pass (e.g. right after a rebuild established the groups) …
+      await handler.persistGeocode(makeJob(), result);
+      // … and a second, identical rerun.
+      await handler.persistGeocode(makeJob(), result);
+
+      const second = mockPrisma.mediaItem.update.mock.calls[1][0].data;
+      expect(second.geoCanonicalAdmin1).toBe('Heredia');
+      expect(second.geoCanonicalLocality).toBe('San José');
+      expect(second.geoAdmin1).toBe('Provincia de Heredia');
+    });
+
+    it('passes the item coordinates to the resolver so radius capture can apply', async () => {
+      await handler.persistGeocode(makeJob(), result);
+
+      expect(mockLocationGroupResolver.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({ geoAdmin1: 'Provincia de Heredia' }),
+        { lat: 9.93, lng: -84.08 },
+      );
+    });
+
+    it('passes null coordinates when the item has none', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        id: 'media-1',
+        circleId: 'circle-1',
+        deletedAt: null,
+        takenLat: null,
+        takenLng: null,
+      } as never);
+
+      await handler.persistGeocode(makeJob(), result);
+
+      expect(mockLocationGroupResolver.resolve).toHaveBeenCalledWith(expect.anything(), null);
+    });
+
+    it('with grouping OFF (identity resolver) canonical equals raw verbatim', async () => {
+      // mockLocationGroupResolver defaults to the identity implementation.
+      await handler.persistGeocode(makeJob(), result);
+
+      const data = mockPrisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.geoCanonicalCountry).toBe(data.geoCountry);
+      expect(data.geoCanonicalAdmin1).toBe(data.geoAdmin1);
+      expect(data.geoCanonicalLocality).toBe(data.geoLocality);
     });
   });
 });

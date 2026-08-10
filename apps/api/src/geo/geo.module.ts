@@ -9,9 +9,10 @@ import { GeoLocationModule } from '../media/geo/geo-location.module';
 import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { CirclesModule } from '../circles/circles.module';
+import { LocationGroupsModule } from '../location-groups/location-groups.module';
 
 @Module({
-  imports: [GeoLocationModule, SettingsModule, EnrichmentModule, CirclesModule],
+  imports: [GeoLocationModule, SettingsModule, EnrichmentModule, CirclesModule, LocationGroupsModule],
   controllers: [GeoSettingsController, GeocodeAdminController, GeocodeMediaController],
   providers: [GeoSettingsService, GeocodeBackfillService, GeocodeHandler],
   exports: [GeocodeBackfillService, GeoSettingsService],

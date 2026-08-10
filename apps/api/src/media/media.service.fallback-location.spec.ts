@@ -32,6 +32,8 @@ import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
 import { MediaTouchService } from './media-touch.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 
 const CIRCLE_ID = 'circle-uuid-0001-0002-0003';
 
@@ -165,6 +167,8 @@ describe('MediaService.createMedia — fallback location', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.

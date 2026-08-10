@@ -5,6 +5,7 @@ import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 
 @Injectable()
 export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
@@ -27,6 +28,7 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly geoLocationService: GeoLocationService,
     private readonly prisma: PrismaService,
+    private readonly locationGroupResolver: LocationGroupResolverService,
   ) {}
 
   onModuleInit(): void {
@@ -75,7 +77,13 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
 
       // PERSIST half — identical whether the result came from this in-process
       // call or a node's POST /nodes/:id/jobs/:jobId/result.
-      await this.persistGeocode(job, computed, { id: mediaItem.id, circleId, deletedAt: mediaItem.deletedAt });
+      await this.persistGeocode(job, computed, {
+        id: mediaItem.id,
+        circleId,
+        deletedAt: mediaItem.deletedAt,
+        takenLat: mediaItem.takenLat,
+        takenLng: mediaItem.takenLng,
+      });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`Geocode job ${job.id} failed for MediaItem ${mediaItemId}: ${error}`);
@@ -122,7 +130,13 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
   async persistGeocode(
     job: EnrichmentJob,
     result: GeocodeResult,
-    preloadedMediaItem?: { id: string; circleId: string; deletedAt: Date | null },
+    preloadedMediaItem?: {
+      id: string;
+      circleId: string;
+      deletedAt: Date | null;
+      takenLat: number | null;
+      takenLng: number | null;
+    },
   ): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('geocode job missing mediaItemId');
@@ -132,7 +146,13 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
       preloadedMediaItem ??
       (await this.prisma.mediaItem.findUnique({
         where: { id: job.mediaItemId },
-        select: { id: true, circleId: true, deletedAt: true },
+        select: {
+          id: true,
+          circleId: true,
+          deletedAt: true,
+          takenLat: true,
+          takenLng: true,
+        },
       }));
 
     if (!mediaItem || mediaItem.deletedAt) {
@@ -146,6 +166,30 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
       result.country || result.countryCode || result.admin1 || result.admin2 || result.locality || result.placeName;
 
     if (hasData) {
+      // Location Grouping (issue #373): canonicalize in the SAME update as the
+      // raw columns, so the two halves can never be transiently inconsistent.
+      //
+      // ⚠️ This handler is OVERWRITE-ALL (every geo column, including absent
+      // tiers -> null) — deliberately unlike MediaMetadataSyncService's
+      // present-only semantics. Both write canonical columns using their OWN
+      // existing semantics; do NOT unify them.
+      //
+      // This overwrite-all behavior is precisely WHY canonical names get their
+      // own columns: a canonical name written into geo_admin1 would be silently
+      // reverted here on the next re-geocode. The raw columns stay untouched by
+      // the grouping feature.
+      const canonical = await this.locationGroupResolver.resolve(
+        {
+          geoCountry: result.country ?? null,
+          geoCountryCode: result.countryCode ?? null,
+          geoAdmin1: result.admin1 ?? null,
+          geoLocality: result.locality ?? null,
+        },
+        mediaItem.takenLat !== null && mediaItem.takenLng !== null
+          ? { lat: mediaItem.takenLat, lng: mediaItem.takenLng }
+          : null,
+      );
+
       await this.prisma.mediaItem.update({
         where: { id: mediaItemId },
         data: {
@@ -157,6 +201,7 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
           geoPlaceName: result.placeName ?? null,
           geoSource: result.source,
           geocodedAt: new Date(),
+          ...canonical,
         },
       });
 

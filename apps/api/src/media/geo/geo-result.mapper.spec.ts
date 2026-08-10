@@ -59,3 +59,26 @@ describe('GEO_CLEAR_COLUMNS', () => {
     });
   });
 });
+
+describe('GEO_CLEAR_COLUMNS — Location Grouping (issue #373)', () => {
+  it('nulls ALL THREE canonical columns alongside the raw ones', () => {
+    // A canonical name left behind with no raw value inverts the invariant
+    // ("raw non-null => canonical non-null") into a canonical-without-raw orphan.
+    expect(GEO_CLEAR_COLUMNS.geoCanonicalCountry).toBeNull();
+    expect(GEO_CLEAR_COLUMNS.geoCanonicalAdmin1).toBeNull();
+    expect(GEO_CLEAR_COLUMNS.geoCanonicalLocality).toBeNull();
+  });
+
+  it('every raw geo column it nulls has its canonical counterpart nulled too', () => {
+    const pairs: Array<[keyof typeof GEO_CLEAR_COLUMNS, keyof typeof GEO_CLEAR_COLUMNS]> = [
+      ['geoCountry', 'geoCanonicalCountry'],
+      ['geoAdmin1', 'geoCanonicalAdmin1'],
+      ['geoLocality', 'geoCanonicalLocality'],
+    ];
+
+    for (const [raw, canonical] of pairs) {
+      expect(GEO_CLEAR_COLUMNS[raw]).toBeNull();
+      expect(GEO_CLEAR_COLUMNS[canonical]).toBeNull();
+    }
+  });
+});

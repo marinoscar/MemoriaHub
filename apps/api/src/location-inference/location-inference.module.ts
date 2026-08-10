@@ -13,6 +13,7 @@ import { LocationInferenceService } from './location-inference.service';
 import { LocationInferenceHandler } from './location-inference.handler';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
+import { LocationGroupsModule } from '../location-groups/location-groups.module';
 import { LocationSuggestionRunsController } from './runs/location-suggestion-runs.controller';
 import { LocationSuggestionRunEvaluateHandler } from './runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-suggestion-run-execute-batch.handler';
@@ -42,6 +43,7 @@ import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-sugges
     GeoLocationModule,
     MediaModule,
     ReviewRunsModule,
+    LocationGroupsModule,
   ],
   controllers: [
     LocationSuggestionController,

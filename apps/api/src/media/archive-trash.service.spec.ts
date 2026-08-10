@@ -39,6 +39,8 @@ import { UploadNotificationService } from '../notifications/producers/upload-not
 import { MediaTouchService } from './media-touch.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { randomUUID } from 'crypto';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -174,6 +176,8 @@ describe('MediaService — archive & trash methods', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.

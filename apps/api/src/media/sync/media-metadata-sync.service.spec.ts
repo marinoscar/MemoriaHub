@@ -8,6 +8,8 @@ import {
   MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import { randomUUID } from 'crypto';
+import { LocationGroupResolverService } from '../../location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../../../test/mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error for unique constraint violations
@@ -92,6 +94,8 @@ describe('MediaMetadataSyncService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaMetadataSyncService,
         { provide: PrismaService, useValue: mockPrisma },
         // EventEmitter2 is required by @OnEvent decorator at module init time

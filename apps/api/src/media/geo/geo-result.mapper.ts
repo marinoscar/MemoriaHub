@@ -38,4 +38,11 @@ export const GEO_CLEAR_COLUMNS = {
   geoSource: null,
   geocodedAt: null,
   coordSource: null,
+  // Location Grouping (issue #373): the canonical columns are DERIVED from the
+  // raw ones, so clearing a location must clear both halves — leaving a
+  // canonical name behind with no raw value would invert the invariant
+  // ("raw non-null ⇒ canonical non-null") into a canonical-without-raw orphan.
+  geoCanonicalCountry: null,
+  geoCanonicalAdmin1: null,
+  geoCanonicalLocality: null,
 } as const;

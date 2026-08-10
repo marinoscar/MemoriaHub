@@ -29,6 +29,7 @@ import { FaceDetectionHandler } from '../face/face-detection.handler';
 import { VideoFaceDetectionHandler } from '../face/video-face-detection.handler';
 import { GeocodeHandler } from '../geo/geocode.handler';
 import { StorageInsightsHandler } from '../insights/storage-insights.handler';
+import { LocationGroupRebuildHandler } from '../location-groups/location-group-rebuild.handler';
 import { LocationInferenceHandler } from '../location-inference/location-inference.handler';
 import { MetadataExtractionHandler } from '../metadata/metadata.handler';
 import { SocialMediaDetectionHandler } from '../social-media/social-media-detection.handler';
@@ -63,6 +64,7 @@ const ALL_HANDLER_CLASSES = [
   VideoFaceDetectionHandler,
   GeocodeHandler,
   StorageInsightsHandler,
+  LocationGroupRebuildHandler,
   LocationInferenceHandler,
   MetadataExtractionHandler,
   SocialMediaDetectionHandler,
@@ -96,6 +98,7 @@ const DOCUMENTED_SERVER_ONLY_TYPES = [
   'duplicate_detection_batch',
   'face_auto_archive_sweep',
   'job_history_purge',
+  'location_group_rebuild',
   'location_inference',
   'location_suggestion_run_evaluate',
   'location_suggestion_run_execute_batch',
@@ -273,6 +276,22 @@ describe('server-only type derivation (drift guard)', () => {
     it('memory_generation is server-only and system-mode eligible', () => {
       expect(registry.serverOnlyTypes()).toContain('memory_generation');
       expect(systemModeEligibleTypes(registry, {})).toContain('memory_generation');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Location Grouping (issue #373): location_group_rebuild omits the
+  // node-result pair BY DESIGN — it is a set-based SQL sweep over
+  // media_items.geo_canonical_*, with no media bytes to stream and no per-item
+  // unit of work to hand a node. It therefore falls out of serverOnlyTypes()
+  // naturally, with no explicit pinning needed (unlike thumbnail_repair /
+  // workflow_execute_batch), the same inference as face_auto_archive_sweep,
+  // duplicate_confidence_backfill and the location_inference sweep.
+  // -------------------------------------------------------------------------
+  describe('location_group_rebuild (issue #373)', () => {
+    it('location_group_rebuild is server-only and system-mode eligible', () => {
+      expect(registry.serverOnlyTypes()).toContain('location_group_rebuild');
+      expect(systemModeEligibleTypes(registry, {})).toContain('location_group_rebuild');
     });
   });
 });

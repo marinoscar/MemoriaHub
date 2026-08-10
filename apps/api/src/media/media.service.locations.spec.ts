@@ -24,6 +24,8 @@ import { UploadNotificationService } from '../notifications/producers/upload-not
 import { MediaTouchService } from './media-touch.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 
 const CIRCLE_ID = 'circle-locations-test';
 const USER_ID = 'user-locations-test';
@@ -74,6 +76,8 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaService,
         MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },

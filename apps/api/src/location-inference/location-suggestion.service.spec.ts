@@ -30,6 +30,8 @@ import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 // NOTE (backend-dev): the synchronous `bulkAcceptSuggestions` method and its DTO
 // were removed in favour of the async run-based engine
 // (LocationSuggestionRunService). The former `describe('bulkAcceptSuggestions')`
@@ -96,6 +98,8 @@ describe('LocationSuggestionService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         LocationSuggestionService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.

@@ -1,5 +1,6 @@
 import type { GeoLocationProvider } from './geo-location-provider.interface';
 import { geoResultToMediaColumns } from './geo-result.mapper';
+import type { LocationGroupResolverService } from '../../location-groups/location-group-resolver.service';
 
 /**
  * Data patch produced by applyLocation — write coords + coordSource
@@ -18,6 +19,14 @@ export interface ApplyLocationPatch {
   geoPlaceName: string | null;
   geoSource: string;
   geocodedAt: Date;
+  /**
+   * Canonical location-group columns (issue #373), derived from the raw geo
+   * columns above by LocationGroupResolverService. Non-null whenever their raw
+   * counterpart is non-null — verbatim when no group matches.
+   */
+  geoCanonicalCountry: string | null;
+  geoCanonicalAdmin1: string | null;
+  geoCanonicalLocality: string | null;
 }
 
 /**
@@ -39,6 +48,11 @@ export interface ApplyLocationPatch {
  * coordinate *provenance*. A later automatic `geocode` job re-running for
  * this item is expected to overwrite geoSource; it must never touch
  * coordSource.
+ *
+ * `resolver` (issue #373) canonicalizes the freshly-geocoded tiers in the same
+ * patch, so a manual location set, a bulk location update and a
+ * location-suggestion accept all land canonical columns consistent with their
+ * raw ones — this one helper covers all three call sites.
  */
 export async function applyLocation(
   geoProvider: GeoLocationProvider,
@@ -46,13 +60,27 @@ export async function applyLocation(
   lng: number,
   altitude: number | null | undefined,
   coordSource: 'manual' | 'inferred',
+  resolver: LocationGroupResolverService,
 ): Promise<ApplyLocationPatch> {
   const result = await geoProvider.reverseGeocode(lat, lng);
+  const geoColumns = geoResultToMediaColumns(result ?? {}, 'manual');
+
+  const canonical = await resolver.resolve(
+    {
+      geoCountry: geoColumns.geoCountry,
+      geoCountryCode: geoColumns.geoCountryCode,
+      geoAdmin1: geoColumns.geoAdmin1,
+      geoLocality: geoColumns.geoLocality,
+    },
+    { lat, lng },
+  );
+
   return {
     takenLat: lat,
     takenLng: lng,
     takenAltitude: altitude ?? null,
     coordSource,
-    ...geoResultToMediaColumns(result ?? {}, 'manual'),
+    ...geoColumns,
+    ...canonical,
   };
 }

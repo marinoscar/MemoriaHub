@@ -24,6 +24,8 @@ import { UploadNotificationService } from '../notifications/producers/upload-not
 import { MediaTouchService } from './media-touch.service';
 import { mediaThumbnailsQuerySchema } from './dto/media-thumbnails-query.dto';
 import { MediaThumbnailService } from './media-thumbnail.service';
+import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
 // AND-composition query helpers
@@ -283,6 +285,8 @@ describe('MediaService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        // Location Grouping (issue #373) — identity resolver by default.
+        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService so batched/legacy thumbnail-signing logic
         // stays faithful to production; its own dependencies (PrismaService,
