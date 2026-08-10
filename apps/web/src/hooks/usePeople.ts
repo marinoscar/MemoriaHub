@@ -17,7 +17,17 @@ import type { PersonListResponse, PersonDetail, ClusterResult } from '../service
 // Hook for listing people in a circle
 export function usePeople(
   circleId: string | null,
-  opts?: { includeUnlabeled?: boolean; hidden?: boolean },
+  opts?: {
+    includeUnlabeled?: boolean;
+    hidden?: boolean;
+    /**
+     * Page size for the underlying list request (default 100). Callers that
+     * only need `data.meta.totalItems` (e.g. a count probe) can pass 1 so the
+     * request doesn't ship a page of person records — and their signed cover
+     * thumbnail URLs — that nothing renders.
+     */
+    pageSize?: number;
+  },
 ) {
   const [data, setData] = useState<PersonListResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,7 +42,7 @@ export function usePeople(
       const result = await listPeople(circleId, {
         includeUnlabeled: opts?.includeUnlabeled,
         hidden: opts?.hidden,
-        pageSize: 100,
+        pageSize: opts?.pageSize ?? 100,
       });
       if (!isMounted()) return;
       setData(result);
@@ -42,7 +52,7 @@ export function usePeople(
     } finally {
       if (isMounted()) setLoading(false);
     }
-  }, [circleId, opts?.includeUnlabeled, opts?.hidden, isMounted]);
+  }, [circleId, opts?.includeUnlabeled, opts?.hidden, opts?.pageSize, isMounted]);
 
   useEffect(() => {
     void refresh();

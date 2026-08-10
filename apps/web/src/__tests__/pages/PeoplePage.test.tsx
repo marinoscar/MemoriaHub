@@ -327,7 +327,30 @@ describe('PeoplePage', () => {
 
   // -------------------------------------------------------------------------
   describe('tabs — People / Hidden', () => {
-    it('renders "People" and "Hidden" tabs', async () => {
+    it('renders NO tab strip when nothing is hidden', async () => {
+      render(<PeoplePage />);
+
+      // The People content still renders — there is just no tab strip above it.
+      await screen.findByRole('heading', { name: /named people/i });
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    });
+
+    it('probes the hidden count with pageSize 1 (count-only, no person payload)', async () => {
+      render(<PeoplePage />);
+
+      await screen.findByRole('heading', { name: /named people/i });
+      expect(mockUsePeople).toHaveBeenCalledWith(
+        'circle-1',
+        expect.objectContaining({ hidden: true, pageSize: 1 }),
+      );
+    });
+
+    it('renders "People" and "Hidden" tabs once a person is hidden', async () => {
+      mockUsePeople.mockImplementation((_, opts?: { hidden?: boolean }) => {
+        if (opts?.hidden) return makeUsePeopleDefaults([makePerson('hp1', 'Bob')]) as any;
+        return makeUsePeopleDefaults([]) as any;
+      });
+
       render(<PeoplePage />);
 
       expect(await screen.findByRole('tab', { name: /^people$/i })).toBeInTheDocument();
@@ -341,16 +364,54 @@ describe('PeoplePage', () => {
     });
 
     it('switches to the Hidden tab when clicked', async () => {
+      mockUsePeople.mockImplementation((_, opts?: { hidden?: boolean }) => {
+        if (opts?.hidden) return makeUsePeopleDefaults([makePerson('hp1', 'Bob')]) as any;
+        return makeUsePeopleDefaults([]) as any;
+      });
+
       const user = userEvent.setup();
       render(<PeoplePage />);
 
       await screen.findByRole('tab', { name: /^people$/i });
       await user.click(screen.getByRole('tab', { name: /hidden/i }));
 
-      // HiddenPeopleView renders an empty state message when no hidden people
+      // HiddenPeopleView renders the hidden person plus its explanatory blurb
       await waitFor(() => {
-        expect(screen.getByText(/no hidden people/i)).toBeInTheDocument();
+        expect(screen.getByText(/hidden people are excluded from the people page/i)).toBeInTheDocument();
       });
+      expect(screen.getByText('Bob')).toBeInTheDocument();
+    });
+
+    it('falls back to the People tab when the last hidden person is unhidden', async () => {
+      // The hidden set is mutable: unhiding empties it, so the next render sees
+      // hiddenCount === 0 and the Hidden tab disappears out from under the user.
+      let hiddenPeople: PersonListItem[] = [makePerson('hp1', 'Bob')];
+      const unhideFn = vi.fn().mockImplementation(async () => {
+        hiddenPeople = [];
+        return { unhidden: 1 };
+      });
+
+      mockUsePeople.mockImplementation((_, opts?: { hidden?: boolean }) => {
+        if (opts?.hidden) return makeUsePeopleDefaults(hiddenPeople, { unhide: unhideFn }) as any;
+        return makeUsePeopleDefaults([]) as any;
+      });
+
+      const user = userEvent.setup();
+      render(<PeoplePage />);
+
+      await user.click(await screen.findByRole('tab', { name: /hidden/i }));
+      await user.click(await screen.findByRole('button', { name: /unhide person/i }));
+
+      await waitFor(() => {
+        expect(unhideFn).toHaveBeenCalledWith(['hp1']);
+      });
+
+      // Tab strip is gone entirely, and the People content is showing again —
+      // not an empty body for a tab that no longer exists.
+      await waitFor(() => {
+        expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      });
+      expect(screen.getByRole('heading', { name: /named people/i })).toBeInTheDocument();
     });
   });
 
