@@ -96,6 +96,21 @@ export class MaintenanceModeService {
   private inMemoryStartedAt: string | null = null;
   private inMemoryStartedById: string | null = null;
 
+  /**
+   * Process-local `allowAdmins` companion to the override above, `null` when
+   * unset (defer to the persisted value).
+   *
+   * Exists for issue #344's swap window specifically. `allowAdmins` defaults to
+   * TRUE — correct for a planned upgrade, where an admin must be able to
+   * exercise the app before reopening it — but actively wrong during the few
+   * seconds the database is being renamed: there is no database for an admin
+   * request to reach, so letting one through produces a confusing hard error
+   * rather than the honest 503 everyone else gets. Like the enabled override,
+   * it lives only in memory because the persisted setting is inside the
+   * database that momentarily does not exist under that name.
+   */
+  private inMemoryAllowAdmins: boolean | null = null;
+
   constructor(
     private readonly systemSettings: SystemSettingsService,
     private readonly prisma: PrismaService,
@@ -135,7 +150,10 @@ export class MaintenanceModeService {
       message: usingInMemory
         ? (this.inMemoryReason ?? persisted.message)
         : persisted.message,
-      allowAdmins: persisted.allowAdmins,
+      allowAdmins:
+        usingInMemory && this.inMemoryAllowAdmins !== null
+          ? this.inMemoryAllowAdmins
+          : persisted.allowAdmins,
       startedAt: usingInMemory
         ? (this.inMemoryStartedAt ?? persisted.startedAt)
         : persisted.startedAt,
@@ -156,13 +174,19 @@ export class MaintenanceModeService {
    * the database may already be gone). The persisted write is what makes the
    * flag survive the restart.
    */
-  async enable(reason: string, byUserId: string | null): Promise<MaintenanceState> {
+  async enable(
+    reason: string,
+    byUserId: string | null,
+    opts: { allowAdmins?: boolean } = {},
+  ): Promise<MaintenanceState> {
     const startedAt = new Date().toISOString();
 
     this.inMemoryOverride = true;
     this.inMemoryReason = reason;
     this.inMemoryStartedAt = startedAt;
     this.inMemoryStartedById = byUserId;
+    this.inMemoryAllowAdmins =
+      typeof opts.allowAdmins === 'boolean' ? opts.allowAdmins : null;
 
     this.logger.warn(
       `Maintenance mode ENABLED by ${byUserId ?? 'system'}: ${reason || '(no message)'}`,
@@ -183,6 +207,7 @@ export class MaintenanceModeService {
     this.inMemoryReason = null;
     this.inMemoryStartedAt = null;
     this.inMemoryStartedById = null;
+    this.inMemoryAllowAdmins = null;
 
     this.logger.warn('Maintenance mode DISABLED');
 
@@ -199,6 +224,7 @@ export class MaintenanceModeService {
     this.inMemoryReason = null;
     this.inMemoryStartedAt = null;
     this.inMemoryStartedById = null;
+    this.inMemoryAllowAdmins = null;
   }
 
   /**

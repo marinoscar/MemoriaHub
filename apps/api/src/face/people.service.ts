@@ -29,6 +29,7 @@ import {
 import { MergePeopleDto } from './dto/merge-people.dto';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { MediaTouchService } from '../media/media-touch.service';
+import { UserAvatarService } from '../users/user-avatar.service';
 
 @Injectable()
 export class PeopleService {
@@ -43,6 +44,11 @@ export class PeopleService {
     private readonly systemSettings: SystemSettingsService,
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly mediaTouch: MediaTouchService,
+    // Profile picture management (issue #354): an account can be linked to a
+    // Person and display that person's picture, so a change to the person's
+    // chosen picture must propagate. FaceModule -> UsersModule is the only edge
+    // between the two; UsersModule must never import FaceModule back.
+    private readonly userAvatarService: UserAvatarService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -478,6 +484,23 @@ export class PeopleService {
       await this.touchMediaForPersons([personId], person.circleId);
     }
 
+    // Profile picture management (issue #354): any account linked to this person
+    // AND displaying its picture needs a fresh render. Best-effort and
+    // fire-and-forget — the person update must never fail because an avatar
+    // could not be re-rendered (same posture as the notification producers).
+    // refreshAvatarsForPerson is itself total; the try/catch is belt-and-braces.
+    if (dto.profileMediaItemId !== undefined || dto.profileCrop !== undefined) {
+      try {
+        await this.userAvatarService.refreshAvatarsForPerson(personId);
+      } catch (err) {
+        this.logger.warn(
+          `Linked-avatar refresh failed for person ${personId} (non-fatal): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
     this.logger.log(`Person updated: ${personId} by user ${userId}`);
 
     return {
@@ -725,7 +748,14 @@ export class PeopleService {
         },
       });
 
-      // 5. Audit
+      // 5. Carry any account->person link over to the target (issue #354),
+      //    mirroring the coverFaceId carry-over above and inside the SAME
+      //    transaction so a link never survives a rolled-back merge. The
+      //    rendered avatar bytes need no refresh: their URL addresses the USER,
+      //    not the person, so it stays valid.
+      await this.userAvatarService.carryLinkedUsersOnMerge(tx, sourceId, targetId);
+
+      // 6. Audit
       await tx.auditEvent.create({
         data: {
           actorUserId: userId,
@@ -739,7 +769,7 @@ export class PeopleService {
       return updatedT;
     });
 
-    // 6. Recompute target centroid (best-effort; failure logged, not thrown)
+    // 7. Recompute target centroid (best-effort; failure logged, not thrown)
     try {
       await this.matchingService.computePersonCentroid(targetId);
     } catch (err) {

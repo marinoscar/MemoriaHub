@@ -25,6 +25,13 @@ export interface User {
 
 export interface UserSettings {
   theme: 'light' | 'dark' | 'system';
+  /**
+   * @deprecated Superseded by `GET`/`PATCH /api/users/me/profile` and the
+   * `/profile` page (issue #354). The API still returns this namespace, but
+   * `useProviderImage` and `customImageUrl` are inert: the avatar's source is
+   * first-class user state (`avatarSource`) now, not a settings blob. Nothing
+   * in the web app writes these keys — do not reintroduce a UI that does.
+   */
   profile: {
     displayName?: string;
     useProviderImage: boolean;

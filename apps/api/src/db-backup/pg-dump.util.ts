@@ -202,8 +202,14 @@ export interface SpawnedPgProcess {
  * The `settled` guard is load-bearing exactly as it is in the ffmpeg runner:
  * the SIGKILL issued on timeout makes the child emit its own 'close' (and
  * possibly 'error') afterwards, and those late events must not settle twice.
+ *
+ * EXPORTED for `pg-restore.util.ts` (#344). The restore side needs byte-for-byte
+ * the same process handling — SIGKILL-guarded timeout, `settled` guard, bounded
+ * stderr tail, `PGPASSWORD` never in argv — and re-implementing it there would
+ * create a second copy of exactly the details that are easy to get subtly wrong.
+ * It stays module-private in spirit: only the two `pg-*.util` modules call it.
  */
-function spawnStreaming(
+export function spawnPgProcess(
   command: string,
   args: readonly string[],
   env: NodeJS.ProcessEnv,
@@ -317,7 +323,7 @@ export function spawnPgDump(
   compressionLevel: number,
   opts: SpawnPgOptions = {},
 ): SpawnedPgProcess {
-  return spawnStreaming(
+  return spawnPgProcess(
     resolvePgDumpPath(),
     buildPgDumpArgs(cfg, compressionLevel),
     buildPgEnv(cfg),
@@ -339,7 +345,7 @@ export function spawnPgRestoreList(
   cfg: PgConnectionConfig,
   opts: SpawnPgOptions = {},
 ): SpawnedPgProcess {
-  return spawnStreaming(
+  return spawnPgProcess(
     resolvePgRestorePath(),
     buildPgRestoreListArgs(),
     buildPgEnv(cfg),

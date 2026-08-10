@@ -147,6 +147,10 @@ export class UserSettingsService {
           dto.profile?.displayName !== undefined
             ? dto.profile.displayName
             : current.profile.displayName,
+        // DEPRECATED (issue #354): both keys are inert. They are merged through
+        // verbatim — never interpreted — so an older client's payload still
+        // round-trips and the stored blob keeps satisfying userSettingsSchema.
+        // Avatar state lives on the user row; see UserAvatarService.
         useProviderImage:
           dto.profile?.useProviderImage !== undefined
             ? dto.profile.useProviderImage
@@ -419,6 +423,13 @@ export class UserSettingsService {
 
   /**
    * Update profile image preference
+   *
+   * @deprecated (issue #354) Writes the two inert `profile.useProviderImage` /
+   * `profile.customImageUrl` keys, which nothing reads any more. It has no HTTP
+   * caller. Avatar changes go through UserAvatarService — the single writer of
+   * `User.avatarSource` / `avatarStorageKey` / `avatarVersion` / `linkedPersonId`
+   * / `profileImageUrl` — via the `/api/users/me/profile` and
+   * `/api/users/me/avatar` routes.
    */
   async updateProfileImage(
     userId: string,

@@ -10,7 +10,13 @@ export const userSettingsResponseSchema = z.object({
   theme: z.enum(['light', 'dark', 'system']),
   profile: z.object({
     displayName: z.string().nullable().optional(),
+    /**
+     * @deprecated (issue #354) No-op. Avatar state now lives on the user row
+     * and is surfaced by GET /api/users/me/profile; this key is still returned
+     * only so older clients keep parsing the response.
+     */
     useProviderImage: z.boolean(),
+    /** @deprecated (issue #354) No-op — see useProviderImage above. */
     customImageUrl: z.string().url().nullable().optional(),
   }),
   search: z.object({

@@ -1,5 +1,17 @@
 import { Reflector } from '@nestjs/core';
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ExecutionContext,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+
+import {
+  DatabaseRestoreAlreadyRunningError,
+  DatabaseRestoreNotAllowedError,
+  DatabaseRestoreNotFoundError,
+} from './database-restore.service';
 
 import { DatabaseBackupController } from './db-backup.controller';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -27,6 +39,8 @@ const WRITE_ROUTES: Handler[] = [
   'deleteRun',
   'cancelRun',
 ];
+/** #344's two routes sit behind their OWN permission, not `db_backup:write`. */
+const RESTORE_ROUTES: Handler[] = ['restore', 'rollback'];
 
 function contextFor(handler: Handler, permissions: string[], roles: string[]) {
   const request: any = {
@@ -61,7 +75,7 @@ describe('DatabaseBackupController (permission gates)', () => {
   });
 
   it('declares Admin role on every route', () => {
-    for (const handler of [...READ_ROUTES, ...WRITE_ROUTES]) {
+    for (const handler of [...READ_ROUTES, ...WRITE_ROUTES, ...RESTORE_ROUTES]) {
       const roles = Reflect.getMetadata(
         ROLES_KEY,
         DatabaseBackupController.prototype[handler],
@@ -108,11 +122,39 @@ describe('DatabaseBackupController (permission gates)', () => {
     expect(() => rolesGuard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
-  it('does not expose restore or rollback routes (that is #344)', () => {
-    const proto = DatabaseBackupController.prototype as any;
-    expect(proto.restore).toBeUndefined();
-    expect(proto.rollback).toBeUndefined();
-  });
+  it.each(RESTORE_ROUTES)(
+    'requires db_backup:restore on %s — write is not enough',
+    (handler) => {
+      const writeOnly = contextFor(
+        handler,
+        [PERMISSIONS.DB_BACKUP_READ, PERMISSIONS.DB_BACKUP_WRITE],
+        [ROLES.ADMIN],
+      );
+      expect(() => permissionsGuard.canActivate(writeOnly)).toThrow(
+        ForbiddenException,
+      );
+
+      const allowed = contextFor(
+        handler,
+        [PERMISSIONS.DB_BACKUP_RESTORE],
+        [ROLES.ADMIN],
+      );
+      expect(rolesGuard.canActivate(allowed)).toBe(true);
+      expect(permissionsGuard.canActivate(allowed)).toBe(true);
+    },
+  );
+
+  it.each(RESTORE_ROUTES)(
+    'rejects a non-admin holding db_backup:restore on %s',
+    (handler) => {
+      const ctx = contextFor(
+        handler,
+        [PERMISSIONS.DB_BACKUP_RESTORE],
+        ['contributor'],
+      );
+      expect(() => rolesGuard.canActivate(ctx)).toThrow(ForbiddenException);
+    },
+  );
 
   it('declares db_backup:read on the download route, not a write permission', () => {
     const perms = Reflect.getMetadata(
@@ -134,7 +176,14 @@ describe('DatabaseBackupController (delegation)', () => {
     deleteRun: jest.fn(),
     cancelRun: jest.fn(),
   };
-  const controller = new DatabaseBackupController(service as any);
+  const restoreService = {
+    startRestore: jest.fn(),
+    rollback: jest.fn(),
+  };
+  const controller = new DatabaseBackupController(
+    service as any,
+    restoreService as any,
+  );
   const user = { id: 'user-1' } as any;
 
   beforeEach(() => jest.clearAllMocks());
@@ -154,5 +203,52 @@ describe('DatabaseBackupController (delegation)', () => {
     expect(service.getDownloadUrl).toHaveBeenCalledWith('run-1', {
       expiresIn: 900,
     });
+  });
+
+  it('passes the caller id and schema override through on restore', async () => {
+    restoreService.startRestore.mockResolvedValue({ mode: 'running' });
+    await controller.restore(
+      'run-1',
+      { confirmation: 'RESTORE', overrideSchemaCheck: true } as any,
+      user,
+    );
+    expect(restoreService.startRestore).toHaveBeenCalledWith('run-1', {
+      userId: 'user-1',
+      overrideSchemaCheck: true,
+    });
+  });
+
+  it('defaults overrideSchemaCheck to false rather than undefined', async () => {
+    restoreService.startRestore.mockResolvedValue({ mode: 'running' });
+    await controller.restore('run-1', { confirmation: 'RESTORE' } as any, user);
+    expect(restoreService.startRestore).toHaveBeenCalledWith('run-1', {
+      userId: 'user-1',
+      overrideSchemaCheck: false,
+    });
+  });
+
+  it('maps a concurrent restore onto 409 carrying the active run id', async () => {
+    restoreService.startRestore.mockRejectedValue(
+      new DatabaseRestoreAlreadyRunningError('run-other'),
+    );
+    await expect(
+      controller.restore('run-1', { confirmation: 'RESTORE' } as any, user),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('maps an unknown run onto 404 and a disallowed run onto 400', async () => {
+    restoreService.rollback.mockRejectedValue(
+      new DatabaseRestoreNotFoundError('run-1'),
+    );
+    await expect(
+      controller.rollback('run-1', { confirmation: 'ROLLBACK' } as any, user),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    restoreService.rollback.mockRejectedValue(
+      new DatabaseRestoreNotAllowedError('nope'),
+    );
+    await expect(
+      controller.rollback('run-1', { confirmation: 'ROLLBACK' } as any, user),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
