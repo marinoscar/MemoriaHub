@@ -36,6 +36,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { fold } from '../location-groups/normalize-location-name';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
 import { BulkTagsDto } from './dto/bulk-tags.dto';
@@ -54,6 +55,19 @@ import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
 import { MediaTouchService } from './media-touch.service';
+
+/**
+ * Key for the tiered-browsing group-cover override map (Location Grouping,
+ * issue #374).
+ *
+ * `''` is the UNSCOPED country sentinel, matching `LocationGroup.countryCode`'s
+ * NOT NULL DEFAULT '' — a nullable scope would make two same-named groups
+ * indistinguishable here for exactly the reason the column is not nullable in
+ * the schema.
+ */
+function groupCoverKey(countryCode: string | null, name: string): string {
+  return `${countryCode ?? ''}|${fold(name)}`;
+}
 
 /** Shape of each element returned by listLocations. */
 export interface MediaLocation {
@@ -600,6 +614,7 @@ export class MediaService {
         takenLng: true,
         capturedAt: true,
         geoLocality: true,
+        geoCanonicalLocality: true,
       },
       orderBy: { capturedAt: 'desc' },
       // Optional preview bound. Absent (e.g. the album map view) => every point.
@@ -608,12 +623,16 @@ export class MediaService {
 
     // Lightweight map-pin payload — no per-row thumbnail signing. Thumbnails
     // are fetched on demand in batches via getThumbnails().
+    //
+    // The pin LABEL is the canonical locality (Location Grouping, issue #374),
+    // so a map pin and the /places entry it belongs to read the same name. The
+    // response FIELD keeps its `geoLocality` name so no client changes.
     return rows.map((row) => ({
       id: row.id,
       takenLat: row.takenLat as number,
       takenLng: row.takenLng as number,
       capturedAt: row.capturedAt,
-      geoLocality: row.geoLocality,
+      geoLocality: row.geoCanonicalLocality ?? row.geoLocality,
     }));
   }
 
@@ -2645,8 +2664,16 @@ export class MediaService {
   /**
    * Explore: aggregate media by place (locality or place name).
    * Groups non-deleted geotagged items in the circle by their most specific
-   * available geo tier (geoLocality > geoPlaceName), returning up to 50
-   * places ordered by item count descending with a cover thumbnail.
+   * available geo tier (geoCanonicalLocality > geoLocality > geoPlaceName),
+   * returning up to 50 places ordered by item count descending with a cover
+   * thumbnail.
+   *
+   * Location Grouping (issue #374): the group key is the CANONICAL locality, so
+   * "Heredia", "Heredia Province" and "Provincia de Heredia" collapse into one
+   * entry. The `?? geoLocality` step is belt-and-braces rather than a real
+   * fallback — the canonical column is populated whenever the raw one is — and
+   * `geoPlaceName` remains the last resort because it deliberately does not
+   * participate in grouping.
    */
   async explorePlaces(
     circleId: string,
@@ -2667,6 +2694,7 @@ export class MediaService {
         ],
       },
       select: {
+        geoCanonicalLocality: true,
         geoLocality: true,
         geoPlaceName: true,
         metadata: true,
@@ -2680,7 +2708,7 @@ export class MediaService {
     >();
 
     for (const item of items) {
-      const name = item.geoLocality ?? item.geoPlaceName;
+      const name = item.geoCanonicalLocality ?? item.geoLocality ?? item.geoPlaceName;
       if (!name) continue;
 
       const existing = placeMap.get(name);
@@ -2776,14 +2804,31 @@ export class MediaService {
   /**
    * Run the shared geo groupBy used by both tiered-location endpoints.
    *
-   * A single Prisma groupBy over the four geo columns gives us per-combination
+   * A single Prisma groupBy over the geo columns gives us per-combination
    * counts, which we then fold into per-tier maps in application code.  This is
    * intentionally NOT the full-metadata scan explorePlaces performs — covers
    * are fetched lazily per surviving group in {@link buildLocationLevel}.
+   *
+   * Location Grouping (issue #374): the three CANONICAL columns are ADDED to
+   * `by:` rather than replacing their raw counterparts. `groupBy` cannot
+   * express a `COALESCE(canonical, raw)` projection, so the canonical column
+   * has to be a real grouping key; keeping the raw columns alongside costs
+   * nothing in practice (canonical equals raw for every ungrouped value, so the
+   * row cardinality is unchanged) and leaves the raw spelling available to any
+   * future consumer of these rows. {@link buildLocationLevel} folds on the
+   * canonical value, which is what actually collapses variant spellings.
    */
   private fetchGeoGroupRows(circleId: string) {
     return this.prisma.mediaItem.groupBy({
-      by: ['geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality'],
+      by: [
+        'geoCountry',
+        'geoCountryCode',
+        'geoAdmin1',
+        'geoLocality',
+        'geoCanonicalCountry',
+        'geoCanonicalAdmin1',
+        'geoCanonicalLocality',
+      ],
       where: {
         circleId,
         deletedAt: null,
@@ -2806,6 +2851,20 @@ export class MediaService {
    *
    * Cover work is O(surviving groups) single-row lookups — never a scan of
    * every item's metadata.
+   *
+   * Location Grouping (issue #374), two changes:
+   *
+   *  - The fold key and the cover `where` both use the CANONICAL column, so a
+   *    tier entry is one group rather than one raw spelling. COUNTRIES are the
+   *    exception: they stay keyed by `geoCountryCode`, so renaming a country
+   *    group changes only the DISPLAY name while the grouping key remains the
+   *    ISO code (a code is already canonical — two spellings of "United States"
+   *    were never two entries).
+   *
+   *  - A group carrying an explicit `coverMediaItemId` OVERRIDES the
+   *    most-recently-captured heuristic, and skips the `findFirst` entirely.
+   *    The override is resolved from ONE `location_groups` read for the whole
+   *    tier, not one per entry.
    */
   private async buildLocationLevel(
     rows: Awaited<ReturnType<MediaService['fetchGeoGroupRows']>>,
@@ -2829,10 +2888,12 @@ export class MediaService {
       const count = row._count._all;
 
       if (level === 'countries') {
-        const country = row.geoCountry;
+        const country = row.geoCanonicalCountry ?? row.geoCountry;
         if (!country) continue; // filtered NOT NULL above; guard for types
         // Key by geoCountryCode (indexed) when present so cover lookups can use
         // the index; fall back to the display name when the code is missing.
+        // A country group therefore renames only the DISPLAY name — the
+        // grouping key stays the ISO code.
         const key = row.geoCountryCode ?? country;
         const existing = map.get(key);
         if (existing) {
@@ -2845,13 +2906,13 @@ export class MediaService {
           });
         }
       } else if (level === 'regions') {
-        const region = row.geoAdmin1;
+        const region = row.geoCanonicalAdmin1 ?? row.geoAdmin1;
         if (!region) continue;
         const existing = map.get(region);
         if (existing) existing.count += count;
         else map.set(region, { name: region, countryCode: null, count });
       } else {
-        const city = row.geoLocality;
+        const city = row.geoCanonicalLocality ?? row.geoLocality;
         if (!city) continue;
         const existing = map.get(city);
         if (existing) existing.count += count;
@@ -2863,9 +2924,29 @@ export class MediaService {
       .sort((a, b) => b.count - a.count)
       .slice(0, cap);
 
-    // One bounded, indexed cover lookup per surviving group, run in parallel.
+    // Explicit group covers for this whole tier, in ONE read. Keyed by the
+    // group's normalized name (and country scope), matching how the resolver
+    // identifies a group.
+    const coverOverrides = await this.fetchGroupCoverOverrides(level, sorted);
+
+    // One bounded, indexed cover lookup per surviving group WITHOUT an explicit
+    // group cover, run in parallel.
     const withCovers = await Promise.all(
       sorted.map(async (entry) => {
+        const override = coverOverrides.get(
+          groupCoverKey(entry.countryCode, entry.name),
+        );
+        if (override !== undefined) {
+          // An admin chose this photo; the capturedAt heuristic is skipped
+          // entirely rather than run and discarded.
+          return {
+            name: entry.name,
+            countryCode: entry.countryCode,
+            count: entry.count,
+            metadata: override,
+          };
+        }
+
         const where: Prisma.MediaItemWhereInput = {
           circleId,
           deletedAt: null,
@@ -2874,11 +2955,11 @@ export class MediaService {
         if (level === 'countries') {
           // Prefer the indexed countryCode; fall back to display name.
           if (entry.countryCode) where.geoCountryCode = entry.countryCode;
-          else where.geoCountry = entry.name;
+          else where.geoCanonicalCountry = entry.name;
         } else if (level === 'regions') {
-          where.geoAdmin1 = entry.name;
+          where.geoCanonicalAdmin1 = entry.name;
         } else {
-          where.geoLocality = entry.name;
+          where.geoCanonicalLocality = entry.name;
         }
 
         const cover = await this.prisma.mediaItem.findFirst({
@@ -2905,6 +2986,73 @@ export class MediaService {
       count,
       coverThumbnailUrl: thumbnailUrl,
     }));
+  }
+
+  /**
+   * Explicit `LocationGroup.coverMediaItemId` covers for one tier of entries
+   * (Location Grouping, issue #374).
+   *
+   * ONE `location_groups` read for the whole tier, keyed by the group's
+   * normalized name — never one lookup per entry, which is the same "no
+   * per-row lookup" rule the management API's item counts follow.
+   *
+   * A group whose cover item was hard-deleted has `coverMediaItemId` nulled by
+   * the SetNull FK, so it simply falls back to the capturedAt heuristic — the
+   * override map only ever carries groups that really do have a cover.
+   *
+   * NOTE the deliberate absence of a `circleId` filter on the cover item: a
+   * group is GLOBAL (it is a fact about the world, not about one circle), so
+   * its chosen cover may live in a different circle than the one being browsed.
+   * That is accepted — an admin choosing a cover is choosing what the place
+   * looks like, and the alternative (per-circle covers) is an explicit v1
+   * non-goal.
+   */
+  private async fetchGroupCoverOverrides(
+    level: 'countries' | 'regions' | 'cities',
+    entries: Array<{ name: string; countryCode: string | null }>,
+  ): Promise<Map<string, Prisma.JsonValue | null>> {
+    const overrides = new Map<string, Prisma.JsonValue | null>();
+    if (entries.length === 0) return overrides;
+
+    const groupLevel =
+      level === 'countries' ? 'country' : level === 'regions' ? 'region' : 'locality';
+
+    const groups = await this.prisma.locationGroup.findMany({
+      where: {
+        level: groupLevel,
+        enabled: true,
+        normalizedName: { in: entries.map((e) => fold(e.name)) },
+        coverMediaItemId: { not: null },
+      },
+      select: {
+        countryCode: true,
+        normalizedName: true,
+        coverMediaItem: { select: { metadata: true, deletedAt: true } },
+      },
+    });
+
+    for (const group of groups) {
+      // A soft-deleted cover is treated as no cover: the SetNull FK only fires
+      // on a HARD delete, so a trashed photo would otherwise keep being served
+      // as a group cover after the user removed it.
+      if (!group.coverMediaItem || group.coverMediaItem.deletedAt) continue;
+      overrides.set(
+        `${group.countryCode}|${group.normalizedName}`,
+        group.coverMediaItem.metadata,
+      );
+    }
+
+    // Unscoped ('') groups apply in every country, so fill them in for any
+    // entry the exactly-scoped pass did not already claim — "more specific
+    // wins", the same precedence the resolver applies.
+    for (const entry of entries) {
+      const scoped = groupCoverKey(entry.countryCode, entry.name);
+      if (overrides.has(scoped)) continue;
+      const unscoped = overrides.get(`|${fold(entry.name)}`);
+      if (unscoped !== undefined) overrides.set(scoped, unscoped);
+    }
+
+    return overrides;
   }
 
   /**
@@ -3072,8 +3220,21 @@ export class MediaService {
       'viewer' as CircleRole,
     );
 
+    // Location Grouping (issue #374): the canonical columns are ADDED to `by:`
+    // and the fold below keys on them, so search facets show the same collapsed
+    // names the browse surfaces do. The absence of `archivedAt: null` is
+    // PRESERVED and deliberate — search includes archived items by default,
+    // unlike fetchGeoGroupRows above.
     const rows = await this.prisma.mediaItem.groupBy({
-      by: ['geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality'],
+      by: [
+        'geoCountry',
+        'geoCountryCode',
+        'geoAdmin1',
+        'geoLocality',
+        'geoCanonicalCountry',
+        'geoCanonicalAdmin1',
+        'geoCanonicalLocality',
+      ],
       where: {
         circleId,
         deletedAt: null,
@@ -3094,10 +3255,10 @@ export class MediaService {
     const countryMap = new Map<string, CountryEntry>();
 
     for (const row of rows) {
-      const country = row.geoCountry as string; // filtered NOT NULL above
+      const country = (row.geoCanonicalCountry ?? row.geoCountry) as string; // raw filtered NOT NULL above
       const countryCode = (row.geoCountryCode as string | null) ?? null;
-      const region = (row.geoAdmin1 as string | null) ?? null;
-      const locality = (row.geoLocality as string | null) ?? null;
+      const region = (row.geoCanonicalAdmin1 ?? row.geoAdmin1 ?? null) as string | null;
+      const locality = (row.geoCanonicalLocality ?? row.geoLocality ?? null) as string | null;
       const count = row._count._all;
 
       let countryEntry = countryMap.get(country);

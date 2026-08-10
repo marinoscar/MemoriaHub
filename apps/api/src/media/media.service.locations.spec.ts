@@ -32,8 +32,15 @@ const USER_ID = 'user-locations-test';
 
 /**
  * Build a groupBy row as Prisma would return it for the shared
- * fetchGeoGroupRows() call (geoCountry / geoCountryCode / geoAdmin1 /
- * geoLocality + _count._all).
+ * fetchGeoGroupRows() call.
+ *
+ * The three `geoCanonical*` columns (Location Grouping, issue #374) mirror
+ * their raw counterparts exactly — which is not test convenience but the real
+ * database state whenever NO group claims a value: the migration seeded
+ * `canonical = raw` for every existing row, and the resolver is the identity
+ * function when the feature is off. Every assertion in this file therefore
+ * doubles as a READ-PATH NEUTRALITY check: identical inputs, identical output
+ * to the pre-#374 behaviour.
  */
 function makeRow(
   geoCountry: string,
@@ -47,6 +54,9 @@ function makeRow(
     geoCountryCode,
     geoAdmin1,
     geoLocality,
+    geoCanonicalCountry: geoCountry,
+    geoCanonicalAdmin1: geoAdmin1,
+    geoCanonicalLocality: geoLocality,
     _count: { _all: count },
   };
 }
@@ -73,6 +83,10 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
     // storageObject.findMany call. Default to no matching rows -> falls back
     // to the legacy static provider.
     (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
+    // buildLocationLevel's group-cover override (Location Grouping, issue
+    // #374) is ONE location_groups read per tier. Default: no groups, so every
+    // entry falls through to the unchanged capturedAt cover heuristic.
+    (mockPrisma.locationGroup.findMany as jest.Mock).mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -126,7 +140,15 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
       await service.exploreLocations(CIRCLE_ID, USER_ID, []);
 
       expect(mockPrisma.mediaItem.groupBy).toHaveBeenCalledWith({
-        by: ['geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality'],
+        by: [
+          'geoCountry',
+          'geoCountryCode',
+          'geoAdmin1',
+          'geoLocality',
+          'geoCanonicalCountry',
+          'geoCanonicalAdmin1',
+          'geoCanonicalLocality',
+        ],
         where: {
           circleId: CIRCLE_ID,
           deletedAt: null,
@@ -413,7 +435,15 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
       await service.exploreLocationLevel(CIRCLE_ID, 'countries', USER_ID, []);
 
       expect(mockPrisma.mediaItem.groupBy).toHaveBeenCalledWith({
-        by: ['geoCountry', 'geoCountryCode', 'geoAdmin1', 'geoLocality'],
+        by: [
+          'geoCountry',
+          'geoCountryCode',
+          'geoAdmin1',
+          'geoLocality',
+          'geoCanonicalCountry',
+          'geoCanonicalAdmin1',
+          'geoCanonicalLocality',
+        ],
         where: {
           circleId: CIRCLE_ID,
           deletedAt: null,

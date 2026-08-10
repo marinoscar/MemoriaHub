@@ -208,7 +208,15 @@ function accumulatePlace(
   map.set(trimmed, stats);
 }
 
-/** Fold one coordinate-bearing item into the home statistics. */
+/**
+ * Fold one coordinate-bearing item into the home statistics.
+ *
+ * `geoLocality` / `geoAdmin1` carry the CANONICAL place names as of Location
+ * Grouping (issue #374) — `TripCurator` resolves `geoCanonical* ?? geo*` before
+ * calling in, so every place name that reaches this module is already
+ * collapsed. The parameter names are kept for continuity with the columns they
+ * originate from; this module does no resolution of its own.
+ */
 export function accumulateHomeSample(
   stats: HomeStats,
   sample: {
@@ -234,7 +242,7 @@ export function accumulateHomeSample(
 export interface HomeLocation {
   /** Which column the inference landed on. */
   level: 'locality' | 'admin1';
-  /** The place name itself (`geoLocality` or `geoAdmin1` value). */
+  /** The place name itself — the CANONICAL `geoLocality` / `geoAdmin1` value. */
   label: string;
   /** Home's admin1, used by the no-coordinate metadata fallback. Null when unknown. */
   admin1: string | null;
