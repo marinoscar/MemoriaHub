@@ -1511,12 +1511,28 @@ export default function PeoplePage() {
     hide: hideUnlabeled,
   } = usePeople(activeCircleId, { includeUnlabeled: true });
 
-  // Hidden people count (for badge)
+  // Hidden people count. This is a count-only probe (pageSize 1 — we read
+  // meta.totalItems, never the items), because it decides whether the Hidden
+  // tab exists at all. HiddenPeopleView does its own full fetch when the tab
+  // is actually open.
   const {
     data: hiddenData,
     refresh: refreshHidden,
-  } = usePeople(activeCircleId, { hidden: true, includeUnlabeled: true });
+  } = usePeople(activeCircleId, { hidden: true, includeUnlabeled: true, pageSize: 1 });
   const hiddenCount = hiddenData?.meta.totalItems ?? 0;
+
+  // The Hidden tab is the ONLY way to unhide or purge a hidden person, so it
+  // must appear whenever something is hidden — but when nothing is, it's a
+  // dead affordance easily confused with the separate /people/archived page
+  // (Face.hiddenAt vs Person.hiddenAt). Show it only when it can do something.
+  const showHiddenTab = hiddenCount > 0;
+
+  // If the last hidden person is unhidden or purged while the Hidden tab is
+  // open, the tab disappears out from under the user — fall back to People so
+  // the page doesn't render a body for a tab that no longer exists.
+  useEffect(() => {
+    if (!showHiddenTab && activeTab === 1) setActiveTab(0);
+  }, [showHiddenTab, activeTab]);
 
   // Filter unlabeled from the unlabeled fetch
   const unlabeledPeople = (unlabeledData?.items ?? []).filter((p) => p.isUnlabeled);
@@ -1697,31 +1713,30 @@ export default function PeoplePage() {
         </Alert>
       )}
 
-      {/* Tabs: People / Hidden */}
-      <Tabs
-        value={activeTab}
-        onChange={(_, v: number) => {
-          setActiveTab(v);
-          handleClearSelection();
-        }}
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab label="People" value={0} />
-        <Tab
-          label={
-            hiddenCount > 0 ? (
+      {/* Tabs: People / Hidden — the whole strip is omitted when nothing is
+          hidden, since a lone "People" tab conveys nothing. */}
+      {showHiddenTab && (
+        <Tabs
+          value={activeTab}
+          onChange={(_, v: number) => {
+            setActiveTab(v);
+            handleClearSelection();
+          }}
+          sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab label="People" value={0} />
+          <Tab
+            label={
               <Badge badgeContent={hiddenCount} color="default" max={999}>
                 Hidden
               </Badge>
-            ) : (
-              'Hidden'
-            )
-          }
-          value={1}
-          icon={<VisibilityOffIcon fontSize="small" />}
-          iconPosition="start"
-        />
-      </Tabs>
+            }
+            value={1}
+            icon={<VisibilityOffIcon fontSize="small" />}
+            iconPosition="start"
+          />
+        </Tabs>
+      )}
 
       {/* ── MAIN PEOPLE TAB ── */}
       {activeTab === 0 && (
