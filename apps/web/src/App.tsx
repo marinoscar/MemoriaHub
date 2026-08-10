@@ -25,7 +25,6 @@ const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
 const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
 const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
-const BackupPage = lazy(() => import('./pages/Admin/BackupPage'));
 const DbBackupPage = lazy(() => import('./pages/Admin/DbBackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
@@ -141,7 +140,12 @@ function AppRoutes() {
                 <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
                 <Route path="/admin/settings/doctor" element={<DoctorPage />} />
                 <Route path="/admin/settings/workflows" element={<WorkflowsSettingsPage />} />
-                <Route path="/admin/settings/backup" element={<BackupPage />} />
+                {/* v0 server-side backup retired (#367) — superseded by the node-based
+                    Local Media Backup reachable from the Worker Nodes page. */}
+                <Route
+                  path="/admin/settings/backup"
+                  element={<Navigate to="/admin/settings/nodes" replace />}
+                />
                 <Route path="/admin/settings/db-backup" element={<DbBackupPage />} />
                 <Route path="/admin/settings/sharing" element={<PublicSharesPage />} />
                 {/* Legacy admin route redirects */}
@@ -152,7 +156,7 @@ function AppRoutes() {
                 <Route path="/admin/tags" element={<Navigate to="/admin/settings/tagging" replace />} />
                 <Route path="/admin/insights" element={<Navigate to="/admin/settings/storage/insights" replace />} />
                 <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage/providers" replace />} />
-                <Route path="/admin/backup" element={<Navigate to="/admin/settings/backup" replace />} />
+                <Route path="/admin/backup" element={<Navigate to="/admin/settings/nodes" replace />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/people" element={<PeoplePage />} />
                 <Route path="/people/archived" element={<ArchivedFacesPage />} />
