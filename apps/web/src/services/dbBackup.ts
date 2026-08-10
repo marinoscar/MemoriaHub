@@ -11,10 +11,19 @@ import { api } from './api';
  * to decimal strings by the API's `toRunDto`. They are typed `string` here and
  * humanized with `formatBytes` (BigInt parsing) — never `Number()`-coerced.
  *
- * ## Restore / rollback are NOT here
+ * ## Restore / rollback (#344, merged)
  *
- * `POST /runs/:id/restore` and `POST /runs/:id/rollback` are issue #344 and do
- * not exist on the API yet. Nothing in this file guesses at their shape.
+ * The restore half is typed against `DatabaseRestoreService`'s exported types
+ * verbatim — `StartRestoreResult`, `RestorePreflightReport`, `PreflightCheck`,
+ * `GuidedRestorePayload`, `RollbackResult`.
+ *
+ * **There is NO read-only pre-flight endpoint.** `POST /runs/:id/restore` is
+ * the only way to obtain a `RestorePreflightReport`, and it requires the typed
+ * `confirmation` literal. It is nonetheless safe to call: a failed CAPABILITY
+ * gate returns `mode:'guided'` and a failed schema gate returns `mode:'blocked'`
+ * — in both cases NOTHING is created, nothing is renamed, and the live database
+ * is untouched. Only `mode:'running'` actually starts work. The dialog is built
+ * around that fact rather than pretending a dry run exists.
  */
 
 // ---------------------------------------------------------------------------
@@ -111,7 +120,8 @@ export interface DbBackupRunDto {
   migrationName: string | null;
   lastError: string | null;
   createdById: string | null;
-  restoreStatus: string | null;
+  /** #344 lifecycle marker; see `DbRestoreStatus`. */
+  restoreStatus: DbRestoreStatus | null;
   restoreError: string | null;
   restoredAt: string | null;
   restoredById: string | null;
@@ -150,6 +160,108 @@ export interface CancelDbBackupResponse {
   runId: string;
   signalled: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Restore / rollback (#344)
+// ---------------------------------------------------------------------------
+
+/** The literal the API's Zod schema demands. Anything else is a 400. */
+export const RESTORE_CONFIRMATION = 'RESTORE';
+export const ROLLBACK_CONFIRMATION = 'ROLLBACK';
+
+/** `docs/runbooks/database-restore.md` (#346), as the guided payload names it. */
+export const RESTORE_RUNBOOK_PATH = 'docs/runbooks/database-restore.md';
+export const RESTORE_RUNBOOK_URL = `https://github.com/marinoscar/MemoriaHub/blob/main/${RESTORE_RUNBOOK_PATH}`;
+
+export type DbRestorePreflightStatus = 'ok' | 'warning' | 'blocked';
+
+export interface DbRestorePreflightCheck {
+  key: string;
+  label: string;
+  status: DbRestorePreflightStatus;
+  message: string;
+  actionItem?: string;
+}
+
+export interface DbRestorePreflightReport {
+  /**
+   * `ok` — proceed. `guided` — a CAPABILITY gate failed and the app cannot
+   * drive the restore at all. `blocked` — a gate the admin may consciously
+   * override (today: schema compatibility).
+   */
+  status: 'ok' | 'guided' | 'blocked';
+  checks: DbRestorePreflightCheck[];
+  /** The mode actually in force, AFTER any automatic downgrade. */
+  rollbackMode: DbBackupRollbackMode;
+  /** What `databaseBackup.restoreRollbackMode` asked for. */
+  rollbackModeRequested: DbBackupRollbackMode;
+  rollbackModeDowngraded: boolean;
+  downgradeReason: string | null;
+  scratchDatabase: string;
+  oldDatabase: string;
+}
+
+export interface DbGuidedRestorePayload {
+  reason: string;
+  runbook: string;
+  commands: string[];
+  notes: string[];
+}
+
+/**
+ * Three NORMAL outcomes. `guided` and `blocked` are designed paths, not errors:
+ * neither starts anything, so the dialog renders them as results rather than
+ * failures.
+ */
+export type StartDbRestoreResult =
+  | {
+      mode: 'running';
+      runId: string;
+      scratchDatabase: string;
+      oldDatabase: string;
+      rollbackMode: DbBackupRollbackMode;
+      rollbackModeDowngraded: boolean;
+      preflight: DbRestorePreflightReport;
+    }
+  | {
+      mode: 'guided';
+      runId: string;
+      guided: DbGuidedRestorePayload;
+      preflight: DbRestorePreflightReport;
+    }
+  | {
+      mode: 'blocked';
+      runId: string;
+      reason: string;
+      preflight: DbRestorePreflightReport;
+    };
+
+export type DbRollbackResult =
+  | { mode: 'renamed'; runId: string; restoredDatabase: string }
+  | { mode: 'restore_started'; runId: string; preRestoreBackupId: string }
+  | { mode: 'unavailable'; runId: string; reason: string };
+
+/**
+ * Lifecycle of a restore, as written to `DbBackupRunDto.restoreStatus`.
+ *
+ * `guided` / `blocked` are PERSISTED terminal-ish markers for an attempt that
+ * never started, so a reload after either still shows what happened.
+ */
+export type DbRestoreStatus =
+  | 'restoring'
+  | 'verifying'
+  | 'swapping'
+  | 'completed'
+  | 'failed'
+  | 'guided'
+  | 'blocked';
+
+/** Restore phases during which `GET /runs/:id` is expected to keep answering. */
+export const RESTORE_ACTIVE_STATUSES: readonly string[] = [
+  'restoring',
+  'verifying',
+  'swapping',
+];
 
 // ---------------------------------------------------------------------------
 // API functions
@@ -216,4 +328,38 @@ export async function cancelDbBackupRun(
   id: string,
 ): Promise<CancelDbBackupResponse> {
   return api.post<CancelDbBackupResponse>(`/admin/db-backup/runs/${id}/cancel`);
+}
+
+/**
+ * Start a restore FROM this backup — or, when a gate fails, learn why.
+ *
+ * Returns once the cheap pre-flight gates have run. `mode:'running'` means the
+ * multi-hour scratch-database rebuild has begun IN THE BACKGROUND with the app
+ * still fully serving; poll `getDbBackupRun` and watch `restoreStatus`.
+ *
+ * `overrideSchemaCheck` unblocks the compatibility gate ONLY — it can never
+ * bypass a capability gate, which is why a `guided` result has no "try anyway".
+ */
+export async function startDbRestore(
+  id: string,
+  opts: { overrideSchemaCheck?: boolean } = {},
+): Promise<StartDbRestoreResult> {
+  return api.post<StartDbRestoreResult>(`/admin/db-backup/runs/${id}/restore`, {
+    confirmation: RESTORE_CONFIRMATION,
+    ...(opts.overrideSchemaCheck ? { overrideSchemaCheck: true } : {}),
+  });
+}
+
+/**
+ * Roll a completed restore back.
+ *
+ * `retain_database` mode renames the retained pre-swap database back — seconds,
+ * then a process restart. `pre_restore_dump` mode has no database to rename, so
+ * the API starts a full restore of the safety dump instead: hours. `mode` in
+ * the response says which actually happened.
+ */
+export async function rollbackDbRestore(id: string): Promise<DbRollbackResult> {
+  return api.post<DbRollbackResult>(`/admin/db-backup/runs/${id}/rollback`, {
+    confirmation: ROLLBACK_CONFIRMATION,
+  });
 }
