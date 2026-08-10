@@ -14,16 +14,27 @@ datasource db {
 // User & Identity
 // =============================================================================
 
+enum UserAvatarSource {
+  oauth
+  upload
+  person
+}
+
 model User {
-  id                      String   @id @default(uuid()) @db.Uuid
-  email                   String   @unique
-  displayName             String?  @map("display_name")
-  providerDisplayName     String?  @map("provider_display_name")
-  profileImageUrl         String?  @map("profile_image_url")
-  providerProfileImageUrl String?  @map("provider_profile_image_url")
-  isActive                Boolean  @default(true) @map("is_active")
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                      String           @id @default(uuid()) @db.Uuid
+  email                   String           @unique
+  displayName             String?          @map("display_name")
+  providerDisplayName     String?          @map("provider_display_name")
+  profileImageUrl         String?          @map("profile_image_url")
+  providerProfileImageUrl String?          @map("provider_profile_image_url")
+  isActive                Boolean          @default(true) @map("is_active")
+  createdAt               DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+  // Profile picture management (issue #354)
+  avatarSource            UserAvatarSource @default(oauth) @map("avatar_source")
+  avatarStorageKey        String?          @map("avatar_storage_key")
+  avatarVersion           String?          @map("avatar_version")
+  linkedPersonId          String?          @map("linked_person_id") @db.Uuid
 
   // Relations
   identities                  UserIdentity[]
@@ -82,7 +93,10 @@ model User {
   // PostgreSQL Database Backup & Restore relations (epic #339, issue #340)
   databaseBackupsCreated      DatabaseBackupRun[]         @relation("DatabaseBackupCreatedBy")
   databaseBackupsRestored     DatabaseBackupRun[]         @relation("DatabaseBackupRestoredBy")
+  // Profile picture management relations (issue #354)
+  linkedPerson                Person?                     @relation("UserLinkedPerson", fields: [linkedPersonId], references: [id], onDelete: SetNull)
 
+  @@index([linkedPersonId])
   @@map("users")
 }
 
@@ -802,6 +816,8 @@ model Person {
   faces            Face[]     @relation("PersonFaces")
   // Memories relations (epic #300, issue #301)
   memories         Memory[]
+  // Profile picture management relations (issue #354)
+  linkedUsers      User[]     @relation("UserLinkedPerson")
 
   @@index([circleId])
   @@index([circleId, favorite])

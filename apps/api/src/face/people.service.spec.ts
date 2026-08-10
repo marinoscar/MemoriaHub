@@ -15,6 +15,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { MediaTouchService } from '../media/media-touch.service';
+import { UserAvatarService } from '../users/user-avatar.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -76,6 +77,10 @@ describe('PeopleService', () => {
   let mockSystemSettings: { isFeatureEnabled: jest.Mock; getSettings: jest.Mock };
   let mockMediaThumbnailService: { signThumb: jest.Mock; signThumbsBatched: jest.Mock };
   let mockMediaTouch: { touchMediaItems: jest.Mock };
+  let mockUserAvatarService: {
+    refreshAvatarsForPerson: jest.Mock;
+    carryLinkedUsersOnMerge: jest.Mock;
+  };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -115,6 +120,15 @@ describe('PeopleService', () => {
     mockMediaTouch = {
       touchMediaItems: jest.fn().mockResolvedValue(undefined),
     };
+    // Profile picture management (issue #354): PeopleService calls this
+    // best-effort on person profile-picture changes (updatePerson) and to
+    // carry link ownership across a merge (mergePeople). Neither call's
+    // outcome is asserted by the pre-existing tests below, so a resolved
+    // no-op is a faithful default.
+    mockUserAvatarService = {
+      refreshAvatarsForPerson: jest.fn().mockResolvedValue(undefined),
+      carryLinkedUsersOnMerge: jest.fn().mockResolvedValue(0),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -127,6 +141,7 @@ describe('PeopleService', () => {
         { provide: SystemSettingsService, useValue: mockSystemSettings },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
         { provide: MediaTouchService, useValue: mockMediaTouch },
+        { provide: UserAvatarService, useValue: mockUserAvatarService },
       ],
     }).compile();
 

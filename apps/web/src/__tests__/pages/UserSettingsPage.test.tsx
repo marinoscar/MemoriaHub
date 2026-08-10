@@ -189,8 +189,21 @@ describe('UserSettingsPage', () => {
   });
 
   describe('Profile Settings', () => {
-    it('should call updateProfile when profile is saved', async () => {
-      const updateProfile = vi.fn().mockResolvedValue(undefined);
+    /**
+     * Issue #354 moved all profile editing to `/profile`. The card left behind
+     * is a read-only summary, so this page must no longer save the deprecated
+     * `useProviderImage` / `customImageUrl` keys — nor offer a control that
+     * could.
+     */
+    it('should render the profile summary with a link to /profile', () => {
+      render(<UserSettingsPage />);
+
+      const link = screen.getByRole('link', { name: /manage profile picture/i });
+      expect(link).toHaveAttribute('href', '/profile');
+    });
+
+    it('should not call updateProfile — the deprecated keys are never written', () => {
+      const updateProfile = vi.fn();
       mockUseUserSettings.mockReturnValue({
         settings: {
           theme: 'system',
@@ -213,8 +226,9 @@ describe('UserSettingsPage', () => {
 
       render(<UserSettingsPage />);
 
-      // Profile update will be triggered by ProfileSettings component
-      expect(updateProfile).toBeDefined();
+      expect(updateProfile).not.toHaveBeenCalled();
+      expect(screen.queryByRole('switch', { name: /google profile image/i })).not
+        .toBeInTheDocument();
     });
   });
 

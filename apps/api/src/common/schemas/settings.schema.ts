@@ -253,7 +253,16 @@ export const userSettingsSchema = z.object({
   theme: z.enum(['light', 'dark', 'system']),
   profile: z.object({
     displayName: z.string().max(100).optional(),
+    /**
+     * @deprecated (issue #354) No-op. Avatar selection now lives on the user
+     * row — `User.avatarSource` / `avatarStorageKey` / `linkedPersonId`, written
+     * only by UserAvatarService and resolved into `User.profileImageUrl`.
+     * Nothing in the API reads these two keys; they are retained purely so
+     * older clients that still send them do not start getting 400s.
+     * Use GET/PATCH /api/users/me/profile and the /api/users/me/avatar routes.
+     */
     useProviderImage: z.boolean(),
+    /** @deprecated (issue #354) No-op — see useProviderImage above. */
     customImageUrl: z.string().url().nullable().optional(),
   }),
   search: z.object({
@@ -271,7 +280,9 @@ export const userSettingsPatchSchema = z.object({
   theme: z.enum(['light', 'dark', 'system']).optional(),
   profile: z.object({
     displayName: z.string().max(100).optional(),
+    /** @deprecated (issue #354) No-op — see userSettingsSchema above. */
     useProviderImage: z.boolean().optional(),
+    /** @deprecated (issue #354) No-op — see userSettingsSchema above. */
     customImageUrl: z.string().url().nullable().optional(),
   }).optional(),
   search: z.object({
