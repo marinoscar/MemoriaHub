@@ -17,6 +17,7 @@ const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
 const ActivateDevicePage = lazy(() => import('./pages/ActivateDevicePage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
 const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
+const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
@@ -106,6 +107,7 @@ function AppRoutes() {
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/settings" element={<UserSettingsPage />} />
+                <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
                 <Route path="/circles" element={<CircleListPage />} />
                 <Route path="/circles/:id" element={<CircleDetailPage />} />

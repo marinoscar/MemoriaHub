@@ -22,7 +22,6 @@ export default function UserSettingsPage() {
     error,
     isSaving,
     updateTheme,
-    updateProfile,
     updateSettings,
   } = useUserSettings();
 
@@ -35,17 +34,6 @@ export default function UserSettingsPage() {
       setSuccessMessage('Theme updated');
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Failed to update theme');
-    }
-  };
-
-  const handleProfileSave = async (
-    profile: NonNullable<typeof settings>['profile']
-  ) => {
-    try {
-      await updateProfile(profile);
-      setSuccessMessage('Profile updated');
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Failed to update profile');
     }
   };
 
@@ -78,12 +66,8 @@ export default function UserSettingsPage() {
               disabled={isSaving}
             />
 
-            {/* Profile Settings */}
-            <ProfileSettings
-              profile={settings.profile}
-              onSave={handleProfileSave}
-              disabled={isSaving}
-            />
+            {/* Profile summary — editing lives at /profile (issue #354) */}
+            <ProfileSettings />
 
             {/* Notification Preferences (issue #251) */}
             <NotificationSettings
