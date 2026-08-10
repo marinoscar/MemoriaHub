@@ -62,7 +62,7 @@ describe('LinkedPersonCard', () => {
     vi.clearAllMocks();
     mockListPeople.mockResolvedValue({
       items: [],
-      meta: { page: 1, pageSize: 200, totalItems: 0, totalPages: 0 },
+      meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 },
     });
   });
 
@@ -121,7 +121,7 @@ describe('LinkedPersonCard', () => {
       );
       mockListPeople.mockResolvedValue({
         items: [],
-        meta: { page: 1, pageSize: 200, totalItems: 0, totalPages: 0 },
+        meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 },
       });
 
       render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
@@ -180,7 +180,7 @@ describe('LinkedPersonCard', () => {
             favorite: false,
           },
         ],
-        meta: { page: 1, pageSize: 200, totalItems: 1, totalPages: 1 },
+        meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
       });
 
       render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
@@ -212,7 +212,7 @@ describe('LinkedPersonCard', () => {
             favorite: false,
           },
         ],
-        meta: { page: 1, pageSize: 200, totalItems: 1, totalPages: 1 },
+        meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
       });
       const onLinkChange = vi.fn().mockResolvedValue(undefined);
       const user = userEvent.setup();
@@ -244,7 +244,7 @@ describe('LinkedPersonCard', () => {
       );
       mockListPeople.mockResolvedValue({
         items: [],
-        meta: { page: 1, pageSize: 200, totalItems: 0, totalPages: 0 },
+        meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 },
       });
       const onLinkChange = vi.fn().mockResolvedValue(undefined);
       const user = userEvent.setup();
@@ -269,6 +269,98 @@ describe('LinkedPersonCard', () => {
 
       await waitFor(() => {
         expect(onLinkChange).toHaveBeenCalledWith(null);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 5. Regressions from issue #371
+  // -------------------------------------------------------------------------
+  describe('page-size contract with GET /api/people (issue #371)', () => {
+    function person(id: string, name: string) {
+      return {
+        id,
+        name,
+        isUnlabeled: false,
+        faceCount: 1,
+        coverFace: null,
+        profileMediaItemId: null,
+        profileCrop: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        favorite: false,
+      };
+    }
+
+    /**
+     * The original bug: the card asked for 200, `listPeopleQuerySchema` caps
+     * pageSize at 100, so every request 400'd and the picker was dead in every
+     * install. Mocking `listPeople` hides that, so assert the contract directly.
+     */
+    it('never requests more rows than the API accepts', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        flagsResult({ features: { faceRecognition: true } }),
+      );
+      mockListPeople.mockResolvedValue({
+        items: [person('person-1', 'Grandma')],
+        meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
+      });
+
+      render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
+
+      await waitFor(() => expect(mockListPeople).toHaveBeenCalled());
+      for (const [, opts] of mockListPeople.mock.calls) {
+        expect(opts?.pageSize).toBeLessThanOrEqual(100);
+      }
+    });
+
+    it('pages past the first 100 so a large circle stays searchable', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        flagsResult({ features: { faceRecognition: true } }),
+      );
+      mockListPeople.mockImplementation((_circleId, opts) =>
+        Promise.resolve({
+          items: [
+            opts?.page === 2
+              ? person('person-2', 'Grandpa')
+              : person('person-1', 'Grandma'),
+          ],
+          meta: {
+            page: opts?.page ?? 1,
+            pageSize: 100,
+            totalItems: 2,
+            totalPages: 2,
+          },
+        }),
+      );
+
+      const user = userEvent.setup();
+      render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/Find a person/i)).toBeInTheDocument();
+      });
+      expect(mockListPeople).toHaveBeenCalledTimes(2);
+
+      // The second page's person is selectable, not silently truncated away.
+      await user.click(screen.getByLabelText(/Find a person/i));
+      expect(await screen.findByText('Grandpa')).toBeInTheDocument();
+    });
+
+    it('surfaces the underlying failure instead of a bare "Failed to load people."', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        flagsResult({ features: { faceRecognition: true } }),
+      );
+      mockListPeople.mockRejectedValue(
+        new Error('pageSize: Number must be less than or equal to 100'),
+      );
+
+      render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/less than or equal to 100/i),
+        ).toBeInTheDocument();
       });
     });
   });
