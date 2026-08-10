@@ -290,7 +290,7 @@ Raw-SQL table (not modeled in Prisma — the same reason `media_item_embedding` 
 | `model` | text | Model tag, currently always `clip-vit-b32-q8` (`VISUAL_EMBEDDING_MODEL_TAG`) — future model swaps stay traceable per row |
 | `created_at` | timestamptz | |
 
-Indexes: plain B-tree on `circle_id`; **HNSW** on `embedding` (`vector_cosine_ops`, `m = 16, ef_construction = 64`) — same tuning as `media_item_embedding`'s HNSW index. Requires the `vector` Postgres extension (already enabled by an earlier migration for semantic search) and the `pgvector/pgvector:pg16` database image.
+Indexes: plain B-tree on `circle_id`; **HNSW** on `embedding` (`vector_cosine_ops`, `m = 16, ef_construction = 64`) — same tuning as `media_item_embedding`'s HNSW index. Requires the `vector` Postgres extension (already enabled by an earlier migration for semantic search) and the `pgvector/pgvector:pg17` database image.
 
 `ensureEmbedding(mediaItemId)` is the single write path: it checks row existence first (idempotent, resumable — safe to call from every retry of a batch job), then downloads the object bytes, embeds, and `INSERT ... ON CONFLICT (media_item_id) DO UPDATE`. If the model is degraded or the download/embed fails, it returns `'unavailable'` without writing a row — a later retry (or a future backfill with `force: true` after the model becomes available) will attempt again.
 
@@ -374,7 +374,7 @@ One `media_visual_embedding` row costs **512 × 4 bytes ≈ 2.1 KB** for the vec
 
 `duplicate_groups` rows (~200 bytes each, one per cluster — not one per photo) and `duplicate_detection_batch` job rows (100 per 10 000 photos, auto-purged by the nightly `job_history_purge` job per `jobs.history.retentionDays`) are noise by comparison. Query load during backfill is one HNSW KNN lookup (single-digit milliseconds) plus a couple of inserts per photo, at worker concurrency 1 by default — no load spikes to plan around.
 
-**Verdict:** not a capacity concern on a typical 4–8 GB self-hosted VPS at these scales. If a deployment ever grows past roughly 200 000 photos, the escape hatch is migrating the `embedding` column type to `halfvec(512)` (pgvector ≥ 0.7, supported by the same `pgvector/pgvector:pg16` image already in use), which halves both the raw vector size and the HNSW index size. This is **not built today** — it is a documented future migration path, not a current limitation.
+**Verdict:** not a capacity concern on a typical 4–8 GB self-hosted VPS at these scales. If a deployment ever grows past roughly 200 000 photos, the escape hatch is migrating the `embedding` column type to `halfvec(512)` (pgvector ≥ 0.7, supported by the same `pgvector/pgvector:pg17` image already in use), which halves both the raw vector size and the HNSW index size. This is **not built today** — it is a documented future migration path, not a current limitation.
 
 ### 7.2 What Happens to Embeddings When a Duplicate Group Is Resolved
 
