@@ -25,6 +25,7 @@ import { AuthService } from './auth.service';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
+import { AllowDuringMaintenance } from '../common/maintenance/allow-during-maintenance.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { RequestUser } from './interfaces/authenticated-user.interface';
 import { GoogleProfile } from './strategies/google.strategy';
@@ -45,6 +46,14 @@ const COOKIE_OPTIONS = {
 };
 
 @ApiTags('Authentication')
+/**
+ * MAINTENANCE MODE (issue #348): five routes here carry
+ * `@AllowDuringMaintenance()` — `providers`, `google`, `google/callback`,
+ * `refresh`, and `me`. Together they are the minimum needed to SIGN IN while
+ * the site is down, without which an admin who is not already authenticated
+ * could never reach the maintenance toggle to turn it off. Everything else on
+ * this controller (logout, logout-all) is correctly blocked.
+ */
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -59,6 +68,7 @@ export class AuthController {
    * Returns list of enabled OAuth providers
    */
   @Public()
+  @AllowDuringMaintenance()
   @Get('providers')
   @ApiOperation({
     summary: 'List enabled OAuth providers',
@@ -83,6 +93,7 @@ export class AuthController {
    * Initiates Google OAuth flow
    */
   @Public()
+  @AllowDuringMaintenance()
   @Get('google')
   @UseGuards(GoogleOAuthGuard)
   @ApiOperation({
@@ -117,6 +128,7 @@ export class AuthController {
    * Google OAuth callback endpoint
    */
   @Public()
+  @AllowDuringMaintenance()
   @Get('google/callback')
   @UseGuards(GoogleOAuthGuard)
   @ApiOperation({
@@ -199,6 +211,7 @@ export class AuthController {
    * Returns current authenticated user information
    */
   @Get('me')
+  @AllowDuringMaintenance()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
@@ -228,6 +241,7 @@ export class AuthController {
    * Refresh access token using refresh token from cookie
    */
   @Public()
+  @AllowDuringMaintenance()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

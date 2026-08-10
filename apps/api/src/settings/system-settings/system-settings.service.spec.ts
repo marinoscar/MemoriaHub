@@ -119,7 +119,8 @@ describe('SystemSettingsService', () => {
       // systemSettingsSchema.parse fills in every optional top-level branch
       // with its default when omitted from the DTO — not just `face`. This
       // fixture must mirror ALL of those defaults (face, storage, burst,
-      // dedup, geo, jobs, pictureEnhancement, workflows, databaseBackup) or
+      // dedup, geo, jobs, pictureEnhancement, workflows, databaseBackup,
+      // maintenance) or
       // the toHaveBeenCalledWith assertion below drifts out of sync every
       // time a new default branch is added to the schema. `ai.features.enhance`
       // and `ai.features.memories` are also filled with their defaults (null)
@@ -146,6 +147,7 @@ describe('SystemSettingsService', () => {
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
         memories: DEFAULT_SYSTEM_SETTINGS.memories,
         databaseBackup: DEFAULT_SYSTEM_SETTINGS.databaseBackup,
+        maintenance: DEFAULT_SYSTEM_SETTINGS.maintenance,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({
@@ -254,6 +256,7 @@ describe('SystemSettingsService', () => {
         notifications: DEFAULT_SYSTEM_SETTINGS.notifications,
         memories: DEFAULT_SYSTEM_SETTINGS.memories,
         databaseBackup: DEFAULT_SYSTEM_SETTINGS.databaseBackup,
+        maintenance: DEFAULT_SYSTEM_SETTINGS.maintenance,
       };
 
       mockPrisma.systemSettings.upsert.mockResolvedValue({

@@ -7,6 +7,7 @@ import { ThemeContextProvider, useThemeContext } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { MaintenanceGate } from './components/common/MaintenanceGate';
 
 // Pages (lazy loaded)
 import { Suspense, lazy } from 'react';
@@ -17,6 +18,7 @@ const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
 const ActivateDevicePage = lazy(() => import('./pages/ActivateDevicePage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
 const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
+const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
@@ -87,6 +89,10 @@ function AppRoutes() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <ErrorBoundary>
+        {/* Maintenance mode (issue #348): sits outside <Routes> so the takeover
+            is global — every route, authenticated or not — instead of each
+            page having to handle a maintenance 503 itself. */}
+        <MaintenanceGate>
         <Suspense fallback={<LoadingSpinner fullScreen />}>
           <Routes>
             {/* Public routes */}
@@ -107,6 +113,7 @@ function AppRoutes() {
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/settings" element={<UserSettingsPage />} />
+                <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
                 <Route path="/circles" element={<CircleListPage />} />
                 <Route path="/circles/:id" element={<CircleDetailPage />} />
@@ -191,6 +198,7 @@ function AppRoutes() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </MaintenanceGate>
       </ErrorBoundary>
     </ThemeProvider>
   );

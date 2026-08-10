@@ -42,6 +42,7 @@ export interface ResolvedSettings {
   workflows: SystemSettingsValue['workflows'];
   memories: SystemSettingsValue['memories'];
   databaseBackup: SystemSettingsValue['databaseBackup'];
+  maintenance: SystemSettingsValue['maintenance'];
   updatedAt: Date;
   updatedBy: { id: string; email: string } | null;
   version: number;
@@ -80,8 +81,14 @@ export class SystemSettingsService {
   /**
    * Invalidate the in-memory settings cache.
    * Call after any write so that the next read fetches fresh data.
+   *
+   * PUBLIC (issue #348): MaintenanceModeService writes the `maintenance.*`
+   * namespace through patchSettings and must be able to guarantee the toggle
+   * is visible on the very next read rather than up to SETTINGS_CACHE_TTL_MS
+   * later — a 5 s window where the site is "still up" after an admin took it
+   * down is exactly the confusion this feature exists to remove.
    */
-  private invalidateSettingsCache(): void {
+  invalidateSettingsCache(): void {
     this.settingsCache = null;
   }
 
@@ -146,6 +153,7 @@ export class SystemSettingsService {
       workflows: value.workflows,
       memories: value.memories,
       databaseBackup: value.databaseBackup,
+      maintenance: value.maintenance,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -245,6 +253,7 @@ export class SystemSettingsService {
       workflows: value.workflows,
       memories: value.memories,
       databaseBackup: value.databaseBackup,
+      maintenance: value.maintenance,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,
@@ -775,6 +784,32 @@ export class SystemSettingsService {
           (current as any).databaseBackup?.oldDatabaseRetentionHours ??
           168,
       },
+      // Admin-controlled maintenance mode (issue #348).
+      maintenance: {
+        enabled:
+          (dto as any).maintenance?.enabled ??
+          (current as any).maintenance?.enabled ??
+          false,
+        message:
+          (dto as any).maintenance?.message ??
+          (current as any).maintenance?.message ??
+          '',
+        // Defaults TRUE — see the lockout-prevention note on the schema.
+        allowAdmins:
+          (dto as any).maintenance?.allowAdmins ??
+          (current as any).maintenance?.allowAdmins ??
+          true,
+        // Nullable: null is meaningful ("maintenance is off"), so distinguish
+        // "not sent" from "explicitly cleared" with !== undefined.
+        startedAt:
+          (dto as any).maintenance?.startedAt !== undefined
+            ? (dto as any).maintenance?.startedAt
+            : ((current as any).maintenance?.startedAt ?? null),
+        startedById:
+          (dto as any).maintenance?.startedById !== undefined
+            ? (dto as any).maintenance?.startedById
+            : ((current as any).maintenance?.startedById ?? null),
+      },
     };
 
     // Validate merged result
@@ -827,6 +862,7 @@ export class SystemSettingsService {
       workflows: value.workflows,
       memories: value.memories,
       databaseBackup: value.databaseBackup,
+      maintenance: value.maintenance,
       updatedAt: settings.updatedAt,
       updatedBy: settings.updatedByUser,
       version: settings.version,

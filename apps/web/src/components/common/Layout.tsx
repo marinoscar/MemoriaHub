@@ -7,6 +7,7 @@ import { BottomNav } from '../navigation/BottomNav';
 import { MediaRefreshProvider } from '../../contexts/MediaRefreshContext';
 import { MediaPreviewProvider } from '../../contexts/MediaPreviewContext';
 import { SearchProvider } from '../../contexts/SearchContext';
+import { MaintenanceBanner } from './MaintenanceBanner';
 
 interface LayoutProps {
   /**
@@ -48,6 +49,9 @@ export function Layout({ fullBleed = false }: LayoutProps) {
             backgroundColor: theme.palette.background.default,
           }}
         >
+          {/* Above the AppBar so it is visible on every authenticated screen
+              (issue #348). Renders nothing for non-admins. */}
+          <MaintenanceBanner />
           <AppBar onMenuClick={handleSidebarToggle} />
           <Box sx={{ display: 'flex', flexGrow: 1 }}>
             <Sidebar open={sidebarOpen} onClose={handleSidebarClose} />

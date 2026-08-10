@@ -13,11 +13,13 @@ import {
 import {
   Settings as SettingsIcon,
   AdminPanelSettings as AdminIcon,
+  AccountCircle as ProfileIcon,
   Logout as LogoutIcon,
   GroupWork as CircleIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAuthedImage } from '../../hooks/useAuthedImage';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
 
@@ -27,6 +29,10 @@ export function UserMenu() {
   const { hasPermission } = usePermissions();
   const { circles, activeCircle, setActiveCircle } = useCircle();
   const navigate = useNavigate();
+  // An uploaded avatar lives behind the authenticated `/api/users/:id/avatar`
+  // byte proxy, so a bare `src` would render broken; a provider URL passes
+  // through untouched.
+  const { src: avatarSrc } = useAuthedImage(user?.profileImageUrl);
 
   const open = Boolean(anchorEl);
 
@@ -67,7 +73,7 @@ export function UserMenu() {
         aria-expanded={open ? 'true' : undefined}
       >
         <Avatar
-          src={user.profileImageUrl || undefined}
+          src={avatarSrc || undefined}
           alt={user.displayName || user.email}
           sx={{ width: 32, height: 32, fontSize: '0.875rem' }}
         >
@@ -137,6 +143,13 @@ export function UserMenu() {
         <Divider />
 
         {/* Navigation Items */}
+        <MenuItem onClick={() => handleNavigate('/profile')}>
+          <ListItemIcon>
+            <ProfileIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Profile</ListItemText>
+        </MenuItem>
+
         <MenuItem onClick={() => handleNavigate('/settings')}>
           <ListItemIcon>
             <SettingsIcon fontSize="small" />

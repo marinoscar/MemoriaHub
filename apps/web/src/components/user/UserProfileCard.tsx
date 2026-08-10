@@ -12,10 +12,20 @@ import {
 import { Settings as SettingsIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAuthedImage } from '../../hooks/useAuthedImage';
 
+/**
+ * Read-only account summary — avatar, name, email, roles, member-since.
+ *
+ * Rendered in the left column of `/profile`; the picture itself is managed by
+ * the cards beside it.
+ */
 export function UserProfileCard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  // `profileImageUrl` may be an authenticated `/api/users/:id/avatar` path once
+  // the user has uploaded a picture; a provider URL passes straight through.
+  const { src: avatarSrc } = useAuthedImage(user?.profileImageUrl);
 
   if (!user) return null;
 
@@ -40,7 +50,7 @@ export function UserProfileCard() {
         >
           {/* Profile Image */}
           <Avatar
-            src={user.profileImageUrl || undefined}
+            src={avatarSrc || undefined}
             alt={user.displayName || user.email}
             sx={{
               width: 80,

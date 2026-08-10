@@ -168,7 +168,7 @@ describe('SystemSettingsPage', () => {
   });
 
   describe('Tabs', () => {
-    it('should display only the UI Settings and Storage tabs', async () => {
+    it('should display the UI Settings, Storage, and Maintenance tabs', async () => {
       render(<SystemSettingsPage />, {
         wrapperOptions: { user: mockAdminUser },
       });
@@ -176,11 +176,12 @@ describe('SystemSettingsPage', () => {
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: /ui settings/i })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: /storage/i })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: /maintenance/i })).toBeInTheDocument();
       });
 
       expect(screen.queryByRole('tab', { name: /feature flags/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('tab', { name: /advanced.*json/i })).not.toBeInTheDocument();
-      expect(screen.getAllByRole('tab')).toHaveLength(2);
+      expect(screen.getAllByRole('tab')).toHaveLength(3);
     });
 
     it('should switch tabs on click', async () => {
