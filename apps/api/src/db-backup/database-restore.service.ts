@@ -1148,7 +1148,7 @@ export class DatabaseRestoreService {
         throw err;
       }
 
-      await this.reinsertCatalog(client, ctx.pg, catalog);
+      await this.reinsertCatalog(ctx.pg, catalog);
 
       if (ctx.rollbackMode === 'pre_restore_dump') {
         // The safety net is the dump, not the database; keeping both would
@@ -1208,12 +1208,13 @@ export class DatabaseRestoreService {
    *   - `pre_restore_backup_id` (a self-FK) is applied in a SECOND pass, since
    *     the row it points at may not have been inserted yet during the first.
    *
-   * Runs over the raw admin connection rather than Prisma: the Prisma pool has
-   * just been disconnected and its client is bound to a database name whose
-   * meaning changed a moment ago.
+   * Runs over its OWN short-lived connection to the (newly renamed) live
+   * database rather than Prisma: the Prisma pool has just been disconnected and
+   * its client is bound to a database name whose meaning changed a moment ago.
+   * The caller's maintenance connection cannot be reused either — it is
+   * attached to the `postgres` database, not to the one these rows belong in.
    */
   private async reinsertCatalog(
-    client: AdminClientLike,
     pg: PgConnectionConfig,
     rows: Record<string, unknown>[],
   ): Promise<void> {
@@ -1311,8 +1312,6 @@ export class DatabaseRestoreService {
       },
       { database: pg.database },
     );
-
-    void client; // The maintenance connection is the caller's; nothing to do with it here.
   }
 
   // -------------------------------------------------------------------------
