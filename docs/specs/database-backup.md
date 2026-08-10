@@ -1,7 +1,7 @@
 # PostgreSQL Database Backup & Restore
 
 Epic: [#339](https://github.com/marinoscar/MemoriaHub/issues/339)
-Code: `apps/api/src/db-backup/` (issues #340–#343), `apps/api/src/common/maintenance/` (issue #348), issue #344 (restore/rollback — design intent only, not yet merged as of this writing)
+Code: `apps/api/src/db-backup/` (issues #340–#344), `apps/api/src/common/maintenance/` (issue #348)
 Runbook: [Database Restore](../runbooks/database-restore.md)
 
 ## Table of Contents
@@ -10,7 +10,7 @@ Runbook: [Database Restore](../runbooks/database-restore.md)
 2. [Architecture](#2-architecture)
 3. [Data Model](#3-data-model)
 4. [Backup Engine](#4-backup-engine)
-5. [Restore and Rollback (#344 — design intent)](#5-restore-and-rollback-344--design-intent)
+5. [Restore and Rollback (#344)](#5-restore-and-rollback-344)
 6. [API](#6-api)
 7. [RBAC](#7-rbac)
 8. [Settings Reference](#8-settings-reference)
@@ -30,7 +30,7 @@ This feature gives admins a reliable, schedulable, retained backup of MemoriaHub
 - Post-upload verification (`pg_restore --list` against the uploaded bytes) before a run is marked `completed`
 - Admin API: config, trigger, list/detail, download, delete, cancel
 - A dedicated `docs/runbooks/database-restore.md` for manual disaster recovery when the app itself is unreachable
-- In-app restore via scratch database + atomic rename swap (issue #344 — see §5, design intent only in this document)
+- In-app restore via scratch database + atomic rename swap (issue #344 — see §5)
 - Admin-controlled maintenance mode (issue #348), built as a general platform feature but a hard prerequisite for #344's traffic-quiescing cutover
 
 **Explicitly deferred (v1):**
@@ -223,43 +223,104 @@ A `DatabaseBackupAlreadyRunningError` racing the schedule's own attempt to fire 
 
 ---
 
-## 5. Restore and Rollback (#344 — design intent)
+## 5. Restore and Rollback (#344)
 
-**Everything in this section describes the intended design of issue #344, which had not merged in this worktree as of this writing.** No code — `database-restore.service.ts`, `pg-restore.util.ts`, `admin-connection.util.ts`, the `POST /runs/:id/restore` / `POST /runs/:id/rollback` endpoints — exists yet to verify these paragraphs against. Treat this section as a design record, not a description of shipped behavior; the [runbook](../runbooks/database-restore.md) marks its own #344-dependent passages the same way. The manual procedure the runbook documents in full is the ground truth this design automates.
+`DatabaseRestoreService` (`apps/api/src/db-backup/database-restore.service.ts`), `pg-restore.util.ts`, and `admin-connection.util.ts` are merged. This section describes the shipped implementation. The [runbook](../runbooks/database-restore.md) documents the equivalent manual procedure — still the only path when the app itself is unreachable, and the ground truth this feature automates.
 
 ### 5.1 Why in-place restore is rejected
 
 `pg_dump` archives store `CREATE INDEX` statements, not index data — restore time is dominated by rebuilding HNSW indexes over the restored vector rows (§1), plausibly hours. That single fact rules out any restore strategy that holds the live database in a broken state for the restore's full duration.
 
-An earlier design draft proposed `pg_restore --clean --if-exists` directly against the live database. Rejected as self-contradicting: `--clean` drops every object in the archive, **including `database_backup_runs` itself** — the restore destroys the row-based record of its own progress and then replaces the whole table with the catalog as it existed at backup time. You cannot record a restore's outcome inside the database currently being restored. Its failure mode compounds this: fail partway through the object-drop-and-recreate cycle, and the app can't boot (tables it needs may not exist yet), there's no admin UI (same reason), and there's no backup catalog to even see what to try next — the tool needed to recover from the failure was itself destroyed by the failure. See the [runbook §6](../runbooks/database-restore.md#6-why-not-pg_restore---clean---if-exists-against-the-live-database) for the full argument in operator-facing form.
+An earlier design draft proposed `pg_restore --clean --if-exists` directly against the live database. Rejected outright, and the code contains no path that does this: `--clean` drops every object in the archive, **including `database_backup_runs` itself** — the restore would destroy the row-based record of its own progress and then replace the whole table with the catalog as it existed at backup time. You cannot record a restore's outcome inside the database currently being restored. Its failure mode compounds this: fail partway through the object-drop-and-recreate cycle, and the app can't boot (tables it needs may not exist yet), there's no admin UI (same reason), and there's no backup catalog to even see what to try next — the tool needed to recover from the failure would itself have been destroyed by the failure. See the [runbook §6](../runbooks/database-restore.md#6-why-not-pg_restore---clean---if-exists-against-the-live-database) for the full argument in operator-facing form.
 
-### 5.2 Scratch database + atomic rename swap
+### 5.2 `POST /runs/:id/restore` — pre-flight, then a detached background restore
 
-Instead: restore into a fresh `memoriahub_restore_<suffix>` database in the same Postgres cluster **while the live application stays fully up and serving**, verify the restored data, then briefly quiesce traffic (via maintenance mode, §5.3) and swap the new database into place with a rename pair:
+There is **no separate, read-only pre-flight endpoint.** `POST /api/admin/db-backup/runs/:id/restore` runs the cheap pre-flight gates synchronously and returns their full report in the same response — a `guided` or `blocked` outcome (below) creates nothing: no scratch database, no rename, live data completely untouched. Only a `running` outcome starts real work, and even then the multi-hour restore is detached from the HTTP request (`void this.executeRestore(...).catch(...)`) so the caller gets an immediate response and polls `GET /runs/:id` → `restoreStatus` for progress.
+
+Three outcomes, keyed by the response's `mode`:
+
+- **`running`** — every gate passed (or the schema gate was explicitly overridden). The restore is now proceeding in the background: `restoreStatus` walks `restoring` → `verifying` → `swapping` → `completed` (or `failed` at any step). The response also carries `scratchDatabase`, `oldDatabase`, and the `rollbackMode` actually in force.
+- **`guided`** — a **capability** gate failed: no `CREATEDB` privilege, no `vector` extension available in the cluster, or the API couldn't even open an admin connection to the maintenance database. Not an error state — the app genuinely cannot drive the restore (common on managed Postgres with a restricted role), so the response carries a ready-to-paste, fully parameterized command block (`GuidedRestorePayload.commands`) plus a link to this runbook, instead of either failing outright or proceeding unsafely. `restoreStatus` is persisted as `'guided'`.
+- **`blocked`** — the schema-compatibility gate failed (the archive's recorded `migrationName` differs from the live database's latest applied migration, in either direction) and `overrideSchemaCheck` was not set. Re-send with `overrideSchemaCheck: true` for the restore-then-`prisma migrate deploy` path. `restoreStatus` is persisted as `'blocked'`. A capability gate can **never** be overridden this way — no amount of admin intent conjures a `CREATEDB` privilege the cluster doesn't grant.
+
+**`restoreStatus` is a plain string column** (`DatabaseBackupRun.restoreStatus`, `String?`), not a Prisma enum, and moves through: `null` (never attempted) → `'guided'` | `'blocked'` | `'restoring'` → `'verifying'` → `'swapping'` → `'completed'` | `'failed'`. `guided` and `blocked` are terminal for that attempt (nothing runs in the background); `restoring`/`verifying`/`swapping` are the three non-terminal states that hold the single-active-restore slot (`assertNoRestoreInProgress` — a second `POST /runs/:id/restore` while one of these three is set throws `DatabaseRestoreAlreadyRunningError`, mapped to 409).
+
+### 5.3 Pre-flight gates, precisely
+
+Evaluated in `DatabaseRestoreService.preflight`, all against the CHEAP-to-check subset — artifact bytes are downloaded and verified only once the restore is already `running` (§5.5), so a bad archive costs time, never a wasted pre-flight):
+
+| Gate | Checks | On failure |
+|---|---|---|
+| `capability.createdb` | `pg_roles.rolcreatedb OR rolsuper` for the connecting role — **probed, never assumed** | `guided` |
+| `capability.pgvector` | `vector` extension present in `pg_available_extensions` (the archive issues `CREATE EXTENSION vector`) | `guided` |
+| `capability.admin_connection` | The admin connection to the maintenance database (`postgres` by default) itself succeeds | `guided` (implies every other capability check below it did not run) |
+| `disk.free` | Free space on the Postgres data directory's filesystem (`statfs`) covers ~1× the live database for the scratch copy, plus another ~1× when `rollbackMode='retain_database'`, plus the artifact's own size, with 20% headroom | Never blocks — degrades to a `warning` when the data directory isn't visible from the API container (managed Postgres), or **automatically downgrades `rollbackMode` from `retain_database` to `pre_restore_dump`** (reported as a separate `rollback.downgraded` warning check) when disk is short in `retain_database` mode |
+| `replicas.single` | Counts distinct `pg_stat_activity.client_addr` values connected to the live database — a heuristic, not a guarantee | Never blocks — `warning` only |
+| `schema.compatible` | Archive's `migrationName` vs. the live database's latest applied `_prisma_migrations` row | `blocked` unless `overrideSchemaCheck: true` was passed (then `warning`); also `warning` (not `blocked`) when either migration name is unknown |
+| `artifact.recorded` | Metadata-only placeholder — always `ok`; the real checksum + `pg_restore --list` check runs against the actually-downloaded bytes as the first phase of the async run, described in the check's own message | Never blocks |
+
+Overall `status` is `guided` if ANY capability gate failed (this wins over everything else — even a schema mismatch is moot if the app can't create a scratch database at all), else `blocked` if any check is `blocked` (currently only `schema.compatible`), else `ok`.
+
+### 5.4 Scratch database + atomic rename swap
+
+Once pre-flight passes (`ok` or an overridden `blocked`), the restore itself is: restore into a fresh `<db>_restore_<suffix>` database in the same Postgres cluster **while the live application stays fully up and serving**, verify the restored data, then briefly quiesce traffic (via maintenance mode, §5.6) and swap the new database into place with a rename pair:
 
 ```
 ALTER DATABASE memoriahub RENAME TO memoriahub_old_<suffix>;
 ALTER DATABASE memoriahub_restore_<suffix> RENAME TO memoriahub;
 ```
 
-Blue-green deployment needs only a second *database* here, not a second running instance. This shrinks the destructive window from "the entire multi-hour restore" to "a rename pair plus a process restart" — seconds, not hours — and the previous live database survives, renamed rather than dropped, as the rollback path (§5.4). This is exactly the procedure documented step-by-step, with verbatim commands, in the [runbook §3](../runbooks/database-restore.md#3-recommended-procedure-scratch-database--rename); #344's job is to automate precisely those steps end to end, including pre-flight capability checks the manual procedure asks a human to verify by eye.
+Blue-green deployment needs only a second *database* here, not a second running instance. This shrinks the destructive window from "the entire multi-hour restore" to "a rename pair plus a process restart" — seconds, not hours — and the previous live database survives, renamed rather than dropped, as the rollback path (§5.7 for `retain_database` mode). This is exactly the procedure documented step-by-step, with verbatim commands, in the [runbook §3](../runbooks/database-restore.md#3-recommended-procedure-scratch-database--rename), which `DatabaseRestoreService` automates end to end, including the pre-flight capability checks the manual procedure asks a human to verify by eye.
 
-Pre-flight gates (does the connecting role have `CREATEDB`? is there enough free disk for a second copy of the database? is pgvector actually available on this Postgres instance?) are checked before attempting the automated path; failing any of them degrades automatically to **guided restore** — surfacing a ready-to-paste version of the manual runbook's commands rather than either failing outright or proceeding unsafely.
+`verifyScratchDatabase` runs four checks against the scratch database before the swap is even attempted — the `vector` extension is present, the `REQUIRED_TABLES` list (`users`, `circles`, `media_items`, `database_backup_runs`, `_prisma_migrations`) all exist, `users` has at least one row (guards against an apparently-empty restore), and no index in `pg_index` is `indisvalid = false` (a build that didn't finish — exactly the failure `--exit-on-error` should have already caught, checked again defensively). Any failure here throws before the swap runs, so the live database is never touched.
 
-### 5.3 Why maintenance mode is a prerequisite, not an add-on
+### 5.5 The restore phases, in order
 
-Issue #348 (admin-controlled maintenance mode — see the [Maintenance Mode runbook](../runbooks/maintenance-mode.md)) exists specifically to give the restore cutover a way to stop traffic during the rename-and-restart window, but was built as an independent, general-purpose platform feature — it is separately useful for any planned app upgrade requiring downtime, with no dependency on this feature at all. The restore flow depends on it in one direction only (§348 has no dependency back on database backup); the epic's execution order accordingly builds #348 before #344.
+`executeRestore` runs these steps sequentially, updating `restoreStatus` as it goes:
 
-### 5.4 The two rollback modes
+1. **Download + verify the artifact** — streams the backup object to a local temp file (`pg_restore -j N` needs a seekable file, so this cannot be a pipe like the backup side), hashing on the same pass and comparing against `checksumSha256`, then runs `pg_restore --list` against the downloaded bytes and requires a non-empty table of contents. This re-verifies what #341's backup-time check already proved once — the failure being guarded against here (bit-rot, a truncated download, a provider-side lifecycle rule) can only have happened *since* the upload.
+2. **Pre-restore dump**, only when `rollbackMode='pre_restore_dump'` — reuses `DatabaseBackupRunnerService.runBackup` wholesale (`trigger='pre_restore'`) rather than a second dump implementation, and records the resulting run id on `preRestoreBackupId`.
+3. **`CREATE DATABASE <scratch>`.**
+4. **`pg_restore` into the scratch database** (`restoreStatus='restoring'`) — the long phase, hours on a large library.
+5. **Verify** (`restoreStatus='verifying'`) — §5.4's four checks.
+6. **Swap** (`restoreStatus='swapping'`) — §5.6.
 
-See §3.3's table for the full tradeoff. In short: `retain_database` (default) keeps the pre-restore database around as `memoriahub_old_<suffix>` for a seconds-fast rename-back rollback at the cost of ~2× Postgres disk while it's retained; `pre_restore_dump` takes a fresh `pg_dump` immediately before the restore (recorded via the `preRestoreBackupId` self-relation on `DatabaseBackupRun`, §3.1) and never holds two live databases at once, at the cost of an hours-long restore if rollback is ever actually needed.
+A failure at any point before the swap is caught, recorded (`restoreStatus='failed'`, `restoreError` truncated to 4000 chars), and the scratch database is best-effort dropped — the live database is never touched by any of these failure paths.
 
-### 5.5 Deployment prerequisites the cutover depends on
+### 5.6 The swap itself, and why maintenance mode is a prerequisite
 
-Both documented as v1 limitations, not silently assumed:
+The swap (`DatabaseRestoreService.swap`) is the one seconds-long destructive window, and its ordering is the whole design:
 
-- **`restart: unless-stopped` (or equivalent).** The restore's cutover is designed to end by having the API process exit itself and rely on the container orchestrator to bring it back up against the renamed database. `infra/compose/prod.compose.yml` already sets this on `api`/`web`/`nginx`. See the [runbook §8.1](../runbooks/database-restore.md#81-restart-unless-stopped-or-equivalent).
-- **Single API replica.** The rename only meaningfully quiesces traffic if exactly one process holds connections to the live database name at swap time; a second untouched replica would keep writing against whichever database name it still has open, defeating the swap. Multi-replica-safe restore is explicitly out of scope for v1 (epic #339's scope list) — see the [runbook §8.2](../runbooks/database-restore.md#82-single-api-replica-constraint).
+1. **Export the backup catalog** (`exportCatalog`) while the live database still answers — see §5.8.
+2. **Enable maintenance mode** via the in-memory override, `allowAdmins: false`. Issue #348's `MaintenanceModeService.enable()` gained exactly this optional `{ allowAdmins?: boolean }` second-argument for the swap window: the persisted flag lives in `system_settings`, i.e. inside the database about to be renamed, so it is unreadable at exactly this moment — which is why #348 has two layers (persisted setting + in-memory override) and not one. `allowAdmins: false` is deliberate too: even an admin request would hit a database that momentarily does not exist between the two renames. #348 was built as an independent, general-purpose platform feature — separately useful for any planned upgrade requiring downtime — that #344 consumes rather than rebuilding; the dependency runs one direction only.
+3. **Disconnect the Prisma pool, then `pg_terminate_backend` whatever is left** — a rename fails while any session holds the database open.
+4. **Rename live → old, then scratch → live.** Between the two statements there is no `<live>`-named database at all, which is exactly why traffic must already be stopped by step 2. If the SECOND rename fails, the service renames the original back into place rather than leaving the cluster with no database under the expected name — the one genuinely dangerous moment in the whole design, handled explicitly.
+5. **Re-insert the carried-over catalog** into the newly-renamed live database (§5.8).
+6. **`process.exit(0)`** — the orchestrator restarts the process with a fresh connection pool. See §5.9's `restart: unless-stopped` requirement.
+
+### 5.7 `POST /runs/:id/rollback` — the two rollback modes
+
+`RollbackDatabaseRestoreDto` requires the literal confirmation string `"ROLLBACK"`, mirroring the restore endpoint's `"RESTORE"` requirement. Response `mode` says which of three things happened:
+
+- **`renamed`** (`rollbackMode='retain_database'`, the default) — renames the retained `restoreOldDb` back into place with the same two-step rename-with-recovery pattern as the forward swap, enables maintenance mode the same way, and exits. **Seconds** — the entire justification for paying ~2× the Postgres volume during `oldDatabaseRetentionHours`.
+- **`restore_started`** (`rollbackMode='pre_restore_dump'`, i.e. `restoreOldDb` is null but `preRestoreBackupId` is set) — there is no database to rename, only the safety dump taken before the swap, so rolling back delegates straight back into `startRestore(preRestoreBackupId, { overrideSchemaCheck: true })` — a full restore, **hours** again. The schema check is force-overridden here because the pre-restore dump was taken from the exact schema the running code was using moments earlier, so a compatibility block would be spurious.
+- **`unavailable`** — neither a retained database nor a pre-restore dump exists (e.g. the retained database already aged out past `oldDatabaseRetentionHours` and was manually dropped). Nothing to roll back to.
+
+Rollback is only callable when `run.restoreStatus === 'completed'` (`DatabaseRestoreNotAllowedError` otherwise) — it undoes a *finished* restore, not an in-flight or failed one.
+
+**On the response shape:** a successful restore's response (and `GET /runs/:id`) surfaces `swappedAt` and `restoreOldDb` (when `retain_database` mode retained one), but there is **no server-computed expiry field** — an admin who needs to know how much longer the retained database will survive computes it themselves from `swappedAt + databaseBackup.oldDatabaseRetentionHours`, the same way `oldDatabaseRetentionHours`-based pruning (§4.4 rule 2) is evaluated. Nothing persists a precomputed `oldDatabaseExpiresAt`.
+
+### 5.8 Two things the swap introduces, both handled
+
+- **Catalog carry-over.** The restored database holds `database_backup_runs` as of BACKUP time, so this restore's own record — and every backup taken since, including any that ran between the backup being restored and the moment the swap fires — would vanish at the rename. `exportCatalog` snapshots every row from the live database (with this run's own restore-audit fields already patched to their post-swap values) immediately before maintenance mode is enabled; `reinsertCatalog` re-inserts them into the newly-renamed live database via `INSERT ... ON CONFLICT (id) DO UPDATE`, over its own short-lived admin connection (never Prisma — the pool was just disconnected and is bound to a database name whose meaning just changed). User FKs (`createdById`, `restoredById`) are resolved through `(SELECT id FROM users WHERE id = $n)`, which yields `NULL` rather than aborting the whole carry-over when the referenced user was created after the archive was taken; the self-FK `preRestoreBackupId` is applied in a second pass since the row it points at may not exist yet during the first. A single unrepresentable row logs a warning and is skipped rather than failing the entire carry-over.
+- **Migration roll-forward.** `_prisma_migrations` also comes from the backup, so restoring an older archive can leave the schema behind the running code — exactly what the `schema.compatible` pre-flight gate (§5.3) detects and BLOCKS by default; `overrideSchemaCheck: true` plus `prisma migrate deploy` after the swap is the documented remedy.
+
+### 5.9 Deployment prerequisites the cutover depends on
+
+Both documented as v1 limitations, not silently assumed, and both still true of the merged implementation:
+
+- **`restart: unless-stopped` (or equivalent).** The swap ends in `process.exit(0)`, relying on the container orchestrator to bring the process back up against the renamed database. `infra/compose/prod.compose.yml` already sets this on `api`/`web`/`nginx`. See the [runbook §8.1](../runbooks/database-restore.md#81-restart-unless-stopped-or-equivalent).
+- **Single API replica.** The rename only meaningfully quiesces traffic if exactly one process holds connections to the live database name at swap time; a second untouched replica would keep writing against whichever database name it still has open, defeating the swap. The pre-flight only WARNS (`replicas.single`, §5.3) since distinct client addresses are a heuristic, not a guarantee. Multi-replica-safe restore is explicitly out of scope for v1 (epic #339's scope list) — see the [runbook §8.2](../runbooks/database-restore.md#82-single-api-replica-constraint).
 
 ---
 
@@ -278,7 +339,7 @@ Full endpoint-by-endpoint reference — parameters, response shapes, permission 
 | `DELETE /api/admin/db-backup/runs/:id` | `db_backup:write` | Delete object then row; refuses a `pending`/`running` row |
 | `POST /api/admin/db-backup/runs/:id/cancel` | `db_backup:write` | Cooperative abort — routes through the same failure path as any other failed run |
 
-**[#344 — not yet implemented]** `POST /api/admin/db-backup/runs/:id/restore` and `POST /api/admin/db-backup/runs/:id/rollback` (`db_backup:restore`) belong on this same `DatabaseBackupController` — the controller is deliberately shaped so #344 extends it rather than standing up a second one.
+`POST /api/admin/db-backup/runs/:id/restore` and `POST /api/admin/db-backup/runs/:id/rollback` (`db_backup:restore`, issue #344) live on this same `DatabaseBackupController`, at its bottom — see §5 for the full request/response contract, the three pre-flight outcomes, and the two rollback modes.
 
 ---
 
@@ -288,7 +349,7 @@ Three permissions, all Admin-only, added in issue #340 (all three already exist 
 
 - **`db_backup:read`** — view configuration, run history/detail, and download backup artifacts
 - **`db_backup:write`** — change configuration, trigger manual runs, delete runs, cancel in-flight runs
-- **`db_backup:restore`** — drive a restore or rollback (#344); kept as its own permission distinct from `db_backup:write` because a restore is destructive to the running database in a way ordinary backup configuration is not — an admin trusted to schedule and prune backups is not automatically trusted to swap the live database out from under the app
+- **`db_backup:restore`** — drive a restore or rollback (`POST /runs/:id/restore`, `POST /runs/:id/rollback`); kept as its own permission distinct from `db_backup:write` because a restore is destructive to the running database in a way ordinary backup configuration is not — an admin trusted to schedule and prune backups is not automatically trusted to swap the live database out from under the app
 
 No per-circle role interacts with this feature at all — database backup/restore is inherently app-wide, unlike every circle-scoped feature elsewhere in this codebase.
 
@@ -310,7 +371,7 @@ The `databaseBackup.*` namespace, `apps/api/src/common/schemas/settings.schema.t
 | `databaseBackup.storageProvider` | string \| `null` | `null` | Explicit provider override; `null` = use whatever is currently the active storage provider |
 | `databaseBackup.runStaleMinutes` | int 5–240 | `30` | Heartbeat staleness window (§3.2); must exceed the heartbeat interval (`DB_BACKUP_HEARTBEAT_MS`, default 20s) by a wide margin, which the 5-minute floor guarantees |
 | `databaseBackup.compressionLevel` | int 0–9 | `1` | `pg_dump -Z` level; kept low by default since embedding vectors are near-incompressible (§4.1) |
-| `databaseBackup.restoreRollbackMode` | `retain_database`\|`pre_restore_dump` | `'retain_database'` | Which rollback strategy #344 uses (§3.3/§5.4) |
+| `databaseBackup.restoreRollbackMode` | `retain_database`\|`pre_restore_dump` | `'retain_database'` | Which rollback strategy the restore uses (§3.3/§5.7) |
 | `databaseBackup.oldDatabaseRetentionHours` | int 1–720 | `168` (7 days) | Age-based retention window for `pre_restore`-trigger runs (§4.4 rule 2) |
 
 **Environment variables** (process-level, not persisted settings):
@@ -333,10 +394,11 @@ The `databaseBackup.*` namespace, `apps/api/src/common/schemas/settings.schema.t
 - **BigInt fields never leave the API raw.** `sizeBytes`/`bytesWritten` are Prisma `BigInt` columns; every response maps them to strings explicitly (§3.1). See CLAUDE.md's general BigInt gotcha.
 - **Embeddings are recomputable but are NOT excluded from the dump.** `media_item_embedding`, `media_visual_embedding`, and `faces.embedding` could in principle be regenerated via the existing tagging/duplicate/face backfill endpoints, which could shrink dump size by roughly 70%. Deliberately not done in v1: text embeddings cost real money to regenerate at scale (AI provider calls), and silently dropping data from what's supposed to be a complete backup is a footgun waiting to surprise someone during an actual disaster.
 - **Dumps contain plaintext PII** — emails, names, and everything else in the live schema — and must be treated as sensitive as the database itself. Values already encrypted at rest via `SECRETS_ENCRYPTION_KEY` (AI/face/storage/geo/email provider credentials) stay encrypted *inside* the dump too, so a leaked dump exposes nothing beyond what the masked admin APIs already reach — but bucket-level access to the `db-backups/` prefix should still be restricted at the infrastructure layer independent of this feature's own `db_backup:read` gate.
-- **The restore's `restart: unless-stopped` and single-replica assumptions are structural, not defensive.** See §5.5 — verify both before you need them, not during an incident.
+- **The restore's `restart: unless-stopped` and single-replica assumptions are structural, not defensive.** See §5.9 — verify both before you need them, not during an incident.
 
 ---
 
 ## 10. Document History
 
-- 2026-08 — Initial version, written alongside the [disaster-recovery runbook](../runbooks/database-restore.md) (issue #346, epic #339), documenting the merged implementation of issues #340–#343 and #348, plus issue #344's design intent (not yet merged as of this writing — see §5's disclaimer).
+- 2026-08 — Initial version, written alongside the [disaster-recovery runbook](../runbooks/database-restore.md) (issue #346, epic #339), documenting the merged implementation of issues #340–#343 and #348, plus issue #344's design intent (not yet merged as of that writing).
+- 2026-08 — Issue #344 (restore/rollback via scratch database + atomic swap) merged; §5 rewritten to describe the shipped `DatabaseRestoreService` implementation rather than design intent — the pre-flight gate table, the three `POST /runs/:id/restore` outcomes (no separate dry-run/pre-flight endpoint exists), the `restoreStatus` value set, the swap ordering, the two rollback modes, and the catalog carry-over mechanism.

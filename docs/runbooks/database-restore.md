@@ -3,9 +3,9 @@
 Issue: [#346](https://github.com/marinoscar/MemoriaHub/issues/346), epic [#339](https://github.com/marinoscar/MemoriaHub/issues/339)
 Related: [Database Backup spec](../specs/database-backup.md), [Maintenance Mode runbook](maintenance-mode.md)
 
-**Use this runbook when the application itself is broken, misconfigured, or unreachable.** The in-app restore (issue #344, epic #339) automates the same scratch-database-and-rename procedure documented here, but it requires a running API — which is exactly the thing disaster recovery cannot assume. Everything in this document is plain PostgreSQL: it works whether or not the API, the admin UI, or issue #344's code exists on your deployed version.
+**Use this runbook when the application itself is broken, misconfigured, or unreachable.** The in-app restore (issue #344, epic #339) automates the same scratch-database-and-rename procedure documented here, but it requires a running API — which is exactly the thing disaster recovery cannot assume. Everything in this document is plain PostgreSQL: it works whether or not the API or the admin UI is currently reachable on your deployment.
 
-> **Status note (as of this writing):** the in-app restore endpoints (`POST /api/admin/db-backup/runs/:id/restore`, `POST /api/admin/db-backup/runs/:id/rollback`) are issue #344 and had not landed at the time this runbook was written. Sections that describe them are marked **[#344 — in-app path]** and describe *intent*, not code you can currently call. The manual procedure in §3 works today and does not depend on #344 at all — it is the ground truth #344 automates.
+> **Status note:** the in-app restore endpoints (`POST /api/admin/db-backup/runs/:id/restore`, `POST /api/admin/db-backup/runs/:id/rollback`) are issue #344 and have merged — see the [Database Backup spec §5](../specs/database-backup.md#5-restore-and-rollback-344) for the full API contract. The manual procedure in §3 remains equally authoritative: it is the ground truth the in-app path automates, it is code-independent, and it is the only path when the application itself is unreachable — nothing below has been softened or superseded by #344 landing.
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@ Related: [Database Backup spec](../specs/database-backup.md), [Maintenance Mode 
 2. [Environment gotchas](#2-environment-gotchas-that-will-otherwise-bite-mid-incident)
 3. [Recommended procedure: scratch database + rename](#3-recommended-procedure-scratch-database--rename)
 4. [Rollback (verbatim commands)](#4-rollback-verbatim-commands)
-5. [Alternative: restore into a fresh empty database](#5-alternative-restore-into-a-fresh-empty-database-inspection--partial-recovery)
+5. [Alternative: restoring into a fresh empty database](#5-alternative-restoring-into-a-fresh-empty-database-inspection--partial-recovery)
 6. [Why not `pg_restore --clean --if-exists` against the live database](#6-why-not-pg_restore---clean---if-exists-against-the-live-database)
 7. [Migration-state drift](#7-migration-state-drift)
 8. [Deployment prerequisites](#8-deployment-prerequisites)
@@ -192,8 +192,8 @@ SELECT indexname, tablename
 FROM pg_indexes
 WHERE indexname IN (
   'faces_embedding_vec_hnsw_idx',
-  'media_item_embedding_embedding_idx',
-  'media_visual_embedding_embedding_idx'
+  'media_item_embedding_hnsw_idx',
+  'media_visual_embedding_hnsw_idx'
 );
 
 -- 4. Latest applied migration — compare this against what you expect for
@@ -277,7 +277,7 @@ This reverses the entire operation in seconds, the same way the forward swap did
 dropdb -h <db-host> -p <db-port> -U <db-user> "memoriahub_failed_restore_<suffix>"
 ```
 
-**[#344 — in-app path]** The in-app restore is designed to expose this same rollback as a single API call once it lands (`POST /api/admin/db-backup/runs/:id/rollback`, `db_backup:restore`), doing programmatically exactly what the commands above do by hand, gated by the configured `databaseBackup.restoreRollbackMode` (see the [spec](../specs/database-backup.md#5-restore-and-rollback-344--design-intent) for the two modes and their tradeoff). Until it lands, the commands above are the only rollback path — copy them into your incident notes before you ever run Step 4 of §3, so they're ready to paste the moment you need them.
+The in-app restore exposes this same rollback as a single API call (`POST /api/admin/db-backup/runs/:id/rollback`, `db_backup:restore`), doing programmatically exactly what the commands above do by hand, gated by the configured `databaseBackup.restoreRollbackMode` (see the [spec §5.7](../specs/database-backup.md#57-post-runsidrollback--the-two-rollback-modes) for the two modes and their tradeoff). That endpoint requires a reachable API, which is precisely what this runbook exists for the case where you don't have — so the commands above remain the procedure to use whenever the app itself is what's broken. Copy them into your incident notes before you ever run Step 4 of §3, so they're ready to paste the moment you need them.
 
 ---
 
@@ -331,7 +331,7 @@ Running current application code against an older schema produces confusing, oft
    (Point `DATABASE_URL`/the individual `POSTGRES_*` env vars at the restored database — the same connection details you used for the restore itself.) This applies every migration that exists in your current codebase but not yet in the restored database's `_prisma_migrations` table, rolling the schema **forward** to match the code you're about to run.
 3. Only then start (or resume traffic to) the API.
 
-**Note on backup-catalog continuity:** the scratch-and-rename procedure in §3 swaps in the *entire* restored database, `database_backup_runs` included — so after a hand-run restore, your backup history table only contains rows up to the moment the restored backup was taken. Any backups that ran *after* that timestamp (and before the incident) are gone from the catalog, even though their files may still exist in storage under `db-backups/` (worth checking manually if you need them — see §1.2). This is a genuine information loss specific to the manual path: **[#344 — in-app path]** the in-app restore is designed to carry the backup catalog across the swap for exactly this reason (see the [spec](../specs/database-backup.md)), which the manual procedure here cannot replicate — there is no code running server-side to do that bookkeeping when you're driving `pg_restore` and `psql` by hand.
+**Note on backup-catalog continuity:** the scratch-and-rename procedure in §3 swaps in the *entire* restored database, `database_backup_runs` included — so after a hand-run restore, your backup history table only contains rows up to the moment the restored backup was taken. Any backups that ran *after* that timestamp (and before the incident) are gone from the catalog, even though their files may still exist in storage under `db-backups/` (worth checking manually if you need them — see §1.2). This is a genuine information loss specific to the manual path: the in-app restore carries the backup catalog across the swap for exactly this reason (`DatabaseRestoreService.exportCatalog`/`reinsertCatalog` — see the [spec §5.8](../specs/database-backup.md#58-two-things-the-swap-introduces-both-handled)), which the manual procedure here cannot replicate — there is no code running server-side to do that bookkeeping when you're driving `pg_restore` and `psql` by hand.
 
 ---
 
@@ -341,7 +341,7 @@ Two structural assumptions this whole recovery model depends on — verify them 
 
 ### 8.1 `restart: unless-stopped` (or equivalent)
 
-**[#344 — in-app path]** The in-app restore is designed to finish its cutover by having the API process **exit itself** and rely on the container orchestrator to restart it against the renamed database — the same reason the manual procedure's Step 4d above explicitly restarts the API rather than expecting it to notice the swap on its own. If the deployment does not restart a stopped/exited container automatically, the restore would leave the app down even though the database-side swap succeeded correctly.
+The in-app restore finishes its cutover by having the API process **exit itself** (`process.exit(0)`) and relying on the container orchestrator to restart it against the renamed database — the same reason the manual procedure's Step 4d above explicitly restarts the API rather than expecting it to notice the swap on its own. If the deployment does not restart a stopped/exited container automatically, the restore leaves the app down even though the database-side swap succeeded correctly.
 
 This repository's `infra/compose/prod.compose.yml` already sets `restart: unless-stopped` on the `api`, `web`, and `nginx` services — confirmed current as of this writing. If you're running a different deployment topology (bare `docker run`, a different Compose override, a non-Compose orchestrator), verify the equivalent restart policy is in place:
 ```bash
@@ -351,13 +351,13 @@ For Kubernetes, this is the default Pod `restartPolicy: Always` behavior via the
 
 ### 8.2 Single-API-replica constraint
 
-**[#344 — in-app path]** The scratch-database-and-rename cutover — whether driven by hand (§3) or automated by #344 — assumes a **single API replica**. The rename only meaningfully quiesces traffic if there is exactly one process holding connections to `memoriahub` at the moment of Step 4; a second replica that isn't also stopped would keep serving (and writing!) against whichever database name it currently has connections open to, defeating the whole point of the swap and risking split-brain writes across the old and new databases. If your deployment runs more than one API replica, **stop all of them** in Step 4a, not just one, and bring all of them back up in Step 4d. This is a documented v1 limitation of the restore design (see epic #339's out-of-scope list), not something either the manual procedure or #344 currently handles for you automatically across replicas.
+The scratch-database-and-rename cutover — whether driven by hand (§3) or automated by the in-app restore (issue #344) — assumes a **single API replica**. The rename only meaningfully quiesces traffic if there is exactly one process holding connections to `memoriahub` at the moment of Step 4; a second replica that isn't also stopped would keep serving (and writing!) against whichever database name it currently has connections open to, defeating the whole point of the swap and risking split-brain writes across the old and new databases. If your deployment runs more than one API replica, **stop all of them** in Step 4a, not just one, and bring all of them back up in Step 4d. The in-app restore's pre-flight only WARNS about multiple replicas (`replicas.single`, a heuristic over distinct `pg_stat_activity` client addresses — see the [spec §5.3](../specs/database-backup.md#53-pre-flight-gates-precisely)); it does not and cannot stop other replicas for you. This is a documented v1 limitation of the restore design (see epic #339's out-of-scope list), not something either the manual procedure or the in-app path currently handles for you automatically across replicas.
 
 ---
 
 ## 9. Verification and bring-up
 
-After Step 4d (or after the in-app restore's automated equivalent, once #344 lands), confirm the swap actually took:
+After Step 4d (or after the in-app restore's automated equivalent — `POST /api/admin/db-backup/runs/:id/restore` completing with `restoreStatus='completed'`), confirm the swap actually took:
 
 ```bash
 # Sanity check row counts against what you verified in Step 3 — should match
@@ -374,8 +374,8 @@ SELECT indexname, tablename
 FROM pg_indexes
 WHERE indexname IN (
   'faces_embedding_vec_hnsw_idx',
-  'media_item_embedding_embedding_idx',
-  'media_visual_embedding_embedding_idx'
+  'media_item_embedding_hnsw_idx',
+  'media_visual_embedding_hnsw_idx'
 );
 SQL
 
