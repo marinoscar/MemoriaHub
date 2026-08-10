@@ -41,6 +41,18 @@ export interface MemoryCuratorContext {
    */
   backfill: boolean;
   /**
+   * #315 backfill sharding: restrict the On This Day curator's anchor set to
+   * these calendar months (1–12).
+   *
+   * Absent means "every month", which is what a scheduled run and an unsharded
+   * backfill both do. It lives on the shared context rather than on a curator-
+   * specific options object because the context is already the one channel
+   * from `job.payload` to a curator, and only one curator reads it — inventing
+   * a per-curator payload envelope for a single field would cost more than it
+   * bought. A curator that does not shard by month simply ignores it.
+   */
+  anchorMonths?: number[];
+  /**
    * The run's AI-titling budget and circuit breaker (#306), created ONCE by the
    * handler and shared by every curator so a provider rate limit stops the
    * whole job's titling and a backfill's 100-call cap is job-wide rather than

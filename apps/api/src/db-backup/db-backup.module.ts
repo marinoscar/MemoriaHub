@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { DatabaseBackupRetentionService } from './database-backup-retention.service';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
 import { DatabaseBackupAdminService } from './db-backup-admin.service';
+import { DatabaseBackupScheduleTask } from './db-backup-schedule.task';
 import { DatabaseBackupController } from './db-backup.controller';
 
 /**
@@ -25,11 +27,25 @@ import { DatabaseBackupController } from './db-backup.controller';
  *
  * Exports the runner so #342's scheduler cron and #343's admin controller can
  * both drive a run without duplicating any of the lifecycle.
+ *
+ * #342 adds two providers alongside it:
+ *   - DatabaseBackupScheduleTask: the every-10-minutes cron that fires due
+ *     backups and releases stale runs. Registered as a plain provider — Nest's
+ *     ScheduleModule discovers `@Cron` methods on any instantiated provider, so
+ *     no per-module import is needed (same as TrashPurgeTask/NodeBackupStaleTask).
+ *   - DatabaseBackupRetentionService: exported too, so #343's manual-run
+ *     endpoint can prune on the same rules the scheduler uses rather than
+ *     growing a second retention policy.
  */
 @Module({
   imports: [PrismaModule, SettingsModule, StorageProvidersModule],
   controllers: [DatabaseBackupController],
-  providers: [DatabaseBackupRunnerService, DatabaseBackupAdminService],
-  exports: [DatabaseBackupRunnerService],
+  providers: [
+    DatabaseBackupRunnerService,
+    DatabaseBackupAdminService,
+    DatabaseBackupRetentionService,
+    DatabaseBackupScheduleTask,
+  ],
+  exports: [DatabaseBackupRunnerService, DatabaseBackupRetentionService],
 })
 export class DbBackupModule {}

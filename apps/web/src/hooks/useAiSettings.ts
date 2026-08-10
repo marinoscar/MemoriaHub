@@ -11,6 +11,7 @@ import {
   getAiEmbeddingModels,
   testAiEmbedding,
   putAiEnhanceFeature,
+  putAiMemoriesFeature,
   getAiImageModels,
 } from '../services/ai';
 import { useIsMounted } from './useIsMounted';
@@ -105,6 +106,17 @@ export function useAiSettings() {
     return getAiImageModels(provider);
   }, []);
 
+  /**
+   * Memories title/subtitle/narrative model (epic #300). Nulls clear the
+   * selection, which drops memories back to deterministic template titles.
+   */
+  const saveMemoriesFeature = useCallback(
+    async (provider: string | null, model: string | null) => {
+      await putAiMemoriesFeature({ provider, model });
+    },
+    [],
+  );
+
   return {
     settings,
     loading,
@@ -121,5 +133,6 @@ export function useAiSettings() {
     testEmbedding,
     saveEnhanceFeature,
     getImageModels,
+    saveMemoriesFeature,
   };
 }
