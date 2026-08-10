@@ -59,6 +59,14 @@ export class CurrentUserDto {
     description: 'User permissions (aggregated from roles)',
   })
   permissions!: string[];
+
+  @ApiProperty({
+    example: '2026-08-09T22:51:02.000Z',
+    description: 'When the account was created',
+    type: String,
+    format: 'date-time',
+  })
+  createdAt!: Date;
 }
 
 /**

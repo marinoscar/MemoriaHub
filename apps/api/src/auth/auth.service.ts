@@ -650,6 +650,9 @@ export class AuthService {
       isActive: user.isActive,
       roles,
       permissions,
+      // The web `User` type has always declared `createdAt`, but this response
+      // never carried it, so /profile rendered "Member since Invalid Date".
+      createdAt: user.createdAt,
     };
   }
 

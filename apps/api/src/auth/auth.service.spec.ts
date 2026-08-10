@@ -525,6 +525,9 @@ describe('AuthService', () => {
       expect(result.profileImageUrl).toBe('https://example.com/photo.jpg');
       expect(result.roles).toContainEqual({ name: 'viewer' });
       expect(result.permissions).toContain('user_settings:read');
+      // Issue #371: omitting this rendered "Member since Invalid Date" on
+      // /profile, invisible to typecheck because the web User type declares it.
+      expect(result.createdAt).toBe(mockUser.createdAt);
     });
 
     it('should prefer user display name over provider', async () => {
