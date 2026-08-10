@@ -6,6 +6,21 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 
 ## Features
 
+### ✨ Memories
+MemoriaHub brings your library back to life: On This Day flashbacks, auto-curated trips, best-of-people collections, seasonal highlights, and year-in-review stories — generated on your own server, told with AI-written titles, played as full-screen stories, and delivered to your family as a beautiful email digest. Your memories never leave your hands.
+
+- **Seven memory types**: `On This Day` (same day, past years), `Trip` (auto-detected away-from-home clusters, no manual tagging), `Best of {Person}` (per-person, per-year highlights from face recognition), `{Person} Through the Years`, `Theme` (AI-tag-driven collections like "Golden sunsets"), `Seasonal` (e.g. "Summer 2025"), and `Year in Review`
+- **Full-screen story player**: segmented progress, Ken Burns motion, hold-to-pause, keyboard and screen-reader support
+- **Notification Center + email digest**: an in-app bell alert and a self-hosted HTML digest, sent only when there's genuinely new content — never a hollow "nothing happened" email — with one-click, no-login unsubscribe
+- **Full user control**: favorite, hide, or permanently delete any memory (deletion is forever — it's never regenerated); hide specific people or date ranges from ever being resurfaced; save any memory as a real, shareable album
+- **Privacy first**: every curation pass — quality scoring, trip clustering, face and theme matching — runs entirely on your own server against data it already has. AI-written titles are entirely optional and provider-configurable; with no provider configured (the default posture), memories still generate on schedule with clean, deterministic titles instead
+
+Off by default (`features.memories`) — an admin turns it on in Admin Settings, then optionally runs one backfill pass to light up years of memories from the existing library in the background. See [docs/specs/memories.md](docs/specs/memories.md) for the full design.
+
+<!-- TODO: screenshot — Home memories carousel (docs/images/memories-carousel.png) -->
+<!-- TODO: screenshot — full-screen story player (docs/images/memories-story-player.png) -->
+<!-- TODO: screenshot — email digest (docs/images/memories-email-digest.png) -->
+
 ### Family Circles (Collaborative Library)
 - **Shared Circle Library**: Every media item belongs to exactly one circle and is visible to all circle members — photos uploaded by any collaborator appear in the shared timeline
 - **Multiple Circles per User**: Belong to your personal library and several family circles simultaneously; switch active circle in the web app or CLI
@@ -51,7 +66,7 @@ MemoriaHub is a personal media-ownership platform that gives families full contr
 - **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
 
 ### Planned Capabilities
-The roadmap covers further long-term enrichment such as platform import paths (Google Photos Takeout, OneDrive), Azure storage, trip/event grouping, and additional duplicate-detection tiers (Phase 09). The Android MVP (Phase 08) and cross-cutting enrichment features (face recognition, AI auto-tagging, agentic search) are already shipped. See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
+The roadmap covers further long-term enrichment such as platform import paths (Google Photos Takeout, OneDrive), Azure storage, and additional duplicate-detection tiers (Phase 09). The Android MVP (Phase 08), cross-cutting enrichment features (face recognition, AI auto-tagging, agentic search), and trip/event grouping (now shipped as part of Memories, above) are already shipped. See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
 
 ## Technology Stack
 
