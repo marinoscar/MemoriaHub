@@ -361,23 +361,15 @@ Face recognition, auto-tagging, and burst detection are global feature toggles (
 - `POST /api/circles/:id/invites` - Send invite by email; upserts allowed_emails (circle_admin role required)
 - `DELETE /api/circles/:id/invites/:inviteId` - Cancel pending invite (circle_admin role required)
 
-### Admin: Backup (Admin role + backup:run / backup:read)
-Server-side S3-to-local-disk replication (`apps/api/src/jobs/backup/`, `BACKUP_LOCAL_PATH`) — distinct from the node-based **Local Media Backup** feature under [Node Data-Plane](#node-data-plane-distributed-workers--admin-worker-nodes) above (`/api/nodes/:id/backup/*`), which pulls original bytes to a worker node's own disk instead of the server's. This admin surface's former eager, per-object presigned-URL listing route was removed as superseded by that feature's paginated, presigned change feed.
-- `POST /api/admin/backup` - Trigger a backup run
-- `GET /api/admin/backup/runs` - List recent backup runs
-- `GET /api/admin/backup/status` - Alias for /runs
-- `GET /api/admin/backup/runs/:runId` - Get single run detail
-
 ### Admin: Database Backup (Admin role + db_backup:read / db_backup:write / db_backup:restore)
-**This repo now has THREE separately-named backup features. They are not variants of each other — read this paragraph before touching any of them.**
+**This repo has TWO separately-named backup features. They are not variants of each other — read this paragraph before touching either of them.**
 
 | Feature | Route prefix | Code | What it copies | Destination |
 |---|---|---|---|---|
-| **Admin: Backup** (above) | `/api/admin/backup/*` | `apps/api/src/jobs/backup/` | MEDIA objects | the API server's own local disk (`BACKUP_LOCAL_PATH`) |
 | **Local Media Backup** | `/api/nodes/:id/backup/*` | epic #308, see [spec](docs/specs/local-backup.md) | MEDIA original bytes | a worker NODE's local disk (pull-mirror) |
 | **Admin: Database Backup** (this one) | `/api/admin/db-backup/*` | `apps/api/src/db-backup/` | the **PostgreSQL database** (`pg_dump -Fc`) | an object-storage provider |
 
-Only this one backs up the DATABASE; the other two back up media files and never touch Postgres. Epic #339: `DatabaseBackupRun` schema + `databaseBackup.*` settings + the three permissions (#340), the `pg_dump` streaming engine (#341), scheduling/retention (#342), this admin API (#343), restore/rollback (#344). See the [Database Backup & Restore spec](docs/specs/database-backup.md) for the full architecture (why this deliberately isn't an `enrichment_jobs` job type, the heartbeat + partial-unique-index guard, streaming/verification contract, retention, the two rollback modes) and the [Database Restore runbook](docs/runbooks/database-restore.md) (#346) for the manual, code-independent disaster-recovery procedure — the scratch-database-and-rename steps #344 automates, plus every pgvector/client-version/`pg_restore -j` gotcha, written and usable regardless of whether #344/#345 have landed on a given deployment.
+Only this one backs up the DATABASE; the other backs up media files and never touches Postgres. (There was a THIRD — a v0 server-side S3-to-API-disk media replication at `/api/admin/backup/*`, `apps/api/src/jobs/backup/`, with its own `backup:run`/`backup:read` permissions. It was retired in issue #367 as superseded by epic #308's strictly better node-based mirror; its routes now redirect to `/admin/settings/nodes`. Do not resurrect it, and do not confuse the historical `BACKUP_LOCAL_PATH` env var with it — that key is now read solely by `LocalDiskStorageProvider` as the `local` storage provider's filesystem root.) Epic #339: `DatabaseBackupRun` schema + `databaseBackup.*` settings + the three permissions (#340), the `pg_dump` streaming engine (#341), scheduling/retention (#342), this admin API (#343), restore/rollback (#344). See the [Database Backup & Restore spec](docs/specs/database-backup.md) for the full architecture (why this deliberately isn't an `enrichment_jobs` job type, the heartbeat + partial-unique-index guard, streaming/verification contract, retention, the two rollback modes) and the [Database Restore runbook](docs/runbooks/database-restore.md) (#346) for the manual, code-independent disaster-recovery procedure — the scratch-database-and-rename steps #344 automates, plus every pgvector/client-version/`pg_restore -j` gotcha, written and usable regardless of whether #344/#345 have landed on a given deployment.
 
 `DatabaseBackupRunnerService` (`apps/api/src/db-backup/database-backup-runner.service.ts`) streams `pg_dump` stdout with backpressure straight into `provider.upload()` — the archive is NEVER materialised in memory — computing the sha256 and byte count on the same single pass, then verifies the UPLOADED object by streaming it back through `pg_restore --list` before declaring success. Deliberately NOT an `enrichment_jobs` job type: `jobs.stuckThresholdMinutes` defaults to 3 minutes and would flag a 30-minute dump as stuck, reset it, and start a SECOND concurrent dump. The precedent it follows is `NodeBackupRun` + `NodeBackupStaleTask` — a dedicated run table with its own heartbeat. At most one run is in flight app-wide, enforced by the raw-SQL partial unique index `database_backup_runs_active_uniq_idx` on `(status) WHERE status IN ('pending','running')` — the DATABASE, not a process-local flag, decides who wins, so the guard holds across replicas; the loser's Prisma P2002 becomes the typed `DatabaseBackupAlreadyRunningError` that this API turns into a 409.
 
@@ -905,8 +897,6 @@ Admin-controlled app-wide maintenance mode (issue #348) — see the [Maintenance
 - `circles:read` - List and read circles the user is a member of (all roles)
 - `circles:write` - Create circles and manage circles the user owns (all roles)
 - `circles:manage_any` - Read/write/delete any circle regardless of membership (Admin only)
-- `backup:run` - Trigger backup jobs (Admin only)
-- `backup:read` - Read backup run history and object list (Admin only)
 - `ai_settings:read` - View AI provider config, test connectivity, list models (Admin only)
 - `ai_settings:write` - Configure AI provider credentials and set active search model (Admin only)
 - `search:use` - Use deterministic search and conversational (agentic) search (all roles)

@@ -2510,56 +2510,7 @@ Revoke a pending invite. Cannot revoke a claimed invite.
 
 ## Admin: Backup
 
-All backup endpoints require the global `admin` role and `backup:run` or `backup:read` permission.
-
-#### POST /admin/backup
-**Requires:** Admin role + `backup:run` permission
-
-Trigger a local-drive replication job. Copies ready `MediaItem` blobs from S3 to `BACKUP_LOCAL_PATH`. Writes a per-circle manifest alongside the blobs.
-
-**Request Body:**
-```json
-{
-  "circleId": "uuid"
-}
-```
-Omit `circleId` to back up all circles.
-
-**Response 200:**
-```json
-{
-  "runId": "audit-event-uuid",
-  "status": "started",
-  "circleId": "uuid | null",
-  "startedAt": "ISO8601"
-}
-```
-
----
-
-#### GET /admin/backup/runs
-#### GET /admin/backup/status
-**Requires:** Admin role + `backup:read` permission
-
-List recent backup runs (sourced from `audit_events`).
-
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | number | 20 | Number of runs to return |
-
-**Response 200:** Array of run summary objects
-
----
-
-#### GET /admin/backup/runs/:runId
-**Requires:** Admin role + `backup:read` permission
-
-Get the status and result of a specific backup run.
-
-**Response 200:** Run detail object including item count, errors, and timing
-
----
+> **Retired (issue #367).** The v0 server-side media backup — `POST /api/admin/backup` and its `/runs`, `/status`, `/runs/:runId` read endpoints, gated by the `backup:run`/`backup:read` permissions — has been removed. It copied media blobs from S3 to the API server's own disk, which epic #308's node-based Local Media Backup supersedes with an incremental, verified, restorable mirror on a separate machine. All four endpoints now 404 and the permissions no longer exist. For media backup see the Local Media Backup reference below; for database backup see **Admin: Database Backup**.
 
 > **Node-based Local Media Backup** (a separate feature, epic #308) is not documented in this file's endpoint enumeration — see the [Local Media Backup specification §12](specs/local-backup.md#12-api-endpoints-reference) for the full `/api/nodes/:id/backup/*` control-plane reference (config, runs, change feed, ack, manifest, dimensions).
 

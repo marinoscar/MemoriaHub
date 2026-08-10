@@ -27,7 +27,7 @@ Off by default (`features.memories`) — an admin turns it on in Admin Settings,
 - **Per-Circle Roles**: `circle_admin` manages members and content; `collaborator` adds and organizes media; `viewer` has read-only access
 - **Email Invites**: Circle admins invite by email; the invite automatically allowlists the recipient so they can log in and join immediately on first sign-in
 - **Two-Layer Admin Model**: The global system Admin bypasses per-circle membership for full cross-circle management; per-circle roles govern everyday access
-- **Local-Drive Backup**: Admin-triggered server-side backup replicates S3 blobs to `BACKUP_LOCAL_PATH`; CLI `memoriahub backup` command lets operators pull blobs to their own drive
+- **Local Media Backup**: A registered worker node pull-mirrors a circle's original media bytes to its own disk over an incremental, sha256-verified change feed, with JSON sidecars, a queryable SQLite catalog, scheduling, reconcile, and restore — driven by the CLI's `memoriahub backup init|run|status|verify|prune|restore|schedule` commands (see [docs/local-backup.md](docs/local-backup.md))
 
 ### Android App (Camera Backup)
 - **Native Android Client**: A Kotlin/Jetpack Compose app at `apps/android/` that provides always-on camera photo and video backup to any circle (personal by default); built with AGP 8.11.1, minSdk 26 (Android 8.0+)
@@ -318,13 +318,7 @@ Interactive API documentation is available at `/api/docs` when running the appli
 - `POST /api/circles/:id/invites` - Create invite + upsert allowlist entry
 - `DELETE /api/circles/:id/invites/:inviteId` - Revoke pending invite
 
-**Admin — Backup:**
-- `POST /api/admin/backup` - Trigger local-drive backup replication
-- `GET /api/admin/backup/runs` - List recent backup runs
-- `GET /api/admin/backup/status` - Alias for `/runs`
-- `GET /api/admin/backup/runs/:runId` - Get status of a specific run
-
-> Node-based Local Media Backup (a worker node pulling original bytes to its own disk) is a separate feature at `/api/nodes/:id/backup/*` — see [docs/specs/local-backup.md](docs/specs/local-backup.md).
+> **Media backup** is the node-based Local Media Backup at `/api/nodes/:id/backup/*` — a worker node pulling original bytes to its own disk; see [docs/specs/local-backup.md](docs/specs/local-backup.md). (The older admin-triggered `/api/admin/backup/*` server-side replication was retired in issue #367.) **Database backup** is a separate feature at `/api/admin/db-backup/*` — see [docs/specs/database-backup.md](docs/specs/database-backup.md).
 
 **Media (circle-scoped — `circleId` required):**
 - `GET /api/media/dashboard` - Circle dashboard (On This Day, recent, favorites, review-queue counts)
@@ -411,7 +405,9 @@ AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 S3_BUCKET=your-bucket-name
 
-# Backup / Local-Drive Replication (Admin only)
+# Filesystem root for the `local` storage provider (STORAGE_PROVIDER=local).
+# The `BACKUP_` name is historical — it predates the retired v0 server-side
+# backup feature and no longer has anything to do with backups.
 # BACKUP_LOCAL_PATH=/mnt/external-drive/memoriahub-backup
 # STORAGE_BACKUP_PROVIDER=local
 

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **v0 server-side media backup** — The Admin-triggered S3-to-API-server-disk replication feature has been removed entirely, superseded by epic #308's node-based Local Media Backup (`/api/nodes/:id/backup/*`), which mirrors original bytes to a *separate* machine incrementally, with sha256 verification, sidecars, a SQLite catalog, and restore. The v0 feature was also non-functional in practice: it ran the whole copy inside the `POST` request (504 behind nginx's 60s `proxy_read_timeout`), only wrote run history on completion (so history was always empty), resolved the boot-env `STORAGE_PROVIDER` rather than each object's own provider, and could copy files onto themselves under `STORAGE_PROVIDER=local`. Removed surface area:
+  - API endpoints `POST /api/admin/backup`, `GET /api/admin/backup/runs`, `GET /api/admin/backup/status`, `GET /api/admin/backup/runs/:runId` — all now 404 and absent from Swagger
+  - The entire `apps/api/src/jobs/` tree (module, controller, service, DTO)
+  - Permissions `backup:run` and `backup:read`, dropped from the RBAC catalog and deleted from the `permissions` table by migration (their Admin grants cascade)
+  - Web UI: the `/admin/settings/backup` page, its run-history table, service and hook, and the "Backup" card in the Settings hub
+  - Routes: `/admin/settings/backup` and `/admin/backup` both now redirect to `/admin/settings/nodes` in a single hop, where the replacement feature lives
+  - **Kept deliberately:** `LocalDiskStorageProvider`, the `storage.backup.localPath` config key, and the `BACKUP_LOCAL_PATH` env var — these back the `local` *storage* provider that serves real media; the `backup` in the name is historical. Existing `backup.start` / `backup.complete` `audit_events` rows are also kept, as append-only history.
+
 - **Media classification feature** — The `MediaClassification` enum (`memory | low_value | unreviewed`) and the `classification` column on `media_items` (including its database index) have been removed entirely. This field was originally introduced in Phase 01 and partially surfaced in bulk editing (`PATCH /api/media/bulk`) and a review-queue UI, but the full automatic heuristic processors and dedicated review mode were never completed. Stored classification values were intentionally dropped as part of the schema migration. Removed surface area:
   - `MediaClassification` Prisma enum and `media_items.classification` column + index (migration)
   - `classification` filter on `GET /api/media` and `POST /api/search`

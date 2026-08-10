@@ -249,8 +249,6 @@ Permissions are strings mapped to roles:
 - `circles:read` — list and read circles the user is a member of
 - `circles:write` — create circles and manage circles the user owns
 - `circles:manage_any` — read/write/delete any circle (Admin only)
-- `backup:run` — trigger a backup job (Admin only)
-- `backup:read` — read backup run history and object list (Admin only)
 
 Admin: all  
 Contributor/Viewer: limited subsets (circles:read + circles:write for both)
@@ -261,7 +259,6 @@ Contributor/Viewer: limited subsets (circles:read + circles:write for both)
 - User settings endpoints scoped to authenticated user
 - User admin endpoints Admin-only
 - Circle endpoints enforce two-layer authorization: global permission check (circles:read / circles:write) followed by per-circle role check via `CircleMembershipService.assertCircleAccess()`
-- Backup endpoints require Admin role and backup:run / backup:read permission
 
 ### 7.4 Per-Circle Role Model (Family Circles)
 In addition to system-level RBAC, each circle has per-circle roles that control what members can do within that circle:
@@ -331,12 +328,6 @@ Consistent success/error format:
 - `GET /api/circles/:id/invites` — list pending invites (circles:write + circle_admin)
 - `POST /api/circles/:id/invites` — send invite by email; upserts allowed_emails (circles:write + circle_admin rank)
 - `DELETE /api/circles/:id/invites/:inviteId` — cancel pending invite (circles:write + circle_admin)
-
-**Admin: Backup** (server-side S3-to-local-disk replication; distinct from the node-based Local Media Backup feature at `/api/nodes/:id/backup/*` — see [docs/specs/local-backup.md](specs/local-backup.md))
-- `POST /api/admin/backup` — trigger backup run (Admin + backup:run)
-- `GET /api/admin/backup/runs` — list recent backup runs (Admin + backup:read)
-- `GET /api/admin/backup/status` — alias for /runs (Admin + backup:read)
-- `GET /api/admin/backup/runs/:runId` — get single run detail (Admin + backup:read)
 
 **Health**
 - `GET /api/health/live`
@@ -515,9 +506,9 @@ System settings example:
 ### 10.3 Seeding
 Seed:
 - Roles (Admin/Contributor/Viewer)
-- Permissions (including `circles:read`, `circles:write`, `circles:manage_any`, `backup:run`, `backup:read`)
+- Permissions (including `circles:read`, `circles:write`, `circles:manage_any`)
 - Role-permission mappings:
-  - Admin: all permissions including `circles:manage_any`, `backup:run`, `backup:read`
+  - Admin: all permissions including `circles:manage_any`
   - Contributor: `circles:read`, `circles:write`
   - Viewer: `circles:read`, `circles:write`
 - system_settings row (`key=global`) with defaults

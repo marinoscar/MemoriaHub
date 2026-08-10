@@ -524,19 +524,6 @@ CircleMembershipService.assertCircleAccess(userId, circleId, permissions, requir
 
 Per-circle role ranking: `viewer (1) < collaborator (2) < circle_admin (3)`.
 
-#### Backup Module
-
-```
-apps/api/src/jobs/backup/
-├── backup.module.ts
-├── backup.controller.ts           # @Controller('admin/backup')
-├── backup.service.ts              # runBackup, getRecentRuns, getRunStatus
-└── dto/
-    └── trigger-backup.dto.ts
-```
-
-The backup job mirrors ready `MediaItem` blobs from S3 to the local provider rooted at `BACKUP_LOCAL_PATH`. Runs are tracked as `audit_events` records. This is a separate, server-side feature from the node-based **Local Media Backup** (`apps/api/src/nodes/node-backup.*`, `/api/nodes/:id/backup/*`), which pulls original bytes to a worker node's own disk — see [docs/specs/local-backup.md](specs/local-backup.md).
-
 #### LocalDiskStorageProvider
 
 ```
@@ -544,7 +531,7 @@ apps/api/src/storage/providers/local/
 └── local-disk.provider.ts         # Implements StorageProvider interface
 ```
 
-Selected when `STORAGE_BACKUP_PROVIDER=local`. Used exclusively by the backup job; the primary upload path continues to use the S3 provider.
+Selected as the active storage provider via `STORAGE_PROVIDER=local` / `storage.activeProvider='local'`, in which case it serves real media uploads and downloads. Its filesystem root is `storage.backup.localPath` (`BACKUP_LOCAL_PATH`) — a historical name inherited from the v0 server-side backup feature retired in issue #367; the key has nothing to do with backups any more and must not be renamed without a data-migration plan.
 
 ---
 
@@ -1109,7 +1096,6 @@ The system uses two independent authorization layers that work together.
                     │ media:read_any / write_any / delete_any      │
                     │ circles:read  │  circles:write               │
                     │ circles:manage_any (Admin)                   │
-                    │ backup:run  │  backup:read (Admin)           │
                     └────────────┬─────────────────────────────────┘
                                  │
         ┌────────────────────────┼────────────────────────┐
@@ -1120,8 +1106,8 @@ The system uses two independent authorization layers that work together.
 ├───────────────┤      ├───────────────┤      ├───────────────┤
 │ ALL perms     │      │ circles:read/ │      │ circles:read/ │
 │ incl. _any    │      │   write       │      │   write       │
-│ backup:run/   │      │ media:read/   │      │ media:read/   │
-│   read        │      │   write/delete│      │   write/delete│
+│               │      │ media:read/   │      │ media:read/   │
+│               │      │   write/delete│      │   write/delete│
 │               │      │ user_settings:│      │ user_settings:│
 │ Super-admin   │      │   read/write  │      │   read/write  │
 │ bypass for    │      │               │      │               │
@@ -1196,7 +1182,6 @@ Before OAuth authentication completes:
 | **System Settings** | `/api/system-settings/*` | Yes (Admin) | App configuration |
 | **Allowlist** | `/api/allowlist/*` | Yes (Admin) | Access control |
 | **Circles** | `/api/circles/*` | Yes | Circle CRUD, members, invites |
-| **Admin Backup** | `/api/admin/backup/*` | Yes (Admin) | Local-drive backup/replication |
 | **Media Bulk** | `/api/media/bulk*` | Yes (`media:write` / `media:delete`) | Bulk update/tag/delete media items |
 | **Geo** | `/api/media/geo/*` | Yes (`media:read`) | Reverse and forward geocoding |
 | **Dashboard** | `/api/media/dashboard` | Yes (`media:read`) | Circle dashboard aggregation |
@@ -1307,10 +1292,6 @@ Server-side S3-to-local-disk replication, distinct from the node-based Local Med
 
 | Method | Path | Permission | Purpose |
 |--------|------|------------|---------|
-| `POST` | `/api/admin/backup` | `backup:run` (Admin role required) | Trigger local-drive replication |
-| `GET` | `/api/admin/backup/runs` | `backup:read` (Admin) | List recent backup runs |
-| `GET` | `/api/admin/backup/status` | `backup:read` (Admin) | Alias for `/runs` |
-| `GET` | `/api/admin/backup/runs/:runId` | `backup:read` (Admin) | Get specific run status |
 
 #### Admin Job Queue
 
@@ -1373,7 +1354,6 @@ Server-side S3-to-local-disk replication, distinct from the node-based Local Med
 | Circle Detail | `/circles/:id` | Required | Any | Members, invites, and content for one circle |
 | System Settings | `/admin/settings` | Required | Admin | App configuration |
 | User Management | `/admin/users` | Required | Admin | User/allowlist mgmt |
-| Admin Backup | `/admin/backup` | Required | Admin | Trigger and monitor backup runs |
 | Device Activation | `/device` | Required | Any | Device auth approval |
 | Test Login | `/testing/login` | Public | - | Test auth bypass (dev only) |
 
