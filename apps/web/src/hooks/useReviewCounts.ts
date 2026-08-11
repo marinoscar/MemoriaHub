@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import type { ReviewCountsResponse } from '../types/media';
 import { getReviewCounts } from '../services/media';
 import { useCircle } from './useCircle';
@@ -134,6 +134,8 @@ export function useReviewCounts(
     [isMounted],
   );
 
+  // The instance's OWN lifecycle fetch: mount, and any change to what it is
+  // fetching. Deliberately does NOT depend on `rev` — see the effect below.
   useEffect(() => {
     if (!enabled || !activeCircleId) {
       setData(null);
@@ -141,9 +143,32 @@ export function useReviewCounts(
       return;
     }
     void fetch(activeCircleId);
-    // `rev` is not used in the body — it is here precisely so a bump of the
-    // shared signal re-runs this effect and refetches.
-  }, [enabled, activeCircleId, fetch, rev]);
+  }, [enabled, activeCircleId, fetch]);
+
+  // The SHARED-SIGNAL fetch, split out and guarded so it fires only on a
+  // GENUINE bump — never on this instance's first run.
+  //
+  // WHY (issue #392): `ReviewHubPage` calls `refreshReviewCounts()` from its own
+  // mount effect, which is spec §4.5 requirement 1 — returning after clearing
+  // four bursts must not show a cached "4". But with `rev` folded into the
+  // effect above, one hub mount issued TWO identical requests: the instance's
+  // own mount fetch, and then a second one when its own signal bumped the
+  // revision a tick later. The signal exists to refetch OTHER already-mounted
+  // instances (the rail's aggregate badge), which have already done their own
+  // mount fetch; a freshly-mounting instance is by definition not stale.
+  //
+  // The ref is seeded from `rev` at first render rather than from a boolean
+  // "have I run" flag, so an instance that mounts DURING someone else's bump
+  // still compares against the revision it actually rendered with.
+  const seenRevisionRef = useRef(rev);
+  useEffect(() => {
+    if (seenRevisionRef.current === rev) return;
+    seenRevisionRef.current = rev;
+    // A disabled instance still issues no request of its own (issue #204) —
+    // the signal does not override the gate.
+    if (!enabled || !activeCircleId) return;
+    void fetch(activeCircleId);
+  }, [rev, enabled, activeCircleId, fetch]);
 
   // Routed through the shared signal rather than fetching locally, so one
   // caller's refresh refreshes every consumer — see the header comment. A

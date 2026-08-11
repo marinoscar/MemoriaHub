@@ -1,8 +1,8 @@
-import { Box, useTheme } from '@mui/material';
+import { Box, useMediaQuery, useTheme } from '@mui/material';
 import { Outlet } from 'react-router-dom';
-import { useState, useCallback } from 'react';
 import { AppBar } from '../navigation/AppBar';
-import { Sidebar } from '../navigation/Sidebar';
+import { NavigationRail } from '../navigation/NavigationRail';
+import { NavContextPane } from '../navigation/NavContextPane';
 import { BottomNav } from '../navigation/BottomNav';
 import { MediaRefreshProvider } from '../../contexts/MediaRefreshContext';
 import { MediaPreviewProvider } from '../../contexts/MediaPreviewContext';
@@ -17,17 +17,35 @@ interface LayoutProps {
   fullBleed?: boolean;
 }
 
+/**
+ * The app shell — three navigation treatments, one per size class.
+ *
+ * Issue #392, epic #388, spec §4. The `Sidebar` drawer this used to mount is
+ * gone from every breakpoint:
+ *
+ *   phone   (< md)  →  bottom bar only. No drawer, no hamburger, no drawer
+ *                      state to manage — which is why this component no longer
+ *                      holds any (spec §4.1).
+ *   tablet  (md–lg) →  a permanent collapsed rail (~56px). Always visible, so
+ *                      navigating costs zero taps instead of one (spec §4.2).
+ *   desktop (≥ lg)  →  expanded rail + a context pane for Collections and
+ *                      Review (spec §4.3).
+ *
+ * The chrome is chosen by MOUNTING, not by rendering-then-hiding: exactly one
+ * navigation surface exists in the tree at any width, so a resize across `md`
+ * or `lg` swaps it rather than briefly showing two.
+ */
 export function Layout({ fullBleed = false }: LayoutProps) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const theme = useTheme();
-
-  const handleSidebarToggle = useCallback(() => {
-    setSidebarOpen((prev) => !prev);
-  }, []);
-
-  const handleSidebarClose = useCallback(() => {
-    setSidebarOpen(false);
-  }, []);
+  // `up('md')` and `down('md')` (in BottomNav) are exact complements, so there
+  // is no width at which both the rail and the bottom bar render, and none at
+  // which neither does.
+  const showRail = useMediaQuery(theme.breakpoints.up('md'));
+  // The pane is a `lg`-and-up affordance, independent of the rail's collapse
+  // preference: collapsing the rail reclaims RAIL width, it does not mean "I
+  // want less context". A user on a 1400px screen who prefers a narrow rail
+  // still has room for — and still benefits from — the second column.
+  const showContextPane = useMediaQuery(theme.breakpoints.up('lg'));
 
   return (
     <MediaRefreshProvider>
@@ -52,9 +70,16 @@ export function Layout({ fullBleed = false }: LayoutProps) {
           {/* Above the AppBar so it is visible on every authenticated screen
               (issue #348). Renders nothing for non-admins. */}
           <MaintenanceBanner />
-          <AppBar onMenuClick={handleSidebarToggle} />
-          <Box sx={{ display: 'flex', flexGrow: 1 }}>
-            <Sidebar open={sidebarOpen} onClose={handleSidebarClose} />
+          <AppBar />
+          {/* `minWidth: 0` on the ROW as well as on each of its children: the
+              row is itself a flex item of the column above, and issue #291's
+              runaway width propagates through every level that omits it. */}
+          <Box sx={{ display: 'flex', flexGrow: 1, minWidth: 0 }}>
+            {/* Focus order follows visual order (spec §7): rail, then context
+                pane, then main — which is also their DOM order here, so no
+                tabindex juggling is needed to achieve it. */}
+            {showRail && <NavigationRail />}
+            {showContextPane && <NavContextPane />}
             <Box
               component="main"
               // `minWidth: 0` in BOTH branches is load-bearing, not cosmetic
@@ -76,6 +101,8 @@ export function Layout({ fullBleed = false }: LayoutProps) {
                       flexGrow: 1,
                       minWidth: 0,
                       p: 3,
+                      // Clears the fixed bottom bar, which only exists below
+                      // `md` — the same breakpoint `BottomNav` gates on.
                       pb: { xs: 10, md: 3 },
                     }
               }
@@ -83,7 +110,14 @@ export function Layout({ fullBleed = false }: LayoutProps) {
               <Outlet />
             </Box>
           </Box>
-          <BottomNav onMore={() => setSidebarOpen(true)} />
+          {/* Mounted only where it renders. `BottomNav` also gates itself on
+              `down('md')`, but it calls `useReviewQueues` for its badge, and
+              `useReviewCounts` beneath that deliberately does NOT dedupe across
+              consumers — so a self-gating-but-mounted bottom bar would double
+              every counts request at `md` and up, where the rail already holds
+              one. `!showRail` is the exact complement of the rail's gate, so
+              there is no width with two navs and none with zero. */}
+          {!showRail && <BottomNav />}
         </Box>
       </SearchProvider>
       </MediaPreviewProvider>
