@@ -527,6 +527,35 @@ describe('AuthService', () => {
       expect(result.permissions).toContain('user_settings:read');
     });
 
+    it('should include createdAt as an ISO string in the response (issue #371)', async () => {
+      const mockUser = {
+        id: 'user-1',
+        email: 'test@example.com',
+        displayName: null,
+        providerDisplayName: 'Provider Name',
+        profileImageUrl: null,
+        providerProfileImageUrl: 'https://example.com/photo.jpg',
+        isActive: true,
+        createdAt: new Date('2026-01-15T10:30:00.000Z'),
+        userRoles: [
+          {
+            role: {
+              name: 'viewer',
+              rolePermissions: [{ permission: { name: 'user_settings:read' } }],
+            },
+          },
+        ],
+      };
+
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser as any);
+
+      const result = await service.getCurrentUser('user-1');
+
+      expect(result).toHaveProperty('createdAt');
+      expect(typeof result.createdAt).toBe('string');
+      expect(result.createdAt).toBe(mockUser.createdAt.toISOString());
+    });
+
     it('should prefer user display name over provider', async () => {
       const mockUser = {
         id: 'user-1',
