@@ -279,6 +279,12 @@ lg 1200`), which align closely with Material 3's compact / medium / expanded win
   [`docs/audits/mobile-topbar-audit.md`](../audits/mobile-topbar-audit.md) that toolbar
   already measures ~354 px against 360 px of viewport with the search pill present; removing
   it resolves that crowding permanently rather than tuning gaps again.
+  **Prerequisite:** a destination that replaces a piece of chrome MUST itself own the
+  equivalent capability *before* that chrome is gated away. `/search` therefore renders its
+  own search field (`PageSearchBar`, carrying both free-text/agentic search and the advanced
+  `SearchPanel`) in every one of its render branches. Issue #400 is the regression that
+  proved the rule: the pill was gated to `md`+ while `SearchPage` still only rendered
+  results, leaving every user below 900 px with no way to search at all.
 - **The circle chip replaces the wordmark.** On a phone, which circle you are in matters more
   than the app's name.
 - Review carries a dot indicator rather than a numeric badge at this size.

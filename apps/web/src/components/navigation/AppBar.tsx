@@ -197,14 +197,23 @@ export function AppBar() {
               <CircleChip />
 
               {/* Central search pill — `md` and up ONLY (spec §4.1 / §4.2).
-                  Below `md` Search is a bottom-bar destination, so a search
-                  field here would be a second entry point to the same place
-                  competing for the scarcest row in the app; removing it is what
-                  permanently resolves the ~354px-against-360px crowding the
-                  topbar audit documents, rather than tuning gaps a third time.
-                  At `md` and up the destination gives up its RAIL slot instead
-                  and is carried here, where there is width for a real input —
-                  see the header of `NavigationRail`. */}
+                  Below `md` this pill is absent, which frees the scarcest row in
+                  the app and permanently resolves the ~354px-against-360px
+                  crowding the topbar audit documents. At `md` and up the Search
+                  destination gives up its RAIL slot instead and is carried here,
+                  where there is width for a real input — see the header of
+                  `NavigationRail`.
+
+                  ⚠️ THIS GATE IS ONLY VALID BECAUSE `/search` OWNS ITS OWN INPUT.
+                  The tab is NOT by itself an equivalent replacement for this
+                  pill: `TopbarSearch` is the sole opener of `SearchPanel` and the
+                  sole free-text/agentic entry point in the toolbar, and issue
+                  #400 is the production outage that happened when this gate
+                  landed while `SearchPage` still only rendered results. What
+                  makes it correct now is `PageSearchBar`, mounted in all four
+                  `SearchPage` branches, which carries both capabilities. Do not
+                  remove that bar — deleting it silently recreates the outage
+                  below 900px, where this pill does not render at all. */}
               {isMd && <TopbarSearch />}
 
               {/* The flexible spacer that `TopbarSearch` used to supply.
