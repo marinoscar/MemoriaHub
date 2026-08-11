@@ -13,13 +13,17 @@ import {
   DEFAULT_USER_SETTINGS,
   DataTableLayoutValue,
   MemoriesPreferencesValue,
+  NavigationPreferencesValue,
   NotificationPreferencesValue,
   UserSettingsValue,
 } from '../../common/types/settings.types';
 import {
   DATA_TABLE_MAX_TABLES,
   MemoriesPreferencesPatch,
+  NAVIGATION_MAX_PINNED,
+  NavigationPreferencesPatch,
   NotificationPreferencesPatch,
+  isNavigationPinnableKey,
   userSettingsSchema,
 } from '../../common/schemas/settings.schema';
 import { disabledNotificationTypes } from '../../notifications/notification-preferences.service';
@@ -69,6 +73,13 @@ export class UserSettingsService {
       // Same contract again: absent namespace / field means "no preference"
       // (nothing hidden, digest not opted out). Never materialized here.
       memories: value.memories,
+      // Same contract again: absent namespace / field means "use the built-in
+      // defaults" (nothing pinned, rail expanded). Never materialized here.
+      //
+      // THE ONE READ-PATH TRANSFORM IN THIS SERVICE: pins naming a destination
+      // this release no longer knows are dropped. This is the single place it
+      // happens, and it is the read path on purpose — see sanitizeNavigation().
+      navigation: this.sanitizeNavigation(value.navigation),
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -115,6 +126,11 @@ export class UserSettingsService {
       // Same contract again: absent namespace / field means "no preference"
       // (nothing hidden, digest not opted out). Never materialized here.
       memories: value.memories,
+      // Verbatim, and safe to be verbatim: what was just written passed
+      // `userSettingsSchema`, whose `pinned` is the strict key enum, so an
+      // unknown key cannot be present here. Only the stored-blob read path
+      // (getSettings) needs the drop.
+      navigation: value.navigation,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -169,6 +185,13 @@ export class UserSettingsService {
         dto.notifications,
       ),
       memories: this.mergeMemories(current.memories, dto.memories),
+      // `current` came from getSettings(), so any pin naming a destination this
+      // release no longer knows was ALREADY dropped before it got here. That is
+      // load-bearing rather than incidental: `userSettingsSchema.parse(merged)`
+      // below validates `pinned` against the strict key enum, so an unsanitized
+      // legacy pin would turn every unrelated PATCH (a theme change!) into a
+      // 500. The read-side drop is what keeps the strict write-side enum safe.
+      navigation: this.mergeNavigation(current.navigation, dto.navigation),
     };
 
     // The per-table-id merge above can push the namespace past its cap even
@@ -178,6 +201,19 @@ export class UserSettingsService {
     if (tableCount > DATA_TABLE_MAX_TABLES) {
       throw new BadRequestException(
         `dataTables may hold at most ${DATA_TABLE_MAX_TABLES} table ids (patch would produce ${tableCount})`,
+      );
+    }
+
+    // Same reasoning for `navigation.pinned` (issue #392). The patch payload
+    // itself is capped by the DTO, but a merge can still exceed the bound —
+    // most obviously when the patch leaves `pinned` untouched and the stored
+    // list is already over-cap (an internal caller such as updateTheme() never
+    // passes through the HTTP DTO at all). Enforce the real, post-merge bound
+    // here so it surfaces as a 400 rather than a raw ZodError -> 500.
+    const pinnedCount = merged.navigation?.pinned?.length ?? 0;
+    if (pinnedCount > NAVIGATION_MAX_PINNED) {
+      throw new BadRequestException(
+        `navigation.pinned may hold at most ${NAVIGATION_MAX_PINNED} destinations (patch would produce ${pinnedCount})`,
       );
     }
 
@@ -214,6 +250,11 @@ export class UserSettingsService {
       // Same contract again: absent namespace / field means "no preference"
       // (nothing hidden, digest not opted out). Never materialized here.
       memories: value.memories,
+      // Verbatim, and safe to be verbatim: what was just written passed
+      // `userSettingsSchema`, whose `pinned` is the strict key enum, so an
+      // unknown key cannot be present here. Only the stored-blob read path
+      // (getSettings) needs the drop.
+      navigation: value.navigation,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -368,6 +409,94 @@ export class UserSettingsService {
     }
 
     return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  /**
+   * Merge a PATCH's `navigation` payload into the stored namespace (issue #392).
+   *
+   * FIELD-WISE, one level deep — the same shape as mergeMemories() /
+   * mergeNotifications():
+   *   - `navigation` absent from the patch → stored namespace untouched;
+   *   - `navigation: null`                 → namespace DELETED, i.e. reset to
+   *     defaults (nothing pinned, rail expanded) rather than pinned to an
+   *     explicit empty blob;
+   *   - a field present                    → replaced wholesale. `pinned` is
+   *     replace-not-append deliberately: pin, unpin and REORDER are all the
+   *     same PATCH from the client's point of view, and an append-only merge
+   *     would make the latter two inexpressible;
+   *   - a field set to `null`              → DELETED (JSON Merge Patch), which
+   *     resets it to its absent default instead of writing `[]` / `false` that
+   *     would survive a future default change.
+   *
+   * An empty result collapses back to `undefined` — the absent namespace IS
+   * the canonical "nothing persisted" state, and storing `{}` is only noise.
+   */
+  private mergeNavigation(
+    current: NavigationPreferencesValue | undefined,
+    patch: NavigationPreferencesPatch | null | undefined,
+  ): NavigationPreferencesValue | undefined {
+    if (patch === undefined) return current;
+    if (patch === null) return undefined;
+
+    const merged: NavigationPreferencesValue = { ...(current ?? {}) };
+
+    if (patch.pinned !== undefined) {
+      if (patch.pinned === null) delete merged.pinned;
+      else merged.pinned = patch.pinned;
+    }
+    if (patch.railCollapsed !== undefined) {
+      if (patch.railCollapsed === null) delete merged.railCollapsed;
+      else merged.railCollapsed = patch.railCollapsed;
+    }
+
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  /**
+   * Drop stored pins that no longer name a known destination (issue #392).
+   *
+   * WHY THIS IS A READ-PATH TRANSFORM, AND WHY IT DROPS RATHER THAN REJECTS —
+   * the deliberate asymmetry with how the schema treats a WRITE:
+   *
+   *   - A write naming an unknown key is REJECTED (400 from the strict key
+   *     enum). That is a client bug, and a 400 is how it gets found.
+   *   - A stored unknown key is DROPPED. It is not a client bug: it is a
+   *     destination THIS APP shipped, the user pinned, and a later release
+   *     removed. Failing on it would 500 every settings read — and, because
+   *     patchSettings() re-validates the merged blob, every subsequent PATCH of
+   *     any unrelated field too — bricking the user's settings over one dead
+   *     pin. Degrading to "that entry is simply not pinned" is the only
+   *     acceptable outcome, and it is exactly what makes the strict write-side
+   *     enum safe to keep.
+   *
+   * Deliberately NOT applied on the way IN (writeSettings): the stored blob is
+   * left alone until the user's next write, at which point the sanitized list
+   * is what gets persisted. Nothing else is filtered here — notably the cap is
+   * NOT enforced on read, so an over-cap blob still READS fine and only a write
+   * that would persist it is refused (as a 400, see patchSettings).
+   *
+   * Returns the SAME object when nothing was dropped, so the overwhelmingly
+   * common case allocates nothing.
+   */
+  private sanitizeNavigation(
+    value: NavigationPreferencesValue | undefined,
+  ): NavigationPreferencesValue | undefined {
+    if (!value?.pinned) return value;
+
+    const known = value.pinned.filter((key) => isNavigationPinnableKey(key));
+    if (known.length === value.pinned.length) return value;
+
+    this.logger.debug(
+      `Dropped ${value.pinned.length - known.length} unknown navigation pin(s) on read`,
+    );
+
+    // An emptied list collapses to absent, matching mergeNavigation()'s rule
+    // that the absent namespace/field IS "nothing persisted".
+    const sanitized: NavigationPreferencesValue = { ...value };
+    if (known.length > 0) sanitized.pinned = known;
+    else delete sanitized.pinned;
+
+    return Object.keys(sanitized).length > 0 ? sanitized : undefined;
   }
 
   /**
