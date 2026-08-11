@@ -3,10 +3,15 @@
  *
  * `useReviewQueues` is mocked directly so the dot-badge/accessible-name cases
  * can drive `totalPending` without touching the network. `BottomNav` self-gates
- * on `down('md')`, so every test renders at the default (all-`matches:false`)
- * viewport, matching `setup.ts`'s baseline — the phone treatment — unless a
- * case explicitly widens the viewport to prove the component renders nothing
- * above `md`.
+ * on `down('sm')` (issue #402 moved this from `down('md')`/900px to
+ * `down('sm')`/600px, coupled to `Layout`'s `showRail` — see that file's
+ * header for the full six-gate list), so every test explicitly sets a phone
+ * width via `setViewportWidth` in `beforeEach` — the raw suite-wide baseline
+ * (every `matchMedia` query reporting `matches: false`) is NOT equivalent to
+ * any real phone width for a `down(...)` query (it would make `down('sm')`
+ * false too, i.e. "not mobile", the opposite of this component's own
+ * treatment) — unless a case explicitly widens the viewport to prove the
+ * component renders nothing at `sm` and above.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
@@ -73,16 +78,16 @@ function restoreDefaultViewport() {
   });
 }
 
-const PHONE_WIDTH = 400; // < md(900) -> down('md') matches -> BottomNav renders
+const PHONE_WIDTH = 400; // < sm(600) -> down('sm') matches -> BottomNav renders
 
 describe('BottomNav', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // The suite-wide `matchMedia` baseline (setup.ts) reports every query as
-    // NOT matching, which for `down('md')` means "not mobile" — the opposite
+    // NOT matching, which for `down('sm')` means "not mobile" — the opposite
     // of the treatment this component exists for. So every case here needs an
-    // explicit phone-width viewport; only the "renders nothing at md+" case
-    // below widens it.
+    // explicit phone-width viewport; only the width-widening cases below
+    // (900px, and the #402 in-band 700px coupling case) override it.
     setViewportWidth(PHONE_WIDTH);
     mockUseReviewQueues.mockReturnValue(reviewQueues());
   });
@@ -113,8 +118,35 @@ describe('BottomNav', () => {
     expect(screen.queryByRole('button', { name: /menu/i })).not.toBeInTheDocument();
   });
 
-  it('renders nothing at md and above (self-gated on down("md"))', () => {
+  it('renders nothing at sm and above (self-gated on down("sm"), issue #402)', () => {
     setViewportWidth(1000);
+
+    const { container } = render(<BottomNav />, { wrapperOptions: { route: '/' } });
+
+    expect(container.firstChild).toBeNull();
+  });
+
+  // ===========================================================================
+  // Coupling regression guard (issue #402) — at the exact rail boundary (600)
+  // and an in-band width (700, e.g. iPad portrait's 768 or the Fold 7's
+  // ~750), `BottomNav` must ALREADY be gone: before this fix its self-gate was
+  // `down('md')`/900px, so both widths still showed the bottom bar alongside
+  // no rail at all. A regression that moves this component's gate back to
+  // `md` in isolation — without touching `Layout`'s `showRail` — fails here
+  // even though `navigation/breakpoints.test.tsx`'s cross-cutting sweep would
+  // also catch it (that file exercises this same real, unmocked component).
+  // ===========================================================================
+
+  it('renders nothing at the exact rail boundary (600px)', () => {
+    setViewportWidth(600);
+
+    const { container } = render(<BottomNav />, { wrapperOptions: { route: '/' } });
+
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders nothing at an in-band width (700px, e.g. a tablet/foldable in portrait)', () => {
+    setViewportWidth(700);
 
     const { container } = render(<BottomNav />, { wrapperOptions: { route: '/' } });
 
