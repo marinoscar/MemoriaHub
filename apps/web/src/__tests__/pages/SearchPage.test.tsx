@@ -505,4 +505,133 @@ describe('SearchPage', () => {
       expect(screen.getByText('Grace')).toBeInTheDocument();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Capability guard — regression coverage for production bug #400.
+  //
+  // #392 gated TopbarSearch (the AppBar's search pill) to `md`+, on the
+  // rationale that Search moved to a bottom-bar destination. But `/search`
+  // had no input of its own, so below 900px there was NO way to run a
+  // search or open SearchPanel at all — every #392 test still passed
+  // because they all asserted CHROME ("TopbarSearch hidden below md"), never
+  // CAPABILITY ("can a user actually search from this page"). These tests
+  // assert capability directly, in every SearchPage branch, with no AppBar
+  // mounted — so they fail the way #400 failed if PageSearchBarSection is
+  // ever removed from a branch again.
+  // -------------------------------------------------------------------------
+  describe('Capability guard — search remains usable in every branch (regression for #400)', () => {
+    // None of these tests render AppBar/TopbarSearch — `render()` from
+    // test-utils mounts SearchPage bare, exactly like every test above. That
+    // is deliberate: the whole bug was the page silently depending on
+    // toolbar chrome it does not itself render, so proving the guard here
+    // must not accidentally lean on chrome either.
+    it('sanity check: this suite never mounts AppBar / TopbarSearch', () => {
+      render(<SearchPage />);
+      // TopbarSearch's own aria-label ("Open advanced search filters") is
+      // distinct from PageSearchBar's ("Advanced search") specifically so
+      // this assertion cannot be satisfied by the toolbar accidentally
+      // being present.
+      expect(
+        screen.queryByRole('button', { name: /open advanced search filters/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('branch: no active circle — a search input and advanced-search trigger are present (disabled)', () => {
+      mockUseCircle.mockReturnValue({
+        ...defaultCircleMock(),
+        activeCircle: null,
+        activeCircleId: null,
+      } as any);
+
+      render(<SearchPage />);
+
+      // Confirms we are really in the no-circle branch.
+      expect(screen.getByRole('alert').textContent).toMatch(/select a circle/i);
+
+      expect(screen.getByRole('textbox', { name: /search your photos/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /advanced search/i })).toBeInTheDocument();
+    });
+
+    it('branch: deterministic (advanced) results (searchRequest !== null) — search input and advanced trigger are present', () => {
+      mockUseSearch.mockReturnValue({
+        ...defaultSearchMock(),
+        searchRequest: { circleId: 'circle-1', filters: {} },
+      } as any);
+
+      render(<SearchPage />);
+
+      // Confirms we are really in the deterministic-results branch, and that
+      // the fix is additive — the gallery still renders alongside the bar.
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
+      expect(screen.getByText(/search results/i)).toBeInTheDocument();
+
+      expect(screen.getByRole('textbox', { name: /search your photos/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /advanced search/i })).toBeInTheDocument();
+    });
+
+    it('branch: agentic results (results !== null) — search input and advanced trigger are present', () => {
+      mockUseSearch.mockReturnValue({
+        ...defaultSearchMock(),
+        results: {
+          items: [],
+          meta: { page: 1, pageSize: 20, totalItems: 3, totalPages: 1 },
+        },
+      } as any);
+
+      render(<SearchPage />);
+
+      // Confirms we are really in the agentic-results branch, and that
+      // existing content (the gallery, the result count) is undisturbed.
+      expect(screen.getByTestId('media-gallery')).toBeInTheDocument();
+      expect(screen.getByText(/3 results/i)).toBeInTheDocument();
+
+      expect(screen.getByRole('textbox', { name: /search your photos/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /advanced search/i })).toBeInTheDocument();
+    });
+
+    it('branch: agentic search in flight (isSearching, results === null) — search input and advanced trigger are present', () => {
+      mockUseSearch.mockReturnValue({
+        ...defaultSearchMock(),
+        isSearching: true,
+        results: null,
+      } as any);
+
+      render(<SearchPage />);
+
+      // Confirms we are really in the isSearching branch.
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+
+      expect(screen.getByRole('textbox', { name: /search your photos/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /advanced search/i })).toBeInTheDocument();
+    });
+
+    it('branch: default explore state (no request, no results, not searching) — search input and advanced trigger are present', () => {
+      // defaultSearchMock() is already searchRequest:null, results:null,
+      // isSearching:false — the explore branch.
+      render(<SearchPage />);
+
+      // Confirms we are really in the explore branch, and existing content
+      // (the Explore carousels) is undisturbed.
+      expect(screen.getByText('Countries')).toBeInTheDocument();
+      expect(screen.getByText('Regions')).toBeInTheDocument();
+      expect(screen.getByText('Cities')).toBeInTheDocument();
+      expect(screen.getByText('Tags')).toBeInTheDocument();
+
+      expect(screen.getByRole('textbox', { name: /search your photos/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /advanced search/i })).toBeInTheDocument();
+    });
+
+    it('typing into the page search bar in the explore branch actually reaches runAgentSearch (end-to-end, not just presence)', async () => {
+      const runAgentSearch = vi.fn();
+      mockUseSearch.mockReturnValue({ ...defaultSearchMock(), runAgentSearch } as any);
+
+      const user = userEvent.setup();
+      render(<SearchPage />);
+
+      const input = screen.getByRole('textbox', { name: /search your photos/i });
+      await user.type(input, 'birthday party{Enter}');
+
+      expect(runAgentSearch).toHaveBeenCalledWith('birthday party');
+    });
+  });
 });
