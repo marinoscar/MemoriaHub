@@ -503,6 +503,12 @@ expensive rich-card-grid requirement applies precisely where the cost it offsets
 An implementer who reads §6.1 as "build cover art everywhere" is building it for a
 breakpoint that does not need it.
 
+**Favorites resolves to `/media?favorite=1`** — note `=1`, not `=true`.
+`MediaLibraryPage` reads `searchParams.get('favorite') === '1'`
+(`apps/web/src/pages/MediaLibrary`, and the API's `media-query.dto.ts` carries the matching
+filter), so `favorite=true` silently renders an UNFILTERED library rather than erroring.
+No new route is needed.
+
 **Pane contents mirror the card grid's ordering and grouping:** Albums, People, Places,
 Memories, Map — then a divider — Favorites, Archive, Trash. Feature-gated entries (Memories)
 hide in both surfaces from the same flag check.
