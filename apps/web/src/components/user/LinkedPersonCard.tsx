@@ -23,8 +23,20 @@ import { listPeople } from '../../services/face';
 import type { PersonListItem } from '../../services/face';
 import type { UserProfile } from '../../services/userProfile';
 
-/** Upper bound on people loaded per circle — enough to search, bounded per request. */
-const PEOPLE_PAGE_SIZE = 200;
+/**
+ * Rows requested per page. Must not exceed the API's cap — `GET /api/people`
+ * validates `pageSize` with `.max(100)` (`apps/api/src/face/dto/people.dto.ts`)
+ * and 400s on anything larger, which used to make every request in
+ * `loadPeople` fail at once.
+ */
+const PEOPLE_REQUEST_PAGE_SIZE = 100;
+
+/**
+ * Hard ceiling on how many people are loaded per circle across all pages.
+ * Bounded, not a preference: a circle with tens of thousands of detected
+ * faces must not turn the picker into an unbounded paging loop.
+ */
+const MAX_PEOPLE_PER_CIRCLE = 1000;
 
 interface PersonOption {
   person: PersonListItem;
@@ -79,22 +91,43 @@ export function LinkedPersonCard({
     setLoadingPeople(true);
     setLoadError(null);
     try {
-      // One request per circle, tolerated individually: a single circle failing
-      // (e.g. a permission edge) must not blank out the whole picker.
+      // One (possibly multi-page) fetch per circle, tolerated individually: a
+      // single circle failing entirely (e.g. a permission edge) must not blank
+      // out the whole picker.
       const results = await Promise.allSettled(
-        circles.map((circle) =>
-          listPeople(circle.id, { pageSize: PEOPLE_PAGE_SIZE }).then((resp) => ({
-            circle,
-            items: resp.items,
-          })),
-        ),
+        circles.map(async (circle) => {
+          const items: PersonListItem[] = [];
+          const first = await listPeople(circle.id, {
+            page: 1,
+            pageSize: PEOPLE_REQUEST_PAGE_SIZE,
+          });
+          items.push(...first.items);
+
+          let page = 1;
+          while (
+            page < first.meta.totalPages &&
+            items.length < MAX_PEOPLE_PER_CIRCLE
+          ) {
+            page += 1;
+            const next = await listPeople(circle.id, {
+              page,
+              pageSize: PEOPLE_REQUEST_PAGE_SIZE,
+            });
+            items.push(...next.items);
+            if (next.items.length === 0) break;
+          }
+
+          return { circle, items };
+        }),
       );
 
       const collected: PersonOption[] = [];
+      let firstRejection: unknown = undefined;
       let anyFailed = false;
       for (const result of results) {
         if (result.status === 'rejected') {
           anyFailed = true;
+          if (firstRejection === undefined) firstRejection = result.reason;
           continue;
         }
         const { circle, items } = result.value;
@@ -110,7 +143,11 @@ export function LinkedPersonCard({
 
       setPeople(collected);
       if (anyFailed && collected.length === 0) {
-        setLoadError('Failed to load people.');
+        setLoadError(
+          firstRejection instanceof Error
+            ? firstRejection.message
+            : String(firstRejection),
+        );
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load people');
