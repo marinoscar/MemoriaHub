@@ -62,7 +62,7 @@ describe('LinkedPersonCard', () => {
     vi.clearAllMocks();
     mockListPeople.mockResolvedValue({
       items: [],
-      meta: { page: 1, pageSize: 200, totalItems: 0, totalPages: 0 },
+      meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 },
     });
   });
 
@@ -121,7 +121,7 @@ describe('LinkedPersonCard', () => {
       );
       mockListPeople.mockResolvedValue({
         items: [],
-        meta: { page: 1, pageSize: 200, totalItems: 0, totalPages: 0 },
+        meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 },
       });
 
       render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
@@ -180,7 +180,7 @@ describe('LinkedPersonCard', () => {
             favorite: false,
           },
         ],
-        meta: { page: 1, pageSize: 200, totalItems: 1, totalPages: 1 },
+        meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
       });
 
       render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
@@ -212,7 +212,7 @@ describe('LinkedPersonCard', () => {
             favorite: false,
           },
         ],
-        meta: { page: 1, pageSize: 200, totalItems: 1, totalPages: 1 },
+        meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
       });
       const onLinkChange = vi.fn().mockResolvedValue(undefined);
       const user = userEvent.setup();
@@ -235,6 +235,127 @@ describe('LinkedPersonCard', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Regression coverage for issue #371 — GET /api/people pageSize contract
+  // and pagination/error-surfacing.
+  // -------------------------------------------------------------------------
+  describe('pageSize and pagination (issue #371)', () => {
+    it('never requests a pageSize greater than the API cap of 100', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        flagsResult({ features: { faceRecognition: true } }),
+      );
+      mockListPeople.mockResolvedValue({
+        items: [],
+        meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 1 },
+      });
+
+      render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(mockListPeople).toHaveBeenCalled();
+      });
+
+      // The load-bearing regression assertion: the old code requested 200,
+      // which the API rejects (`.max(100)` in `people.dto.ts`). Every call
+      // must request a pageSize the API actually accepts.
+      for (const call of mockListPeople.mock.calls) {
+        const opts = call[1] as { pageSize?: number } | undefined;
+        expect(opts?.pageSize).toBeDefined();
+        expect(opts!.pageSize as number).toBeLessThanOrEqual(100);
+      }
+      expect(mockListPeople).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ page: 1, pageSize: 100 }),
+      );
+    });
+
+    it('pages through multiple pages and accumulates people from every page', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        flagsResult({ features: { faceRecognition: true } }),
+      );
+
+      const pageOnePerson = {
+        id: 'person-page-1',
+        name: 'Page One Person',
+        isUnlabeled: false,
+        faceCount: 3,
+        coverFace: null,
+        profileMediaItemId: null,
+        profileCrop: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        favorite: false,
+      };
+      const pageTwoPerson = {
+        id: 'person-page-2',
+        name: 'Page Two Person',
+        isUnlabeled: false,
+        faceCount: 1,
+        coverFace: null,
+        profileMediaItemId: null,
+        profileCrop: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        favorite: false,
+      };
+
+      mockListPeople.mockImplementation(async (_circleId, opts) => {
+        if (opts?.page === 2) {
+          return {
+            items: [pageTwoPerson],
+            meta: { page: 2, pageSize: 100, totalItems: 2, totalPages: 2 },
+          };
+        }
+        return {
+          items: [pageOnePerson],
+          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 2 },
+        };
+      });
+
+      const user = userEvent.setup();
+      render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
+
+      const input = await screen.findByLabelText(/Find a person/i);
+
+      await waitFor(() => {
+        expect(mockListPeople).toHaveBeenCalledTimes(2);
+      });
+      expect(mockListPeople).toHaveBeenNthCalledWith(
+        1,
+        expect.any(String),
+        expect.objectContaining({ page: 1, pageSize: 100 }),
+      );
+      expect(mockListPeople).toHaveBeenNthCalledWith(
+        2,
+        expect.any(String),
+        expect.objectContaining({ page: 2, pageSize: 100 }),
+      );
+
+      await user.click(input);
+      expect(await screen.findByText('Page One Person')).toBeInTheDocument();
+      expect(await screen.findByText('Page Two Person')).toBeInTheDocument();
+    });
+
+    it('surfaces the real rejection message when every circle fails to load', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        flagsResult({ features: { faceRecognition: true } }),
+      );
+      mockListPeople.mockRejectedValue(
+        new Error('Request failed with status code 400'),
+      );
+
+      render(<LinkedPersonCard profile={makeProfile()} onLinkChange={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Request failed with status code 400'),
+        ).toBeInTheDocument();
+      });
+      // The old hard-coded fallback string must not appear.
+      expect(screen.queryByText('Failed to load people.')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Unlink affordance
   // -------------------------------------------------------------------------
   describe('unlink affordance', () => {
@@ -244,7 +365,7 @@ describe('LinkedPersonCard', () => {
       );
       mockListPeople.mockResolvedValue({
         items: [],
-        meta: { page: 1, pageSize: 200, totalItems: 0, totalPages: 0 },
+        meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 },
       });
       const onLinkChange = vi.fn().mockResolvedValue(undefined);
       const user = userEvent.setup();

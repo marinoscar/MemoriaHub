@@ -63,6 +63,22 @@ describe('Auth Controller (Integration)', () => {
       });
     });
 
+    it('should include createdAt as an ISO string (issue #371)', async () => {
+      const user = await createMockTestUser(context);
+
+      const response = await request(context.app.getHttpServer())
+        .get('/api/auth/me')
+        .set(authHeader(user.accessToken))
+        .expect(200);
+
+      expect(response.body.data).toHaveProperty('createdAt');
+      expect(typeof response.body.data.createdAt).toBe('string');
+      // ISO 8601 timestamp
+      expect(response.body.data.createdAt).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
+    });
+
     it('should return 401 without token', async () => {
       await request(context.app.getHttpServer())
         .get('/api/auth/me')

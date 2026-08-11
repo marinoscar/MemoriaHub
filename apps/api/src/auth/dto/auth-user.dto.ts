@@ -48,6 +48,12 @@ export class CurrentUserDto {
   isActive!: boolean;
 
   @ApiProperty({
+    example: '2026-01-15T10:30:00.000Z',
+    description: 'Account creation timestamp',
+  })
+  createdAt!: string;
+
+  @ApiProperty({
     type: [RoleDto],
     description: 'User roles',
   })
