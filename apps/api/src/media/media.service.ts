@@ -3031,6 +3031,11 @@ export class MediaService {
       },
     });
 
+    // Country-SCOPED groups, indexed by normalized name alone. Needed because
+    // the regions and cities tiers aggregate ACROSS countries and therefore
+    // carry no countryCode of their own (see the fallback below).
+    const scopedByName = new Map<string, Array<Prisma.JsonValue | null>>();
+
     for (const group of groups) {
       // A soft-deleted cover is treated as no cover: the SetNull FK only fires
       // on a HARD delete, so a trashed photo would otherwise keep being served
@@ -3040,16 +3045,47 @@ export class MediaService {
         `${group.countryCode}|${group.normalizedName}`,
         group.coverMediaItem.metadata,
       );
+      if (group.countryCode !== '') {
+        const bucket = scopedByName.get(group.normalizedName);
+        if (bucket) bucket.push(group.coverMediaItem.metadata);
+        else scopedByName.set(group.normalizedName, [group.coverMediaItem.metadata]);
+      }
     }
 
     // Unscoped ('') groups apply in every country, so fill them in for any
     // entry the exactly-scoped pass did not already claim — "more specific
     // wins", the same precedence the resolver applies.
     for (const entry of entries) {
+      const normalized = fold(entry.name);
       const scoped = groupCoverKey(entry.countryCode, entry.name);
       if (overrides.has(scoped)) continue;
-      const unscoped = overrides.get(`|${fold(entry.name)}`);
-      if (unscoped !== undefined) overrides.set(scoped, unscoped);
+
+      const unscoped = overrides.get(`|${normalized}`);
+      if (unscoped !== undefined) {
+        overrides.set(scoped, unscoped);
+        continue;
+      }
+
+      // Country-scoped fallback (issue #407). `buildLocationLevel` aggregates
+      // regions and cities across countries and passes countryCode: null, so
+      // the lookups above only ever match a group whose countryCode is the
+      // unscoped '' sentinel — a region or city group created with an explicit
+      // country from the admin page grouped its members correctly (the resolver
+      // and rebuild are unaffected) but its cover never showed on
+      // /places/regions|cities.
+      //
+      // Only entries with NO country of their own take this path: an entry that
+      // knows its country and missed the exact-key lookup genuinely has no
+      // group, and a differently-scoped group must not answer for it.
+      if (entry.countryCode) continue;
+      const candidates = scopedByName.get(normalized);
+      // Exactly one scoped group ⇒ unambiguous, use it. Several (the same
+      // region name scoped to different countries, e.g. "Ontario" in CA and US)
+      // ⇒ deliberately NO override: with the country erased at this tier there
+      // is nothing to choose on, and picking arbitrarily would show one
+      // country's photo for the other's places. The capturedAt heuristic wins
+      // instead, which at least draws from the circle's own items.
+      if (candidates && candidates.length === 1) overrides.set(scoped, candidates[0]);
     }
 
     return overrides;

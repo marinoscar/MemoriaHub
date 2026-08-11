@@ -32,6 +32,7 @@ const mockService = {
   removeMembers: jest.fn(),
   listValues: jest.fn(),
   suggestions: jest.fn(),
+  merge: jest.fn(),
   triggerRebuild: jest.fn(),
 };
 
@@ -113,6 +114,7 @@ const READ_HANDLERS: Array<[string, (...args: any[]) => unknown, object]> = [
 
 const WRITE_HANDLERS: Array<[string, (...args: any[]) => unknown, object]> = [
   ['POST /location-groups', controller.create, controller],
+  ['POST /location-groups/merge', controller.merge, controller],
   ['PATCH /location-groups/:id', controller.update, controller],
   ['DELETE /location-groups/:id', controller.remove, controller],
   ['POST /location-groups/:id/members', controller.addMembers, controller],
@@ -182,6 +184,26 @@ describe('LocationGroupsController', () => {
 
       expect(mockService.addMembers).toHaveBeenCalledWith('group-1', ['Heredia']);
       expect(mockService.removeMembers).toHaveBeenCalledWith('group-1', ['Heredia']);
+    });
+
+    it('merge passes the dto and the current user id', async () => {
+      mockService.merge.mockResolvedValue({});
+      const dto = {
+        level: 'locality',
+        countryCode: 'US',
+        values: ['Conroe', 'Shenandoah'],
+        canonicalName: 'The Woodlands',
+      } as any;
+
+      await controller.merge(dto, 'user-1');
+
+      expect(mockService.merge).toHaveBeenCalledWith(dto, 'user-1');
+    });
+
+    it('merge tolerates a missing user id (passes null, never undefined)', async () => {
+      mockService.merge.mockResolvedValue({});
+      await controller.merge({} as any, undefined as unknown as string);
+      expect(mockService.merge).toHaveBeenCalledWith({}, null);
     });
 
     it('the admin rebuild forwards circleId and groupIds', async () => {
