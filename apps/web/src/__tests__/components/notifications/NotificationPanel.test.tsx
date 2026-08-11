@@ -207,6 +207,33 @@ describe('NotificationPanel', () => {
   });
 
   // =========================================================================
+  // Footer "See all notifications" (issue #389 — the deleted Sidebar
+  // "Notifications" row means this footer button is now the ONLY path to
+  // /notifications).
+  // =========================================================================
+
+  describe('footer', () => {
+    it('reads "See all notifications"', () => {
+      setNotificationsState({ hasLoadedList: true, items: [] });
+      renderPanel();
+
+      expect(screen.getByRole('button', { name: 'See all notifications' })).toBeInTheDocument();
+    });
+
+    it('navigates to /notifications and closes the panel when clicked', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      setNotificationsState({ hasLoadedList: true, items: [] });
+      render(<NotificationPanel open anchorEl={null} onClose={onClose} />);
+
+      await user.click(screen.getByRole('button', { name: 'See all notifications' }));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(mockNavigate).toHaveBeenCalledWith('/notifications');
+    });
+  });
+
+  // =========================================================================
   // Mark all as read
   // =========================================================================
 

@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { AppBar } from '../../../components/navigation/AppBar';
 import { APP_NAME } from '../../../constants/app';
+import type { Circle } from '../../../types/circles';
 
 // ---------------------------------------------------------------------------
 // Module mocks
@@ -37,9 +38,112 @@ vi.mock('../../../components/media/MediaUploadDialog', () => ({
   ),
 }));
 
+// useCircle is mocked directly (rather than relying on test-utils' single-
+// circle CircleContext wrapper) so the CircleChip tests below can exercise a
+// real multi-circle menu and assert on `setActiveCircle` calls — the same
+// pattern UserMenu.test.tsx already uses for the circle switcher it used to
+// own before spec §3.3 moved it here.
+vi.mock('../../../hooks/useCircle', () => ({
+  useCircle: vi.fn(),
+}));
+
+import { useCircle } from '../../../hooks/useCircle';
+
+const mockUseCircle = vi.mocked(useCircle);
+
+const mockCircle1: Circle = {
+  id: 'circle-1',
+  name: "Test User's Library",
+  description: null,
+  ownerId: 'test-user-id',
+  isPersonal: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+const mockCircle2: Circle = {
+  id: 'circle-2',
+  name: 'Family Circle',
+  description: 'Our family',
+  ownerId: 'test-user-id',
+  isPersonal: false,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+function makeCircleDefaults(overrides: Record<string, unknown> = {}) {
+  return {
+    circles: [mockCircle1],
+    activeCircle: mockCircle1,
+    activeCircleId: mockCircle1.id,
+    activeCircleRole: 'circle_admin' as const,
+    loading: false,
+    setActiveCircle: vi.fn().mockResolvedValue(undefined),
+    refreshCircles: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Viewport helper — computes `matches` from the actual min-width/max-width
+// embedded in MUI's compiled breakpoint query string, so a single `px` value
+// drives every `useMediaQuery(...)` call in the component consistently
+// (AppBar reads three different breakpoints: up('md'), down('sm'),
+// down('md')). Mirrors the technique in NotificationPanel.test.tsx, made
+// width-based instead of a fixed query-string check.
+// ---------------------------------------------------------------------------
+
+function setViewportWidth(px: number) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => {
+      const min = query.match(/min-width:\s*([\d.]+)px/);
+      const max = query.match(/max-width:\s*([\d.]+)px/);
+      let matches = true;
+      if (min) matches = matches && px >= parseFloat(min[1]);
+      if (max) matches = matches && px <= parseFloat(max[1]);
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      };
+    }),
+  });
+}
+
+function restoreDefaultViewport() {
+  // Matches setup.ts's baseline: every query reports `matches: false`.
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
 // ---------------------------------------------------------------------------
 
 describe('AppBar', () => {
+  beforeEach(() => {
+    mockUseCircle.mockReturnValue(makeCircleDefaults());
+  });
+
+  afterEach(() => {
+    restoreDefaultViewport();
+  });
+
   describe('Rendering', () => {
     it('should render app title', () => {
       render(<AppBar />);
@@ -195,6 +299,24 @@ describe('AppBar', () => {
       await user.click(logoImg);
       expect(logoImg).toBeInTheDocument();
     });
+
+    it('hides the wordmark below the sm breakpoint (phone)', () => {
+      setViewportWidth(360); // < 600 → down('sm') matches → isPhone=true
+
+      render(<AppBar />);
+
+      expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
+      expect(screen.queryByText(APP_NAME)).not.toBeInTheDocument();
+    });
+
+    it('shows the wordmark at and above the sm breakpoint', () => {
+      setViewportWidth(700); // >= 600 → down('sm') does not match → isPhone=false
+
+      render(<AppBar />);
+
+      expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
+      expect(screen.getByText(APP_NAME)).toBeInTheDocument();
+    });
   });
 
   describe('Upload button', () => {
@@ -219,6 +341,145 @@ describe('AppBar', () => {
       await user.click(uploadBtn);
 
       expect(screen.getByTestId('upload-dialog')).toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
+  // Circle chip (spec §3.3) — promoted into the top bar
+  // =========================================================================
+
+  describe('Circle chip', () => {
+    it('renders the active circle name', () => {
+      render(<AppBar />);
+
+      expect(screen.getByText("Test User's Library")).toBeInTheDocument();
+    });
+
+    it('opens the circle menu on click', async () => {
+      const user = userEvent.setup();
+      mockUseCircle.mockReturnValue(makeCircleDefaults({ circles: [mockCircle1, mockCircle2] }));
+
+      render(<AppBar />);
+
+      await user.click(screen.getByRole('button', { name: /active circle/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('menu')).toBeInTheDocument();
+      });
+      expect(screen.getByRole('menuitem', { name: /family circle/i })).toBeInTheDocument();
+    });
+
+    it('calls setActiveCircle when a different circle is picked', async () => {
+      const setActiveCircle = vi.fn().mockResolvedValue(undefined);
+      mockUseCircle.mockReturnValue(
+        makeCircleDefaults({ circles: [mockCircle1, mockCircle2], setActiveCircle }),
+      );
+
+      const user = userEvent.setup();
+      render(<AppBar />);
+
+      await user.click(screen.getByRole('button', { name: /active circle/i }));
+      const familyItem = await screen.findByRole('menuitem', { name: /family circle/i });
+      await user.click(familyItem);
+
+      await waitFor(() => {
+        expect(setActiveCircle).toHaveBeenCalledWith('circle-2');
+      });
+    });
+
+    it('navigates to /circles when "Manage Circles" is clicked', async () => {
+      const user = userEvent.setup();
+      render(<AppBar />);
+
+      await user.click(screen.getByRole('button', { name: /active circle/i }));
+      const manageItem = await screen.findByRole('menuitem', { name: /manage circles/i });
+      await user.click(manageItem);
+
+      // The chip's menu closes and the app navigates — asserted via the menu
+      // disappearing, since AppBar itself does not mock useNavigate here.
+      await waitFor(() => {
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      });
+    });
+
+    it('renders nothing when there is no active circle', () => {
+      mockUseCircle.mockReturnValue(makeCircleDefaults({ activeCircle: null, activeCircleId: null }));
+
+      render(<AppBar />);
+
+      expect(screen.queryByRole('button', { name: /active circle/i })).not.toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
+  // Admin drill-down header (spec §4.4) — down('md') + an /admin/* route
+  // =========================================================================
+
+  describe('Admin drill-down (phone/tablet)', () => {
+    it('renders Back + the resolved page title, and hides the circle chip, upload button, and search', () => {
+      setViewportWidth(500); // < 900 → down('md') matches → isCompactNav=true
+
+      render(<AppBar />, {
+        wrapperOptions: { route: '/admin/settings/jobs', authenticated: true },
+      });
+
+      expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Job Queue' })).toBeInTheDocument();
+
+      expect(screen.queryByRole('button', { name: /active circle/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /upload media/i })).not.toBeInTheDocument();
+      // TopbarSearch is entirely absent — no hamburger either, since it too
+      // is dropped from this header per spec §4.4.
+      expect(screen.queryByRole('button', { name: 'toggle drawer' })).not.toBeInTheDocument();
+    });
+
+    it('back from a detail page (e.g. Job Queue) navigates to the hub, /admin/settings', async () => {
+      const user = userEvent.setup();
+      setViewportWidth(500);
+
+      render(<AppBar />, {
+        wrapperOptions: { route: '/admin/settings/jobs', authenticated: true },
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Back' }));
+
+      // No mocked useNavigate here; assert via the route-dependent title,
+      // which flips to the hub's title once the MemoryRouter has actually
+      // navigated to /admin/settings.
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+      });
+    });
+
+    it('back from the hub itself (/admin/settings) navigates to /', async () => {
+      const user = userEvent.setup();
+      setViewportWidth(500);
+
+      render(<AppBar />, {
+        wrapperOptions: { route: '/admin/settings', authenticated: true },
+      });
+
+      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Back' }));
+
+      // Having left /admin entirely, the drill-down header itself
+      // unmounts — the normal toolbar (with the circle chip) takes over.
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /active circle/i })).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('renders the normal toolbar (circle chip present) at the same narrow width on a non-admin route', () => {
+      setViewportWidth(500);
+
+      render(<AppBar />, {
+        wrapperOptions: { route: '/', authenticated: true },
+      });
+
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /active circle/i })).toBeInTheDocument();
     });
   });
 });

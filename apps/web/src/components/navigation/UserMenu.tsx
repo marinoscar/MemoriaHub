@@ -15,19 +15,25 @@ import {
   AdminPanelSettings as AdminIcon,
   AccountCircle as ProfileIcon,
   Logout as LogoutIcon,
-  GroupWork as CircleIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAuthedImage } from '../../hooks/useAuthedImage';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useCircle } from '../../hooks/useCircle';
 
+/**
+ * The avatar menu is ACCOUNT scope only.
+ *
+ * The circle switcher and "Manage Circles" used to live here; they moved to the
+ * top-bar `CircleChip` (spec §3.3). Circle is *context* — which library the
+ * whole app is currently pointed at — not an account setting, and leaving a
+ * copy here would make it the third path to one action (chip, drawer row, this
+ * menu) with no way for a user to tell which is canonical.
+ */
 export function UserMenu() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const { user, logout } = useAuth();
   const { hasPermission } = usePermissions();
-  const { circles, activeCircle, setActiveCircle } = useCircle();
   const navigate = useNavigate();
   // An uploaded avatar lives behind the authenticated `/api/users/:id/avatar`
   // byte proxy, so a bare `src` would render broken; a provider URL passes
@@ -102,43 +108,6 @@ export function UserMenu() {
             {user.email}
           </Typography>
         </Box>
-
-        <Divider />
-
-        {/* Circle Section */}
-        <Typography
-          variant="overline"
-          sx={{ px: 2, pt: 1, display: 'block' }}
-          color="text.secondary"
-        >
-          Circle
-        </Typography>
-
-        {circles.length === 0 ? (
-          <MenuItem disabled>
-            <ListItemText>No circles yet</ListItemText>
-          </MenuItem>
-        ) : (
-          circles.map((c) => (
-            <MenuItem
-              key={c.id}
-              selected={c.id === activeCircle?.id}
-              onClick={() => void setActiveCircle(c.id)}
-            >
-              <ListItemIcon>
-                <CircleIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>{c.name}</ListItemText>
-            </MenuItem>
-          ))
-        )}
-
-        <MenuItem onClick={() => handleNavigate('/circles')}>
-          <ListItemIcon>
-            <CircleIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Manage Circles</ListItemText>
-        </MenuItem>
 
         <Divider />
 

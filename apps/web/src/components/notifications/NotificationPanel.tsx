@@ -195,8 +195,12 @@ export function NotificationPanel({ open, anchorEl, onClose }: NotificationPanel
 
       {/* Footer */}
       <Box sx={{ p: 1, flexShrink: 0 }}>
+        {/* "See all notifications", not "See all": with the Notifications drawer
+            row deleted (spec §3.3) this footer is the ONLY path to
+            /notifications, so its label has to name the destination without
+            relying on the surrounding popover for context. */}
         <Button fullWidth size="small" onClick={handleSeeAll} sx={{ minHeight: 40 }}>
-          See all
+          See all notifications
         </Button>
       </Box>
     </Box>
