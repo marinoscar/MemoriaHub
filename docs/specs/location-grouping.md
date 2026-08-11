@@ -279,6 +279,8 @@ Because §3.4's invariant guarantees the canonical column is populated whenever 
 
 **Cover override.** `buildLocationLevel` currently picks each tier entry's cover with one bounded `findFirst` ordered by `capturedAt desc`. It now first looks the entry up in `location_groups` by `(level, countryCode, normalizedName)`; if a matching group has a `coverMediaItemId`, that item's thumbnail is used and the `findFirst` is skipped entirely. Otherwise the existing heuristic is unchanged.
 
+**Country-scoped fallback (issue #407).** The regions and cities tiers of `exploreLocations` aggregate across countries and pass a `countryCode` of `null`, so the lookup above only ever matched an UNSCOPED (`countryCode: ''`) group — a region or city group created with an explicit country scope grouped its members correctly (the resolver and rebuild were unaffected) but its cover never showed on `/places/regions|cities`. `fetchGroupCoverOverrides` now adds a second pass: for a tier entry with no country of its own, if exactly one country-scoped group shares its folded name, that group's cover is used. If **several** scoped groups share the name (e.g. an "Ontario" region group under both CA and US), the fallback deliberately declines rather than picking arbitrarily — with the country erased at this tier there is nothing principled to choose on — and the `capturedAt` heuristic wins instead, since it at least draws from the circle's own items.
+
 **Filters match canonical OR raw** so that pre-existing deep links, bookmarks, and Android/CLI clients passing a raw name keep working:
 
 ```ts
@@ -397,23 +399,55 @@ Body `{ values: string[] }` → `{ added }` / `{ removed }`. `POST` returns the 
 
 ### 9.7 `GET /api/location-groups/values`
 
-Query: `level`, `q`, `grouped=all|ungrouped|grouped`, `page`, `pageSize`. Returns the distinct **raw** values present app-wide with `{ value, countryCode, itemCount, groupId | null, groupCanonicalName | null }`, backed by one `groupBy` over the raw column plus `geoCountryCode`. This is the member-picker's data source. (`geo_settings:read`)
+Query: `level`, `q`, `grouped=all|ungrouped|grouped`, `limit`, `page`, `pageSize`. Returns the distinct **raw** values present app-wide with `{ value, countryCode, itemCount, groupId | null, groupCanonicalName | null }`, backed by one `groupBy` over the raw column plus `geoCountryCode`. This is the member-picker's data source. (`geo_settings:read`)
+
+**Two modes, selected by presence of `page`/`pageSize` (issue #407).** The endpoint originally offered only a `limit`-capped top-N (default 500) with `meta.total` computed AFTER slicing, which made an honest "showing N of M" impossible and gave the select-many-and-merge flow (§12) no way to reach a value past position 500.
+
+- **Legacy mode** (neither `page` nor `pageSize` supplied) — unchanged: the first `limit` values, ordered by item count desc. `LocationGroupEditorDialog`'s member picker still uses this, passing `limit: 50`.
+- **Paginated mode** (`page` and/or `pageSize` supplied) — `page` defaults to 1, `pageSize` to 50, and `limit` is **ignored**. This is what the "All locations" checkbox list (§12.1) and any future paged consumer use.
+
+`meta` is `{ total, page, pageSize, limit }` in both modes; `total` is always the pre-slice, post-`grouped`-filter count. Legacy mode reports `page: 1` and `pageSize` equal to the resolved `limit`, so a client that only ever reads `meta.total`/`meta.page`/`meta.pageSize` works unmodified either way.
+
+> `page`/`pageSize` deliberately carry **no zod `.default()`** on the query schema — unlike `ListLocationGroupsSchema`'s `page`/`pageSize`, which do. A default here would make the two modes indistinguishable: every legacy caller's request would silently gain a `page` value and flip into paginated mode. Mode selection has to see "was this key present at all", which only an `.optional()` field without a default can express.
 
 ### 9.8 `GET /api/location-groups/suggestions`
 
 Query: `level`, `limit`. Returns clusters of two or more *ungrouped* raw values sharing a `suggestionKey`, each `{ suggestedCanonicalName, countryCode, members: [{ value, itemCount }], totalItems }`. `suggestedCanonicalName` is the shortest member after noise-stripping, title-cased — so the Heredia cluster proposes `"Heredia"`. Values below `locationGrouping.suggestionMinItems` are excluded. (`geo_settings:read`)
 
-### 9.9 `POST /api/admin/location-groups/rebuild`
+Because clustering keys on a shared `suggestionKey`, values that are practically equivalent but textually unrelated — "Conroe" / "Shenandoah" / "The Woodlands" — are three distinct keys and are **never** proposed here. §9.9 exists for exactly that gap.
+
+### 9.9 `POST /api/location-groups/merge` (issue #407)
+
+Select-many-and-merge: fold an admin-chosen, arbitrary set of raw values into one group in a single call, without walking the one-at-a-time `POST /:id/members` flow or being limited to what §9.8's `suggestionKey` clustering can find.
+
+Body `{ level, values: string[] (1–500), countryCode?, targetGroupId? }` **XOR** `{ …, canonicalName? }` → `201` `{ groupId, created, added, skipped, jobId, status, group }`. (`geo_settings:write`)
+
+- **Exactly one of `targetGroupId` / `canonicalName`** — both or neither present is a `400`. The XOR is enforced in the **service**, not a zod `.refine`, matching the `center`/`radiusKm` precedent in §9.3: one place the rule can fail.
+- **`targetGroupId`** adds `values` to an already-existing group and **never renames it** — merging into "The Woodlands" must not turn it into "Conroe" because that was the first value ticked.
+- **`canonicalName`** creates a new group owning `values`, going through the same `assertMembersUnclaimed` conflict check as §9.3's `POST /api/location-groups`, so the two paths cannot drift.
+- **Scope inheritance.** An omitted or empty-string `countryCode` on the `targetGroupId` path inherits the target group's own scope; a non-empty `countryCode` that disagrees with it is a `400`. This leniency is required, not laziness: `GET /api/media/explore/locations/:level`'s regions/cities tiers aggregate across countries and carry no code, so a caller merging from those surfaces genuinely cannot know the target's country — the same erasure behind the §7 cover-override fallback.
+- **One transaction, one rebuild.** The whole merge — lookup, conflict check, alias inserts — runs inside one `$transaction`, so a conflict discovered on the fourth value cannot leave the first three claimed. Exactly one rebuild is enqueued **after** the transaction commits, never inside it, so a rolled-back merge leaves no orphaned rebuild job behind.
+- **`409`** (same shape as §9.3, `details.groupId` / `details.groupName`) when a value already belongs to a **different** group — merge blocks, it never re-parents. A value the target **already** owns is not a conflict; it is counted in the response's `skipped`, making a repeated merge of the same selection idempotent.
+- A tier mismatch (merging city values into a region group) is a `400`; an unknown `targetGroupId` is a `404`.
+
+### 9.10 `POST /api/admin/location-groups/rebuild`
 
 Body `{ circleId?, groupIds? }` → `{ data: { jobId, status } }`. (`geo_settings:write`)
 
-### 9.10 As implemented (issue #374)
+### 9.11 As implemented (issue #374)
 
 - **Module split.** The controllers and `LocationGroupsService` live in a SEPARATE `LocationGroupsAdminModule`, not in `LocationGroupsModule`. Signing a group's cover thumbnail needs `MediaThumbnailService`, and `MediaModule` already imports `LocationGroupsModule` for the resolver on its write paths — so importing `MediaModule` into the leaf module would close a cycle. Edge direction is one-way: `LocationGroupsAdminModule → MediaModule → LocationGroupsModule`, no `forwardRef`. This is the `NotificationsReconcileModule` precedent.
-- **Mutations enqueue a FULL rebuild (`{}`), never `{ groupIds: [id] }`.** The job's RESET pass always runs over the whole scope and only the listed groups are re-applied afterwards, so a group-scoped rebuild would strand every OTHER group's canonical names at their raw values. `groupIds` is exposed only on §9.9, where the caller owns that tradeoff; the Swagger description says so.
+- **Mutations enqueue a FULL rebuild (`{}`), never `{ groupIds: [id] }`.** The job's RESET pass always runs over the whole scope and only the listed groups are re-applied afterwards, so a group-scoped rebuild would strand every OTHER group's canonical names at their raw values. `groupIds` is exposed only on §9.10, where the caller owns that tradeoff; the Swagger description says so.
 - **The cover-item check is evaluated against the group's MEMBER SET, not the materialised `geo_canonical_*` column.** The rebuild is asynchronous, so checking the column alone would reject every cover an admin picks in the seconds right after creating a group — which is exactly when they pick one. Both the canonical and the raw value are folded and tested against the group's aliases plus its own normalized name, so an item the rebuild has already claimed and one it has not both pass. Country scope is checked separately.
 - **Conflict detection covers a group's own canonical name, not only alias rows.** A group's canonical name always resolves to itself, so claiming it for a second group is just as ambiguous as claiming an alias — even though the alias unique index would not catch it.
 - **`GET /values` and `GET /suggestions` are capped, not paginated** (`limit`, default 500 / 50), ordered by item count descending. Both are app-wide by design: groups are global, so neither takes a `circleId`.
+
+### 9.12 As implemented (issue #407)
+
+- **Route order.** `/merge` is declared alongside `/values` and `/suggestions`, before `/:id` — the same `ParseUUIDPipe`-collision reason those two static routes come first (Nest would otherwise try to parse `"merge"` as a group UUID). It is a static path today only because no `POST /:id` handler exists; adding one later must not silently swallow it.
+- **`assertMembersUnclaimed` / `createGroupWithMembers` / `attachMembers` are shared, not duplicated,** between `POST /api/location-groups` (§9.3) and `merge`'s two branches — so a merge can never bypass the conflict rule §9.3 already enforces, and the two paths cannot drift out of sync.
+- **The rebuild job merge enqueues may not be a new job.** Because `LocationGroupRebuildService` deliberately never passes `skipDedup` (§8.2), a burst of merges collapses the pending rebuild into one row; the `jobId` a merge response reports may be a job an *earlier* mutation already enqueued. This is the desired behaviour, not a defect — the admin UI polls it exactly as it polls an explicit §9.10 trigger.
+- **`values` dedupe.** Blank entries are dropped and fold-duplicates collapse to the first spelling submitted, mirroring `POST /:id/members`.
 
 ---
 
@@ -456,10 +490,10 @@ Non-admin users are unaffected: they see canonical names on every browse surface
 
 ## 12. Frontend
 
-> **Not yet implemented (issue #375).** Everything in this section is still
-> specification; the backend it consumes shipped with #374. `apps/web/` was
-> deliberately untouched by #374 so the read-path migration could land — and be
-> proven neutral — without any UI change riding along.
+> **Implemented.** §12.1's admin page shipped in issue #375 (PR #387). The
+> select-many-and-merge flow in §12.3 (issue #407) extends both this page and
+> the `/places` browse surfaces; §12.2's location-picker improvements are a
+> separate, unrelated epic tracked independently.
 
 ### 12.1 Admin page
 
@@ -474,8 +508,11 @@ Structure follows `LocationInferenceSettingsPage.tsx` exactly: inner `…Content
 | **Groups** | Countries / Regions / Cities tabs; per group: member chips, item count, cover thumbnail, enable toggle, edit and delete |
 | **Group editor dialog** | canonical name, country scope, searchable member picker fed by `GET /values` (showing item counts and any owning group), cover picker over the group's own photos, and an optional **Area** block with a `LocationPickerMap` for the centre plus a radius slider drawing a `<Circle>` overlay |
 | **Rebuild** | trigger button plus job-status polling, the same shape as the existing backfill runners |
+| **All locations** (issue #407) | a fourth section: a searchable, `GET /values`-paginated (50/page, §9.7) checkbox list over every raw value app-wide — value, country, item count, owning group — feeding §12.3's shared merge dialog |
 
 New service module `apps/web/src/services/locationGroups.ts` and matching types.
+
+The **All locations** selection is a keyed map (`Map<string, LocationValue>`), never row indices, so it survives both a search-term change and a page change — an admin can tick two values under one search term, change the term, tick two more, and merge all four in one call.
 
 `MediaDetailDrawer`'s geo block shows the canonical name with the raw value as secondary text when the two differ — e.g. **Region** `Heredia`, caption *from "Provincia de Heredia"*.
 
@@ -493,6 +530,21 @@ Four gaps close in this epic:
 | 4 | The reverse-geocoded address is a faint caption; scroll-wheel zoom is disabled on an editing surface | Promote `geoLabel` into a bordered *"Use this location: San José, San José Province, Costa Rica"* confirm row with a resolving state and an explicit *"Coordinates only — no address found"* fallback; make `scrollWheelZoom` a prop defaulting `true` for the picker, leaving `LocationMiniMap` untouched |
 
 > `LocationPickerMap` has **five** call sites — `LocationSearchPicker`, `SearchPanel`, `ActionParamEditor`, `ConditionValueEditor` — so every new prop must be **optional and backward-compatible**. Any new marker must use `defaultIcon` from `lib/leaflet-setup.ts`, the inline-SVG `divIcon` that works around the Leaflet-PNG-under-Vite bug.
+
+### 12.3 Select-many-and-merge (issue #407)
+
+The Suggestions panel (§12.1) only ever proposes a cluster that shares a `suggestionKey` (§4.2, §9.8) — genuinely different spellings of one place ("Conroe" / "Shenandoah" / "The Woodlands") are three distinct keys and are never clustered there. The only other pre-existing path was the group editor's member picker, one value at a time. Issue #407 adds a third path: tick several raw values anywhere they're browsable, then merge them in one call via §9.9.
+
+**Shared dialog.** `apps/web/src/components/locations/MergeLocationsDialog.tsx` is used **verbatim** by both surfaces below — it owns none of the selection (the caller keeps it, so a `409` can leave it intact for the user to untick the offending value and retry) and submits `POST /api/location-groups/merge`.
+
+- **Target.** A radio choice between creating a new group (canonical-name field, prefilled from the selected value with the highest item count) and merging into an existing one (an `Autocomplete` over `GET /api/location-groups?level=`, `pageSize: 200` — the group is never renamed).
+- **Mixed-country consent.** If the selection spans more than one country code, creating a **new** group requires an explicit "apply in every country" checkbox before the submit button enables; merging into an **existing** group never shows this prompt, since the target's own scope governs regardless of what was ticked.
+- **Country scope submitted.** `/places/countries` (below) supplies the tile's own code; `/places/regions|cities` and the admin All-locations list supply the unscoped `''` sentinel — and when merging into an **existing** group, the dialog sends no `countryCode` at all, since a disagreeing non-empty code would be a `400` the user could do nothing about.
+- **Conflict handling.** On a `409`, the dialog stays open, the selection stays intact, and the offending chip is highlighted using the conflict's `details.groupName` (read via `extractLocationGroupConflict()` — never a top-level field, per the `HttpExceptionFilter` allowlist gotcha in §13).
+
+**`/places/countries|regions|cities` (`LevelBrowsePage`) — merge in context.** An admin-only "Select" toggle (gated on `geo_settings:write`; the page is pixel-identical to before for anyone without it) turns each tile into a checkbox, with a "N selected · M photos" bar and a "Merge…" action above the grid. This is deliberately *in context* — the surface where an admin is already looking at three separate Heredia tiles is the natural place to select and merge them, rather than requiring a trip to the admin settings page.
+
+**Admin "All locations" (§12.1) — merge from the full catalog.** The paginated checkbox list over every raw value app-wide reaches values `/places` never groups on its own (a value with zero recent photos in the currently-browsed circle, or one an admin found by searching rather than browsing) and feeds the same dialog.
 
 ---
 
@@ -568,3 +620,4 @@ Under `apps/web/src/__tests__/`, mirroring the source tree: the admin page rende
 |---------|------|--------|---------|
 | 1.0 | August 2026 | AI Assistant | Initial specification for the Location Grouping epic |
 | 1.1 | August 2026 | AI Assistant | Status → backend implemented (#372/#373/#374). Marked §12 Frontend as still pending (#375); recorded the implementation notes for §9's management API and §7's read-path migration below |
+| 1.2 | August 2026 | AI Assistant | §12 Frontend → implemented (#375/#387), corrected from the prior "not yet implemented" note. Documented issue #407's select-many-and-merge flow: new `POST /api/location-groups/merge` endpoint (§9.9, one transaction + one deferred rebuild, existing-group-never-renamed / new-group-created XOR, block-not-reparent conflict semantics); `GET /api/location-groups/values`'s new paginated mode alongside its unchanged legacy top-N mode, and why `page`/`pageSize` deliberately carry no zod default (§9.7); the `/places` admin-only tile Select mode and the admin "All locations" checkbox browser, both driving the shared `MergeLocationsDialog` (§12.1, §12.3); and the country-scoped cover-override fallback for region/city groups created with an explicit country (§7) |
