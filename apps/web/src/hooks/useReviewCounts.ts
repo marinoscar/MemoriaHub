@@ -115,8 +115,22 @@ export function useReviewCounts(
   // together; it is read during render so it can be an effect dependency.
   const rev = useSyncExternalStore(subscribeRevision, getRevision, getRevision);
 
+  // Does THIS instance have a request in the air right now? Read only by guard
+  // 2 below.
+  //
+  // A ref rather than the `isLoading` state it shadows, for two reasons: it
+  // must not cause a render, and it must be readable SYNCHRONOUSLY inside an
+  // effect that runs in the very same commit that started the fetch — a state
+  // update would not have landed yet at that point, which is precisely the
+  // moment the guard has to make its decision.
+  //
+  // Per-INSTANCE, which is why `__resetReviewCountsForTests` needs no addition
+  // for it: it dies with the component that owns it.
+  const inFlightRef = useRef(false);
+
   const fetch = useCallback(
     async (circleId: string) => {
+      inFlightRef.current = true;
       setIsLoading(true);
       setError(null);
       try {
@@ -128,6 +142,13 @@ export function useReviewCounts(
         const message = err instanceof Error ? err.message : 'Failed to load review counts';
         setError(message);
       } finally {
+        // UNCONDITIONAL, and unlike the `isLoading` reset below it is NOT gated
+        // on `isMounted()`. This is the property that makes the whole guard
+        // safe: a rejected request, an aborted one, or one that resolves after
+        // unmount can never leave the flag stuck true and the instance
+        // permanently deaf to the shared signal. The failure mode is bounded to
+        // one component AND it self-heals on the very next settle.
+        inFlightRef.current = false;
         if (isMounted()) setIsLoading(false);
       }
     },
@@ -145,38 +166,99 @@ export function useReviewCounts(
     void fetch(activeCircleId);
   }, [enabled, activeCircleId, fetch]);
 
-  // The SHARED-SIGNAL fetch, split out and guarded so it fires only on a
-  // GENUINE bump — never on this instance's first run.
+  // The SHARED-SIGNAL fetch, split out of the lifecycle effect above and
+  // protected by TWO guards. They defend against different things and neither
+  // subsumes the other (issue #392).
   //
-  // WHY (issue #392): `ReviewHubPage` calls `refreshReviewCounts()` from its own
-  // mount effect, which is spec §4.5 requirement 1 — returning after clearing
-  // four bursts must not show a cached "4". But with `rev` folded into the
-  // effect above, one hub mount issued TWO identical requests: the instance's
-  // own mount fetch, and then a second one when its own signal bumped the
-  // revision a tick later. The signal exists to refetch OTHER already-mounted
-  // instances (the rail's aggregate badge), which have already done their own
-  // mount fetch; a freshly-mounting instance is by definition not stale.
+  // WHAT THE SIGNAL IS FOR, so the guards read as narrowing rather than as
+  // undoing it: `refreshReviewCounts()` exists to update instances that are
+  // ALREADY MOUNTED AND STALE — above all the navigation rail's aggregate
+  // badge, which is mounted for the whole session and would otherwise still
+  // show "4" after the user cleared four bursts (spec §4.5 requirement 1).
+  // Both guards below only ever suppress a refetch for an instance that
+  // demonstrably already holds fresh data, so that job is untouched.
   //
-  // The ref is seeded from `rev` at first render rather than from a boolean
-  // "have I run" flag, so an instance that mounts DURING someone else's bump
-  // still compares against the revision it actually rendered with.
+  // GUARD 1 — FIRST RUN (`seenRevisionRef`). Without it, a BARE MOUNT with no
+  // concurrent signal at all fires twice: the effect above fetches, and this
+  // effect's own first run fetches again because `rev` is one of its deps. That
+  // is the common case — every review badge mount anywhere in the app — so
+  // fixing it halves the request count on the far more frequent path. (It does
+  // NOT by itself fix the Review hub, which is guard 2's job.) The ref is
+  // seeded from `rev` at first render rather than from a boolean "have I run"
+  // flag, so an instance mounting DURING someone else's bump still compares
+  // against the revision it actually rendered with.
+  //
+  // GUARD 2 — IN FLIGHT (`inFlightRef`). `ReviewHubPage` mounts TWO consumers
+  // of this hook (its own `useReviewQueues` call, plus the nested
+  // `<ReviewQueueList>`), then calls `refreshReviewCounts()` from its mount
+  // effect — which lands AFTER both have already started fetching, so it is a
+  // genuine bump that guard 1 cannot catch, and the hub cost 4 requests where 2
+  // would do. An instance with a request already in the air does not stack a
+  // second one on top of it; the answer it is waiting for is the same answer
+  // the bump would ask for. The rail's badge is idle at that moment, so it
+  // refetches exactly as intended, which is the whole point of the signal.
+  //
+  // THE RULE IS "don't stack a refetch on a fetch already running for this
+  // instance" — stated directly. An earlier revision approximated it with a
+  // wall-clock "did I fetch within the last second" window, which was both
+  // vaguer (it also suppressed genuine signals arriving shortly after an
+  // instance had finished loading) and non-deterministic: it made the signal's
+  // core contract — an older mounted instance still refetches — impossible to
+  // assert without controlling the clock, since in a test "older" is ten
+  // milliseconds. A guard that forces correct tests to fake time is telling you
+  // something about the guard.
+  //
+  // Deliberately NOT a response cache and NOT a MODULE-LEVEL in-flight slot:
+  // both were tried in issue #390 and removed. A cache introduces module state
+  // that survives unmount and hands consumers staleness they cannot bust; a
+  // shared slot is wedged shut GLOBALLY and permanently by one request that
+  // never settles, taking every consumer down with it.
+  //
+  // A PER-INSTANCE flag is not the same mechanism, and this is the distinction
+  // a future reader will trip over: it holds no data, so it cannot serve
+  // anything stale; its blast radius is one component; it cannot outlive that
+  // component; it is cleared in an unconditional `finally`, so even a rejected
+  // or post-unmount fetch releases it; and an instance stuck mid-request is
+  // already rendering its own loading state. Bounded and self-healing, rather
+  // than global and permanent.
   const seenRevisionRef = useRef(rev);
   useEffect(() => {
     if (seenRevisionRef.current === rev) return;
+    // Consumed even when the fetch is skipped below, so one bump can never be
+    // acted on twice.
     seenRevisionRef.current = rev;
     // A disabled instance still issues no request of its own (issue #204) —
     // the signal does not override the gate.
     if (!enabled || !activeCircleId) return;
+    if (inFlightRef.current) return;
     void fetch(activeCircleId);
   }, [rev, enabled, activeCircleId, fetch]);
 
-  // Routed through the shared signal rather than fetching locally, so one
-  // caller's refresh refreshes every consumer — see the header comment. A
-  // disabled instance still issues no request of its own: its effect returns
-  // early regardless of the revision.
+  // `refetch()` fetches LOCALLY *and* raises the shared signal — it is not
+  // merely a wrapper around the signal any more, and the difference matters.
+  //
+  // Guard 2 above is scoped to the SIGNAL, which is an ambient "someone,
+  // somewhere, changed the data" broadcast that a busy instance can safely
+  // ignore. `refetch()` is the opposite: an explicit, caller-initiated "get ME
+  // the numbers again" on THIS instance. If it were still routed only through
+  // the signal, guard 2 would silently swallow it whenever a fetch happened to
+  // be in flight — so a "Refresh" button pressed while the page was still
+  // settling would do nothing at all, and report success while doing it. The
+  // local fetch is therefore unconditional.
+  //
+  // Ordering is deliberate: the local fetch runs FIRST so it raises
+  // `inFlightRef`, and the bump that follows is then correctly ignored by this
+  // instance's own revision effect while still reaching every OTHER mounted
+  // consumer. One request here, one per sibling — never two for the caller.
+  //
+  // `enabled: false` still issues no request of its own (issue #204): the local
+  // fetch is gated, and only the broadcast goes out.
   const refetch = useCallback(() => {
+    if (enabled && activeCircleId) {
+      void fetch(activeCircleId);
+    }
     refreshReviewCounts();
-  }, []);
+  }, [enabled, activeCircleId, fetch]);
 
   return { data, isLoading, error, refetch };
 }

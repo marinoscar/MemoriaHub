@@ -43,6 +43,12 @@ export default function ReviewHubPage() {
 
   // The SAME resolver the pane and the rail badge read, so the queue this page
   // redirects into can never be one the pane does not list.
+  //
+  // This is a SECOND consumer of `useReviewCounts` on this page — the nested
+  // `<ReviewQueueList>` below mounts its own. That is by design (the counts
+  // hook deliberately does not dedupe; see its header), and the redundant
+  // refetch it used to cause when `refreshReviewCounts()` fires below is now
+  // absorbed by that hook's recency guard rather than by a cache here.
   const { entries, isLoading } = useReviewQueues();
 
   // Spec §4.5 requirement 1, and the criterion most likely to regress silently:
@@ -72,20 +78,33 @@ export default function ReviewHubPage() {
     [entries],
   );
 
-  // TWO conditions guard the redirect, and BOTH matter:
+  // TWO conditions guard the redirect. What each one actually buys, stated
+  // precisely — both were overstated in an earlier revision of this comment:
   //
-  //  - `!isLoading` — redirecting off a still-resolving entry list would send
-  //    the user into the wrong queue (or bounce them out of a legitimate one as
-  //    a flag lands a beat later) with no way to tell why it happened. Until
-  //    the flags AND counts have answered we fall through and render, which
-  //    shows `ReviewQueueList`'s own loading state.
-  //  - `landingEntry !== null` — with every review feature off there is nothing
-  //    to redirect INTO, so we fall through again and let the list render its
-  //    all-disabled explanation. A redirect to nowhere would be a blank screen.
+  //  - `!isLoading` — waits for the FEATURE FLAGS. Redirecting off a
+  //    half-resolved entry list would send the user into the wrong queue (or
+  //    bounce them out of a legitimate one as a flag lands a beat later) with
+  //    no way to tell why. It does NOT meaningfully wait for the COUNTS:
+  //    `useReviewCounts` starts at `isLoading: false` and only flips inside an
+  //    effect, which has not run when this first-render decision is made. That
+  //    is harmless and needs no fixing — `landingEntry` is derived purely from
+  //    the flags and the registry's fixed order, and never from a count — so a
+  //    slow or failed counts request cannot change where we land. Do not add a
+  //    counts gate here on the strength of the word "loading": it would delay
+  //    the redirect for information the redirect does not use.
+  //  - `landingEntry !== null` — a redirect to nowhere would be a blank
+  //    screen. NOTE this branch is unreachable as the registry currently
+  //    stands: `insights` carries `flag: null`, so it always resolves, and a
+  //    deployment with every queue feature AND Automations disabled still lands
+  //    on `/review/insights` — which is the right outcome, since Insights is
+  //    genuinely the only thing left to show. The guard is kept for the same
+  //    reason `ReviewQueueList` keeps its own all-disabled branch: it is the
+  //    correct response if that ever changes, and the alternative is a blank
+  //    screen rather than a loud failure.
   //
   // Falling through is deliberate in both cases rather than branching to a
-  // bespoke state: the two states already exist inside `ReviewQueueList` and
-  // are the exact ones every other breakpoint shows.
+  // bespoke state: the loading and all-disabled states already exist inside
+  // `ReviewQueueList` and are the exact ones every other breakpoint shows.
   if (isDesktop && !isLoading && landingEntry !== null) {
     // `replace`, so Back from a queue returns to wherever the user actually
     // came from rather than bouncing through a route that immediately

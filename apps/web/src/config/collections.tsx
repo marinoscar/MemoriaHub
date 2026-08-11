@@ -130,6 +130,23 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     // mode passes a click-through review and is wrong in the product. The
     // neighbouring params follow the same convention (`missingGeo=1`,
     // `noFaces=1`), so any card added here must use `=1` too.
+    //
+    // KNOWN GAP (issue #392), recorded rather than fixed: `/media` is owned by
+    // the `photos` destination in `config/destinations.ts` — spec §3.5's
+    // explicit table — and `resolveActiveDestination` only ever sees a
+    // PATHNAME, never the query string. So navigating to Favorites resolves the
+    // active destination to `photos`, and the desktop context pane (which
+    // renders only for Collections and Review) closes instead of staying open
+    // with this row selected. Every other entry in this registry keeps the pane
+    // open; this one does not.
+    //
+    // It is left alone deliberately. Re-pointing `/media` at `collections`
+    // would contradict §3.5 and break the "no route is claimed by two
+    // destinations" test, since the same prefix carries the unfiltered
+    // timeline. A real fix needs either a dedicated `/favorites` route or
+    // query-aware route ownership, and both are IA changes well outside this
+    // issue. Nothing is unreachable in the meantime — Favorites still
+    // navigates and still filters correctly.
     path: '/media?favorite=1',
     source: null,
     flag: null,

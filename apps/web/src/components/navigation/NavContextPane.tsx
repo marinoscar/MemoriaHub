@@ -73,15 +73,21 @@ function resolveReviewKey(pathname: string): ReviewQueueKey | null {
 /**
  * Which collection the current URL is showing, or `null`.
  *
- * Favorites is the one entry whose `path` carries a query string
- * (`/media?favorite=1` — note `=1`, not `=true`, see `config/collections.tsx`),
- * so it cannot be matched by prefix like the rest and is checked against the
- * live search params instead.
+ * FAVORITES IS DELIBERATELY NOT MATCHED HERE, and an earlier revision's
+ * query-string special case for it has been deleted as dead code. Its target,
+ * `/media?favorite=1`, is owned by the `photos` destination (spec §3.5's
+ * table), so `resolveActiveDestination` returns `photos` and this pane has
+ * already returned `null` before this function is ever reached on that route.
+ * A `favorite=1` branch here could never run, and leaving it in place would
+ * read as load-bearing support for a case the component does not actually
+ * handle. The gap itself is documented at the Favorites entry in
+ * `config/collections.tsx`, together with why fixing it is out of scope.
+ *
+ * The `includes('?')` skip below is what keeps that entry from being matched by
+ * accident — its `path` is not a bare prefix and `owns()` would never be right
+ * for it.
  */
-function resolveCollectionKey(pathname: string, search: string): CollectionKey | null {
-  if (owns('/media', pathname) && new URLSearchParams(search).get('favorite') === '1') {
-    return 'favorites';
-  }
+function resolveCollectionKey(pathname: string): CollectionKey | null {
   for (const entry of COLLECTIONS) {
     if (entry.path.includes('?')) continue;
     if (owns(entry.path, pathname)) return entry.key;
@@ -91,7 +97,7 @@ function resolveCollectionKey(pathname: string, search: string): CollectionKey |
 
 export function NavContextPane() {
   const theme = useTheme();
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
 
   const destination = resolveActiveDestination(pathname);
   const isReview = destination === 'review';
@@ -145,10 +151,7 @@ export function NavContextPane() {
       {isReview ? (
         <ReviewQueueList variant="pane" activeKey={resolveReviewKey(pathname)} />
       ) : (
-        <CollectionsList
-          variant="pane"
-          activeKey={resolveCollectionKey(pathname, search)}
-        />
+        <CollectionsList variant="pane" activeKey={resolveCollectionKey(pathname)} />
       )}
     </Box>
   );
