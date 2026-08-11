@@ -356,6 +356,67 @@ describe('LinkedPersonCard', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Regression coverage for issue #406 — the picker self-heals after a link
+  // attempt, since `onLinkChange` swallows its own errors and this component
+  // has no way to tell success from failure.
+  // -------------------------------------------------------------------------
+  describe('picker refresh after a link attempt (issue #406)', () => {
+    it('re-fetches the people list after onLinkChange resolves, dropping a since-invalidated option', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        flagsResult({ features: { faceRecognition: true } }),
+      );
+      mockListPeople.mockResolvedValue({
+        items: [
+          {
+            id: 'person-1',
+            name: 'Grandma',
+            isUnlabeled: false,
+            faceCount: 12,
+            coverFace: null,
+            profileMediaItemId: null,
+            profileCrop: null,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            favorite: false,
+          },
+        ],
+        meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
+      });
+      // The component cannot distinguish a successful link from a failed one
+      // — `onLinkChange` (`ProfilePage.handleLinkChange`) catches internally
+      // and never rethrows — so mocking it to simply resolve exercises both
+      // cases identically from this component's point of view.
+      const onLinkChange = vi.fn().mockResolvedValue(undefined);
+      const user = userEvent.setup();
+
+      render(<LinkedPersonCard profile={makeProfile()} onLinkChange={onLinkChange} />);
+
+      const input = await screen.findByLabelText(/Find a person/i);
+
+      const callsAfterMount = mockListPeople.mock.calls.length;
+      expect(callsAfterMount).toBeGreaterThan(0);
+
+      await user.click(input);
+      const option = await screen.findByText('Grandma');
+      await user.click(option);
+
+      const linkButton = screen.getByRole('button', { name: /Link this person/i });
+      await user.click(linkButton);
+
+      await waitFor(() => {
+        expect(onLinkChange).toHaveBeenCalledWith('person-1');
+      });
+
+      // The load-bearing assertion: after the link attempt settles, the
+      // picker refreshes its data instead of leaving a stale option
+      // retryable forever.
+      await waitFor(() => {
+        expect(mockListPeople.mock.calls.length).toBeGreaterThan(callsAfterMount);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Unlink affordance
   // -------------------------------------------------------------------------
   describe('unlink affordance', () => {
