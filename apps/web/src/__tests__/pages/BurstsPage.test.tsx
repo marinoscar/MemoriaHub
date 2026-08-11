@@ -56,6 +56,10 @@ vi.mock('../../hooks/useSystemSettings', () => ({
   useSystemSettings: vi.fn(),
 }));
 
+vi.mock('../../hooks/useFeatureFlags', () => ({
+  useFeatureFlags: vi.fn(),
+}));
+
 vi.mock('../../hooks/useBursts', () => ({
   useBurstGroups: vi.fn(),
   useBurstGroupDetail: vi.fn(),
@@ -88,6 +92,7 @@ import BurstGroupPage from '../../pages/Bursts/BurstGroupPage';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useBurstGroups, useBurstGroupDetail } from '../../hooks/useBursts';
 import { ApiError } from '../../services/api';
 import type { BurstGroupSummary, BurstGroupDetail } from '../../services/bursts';
@@ -95,6 +100,7 @@ import type { BurstGroupSummary, BurstGroupDetail } from '../../services/bursts'
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseCircle = vi.mocked(useCircle);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUseBurstGroups = vi.mocked(useBurstGroups);
 const mockUseBurstGroupDetail = vi.mocked(useBurstGroupDetail);
 
@@ -196,6 +202,26 @@ function makeSystemSettingsHook(
   };
 }
 
+/**
+ * Default matches the real MSW `GET /api/features` handler's response
+ * (`{ features: {} }`) so tests that don't care about the flag keep behaving
+ * exactly as they did before `useFeatureFlags` was mocked directly here —
+ * `burstDetection` is absent, so the feature-off banner (issue #404) shows
+ * by default just as it did under the real network round trip.
+ */
+function makeFeatureFlagsHook(
+  overrides: Partial<ReturnType<typeof useFeatureFlags>> = {},
+): ReturnType<typeof useFeatureFlags> {
+  return {
+    features: {},
+    pictureEnhancement: null,
+    isLoading: false,
+    error: null,
+    refresh: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
 function makeSummary(id = 'group-1'): BurstGroupSummary {
   return {
     id,
@@ -267,6 +293,7 @@ describe('BurstsPage', () => {
     mockUsePermissions.mockReturnValue(makePermissions(false));
     mockUseCircle.mockReturnValue(makeCircleContext());
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
+    mockUseFeatureFlags.mockReturnValue(makeFeatureFlagsHook());
     mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook());
   });
 
@@ -856,6 +883,41 @@ describe('BurstsPage', () => {
       const call = fetchGroups.mock.calls[0][0];
       expect(call).not.toHaveProperty('sortBy');
       expect(call).not.toHaveProperty('sortOrder');
+    });
+  });
+
+  describe('feature-disabled banner (issue #404)', () => {
+    it('renders the banner above the existing groups when the flag is off — the groups still render', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ features: { burstDetection: false } }),
+      );
+      mockUseBurstGroups.mockReturnValue(
+        makeBurstGroupsHook({ items: [makeSummary('g-1'), makeSummary('g-2')] }),
+      );
+
+      render(<BurstsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/burst detection is turned off/i)).toBeInTheDocument();
+      });
+      // Above the content, never instead of it — the groups are still real,
+      // still resolvable, and are exactly why the page has to stay reachable.
+      const photoLabels = screen.getAllByText(/5 photos/i);
+      expect(photoLabels.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('does not render the banner when the flag is on', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ features: { burstDetection: true } }),
+      );
+      mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook({ items: [makeSummary('g-1')] }));
+
+      render(<BurstsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/review bursts/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/burst detection is turned off/i)).not.toBeInTheDocument();
     });
   });
 });

@@ -145,6 +145,26 @@ describe('ReviewQueuePage', () => {
       expect(await screen.findByText('ReviewHubStub')).toBeInTheDocument();
     });
 
+    it('a queue whose feature is off but which has residual pending work stays reachable — it does NOT redirect (issue #404 knock-on)', async () => {
+      // The exact contrast with the case directly above: `duplicates` is
+      // still off, but `useReviewQueues` (issue #404) now resolves a queue
+      // entry whenever the server reports real pending work behind it,
+      // regardless of the flag — so `entries` contains `duplicates` here even
+      // though its flag is off. `ReviewQueuePage` does not know or care WHY
+      // an entry is present; it only asks whether `entries` contains it. That
+      // single lookup is what makes `/review/duplicates` stop bouncing to the
+      // hub for a deployment with residual duplicate groups and the feature
+      // toggled off — no change to this file's own resolution logic was
+      // needed for that to fall out.
+      const entries = buildEntries({ duplicates: 6 }, ['duplicates']);
+      mockResult({ entries, isLoading: false });
+
+      renderAt('/review/duplicates');
+
+      expect(await screen.findByText('DuplicatesPageStub')).toBeInTheDocument();
+      expect(screen.queryByText('ReviewHubStub')).not.toBeInTheDocument();
+    });
+
     it('does NOT redirect a disabled-looking queue while flags are still resolving — shows a spinner instead', () => {
       mockResult({ entries: [], isLoading: true });
 
