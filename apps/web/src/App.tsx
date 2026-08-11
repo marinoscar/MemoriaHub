@@ -63,6 +63,8 @@ const DuplicateGroupPage = lazy(() => import('./pages/Duplicates/DuplicateGroupP
 const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionsPage'));
 const LocationSuggestionRunRedirect = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionRunRedirect'));
 const ReviewRunPage = lazy(() => import('./pages/Reviews/ReviewRunPage'));
+const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
+const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
 const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
@@ -180,6 +182,12 @@ function AppRoutes() {
                     when `features.memories` is off. */}
                 <Route path="/memories" element={<MemoriesPage />} />
                 <Route path="/memories/:id" element={<MemoryDetailPage />} />
+                {/* The Review hub (issue #390). It ADDS a namespace; it does not
+                    replace one — every queue's standalone route below still
+                    resolves, because bookmarks, the Home review banners and the
+                    `review_queue_*` notification links all point at them. */}
+                <Route path="/review" element={<ReviewHubPage />} />
+                <Route path="/review/:queue" element={<ReviewQueuePage />} />
                 <Route path="/bursts" element={<BurstsPage />} />
                 <Route path="/bursts/:id" element={<BurstGroupPage />} />
                 <Route path="/duplicates" element={<DuplicatesPage />} />
