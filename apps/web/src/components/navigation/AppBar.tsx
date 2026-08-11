@@ -34,8 +34,8 @@ import appLogo from '../../assets/app_logo.png';
  * The top bar.
  *
  * Takes no props as of issue #392: the `onMenuClick` hamburger callback went
- * away with the drawer it opened. Navigation below `md` is the bottom bar, and
- * at `md` and up it is the permanent rail — neither needs anything from here.
+ * away with the drawer it opened. Navigation below `sm` is the bottom bar, and
+ * at `sm` and up it is the permanent rail — neither needs anything from here.
  */
 export function AppBar() {
   const theme = useTheme();
@@ -44,13 +44,18 @@ export function AppBar() {
   const { isDarkMode, toggleMode } = useThemeContext();
   const { activeCircle } = useCircle();
   const { triggerRefresh } = useMediaRefresh();
-  const isMd = useMediaQuery(theme.breakpoints.up('md'));
-  const isPhone = useMediaQuery(theme.breakpoints.down('sm'));
-  // Console mode does not exist below `md` (spec §4.4): there is no rail to
-  // swap, so the admin surface is a drill-down and the top bar becomes its
-  // header. Note this is `down('md')`, not the `isPhone` (`down('sm')`) used
-  // for the wordmark — a tablet has a rail and keeps the normal toolbar.
-  const isCompactNav = useMediaQuery(theme.breakpoints.down('md'));
+  // Both gates are the Material 3 compact/medium boundary at 600px, matching
+  // `Layout`'s `showRail` (issue #402 — see the coupled-gate list there). They
+  // were `md` (900px) and drifted apart from the wordmark's `sm`; now that all
+  // of this chrome pivots on the same window class, ONE query drives the
+  // compact treatment rather than two identically-defined ones that could
+  // silently diverge again.
+  const isTabletUp = useMediaQuery(theme.breakpoints.up('sm'));
+  // Drives three things, all of which are properties of the compact window
+  // class rather than three independent preferences: the wordmark is dropped,
+  // and — because there is no rail to swap into Console mode (spec §4.4) — the
+  // admin surface becomes a drill-down with this bar as its header.
+  const isCompactWindow = useMediaQuery(theme.breakpoints.down('sm'));
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadSnackbar, setUploadSnackbar] = useState(false);
@@ -65,7 +70,7 @@ export function AppBar() {
   // the admin surface — the same rule spec §3.5 mandates for destination
   // ownership, applied to the one prefix this component cares about.
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin/');
-  const adminDrillDown = isCompactNav && isAdminRoute;
+  const adminDrillDown = isCompactWindow && isAdminRoute;
 
   // Up one level, expressed as an explicit destination rather than
   // `navigate(-1)`: history can contain anything (a deep link, a redirect, a
@@ -97,8 +102,8 @@ export function AppBar() {
             left because a DESTINATION took over their job, not because they
             were squeezed out:
               - the hamburger, with the drawer it opened (spec §4.1);
-              - the search pill, because Search is a bottom-bar tab below `md`
-                (see the `isMd` gate on TopbarSearch below).
+              - the search pill, because Search is a bottom-bar tab below `sm`
+                (see the `isTabletUp` gate on TopbarSearch below).
             Together they return ~80px. The four fixed icon buttons plus the
             32px logo now measure ~232px of the 360px viewport, leaving the chip
             ~120px — comfortably past its 108px cap, so on a phone it renders at
@@ -172,7 +177,7 @@ export function AppBar() {
                   alt={APP_NAME}
                   sx={{ height: 32, width: 'auto', display: 'block', objectFit: 'contain' }}
                 />
-                {!isPhone && (
+                {!isCompactWindow && (
                   <Typography
                     variant="h6"
                     component="div"
@@ -196,13 +201,19 @@ export function AppBar() {
                   own comment for the minWidth/maxWidth rule. */}
               <CircleChip />
 
-              {/* Central search pill — `md` and up ONLY (spec §4.1 / §4.2).
-                  Below `md` this pill is absent, which frees the scarcest row in
+              {/* Central search pill — `sm` and up ONLY (spec §4.1 / §4.2).
+                  Below `sm` this pill is absent, which frees the scarcest row in
                   the app and permanently resolves the ~354px-against-360px
-                  crowding the topbar audit documents. At `md` and up the Search
+                  crowding the topbar audit documents. At `sm` and up the Search
                   destination gives up its RAIL slot instead and is carried here,
                   where there is width for a real input — see the header of
                   `NavigationRail`.
+
+                  `TopbarSearch` has its own internal `down('sm')` split between
+                  its collapsed-icon and inline-pill forms; since #402 this gate
+                  sits on the SAME boundary, so the pill mounts exactly where its
+                  own inline branch renders and the collapsed branch is only ever
+                  reached from the phone overlay path.
 
                   ⚠️ THIS GATE IS ONLY VALID BECAUSE `/search` OWNS ITS OWN INPUT.
                   The tab is NOT by itself an equivalent replacement for this
@@ -213,8 +224,8 @@ export function AppBar() {
                   makes it correct now is `PageSearchBar`, mounted in all four
                   `SearchPage` branches, which carries both capabilities. Do not
                   remove that bar — deleting it silently recreates the outage
-                  below 900px, where this pill does not render at all. */}
-              {isMd && <TopbarSearch />}
+                  below 600px, where this pill does not render at all. */}
+              {isTabletUp && <TopbarSearch />}
 
               {/* The flexible spacer that `TopbarSearch` used to supply.
                   Removing it without a replacement is EXACTLY the regression
@@ -222,11 +233,11 @@ export function AppBar() {
                   icons pack to the left with dead space on the right, because
                   nothing in the row grows. Rendered only where the search pill
                   is absent, so the two never compete for the same free space. */}
-              {!isMd && <Box aria-hidden sx={{ flexGrow: 1, minWidth: 0 }} />}
+              {!isTabletUp && <Box aria-hidden sx={{ flexGrow: 1, minWidth: 0 }} />}
 
               {/* Upload button */}
               {activeCircle && (
-                isMd ? (
+                isTabletUp ? (
                   <Button
                     variant="outlined"
                     size="small"

@@ -23,24 +23,42 @@ interface LayoutProps {
  * Issue #392, epic #388, spec §4. The `Sidebar` drawer this used to mount is
  * gone from every breakpoint:
  *
- *   phone   (< md)  →  bottom bar only. No drawer, no hamburger, no drawer
+ *   compact (< sm)  →  bottom bar only. No drawer, no hamburger, no drawer
  *                      state to manage — which is why this component no longer
  *                      holds any (spec §4.1).
- *   tablet  (md–lg) →  a permanent collapsed rail (~56px). Always visible, so
+ *   medium  (sm–lg) →  a permanent collapsed rail (~56px). Always visible, so
  *                      navigating costs zero taps instead of one (spec §4.2).
- *   desktop (≥ lg)  →  expanded rail + a context pane for Collections and
+ *   expanded (≥ lg) →  expanded rail + a context pane for Collections and
  *                      Review (spec §4.3).
  *
  * The chrome is chosen by MOUNTING, not by rendering-then-hiding: exactly one
- * navigation surface exists in the tree at any width, so a resize across `md`
+ * navigation surface exists in the tree at any width, so a resize across `sm`
  * or `lg` swaps it rather than briefly showing two.
  */
 export function Layout({ fullBleed = false }: LayoutProps) {
   const theme = useTheme();
-  // `up('md')` and `down('md')` (in BottomNav) are exact complements, so there
-  // is no width at which both the rail and the bottom bar render, and none at
-  // which neither does.
-  const showRail = useMediaQuery(theme.breakpoints.up('md'));
+  // 600px, NOT 900px (issue #402). This is Material 3's MEDIUM window class
+  // threshold — compact < 600dp, medium 600–840dp, expanded ≥ 840dp — and M3 is
+  // explicit that a rail is the correct chrome from medium upward ("only use
+  // navigation rails for medium window size classes and larger"), with "a
+  // tablet or foldable in portrait" named as the canonical medium case. Gating
+  // at MUI's `md` (900px) handed the phone treatment to every 600–899px device:
+  // an unfolded Z Fold 7 (~750px), iPad portrait (768px), iPad Pro 11" portrait
+  // (834px), Android tablets in portrait, and phones in landscape.
+  //
+  // ⚠️ FIVE GATES ARE COUPLED TO THIS ONE AND MUST MOVE TOGETHER. Moving the
+  // rail alone renders two navigation surfaces, or none, in the gap:
+  //   1. this `showRail`                               — the rail itself
+  //   2. `BottomNav`'s `down('sm')`                    — the EXACT complement
+  //   3. `AppBar`'s `isTabletUp` (`up('sm')`)          — search pill + upload label
+  //   4. `AppBar`'s `isCompactWindow` (`down('sm')`)   — admin drill-down top bar
+  //   5. `SettingsHubPage`'s `isCompactWindow`         — must agree with (4)
+  // plus `<main>`'s `pb` below, which clears the bottom bar and so is only
+  // needed where the bottom bar exists.
+  //
+  // The EXPANDED tier is deliberately left at `lg` (1200) rather than M3's
+  // 840dp — see `showContextPane` below; that is a separate design decision.
+  const showRail = useMediaQuery(theme.breakpoints.up('sm'));
   // The pane is a `lg`-and-up affordance, independent of the rail's collapse
   // preference: collapsing the rail reclaims RAIL width, it does not mean "I
   // want less context". A user on a 1400px screen who prefers a narrow rail
@@ -102,8 +120,11 @@ export function Layout({ fullBleed = false }: LayoutProps) {
                       minWidth: 0,
                       p: 3,
                       // Clears the fixed bottom bar, which only exists below
-                      // `md` — the same breakpoint `BottomNav` gates on.
-                      pb: { xs: 10, md: 3 },
+                      // `sm` — the same breakpoint `BottomNav` gates on. Moving
+                      // this with the rail (issue #402) is what keeps 600–899px
+                      // from carrying 80px of padding for a bar that is no
+                      // longer mounted there.
+                      pb: { xs: 10, sm: 3 },
                     }
               }
             >
@@ -111,10 +132,10 @@ export function Layout({ fullBleed = false }: LayoutProps) {
             </Box>
           </Box>
           {/* Mounted only where it renders. `BottomNav` also gates itself on
-              `down('md')`, but it calls `useReviewQueues` for its badge, and
+              `down('sm')`, but it calls `useReviewQueues` for its badge, and
               `useReviewCounts` beneath that deliberately does NOT dedupe across
               consumers — so a self-gating-but-mounted bottom bar would double
-              every counts request at `md` and up, where the rail already holds
+              every counts request at `sm` and up, where the rail already holds
               one. `!showRail` is the exact complement of the rail's gate, so
               there is no width with two navs and none with zero. */}
           {!showRail && <BottomNav />}
