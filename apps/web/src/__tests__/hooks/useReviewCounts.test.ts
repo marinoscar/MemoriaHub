@@ -480,4 +480,60 @@ describe('useReviewCounts', () => {
       expect(mockGetReviewCounts).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // The revision effect's "skip on first run" guard (issue #392) — the
+  // double-fetch fix.
+  //
+  // Before this fix, the hook fetched off a SINGLE effect with `rev` folded
+  // directly into its dependency array (`[enabled, activeCircleId, fetch,
+  // rev]`). Splitting that into two effects — an unconditional mount-lifecycle
+  // fetch, plus a signal-driven fetch — is only correct if the SECOND effect
+  // is guarded to do nothing on ITS OWN first run: an unguarded version would
+  // ALSO fire (unconditionally, on mount, exactly like any other effect) the
+  // moment it exists, which would double every mount's request even with NO
+  // `refreshReviewCounts()` call in sight — the "instance's own mount fetch,
+  // and then a second one" scenario the current code's comment describes.
+  // `seenRevisionRef = useRef(rev)` is what prevents that: it seeds the
+  // guard's baseline from whatever revision was ALREADY current when this
+  // instance first rendered, so the effect's first run is always a no-op.
+  // ---------------------------------------------------------------------------
+  describe('the revision effect skips its own first run (double-fetch fix)', () => {
+    beforeEach(() => {
+      setCircle('circle-abc');
+      mockGetReviewCounts.mockResolvedValue(mockCounts);
+    });
+
+    it('a bare mount with no external refreshReviewCounts() call issues exactly ONE request, not two', async () => {
+      const { result } = renderHook(() => useReviewCounts());
+
+      await waitFor(() => expect(result.current.data).toEqual(mockCounts));
+      // Give a stray second effect run a chance to fire before asserting the
+      // count is final — the bug this guards against would show up here as a
+      // SECOND call arriving shortly after the first.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(mockGetReviewCounts).toHaveBeenCalledTimes(1);
+    });
+
+    it('mounting while the shared revision is ALREADY non-zero (settled prior activity, no concurrent bump) still issues exactly one request', async () => {
+      // Elevate the shared revision via unrelated prior activity, fully
+      // settled before this instance ever mounts.
+      act(() => {
+        refreshReviewCounts();
+        refreshReviewCounts();
+      });
+
+      const { result } = renderHook(() => useReviewCounts());
+
+      await waitFor(() => expect(result.current.data).toEqual(mockCounts));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // The freshly-mounted instance's own baseline is seeded from the
+      // CURRENT (already-elevated) revision, so its first run is a no-op —
+      // it never mistakes "the revision happens to be non-zero" for "someone
+      // just bumped it".
+      expect(mockGetReviewCounts).toHaveBeenCalledTimes(1);
+    });
+  });
 });

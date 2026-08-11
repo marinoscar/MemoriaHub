@@ -4,7 +4,7 @@
  * Thin by design — the page contributes chrome, scroll restoration, and the
  * count-invalidation-on-mount behavior around `ReviewQueueList`.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { Routes, Route, Link as RouterLink } from 'react-router-dom';
 import { render } from '../utils/test-utils';
@@ -99,12 +99,14 @@ describe('ReviewHubPage', () => {
   // Scroll restoration
   // =========================================================================
 
-  it('invokes scroll restoration under the "review-hub" key', () => {
+  it('invokes scroll restoration under the "review-hub" key, disabled on desktop where this page never paints a scrollable list', () => {
     mockFlags({});
 
     render(<ReviewHubPage />);
 
-    expect(mockUseScrollRestoration).toHaveBeenCalledWith('review-hub');
+    // Restoration is a no-op on desktop (`enabled: !isDesktop`) — the default
+    // (non-desktop) viewport here means `enabled: true`.
+    expect(mockUseScrollRestoration).toHaveBeenCalledWith('review-hub', { enabled: true });
   });
 
   // =========================================================================
@@ -191,5 +193,189 @@ describe('ReviewHubPage', () => {
     // proof the hub's mount invalidation reaches every mounted consumer, not
     // just its own internal list.
     await waitFor(() => expect(screen.getByTestId('badge').textContent).toBe('9'));
+  });
+
+  // =========================================================================
+  // Desktop redirect (issue #392, spec §4.5) — `/review` lands the user
+  // straight in the first enabled queue on desktop instead of duplicating the
+  // context pane's own overview list in <main>.
+  // =========================================================================
+
+  describe('desktop (up("lg")) redirect', () => {
+    function setViewportWidth(px: number) {
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => {
+          const min = query.match(/min-width:\s*([\d.]+)px/);
+          const max = query.match(/max-width:\s*([\d.]+)px/);
+          let matches = true;
+          if (min) matches = matches && px >= parseFloat(min[1]);
+          if (max) matches = matches && px <= parseFloat(max[1]);
+          return {
+            matches,
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+          };
+        }),
+      });
+    }
+
+    function restoreDefaultViewport() {
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+    }
+
+    const DESKTOP_WIDTH = 1300; // >= lg (1200)
+
+    function renderAtRoute(path = '/review') {
+      function Harness() {
+        return (
+          <Routes>
+            <Route path="/review" element={<ReviewHubPage />} />
+            <Route path="/review/bursts" element={<div>Bursts queue marker</div>} />
+            <Route path="/review/duplicates" element={<div>Duplicates queue marker</div>} />
+            <Route path="/review/insights" element={<div>Insights marker</div>} />
+            <Route path="/review/automations" element={<div>Automations marker</div>} />
+          </Routes>
+        );
+      }
+      return render(<Harness />, { wrapperOptions: { route: path } });
+    }
+
+    afterEach(() => {
+      restoreDefaultViewport();
+    });
+
+    it('redirects to the first ENABLED queue in registry order — bursts before duplicates, never "the fullest queue"', async () => {
+      setViewportWidth(DESKTOP_WIDTH);
+      // Duplicates has a far higher count, but bursts precedes it in
+      // REVIEW_QUEUES' fixed registry order — the redirect must not be
+      // swayed by which queue has more pending work.
+      mockFlags({ burstDetection: true, duplicateDetection: true });
+      mockGetReviewCounts.mockResolvedValue(
+        counts({ pendingBurstGroups: 1, pendingDuplicateGroups: 500 }),
+      );
+
+      renderAtRoute('/review');
+
+      expect(await screen.findByText('Bursts queue marker')).toBeInTheDocument();
+      expect(screen.queryByText('Duplicates queue marker')).not.toBeInTheDocument();
+    });
+
+    // "Insights" (`REVIEW_QUEUES`'s first `secondary` entry) carries NO
+    // feature flag (`flag: null`) — it is unconditionally available. So with
+    // every queue-producing feature off, the redirect's fallback
+    // (`entries.find('queue') ?? entries.find('secondary')`) still finds a
+    // landing target: Insights, in registry order, ahead of Automations.
+    // This also means `landingEntry` can never truly be null today — see the
+    // next test.
+    it('falls back to the first SECONDARY entry (Insights) in registry order once no queue-producing feature is on', async () => {
+      setViewportWidth(DESKTOP_WIDTH);
+      mockUseWorkflowsEnabled.mockReturnValue(true); // Automations also enabled, but Insights precedes it
+      mockFlags({}); // every queue-producing (bursts/duplicates/locations/enhancements) feature off
+
+      renderAtRoute('/review');
+
+      expect(await screen.findByText('Insights marker')).toBeInTheDocument();
+      expect(screen.queryByText('Automations marker')).not.toBeInTheDocument();
+    });
+
+    it('does NOT redirect while flags are still loading — falls through to the normal render', () => {
+      setViewportWidth(DESKTOP_WIDTH);
+      mockUseFeatureFlags.mockReturnValue({
+        features: null,
+        pictureEnhancement: null,
+        isLoading: true,
+        error: null,
+        refresh: vi.fn().mockResolvedValue(undefined),
+      });
+
+      renderAtRoute('/review');
+
+      // No redirect happened — the hub's own heading is what's on screen.
+      expect(screen.getByRole('heading', { name: 'Review' })).toBeInTheDocument();
+      expect(screen.queryByText('Bursts queue marker')).not.toBeInTheDocument();
+    });
+
+    // NOTE on the "does not redirect while counts are loading" half of this
+    // requirement: `useReviewCounts`'s `isLoading` starts `false` (its
+    // `useState` initial value) and only flips `true` once the mount EFFECT
+    // runs — but `ReviewHubPage`'s redirect decision is made from the FIRST
+    // render's output, which is computed before any effect has run. Because
+    // `landingEntry` itself is derived purely from flags/registry order (not
+    // counts), the redirect fires on that first render regardless of whether
+    // a counts fetch is in flight. Verified empirically: a `getReviewCounts`
+    // that never resolves does not stop the desktop redirect. This diverges
+    // from the code's own comment ("until the flags AND counts have
+    // answered..."), which is worth a maintainer's attention — flagged in the
+    // handoff rather than asserted here as a passing case, since the
+    // "blocks on counts" behavior does not actually hold today.
+    it('does NOT wait on counts to answer before redirecting (counts are irrelevant to landingEntry, which is registry+flags only)', async () => {
+      setViewportWidth(DESKTOP_WIDTH);
+      mockFlags({ duplicateDetection: true });
+      // Never resolves.
+      mockGetReviewCounts.mockReturnValue(new Promise(() => {}));
+
+      renderAtRoute('/review');
+
+      expect(await screen.findByText('Duplicates queue marker')).toBeInTheDocument();
+    });
+
+    // "Nothing enabled" is likewise structurally unreachable via feature
+    // flags today, for the same reason as the Insights fallback test above:
+    // `anyEnabled` (`ReviewQueueList`'s "No review features are enabled"
+    // gate) requires `entries.length === 0`, but Insights's null flag means
+    // `entries` can never be empty. The component's own comment
+    // acknowledges this ("today this cannot happen") and keeps the branch
+    // only for forward compatibility. So the true, provable statement is:
+    // even with every OTHER feature off, the desktop redirect still fires —
+    // to Insights, never to the "No review features are enabled" fallback.
+    it('always finds a landing target today — even with every queue and Automations off, it redirects to Insights rather than falling through to "no features enabled"', async () => {
+      setViewportWidth(DESKTOP_WIDTH);
+      mockUseWorkflowsEnabled.mockReturnValue(false);
+      mockFlags({}); // every review feature off, workflows off too
+
+      renderAtRoute('/review');
+
+      expect(await screen.findByText('Insights marker')).toBeInTheDocument();
+      expect(screen.queryByText('No review features are enabled')).not.toBeInTheDocument();
+    });
+
+    it('phone (default viewport) still renders the full hub list — no redirect', async () => {
+      mockFlags({ duplicateDetection: true });
+      mockGetReviewCounts.mockResolvedValue(counts({ pendingDuplicateGroups: 3 }));
+
+      renderAtRoute('/review');
+
+      expect(screen.getByRole('heading', { name: 'Review' })).toBeInTheDocument();
+      expect(await screen.findByRole('link', { name: 'Duplicates, 3 pending' })).toBeInTheDocument();
+    });
+
+    it('tablet (md-lg) still renders the full hub list — the 56px rail has no room for a pane', async () => {
+      setViewportWidth(950); // >= md(900), < lg(1200)
+      mockFlags({ duplicateDetection: true });
+      mockGetReviewCounts.mockResolvedValue(counts({ pendingDuplicateGroups: 3 }));
+
+      renderAtRoute('/review');
+
+      expect(screen.getByRole('heading', { name: 'Review' })).toBeInTheDocument();
+      expect(await screen.findByRole('link', { name: 'Duplicates, 3 pending' })).toBeInTheDocument();
+    });
   });
 });
