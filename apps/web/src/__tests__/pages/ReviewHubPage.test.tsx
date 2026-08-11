@@ -82,6 +82,45 @@ describe('ReviewHubPage', () => {
   });
 
   // =========================================================================
+  // Request-count regression (issue #392) — the fix itself had no standing
+  // assertion before this test.
+  // =========================================================================
+
+  it('mounting on phone issues at most 2 GET /api/media/review-counts calls, not 4', async () => {
+    mockFlags({ duplicateDetection: true });
+    mockGetReviewCounts.mockResolvedValue(counts({ pendingDuplicateGroups: 3 }));
+
+    // Default (non-desktop) viewport, matching the "phone" case elsewhere in
+    // this file — `up('lg')` redirects away before the hub (and its two
+    // counts consumers) ever renders.
+    render(<ReviewHubPage />);
+
+    // Let both `useReviewCounts` consumers' mount effects, the page's own
+    // mount-triggered `refreshReviewCounts()` bump, and the resulting
+    // settle(s) all play out.
+    await screen.findByRole('link', { name: 'Duplicates, 3 pending' });
+
+    // Pre-fix (#392), this was 4: `ReviewHubPage` mounts two `useReviewCounts`
+    // consumers — its own `useReviewQueues()` plus the nested
+    // `<ReviewQueueList variant="hub">` — and the page's own mount effect
+    // immediately calls `refreshReviewCounts()`, bumping the shared revision
+    // right after both consumers have already started fetching. The fix
+    // makes an instance with a request already in flight skip the
+    // bump-triggered refetch, dropping the count to 2.
+    //
+    // Asserting `<= 2` rather than `=== 2` is deliberate, not a loosened
+    // check: with an instantly-resolving mock, whether a fetch's `.then`
+    // continuation (which clears `inFlightRef`) runs before or after the
+    // revision bump's store-triggered re-render is a genuine race in THIS
+    // TEST ENVIRONMENT ONLY — a real network round trip always dwarfs a
+    // React commit, so production is unaffected either way (see
+    // `useReviewCounts.ts`'s guard-2 comment). `<= 2` still fails loudly at
+    // the pre-fix value of 4, which is the regression worth catching, without
+    // being flaky on that ordering. Do not tighten this to `=== 2`.
+    expect(mockGetReviewCounts.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  // =========================================================================
   // Navigating a row targets /review/<key>
   // =========================================================================
 
