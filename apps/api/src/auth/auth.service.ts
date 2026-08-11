@@ -648,6 +648,7 @@ export class AuthService {
       displayName,
       profileImageUrl,
       isActive: user.isActive,
+      createdAt: user.createdAt.toISOString(),
       roles,
       permissions,
     };
