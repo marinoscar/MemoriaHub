@@ -22,22 +22,16 @@ import {
   Groups as GroupsIcon,
   Explore as ExploreIcon,
   PhotoAlbum as AlbumIcon,
-  BurstMode as BurstModeIcon,
   Archive as ArchiveOutlinedIcon,
   Delete as DeleteOutlineIcon,
-  ContentCopy as ContentCopyIcon,
-  MyLocation as MyLocationIcon,
-  Insights as InsightsIcon,
-  AccountTree as AccountTreeIcon,
-  AutoFixHigh as AutoFixHighIcon,
+  FactCheck as FactCheckIcon,
   AutoAwesomeMotion as AutoAwesomeMotionIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
-import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
-import { useReviewCounts } from '../../hooks/useReviewCounts';
+import { useReviewQueues } from '../../hooks/useReviewQueues';
+import { resolveActiveDestination } from '../../config/destinations';
 import { ADMIN_HUB_PATH, visibleAdminSections } from '../../config/adminSections';
 
 interface SidebarProps {
@@ -51,6 +45,12 @@ interface NavItemDef {
   path: string;
   /** Optional pending-work count. Rendered as a badge only when > 0. */
   badgeCount?: number;
+  /**
+   * Accessible name override. Required wherever a badge carries meaning: a
+   * badge must never be the sole carrier of it (spec §7), so the count is
+   * spelled into the name — "Review, 12 items pending".
+   */
+  ariaLabel?: string;
 }
 
 const DRAWER_WIDTH = 240;
@@ -73,21 +73,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin, hasPermission } = usePermissions();
-  const workflowsEnabled = useWorkflowsEnabled();
-  const { pictureEnhancement } = useFeatureFlags();
-  // The AI Enhancements badge is the sole consumer of these counts, and that
-  // entry only renders when the enhancer flag is on — so the hook is gated on
-  // the same condition and issues NO request while the flag is off or still
-  // loading (issue #204). `useReviewCounts` is keyed on the active circle, so
-  // when it IS enabled this is one small counts-only request per circle
-  // switch, not per navigation, and not the full dashboard payload.
-  const { data: reviewCounts } = useReviewCounts({
-    enabled: pictureEnhancement?.enabled === true,
-  });
-  const pendingEnhancements = reviewCounts?.pendingEnhancements ?? 0;
-  // Same module-level flag cache the enhancer entry above reads — this adds no
-  // second request. `=== true` for the same reason documented there: the entry
-  // must not flash in while the flags load, and a flags outage must hide it.
+  // The single aggregate badge for the whole Review inbox (issue #390). It sums
+  // only the ENABLED queues, and it observes the same refresh signal the hub
+  // list does — so the badge and the list refetch together and cannot end up
+  // showing two different numbers on one screen.
+  const { totalPending } = useReviewQueues();
+  // `=== true` (not a truthy check) so the entry does not flash in while the
+  // flag is still loading, and so a flags outage — which resolves to null rather
+  // than throwing — hides it instead of guessing.
   const memoriesEnabled = useMemoriesEnabled();
 
   // Console mode (spec §3.2): at any `/admin/*` route the drawer swaps its
@@ -119,28 +112,28 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     { label: 'Trash', icon: <DeleteOutlineIcon />, path: '/trash' },
   ];
 
-  const utilitiesItems: NavItemDef[] = [
-    { label: 'Review Bursts', icon: <BurstModeIcon />, path: '/bursts' },
-    { label: 'Review Duplicates', icon: <ContentCopyIcon />, path: '/duplicates' },
-    { label: 'Review Insights', icon: <InsightsIcon />, path: '/review-insights' },
-    { label: 'Location Suggestions', icon: <MyLocationIcon />, path: '/location-suggestions' },
-    ...(workflowsEnabled === true
-      ? [{ label: 'Workflows', icon: <AccountTreeIcon />, path: '/workflows' }]
-      : []),
-    // `=== true` (not a truthy check) so the entry does not flash in while the
-    // flag is still loading — `pictureEnhancement` is null until then, and
-    // useFeatureFlags degrades to null on failure rather than throwing.
-    ...(pictureEnhancement?.enabled === true
-      ? [
-          {
-            label: 'AI Enhancements',
-            icon: <AutoFixHighIcon />,
-            path: '/enhancements',
-            badgeCount: pendingEnhancements,
-          },
-        ]
-      : []),
-  ];
+  // Five UTILITIES rows collapse into ONE badged inbox (issue #390, spec §3.3).
+  // Six quiet rows read as furniture; one badge reads as work.
+  //
+  // It renders UNCONDITIONALLY — never hidden at a zero count, never hidden when
+  // the features are off (spec §6.3). Navigation that changes shape is worse
+  // than navigation that is slightly long: a user cannot find a feature they
+  // know exists, and cannot build muscle memory against a moving target. Keep
+  // the destination, drop the badge.
+  const reviewItem: NavItemDef = {
+    label: 'Review',
+    icon: <FactCheckIcon />,
+    path: '/review',
+    badgeCount: totalPending,
+    ariaLabel:
+      totalPending > 0 ? `Review, ${totalPending} items pending` : 'Review',
+  };
+
+  // Review owns nine route prefixes that do not resemble `/review` — standing at
+  // `/bursts` or `/workflows/:id` must still light this row up, which a
+  // path-prefix match on the item's own path cannot express (spec §3.5). The
+  // other rows keep the `owns` behaviour until #391 converts them.
+  const reviewActive = resolveActiveDestination(location.pathname) === 'review';
 
   // Console mode "invents no new admin IA" (spec §3.2) — these are the SAME
   // five permission-gated sections the hub renders, from the one shared
@@ -187,7 +180,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     active: activeOverride,
   }: {
     item: NavItemDef;
-    /** Escape hatch for Console mode, where nesting needs longest-prefix-wins. */
+    /**
+     * Explicit active state, for the two rows a path-prefix match on the item's
+     * own path cannot decide: Console mode (nesting needs longest-prefix-wins)
+     * and Review (it owns nine prefixes that do not resemble `/review`).
+     */
     active?: boolean;
   }) => {
     const active = activeOverride ?? owns(item.path, location.pathname);
@@ -199,6 +196,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           // explicit landmark (spec §7). Set here, once, so it holds in both
           // Library and Console mode.
           aria-current={active ? 'page' : undefined}
+          aria-label={item.ariaLabel}
           onClick={() => handleNavigate(item.path)}
           sx={{
             borderRadius: 1,
@@ -311,24 +309,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </List>
 
-        {/* UTILITIES section */}
-        <List
-          dense
-          disablePadding
-          subheader={
-            <ListSubheader disableSticky sx={subheaderSx}>
-              Utilities
-            </ListSubheader>
-          }
-        >
-          {utilitiesItems.map((item) => (
-            <NavItem key={item.path} item={item} />
-          ))}
+        {/* Review — one row, no subheader. A "Review" heading over a single
+            "Review" row would be pure chrome. */}
+        <List dense disablePadding sx={{ mt: 1 }}>
+          <NavItem item={reviewItem} active={reviewActive} />
         </List>
       </Box>
 
       {/* Console pinned at the foot, where User Settings used to sit. It is a
-          MODE affordance rather than one of the 14 rows — the epic counts it
+          MODE affordance rather than one of the nine rows — the epic counts it
           separately, which is why it lives below the divider. */}
       {isAdmin && (
         <>

@@ -1,24 +1,17 @@
 /**
- * Tests for the Library/Console Sidebar (issue #389, epic #388).
+ * Tests for the Library/Console Sidebar (issue #390, epic #388).
  *
- * The drawer now has exactly two modes, selected purely by `location.pathname`
- * (spec §3.2):
- *   - LIBRARY mode (any non-`/admin/*` route) renders the 14 primary rows.
- *   - CONSOLE mode (any `/admin/*` route) swaps the drawer's CONTENTS for the
- *     same permission-gated admin catalog `SettingsHubPage` renders, sourced
- *     from the single shared `config/adminSections.tsx` declaration, plus a
- *     "Back to library" affordance.
+ * Issue #390 collapses the five UTILITIES rows (Bursts, Duplicates, Location
+ * Suggestions, AI Enhancements, Workflows / Review Insights) into ONE badged
+ * "Review" row (spec §3.3 / §6.2 / §6.3). Library mode is now nine rows:
+ * Photos, Memories, Explore, Map, Albums, People, Archive, Trash, Review.
  *
- * Eight rows that used to live in the drawer are gone because each duplicates
- * chrome already on screen elsewhere (spec §1.2): Circles, Notifications,
- * User Settings (all now in the AppBar/UserMenu), and Job Queue / Worker
- * Nodes / Storage Insights / Public Sharing (now reachable only through
- * Console). This file asserts their absence explicitly, not just their
- * replacements' presence — a regression that silently reintroduces one of
- * them would otherwise pass every other assertion here.
+ * Console mode, aria-current handling, and the drawer plumbing are unchanged
+ * by this issue and are re-asserted here only to prove #390 didn't regress
+ * them, not because their logic moved.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, mockUser, mockAdminUser } from '../../utils/test-utils';
 import { Sidebar } from '../../../components/navigation/Sidebar';
@@ -52,10 +45,11 @@ vi.mock('../../../hooks/useWorkflowSubjects', () => ({
   useWorkflowsEnabled: vi.fn(),
 }));
 
-// The sidebar's "AI Enhancements" badge is the sole consumer of
-// GET /api/media/review-counts, and it only fires while the enhancer flag is
-// on (issue #204) — partial-mock the media service so these tests can assert
-// a request was (or was not) actually issued, not just what rendered.
+// The Review row's aggregate badge is the sole consumer of
+// GET /api/media/review-counts (via useReviewQueues -> useReviewCounts), and
+// it only fires while at least one counted queue feature is on (issue #204,
+// broadened by #390) — partial-mock the media service so these tests can
+// assert a request was (or was not) actually issued, not just what rendered.
 vi.mock('../../../services/media', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../services/media')>()),
   getReviewCounts: vi.fn(),
@@ -115,13 +109,13 @@ const ALL_ADMIN_PERMISSIONS = Array.from(
 // ---------------------------------------------------------------------------
 
 /**
- * Configure `useFeatureFlags` (drives both the AI Enhancements entry and,
- * transitively through the real `useMemoriesEnabled`, the Memories entry) and
+ * Configure `useFeatureFlags` (drives the Memories row and, transitively
+ * through `useReviewQueues`, the Review row's aggregate badge) and
  * `useWorkflowsEnabled`.
  *
  * `null` for either boolean means "flag not resolved yet" (hidden); a
  * boolean resolves it. `pendingEnhancements` seeds the review-counts response
- * consumed by the AI Enhancements badge; omit to leave that request
+ * consumed by the Review row's badge total; omit to leave that request
  * permanently in flight.
  */
 function mockFlags(options: {
@@ -172,7 +166,7 @@ function mockFlags(options: {
   }
 }
 
-/** All three optional flags resolved ON, for the "14 rows" catalog test. */
+/** All three optional flags resolved ON, for the "9 rows" catalog test. */
 function mockAllFlagsOn(pendingEnhancements = 0) {
   mockFlags({ pictureEnhancement: true, memories: true, workflows: true, pendingEnhancements });
 }
@@ -181,7 +175,7 @@ function mockAllFlagsOn(pendingEnhancements = 0) {
 // Shared row-name catalogs
 // ---------------------------------------------------------------------------
 
-/** The full 14-row Library catalog when every optional flag is enabled. */
+/** The full 9-row Library catalog when every optional flag is enabled. */
 const LIBRARY_ALL_FLAGS_ROWS = [
   'Photos',
   'Memories',
@@ -191,12 +185,7 @@ const LIBRARY_ALL_FLAGS_ROWS = [
   'People',
   'Archive',
   'Trash',
-  'Review Bursts',
-  'Review Duplicates',
-  'Review Insights',
-  'Location Suggestions',
-  'Workflows',
-  'AI Enhancements',
+  'Review',
 ];
 
 /** Rows that used to exist and must never reappear in Library mode. */
@@ -211,6 +200,20 @@ const REMOVED_LIBRARY_ROWS = [
   'Public Sharing',
 ];
 
+/**
+ * The five UTILITIES rows issue #390 collapsed into the single "Review" row.
+ * Their old labels (from the pre-#390 drawer) must never reappear as
+ * standalone Sidebar rows in Library mode.
+ */
+const REMOVED_UTILITIES_ROWS = [
+  'Review Bursts',
+  'Review Duplicates',
+  'Review Insights',
+  'Location Suggestions',
+  'Workflows',
+  'AI Enhancements',
+];
+
 describe('Sidebar', () => {
   const mockOnClose = vi.fn();
 
@@ -221,11 +224,11 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // Library mode — the 14-row catalog (Required case 1)
+  // Library mode — the 9-row catalog
   // =========================================================================
 
   describe('Library mode', () => {
-    it('renders exactly the 14 expected rows with every flag on, and nothing else', () => {
+    it('renders exactly the 9 expected rows with every flag on, and nothing else', () => {
       setNonAdmin();
       mockAllFlagsOn();
 
@@ -250,6 +253,18 @@ describe('Sidebar', () => {
       });
     });
 
+    it('never renders the old UTILITIES rows (Bursts, Duplicates, Location Suggestions, Workflows, AI Enhancements) or a "Utilities" heading — they collapsed into the single Review row', () => {
+      setNonAdmin();
+      mockAllFlagsOn();
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      REMOVED_UTILITIES_ROWS.forEach((label) => {
+        expect(screen.queryByText(label)).not.toBeInTheDocument();
+      });
+      expect(screen.queryByText('Utilities')).not.toBeInTheDocument();
+    });
+
     it('renders the same removed rows check for an admin viewer too (Library mode ignores role)', () => {
       setAdmin(ALL_ADMIN_PERMISSIONS);
       mockAllFlagsOn();
@@ -266,27 +281,58 @@ describe('Sidebar', () => {
       expect(screen.getByText('Console')).toBeInTheDocument();
     });
 
-    it('drops Memories, Workflows, and AI Enhancements when their flags are off/unresolved', () => {
+    it('drops Memories when its flag is off/unresolved, but keeps the other 8 rows', () => {
       setNonAdmin();
       mockFlags({ pictureEnhancement: false, memories: false, workflows: false });
 
       render(<Sidebar open={true} onClose={mockOnClose} />);
 
       expect(screen.queryByText('Memories')).not.toBeInTheDocument();
-      expect(screen.queryByText('Workflows')).not.toBeInTheDocument();
-      expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
 
-      // The 9 rows that are never flag-gated still render.
-      ['Photos', 'Explore', 'Map', 'Albums', 'People', 'Archive', 'Trash', 'Review Bursts', 'Review Duplicates', 'Review Insights', 'Location Suggestions'].forEach(
+      ['Photos', 'Explore', 'Map', 'Albums', 'People', 'Archive', 'Trash', 'Review'].forEach(
         (label) => {
           expect(screen.getByText(label)).toBeInTheDocument();
         },
       );
     });
+
+    // =======================================================================
+    // The Review row is unconditional (spec §6.3) — "do not regress" rules
+    // =======================================================================
+
+    describe('Review row — unconditional rendering (spec §6.3)', () => {
+      it('renders even when every review feature (bursts/duplicates/locations/enhancements/workflows) is off', () => {
+        setNonAdmin();
+        mockFlags({ pictureEnhancement: false, memories: false, workflows: false });
+
+        render(<Sidebar open={true} onClose={mockOnClose} />);
+
+        expect(screen.getByText('Review')).toBeInTheDocument();
+      });
+
+      it('renders even when every review feature is unresolved (null)', () => {
+        setNonAdmin();
+        mockFlags({ pictureEnhancement: null, memories: null, workflows: null });
+
+        render(<Sidebar open={true} onClose={mockOnClose} />);
+
+        expect(screen.getByText('Review')).toBeInTheDocument();
+      });
+
+      it('renders even when the aggregate pending count is zero', async () => {
+        setNonAdmin();
+        mockFlags({ pictureEnhancement: true, pendingEnhancements: 0 });
+
+        render(<Sidebar open={true} onClose={mockOnClose} />);
+
+        await waitFor(() => expect(mockGetReviewCounts).toHaveBeenCalled());
+        expect(screen.getByText('Review')).toBeInTheDocument();
+      });
+    });
   });
 
   // =========================================================================
-  // Console mode (Required cases 2-4)
+  // Console mode (unchanged by #390 — re-asserted as a non-regression check)
   // =========================================================================
 
   describe('Console mode', () => {
@@ -324,11 +370,6 @@ describe('Sidebar', () => {
       LIBRARY_ALL_FLAGS_ROWS.filter((label) => label !== 'Memories').forEach((label) => {
         expect(screen.queryByText(label)).not.toBeInTheDocument();
       });
-
-      // The Library "Memories" row specifically is confirmed absent by
-      // checking it isn't reachable via /memories (the admin card instead
-      // targets /admin/settings/memories) — see the Console navigation test
-      // for "Memories" -> "/admin/settings/memories".
     });
 
     it('never renders the Console mode-switch affordance while already in Console mode', () => {
@@ -423,7 +464,7 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // aria-current (Required case 5, spec §7)
+  // aria-current="page"
   // =========================================================================
 
   describe('aria-current="page"', () => {
@@ -473,14 +514,24 @@ describe('Sidebar', () => {
       expect(insightsButton.classList.contains('Mui-selected')).toBe(true);
       expect(jobQueueButton.classList.contains('Mui-selected')).toBe(false);
     });
+
+    it('is set on the Review row when standing on one of the routes it owns', () => {
+      mockLocation.pathname = '/bursts';
+      setNonAdmin();
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
+      expect(reviewButton).toHaveAttribute('aria-current', 'page');
+    });
   });
 
   // =========================================================================
-  // Segment-boundary matching (Required case 6, spec §3.5)
+  // Segment-boundary matching (spec §3.5)
   // =========================================================================
 
-  describe('segment-boundary matching (owns())', () => {
-    it('activates no row at /reviewer (must not fuzzy-match "Review ..." rows)', () => {
+  describe('segment-boundary matching', () => {
+    it('activates no row at /reviewer (must not fuzzy-match the Review row)', () => {
       mockLocation.pathname = '/reviewer';
       setNonAdmin();
 
@@ -490,14 +541,14 @@ describe('Sidebar', () => {
       expect(selected).toHaveLength(0);
     });
 
-    it('does not activate "Review Bursts" at /burstsfoo', () => {
+    it('does not activate Review at /burstsfoo', () => {
       mockLocation.pathname = '/burstsfoo';
       setNonAdmin();
 
       render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const burstsButton = screen.getByText('Review Bursts').closest('.MuiListItemButton-root') as HTMLElement;
-      expect(burstsButton.classList.contains('Mui-selected')).toBe(false);
+      const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
+      expect(reviewButton.classList.contains('Mui-selected')).toBe(false);
     });
 
     it('activates Photos ONLY on an exact match at /', () => {
@@ -513,15 +564,41 @@ describe('Sidebar', () => {
       expect(selected).toHaveLength(1);
     });
 
-    it('activates a nested route via a genuine segment boundary (e.g. /bursts/some-id activates Review Bursts)', () => {
+    it('activates Review via a genuine segment boundary (e.g. /bursts/some-id)', () => {
       mockLocation.pathname = '/bursts/some-id';
       setNonAdmin();
 
       render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      const burstsButton = screen.getByText('Review Bursts').closest('.MuiListItemButton-root') as HTMLElement;
-      expect(burstsButton.classList.contains('Mui-selected')).toBe(true);
+      const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
+      expect(reviewButton.classList.contains('Mui-selected')).toBe(true);
     });
+  });
+
+  // =========================================================================
+  // The Review row owns nine route prefixes that don't resemble /review
+  // (spec §3.5) — a path-prefix match on the item's own path cannot express
+  // this, so it is driven by `resolveActiveDestination` instead. This is the
+  // whole point of the destination model, so cover several non-/review paths.
+  // =========================================================================
+
+  describe('Review row activation via resolveActiveDestination (spec §3.5)', () => {
+    it.each(['/review', '/bursts', '/bursts/some-id', '/workflows', '/review-insights'])(
+      'is the sole active row at %s',
+      (path) => {
+        mockLocation.pathname = path;
+        setNonAdmin();
+
+        const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+        const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
+        expect(reviewButton.classList.contains('Mui-selected')).toBe(true);
+        expect(reviewButton).toHaveAttribute('aria-current', 'page');
+
+        const selected = container.querySelectorAll('.Mui-selected');
+        expect(selected).toHaveLength(1);
+      },
+    );
   });
 
   // =========================================================================
@@ -557,7 +634,7 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // Navigation targets for a sample of rows
+  // Navigation targets for every Library row
   // =========================================================================
 
   describe('Navigation targets', () => {
@@ -569,10 +646,7 @@ describe('Sidebar', () => {
       ['People', '/people'],
       ['Archive', '/archive'],
       ['Trash', '/trash'],
-      ['Review Bursts', '/bursts'],
-      ['Review Duplicates', '/duplicates'],
-      ['Review Insights', '/review-insights'],
-      ['Location Suggestions', '/location-suggestions'],
+      ['Review', '/review'],
     ])('navigates to %s -> %s', async (label, path) => {
       setNonAdmin();
       render(<Sidebar open={true} onClose={mockOnClose} />);
@@ -584,42 +658,14 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // AI Enhancements entry — flag gate + badge (issue #201/#204, preserved)
+  // Review row badge (issue #201/#204 precedent, re-pointed by #390 —
+  // the badge is no longer a distinct "AI Enhancements" row; it is the
+  // Review row's aggregate total, exercised here through the single
+  // pictureEnhancement flag for a deterministic, single-source count).
   // =========================================================================
 
-  describe('AI Enhancements entry', () => {
-    it('is hidden while the flag is unresolved', () => {
-      setNonAdmin();
-      mockFlags({ pictureEnhancement: null });
-
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-
-      expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
-    });
-
-    it('is hidden when disabled', () => {
-      setNonAdmin();
-      mockFlags({ pictureEnhancement: false });
-
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-
-      expect(screen.queryByText('AI Enhancements')).not.toBeInTheDocument();
-    });
-
-    it('renders under Utilities and navigates to /enhancements when enabled', async () => {
-      setNonAdmin();
-      mockFlags({ pictureEnhancement: true });
-
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-
-      const utilitiesList = screen.getByText('Utilities').closest('.MuiList-root') as HTMLElement;
-      expect(within(utilitiesList).getByText('AI Enhancements')).toBeInTheDocument();
-
-      fireEvent.click(screen.getByText('AI Enhancements').closest('.MuiListItemButton-root') as HTMLElement);
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/enhancements'));
-    });
-
-    it('renders the pending count as a badge', async () => {
+  describe('Review row badge', () => {
+    it('renders the pending count as a badge and in the accessible name', async () => {
       setNonAdmin();
       mockFlags({ pictureEnhancement: true, pendingEnhancements: 7 });
 
@@ -627,9 +673,12 @@ describe('Sidebar', () => {
       await waitFor(() => {
         expect(container.querySelector('.MuiBadge-badge')!.textContent).toBe('7');
       });
+
+      const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
+      expect(reviewButton).toHaveAttribute('aria-label', 'Review, 7 items pending');
     });
 
-    it('caps the badge at 999+', async () => {
+    it('caps the visible badge at 999+ (the underlying count is unrounded elsewhere)', async () => {
       setNonAdmin();
       mockFlags({ pictureEnhancement: true, pendingEnhancements: 1500 });
 
@@ -639,22 +688,26 @@ describe('Sidebar', () => {
       });
     });
 
-    it('renders no badge when the pending count is zero', async () => {
+    it('renders no badge when the pending count is zero, and the accessible name carries no count phrase', async () => {
       setNonAdmin();
       mockFlags({ pictureEnhancement: true, pendingEnhancements: 0 });
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
       await waitFor(() => expect(mockGetReviewCounts).toHaveBeenCalled());
       expect(container.querySelector('.MuiBadge-badge')).toBeNull();
+
+      const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
+      expect(reviewButton).toHaveAttribute('aria-label', 'Review');
     });
   });
 
   // =========================================================================
-  // Review-counts request gating (issue #204, preserved)
+  // Review-counts request gating (issue #204, broadened by #390 to "any
+  // review feature enabled", re-pointed at the Review row's own wiring).
   // =========================================================================
 
   describe('Review-counts request gating', () => {
-    it('issues no request while the enhancer flag is unresolved or disabled', async () => {
+    it('issues no request while every review feature is unresolved or off', async () => {
       setNonAdmin();
       mockFlags({ pictureEnhancement: null });
       render(<Sidebar open={true} onClose={mockOnClose} />);
@@ -662,7 +715,7 @@ describe('Sidebar', () => {
       expect(mockGetReviewCounts).not.toHaveBeenCalled();
     });
 
-    it('requests counts for the active circle when enabled, and never calls the full dashboard', async () => {
+    it('requests counts for the active circle once a review feature is enabled, and never calls the full dashboard', async () => {
       setNonAdmin();
       mockFlags({ pictureEnhancement: true, pendingEnhancements: 3 });
 
@@ -676,7 +729,7 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // Memories entry (issue #309, preserved)
+  // Memories entry (issue #309, preserved — unaffected by #390)
   // =========================================================================
 
   describe('Memories entry', () => {
@@ -703,39 +756,6 @@ describe('Sidebar', () => {
       expect(screen.getByText('Memories')).toBeInTheDocument();
       fireEvent.click(screen.getByText('Memories'));
       await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/memories'));
-    });
-  });
-
-  // =========================================================================
-  // Workflows entry
-  // =========================================================================
-
-  describe('Workflows entry', () => {
-    it('is hidden while unresolved', () => {
-      setNonAdmin();
-      mockFlags({ workflows: null });
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-      expect(screen.queryByText('Workflows')).not.toBeInTheDocument();
-    });
-
-    it('is hidden when disabled', () => {
-      setNonAdmin();
-      mockFlags({ workflows: false });
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-      expect(screen.queryByText('Workflows')).not.toBeInTheDocument();
-    });
-
-    it('renders under Utilities and navigates to /workflows when enabled', async () => {
-      setNonAdmin();
-      mockFlags({ workflows: true });
-
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-
-      const utilitiesList = screen.getByText('Utilities').closest('.MuiList-root') as HTMLElement;
-      expect(within(utilitiesList).getByText('Workflows')).toBeInTheDocument();
-
-      fireEvent.click(screen.getByText('Workflows'));
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/workflows'));
     });
   });
 
