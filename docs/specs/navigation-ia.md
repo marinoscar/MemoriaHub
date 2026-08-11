@@ -351,6 +351,78 @@ circle-scoped, and the space is better spent on the title.
 exists in `SettingsHubPage`'s five sections; this treatment simply stops hiding it behind a
 landing page the user must return to manually.
 
+### 4.5 The Review hub across breakpoints — a queue list, not tabs
+
+Review is **not six parallel views**. It is an inbox, and the distinction decides the
+component:
+
+- **The user's job is "clear the badge," not "visit Duplicates."** Nobody opens the app
+  wanting the Duplicates page specifically; they want to deal with what is pending.
+- **Counts change as the user works.** That is progress feedback. A list surfaces it; a tab
+  bar buries it in labels the user is not looking at.
+- **It is 4 + 2, not 6.** Four draining queues (Bursts, Duplicates, Locations,
+  Enhancements) plus two that are not queues at all (Insights is analytics, Automations is
+  configuration).
+- **The item count is VARIABLE, 1 to 6, depending on feature flags.** A tab bar whose width
+  and item count swing with configuration is the same spatial-memory failure as §4.4's
+  scrolling strip. A list absorbs variable length natively.
+
+Segmented controls were also considered and rejected: they are for 3–5 **mutually exclusive
+views of the same content**, and six-option segmented controls are specifically called out
+as a mobile anti-pattern.
+
+**The resolution: one model at every breakpoint — a queue list with counts.**
+
+| Breakpoint | Treatment |
+|---|---|
+| Phone (`< md`) | Full-screen hub list → drill into a queue → back |
+| Tablet (`md`–`lg`) | Same as phone; the 52 px rail has no room for a pane |
+| Desktop (`≥ lg`) | The same list rendered as §4.3's **context pane**, side by side with the queue — no drilling |
+
+```
+  Phone hub  (/review)                Desktop (rail + context pane + queue)
+┌──────────────────────────────┐    ┌────────┬──────────────┬──────────────┐
+│ Review                   ◯   │    │ Photos │ REVIEW       │ BURSTS · 4   │
+├──────────────────────────────┤    │ Collec…│ ▸ Bursts   4 │              │
+│ ▸ Bursts                  4  │    │ Review │ ▸ Duplicates6│  <BurstsPage>│
+│ ▸ Duplicates              6  │    │        │ ▸ Locations 2│              │
+│ ▸ Locations               2  │    │        │ ▸ Enhance…  –│              │
+│ ▸ Enhancements            –  │    │        │ ──────────   │              │
+│ ────────────────────────     │    │        │ ▸ Insights   │              │
+│ ▸ Insights                   │    │Console │ ▸ Automations│              │
+│ ▸ Automations                │    └────────┴──────────────┴──────────────┘
+├──────────────────────────────┤
+│  ▦    ◈     ⌕     ✓•         │       The context pane IS the hub list.
+│Photos Coll Search Review     │       Tabs are needed at no breakpoint.
+└──────────────────────────────┘
+```
+
+Because §4.3 already specifies a context pane for Review, **the queue list is a component
+that already had to exist.** Choosing a list over tabs therefore removes a component rather
+than adding one, and makes the phone and desktop treatments the same model at two sizes.
+
+**Four requirements:**
+
+1. **Counts MUST refresh when returning to the hub.** Clearing four bursts and coming back
+   to a stale "4" destroys the only progress feedback the feature has. Invalidate
+   `useReviewCounts` on return, do not serve a cached value.
+2. **Fixed row order — never sorted by count.** Sorting would make rows jump between
+   visits, which is the same spatial-memory failure the list exists to avoid. Order is
+   fixed; the counts move, the rows do not.
+3. **Chain-to-next.** On finishing a queue, offer the next non-empty one inline
+   ("Next: 6 duplicates →") rather than requiring a trip back to the hub. The counts are
+   already loaded, so this is nearly free, and it is what turns clearing a backlog from
+   tedious into satisfying.
+4. **A real all-clear state.** When every queue is zero, render one confident "You're all
+   caught up" rather than six rows of "0". A drained queue in the list reads as an em dash,
+   not a zero.
+
+**Deliberately deferred:** a *unified* review stream — one swipeable card deck mixing all
+four queues — would be the more ambitious answer, but each queue has a genuinely different
+decision UI (pick-the-best-of-N for bursts, confirm-a-map-pin for locations, accept/reject a
+rendered image for enhancements). Merging them is a redesign of four review surfaces, not a
+navigation change. Recorded here so the option is not lost, not scheduled.
+
 ---
 
 ## 5. Persistence — `user_settings.navigation`
