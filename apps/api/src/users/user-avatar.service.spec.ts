@@ -675,6 +675,249 @@ describe('UserAvatarService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // unlinkUsersFromPerson() (issue #406)
+  // ---------------------------------------------------------------------------
+
+  describe('unlinkUsersFromPerson', () => {
+    it('clears linkedPersonId for every linked user and reports which need an avatar reset', async () => {
+      const tx = {
+        user: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 'user-a', avatarSource: UserAvatarSource.upload },
+            { id: 'user-b', avatarSource: UserAvatarSource.person },
+            { id: 'user-c', avatarSource: UserAvatarSource.oauth },
+          ]),
+          updateMany: jest.fn().mockResolvedValue({ count: 3 }),
+        },
+      };
+
+      const result = await service.unlinkUsersFromPerson(
+        tx as unknown as Prisma.TransactionClient,
+        PERSON_ID,
+      );
+
+      expect(result).toEqual({
+        unlinkedUserIds: ['user-a', 'user-b', 'user-c'],
+        resetUserIds: ['user-b'],
+      });
+      expect(tx.user.findMany).toHaveBeenCalledWith({
+        where: { linkedPersonId: PERSON_ID },
+        select: { id: true, avatarSource: true },
+      });
+      expect(tx.user.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['user-a', 'user-b', 'user-c'] } },
+        data: { linkedPersonId: null },
+      });
+    });
+
+    it('is a no-op when nobody is linked to the person', async () => {
+      const tx = {
+        user: {
+          findMany: jest.fn().mockResolvedValue([]),
+          updateMany: jest.fn(),
+        },
+      };
+
+      const result = await service.unlinkUsersFromPerson(
+        tx as unknown as Prisma.TransactionClient,
+        PERSON_ID,
+      );
+
+      expect(result).toEqual({ unlinkedUserIds: [], resetUserIds: [] });
+      expect(tx.user.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // resetAvatarsAfterUnlink() (issue #406)
+  // ---------------------------------------------------------------------------
+
+  describe('resetAvatarsAfterUnlink', () => {
+    it('resets avatarSource/avatarStorageKey/avatarVersion/profileImageUrl and reaps the superseded object', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        userRow({
+          id: 'user-b',
+          avatarSource: UserAvatarSource.person,
+          avatarStorageKey: 'avatars/user-b/old.jpg',
+          avatarVersion: 'v-old',
+          providerProfileImageUrl: 'https://provider.example/user-b.jpg',
+        }) as any,
+      );
+
+      await service.resetAvatarsAfterUnlink(['user-b']);
+
+      expect(mockPrisma.user.update).toHaveBeenCalledTimes(1);
+      const writeArgs = mockPrisma.user.update.mock.calls[0][0] as any;
+      expect(writeArgs.where).toEqual({ id: 'user-b' });
+      expect(writeArgs.data).toMatchObject({
+        avatarSource: UserAvatarSource.oauth,
+        avatarStorageKey: null,
+        avatarVersion: null,
+        profileImageUrl: 'https://provider.example/user-b.jpg',
+      });
+      // linkedPersonId is untouched — clearing it is unlinkUsersFromPerson's
+      // job, inside the deletePerson transaction; this method only resets
+      // the avatar for the ids it's handed.
+      expect(writeArgs.data).not.toHaveProperty('linkedPersonId');
+
+      expect(provider.delete).toHaveBeenCalledWith('avatars/user-b/old.jpg');
+      expect(mockPrisma.storageObject.deleteMany).toHaveBeenCalledWith({
+        where: { storageKey: 'avatars/user-b/old.jpg' },
+      });
+    });
+
+    it('is fault-tolerant: one failing user does not stop the rest from being reset', async () => {
+      mockPrisma.user.findUnique.mockImplementation(
+        (args: any) =>
+          Promise.resolve(
+            userRow({ id: args.where.id, avatarSource: UserAvatarSource.person }),
+          ) as any,
+      );
+      mockPrisma.user.update.mockImplementation((args: any) => {
+        if (args.where.id === 'user-a') {
+          return Promise.reject(new Error('db unavailable'));
+        }
+        return Promise.resolve({ ...userRow(), ...args.data }) as any;
+      });
+
+      await expect(
+        service.resetAvatarsAfterUnlink(['user-a', 'user-b']),
+      ).resolves.toBeUndefined();
+
+      const updatedIds = mockPrisma.user.update.mock.calls.map(
+        (c: any[]) => c[0].where.id,
+      );
+      expect(updatedIds).toEqual(['user-a', 'user-b']);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Stale-link backstop (issue #406): renderFromLinkedPerson /
+  // applyAvatarSource('person') both re-check liveness before rendering.
+  // ---------------------------------------------------------------------------
+
+  describe('stale linkedPersonId backstop', () => {
+    it('renderFromLinkedPerson: a soft-deleted linked person -> friendly error, no raw UUID, self-heals a person-sourced avatar', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        userRow({
+          linkedPersonId: PERSON_ID,
+          avatarSource: UserAvatarSource.person,
+          avatarStorageKey: 'avatars/user-1/stale.jpg',
+          avatarVersion: 'v-stale',
+        }) as any,
+      );
+      mockPrisma.person.findUnique.mockResolvedValue(
+        personRow({ deletedAt: new Date('2026-01-01T00:00:00Z') }) as any,
+      );
+
+      let error: unknown;
+      try {
+        await service.renderFromLinkedPerson(USER_ID);
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      const message = (error as BadRequestException).message;
+      expect(message).toMatch(/Your linked person no longer exists/);
+      // Never the raw internal message naming an internal UUID.
+      expect(message).not.toContain(PERSON_ID);
+      expect(message).not.toContain('not found');
+
+      // Self-heals: clears the link AND resets the avatar, since it was
+      // 'person'-sourced.
+      const writeArgs = mockPrisma.user.update.mock.calls.find(
+        (c: any[]) => c[0].data.linkedPersonId === null,
+      );
+      expect(writeArgs).toBeDefined();
+      expect(writeArgs![0].data).toMatchObject({
+        linkedPersonId: null,
+        avatarSource: UserAvatarSource.oauth,
+        avatarStorageKey: null,
+        avatarVersion: null,
+      });
+      expect(provider.delete).toHaveBeenCalledWith('avatars/user-1/stale.jpg');
+    });
+
+    it('renderFromLinkedPerson: leaves a non-person-sourced avatar alone while still clearing the stale link', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        userRow({
+          linkedPersonId: PERSON_ID,
+          avatarSource: UserAvatarSource.upload,
+          avatarStorageKey: 'avatars/user-1/keep.jpg',
+          avatarVersion: 'v-keep',
+        }) as any,
+      );
+      // Fully gone (e.g. a hard delete elsewhere), not just soft-deleted.
+      mockPrisma.person.findUnique.mockResolvedValue(null);
+
+      await expect(service.renderFromLinkedPerson(USER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      const writeArgs = mockPrisma.user.update.mock.calls.find(
+        (c: any[]) => c[0].data.linkedPersonId === null,
+      );
+      expect(writeArgs).toBeDefined();
+      expect(writeArgs![0].data).not.toHaveProperty('avatarSource');
+      expect(writeArgs![0].data).not.toHaveProperty('avatarStorageKey');
+      expect(provider.delete).not.toHaveBeenCalled();
+    });
+
+    it('applyAvatarSource(person) via updateProfile hits the same backstop', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(
+        userRow({
+          linkedPersonId: PERSON_ID,
+          avatarSource: UserAvatarSource.person,
+        }) as any,
+      );
+      mockPrisma.person.findUnique.mockResolvedValue(
+        personRow({ deletedAt: new Date('2026-01-01T00:00:00Z') }) as any,
+      );
+
+      await expect(
+        service.updateProfile(requestUser(), {
+          avatarSource: UserAvatarSource.person,
+        } as any),
+      ).rejects.toThrow(/Your linked person no longer exists/);
+    });
+
+    it('a genuinely live linked person still renders normally (backstop does not false-positive)', async () => {
+      const source = await realJpeg(900, 900);
+      (prepareImageForProcessing as jest.Mock).mockResolvedValue({
+        buffer: source,
+        width: 900,
+        height: 900,
+      });
+
+      mockPrisma.user.findUnique.mockResolvedValue(
+        userRow({ linkedPersonId: PERSON_ID }) as any,
+      );
+      mockPrisma.person.findUnique.mockResolvedValue(
+        personRow({ profileMediaItemId: null, profileCrop: null, coverFaceId: null }) as any,
+      );
+      mockPrisma.face.findFirst.mockResolvedValue({
+        mediaItemId: 'media-3',
+        boundingBox: { x: 0.25, y: 0.25, w: 0.4, h: 0.4 },
+        frameThumbnailKey: null,
+      } as any);
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        type: 'photo',
+        deletedAt: null,
+        storageObject: {
+          storageKey: 'objects/media-3.jpg',
+          storageProvider: 's3',
+          bucket: 'bucket-1',
+          mimeType: 'image/jpeg',
+        },
+      } as any);
+
+      await expect(service.renderFromLinkedPerson(USER_ID)).resolves.toBeDefined();
+      expect(provider.upload).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // uploadAvatar(): output contract — 512x512, EXIF/GPS stripped
   // ---------------------------------------------------------------------------
 

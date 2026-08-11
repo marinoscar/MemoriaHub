@@ -80,6 +80,8 @@ describe('PeopleService', () => {
   let mockUserAvatarService: {
     refreshAvatarsForPerson: jest.Mock;
     carryLinkedUsersOnMerge: jest.Mock;
+    unlinkUsersFromPerson: jest.Mock;
+    resetAvatarsAfterUnlink: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -128,6 +130,13 @@ describe('PeopleService', () => {
     mockUserAvatarService = {
       refreshAvatarsForPerson: jest.fn().mockResolvedValue(undefined),
       carryLinkedUsersOnMerge: jest.fn().mockResolvedValue(0),
+      // deletePerson's stale-link cleanup (issue #406). Default: nobody was
+      // linked to the deleted person, mirroring the pre-existing tests below
+      // that don't set up a linked user.
+      unlinkUsersFromPerson: jest
+        .fn()
+        .mockResolvedValue({ unlinkedUserIds: [], resetUserIds: [] }),
+      resetAvatarsAfterUnlink: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -1282,6 +1291,108 @@ describe('PeopleService', () => {
           data: expect.objectContaining({ action: 'person:delete', targetId: PERSON_ID }),
         }),
       );
+    });
+
+    // -----------------------------------------------------------------------
+    // Stale User.linkedPersonId cleanup (issue #406)
+    // -----------------------------------------------------------------------
+
+    it('calls userAvatarService.unlinkUsersFromPerson INSIDE the transaction', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+
+      // The tx-mock pattern here invokes the callback with `mockPrisma`
+      // itself standing in for `tx`, so this also proves the call happened
+      // as part of the transaction rather than after it.
+      expect(mockUserAvatarService.unlinkUsersFromPerson).toHaveBeenCalledWith(
+        mockPrisma,
+        PERSON_ID,
+      );
+    });
+
+    it('is a no-op on users when no one is linked to the deleted person', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      mockUserAvatarService.unlinkUsersFromPerson.mockResolvedValue({
+        unlinkedUserIds: [],
+        resetUserIds: [],
+      });
+
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(mockUserAvatarService.resetAvatarsAfterUnlink).not.toHaveBeenCalled();
+    });
+
+    it('resets the avatar (after commit) for every unlinked user whose avatarSource was person', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      const callOrder: string[] = [];
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        callOrder.push('transaction-start');
+        const result = await cb(mockPrisma);
+        callOrder.push('transaction-commit');
+        return result;
+      });
+      mockUserAvatarService.unlinkUsersFromPerson.mockImplementation(async () => {
+        callOrder.push('unlinkUsersFromPerson');
+        return { unlinkedUserIds: ['user-a', 'user-b'], resetUserIds: ['user-b'] };
+      });
+      mockUserAvatarService.resetAvatarsAfterUnlink.mockImplementation(async () => {
+        callOrder.push('resetAvatarsAfterUnlink');
+      });
+
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(mockUserAvatarService.resetAvatarsAfterUnlink).toHaveBeenCalledWith([
+        'user-b',
+      ]);
+      // unlinkUsersFromPerson ran inside the transaction; the avatar reset
+      // ran only after the transaction committed.
+      expect(callOrder).toEqual([
+        'transaction-start',
+        'unlinkUsersFromPerson',
+        'transaction-commit',
+        'resetAvatarsAfterUnlink',
+      ]);
+    });
+
+    it('leaves users with avatarSource upload/oauth alone (link cleared, avatar untouched)', async () => {
+      (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => {
+        (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.person.update as jest.Mock).mockResolvedValue({});
+        (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
+        return cb(mockPrisma);
+      });
+      // Two users linked to this person: one 'upload'-sourced, one
+      // 'oauth'-sourced — unlinkUsersFromPerson reports both as unlinked but
+      // NEITHER needs an avatar reset.
+      mockUserAvatarService.unlinkUsersFromPerson.mockResolvedValue({
+        unlinkedUserIds: ['user-upload', 'user-oauth'],
+        resetUserIds: [],
+      });
+
+      await service.deletePerson(PERSON_ID, USER_ID, PERMS);
+
+      expect(mockUserAvatarService.resetAvatarsAfterUnlink).not.toHaveBeenCalled();
     });
   });
 
