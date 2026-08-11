@@ -185,7 +185,65 @@ Two collisions are fixed as part of this work:
   `/places` (`PlacesOverviewPage`). Two different things called explore. Resolution:
   `/search` is named **Search**; `/places` becomes **Places** inside Collections.
 - **"Review Insights"** sits among four review *queues* but is an analytics page. It becomes
-  a tab inside Review rather than a sibling of the queues.
+  an entry inside Review rather than a sibling of the queues.
+
+### 3.5 The destination model — keys, route ownership, and active state
+
+Collapsing 22 rows into 4 creates a problem the current navigation does not have: **a
+destination must light up for routes whose paths do not resemble it.** Standing at
+`/bursts`, the active destination is Review — but `/bursts` does not start with `/review`.
+`Sidebar.tsx`'s current `isActive` (a bare `startsWith`) cannot express this, so the mapping
+must be declared explicitly.
+
+**Canonical destination keys** — the stable identifiers used by the nav components, the
+active-state resolver, and the `pinned` array in §5:
+
+```ts
+type DestinationKey = 'photos' | 'collections' | 'search' | 'review' | 'console';
+```
+
+**Route ownership.** Each destination owns a set of route prefixes. A route may be owned by
+at most one destination.
+
+| Destination | Owns |
+|---|---|
+| `photos` | `/` (exact only), `/media` |
+| `collections` | `/collections`, `/albums`, `/people`, `/places`, `/memories`, `/map`, `/archive`, `/trash`, `/tags` |
+| `search` | `/search` |
+| `review` | `/review`, `/bursts`, `/duplicates`, `/review-insights`, `/location-suggestions`, `/enhancements`, `/workflows`, `/review-runs`, `/location-suggestion-runs` |
+| `console` | `/admin` |
+
+Child routes are covered by their parent prefix (`/albums/:albumId`, `/bursts/:id`,
+`/memories/:id`, `/trash/runs/:runId`, `/places/countries`, `/workflows/:id/runs/:runId`, …)
+and do not need their own entries.
+
+**Routes owned by NO destination — deliberately:**
+
+`/settings`, `/profile`, `/circles`, `/circles/:id`, `/notifications`, `/activate`,
+`/login`, `/auth/callback`, `/s/:token`.
+
+These are reached from the top bar (avatar menu, circle chip, bell) or from outside the app
+entirely. **On these routes no destination renders as active, and that is correct, not a
+bug** — highlighting an unrelated destination would be worse than highlighting none. A test
+should assert this explicitly so a future contributor does not "fix" it.
+
+**Matching rule — segment boundaries, not raw `startsWith`.** A prefix matches when the
+path equals it or continues with `/`:
+
+```ts
+const owns = (prefix: string, path: string) =>
+  prefix === '/' ? path === '/' : path === prefix || path.startsWith(prefix + '/');
+```
+
+A bare `startsWith` would make `/review` match `/reviewer` and `/bursts` match `/burstsfoo`.
+This is a latent bug in the current `isActive` that the consolidation would amplify, since
+each destination now owns many more prefixes. Note `/review-insights` and `/review-runs` do
+**not** match the `/review` prefix under this rule — they are listed as their own prefixes
+above, which is why the table enumerates them rather than relying on `/review` to cover them.
+
+**Longest-prefix wins** if prefixes ever overlap. They do not today, and a test should assert
+that no route in `App.tsx` is claimed by two destinations — that assertion is what keeps this
+table honest as routes are added.
 
 ---
 
@@ -423,6 +481,32 @@ decision UI (pick-the-best-of-N for bursts, confirm-a-map-pin for locations, acc
 rendered image for enhancements). Merging them is a redesign of four review surfaces, not a
 navigation change. Recorded here so the option is not lost, not scheduled.
 
+### 4.6 The Collections hub across breakpoints
+
+Collections has the **same two-surface shape as Review** (§4.5) and must resolve it the same
+way, or the two hubs will drift into different interaction models for no reason.
+
+| Breakpoint | Treatment |
+|---|---|
+| Phone (`< md`) | The full **card grid** (§6.1's rich hub) → tap a card → back |
+| Tablet (`md`–`lg`) | Same card grid, 3–4 columns |
+| Desktop (`≥ lg`) | The §4.3 **context pane** lists the collections; `/collections` resolves to the first entry (Albums) in the main area |
+
+**On desktop `/collections` does NOT render the card grid.** The context pane already gives
+the overview with live counts; a card grid beside it is a menu next to a menu. Landing
+directly in Albums puts photos on screen in zero clicks. This mirrors `/review` → first
+queue exactly.
+
+**This is also what makes §6.1's trade-off coherent.** The extra tap Collections introduces
+exists *only* on phone and tablet — desktop has the pane and pays no tap at all. So the
+expensive rich-card-grid requirement applies precisely where the cost it offsets is real.
+An implementer who reads §6.1 as "build cover art everywhere" is building it for a
+breakpoint that does not need it.
+
+**Pane contents mirror the card grid's ordering and grouping:** Albums, People, Places,
+Memories, Map — then a divider — Favorites, Archive, Trash. Feature-gated entries (Memories)
+hide in both surfaces from the same flag check.
+
 ---
 
 ## 5. Persistence — `user_settings.navigation`
@@ -434,10 +518,32 @@ and the `notifications` namespace (issue #251).
 
 ```ts
 navigation: {
-  pinned?: string[];        // ≤ 6 entries, each a known destination key
+  pinned?: string[];        // ≤ 6 entries, each a PinnableKey (below)
   railCollapsed?: boolean;  // desktop rail collapse preference
 }
 ```
+
+**Pinnable keys are SUB-destinations, never the four primaries.** Pinning Photos would be
+meaningless — it is already in the rail. The pinnable set is exactly the entries that live
+one level down, inside the two hubs:
+
+```ts
+const PINNABLE_KEYS = [
+  // Collections (§4.6)
+  'albums', 'people', 'places', 'memories', 'map', 'favorites', 'archive', 'trash',
+  // Review (§4.5)
+  'bursts', 'duplicates', 'locations', 'enhancements', 'review-insights', 'automations',
+] as const;
+```
+
+Each key resolves to a route and a label through **one shared registry** also consumed by
+the two hubs and both context panes — so a pinned entry can never show a different label or
+target than the same entry in the pane it was pinned from.
+
+**A pinned key whose feature flag is off does not render**, and is *not* removed from
+storage — turning `features.memories` back on must restore the pin rather than silently
+having discarded it. This is the same "absent means default, never destroy user intent"
+posture as the rest of the namespace.
 
 **Every field is optional with no `.default()`.** Absent means "use the built-in defaults" —
 nothing pinned, rail expanded. This mirrors the explicit warning already documented for
@@ -541,6 +647,18 @@ Per phase, at minimum:
 - **Unit (RTL):** the navigation component renders the expected destination set at each
   breakpoint (`useMediaQuery` mocked); permission- and feature-flag-gated entries appear and
   disappear correctly; `aria-current` tracks the active route.
+- **Route ownership (§3.5) — the highest-value test in the epic after reachability.** Three
+  assertions, all cheap and all guarding mistakes that are invisible in manual testing:
+  1. For every route declared in `App.tsx`, the active-state resolver returns either exactly
+     one destination or — for the explicitly unowned list in §3.5 — none. **No route may be
+     claimed by two destinations.** This is what keeps the ownership table honest as routes
+     are added, and it fails loudly the day someone adds a route and forgets the table.
+  2. Boundary matching: `/reviewer` does not activate Review, `/burstsfoo` does not activate
+     Review, `/media-something` does not activate Photos, and `/` activates Photos only on
+     exact match.
+  3. The unowned routes (`/settings`, `/profile`, `/circles`, `/notifications`) render **no**
+     active destination — asserted deliberately so a later contributor does not "fix" it into
+     highlighting something arbitrary.
 - **Regression:** every removed drawer row's destination is still reachable by its existing
   route. This is the single most important test in the epic — the design's central claim is
   that nothing becomes unreachable.
