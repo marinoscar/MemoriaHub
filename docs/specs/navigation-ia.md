@@ -500,6 +500,20 @@ than adding one, and makes the phone and desktop treatments the same model at tw
    caught up" rather than six rows of "0". A drained queue in the list reads as an em dash,
    not a zero.
 
+**Feature gating — enabled OR holding pending work (issue #404).** A queue row renders when
+its feature flag is on **or** the queue still holds pending items. Pure flag gating was
+wrong on three counts. The pages behind these rows have **no feature gate of their own**:
+`BurstsPage`, `DuplicatesPage` and `LocationSuggestionsPage` render, list and resolve
+normally with the flag off, so the row was hiding a working page. The server does not gate
+the numbers either — `computeReviewCounts` returns all four counts unconditionally — so the
+old rule discarded work the API had already reported, in the row *and* in the aggregate
+badge. And groups created while the flag was on, or by an admin backfill, stay in the
+database and stay resolvable; gating them away orphans them with no route in. These three
+rows were ungated entirely before this hub existed, and §6.3 already states the principle:
+**keep the destination, drop the badge.** The two `secondary` entries keep pure flag gating,
+having no count to ask the question of. A page whose feature is off says so in a banner
+above its content — never instead of it, and never as a redirect.
+
 **Deliberately deferred:** a *unified* review stream — one swipeable card deck mixing all
 four queues — would be the more ambitious answer, but each queue has a genuinely different
 decision UI (pick-the-best-of-N for bursts, confirm-a-map-pin for locations, accept/reject a

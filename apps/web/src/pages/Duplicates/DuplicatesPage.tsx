@@ -32,7 +32,9 @@ import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-d
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useDuplicateGroups } from '../../hooks/useDuplicates';
+import { FeatureDisabledNotice } from '../../components/review/FeatureDisabledNotice';
 import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
@@ -188,6 +190,14 @@ export default function DuplicatesPage() {
   const { activeCircle, activeCircleId } = useCircle();
   const { hasPermission, isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
+  // The `=== true` flag convention, inverted with care. Two states must NOT
+  // show the notice: still loading, and a flags outage — `useFeatureFlags`
+  // resolves a failure to `features: null` rather than throwing, and telling a
+  // user their feature is off because a request failed would be a lie printed
+  // in an Alert. So the notice requires a LOADED flag record that does not say
+  // `true`; an absent key inside a loaded record does mean off.
+  const { features } = useFeatureFlags();
+  const featureDisabled = features !== null && features.duplicateDetection !== true;
   const {
     items,
     meta,
@@ -361,6 +371,17 @@ export default function DuplicatesPage() {
           </Tooltip>
         )}
       </Box>
+
+      {/* Feature-off notice (issue #404). Above the content, never instead of
+          it: any groups below are still real, still resolvable, and are exactly
+          why this page must stay reachable with the flag off. */}
+      {featureDisabled && (
+        <FeatureDisabledNotice
+          featureLabel="Duplicate detection"
+          settingsPath="/admin/settings/duplicates"
+          hasExistingWork={items.length > 0}
+        />
+      )}
 
       {/* Resolve-above-threshold actions */}
       {items.length > 0 && (

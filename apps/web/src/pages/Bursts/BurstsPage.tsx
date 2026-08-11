@@ -31,7 +31,9 @@ import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-d
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useBurstGroups } from '../../hooks/useBursts';
+import { FeatureDisabledNotice } from '../../components/review/FeatureDisabledNotice';
 import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
@@ -156,6 +158,11 @@ export default function BurstsPage() {
   const { activeCircle, activeCircleId } = useCircle();
   const { hasPermission, isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
+  // See `DuplicatesPage` for the inversion rule: a LOADED flag record that does
+  // not say `true` means off; still-loading and a flags outage (`features:
+  // null`) must both stay silent rather than claim the feature is disabled.
+  const { features } = useFeatureFlags();
+  const featureDisabled = features !== null && features.burstDetection !== true;
   const {
     items,
     meta,
@@ -331,6 +338,16 @@ export default function BurstsPage() {
           </Tooltip>
         )}
       </Box>
+
+      {/* Feature-off notice (issue #404). Above the content, never instead of
+          it: any groups below are still real and still resolvable. */}
+      {featureDisabled && (
+        <FeatureDisabledNotice
+          featureLabel="Burst detection"
+          settingsPath="/admin/settings/bursts"
+          hasExistingWork={items.length > 0}
+        />
+      )}
 
       {/* Sort control */}
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
