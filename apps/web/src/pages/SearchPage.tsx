@@ -11,8 +11,11 @@
  * When neither is set (and no in-flight search), falls back to the Explore
  * browse rows (People / Places / Tags), which existed before.
  *
- * The search input lives in the AppBar TopbarSearch; this page only
- * renders output.
+ * The page owns its own search input (`PageSearchBar`), mounted at the top of
+ * ALL FOUR render branches below. That is load-bearing, not cosmetic: the
+ * AppBar's `TopbarSearch` is gated to `md`+ (spec §4.1), so below 900px this bar
+ * is the only entry point to free-text/agentic search AND the only opener of
+ * `SearchPanel`. Removing it from any branch re-creates the issue #400 outage.
  */
 
 import { useEffect, useState } from 'react';
@@ -40,6 +43,7 @@ import { MediaGallery } from '../components/media/MediaGallery';
 import { PersonAvatar } from '../components/people/PersonAvatar';
 import { useSearch } from '../contexts/SearchContext';
 import { ExploreCarousel } from '../components/search/ExploreCarousel';
+import { PageSearchBarSection } from '../components/search/PageSearchBar';
 import { renderLocationTile } from './Places/LocationTile';
 import type { ExploreLocationItem } from '../services/media';
 
@@ -211,6 +215,12 @@ export default function SearchPage() {
   if (!activeCircle) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
+        {/* Rendered (disabled — PageSearchBar derives that from the absent
+            circle) so the destination looks and measures the same before and
+            after a circle is picked, and the alert reads as an explanation of
+            the greyed-out field directly above it rather than as the whole
+            page. */}
+        <PageSearchBarSection />
         <Alert severity="info">Select a circle to search your photos.</Alert>
       </Box>
     );
@@ -223,6 +233,8 @@ export default function SearchPage() {
   if (searchRequest !== null) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: 'auto' }}>
+        <PageSearchBarSection />
+
         {/* Header row */}
         <Box
           sx={{
@@ -270,6 +282,8 @@ export default function SearchPage() {
   if (results !== null || isSearching) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: 'auto' }}>
+        <PageSearchBarSection />
+
         {/* Header row */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           {results !== null ? (
@@ -324,6 +338,8 @@ export default function SearchPage() {
   // -------------------------------------------------------------------------
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 900, mx: 'auto' }}>
+      <PageSearchBarSection />
+
       {/* People */}
       {(peopleLoading || people.length > 0) && (
         <ExploreCarousel<PersonListItem>
