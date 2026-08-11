@@ -129,9 +129,19 @@ the time and full immediately after an import.
 **Library mode** (default) carries the four destinations above.
 
 **Console mode** is entered at any `/admin/*` route. The navigation chrome swaps its
-contents rather than the app shell: Overview, Jobs, Nodes, Storage, Backup, Sharing,
-Settings, Doctor, plus a persistent **← Back to library** affordance at the top so the mode
-is always obviously escapable. The circle chip stays; the search pill is hidden.
+contents rather than the app shell, plus a persistent **← Back to library** affordance at
+the top so the mode is always obviously escapable. The circle chip stays; the search pill is
+hidden.
+
+The items it swaps to are **not new information architecture** — `SettingsHubPage` already
+groups all 23 admin pages into five sections (General, AI & Enrichment, Media, Storage,
+Operations), each card carrying its own permission gate. Console mode promotes that existing
+structure from a *page* into *navigation*, which is what removes the current cost of every
+admin-to-admin move routing back through a landing page. Console reuses the hub's groups,
+labels, and gates verbatim.
+
+**On a phone this mode does not exist** — there is no rail to swap, so the admin surface is
+a drill-down hierarchy instead. See §4.4.
 
 This is the cheapest structural change in the proposal — a conditional on
 `location.pathname.startsWith('/admin')` inside one component — and it permanently removes
@@ -270,6 +280,76 @@ lg 1200`), which align closely with Material 3's compact / medium / expanded win
   single-surface destinations and render at full width.
 - **Pinning lives here** (§5). A user who works in People daily pins it into the rail.
 - The rail **collapses to the tablet treatment on demand** and remembers the choice.
+
+### 4.4 Console mode on a phone — a drill-down, not a mode
+
+Console mode (§3.2) is defined as "the rail swaps its contents." On a phone there is no
+rail, so there is nothing to swap. **The resolution is that Console mode does not exist on
+a phone at all: the admin surface is a drill-down hierarchy, and `SettingsHubPage` is the
+navigation.**
+
+```
+  Hub  (/admin/settings)              Detail  (/admin/settings/jobs)
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│ ←  Settings              ◯   │    │ ←  Job Queue             ◯   │
+├──────────────────────────────┤    ├──────────────────────────────┤
+│ ⌕ Search settings            │    │                              │
+│                              │    │  <JobsPage renders here>     │
+│ GENERAL                      │    │                              │
+│  ▸ System                    │    │                              │
+│  ▸ Users & Allowlist         │    │                              │
+│  ▸ Archiving & Deletion      │    │                              │
+│  ▸ Email                     │    │                              │
+│ AI & ENRICHMENT              │    │                              │
+│  ▸ AI Providers              │    │                              │
+│  ▸ Tagging & Descriptions    │    │                              │
+│  …                           │    │                              │
+├──────────────────────────────┤    ├──────────────────────────────┤
+│  ▦    ◈     ⌕     ✓•         │    │  ▦    ◈     ⌕     ✓•         │
+│Photos Coll Search Review     │    │Photos Coll Search Review     │
+└──────────────────────────────┘    └──────────────────────────────┘
+       ↑ bottom bar stays LIBRARY nav in both — always one tap out
+```
+
+**Why not a scrollable tab strip** (the first proposal, rejected):
+
+- Tabs are for **parallel** content; drill-down is for **hierarchical** content. Console is
+  23 pages inside 5 groups — a hierarchy.
+- 23 destinations in a horizontal strip is the documented anti-pattern: excess tabs force
+  horizontal scrolling that reduces discoverability, and shifting tab rows destroy the
+  spatial memory users rely on to remember where they have been
+  ([NN/g, *Tabs, Used Right*](https://www.nngroup.com/articles/tabs-used-right/)).
+- Apple's tab-bar ceiling on iPhone is 3–5 items.
+- iOS Settings — the reference mobile settings experience — is a drill-down, so every phone
+  user already holds the model.
+
+**Four requirements make this excellent rather than merely correct:**
+
+1. **Scroll position MUST be restored when returning to the hub.** This is the single
+   make-or-break detail. SPAs break it by default — `history.pushState` does not restore
+   position, and asynchronously rendered content means the browser does not know the page
+   height at restore time. Without it, returning from a page near the bottom of a 23-card
+   list dumps the user at the top to re-find their place, which is what makes drill-down
+   feel bad. With it, the pattern feels native.
+2. **The bottom bar stays Library navigation on every admin screen.** This is what keeps
+   the admin surface from being a trap: the user is always one tap from Photos. It is also
+   why no "← Back to library" affordance is needed on phone, unlike the rail treatments.
+3. **A back affordance in the top bar that agrees with the OS.** It navigates up one level
+   (detail → hub) and must never diverge from the browser/system back gesture.
+4. **A "Search settings" filter at the top of the hub.** A client-side filter over the
+   `sections` array `SettingsHubPage` already declares, matching on card title. Twenty-three
+   items across five groups is past the point where scanning beats typing — the same reason
+   iOS Settings has a search field. It also benefits desktop, and it is the only approach
+   that **scales**: at 40 admin pages a rail or tab strip degrades, while search stays
+   constant-effort for the user.
+
+**Top bar in the admin drill-down on phone:** back arrow + page title + avatar. The circle
+chip and upload button are dropped — nearly every admin page is global rather than
+circle-scoped, and the space is better spent on the title.
+
+**No new route, no new component, no change to any admin page.** The hierarchy already
+exists in `SettingsHubPage`'s five sections; this treatment simply stops hiding it behind a
+landing page the user must return to manually.
 
 ---
 
