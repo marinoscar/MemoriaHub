@@ -158,6 +158,49 @@ describe('destinations config', () => {
   });
 
   // ===========================================================================
+  // The Collections hub (issue #391, spec §3.4 / §3.5 / §4.6)
+  //
+  // `/collections` is a route App.tsx added for this issue (the generic
+  // "every declared route has zero or one owner" sweep above already covers
+  // it since it parses the live route table) — pinned again explicitly here,
+  // plus every browse route the hub folds in, so a future edit to
+  // `DESTINATION_ROUTES.collections` that drops one of them fails loudly and
+  // specifically rather than only inside the generic sweep.
+  // ===========================================================================
+
+  describe('the Collections hub route and the routes it folds in', () => {
+    it('/collections resolves to the collections destination', () => {
+      expect(resolveActiveDestination('/collections')).toBe('collections');
+    });
+
+    it.each([
+      '/collections',
+      '/albums',
+      '/people',
+      '/places',
+      '/memories',
+      '/map',
+      '/archive',
+      '/trash',
+      '/tags',
+    ])('DESTINATION_ROUTES.collections owns %s', (prefix) => {
+      expect(DESTINATION_ROUTES.collections).toContain(prefix);
+    });
+
+    it.each([
+      ['/albums', 'collections'],
+      ['/people', 'collections'],
+      ['/places', 'collections'],
+      ['/memories', 'collections'],
+      ['/map', 'collections'],
+      ['/archive', 'collections'],
+      ['/trash', 'collections'],
+    ] as const)('%s resolves to %s, not some other destination', (path, expected) => {
+      expect(resolveActiveDestination(path)).toBe(expected);
+    });
+  });
+
+  // ===========================================================================
   // owns() — the primitive every rule above is built on
   // ===========================================================================
 

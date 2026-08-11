@@ -64,6 +64,7 @@ const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/L
 const LocationSuggestionRunRedirect = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionRunRedirect'));
 const ReviewRunPage = lazy(() => import('./pages/Reviews/ReviewRunPage'));
 const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
+const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));
 const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
 const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
@@ -162,6 +163,13 @@ function AppRoutes() {
                 <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage/providers" replace />} />
                 <Route path="/admin/backup" element={<Navigate to="/admin/settings/nodes" replace />} />
                 <Route path="/search" element={<SearchPage />} />
+                {/* The Collections hub (issue #391, spec §4.6) ADDS a route; it
+                    replaces none. Every browse destination below keeps its own
+                    URL, because bookmarks, deep links, the Android app and the
+                    notification links all point at them. On desktop this page
+                    redirects to `/albums` rather than rendering the card grid —
+                    the #392 context pane already carries the overview. */}
+                <Route path="/collections" element={<CollectionsHubPage />} />
                 <Route path="/people" element={<PeoplePage />} />
                 <Route path="/people/archived" element={<ArchivedFacesPage />} />
                 <Route path="/tags" element={<TagsBrowsePage />} />

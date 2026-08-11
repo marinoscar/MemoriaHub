@@ -18,20 +18,15 @@ import {
   Home as HomeIcon,
   AdminPanelSettings as AdminIcon,
   ArrowBack as ArrowBackIcon,
-  Map as MapIcon,
-  Groups as GroupsIcon,
-  Explore as ExploreIcon,
-  PhotoAlbum as AlbumIcon,
-  Archive as ArchiveOutlinedIcon,
-  Delete as DeleteOutlineIcon,
+  Collections as CollectionsIcon,
+  Search as SearchIcon,
   FactCheck as FactCheckIcon,
-  AutoAwesomeMotion as AutoAwesomeMotionIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
 import { useReviewQueues } from '../../hooks/useReviewQueues';
 import { resolveActiveDestination } from '../../config/destinations';
+import type { DestinationKey } from '../../config/destinations';
 import { ADMIN_HUB_PATH, visibleAdminSections } from '../../config/adminSections';
 
 interface SidebarProps {
@@ -43,6 +38,15 @@ interface NavItemDef {
   label: string;
   icon: React.ReactElement;
   path: string;
+  /**
+   * The destination this row represents, when it is one of the four (spec
+   * §3.5). Its active state resolves through `resolveActiveDestination` rather
+   * than a prefix match on `path`, because a destination must light up for
+   * routes that do not resemble it — `/bursts` is Review, `/albums/:id` and
+   * `/places/countries` are Collections. Console rows have no destination key
+   * and keep the `owns`-based match.
+   */
+  destination?: DestinationKey;
   /** Optional pending-work count. Rendered as a badge only when > 0. */
   badgeCount?: number;
   /**
@@ -78,10 +82,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   // list does — so the badge and the list refetch together and cannot end up
   // showing two different numbers on one screen.
   const { totalPending } = useReviewQueues();
-  // `=== true` (not a truthy check) so the entry does not flash in while the
-  // flag is still loading, and so a flags outage — which resolves to null rather
-  // than throwing — hides it instead of guessing.
-  const memoriesEnabled = useMemoriesEnabled();
 
   // Console mode (spec §3.2): at any `/admin/*` route the drawer swaps its
   // CONTENTS, not the app shell — same Drawer, same NavItem, no second Layout.
@@ -90,50 +90,48 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   // pages without global navigation ever growing a row.
   const isConsole = owns('/admin', location.pathname);
 
-  // Eight rows were removed in issue #389 because each duplicates chrome that
-  // is already on screen (spec §1.2): Circles (top-bar circle chip + avatar
-  // menu), Notifications (the AppBar bell, same badge, with a persistent "See
-  // all notifications" footer), User Settings (avatar menu), and the five
-  // ADMINISTRATION shortcuts — an arbitrary sample of a 23-page hub, now
-  // carried in full by Console mode below.
-  const primaryItems: NavItemDef[] = [
-    { label: 'Photos', icon: <HomeIcon />, path: '/' },
-    ...(memoriesEnabled === true
-      ? [{ label: 'Memories', icon: <AutoAwesomeMotionIcon />, path: '/memories' }]
-      : []),
-    { label: 'Explore', icon: <ExploreIcon />, path: '/search' },
-    { label: 'Map', icon: <MapIcon />, path: '/map' },
-    { label: 'Albums', icon: <AlbumIcon />, path: '/albums' },
-  ];
-
-  const libraryItems: NavItemDef[] = [
-    { label: 'People', icon: <GroupsIcon />, path: '/people' },
-    { label: 'Archive', icon: <ArchiveOutlinedIcon />, path: '/archive' },
-    { label: 'Trash', icon: <DeleteOutlineIcon />, path: '/trash' },
-  ];
-
-  // Five UTILITIES rows collapse into ONE badged inbox (issue #390, spec §3.3).
-  // Six quiet rows read as furniture; one badge reads as work.
+  // FOUR DESTINATIONS (spec §3.1), and this is the row set the whole epic was
+  // aiming at. Issue #389 removed the eight rows that duplicated chrome already
+  // on screen; #390 collapsed five UTILITIES rows into one badged Review inbox;
+  // #391 folds the six remaining browse rows — Memories, Map, Albums, and the
+  // LIBRARY section's People / Archive / Trash — into Collections.
   //
-  // It renders UNCONDITIONALLY — never hidden at a zero count, never hidden when
-  // the features are off (spec §6.3). Navigation that changes shape is worse
-  // than navigation that is slightly long: a user cannot find a feature they
-  // know exists, and cannot build muscle memory against a moving target. Keep
-  // the destination, drop the badge.
-  const reviewItem: NavItemDef = {
-    label: 'Review',
-    icon: <FactCheckIcon />,
-    path: '/review',
-    badgeCount: totalPending,
-    ariaLabel:
-      totalPending > 0 ? `Review, ${totalPending} items pending` : 'Review',
-  };
+  // Nothing became unreachable: every one of those routes still resolves and is
+  // listed on `/collections` (and, from #392, in the desktop context pane).
+  //
+  // "Explore" is renamed **Search** here (spec §3.4): it always routed to
+  // `/search`, while a separate explore-style hub lives at `/places`. Two
+  // different things called explore was a naming collision, not a feature.
+  //
+  // Review renders UNCONDITIONALLY — never hidden at a zero count, never hidden
+  // when the features are off (spec §6.3). Navigation that changes shape is
+  // worse than navigation that is slightly long: a user cannot find a feature
+  // they know exists, and cannot build muscle memory against a moving target.
+  // Keep the destination, drop the badge.
+  const libraryItems: NavItemDef[] = [
+    { label: 'Photos', icon: <HomeIcon />, path: '/', destination: 'photos' },
+    {
+      label: 'Collections',
+      icon: <CollectionsIcon />,
+      path: '/collections',
+      destination: 'collections',
+    },
+    { label: 'Search', icon: <SearchIcon />, path: '/search', destination: 'search' },
+    {
+      label: 'Review',
+      icon: <FactCheckIcon />,
+      path: '/review',
+      destination: 'review',
+      badgeCount: totalPending,
+      ariaLabel: totalPending > 0 ? `Review, ${totalPending} items pending` : 'Review',
+    },
+  ];
 
-  // Review owns nine route prefixes that do not resemble `/review` — standing at
-  // `/bursts` or `/workflows/:id` must still light this row up, which a
-  // path-prefix match on the item's own path cannot express (spec §3.5). The
-  // other rows keep the `owns` behaviour until #391 converts them.
-  const reviewActive = resolveActiveDestination(location.pathname) === 'review';
+  // One mechanism for all four rows, not a per-row prefix match: Collections
+  // owns nine prefixes (`/albums`, `/people`, `/places`, `/memories`, `/map`,
+  // `/archive`, `/trash`, `/tags`) and Review owns nine more, none of which
+  // resemble the row's own path (spec §3.5).
+  const activeDestination = resolveActiveDestination(location.pathname);
 
   // Console mode "invents no new admin IA" (spec §3.2) — these are the SAME
   // five permission-gated sections the hub renders, from the one shared
@@ -181,13 +179,20 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   }: {
     item: NavItemDef;
     /**
-     * Explicit active state, for the two rows a path-prefix match on the item's
-     * own path cannot decide: Console mode (nesting needs longest-prefix-wins)
-     * and Review (it owns nine prefixes that do not resemble `/review`).
+     * Explicit active state, for the Console rows: their paths genuinely nest
+     * (`/admin/settings/jobs` vs `/admin/settings/jobs/insights`), so the caller
+     * resolves longest-prefix-wins once and passes the winner down.
      */
     active?: boolean;
   }) => {
-    const active = activeOverride ?? owns(item.path, location.pathname);
+    // Precedence: an explicit override (Console), then the destination model
+    // (every Library row), then a plain prefix match (the "Back to library"
+    // affordance, which is not a destination and must never light up).
+    const active =
+      activeOverride ??
+      (item.destination
+        ? activeDestination === item.destination
+        : owns(item.path, location.pathname));
     return (
       <ListItem disablePadding>
         <ListItemButton
@@ -287,32 +292,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       <Toolbar />
       <Divider />
       <Box sx={{ overflow: 'auto', flexGrow: 1, py: 1 }}>
-        {/* PRIMARY section — no subheader */}
+        {/* Four destinations, ONE flat list — no subheaders. The old LIBRARY
+            subheader went away with the three rows it grouped: a heading over a
+            four-row list that is the entire navigation is pure chrome. */}
         <List dense disablePadding>
-          {primaryItems.map((item) => (
-            <NavItem key={item.path} item={item} />
-          ))}
-        </List>
-
-        {/* LIBRARY section */}
-        <List
-          dense
-          disablePadding
-          subheader={
-            <ListSubheader disableSticky sx={subheaderSx}>
-              Library
-            </ListSubheader>
-          }
-        >
           {libraryItems.map((item) => (
             <NavItem key={item.path} item={item} />
           ))}
-        </List>
-
-        {/* Review — one row, no subheader. A "Review" heading over a single
-            "Review" row would be pure chrome. */}
-        <List dense disablePadding sx={{ mt: 1 }}>
-          <NavItem item={reviewItem} active={reviewActive} />
         </List>
       </Box>
 
