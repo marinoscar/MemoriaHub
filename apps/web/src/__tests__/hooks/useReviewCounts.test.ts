@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useReviewCounts } from '../../hooks/useReviewCounts';
+import {
+  useReviewCounts,
+  refreshReviewCounts,
+  __resetReviewCountsForTests,
+} from '../../hooks/useReviewCounts';
 import type { ReviewCountsResponse } from '../../types/media';
 
 // ---------------------------------------------------------------------------
@@ -64,6 +68,7 @@ function setCircle(id: string | null) {
 describe('useReviewCounts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetReviewCountsForTests();
   });
 
   // -------------------------------------------------------------------------
@@ -354,6 +359,125 @@ describe('useReviewCounts', () => {
       await waitFor(() => {
         expect(result.current.data?.pendingEnhancements).toBe(42);
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Shared refresh signal (issue #390, spec §4.5 requirement 1).
+  //
+  // More than one surface renders these counts at once — the Review hub's
+  // queue list and the sidebar's aggregate badge. `refreshReviewCounts()` is
+  // what keeps them from disagreeing: it bumps a module-level revision every
+  // mounted `useReviewCounts` instance observes, so a refresh triggered by ONE
+  // consumer refetches ALL of them together.
+  // -------------------------------------------------------------------------
+  describe('shared refresh signal', () => {
+    beforeEach(() => {
+      setCircle('circle-abc');
+      mockGetReviewCounts.mockResolvedValue(mockCounts);
+    });
+
+    it('refreshReviewCounts() triggers a refetch on a mounted, enabled instance', async () => {
+      const { result } = renderHook(() => useReviewCounts());
+
+      await waitFor(() => expect(result.current.data).not.toBeNull());
+      const callsBefore = mockGetReviewCounts.mock.calls.length;
+
+      act(() => {
+        refreshReviewCounts();
+      });
+
+      await waitFor(() => {
+        expect(mockGetReviewCounts.mock.calls.length).toBe(callsBefore + 1);
+      });
+    });
+
+    it('a single refreshReviewCounts() call refetches EVERY mounted instance, not just one', async () => {
+      const first = renderHook(() => useReviewCounts());
+      const second = renderHook(() => useReviewCounts());
+
+      await waitFor(() => expect(first.result.current.data).not.toBeNull());
+      await waitFor(() => expect(second.result.current.data).not.toBeNull());
+      const callsBefore = mockGetReviewCounts.mock.calls.length;
+
+      act(() => {
+        refreshReviewCounts();
+      });
+
+      // Both instances issued their own request — the shared piece is only
+      // the SIGNAL, not the data or the request itself (see the hook's header
+      // comment on what is deliberately not shared).
+      await waitFor(() => {
+        expect(mockGetReviewCounts.mock.calls.length).toBe(callsBefore + 2);
+      });
+    });
+
+    it('both instances converge on a value changed between the two fetches', async () => {
+      const a = renderHook(() => useReviewCounts());
+      const b = renderHook(() => useReviewCounts());
+
+      await waitFor(() => expect(a.result.current.data).toEqual(mockCounts));
+      await waitFor(() => expect(b.result.current.data).toEqual(mockCounts));
+
+      const updated = { ...mockCounts, pendingEnhancements: 99 };
+      mockGetReviewCounts.mockResolvedValue(updated);
+
+      act(() => {
+        refreshReviewCounts();
+      });
+
+      await waitFor(() => expect(a.result.current.data).toEqual(updated));
+      await waitFor(() => expect(b.result.current.data).toEqual(updated));
+    });
+
+    it('does NOT refetch a disabled instance — enabled: false still issues no request on a shared refresh', async () => {
+      const { result } = renderHook(() => useReviewCounts({ enabled: false }));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(mockGetReviewCounts).not.toHaveBeenCalled();
+
+      act(() => {
+        refreshReviewCounts();
+      });
+
+      // Give any stray effect a chance to fire before asserting the negative.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mockGetReviewCounts).not.toHaveBeenCalled();
+      expect(result.current.data).toBeNull();
+    });
+
+    it('a disabled instance ignores the signal even while an enabled sibling instance refetches', async () => {
+      const enabled = renderHook(() => useReviewCounts({ enabled: true }));
+      const disabled = renderHook(() => useReviewCounts({ enabled: false }));
+
+      await waitFor(() => expect(enabled.result.current.data).not.toBeNull());
+      const callsBefore = mockGetReviewCounts.mock.calls.length;
+
+      act(() => {
+        refreshReviewCounts();
+      });
+
+      await waitFor(() => {
+        expect(mockGetReviewCounts.mock.calls.length).toBe(callsBefore + 1);
+      });
+      expect(disabled.result.current.data).toBeNull();
+    });
+
+    it('__resetReviewCountsForTests() leaves the hook in a normal working state for the next test', async () => {
+      // Bump the revision a few times, then reset — a subsequent mount must
+      // still fetch exactly once on its own, with no residual pending signal
+      // from before the reset.
+      act(() => {
+        refreshReviewCounts();
+        refreshReviewCounts();
+      });
+      __resetReviewCountsForTests();
+      mockGetReviewCounts.mockClear();
+
+      const { result } = renderHook(() => useReviewCounts());
+
+      await waitFor(() => expect(result.current.data).toEqual(mockCounts));
+      expect(mockGetReviewCounts).toHaveBeenCalledTimes(1);
     });
   });
 });

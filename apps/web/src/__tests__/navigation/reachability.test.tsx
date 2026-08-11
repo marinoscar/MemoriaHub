@@ -68,6 +68,26 @@ const REQUIRED_REACHABLE_PATHS = [
   '/admin/settings/sharing', // was: drawer "Public Sharing" row -> now: Console > Operations > Public Sharing
 ];
 
+// Issue #390 (epic #388, spec §3.5 / §4.5 / §9) adds the Review hub. It ADDS a
+// namespace; it does not replace one. The epic's central claim is that
+// collapsing five UTILITIES rows into one badged "Review" row never makes
+// anything unreachable — every queue's pre-existing standalone route must
+// still resolve, because bookmarks, the Home review banners and the
+// `review_queue_*` notification links all point at those routes directly, not
+// at `/review/*`.
+const REVIEW_HUB_PATHS = ['/review', '/review/:queue'];
+
+// The six standalone routes ReviewQueuePage wraps (verbatim, never redirects)
+// — these existed before #390 and must survive it unchanged.
+const REVIEW_WRAPPED_STANDALONE_PATHS = [
+  '/bursts',
+  '/duplicates',
+  '/review-insights',
+  '/location-suggestions',
+  '/enhancements',
+  '/workflows',
+];
+
 describe('navigation reachability (issue #389)', () => {
   it('parses a realistic number of routes out of App.tsx (parser sanity check)', () => {
     // App.tsx currently declares 60+ routes. A number this low would mean the
@@ -116,6 +136,60 @@ describe('navigation reachability (issue #389)', () => {
 
     const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
     REQUIRED_REACHABLE_PATHS.forEach((path) => {
+      expect(layoutBlock).toContain(`<Route path="${path}"`);
+    });
+  });
+});
+
+// ===========================================================================
+// The Review hub (issue #390, epic #388, spec §3.5 / §4.5 / §9)
+//
+// This is the epic's central claim, restated for this phase: `/review` is a
+// NEW namespace layered on top of the existing queue routes, never a
+// replacement for them. Sidebar.test.tsx already proves the five old
+// UTILITIES rows are gone from the drawer; this file's job is to prove that
+// removal didn't touch the router — every one of those six routes must still
+// resolve directly, exactly as before #390, alongside the two new hub routes.
+// ===========================================================================
+describe('navigation reachability — the Review hub (issue #390)', () => {
+  it.each(REVIEW_HUB_PATHS)('the new Review hub route %s exists in App.tsx', (path) => {
+    expect(routePathSet.has(path)).toBe(true);
+  });
+
+  it.each(REVIEW_WRAPPED_STANDALONE_PATHS)(
+    'the wrapped queue route %s still resolves on its own — the hub does not replace it',
+    (path) => {
+      expect(routePathSet.has(path)).toBe(true);
+    },
+  );
+
+  it('none of the eight Review-related paths are declared more than once', () => {
+    [...REVIEW_HUB_PATHS, ...REVIEW_WRAPPED_STANDALONE_PATHS].forEach((path) => {
+      const occurrences = routePaths.filter((p) => p === path).length;
+      expect(occurrences).toBe(1);
+    });
+  });
+
+  it('none of the six wrapped standalone routes redirect to /review — each still renders its own page', () => {
+    // A route that now merely forwards to the hub would technically satisfy
+    // "the path exists", but would defeat the whole point of wrapping rather
+    // than replacing. Pin that each is a real `<Route path="..." element={<...Page />}>`,
+    // not a `<Navigate to="/review" .../>`.
+    REVIEW_WRAPPED_STANDALONE_PATHS.forEach((path) => {
+      const match = appSource.match(
+        new RegExp(`<Route\\s+path="${path.replace('/', '\\/')}"\\s+element=\\{<([^\\s/>]+)`),
+      );
+      expect(match).not.toBeNull();
+      expect(match![1]).not.toBe('Navigate');
+    });
+  });
+
+  it('every Review-related required path sits inside the authenticated <Layout> route tree', () => {
+    const layoutStart = appSource.indexOf('<Route element={<Layout />}>');
+    const fullBleedStart = appSource.indexOf('<Route element={<Layout fullBleed />}>');
+    const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
+
+    [...REVIEW_HUB_PATHS, ...REVIEW_WRAPPED_STANDALONE_PATHS].forEach((path) => {
       expect(layoutBlock).toContain(`<Route path="${path}"`);
     });
   });
