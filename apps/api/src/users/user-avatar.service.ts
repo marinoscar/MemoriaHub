@@ -61,6 +61,15 @@ export const AVATAR_ALLOWED_MIME_TYPES: readonly string[] = [
 /** Storage-key prefix. See the recursion-guard note on `storeAvatarObject`. */
 const AVATAR_KEY_PREFIX = 'avatars/';
 
+/**
+ * Client-facing message for `assertPersonLinkable` (issue #406). Deliberately
+ * generic — it must never reveal whether the person is missing/deleted or
+ * merely in a circle the caller cannot see (enumeration-resistance), while
+ * still giving the user something actionable instead of a bare UUID.
+ */
+const PERSON_UNLINKABLE_MESSAGE =
+  'This person is no longer available to link. They may have been removed, merged with another person, or you may no longer have access to their circle. Please pick again.';
+
 /** The columns `resolveAvatarUrl` reads. */
 const AVATAR_COLUMNS = {
   id: true,
@@ -331,6 +340,15 @@ export class UserAvatarService {
       );
     }
 
+    // Defense-in-depth backstop (issue #406): `deletePerson` clears
+    // linkedPersonId as part of deleting a person, but this re-checks
+    // liveness directly rather than trusting that every path that can make a
+    // person unusable has already done so (a race between two tabs, or any
+    // future deletion path). Throws a friendly, actionable message and
+    // self-heals instead of reaching renderPersonAvatar's raw
+    // NotFoundException naming an internal UUID.
+    await this.assertLinkedPersonLive(userId, user.linkedPersonId);
+
     await this.renderFromPersonAndStore(userId, user.linkedPersonId);
     return this.getProfile(userId);
   }
@@ -438,6 +456,79 @@ export class UserAvatarService {
     return count;
   }
 
+  /**
+   * Detach every account linked to a person that is being (or was just)
+   * soft-deleted (issue #406).
+   *
+   * `Person.deletedAt` is a soft-delete, so the `User.linkedPersonId ->
+   * Person.id` FK's `onDelete: SetNull` — which only fires on a genuine row
+   * delete — never runs, and the column would otherwise dangle forever.
+   * Called from INSIDE `PeopleService.deletePerson`'s transaction, on the
+   * `tx` passed in, mirroring `carryLinkedUsersOnMerge`'s shape: the clear
+   * MUST be atomic with the soft-delete itself, so a request that fails after
+   * this call can never leave the link half-cleaned.
+   *
+   * Only clears `linkedPersonId` here — it does NOT reset avatar state, since
+   * that write touches `profileImageUrl` (fine inside a transaction) but the
+   * superseded storage bytes must also be reaped, which talks to the storage
+   * provider and does not belong inside a DB transaction. Callers should pass
+   * the returned `resetUserIds` to `resetAvatarsAfterUnlink` AFTER the
+   * transaction commits.
+   */
+  async unlinkUsersFromPerson(
+    tx: Prisma.TransactionClient,
+    personId: string,
+  ): Promise<{ unlinkedUserIds: string[]; resetUserIds: string[] }> {
+    const linked = await tx.user.findMany({
+      where: { linkedPersonId: personId },
+      select: { id: true, avatarSource: true },
+    });
+
+    if (linked.length === 0) {
+      return { unlinkedUserIds: [], resetUserIds: [] };
+    }
+
+    const unlinkedUserIds = linked.map((u) => u.id);
+    const resetUserIds = linked
+      .filter((u) => u.avatarSource === UserAvatarSource.person)
+      .map((u) => u.id);
+
+    await tx.user.updateMany({
+      where: { id: { in: unlinkedUserIds } },
+      data: { linkedPersonId: null },
+    });
+
+    return { unlinkedUserIds, resetUserIds };
+  }
+
+  /**
+   * Best-effort avatar-state reset for the `resetUserIds` returned by
+   * `unlinkUsersFromPerson` — every account that was actively displaying a
+   * now-deleted person's derived picture falls back to the OAuth picture,
+   * using the exact same reset semantics `resetAvatarState` applies elsewhere
+   * (avatarSource -> oauth, avatarStorageKey -> null, avatarVersion -> null,
+   * profileImageUrl recomputed).
+   *
+   * MUST be called AFTER the caller's transaction has committed: it writes
+   * through `this.prisma` (not a `tx`) and reaps storage bytes, neither of
+   * which belongs inside a DB transaction. Mirrors `refreshAvatarsForPerson`'s
+   * fire-and-forget posture — a failure to reset one user's avatar must never
+   * fail (or partially undo) the person deletion that triggered it.
+   */
+  async resetAvatarsAfterUnlink(userIds: string[]): Promise<void> {
+    for (const userId of userIds) {
+      try {
+        await this.resetAvatarState(userId);
+      } catch (err) {
+        this.logger.warn(
+          `resetAvatarsAfterUnlink: avatar reset failed for user ${userId} (non-fatal): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Private — state writes
   // ---------------------------------------------------------------------------
@@ -515,6 +606,8 @@ export class UserAvatarService {
           'This account is not linked to a person yet. Link one first.',
         );
       }
+      // Defense-in-depth backstop (issue #406) — see renderFromLinkedPerson.
+      await this.assertLinkedPersonLive(userId, user.linkedPersonId);
       await this.renderFromPersonAndStore(userId, user.linkedPersonId);
       return;
     }
@@ -910,6 +1003,17 @@ export class UserAvatarService {
    * member of — surfaces as 404, never 403: a 403 would confirm that the id
    * names a real person in a circle the caller cannot see, which is exactly the
    * enumeration the public-share and notification routes also refuse to allow.
+   *
+   * The thrown message is deliberately generic (issue #406) — it must never
+   * reveal WHICH of the two cases applied, only that linking cannot proceed.
+   * A concrete example of the "missing" case: the picker's client-side list
+   * goes stale between page load and the click (the person gets soft-deleted
+   * via `PeopleService.mergePeople`/`deletePerson` in that window), so a
+   * user who picked a real, visible option can still land here — a bare
+   * UUID in a raw NotFoundException gave them nothing to act on. Each throw
+   * site logs server-side first, at `warn` (an expected, user-triggerable
+   * condition, not a system fault), so the disambiguating detail the client
+   * never sees is still traceable from the logs.
    */
   private async assertPersonLinkable(
     user: RequestUser,
@@ -921,7 +1025,10 @@ export class UserAvatarService {
     });
 
     if (!person || person.deletedAt) {
-      throw new NotFoundException(`Person ${personId} not found`);
+      this.logger.warn(
+        `assertPersonLinkable: person ${personId} not found or deleted (requested by user ${user.id})`,
+      );
+      throw new NotFoundException(PERSON_UNLINKABLE_MESSAGE);
     }
 
     try {
@@ -931,10 +1038,64 @@ export class UserAvatarService {
         user.permissions,
         CircleRole.viewer,
       );
-    } catch {
+    } catch (err) {
+      this.logger.warn(
+        `assertPersonLinkable: circle access denied for person ${personId} (circle ${person.circleId}), user ${user.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
       // Collapse Forbidden (and any circle-level NotFound) into a single 404.
-      throw new NotFoundException(`Person ${personId} not found`);
+      throw new NotFoundException(PERSON_UNLINKABLE_MESSAGE);
     }
+  }
+
+  /**
+   * Defense-in-depth backstop (issue #406) for the two entry points that
+   * actually READ a person to render bytes — `renderFromLinkedPerson` and
+   * `applyAvatarSource`'s `'person'` branch — as opposed to
+   * `describeLinkedPerson`, which only ever DESCRIBES the link for a GET.
+   *
+   * `PeopleService.deletePerson` clears `linkedPersonId` for every linked
+   * account as part of the delete itself, so this should normally never fire.
+   * It exists for whatever that cleanup doesn't (yet) cover — a race between
+   * two tabs, or a future way for a person to become unusable without going
+   * through `deletePerson` — and it self-heals exactly like that cleanup
+   * does: clears the stale link, and falls an actively `'person'`-sourced
+   * avatar back to `'oauth'`, so the affordance is consistently disabled on
+   * the client's next `GET /api/users/me/profile` instead of failing the same
+   * way forever. Throws a friendly, actionable message rather than
+   * `renderPersonAvatar`'s raw `NotFoundException` naming an internal UUID.
+   */
+  private async assertLinkedPersonLive(
+    userId: string,
+    personId: string,
+  ): Promise<void> {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+      select: { deletedAt: true },
+    });
+
+    if (person && !person.deletedAt) return;
+
+    const current = await this.loadAvatarColumns(userId);
+    const wasPersonSourced = current.avatarSource === UserAvatarSource.person;
+
+    if (wasPersonSourced) {
+      const previousStorageKey = current.avatarStorageKey;
+      await this.writeAvatarState(userId, {
+        linkedPersonId: null,
+        avatarSource: UserAvatarSource.oauth,
+        avatarStorageKey: null,
+        avatarVersion: null,
+      });
+      await this.deleteAvatarObject(previousStorageKey);
+    } else {
+      await this.writeAvatarState(userId, { linkedPersonId: null });
+    }
+
+    throw new BadRequestException(
+      'Your linked person no longer exists. Please link a different person.',
+    );
   }
 
   /**

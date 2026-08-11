@@ -213,6 +213,14 @@ export function LinkedPersonCard({
       setSelected(null);
     } finally {
       setSubmitting(false);
+      // `onLinkChange` swallows its own errors (see the prop doc), so this
+      // component genuinely cannot tell success from failure here. Re-fetch
+      // regardless: on success it picks up the newly-linked person's fresh
+      // data, and on failure — e.g. the selected person was merged/deleted
+      // by face-clustering between page load and this click (issue #406) —
+      // it drops the now-invalid option so the exact same failing selection
+      // can't be retried indefinitely.
+      void loadPeople();
     }
   };
 
