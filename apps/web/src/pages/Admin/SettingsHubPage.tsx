@@ -31,10 +31,16 @@ export default function SettingsHubPage() {
   const navigate = useNavigate();
   const theme = useTheme();
   const { isAdmin, hasPermission } = usePermissions();
-  // Phone treatment is a drill-down list rather than a card grid (spec §4.4):
+  // Compact treatment is a drill-down list rather than a card grid (spec §4.4):
   // there is no rail to swap into Console mode at this size, so the hub IS the
   // navigation and iOS Settings is the model every phone user already holds.
-  const isPhone = useMediaQuery(theme.breakpoints.down('md'));
+  //
+  // MUST stay identical to `AppBar`'s `isCompactWindow` (issue #402). If the two
+  // disagree, the top bar and the page body are in different modes: a back-arrow
+  // drill-down header sitting above a card grid, or a full toolbar above a list
+  // with no way back up. Both are `down('sm')` — see `common/Layout.tsx` for the
+  // full coupled-gate list.
+  const isCompactWindow = useMediaQuery(theme.breakpoints.down('sm'));
   const [query, setQuery] = useState('');
 
   // The make-or-break detail of the drill-down (spec §4.4 requirement 1):
@@ -113,7 +119,7 @@ export default function SettingsHubPage() {
             variant="overline"
             sx={{
               display: 'block',
-              mb: isPhone ? 0.5 : 1.5,
+              mb: isCompactWindow ? 0.5 : 1.5,
               color: 'text.secondary',
               fontWeight: 600,
               letterSpacing: '0.1em',
@@ -122,7 +128,7 @@ export default function SettingsHubPage() {
             {section.label}
           </Typography>
 
-          {isPhone ? (
+          {isCompactWindow ? (
             // Title + chevron is the WHOLE row. Descriptions are deliberately
             // dropped here: at this width they would triple the list's height
             // and defeat the point of a scannable hierarchy — they stay on the

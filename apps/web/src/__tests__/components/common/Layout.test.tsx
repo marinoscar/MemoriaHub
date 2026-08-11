@@ -19,10 +19,14 @@ import { Layout } from '../../../components/common/Layout';
 
 // ---------------------------------------------------------------------------
 // Module mocks — each nav surface is a simple, breakpoint-agnostic stub, so
-// this file's viewport control drives ONLY `Layout`'s own `up('md')`/`up('lg')`
-// gates, never a self-gate belonging to the real components (`BottomNav`
-// self-gates on `down('md')` too; that overlap is exercised in its own spec,
-// not here).
+// this file's viewport control drives ONLY `Layout`'s own `up('sm')`/`up('lg')`
+// gates (issue #402 moved the rail's gate from `up('md')` to `up('sm')`),
+// never a self-gate belonging to the real components (`BottomNav`
+// self-gates on `down('sm')` too; that overlap is exercised for real, with a
+// REAL BottomNav, in `navigation/breakpoints.test.tsx` — mocking both here
+// means this file's own "exactly one nav" check below cannot detect the two
+// gates drifting apart, only that whatever `Layout` decides is internally
+// consistent with itself).
 // ---------------------------------------------------------------------------
 
 vi.mock('../../../components/navigation/AppBar', () => ({
@@ -52,8 +56,10 @@ import { Outlet } from 'react-router-dom';
 // ---------------------------------------------------------------------------
 // Viewport helper — same technique as AppBar.test.tsx / CollectionsHubPage.test.tsx.
 // The suite baseline (setup.ts) reports every query `matches: false`, which
-// for `up('md')` reads as "below md" — the phone treatment — so phone needs
-// no explicit call; tablet and desktop do.
+// for `up('sm')` reads as "below sm" — the phone treatment — so phone needs
+// no explicit call; medium and desktop do. (Issue #402: the rail's mount gate
+// pivoted from `up('md')`/900px to `up('sm')`/600px — see `Layout.tsx`'s file
+// header for the full coupled-gate list this component is one of six in.)
 // ---------------------------------------------------------------------------
 
 function setViewportWidth(px: number) {
@@ -95,7 +101,12 @@ function restoreDefaultViewport() {
   });
 }
 
-const TABLET_WIDTH = 950; // >= md(900), < lg(1200)
+// Renamed from the pre-#402 `TABLET_WIDTH = 950` (>= md/900) to a genuinely
+// in-band width: 768 is iPad portrait, spec §4.2's and epic #388 criterion
+// 6's named case, and the width at which the rail never rendered pre-fix.
+// 950 would still pass today (it is also >= sm/600) but no longer documents
+// anything meaningful about the "medium" window class this component targets.
+const MEDIUM_WIDTH = 768; // >= sm(600), < lg(1200) — Material 3's medium band
 const DESKTOP_WIDTH = 1300; // >= lg(1200)
 
 describe('Layout', () => {
@@ -150,8 +161,8 @@ describe('Layout', () => {
       expect(screen.queryByTestId('mock-context-pane')).not.toBeInTheDocument();
     });
 
-    it('tablet (md-lg): rail only — no context pane, no bottom bar', () => {
-      setViewportWidth(TABLET_WIDTH);
+    it('medium (sm-lg): rail only — no context pane, no bottom bar', () => {
+      setViewportWidth(MEDIUM_WIDTH);
       render(<Layout />);
 
       expect(screen.getByTestId('mock-rail')).toBeInTheDocument();
@@ -172,15 +183,18 @@ describe('Layout', () => {
   // =========================================================================
   // Exactly one PRIMARY nav (rail xor bottom bar) at every breakpoint —
   // never both together, never neither. `Layout` mounts the rail under
-  // `up('md')` and `BottomNav` under `!showRail`, the exact complement, so
-  // this is a real, assertable guarantee, not a coincidence of the three
-  // cases above.
+  // `up('sm')` (issue #402) and the MOCKED `BottomNav` stub under `!showRail`,
+  // the exact complement — but note both surfaces are stubs here, so this
+  // proves only that `Layout` itself is internally consistent, not that its
+  // gate agrees with the REAL `BottomNav`'s own `down('sm')` self-gate. That
+  // cross-component agreement — the actual issue #402 regression — is what
+  // `navigation/breakpoints.test.tsx` checks with a real, unmocked `BottomNav`.
   // =========================================================================
 
   describe('exactly one primary nav at each breakpoint', () => {
     it.each([
       ['phone', undefined],
-      ['tablet', TABLET_WIDTH],
+      ['medium', MEDIUM_WIDTH],
       ['desktop', DESKTOP_WIDTH],
     ] as const)('%s: rail and bottom bar are mutually exclusive', (_label, width) => {
       if (width) setViewportWidth(width);

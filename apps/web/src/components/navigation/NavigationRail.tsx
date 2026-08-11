@@ -2,15 +2,15 @@
  * The navigation rail — tablet and desktop chrome for the four destinations.
  *
  * Issue #392, epic #388, spec §4.2 / §4.3. This REPLACES `Sidebar`'s 240px
- * drawer at `md` and up. Material 3 deprecated the navigation drawer in favour
+ * drawer at `sm` and up. Material 3 deprecated the navigation drawer in favour
  * of the rail for exactly the reason that matters here: a rail is always
  * visible, so navigating costs ZERO taps, where a drawer costs one before
  * navigation can even begin (spec §2.2).
  *
  * TWO TREATMENTS, ONE COMPONENT
  * -----------------------------
- *   tablet  (md–lg)  →  collapsed, ~56px, icon over a short label
- *   desktop (≥ lg)   →  expanded, 220px, labelled rows + numeric Review badge
+ *   medium  (sm–lg)  →  collapsed, ~56px, icon over a short label
+ *   expanded (≥ lg)  →  expanded, 220px, labelled rows + numeric Review badge
  *                       + a PINNED group + a collapse toggle
  *
  * A desktop user may collapse the rail to the tablet treatment; the choice
@@ -18,12 +18,12 @@
  *
  * WHY SEARCH IS NOT IN THE RAIL — do not "fix" this
  * -------------------------------------------------
- * Search is one of the four destinations at every breakpoint, but at `md` and
+ * Search is one of the four destinations at every breakpoint, but at `sm` and
  * up it is carried by the TOP BAR's search pill rather than by the rail, and so
  * gives up its rail slot (spec §4.2). This is the one place the destination set
- * differs by form factor and it is deliberate: below `md` Search is a bottom-bar
+ * differs by form factor and it is deliberate: below `sm` Search is a bottom-bar
  * tab (which is what freed the top bar of its search field on a 360px screen),
- * and at `md` and up there is width in the toolbar for a real search input,
+ * and at `sm` and up there is width in the toolbar for a real search input,
  * which beats a rail row that only routes to one. Adding Search here would also
  * make the desktop collapse toggle lossy — collapsing "to the tablet treatment"
  * would then silently drop a destination.
@@ -85,7 +85,8 @@ import { ADMIN_HUB_PATH, visibleAdminSections } from '../../config/adminSections
 export const RAIL_WIDTH_COLLAPSED = 56;
 export const RAIL_WIDTH_EXPANDED = 220;
 
-/** The AppBar's `Toolbar` height at `md` and up, which is the only place the rail renders. */
+/** The AppBar's `Toolbar` height at `sm` and up (MUI's default Toolbar steps to
+ * 64px at exactly that breakpoint), which is the only place the rail renders. */
 const APPBAR_HEIGHT = 64;
 
 interface RailRowProps {
@@ -273,13 +274,15 @@ export function NavigationRail() {
   const { pinned, railCollapsed, toggleRailCollapsed } = useNavigationPrefs();
   const pinnedEntries = usePinnedDestinations(pinned, reviewEntries);
 
-  // The rail is mounted by `Layout` only at `md` and up, so this distinguishes
-  // the two rail treatments, not "is there a rail at all".
+  // The rail is mounted by `Layout` only at `sm` and up (issue #402), so this
+  // distinguishes the two rail treatments, not "is there a rail at all". It
+  // stays at `lg`: lowering the EXPANDED tier toward M3's 840dp is a separate
+  // design decision, deliberately not bundled with #402's rail-threshold fix.
   const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
 
-  // Tablet is ALWAYS collapsed — the preference is a desktop affordance, and
-  // honouring it below `lg` would let a stale `railCollapsed: false` render a
-  // 220px rail on a 900px screen.
+  // The medium tier is ALWAYS collapsed — the preference is a desktop
+  // affordance, and honouring it below `lg` would let a stale
+  // `railCollapsed: false` render a 220px rail on a 600px screen.
   const expanded = isDesktop && !railCollapsed;
 
   const isConsole = owns('/admin', pathname);

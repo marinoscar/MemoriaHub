@@ -521,7 +521,7 @@ describe('SettingsHubPage', () => {
     });
 
     it('renders a drill-down list on phone: titles present, descriptions absent, chevrons present', () => {
-      setViewportWidth(400); // < 900 → down('md') matches → isPhone=true
+      setViewportWidth(400); // < 600 → down('sm') matches → isCompactWindow=true
 
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -537,7 +537,7 @@ describe('SettingsHubPage', () => {
     });
 
     it('renders the card grid with descriptions on tablet/desktop', () => {
-      setViewportWidth(1200); // >= 900 → down('md') does not match → isPhone=false
+      setViewportWidth(1200); // >= 600 → down('sm') does not match → isCompactWindow=false
 
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
@@ -547,6 +547,30 @@ describe('SettingsHubPage', () => {
       ).toBeInTheDocument();
 
       // Rendered as a card, not a drill-down list row.
+      expect(screen.getByText('System').closest('.MuiCard-root')).not.toBeNull();
+      expect(screen.queryByText('System')?.closest('.MuiListItemButton-root')).toBeNull();
+    });
+
+    // =======================================================================
+    // Coupling regression guard (issue #402) — at an in-band width (700px),
+    // this page's `isCompactWindow` gate (`down('sm')`) must already agree
+    // with `AppBar`'s and `BottomNav`'s: the card grid, not the drill-down
+    // list. Before this fix all four shared the same `down('md')`/900px gate,
+    // so 700px still rendered the drill-down list. A regression that moves
+    // ONLY this page's gate back to `md` fails here even if `Layout`,
+    // `BottomNav`, and `AppBar` stay correct — see `Layout.tsx`'s file header
+    // for the full six-gate list this is one of.
+    // =======================================================================
+
+    it('renders the card grid, not the drill-down list, at an in-band width (700px)', () => {
+      setViewportWidth(700);
+
+      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText('System')).toBeInTheDocument();
+      expect(
+        screen.getByText('Configure core system settings, application behavior, and global defaults.'),
+      ).toBeInTheDocument();
       expect(screen.getByText('System').closest('.MuiCard-root')).not.toBeNull();
       expect(screen.queryByText('System')?.closest('.MuiListItemButton-root')).toBeNull();
     });

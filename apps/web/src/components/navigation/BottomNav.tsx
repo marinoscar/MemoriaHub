@@ -1,5 +1,5 @@
 /**
- * The phone bottom bar — the ONLY navigation chrome below `md`.
+ * The phone bottom bar — the ONLY navigation chrome below `sm`.
  *
  * Issue #392, epic #388, spec §4.1. Two things changed here and both are the
  * point of the phase:
@@ -46,14 +46,18 @@ import { useReviewQueues } from '../../hooks/useReviewQueues';
 
 export function BottomNav() {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  // The EXACT complement of `Layout`'s `showRail` (`up('sm')`), and it must
+  // stay that way: any drift opens a band with two navigation surfaces or none.
+  // 600px is Material 3's compact/medium boundary — see the coupled-gate list
+  // in `common/Layout.tsx` (issue #402).
+  const isCompactWindow = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
   const location = useLocation();
   // The same aggregate the rail's badge reads, through the same hook — so the
   // two can never show different numbers across a breakpoint change.
   const { totalPending } = useReviewQueues();
 
-  if (!isMobile) return null;
+  if (!isCompactWindow) return null;
 
   const resolved = resolveActiveDestination(location.pathname);
   // `false` (not `null`) is what MUI's BottomNavigation wants for "nothing

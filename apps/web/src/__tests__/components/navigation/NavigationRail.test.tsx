@@ -7,12 +7,16 @@
  * mode's contents) is exercised for real, against the live `ADMIN_SECTIONS`
  * catalog, mirroring `Sidebar.test.tsx`'s established pattern.
  *
- * The rail distinguishes COLLAPSED (tablet, `md`–`lg`) from EXPANDED (desktop,
+ * The rail distinguishes COLLAPSED (below `lg`) from EXPANDED (desktop,
  * `≥ lg`) via its OWN internal `useMediaQuery(theme.breakpoints.up('lg'))` —
- * this file mounts `<NavigationRail />` directly (not through `Layout`, which
- * gates whether the rail mounts AT ALL), and drives that distinction with the
- * same `matchMedia` viewport technique `AppBar.test.tsx` and
- * `CollectionsHubPage.test.tsx` already use.
+ * unaffected by issue #402, which only changed WHETHER the rail mounts at all
+ * (`Layout`'s gate, moved from `up('md')` to `up('sm')`), never this
+ * collapsed/expanded split. This file mounts `<NavigationRail />` directly
+ * (not through `Layout`), and drives that distinction with the same
+ * `matchMedia` viewport technique `AppBar.test.tsx` and
+ * `CollectionsHubPage.test.tsx` already use. `TABLET_WIDTH` below is any width
+ * under `lg` — it no longer needs to be >= `md`/900, since `Layout` no longer
+ * gates the rail's mount on `md` either.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
@@ -94,7 +98,7 @@ function restoreDefaultViewport() {
   });
 }
 
-const TABLET_WIDTH = 950; // >= md(900), < lg(1200) -> collapsed rail
+const TABLET_WIDTH = 950; // any width < lg(1200) -> collapsed rail (this component's own gate is `up('lg')` only; the md/900 boundary belongs to `Layout`, not here — see issue #402)
 const DESKTOP_WIDTH = 1300; // >= lg -> expanded rail
 
 // ---------------------------------------------------------------------------
@@ -231,7 +235,7 @@ describe('NavigationRail', () => {
   // Collapsed (tablet) — full label still reaches assistive technology
   // =========================================================================
 
-  describe('collapsed treatment (tablet, md-lg)', () => {
+  describe('collapsed treatment (below lg — this component\'s own internal split)', () => {
     it('shows an abbreviated visible label but the FULL label as the accessible name', () => {
       render(<NavigationRail />);
 

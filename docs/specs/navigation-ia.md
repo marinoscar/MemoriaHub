@@ -253,9 +253,27 @@ The four destinations **never change between breakpoints**. What changes is the 
 carries them, and what each screen does with the space it saves.
 
 Breakpoints use the MUI theme values already in the codebase (`xs 0 / sm 600 / md 900 /
-lg 1200`), which align closely with Material 3's compact / medium / expanded window classes.
+lg 1200`). They do **not** line up one-to-one with Material 3's window classes (compact
+`< 600dp` / medium `600–840dp` / expanded `≥ 840dp`), so the mapping is stated explicitly
+rather than assumed:
 
-### 4.1 Phone — `< md` (bottom bar, **no drawer**)
+| Tier | M3 window class | Gate used here | Chrome |
+|---|---|---|---|
+| Compact | `< 600dp` | `< sm` (600) | bottom bar |
+| Medium | `600–840dp` | `sm` to `lg` | collapsed rail |
+| Expanded | `≥ 840dp` | `≥ lg` (1200) | expanded rail + context pane |
+
+The rail threshold is **`sm` (600 px), matching M3 exactly** — M3 mandates a rail from the
+medium class upward and names "a tablet or foldable in portrait" as the canonical medium
+case. Gating it at `md` (900 px) was issue #402: every device between 600 and 899 px — an
+unfolded Z Fold 7 (~750 px), iPad portrait (768 px), iPad Pro 11" portrait (834 px), Android
+tablets in portrait, phones in landscape — got the phone treatment.
+
+The expanded threshold is deliberately **`lg` (1200 px), not M3's 840dp**: a context pane
+needs more room than a rail does, and lowering it is a separate design decision tracked on
+its own rather than bundled with the rail fix.
+
+### 4.1 Phone — `< sm` (bottom bar, **no drawer**)
 
 ```
 ┌──────────────────────────────────┐
@@ -283,13 +301,13 @@ lg 1200`), which align closely with Material 3's compact / medium / expanded win
   equivalent capability *before* that chrome is gated away. `/search` therefore renders its
   own search field (`PageSearchBar`, carrying both free-text/agentic search and the advanced
   `SearchPanel`) in every one of its render branches. Issue #400 is the regression that
-  proved the rule: the pill was gated to `md`+ while `SearchPage` still only rendered
-  results, leaving every user below 900 px with no way to search at all.
+  proved the rule: the pill was gated away while `SearchPage` still only rendered results,
+  leaving every user below the pill's threshold with no way to search at all.
 - **The circle chip replaces the wordmark.** On a phone, which circle you are in matters more
   than the app's name.
 - Review carries a dot indicator rather than a numeric badge at this size.
 
-### 4.2 Tablet — `md` to `lg` (collapsed rail)
+### 4.2 Tablet — `sm` to `lg` (collapsed rail)
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -310,8 +328,9 @@ lg 1200`), which align closely with Material 3's compact / medium / expanded win
 
 - **Collapsed navigation rail instead of a temporary drawer** — Material 3's own replacement
   (§2.2). Always visible, so navigating costs **zero taps instead of one**.
-- **~52 px of chrome instead of 240.** On a 768 px screen that is roughly one additional
-  column of photos.
+- **~52 px of chrome instead of 240.** On a 768 px screen — an iPad in portrait, squarely
+  inside this tier since the threshold is 600 px — that is roughly one additional column of
+  photos.
 - **Search returns to the top bar** where there is width for it, and gives up its rail slot.
   This is the one place the destination set differs by form factor, and it is deliberate:
   the destination still exists, it is simply carried by different chrome.
@@ -439,8 +458,8 @@ as a mobile anti-pattern.
 
 | Breakpoint | Treatment |
 |---|---|
-| Phone (`< md`) | Full-screen hub list → drill into a queue → back |
-| Tablet (`md`–`lg`) | Same as phone; the 52 px rail has no room for a pane |
+| Phone (`< sm`) | Full-screen hub list → drill into a queue → back |
+| Tablet (`sm`–`lg`) | Same as phone; the 52 px rail has no room for a pane |
 | Desktop (`≥ lg`) | The same list rendered as §4.3's **context pane**, side by side with the queue — no drilling |
 
 ```
@@ -494,8 +513,8 @@ way, or the two hubs will drift into different interaction models for no reason.
 
 | Breakpoint | Treatment |
 |---|---|
-| Phone (`< md`) | The full **card grid** (§6.1's rich hub) → tap a card → back |
-| Tablet (`md`–`lg`) | Same card grid, 3–4 columns |
+| Phone (`< sm`) | The full **card grid** (§6.1's rich hub) → tap a card → back |
+| Tablet (`sm`–`lg`) | Same card grid, 3–4 columns |
 | Desktop (`≥ lg`) | The §4.3 **context pane** lists the collections; `/collections` resolves to the first entry (Albums) in the main area |
 
 **On desktop `/collections` does NOT render the card grid.** The context pane already gives

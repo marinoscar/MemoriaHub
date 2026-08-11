@@ -146,6 +146,14 @@ describe('AppBar', () => {
 
   describe('Rendering', () => {
     it('should render app title', () => {
+      // The wordmark is desktop-only (>= md, 900px — see the "Brand slot"
+      // section below for the full threshold); an explicit desktop width
+      // keeps this generic "does the title render" case width-independent in
+      // intent rather than relying on the raw jsdom default, which reports
+      // every media query as non-matching and so is not equivalent to any
+      // real viewport for an `up(...)` gate.
+      setViewportWidth(1200);
+
       render(<AppBar />);
 
       expect(screen.getByText(APP_NAME)).toBeInTheDocument();
@@ -223,6 +231,7 @@ describe('AppBar', () => {
   describe('Navigation', () => {
     it('should navigate to home when title is clicked', async () => {
       const user = userEvent.setup();
+      setViewportWidth(1200); // desktop — the wordmark needs >= md to render
 
       render(<AppBar />);
 
@@ -234,6 +243,8 @@ describe('AppBar', () => {
     });
 
     it('should have clickable title', () => {
+      setViewportWidth(1200); // desktop — the wordmark needs >= md to render
+
       render(<AppBar />);
 
       const title = screen.getByText(APP_NAME);
@@ -260,6 +271,8 @@ describe('AppBar', () => {
 
   describe('Responsive Behavior', () => {
     it('should render all elements on desktop', () => {
+      setViewportWidth(1200); // the wordmark needs >= md to render
+
       render(<AppBar />);
 
       expect(screen.getByText(APP_NAME)).toBeInTheDocument();
@@ -284,8 +297,10 @@ describe('AppBar', () => {
 
   describe('Brand slot', () => {
     it('renders logo image on desktop viewport', () => {
+      setViewportWidth(1200); // >= md(900) → isDesktopBrand=true → desktop scenario
+
       render(<AppBar />);
-      // jsdom media queries always return false → isPhone=false → desktop scenario.
+
       // Desktop: both the logo img and the wordmark text are rendered.
       expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
       expect(screen.getByText(APP_NAME)).toBeInTheDocument();
@@ -295,13 +310,15 @@ describe('AppBar', () => {
       const user = userEvent.setup();
       render(<AppBar />);
       // The brand wrapper Box has the onClick; clicking the img triggers navigation.
+      // The logo itself renders at every width (only the wordmark's threshold
+      // differs), so this needs no explicit viewport.
       const logoImg = screen.getByRole('img', { name: APP_NAME });
       await user.click(logoImg);
       expect(logoImg).toBeInTheDocument();
     });
 
-    it('hides the wordmark below the sm breakpoint (phone)', () => {
-      setViewportWidth(360); // < 600 → down('sm') matches → isPhone=true
+    it('hides the wordmark below the md breakpoint (phone and medium/tablet)', () => {
+      setViewportWidth(360); // < 900 → isDesktopBrand=false
 
       render(<AppBar />);
 
@@ -309,13 +326,46 @@ describe('AppBar', () => {
       expect(screen.queryByText(APP_NAME)).not.toBeInTheDocument();
     });
 
-    it('shows the wordmark at and above the sm breakpoint', () => {
-      setViewportWidth(700); // >= 600 → down('sm') does not match → isPhone=false
+    // -----------------------------------------------------------------------
+    // The wordmark's own threshold — a SECOND, differently-placed boundary
+    // ---------------------------------------------------------------------
+    // Unlike the rest of this row's compact behaviour (`isTabletUp`/
+    // `isCompactWindow`, both gated at `sm`/600px per issue #402), the
+    // wordmark stays hidden through the whole medium band and only appears at
+    // `md`/900px. Once the rail moved to 600, the medium band (600-899px)
+    // newly carries the wordmark AND the circle chip AND the search pill at
+    // once, and that row is tight at ~600px — the chip would truncate toward
+    // icon-plus-caret and the pill's placeholder would clip. The wordmark is
+    // the one purely decorative element of the three (the logo beside it
+    // already carries brand identity), so it is the one sacrificed; shrinking
+    // `CircleChip` instead would have degraded a functional control to
+    // preserve a decorative one. This mirrors the exact trade the phone
+    // treatment already makes ("which circle you are in matters more than the
+    // app's name") — it just applies through 900px now, not only below 600.
+    //
+    // Sampled on BOTH sides of BOTH boundaries (600 and 900) — a test that
+    // only checked 360 and 1200 could not distinguish this threshold from the
+    // old, single `sm` one, which is exactly the class of mistake issue #402
+    // itself was.
+    it.each([
+      [360, false], // phone
+      [599, false], // just below the rail threshold
+      [600, false], // the rail/search/chip threshold — wordmark stays hidden here
+      [700, false], // in-band: rail + search pill + chip are already tablet-up
+      [899, false], // just below the wordmark's own threshold
+      [900, true], // the wordmark's own threshold
+      [1200, true], // desktop
+    ])('wordmark visible at %dpx: %s (logo always renders)', (px, wordmarkVisible) => {
+      setViewportWidth(px);
 
       render(<AppBar />);
 
       expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
-      expect(screen.getByText(APP_NAME)).toBeInTheDocument();
+      if (wordmarkVisible) {
+        expect(screen.getByText(APP_NAME)).toBeInTheDocument();
+      } else {
+        expect(screen.queryByText(APP_NAME)).not.toBeInTheDocument();
+      }
     });
   });
 
@@ -412,12 +462,15 @@ describe('AppBar', () => {
   });
 
   // =========================================================================
-  // Admin drill-down header (spec §4.4) — down('md') + an /admin/* route
+  // Admin drill-down header (spec §4.4) — down('sm') + an /admin/* route
+  // (issue #402: this gate pivoted from down('md')/900px to down('sm')/600px,
+  // coupled to `Layout`'s `showRail` — see that file's header for the full
+  // coupled-gate list)
   // =========================================================================
 
-  describe('Admin drill-down (phone/tablet)', () => {
+  describe('Admin drill-down (phone only, since #402)', () => {
     it('renders Back + the resolved page title, and hides the circle chip, upload button, and search', () => {
-      setViewportWidth(500); // < 900 → down('md') matches → isCompactNav=true
+      setViewportWidth(500); // < 600 → down('sm') matches → isCompactWindow=true
 
       render(<AppBar />, {
         wrapperOptions: { route: '/admin/settings/jobs', authenticated: true },
@@ -480,6 +533,48 @@ describe('AppBar', () => {
 
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /active circle/i })).toBeInTheDocument();
+    });
+  });
+
+  // =========================================================================
+  // Coupling regression guard (issue #402) — at an IN-BAND width (600-899px,
+  // e.g. 700), both of AppBar's gates must have already flipped to their
+  // tablet-up treatment: the search pill shows (isTabletUp), and even on an
+  // admin route the drill-down header must NOT appear (isCompactWindow).
+  // Before this fix both were gated at `md`/900px, so 700px still got the
+  // phone treatment on both counts. A regression that moves either gate back
+  // to `md` in isolation fails one of the two assertions below, independent
+  // of whatever `Layout`/`BottomNav` do — see `navigation/breakpoints.test.tsx`
+  // for the companion cross-cutting sweep this pairs with.
+  // =========================================================================
+
+  describe('in-band width (700px) — issue #402 coupling', () => {
+    it('renders the search pill and does NOT render the admin drill-down header, even on an /admin/* route', () => {
+      setViewportWidth(700); // >= 600 → isTabletUp=true, isCompactWindow=false
+
+      render(<AppBar />, {
+        wrapperOptions: { route: '/admin/settings/jobs', authenticated: true },
+      });
+
+      // isTabletUp: the inline search pill (not the phone icon-only button).
+      expect(screen.getByPlaceholderText('Search your photos')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open search' })).not.toBeInTheDocument();
+
+      // isCompactWindow: no drill-down header, even though the route is
+      // /admin/* — the normal toolbar (with the circle chip) renders instead.
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('heading', { name: 'Job Queue' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /active circle/i })).toBeInTheDocument();
+
+      // A THIRD, independent gate lives in this same in-band row: the
+      // wordmark (`isDesktopBrand`, `up('md')`/900px) stays hidden through the
+      // whole medium band so the chip and the search pill have the width —
+      // see the "Brand slot" section's dedicated sweep for the full rationale
+      // and boundary coverage. The logo alone still carries brand identity.
+      expect(screen.queryByText(APP_NAME)).not.toBeInTheDocument();
+      expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
     });
   });
 });
