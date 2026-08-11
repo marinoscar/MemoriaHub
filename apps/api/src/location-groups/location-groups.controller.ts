@@ -22,6 +22,7 @@ import {
   ListLocationGroupsDto,
   ListLocationValuesDto,
   LocationGroupMembersDto,
+  MergeLocationGroupsDto,
   UpdateLocationGroupDto,
 } from './dto/location-group.dto';
 
@@ -37,7 +38,9 @@ import {
  *
  * ROUTE ORDER MATTERS: `/values` and `/suggestions` are declared BEFORE
  * `/:id`, or Nest would match them as a group id and `ParseUUIDPipe` would
- * turn a perfectly valid request into a 400.
+ * turn a perfectly valid request into a 400. `/merge` is kept with them for
+ * the same reason — it is a static path today only because no `POST /:id`
+ * handler exists, and adding one later must not silently swallow it.
  */
 @ApiTags('Location Groups')
 @Controller('location-groups')
@@ -78,6 +81,24 @@ export class LocationGroupsController {
   @ApiResponse({ status: 200, description: '{ items, meta }' })
   async suggestions(@Query() query: ListLocationGroupSuggestionsDto) {
     return this.service.suggestions(query);
+  }
+
+  @Post('merge')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @ApiOperation({
+    summary: 'Merge many raw location values into one group (Admin)',
+    description:
+      'Select-many-and-merge (issue #407). Supply EXACTLY ONE of canonicalName (create a new group owning the values) or targetGroupId (add them to an existing group, never renaming it) — both or neither is a 400. One transaction, one enqueued rebuild. 409 (with the owner at details.groupId / details.groupName) when a value is already claimed by a different group; values the target already owns are counted in `skipped` instead.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: '{ groupId, created, added, skipped, jobId, status, group }',
+  })
+  @ApiResponse({ status: 400, description: 'Both or neither target supplied, or a scope mismatch' })
+  @ApiResponse({ status: 404, description: 'targetGroupId not found' })
+  @ApiResponse({ status: 409, description: 'A value is already claimed by another group' })
+  async merge(@Body() dto: MergeLocationGroupsDto, @CurrentUser('id') userId: string) {
+    return this.service.merge(dto, userId ?? null);
   }
 
   @Get(':id')

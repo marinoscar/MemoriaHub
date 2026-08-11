@@ -18,6 +18,7 @@ import type {
   ListLocationGroupSuggestionsDto,
   ListLocationGroupsDto,
   ListLocationValuesDto,
+  MergeLocationGroupsDto,
   UpdateLocationGroupDto,
 } from './dto/location-group.dto';
 
@@ -39,6 +40,12 @@ export const LEVEL_COLUMNS: Record<
 
 /** Minimum distinct values a suggestion cluster must contain to be proposed. */
 const MIN_SUGGESTION_CLUSTER_SIZE = 2;
+
+/**
+ * Page size `GET /api/location-groups/values` falls back to when a caller opts
+ * into paginated mode with `page` alone. See `listValues`' precedence note.
+ */
+const DEFAULT_VALUES_PAGE_SIZE = 50;
 
 /**
  * Title-case a folded, noise-stripped name for a proposed canonical name.
@@ -232,6 +239,27 @@ export class LocationGroupsService {
    * circle-scoped), annotated with the group that already owns it.
    *
    * ONE `groupBy` over the raw column + `geoCountryCode`, plus ONE alias read.
+   *
+   * ─── `limit` vs `page`/`pageSize` precedence (issue #407) ─────────────────
+   *
+   * The endpoint has TWO modes, selected by whether `page` or `pageSize` is
+   * present in the query:
+   *
+   *   - **Paginated mode** (`page` and/or `pageSize` supplied) — `page`
+   *     defaults to 1, `pageSize` to {@link DEFAULT_VALUES_PAGE_SIZE}, and
+   *     `limit` is IGNORED entirely. This is the mode the select-many-and-merge
+   *     checkbox list uses: a cap it cannot page past would make "showing 50 of
+   *     812" a lie it can never resolve.
+   *
+   *   - **Legacy mode** (neither supplied) — behaves exactly as before: the
+   *     first `limit` values (default 500). `LocationGroupEditorDialog`'s member
+   *     picker passes `limit: 50` and is unaffected.
+   *
+   * `meta.total` is the count BEFORE slicing in BOTH modes — it was previously
+   * the post-slice length, which made an honest "showing N of M" impossible.
+   * `meta.page`/`meta.pageSize` are always present (legacy mode reports page 1
+   * with `pageSize === limit`), and `meta.limit` is echoed so a legacy client
+   * reading it keeps working.
    */
   async listValues(query: ListLocationValuesDto) {
     const level = query.level as LocationGroupLevel;
@@ -271,10 +299,19 @@ export class LocationGroupsService {
         if (query.grouped === 'grouped') return v.groupId !== null;
         return true;
       })
-      .sort((a, b) => b.itemCount - a.itemCount || a.value.localeCompare(b.value))
-      .slice(0, query.limit);
+      .sort((a, b) => b.itemCount - a.itemCount || a.value.localeCompare(b.value));
 
-    return { items: values, meta: { total: values.length, limit: query.limit } };
+    // Count BEFORE slicing — this is the number a "showing N of M" label needs.
+    const total = values.length;
+
+    const paginated = query.page !== undefined || query.pageSize !== undefined;
+    const page = paginated ? (query.page ?? 1) : 1;
+    const pageSize = paginated ? (query.pageSize ?? DEFAULT_VALUES_PAGE_SIZE) : query.limit;
+
+    const offset = (page - 1) * pageSize;
+    const items = values.slice(offset, offset + pageSize);
+
+    return { items, meta: { total, page, pageSize, limit: query.limit } };
   }
 
   /**
@@ -368,50 +405,22 @@ export class LocationGroupsService {
     const level = dto.level as LocationGroupLevel;
     const countryCode = dto.countryCode ?? '';
     const canonicalName = dto.canonicalName.trim();
-    const normalizedName = fold(canonicalName);
 
     const geo = await this.validateGeometry(dto.center ?? null, dto.radiusKm ?? null);
 
-    const existing = await this.prisma.locationGroup.findUnique({
-      where: { level_countryCode_normalizedName: { level, countryCode, normalizedName } },
-      select: { id: true, canonicalName: true },
-    });
-    if (existing) {
-      throw this.conflict(
-        `A ${level} group named "${existing.canonicalName}" already exists in this scope`,
-        existing.id,
-        existing.canonicalName,
-      );
-    }
-
-    // The group's OWN canonical name resolves to itself, so it participates in
-    // the conflict check alongside the explicit member values.
-    const memberValues = this.dedupeValues([...(dto.memberValues ?? []), canonicalName]);
-    await this.assertMembersUnclaimed(level, countryCode, memberValues, null);
-
-    const group = await this.prisma.locationGroup.create({
-      data: {
+    const group = await this.createGroupWithMembers(
+      {
         level,
-        canonicalName,
-        normalizedName,
         countryCode,
+        canonicalName,
+        memberValues: dto.memberValues ?? [],
         enabled: dto.enabled ?? true,
         notes: dto.notes ?? null,
-        centerLat: geo.centerLat,
-        centerLng: geo.centerLng,
-        radiusKm: geo.radiusKm,
+        geo,
         createdById: userId,
-        aliases: {
-          create: memberValues.map((rawValue) => ({
-            level,
-            countryCode,
-            rawValue,
-            normalizedValue: fold(rawValue),
-          })),
-        },
       },
-      include: { aliases: { select: { normalizedValue: true } } },
-    });
+      this.prisma,
+    );
 
     // The cover check runs AFTER creation because it is evaluated against the
     // group's member set (see assertCoverBelongs), which does not exist until
@@ -519,24 +528,133 @@ export class LocationGroupsService {
     const group = await this.prisma.locationGroup.findUnique({ where: { id } });
     if (!group) throw new NotFoundException(`Location group ${id} not found`);
 
-    const deduped = this.dedupeValues(values);
-    await this.assertMembersUnclaimed(group.level, group.countryCode, deduped, id);
-
-    const result = await this.prisma.locationGroupAlias.createMany({
-      data: deduped.map((rawValue) => ({
-        groupId: id,
-        level: group.level,
-        countryCode: group.countryCode,
-        rawValue,
-        normalizedValue: fold(rawValue),
-      })),
-      // A value this group already owns is a no-op, not an error — POSTing the
-      // same picker selection twice must be idempotent.
-      skipDuplicates: true,
-    });
+    const added = await this.attachMembers(group, this.dedupeValues(values), this.prisma);
 
     await this.afterMutation('addMembers', id);
-    return { added: result.count };
+    return { added };
+  }
+
+  /**
+   * `POST /api/location-groups/merge` (issue #407) — fold a multi-select of raw
+   * values into ONE group in a single call.
+   *
+   * Two shapes, and EXACTLY ONE of them (both-or-neither is a 400):
+   *
+   *   - `canonicalName` — create a new group owning `values`. If a group with
+   *     that name already exists in scope this is a `409` carrying the existing
+   *     group at `details.groupId`, NOT a silent merge into it: the caller asked
+   *     to create, and re-targeting their request is exactly the kind of guess
+   *     the "block, never re-parent" rule exists to forbid. The client can
+   *     re-send with `targetGroupId` set to that id.
+   *
+   *   - `targetGroupId` — add `values` to an existing group. The group is NEVER
+   *     renamed; merging values into "The Woodlands" must not turn it into
+   *     "Conroe" because that happened to be the first value selected.
+   *
+   * Everything is written inside ONE transaction, so a conflict discovered on
+   * the fourth value cannot leave the first three already claimed. Exactly ONE
+   * rebuild is enqueued afterwards — never inside the transaction, since a
+   * rolled-back merge must not leave a rebuild job behind.
+   *
+   * Values the TARGET already owns are a no-op (`skippedMemberCount`), not a
+   * conflict, so re-merging the same selection is idempotent. Values owned by a
+   * DIFFERENT group are the standard `409` with `details.groupId` /
+   * `details.groupName`.
+   */
+  async merge(dto: MergeLocationGroupsDto, userId: string | null) {
+    const level = dto.level as LocationGroupLevel;
+
+    const targetGroupId = dto.targetGroupId?.trim() || null;
+    const canonicalName = dto.canonicalName?.trim() || null;
+
+    // XOR, checked here rather than as a zod `.refine` so the rule has exactly
+    // ONE place it can fail — the same reasoning behind center/radiusKm.
+    if ((targetGroupId === null) === (canonicalName === null)) {
+      throw new BadRequestException(
+        'Supply exactly one of targetGroupId (merge into an existing group) or canonicalName (create a new one)',
+      );
+    }
+
+    const values = this.dedupeValues(dto.values);
+    if (values.length === 0) {
+      throw new BadRequestException('values must contain at least one non-blank value');
+    }
+
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      if (targetGroupId !== null) {
+        const group = await tx.locationGroup.findUnique({ where: { id: targetGroupId } });
+        if (!group) throw new NotFoundException(`Location group ${targetGroupId} not found`);
+
+        // A tier mismatch means the caller is merging city names into a region
+        // group (or vice versa) — never a typo worth guessing through, since
+        // the alias rows would then be unreachable by the resolver at either
+        // tier.
+        if (group.level !== level) {
+          throw new BadRequestException(
+            `Location group ${targetGroupId} is a ${group.level} group; the request declared level "${level}"`,
+          );
+        }
+        // An omitted countryCode — or the '' UNSCOPED sentinel — inherits the
+        // target's scope. That leniency is REQUIRED, not laziness: the region
+        // and city tiers of `GET /api/media/explore/locations/:level` aggregate
+        // ACROSS countries and carry no code, so a caller merging from those
+        // surfaces genuinely cannot know the target's country (the same erasure
+        // behind the cover-override bug this issue also fixes).
+        //
+        // A NON-EMPTY countryCode that disagrees is still rejected rather than
+        // quietly ignored, because the alias rows are always written with the
+        // GROUP's scope and the caller would otherwise believe they had claimed
+        // values in a different one.
+        if (dto.countryCode && dto.countryCode !== group.countryCode) {
+          throw new BadRequestException(
+            `Location group ${targetGroupId} is scoped to countryCode "${group.countryCode}"; the request declared "${dto.countryCode}"`,
+          );
+        }
+
+        const added = await this.attachMembers(group, values, tx);
+        return { groupId: group.id, created: false, added };
+      }
+
+      const group = await this.createGroupWithMembers(
+        {
+          level,
+          countryCode: dto.countryCode ?? '',
+          canonicalName: canonicalName as string,
+          memberValues: values,
+          enabled: true,
+          notes: null,
+          geo: { centerLat: null, centerLng: null, radiusKm: null },
+          createdById: userId,
+        },
+        tx,
+      );
+      // Every submitted value is claimed by construction here — a value another
+      // group owned would have thrown, and the group is brand new so nothing
+      // could already have been there.
+      return { groupId: group.id, created: true, added: values.length };
+    });
+
+    const job = await this.afterMutation('merge', outcome.groupId);
+
+    return {
+      groupId: outcome.groupId,
+      created: outcome.created,
+      // `added` rather than a merge-specific name, so it reads the same as
+      // `POST /:id/members`' `{ added }`.
+      added: outcome.added,
+      // Values the target already owned, folded away by createMany's
+      // skipDuplicates. Reported rather than hidden so a client can say
+      // "3 added, 2 already there" instead of implying it moved five.
+      skipped: Math.max(values.length - outcome.added, 0),
+      // The rebuild this merge enqueued, so the admin page can poll it exactly
+      // as it polls an explicit `POST /api/admin/location-groups/rebuild`.
+      // Note it may be a job an EARLIER mutation enqueued: the rebuild service
+      // deliberately does not pass `skipDedup`, so a burst of merges collapses
+      // into one pending job — which is the desired behaviour, not a defect.
+      jobId: job.id,
+      status: job.status,
+      group: await this.get(outcome.groupId),
+    };
   }
 
   /** `DELETE /api/location-groups/:id/members`. */
@@ -569,16 +687,122 @@ export class LocationGroupsService {
   // ===========================================================================
 
   /**
-   * Drop the resolver snapshot and enqueue a FULL rebuild.
+   * Create a group plus its alias rows, with both scope checks that must run
+   * first: the (level, countryCode, normalizedName) uniqueness pre-check and
+   * the cross-group member conflict check.
+   *
+   * Shared by `create()` and the `canonicalName` half of `merge()` so the two
+   * cannot drift — in particular so a merge can never bypass the conflict rule.
+   * `client` is the injected PrismaService for `create()` and a transaction
+   * client for `merge()`; the read-then-write pair is therefore serialized
+   * against a concurrent merge in the merge path.
+   */
+  private async createGroupWithMembers(
+    params: {
+      level: LocationGroupLevel;
+      countryCode: string;
+      canonicalName: string;
+      memberValues: string[];
+      enabled: boolean;
+      notes: string | null;
+      geo: { centerLat: number | null; centerLng: number | null; radiusKm: number | null };
+      createdById: string | null;
+    },
+    client: Prisma.TransactionClient | PrismaService,
+  ) {
+    const { level, countryCode, canonicalName, geo } = params;
+    const normalizedName = fold(canonicalName);
+
+    const existing = await client.locationGroup.findUnique({
+      where: { level_countryCode_normalizedName: { level, countryCode, normalizedName } },
+      select: { id: true, canonicalName: true },
+    });
+    if (existing) {
+      throw this.conflict(
+        `A ${level} group named "${existing.canonicalName}" already exists in this scope`,
+        existing.id,
+        existing.canonicalName,
+      );
+    }
+
+    // The group's OWN canonical name resolves to itself, so it participates in
+    // the conflict check alongside the explicit member values.
+    const memberValues = this.dedupeValues([...params.memberValues, canonicalName]);
+    await this.assertMembersUnclaimed(level, countryCode, memberValues, null, client);
+
+    return client.locationGroup.create({
+      data: {
+        level,
+        canonicalName,
+        normalizedName,
+        countryCode,
+        enabled: params.enabled,
+        notes: params.notes,
+        centerLat: geo.centerLat,
+        centerLng: geo.centerLng,
+        radiusKm: geo.radiusKm,
+        createdById: params.createdById,
+        aliases: {
+          create: memberValues.map((rawValue) => ({
+            level,
+            countryCode,
+            rawValue,
+            normalizedValue: fold(rawValue),
+          })),
+        },
+      },
+      include: { aliases: { select: { normalizedValue: true } } },
+    });
+  }
+
+  /**
+   * Claim `values` for an existing group: conflict-check, then insert the alias
+   * rows. Returns the number of rows actually created.
+   *
+   * Shared by `addMembers()` and the `targetGroupId` half of `merge()`. Alias
+   * rows always carry the GROUP's level and countryCode, never a caller-supplied
+   * pair, so an alias can never end up in a scope the resolver would not look in.
+   */
+  private async attachMembers(
+    group: { id: string; level: LocationGroupLevel; countryCode: string },
+    values: string[],
+    client: Prisma.TransactionClient | PrismaService,
+  ): Promise<number> {
+    await this.assertMembersUnclaimed(group.level, group.countryCode, values, group.id, client);
+
+    const result = await client.locationGroupAlias.createMany({
+      data: values.map((rawValue) => ({
+        groupId: group.id,
+        level: group.level,
+        countryCode: group.countryCode,
+        rawValue,
+        normalizedValue: fold(rawValue),
+      })),
+      // A value this group already owns is a no-op, not an error — POSTing the
+      // same picker selection twice must be idempotent.
+      skipDuplicates: true,
+    });
+
+    return result.count;
+  }
+
+  /**
+   * Drop the resolver snapshot and enqueue a FULL rebuild, returning the job so
+   * a caller that wants to report it (see `merge`) can, without any other
+   * mutation's behaviour changing.
    *
    * See the class doc for why `groupIds` is never narrowed here.
    */
-  private async afterMutation(operation: string, groupId: string): Promise<void> {
+  private async afterMutation(
+    operation: string,
+    groupId: string,
+  ): Promise<{ id: string; status: string }> {
     this.resolver.invalidate();
     const job = await this.rebuild.enqueueRebuild({});
     this.logger.log(
       `location group ${operation} (${groupId}) invalidated the resolver cache and enqueued rebuild ${job.id}`,
     );
+    return { id: job.id, status: job.status };
   }
 
   private countKey(group: {
@@ -694,13 +918,14 @@ export class LocationGroupsService {
     countryCode: string,
     values: string[],
     selfGroupId: string | null,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<void> {
     if (values.length === 0) return;
 
     const normalized = Array.from(new Set(values.map((v) => fold(v))));
 
     const [aliasClashes, groupClashes] = await Promise.all([
-      this.prisma.locationGroupAlias.findMany({
+      client.locationGroupAlias.findMany({
         where: { level, countryCode, normalizedValue: { in: normalized } },
         select: {
           normalizedValue: true,
@@ -708,7 +933,7 @@ export class LocationGroupsService {
           group: { select: { canonicalName: true } },
         },
       }),
-      this.prisma.locationGroup.findMany({
+      client.locationGroup.findMany({
         where: { level, countryCode, normalizedName: { in: normalized } },
         select: { id: true, canonicalName: true, normalizedName: true },
       }),

@@ -173,12 +173,20 @@ export class LocationGroupMembersDto extends createZodDto(LocationGroupMembersSc
  * NO top-level `.default({})` here (or on the suggestions schema below): `level`
  * is REQUIRED, and a default would silently invent one for a caller who forgot
  * it, answering with a different tier's data instead of a 400.
+ *
+ * `page`/`pageSize` are deliberately `.optional()` with NO default (unlike
+ * `ListLocationGroupsSchema`, where both default): their PRESENCE is what
+ * selects paginated mode, so a default would silently switch every legacy
+ * `limit`-only caller over. See `LocationGroupsService.listValues` for the
+ * precedence rule.
  */
 export const ListLocationValuesSchema = z.object({
   level: z.enum(LOCATION_GROUP_LEVELS),
   q: z.string().trim().min(1).max(200).optional(),
   grouped: z.enum(GROUPED_FILTERS).default('all'),
   limit: z.coerce.number().int().min(1).max(2000).default(500),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(500).optional(),
 });
 
 export class ListLocationValuesDto extends createZodDto(ListLocationValuesSchema) {
@@ -191,8 +199,72 @@ export class ListLocationValuesDto extends createZodDto(ListLocationValuesSchema
   @ApiPropertyOptional({ enum: GROUPED_FILTERS, default: 'all' })
   declare grouped: (typeof GROUPED_FILTERS)[number];
 
-  @ApiPropertyOptional({ default: 500, minimum: 1, maximum: 2000 })
+  @ApiPropertyOptional({
+    default: 500,
+    minimum: 1,
+    maximum: 2000,
+    description:
+      'Legacy cap, used ONLY when neither page nor pageSize is supplied. Ignored in paginated mode.',
+  })
   declare limit: number;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    description: 'One-based page. Supplying page or pageSize selects paginated mode.',
+  })
+  declare page?: number;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 500, description: 'Page size (default 50).' })
+  declare pageSize?: number;
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/location-groups/merge
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /api/location-groups/merge` (issue #407) — the select-many-and-merge
+ * flow behind the Location Groups admin page's bulk selection.
+ *
+ * `targetGroupId` XOR `canonicalName` is enforced in the SERVICE, not with a
+ * zod `.refine`, so the rule has exactly ONE place it can fail — the same
+ * reasoning that keeps the `center`/`radiusKm` pairing rule out of this file.
+ */
+export const MergeLocationGroupsSchema = z
+  .object({
+    level: z.enum(LOCATION_GROUP_LEVELS),
+    // Optional with NO default (unlike CreateLocationGroupSchema): an omitted
+    // countryCode means "inherit the target group's scope" on the merge-into
+    // path, which a '' default would turn into a scope MISMATCH 400.
+    countryCode: z.string().trim().max(8).optional(),
+    values: z.array(z.string().trim().min(1).max(200)).min(1).max(500),
+    targetGroupId: z.string().uuid().optional(),
+    canonicalName: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
+export class MergeLocationGroupsDto extends createZodDto(MergeLocationGroupsSchema) {
+  @ApiProperty({ enum: LOCATION_GROUP_LEVELS })
+  declare level: LocationGroupLevelValue;
+
+  @ApiPropertyOptional({
+    description:
+      "ISO country scope. Omitted means unscoped ('') when creating, or the target group's own scope when merging into one.",
+  })
+  declare countryCode?: string;
+
+  @ApiProperty({ type: [String], description: 'Raw geocoder values to fold into the group' })
+  declare values: string[];
+
+  @ApiPropertyOptional({
+    description: 'Merge into this existing group (never renames it). Mutually exclusive with canonicalName.',
+  })
+  declare targetGroupId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Create a new group with this canonical name. Mutually exclusive with targetGroupId.',
+  })
+  declare canonicalName?: string;
 }
 
 // ---------------------------------------------------------------------------

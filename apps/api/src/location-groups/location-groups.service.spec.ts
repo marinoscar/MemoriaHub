@@ -128,6 +128,12 @@ describe('LocationGroupsService', () => {
     (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(null);
     (prisma.locationGroupAlias.findMany as jest.Mock).mockResolvedValue([]);
     (prisma.mediaItem.groupBy as jest.Mock).mockResolvedValue([]);
+    // Interactive transactions run inline against the same mock client, so the
+    // merge path's reads/writes are observable on `prisma` exactly like the
+    // non-transactional ones.
+    (prisma.$transaction as unknown as jest.Mock).mockImplementation((arg: any) =>
+      typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+    );
   });
 
   // =========================================================================
@@ -596,6 +602,558 @@ describe('LocationGroupsService', () => {
       } as any);
 
       expect(result.items.map((i) => i.value)).toEqual(['Guanacaste', 'Heredia']);
+    });
+
+    // -----------------------------------------------------------------------
+    // Pagination (issue #407)
+    // -----------------------------------------------------------------------
+
+    describe('pagination', () => {
+      it('meta.total is the PRE-slice count, not the length of the page', async () => {
+        // The bug this guards: total used to be computed after .slice(), so a
+        // checkbox list could only ever render "showing 2 of 2".
+        const result = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 500,
+          page: 1,
+          pageSize: 2,
+        } as any);
+
+        expect(result.items).toHaveLength(2);
+        expect(result.meta.total).toBe(3);
+      });
+
+      it('pages through the full ordered result set', async () => {
+        const page1 = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 500,
+          page: 1,
+          pageSize: 2,
+        } as any);
+        const page2 = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 500,
+          page: 2,
+          pageSize: 2,
+        } as any);
+
+        expect(page1.items.map((i) => i.value)).toEqual(['Guanacaste', 'Heredia']);
+        expect(page2.items.map((i) => i.value)).toEqual(['Heredia Province']);
+        expect(page2.meta).toMatchObject({ total: 3, page: 2, pageSize: 2 });
+      });
+
+      it('a page past the end is empty but still reports the real total', async () => {
+        const result = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 500,
+          page: 9,
+          pageSize: 2,
+        } as any);
+
+        expect(result.items).toEqual([]);
+        expect(result.meta.total).toBe(3);
+      });
+
+      it('pageSize alone selects paginated mode and page defaults to 1', async () => {
+        const result = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 500,
+          pageSize: 1,
+        } as any);
+
+        expect(result.items.map((i) => i.value)).toEqual(['Guanacaste']);
+        expect(result.meta).toMatchObject({ total: 3, page: 1, pageSize: 1 });
+      });
+
+      it('page alone selects paginated mode with the default page size', async () => {
+        const result = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 500,
+          page: 1,
+        } as any);
+
+        expect(result.meta.pageSize).toBe(50);
+        expect(result.items).toHaveLength(3);
+      });
+
+      it('paginated mode IGNORES limit — a checkbox list must be able to page past the cap', async () => {
+        const result = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 1,
+          page: 1,
+          pageSize: 10,
+        } as any);
+
+        expect(result.items).toHaveLength(3);
+      });
+
+      it('a bare limit keeps the legacy shape: first N values, page 1, pageSize === limit', async () => {
+        // LocationGroupEditorDialog's member picker passes limit: 50 and nothing
+        // else; it must not start paginating out from under itself.
+        const result = await service.listValues({
+          level: 'region',
+          grouped: 'all',
+          limit: 2,
+        } as any);
+
+        expect(result.items.map((i) => i.value)).toEqual(['Guanacaste', 'Heredia']);
+        expect(result.meta).toEqual({ total: 3, page: 1, pageSize: 2, limit: 2 });
+      });
+
+      it('the grouped filter is applied BEFORE the page is sliced', async () => {
+        const result = await service.listValues({
+          level: 'region',
+          grouped: 'ungrouped',
+          limit: 500,
+          page: 1,
+          pageSize: 10,
+        } as any);
+
+        expect(result.items.map((i) => i.value)).toEqual(['Guanacaste']);
+        // total counts only the values that survived the filter, so
+        // "showing 1 of 1" is honest rather than "1 of 3".
+        expect(result.meta.total).toBe(1);
+      });
+    });
+  });
+
+  // =========================================================================
+  // POST /merge  (issue #407)
+  // =========================================================================
+
+  describe('merge', () => {
+    beforeEach(() => {
+      (prisma.locationGroup.create as jest.Mock).mockResolvedValue({
+        id: 'group-new',
+        aliases: [
+          { normalizedValue: 'the woodlands' },
+          { normalizedValue: 'conroe' },
+          { normalizedValue: 'shenandoah' },
+        ],
+      });
+      (prisma.locationGroupAlias.createMany as jest.Mock).mockResolvedValue({ count: 2 });
+    });
+
+    // -----------------------------------------------------------------------
+    // canonicalName ⇒ create
+    // -----------------------------------------------------------------------
+
+    it('creates a new group owning every submitted value', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock)
+        .mockResolvedValueOnce(null) // uniqueness pre-check
+        .mockResolvedValue(makeGroup({ id: 'group-new', canonicalName: 'The Woodlands' }));
+
+      const result = await service.merge(
+        {
+          level: 'locality',
+          countryCode: 'US',
+          values: ['Conroe', 'Shenandoah'],
+          canonicalName: 'The Woodlands',
+        } as any,
+        'user-1',
+      );
+
+      const [call] = (prisma.locationGroup.create as jest.Mock).mock.calls;
+      expect(call[0].data).toMatchObject({
+        level: 'locality',
+        countryCode: 'US',
+        canonicalName: 'The Woodlands',
+        normalizedName: 'the woodlands',
+        createdById: 'user-1',
+      });
+      // The group's own canonical name is claimed alongside the submitted
+      // values, so it resolves to itself just like any alias.
+      expect(call[0].data.aliases.create.map((a: any) => a.rawValue).sort()).toEqual([
+        'Conroe',
+        'Shenandoah',
+        'The Woodlands',
+      ]);
+      expect(result).toMatchObject({
+        groupId: 'group-new',
+        created: true,
+        added: 2,
+        skipped: 0,
+        jobId: 'job-1',
+        status: 'pending',
+      });
+      // The full group detail is returned alongside the counters, so the client
+      // can render the merged group without a follow-up GET.
+      expect(result.group).toMatchObject({ id: 'group-new', canonicalName: 'The Woodlands' });
+    });
+
+    it('409s when a group with that canonical name already exists in scope', async () => {
+      // Deliberately NOT a silent merge into it: the caller asked to create.
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue({
+        id: 'existing-group',
+        canonicalName: 'The Woodlands',
+      });
+
+      const body = sendThroughFilter(
+        await service
+          .merge(
+            {
+              level: 'locality',
+              countryCode: 'US',
+              values: ['Conroe'],
+              canonicalName: 'The Woodlands',
+            } as any,
+            'user-1',
+          )
+          .catch((e) => e),
+      );
+
+      expect(body.statusCode).toBe(409);
+      expect(body.details).toEqual({
+        groupId: 'existing-group',
+        groupName: 'The Woodlands',
+      });
+      expect(prisma.locationGroup.create).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------------
+    // targetGroupId ⇒ add members
+    // -----------------------------------------------------------------------
+
+    it('adds values to an existing group WITHOUT renaming it', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({
+          id: 'group-1',
+          level: 'locality',
+          canonicalName: 'The Woodlands',
+          normalizedName: 'the woodlands',
+          countryCode: 'US',
+        }),
+      );
+
+      const result = await service.merge(
+        {
+          level: 'locality',
+          countryCode: 'US',
+          targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          values: ['Conroe', 'Shenandoah'],
+        } as any,
+        'user-1',
+      );
+
+      // The single most important assertion here: merging values into a group
+      // must never rewrite its canonical name to whatever was selected first.
+      expect(prisma.locationGroup.update).not.toHaveBeenCalled();
+      expect(prisma.locationGroup.create).not.toHaveBeenCalled();
+
+      const [call] = (prisma.locationGroupAlias.createMany as jest.Mock).mock.calls;
+      expect(call[0].skipDuplicates).toBe(true);
+      expect(call[0].data).toEqual([
+        {
+          groupId: 'group-1',
+          level: 'locality',
+          countryCode: 'US',
+          rawValue: 'Conroe',
+          normalizedValue: 'conroe',
+        },
+        {
+          groupId: 'group-1',
+          level: 'locality',
+          countryCode: 'US',
+          rawValue: 'Shenandoah',
+          normalizedValue: 'shenandoah',
+        },
+      ]);
+      expect(result).toMatchObject({ groupId: 'group-1', created: false, added: 2 });
+    });
+
+    it('inherits the target group\'s country scope when countryCode is omitted', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'region', countryCode: 'CR' }),
+      );
+
+      await service.merge(
+        {
+          level: 'region',
+          targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          values: ['Heredia Province'],
+        } as any,
+        'user-1',
+      );
+
+      const [call] = (prisma.locationGroupAlias.createMany as jest.Mock).mock.calls;
+      expect(call[0].data[0].countryCode).toBe('CR');
+    });
+
+    it('values the TARGET already owns are a no-op, not a conflict', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'region', countryCode: 'CR' }),
+      );
+      // The conflict check skips aliases owned by the target itself...
+      (prisma.locationGroupAlias.findMany as jest.Mock).mockResolvedValue([
+        {
+          normalizedValue: 'heredia province',
+          groupId: 'group-1',
+          group: { canonicalName: 'Heredia' },
+        },
+      ]);
+      // ...and createMany's skipDuplicates folds the row away.
+      (prisma.locationGroupAlias.createMany as jest.Mock).mockResolvedValue({ count: 1 });
+
+      const result = await service.merge(
+        {
+          level: 'region',
+          targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          values: ['Heredia Province', 'Provincia de Heredia'],
+        } as any,
+        'user-1',
+      );
+
+      expect(result).toMatchObject({ created: false, added: 1, skipped: 1 });
+    });
+
+    it('404s for an unknown targetGroupId', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.merge(
+          {
+            level: 'region',
+            targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+            values: ['Heredia'],
+          } as any,
+          'user-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('400s when the target group is at a different tier', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'region' }),
+      );
+
+      await expect(
+        service.merge(
+          {
+            level: 'locality',
+            targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+            values: ['Barva'],
+          } as any,
+          'user-1',
+        ),
+      ).rejects.toThrow(/is a region group/);
+    });
+
+    it('tolerates the \'\' UNSCOPED sentinel against a country-scoped target', async () => {
+      // REQUIRED, not leniency for its own sake: the region and city tiers
+      // aggregate across countries and carry no code, so a caller merging from
+      // /places/regions genuinely cannot know the target's country.
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'region', countryCode: 'CR' }),
+      );
+
+      await service.merge(
+        {
+          level: 'region',
+          countryCode: '',
+          targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          values: ['Heredia Province'],
+        } as any,
+        'user-1',
+      );
+
+      const [call] = (prisma.locationGroupAlias.createMany as jest.Mock).mock.calls;
+      expect(call[0].data[0].countryCode).toBe('CR');
+    });
+
+    it('400s when a NON-EMPTY countryCode disagrees with the target group\'s scope', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'region', countryCode: 'CR' }),
+      );
+
+      await expect(
+        service.merge(
+          {
+            level: 'region',
+            countryCode: 'US',
+            targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+            values: ['Heredia'],
+          } as any,
+          'user-1',
+        ),
+      ).rejects.toThrow(/scoped to countryCode "CR"/);
+    });
+
+    // -----------------------------------------------------------------------
+    // Target XOR
+    // -----------------------------------------------------------------------
+
+    it('400s when BOTH targetGroupId and canonicalName are supplied', async () => {
+      await expect(
+        service.merge(
+          {
+            level: 'region',
+            targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+            canonicalName: 'Heredia',
+            values: ['Heredia Province'],
+          } as any,
+          'user-1',
+        ),
+      ).rejects.toThrow(/exactly one of targetGroupId/);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('400s when NEITHER targetGroupId nor canonicalName is supplied', async () => {
+      await expect(
+        service.merge({ level: 'region', values: ['Heredia Province'] } as any, 'user-1'),
+      ).rejects.toThrow(/exactly one of targetGroupId/);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('400s when every submitted value is blank', async () => {
+      await expect(
+        service.merge(
+          { level: 'region', canonicalName: 'Heredia', values: ['   '] } as any,
+          'user-1',
+        ),
+      ).rejects.toThrow(/at least one non-blank value/);
+    });
+
+    // -----------------------------------------------------------------------
+    // Conflicts: block, never re-parent
+    // -----------------------------------------------------------------------
+
+    it('409s ON THE WIRE with details.groupId / details.groupName when a value belongs to another group', async () => {
+      // Same regression guard as the create/addMembers 409s: a top-level
+      // `groupId` is silently stripped by HttpExceptionFilter's allowlist, so
+      // only the real filter can prove the contract holds.
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'locality', countryCode: 'US' }),
+      );
+      (prisma.locationGroupAlias.findMany as jest.Mock).mockResolvedValue([
+        {
+          normalizedValue: 'conroe',
+          groupId: 'other-group',
+          group: { canonicalName: 'Greater Houston' },
+        },
+      ]);
+
+      const body = sendThroughFilter(
+        await service
+          .merge(
+            {
+              level: 'locality',
+              countryCode: 'US',
+              targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+              values: ['Conroe'],
+            } as any,
+            'user-1',
+          )
+          .catch((e) => e),
+      );
+
+      expect(body).toMatchObject({
+        statusCode: 409,
+        details: { groupId: 'other-group', groupName: 'Greater Houston' },
+      });
+      expect(prisma.locationGroupAlias.createMany).not.toHaveBeenCalled();
+    });
+
+    it('the create path 409s on a claimed value too — a merge cannot bypass the rule', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.locationGroupAlias.findMany as jest.Mock).mockResolvedValue([
+        {
+          normalizedValue: 'conroe',
+          groupId: 'other-group',
+          group: { canonicalName: 'Greater Houston' },
+        },
+      ]);
+
+      const body = sendThroughFilter(
+        await service
+          .merge(
+            {
+              level: 'locality',
+              countryCode: 'US',
+              canonicalName: 'The Woodlands',
+              values: ['Conroe'],
+            } as any,
+            'user-1',
+          )
+          .catch((e) => e),
+      );
+
+      expect(body.statusCode).toBe(409);
+      expect(body.details).toEqual({
+        groupId: 'other-group',
+        groupName: 'Greater Houston',
+      });
+      expect(prisma.locationGroup.create).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------------
+    // Transaction + rebuild
+    // -----------------------------------------------------------------------
+
+    it('writes inside ONE transaction', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'region', countryCode: 'CR' }),
+      );
+
+      await service.merge(
+        {
+          level: 'region',
+          targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          values: ['Heredia Province'],
+        } as any,
+        'user-1',
+      );
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('invalidates the resolver and enqueues exactly ONE full, un-deduped rebuild', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(
+        makeGroup({ id: 'group-1', level: 'region', countryCode: 'CR' }),
+      );
+
+      await service.merge(
+        {
+          level: 'region',
+          targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+          values: ['Heredia Province', 'Provincia de Heredia'],
+        } as any,
+        'user-1',
+      );
+
+      expect(resolver.invalidate).toHaveBeenCalledTimes(1);
+      expect(rebuild.enqueueRebuild).toHaveBeenCalledTimes(1);
+      // FULL, never groupIds-scoped: the rebuild's RESET pass runs over the
+      // whole scope, so a scoped rebuild would strand every OTHER group's
+      // canonical names at their raw values. And no skipDedup — collapsing a
+      // burst of merges into one pending rebuild is exactly right.
+      expect(rebuild.enqueueRebuild).toHaveBeenCalledWith({});
+      expect(rebuild.enqueueRebuild.mock.calls[0][0]).not.toHaveProperty('skipDedup');
+      expect(rebuild.enqueueRebuild.mock.calls[0][0]).not.toHaveProperty('groupIds');
+    });
+
+    it('does NOT invalidate or enqueue when the merge is rejected', async () => {
+      (prisma.locationGroup.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.merge(
+          {
+            level: 'region',
+            targetGroupId: 'aaaaaaaa-0000-4000-8000-000000000001',
+            values: ['Heredia'],
+          } as any,
+          'user-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(resolver.invalidate).not.toHaveBeenCalled();
+      expect(rebuild.enqueueRebuild).not.toHaveBeenCalled();
     });
   });
 

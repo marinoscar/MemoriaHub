@@ -438,6 +438,172 @@ describe('MediaService — Location Grouping read paths (issue #374)', () => {
       expect(prisma.mediaItem.findFirst).toHaveBeenCalled();
     });
 
+    // -----------------------------------------------------------------------
+    // Scoped-group cover fallback (issue #407)
+    // -----------------------------------------------------------------------
+
+    describe('country-scoped group covers on the region/city tiers', () => {
+      beforeEach(() => {
+        (prisma.mediaItem.groupBy as jest.Mock).mockResolvedValue([
+          ungroupedRow('Costa Rica', 'CR', 'Heredia', 'Heredia', 3),
+        ]);
+      });
+
+      /**
+       * Every storage key the batched thumbnail signer was asked for. Flattened
+       * across calls (and tolerant of none at all) because a tier whose cover
+       * resolves to null never reaches the signer with a key.
+       */
+      const signedKeys = (): string[] =>
+        (prisma.storageObject.findMany as jest.Mock).mock.calls.flatMap(
+          (call) => call[0]?.where?.storageKey?.in ?? [],
+        );
+
+      it("uses a SCOPED group's cover when no unscoped group matches", async () => {
+        // The bug: buildLocationLevel aggregates regions/cities ACROSS countries
+        // and passes countryCode: null, so the override key is '|heredia' and
+        // only ever matched a group whose countryCode is the unscoped ''
+        // sentinel. A region group created with an explicit country from the
+        // admin page grouped its members correctly but its cover never showed.
+        (prisma.locationGroup.findMany as jest.Mock).mockResolvedValue([
+          {
+            countryCode: 'CR',
+            normalizedName: 'heredia',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'scoped-cover' },
+              deletedAt: null,
+            },
+          },
+        ]);
+
+        await service.exploreLocationLevel(CIRCLE_ID, 'regions', USER_ID, []);
+
+        expect(prisma.mediaItem.findFirst).not.toHaveBeenCalled();
+        const [signCall] = (prisma.storageObject.findMany as jest.Mock).mock.calls;
+        expect(signCall[0].where.storageKey.in).toContain('scoped-cover');
+      });
+
+      it('an UNSCOPED group still wins over a scoped one (more specific loses only its own key)', async () => {
+        (prisma.locationGroup.findMany as jest.Mock).mockResolvedValue([
+          {
+            countryCode: 'CR',
+            normalizedName: 'heredia',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'scoped-cover' },
+              deletedAt: null,
+            },
+          },
+          {
+            countryCode: '',
+            normalizedName: 'heredia',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'unscoped-cover' },
+              deletedAt: null,
+            },
+          },
+        ]);
+
+        await service.exploreLocationLevel(CIRCLE_ID, 'regions', USER_ID, []);
+
+        const [signCall] = (prisma.storageObject.findMany as jest.Mock).mock.calls;
+        expect(signCall[0].where.storageKey.in).toContain('unscoped-cover');
+        expect(signCall[0].where.storageKey.in).not.toContain('scoped-cover');
+      });
+
+      it('AMBIGUOUS multi-country matches yield NO override, falling back to the heuristic', async () => {
+        // "Ontario" scoped to CA and to US: with the country erased at this tier
+        // there is nothing to choose on, and picking arbitrarily would show one
+        // country's photo for the other's places.
+        (prisma.locationGroup.findMany as jest.Mock).mockResolvedValue([
+          {
+            countryCode: 'CA',
+            normalizedName: 'heredia',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'ca-cover' },
+              deletedAt: null,
+            },
+          },
+          {
+            countryCode: 'US',
+            normalizedName: 'heredia',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'us-cover' },
+              deletedAt: null,
+            },
+          },
+        ]);
+
+        await service.exploreLocationLevel(CIRCLE_ID, 'regions', USER_ID, []);
+
+        expect(prisma.mediaItem.findFirst).toHaveBeenCalled();
+        expect(signedKeys()).not.toContain('ca-cover');
+        expect(signedKeys()).not.toContain('us-cover');
+      });
+
+      it('a soft-deleted scoped cover is not a fallback candidate', async () => {
+        (prisma.locationGroup.findMany as jest.Mock).mockResolvedValue([
+          {
+            countryCode: 'CR',
+            normalizedName: 'heredia',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'scoped-cover' },
+              deletedAt: new Date('2026-08-01T00:00:00.000Z'),
+            },
+          },
+        ]);
+
+        await service.exploreLocationLevel(CIRCLE_ID, 'regions', USER_ID, []);
+
+        expect(prisma.mediaItem.findFirst).toHaveBeenCalled();
+      });
+
+      it('a COUNTRY entry that already knows its code never borrows another country\'s group', async () => {
+        // Countries carry a real countryCode, so an exact-key miss means there
+        // genuinely is no group — a differently-scoped one must not answer.
+        (prisma.locationGroup.findMany as jest.Mock).mockResolvedValue([
+          {
+            countryCode: 'US',
+            normalizedName: 'costa rica',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'wrong-country-cover' },
+              deletedAt: null,
+            },
+          },
+        ]);
+
+        await service.exploreLocationLevel(CIRCLE_ID, 'countries', USER_ID, []);
+
+        expect(prisma.mediaItem.findFirst).toHaveBeenCalled();
+        expect(signedKeys()).not.toContain('wrong-country-cover');
+      });
+
+      it('exploreLocations still omits countryCode from regions and cities', async () => {
+        // The fallback must not leak the group's country into the response.
+        (prisma.locationGroup.findMany as jest.Mock).mockResolvedValue([
+          {
+            countryCode: 'CR',
+            normalizedName: 'heredia',
+            coverMediaItem: {
+              metadata: { thumbnailStorageKey: 'scoped-cover' },
+              deletedAt: null,
+            },
+          },
+        ]);
+
+        const result = await service.exploreLocations(CIRCLE_ID, USER_ID, []);
+
+        expect(result.regions).toEqual([
+          { name: 'Heredia', count: 3, coverThumbnailUrl: null },
+        ]);
+        expect(result.cities).toEqual([
+          { name: 'Heredia', count: 3, coverThumbnailUrl: null },
+        ]);
+        expect(result.countries).toEqual([
+          { name: 'Costa Rica', countryCode: 'CR', count: 3, coverThumbnailUrl: null },
+        ]);
+      });
+    });
+
     it('a map pin is labelled with the canonical locality', async () => {
       (prisma.mediaItem.findMany as jest.Mock).mockResolvedValue([
         {
