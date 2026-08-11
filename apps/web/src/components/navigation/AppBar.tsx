@@ -56,6 +56,14 @@ export function AppBar() {
   // and — because there is no rail to swap into Console mode (spec §4.4) — the
   // admin surface becomes a drill-down with this bar as its header.
   const isCompactWindow = useMediaQuery(theme.breakpoints.down('sm'));
+  /**
+   * The wordmark alone keeps the OLD `md` threshold (see the brand block
+   * below). It is a deliberate second boundary in this row, not an oversight:
+   * every other compact behaviour here flips at `sm` with the rail (#402),
+   * while the app name stays hidden through the medium band so the circle chip
+   * and the search pill can have that ~110px instead.
+   */
+  const isDesktopBrand = useMediaQuery(theme.breakpoints.up('md'));
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadSnackbar, setUploadSnackbar] = useState(false);
@@ -177,7 +185,25 @@ export function AppBar() {
                   alt={APP_NAME}
                   sx={{ height: 32, width: 'auto', display: 'block', objectFit: 'contain' }}
                 />
-                {!isCompactWindow && (
+                {/* The wordmark is hidden below `md`, NOT below `sm` like the
+                    rest of this row's compact behaviour — it has its own,
+                    higher threshold on purpose.
+
+                    Once the rail moved to 600 (#402), the medium band newly
+                    carries the wordmark AND the circle chip AND the search
+                    pill, and at ~600px that row is tight: the chip truncates
+                    toward icon-plus-caret and the pill's placeholder clips.
+                    Something has to give, and the wordmark is the only one of
+                    the three that is purely decorative — the logo beside it
+                    already carries brand identity, while the chip carries the
+                    active circle and the pill carries search.
+
+                    This is the same trade the phone treatment already makes
+                    ("which circle you are in matters more than the app's
+                    name", spec §4.1); it simply applies through the medium band
+                    too. Shrinking CircleChip instead would have degraded a
+                    functional control to preserve a decorative one. */}
+                {isDesktopBrand && (
                   <Typography
                     variant="h6"
                     component="div"
