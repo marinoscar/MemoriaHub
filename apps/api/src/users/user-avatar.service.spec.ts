@@ -307,7 +307,7 @@ describe('UserAvatarService', () => {
       );
     });
 
-    it('a non-member gets 404, NOT 403 (enumeration-resistant)', async () => {
+    it('a non-member gets 404, NOT 403 (enumeration-resistant), with an actionable message', async () => {
       mockPrisma.person.findUnique.mockResolvedValue(personRow() as any);
       circleMembership.assertCircleAccess.mockRejectedValueOnce(
         new ForbiddenException('You are not a member of this circle'),
@@ -319,26 +319,43 @@ describe('UserAvatarService', () => {
 
       await expect(promise).rejects.toBeInstanceOf(NotFoundException);
       await expect(promise).rejects.not.toBeInstanceOf(ForbiddenException);
+      await expect(promise).rejects.toThrow(
+        'This person is no longer available to link. They may have been removed, merged with another person, or you may no longer have access to their circle. Please pick again.',
+      );
     });
 
-    it('a soft-deleted person -> 404 without ever checking circle access', async () => {
+    it('a soft-deleted person -> 404 without ever checking circle access, with the same actionable message (issue #406)', async () => {
       mockPrisma.person.findUnique.mockResolvedValue(
         personRow({ deletedAt: new Date('2026-01-01T00:00:00Z') }) as any,
       );
 
-      await expect(
-        service.updateProfile(requestUser(), { linkedPersonId: PERSON_ID } as any),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      const promise = service.updateProfile(requestUser(), {
+        linkedPersonId: PERSON_ID,
+      } as any);
+
+      await expect(promise).rejects.toBeInstanceOf(NotFoundException);
+      // Same message as the non-member case above — the two causes remain
+      // indistinguishable to the caller, only the server log disambiguates.
+      await expect(promise).rejects.toThrow(
+        'This person is no longer available to link. They may have been removed, merged with another person, or you may no longer have access to their circle. Please pick again.',
+      );
+      // No longer a bare UUID with zero context (the pre-fix message).
+      await expect(promise).rejects.not.toThrow(`Person ${PERSON_ID} not found`);
 
       expect(circleMembership.assertCircleAccess).not.toHaveBeenCalled();
     });
 
-    it('a nonexistent person id -> 404 without ever checking circle access', async () => {
+    it('a nonexistent person id -> 404 without ever checking circle access, with the actionable message', async () => {
       mockPrisma.person.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.updateProfile(requestUser(), { linkedPersonId: 'no-such-person' } as any),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      const promise = service.updateProfile(requestUser(), {
+        linkedPersonId: 'no-such-person',
+      } as any);
+
+      await expect(promise).rejects.toBeInstanceOf(NotFoundException);
+      await expect(promise).rejects.toThrow(
+        'This person is no longer available to link. They may have been removed, merged with another person, or you may no longer have access to their circle. Please pick again.',
+      );
 
       expect(circleMembership.assertCircleAccess).not.toHaveBeenCalled();
     });

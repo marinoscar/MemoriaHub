@@ -61,6 +61,15 @@ export const AVATAR_ALLOWED_MIME_TYPES: readonly string[] = [
 /** Storage-key prefix. See the recursion-guard note on `storeAvatarObject`. */
 const AVATAR_KEY_PREFIX = 'avatars/';
 
+/**
+ * Client-facing message for `assertPersonLinkable` (issue #406). Deliberately
+ * generic — it must never reveal whether the person is missing/deleted or
+ * merely in a circle the caller cannot see (enumeration-resistance), while
+ * still giving the user something actionable instead of a bare UUID.
+ */
+const PERSON_UNLINKABLE_MESSAGE =
+  'This person is no longer available to link. They may have been removed, merged with another person, or you may no longer have access to their circle. Please pick again.';
+
 /** The columns `resolveAvatarUrl` reads. */
 const AVATAR_COLUMNS = {
   id: true,
@@ -994,6 +1003,17 @@ export class UserAvatarService {
    * member of — surfaces as 404, never 403: a 403 would confirm that the id
    * names a real person in a circle the caller cannot see, which is exactly the
    * enumeration the public-share and notification routes also refuse to allow.
+   *
+   * The thrown message is deliberately generic (issue #406) — it must never
+   * reveal WHICH of the two cases applied, only that linking cannot proceed.
+   * A concrete example of the "missing" case: the picker's client-side list
+   * goes stale between page load and the click (the person gets soft-deleted
+   * via `PeopleService.mergePeople`/`deletePerson` in that window), so a
+   * user who picked a real, visible option can still land here — a bare
+   * UUID in a raw NotFoundException gave them nothing to act on. Each throw
+   * site logs server-side first, at `warn` (an expected, user-triggerable
+   * condition, not a system fault), so the disambiguating detail the client
+   * never sees is still traceable from the logs.
    */
   private async assertPersonLinkable(
     user: RequestUser,
@@ -1005,7 +1025,10 @@ export class UserAvatarService {
     });
 
     if (!person || person.deletedAt) {
-      throw new NotFoundException(`Person ${personId} not found`);
+      this.logger.warn(
+        `assertPersonLinkable: person ${personId} not found or deleted (requested by user ${user.id})`,
+      );
+      throw new NotFoundException(PERSON_UNLINKABLE_MESSAGE);
     }
 
     try {
@@ -1015,9 +1038,14 @@ export class UserAvatarService {
         user.permissions,
         CircleRole.viewer,
       );
-    } catch {
+    } catch (err) {
+      this.logger.warn(
+        `assertPersonLinkable: circle access denied for person ${personId} (circle ${person.circleId}), user ${user.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
       // Collapse Forbidden (and any circle-level NotFound) into a single 404.
-      throw new NotFoundException(`Person ${personId} not found`);
+      throw new NotFoundException(PERSON_UNLINKABLE_MESSAGE);
     }
   }
 
