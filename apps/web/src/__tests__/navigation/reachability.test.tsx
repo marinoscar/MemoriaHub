@@ -194,3 +194,75 @@ describe('navigation reachability — the Review hub (issue #390)', () => {
     });
   });
 });
+
+// ===========================================================================
+// The Collections hub (issue #391, epic #388, spec §3.4 / §4.6 / §9)
+//
+// Same claim, restated for this phase: `/collections` is a NEW route layered
+// on top of six pre-existing browse routes — Albums, People, Places,
+// Memories, Map, Archive, Trash. (Favorites has no route of its own; it is
+// `favorite=1` on the existing `/media` route, covered separately by
+// `config/collections.test.ts`.) Sidebar.test.tsx already proves none of
+// those six has a standalone drawer row anymore — this file's job is to prove
+// that removal didn't touch the router: every one of those routes must still
+// resolve directly, exactly as before #391, alongside the new hub route.
+// ===========================================================================
+
+const COLLECTIONS_HUB_PATH = '/collections';
+
+/** The seven browse routes the Collections hub indexes (spec §4.6). */
+const COLLECTIONS_STANDALONE_PATHS = [
+  '/albums',
+  '/people',
+  '/places',
+  '/memories',
+  '/map',
+  '/archive',
+  '/trash',
+];
+
+describe('navigation reachability — the Collections hub (issue #391)', () => {
+  it('the new Collections hub route /collections exists in App.tsx', () => {
+    expect(routePathSet.has(COLLECTIONS_HUB_PATH)).toBe(true);
+  });
+
+  it.each(COLLECTIONS_STANDALONE_PATHS)(
+    'the wrapped browse route %s still resolves on its own — the hub does not replace it',
+    (path) => {
+      expect(routePathSet.has(path)).toBe(true);
+    },
+  );
+
+  it('none of the eight Collections-related paths are declared more than once', () => {
+    [COLLECTIONS_HUB_PATH, ...COLLECTIONS_STANDALONE_PATHS].forEach((path) => {
+      const occurrences = routePaths.filter((p) => p === path).length;
+      expect(occurrences).toBe(1);
+    });
+  });
+
+  it('none of the seven standalone browse routes redirect to /collections — each still renders its own page', () => {
+    COLLECTIONS_STANDALONE_PATHS.forEach((path) => {
+      const match = appSource.match(
+        new RegExp(`<Route\\s+path="${path.replace('/', '\\/')}"\\s+element=\\{<([^\\s/>]+)`),
+      );
+      expect(match).not.toBeNull();
+      expect(match![1]).not.toBe('Navigate');
+    });
+  });
+
+  it('every Collections-related required path sits inside an authenticated Layout route tree (standard or full-bleed)', () => {
+    const layoutStart = appSource.indexOf('<Route element={<Layout />}>');
+    const fullBleedStart = appSource.indexOf('<Route element={<Layout fullBleed />}>');
+    const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
+    const fullBleedBlock = appSource.slice(fullBleedStart);
+
+    // /map is the one Collections destination that lives in its OWN
+    // full-bleed Layout wrapper (no content padding, so the map can own the
+    // whole viewport) rather than the shared standard Layout tree.
+    const standardPaths = [COLLECTIONS_HUB_PATH, ...COLLECTIONS_STANDALONE_PATHS.filter((p) => p !== '/map')];
+    standardPaths.forEach((path) => {
+      expect(layoutBlock).toContain(`<Route path="${path}"`);
+    });
+    expect(fullBleedBlock).toContain('<Route path="/map"');
+  });
+});

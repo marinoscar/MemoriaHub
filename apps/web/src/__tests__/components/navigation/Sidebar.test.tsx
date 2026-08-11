@@ -1,13 +1,22 @@
 /**
- * Tests for the Library/Console Sidebar (issue #390, epic #388).
+ * Tests for the Library/Console Sidebar (issue #391, epic #388).
  *
- * Issue #390 collapses the five UTILITIES rows (Bursts, Duplicates, Location
- * Suggestions, AI Enhancements, Workflows / Review Insights) into ONE badged
- * "Review" row (spec §3.3 / §6.2 / §6.3). Library mode is now nine rows:
- * Photos, Memories, Explore, Map, Albums, People, Archive, Trash, Review.
+ * Issue #391 folds the six remaining browse rows — Memories, Map, Albums,
+ * People, Archive, Trash — into the new Collections destination, and renames
+ * "Explore" to "Search" (it always routed to `/search`; a separate
+ * explore-style hub lives at `/places`, so the old label was a naming
+ * collision, not a feature). Library mode is now exactly FOUR rows: Photos,
+ * Collections, Search, Review.
+ *
+ * None of the folded routes became unreachable — every one of them still
+ * resolves and is listed on `/collections` (and, from #392, in the desktop
+ * context pane); `navigation/reachability.test.tsx` is the file that proves
+ * that at the router level. This file's job is the drawer only: which rows
+ * render, and which one lights up as active for a given URL, per the
+ * `resolveActiveDestination` model in `config/destinations.ts` (spec §3.5).
  *
  * Console mode, aria-current handling, and the drawer plumbing are unchanged
- * by this issue and are re-asserted here only to prove #390 didn't regress
+ * by this issue and are re-asserted here only to prove #391 didn't regress
  * them, not because their logic moved.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -109,14 +118,19 @@ const ALL_ADMIN_PERMISSIONS = Array.from(
 // ---------------------------------------------------------------------------
 
 /**
- * Configure `useFeatureFlags` (drives the Memories row and, transitively
- * through `useReviewQueues`, the Review row's aggregate badge) and
- * `useWorkflowsEnabled`.
+ * Configure `useFeatureFlags` (transitively, through `useReviewQueues`, drives
+ * the Review row's aggregate badge) and `useWorkflowsEnabled`.
  *
- * `null` for either boolean means "flag not resolved yet" (hidden); a
- * boolean resolves it. `pendingEnhancements` seeds the review-counts response
- * consumed by the Review row's badge total; omit to leave that request
- * permanently in flight.
+ * `null` for either boolean means "flag not resolved yet"; a boolean resolves
+ * it. `pendingEnhancements` seeds the review-counts response consumed by the
+ * Review row's badge total; omit to leave that request permanently in flight.
+ *
+ * `memories` is still accepted (and still folded into the `features` object
+ * `useFeatureFlags` returns) purely because `useReviewQueues` reads the same
+ * shared `features` record Sidebar does — but note what it does NOT do since
+ * #391: it no longer adds or removes a Sidebar row. Memories moved into
+ * Collections; the "renders exactly 4 rows" tests below assert its flag has
+ * zero effect on the drawer either way.
  */
 function mockFlags(options: {
   pictureEnhancement?: boolean | null;
@@ -166,7 +180,7 @@ function mockFlags(options: {
   }
 }
 
-/** All three optional flags resolved ON, for the "9 rows" catalog test. */
+/** All optional flags resolved ON, for the "4 rows" catalog tests. */
 function mockAllFlagsOn(pendingEnhancements = 0) {
   mockFlags({ pictureEnhancement: true, memories: true, workflows: true, pendingEnhancements });
 }
@@ -175,21 +189,16 @@ function mockAllFlagsOn(pendingEnhancements = 0) {
 // Shared row-name catalogs
 // ---------------------------------------------------------------------------
 
-/** The full 9-row Library catalog when every optional flag is enabled. */
-const LIBRARY_ALL_FLAGS_ROWS = [
-  'Photos',
-  'Memories',
-  'Explore',
-  'Map',
-  'Albums',
-  'People',
-  'Archive',
-  'Trash',
-  'Review',
-];
+/** The full 4-row Library catalog (spec §3.1/§3.4) — fixed, never conditional. */
+const LIBRARY_ROWS = ['Photos', 'Collections', 'Search', 'Review'];
 
-/** Rows that used to exist and must never reappear in Library mode. */
+/**
+ * Every row that used to exist in Library mode and must never reappear there:
+ * the eight #389 already removed, PLUS the six #391 folded into Collections,
+ * PLUS the old "Explore" label #391 renamed to "Search".
+ */
 const REMOVED_LIBRARY_ROWS = [
+  // #389
   'Circles',
   'Notifications',
   'User Settings',
@@ -198,12 +207,20 @@ const REMOVED_LIBRARY_ROWS = [
   'Worker Nodes',
   'Storage Insights',
   'Public Sharing',
+  // #391 — folded into Collections
+  'Memories',
+  'Map',
+  'Albums',
+  'People',
+  'Archive',
+  'Trash',
+  // #391 — renamed
+  'Explore',
 ];
 
 /**
  * The five UTILITIES rows issue #390 collapsed into the single "Review" row.
- * Their old labels (from the pre-#390 drawer) must never reappear as
- * standalone Sidebar rows in Library mode.
+ * Their old labels must never reappear as standalone Sidebar rows either.
  */
 const REMOVED_UTILITIES_ROWS = [
   'Review Bursts',
@@ -224,25 +241,51 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // Library mode — the 9-row catalog
+  // Library mode — the 4-row catalog (spec §3.1 / §3.4)
   // =========================================================================
 
   describe('Library mode', () => {
-    it('renders exactly the 9 expected rows with every flag on, and nothing else', () => {
+    it('renders exactly the 4 expected rows, and nothing else, with every flag on', () => {
       setNonAdmin();
       mockAllFlagsOn();
 
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      LIBRARY_ALL_FLAGS_ROWS.forEach((label) => {
+      LIBRARY_ROWS.forEach((label) => {
         expect(screen.getByText(label)).toBeInTheDocument();
       });
 
       const buttons = container.querySelectorAll('.MuiListItemButton-root');
-      expect(buttons).toHaveLength(LIBRARY_ALL_FLAGS_ROWS.length);
+      expect(buttons).toHaveLength(LIBRARY_ROWS.length);
     });
 
-    it('never renders Circles, Notifications, User Settings, Settings, Job Queue, Worker Nodes, Storage Insights, or Public Sharing', () => {
+    it('renders exactly the same 4 rows with every flag off — the row set never changes shape (spec §6.3)', () => {
+      setNonAdmin();
+      mockFlags({ pictureEnhancement: false, memories: false, workflows: false });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      LIBRARY_ROWS.forEach((label) => {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      });
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      expect(buttons).toHaveLength(LIBRARY_ROWS.length);
+    });
+
+    it('renders exactly the same 4 rows with every flag unresolved (null)', () => {
+      setNonAdmin();
+      mockFlags({ pictureEnhancement: null, memories: null, workflows: null });
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      LIBRARY_ROWS.forEach((label) => {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      });
+      const buttons = container.querySelectorAll('.MuiListItemButton-root');
+      expect(buttons).toHaveLength(LIBRARY_ROWS.length);
+    });
+
+    it('never renders any removed row — the eight #389 rows, the six #391-folded browse rows, or the old "Explore" label', () => {
       setNonAdmin();
       mockAllFlagsOn();
 
@@ -265,7 +308,16 @@ describe('Sidebar', () => {
       expect(screen.queryByText('Utilities')).not.toBeInTheDocument();
     });
 
-    it('renders the same removed rows check for an admin viewer too (Library mode ignores role)', () => {
+    it('never renders a "LIBRARY" subheader — the four-row list has no section heading', () => {
+      setNonAdmin();
+      mockAllFlagsOn();
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      expect(container.querySelector('.MuiListSubheader-root')).toBeNull();
+    });
+
+    it('renders the same removed-rows check for an admin viewer too (Library mode ignores role)', () => {
       setAdmin(ALL_ADMIN_PERMISSIONS);
       mockAllFlagsOn();
 
@@ -281,19 +333,16 @@ describe('Sidebar', () => {
       expect(screen.getByText('Console')).toBeInTheDocument();
     });
 
-    it('drops Memories when its flag is off/unresolved, but keeps the other 8 rows', () => {
+    it('"Search" (not "Explore") is the row label, and it navigates to /search', async () => {
       setNonAdmin();
-      mockFlags({ pictureEnhancement: false, memories: false, workflows: false });
 
       render(<Sidebar open={true} onClose={mockOnClose} />);
 
-      expect(screen.queryByText('Memories')).not.toBeInTheDocument();
+      expect(screen.getByText('Search')).toBeInTheDocument();
+      expect(screen.queryByText('Explore')).not.toBeInTheDocument();
 
-      ['Photos', 'Explore', 'Map', 'Albums', 'People', 'Archive', 'Trash', 'Review'].forEach(
-        (label) => {
-          expect(screen.getByText(label)).toBeInTheDocument();
-        },
-      );
+      fireEvent.click(screen.getByText('Search').closest('.MuiListItemButton-root') as HTMLElement);
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/search'));
     });
 
     // =======================================================================
@@ -332,7 +381,7 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // Console mode (unchanged by #390 — re-asserted as a non-regression check)
+  // Console mode (unchanged by #391 — re-asserted as a non-regression check)
   // =========================================================================
 
   describe('Console mode', () => {
@@ -355,7 +404,7 @@ describe('Sidebar', () => {
       });
     });
 
-    it('does not render any Library-mode row (Photos, Albums, People, ...)', () => {
+    it('does not render any Library-mode row (Photos, Collections, Search, Review)', () => {
       mockLocation.pathname = '/admin/settings/jobs';
       setAdmin(ALL_ADMIN_PERMISSIONS);
 
@@ -363,11 +412,10 @@ describe('Sidebar', () => {
         wrapperOptions: { user: mockAdminUser },
       });
 
-      // "Memories" is excluded from this check: it is ALSO a genuine admin
-      // card title (AI & Enrichment > Memories, the digest/generation
-      // settings page) — its presence here is expected, not a leak of the
-      // Library nav row. Every other Library row has no admin-card homonym.
-      LIBRARY_ALL_FLAGS_ROWS.filter((label) => label !== 'Memories').forEach((label) => {
+      // None of the four Library labels collide with any admin card title
+      // (unlike the pre-#391 "Memories" homonym, which no longer applies —
+      // Memories is not a Sidebar row anymore, it lives inside Collections).
+      LIBRARY_ROWS.forEach((label) => {
         expect(screen.queryByText(label)).not.toBeInTheDocument();
       });
     });
@@ -524,6 +572,18 @@ describe('Sidebar', () => {
       const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
       expect(reviewButton).toHaveAttribute('aria-current', 'page');
     });
+
+    it('is set on the Collections row when standing on a route it owns', () => {
+      mockLocation.pathname = '/albums';
+      setNonAdmin();
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const collectionsButton = screen
+        .getByText('Collections')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      expect(collectionsButton).toHaveAttribute('aria-current', 'page');
+    });
   });
 
   // =========================================================================
@@ -573,6 +633,18 @@ describe('Sidebar', () => {
       const reviewButton = screen.getByText('Review').closest('.MuiListItemButton-root') as HTMLElement;
       expect(reviewButton.classList.contains('Mui-selected')).toBe(true);
     });
+
+    it('activates Collections via a genuine segment boundary (e.g. /albums/some-id)', () => {
+      mockLocation.pathname = '/albums/some-id';
+      setNonAdmin();
+
+      render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const collectionsButton = screen
+        .getByText('Collections')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      expect(collectionsButton.classList.contains('Mui-selected')).toBe(true);
+    });
   });
 
   // =========================================================================
@@ -599,6 +671,41 @@ describe('Sidebar', () => {
         expect(selected).toHaveLength(1);
       },
     );
+  });
+
+  // =========================================================================
+  // The Collections row owns nine route prefixes that don't resemble
+  // /collections either — Memories, Map, Albums, People, Archive, Trash, and
+  // Tags all folded into it (spec §3.4/§3.5). This is the whole point of
+  // #391, so cover several of them explicitly.
+  // =========================================================================
+
+  describe('Collections row activation via resolveActiveDestination (spec §3.5)', () => {
+    it.each([
+      '/collections',
+      '/albums',
+      '/albums/some-id',
+      '/people',
+      '/places/countries',
+      '/map',
+      '/archive',
+      '/trash',
+      '/tags',
+    ])('is the sole active row at %s', (path) => {
+      mockLocation.pathname = path;
+      setNonAdmin();
+
+      const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
+
+      const collectionsButton = screen
+        .getByText('Collections')
+        .closest('.MuiListItemButton-root') as HTMLElement;
+      expect(collectionsButton.classList.contains('Mui-selected')).toBe(true);
+      expect(collectionsButton).toHaveAttribute('aria-current', 'page');
+
+      const selected = container.querySelectorAll('.Mui-selected');
+      expect(selected).toHaveLength(1);
+    });
   });
 
   // =========================================================================
@@ -640,12 +747,8 @@ describe('Sidebar', () => {
   describe('Navigation targets', () => {
     it.each([
       ['Photos', '/'],
-      ['Explore', '/search'],
-      ['Map', '/map'],
-      ['Albums', '/albums'],
-      ['People', '/people'],
-      ['Archive', '/archive'],
-      ['Trash', '/trash'],
+      ['Collections', '/collections'],
+      ['Search', '/search'],
       ['Review', '/review'],
     ])('navigates to %s -> %s', async (label, path) => {
       setNonAdmin();
@@ -662,6 +765,7 @@ describe('Sidebar', () => {
   // the badge is no longer a distinct "AI Enhancements" row; it is the
   // Review row's aggregate total, exercised here through the single
   // pictureEnhancement flag for a deterministic, single-source count).
+  // Unaffected by #391.
   // =========================================================================
 
   describe('Review row badge', () => {
@@ -704,6 +808,7 @@ describe('Sidebar', () => {
   // =========================================================================
   // Review-counts request gating (issue #204, broadened by #390 to "any
   // review feature enabled", re-pointed at the Review row's own wiring).
+  // Unaffected by #391.
   // =========================================================================
 
   describe('Review-counts request gating', () => {
@@ -729,34 +834,30 @@ describe('Sidebar', () => {
   });
 
   // =========================================================================
-  // Memories entry (issue #309, preserved — unaffected by #390)
+  // The memories flag behaviour that still applies (issue #391): the flag
+  // still exists and still resolves through the same shared `features`
+  // record `useReviewQueues` reads, but it no longer adds a "Memories" row —
+  // that moved into Collections (see CollectionsList.test.tsx /
+  // CollectionsHubPage.test.tsx for its new home). Pin the negative here so a
+  // future contributor cannot "restore" a Memories row keyed off this flag.
   // =========================================================================
 
-  describe('Memories entry', () => {
-    it('is hidden when the flag is off', () => {
-      setNonAdmin();
-      mockFlags({ memories: false });
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-      expect(screen.queryByText('Memories')).not.toBeInTheDocument();
-    });
+  describe('Memories flag has no effect on the Sidebar (moved into Collections by #391)', () => {
+    it.each([true, false, null] as const)(
+      'never renders a "Memories" row regardless of the memories flag (%s)',
+      (memories) => {
+        setNonAdmin();
+        mockFlags({ memories });
 
-    it('is hidden while the flag is unresolved', () => {
-      setNonAdmin();
-      mockFlags({ memories: null });
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-      expect(screen.queryByText('Memories')).not.toBeInTheDocument();
-    });
+        render(<Sidebar open={true} onClose={mockOnClose} />);
 
-    it('appears in the primary section and navigates to /memories when enabled', async () => {
-      setNonAdmin();
-      mockFlags({ memories: true });
-
-      render(<Sidebar open={true} onClose={mockOnClose} />);
-
-      expect(screen.getByText('Memories')).toBeInTheDocument();
-      fireEvent.click(screen.getByText('Memories'));
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/memories'));
-    });
+        expect(screen.queryByText('Memories')).not.toBeInTheDocument();
+        // The row count never changes shape because of this flag.
+        expect(screen.getAllByText(/Photos|Collections|Search|Review/)).toHaveLength(
+          LIBRARY_ROWS.length,
+        );
+      },
+    );
   });
 
   // =========================================================================
@@ -785,7 +886,7 @@ describe('Sidebar', () => {
       const { container } = render(<Sidebar open={true} onClose={mockOnClose} />);
 
       const icons = container.querySelectorAll('.MuiListItemIcon-root');
-      expect(icons).toHaveLength(LIBRARY_ALL_FLAGS_ROWS.length);
+      expect(icons).toHaveLength(LIBRARY_ROWS.length);
     });
   });
 });
