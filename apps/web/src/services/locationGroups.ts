@@ -73,9 +73,17 @@ export interface LocationValue {
   groupCanonicalName: string | null;
 }
 
+/**
+ * `GET /api/location-groups/values` response.
+ *
+ * `meta.total` is the count BEFORE slicing, so a paginated caller can render an
+ * honest "showing 50 of 812". `limit` is present only on the legacy capped
+ * (non-paginated) form the editor dialog's member picker still uses; `page` /
+ * `pageSize` only on the paginated form (issue #407).
+ */
 export interface LocationValueListResponse {
   items: LocationValue[];
-  meta: { total: number; limit: number };
+  meta: { total: number; limit?: number; page?: number; pageSize?: number };
 }
 
 export interface LocationGroupSuggestionMember {
@@ -196,17 +204,30 @@ export async function removeLocationGroupMembers(
 // Values + suggestions
 // ---------------------------------------------------------------------------
 
+/**
+ * List the distinct RAW geocoder values present app-wide at one tier.
+ *
+ * Two shapes, both served by the same route:
+ *   - `limit` — the legacy capped form, still used by the editor dialog's
+ *     search-one-at-a-time member picker.
+ *   - `page` / `pageSize` — real pagination (issue #407), used by the admin
+ *     "All locations" browser. `meta.total` counts BEFORE slicing.
+ */
 export async function listLocationValues(params: {
   level: LocationGroupLevel;
   q?: string;
   grouped?: LocationValueGroupedFilter;
   limit?: number;
+  page?: number;
+  pageSize?: number;
 }): Promise<LocationValueListResponse> {
   const qs = new URLSearchParams();
   qs.set('level', params.level);
   if (params.q && params.q.trim()) qs.set('q', params.q.trim());
   if (params.grouped) qs.set('grouped', params.grouped);
   if (params.limit != null) qs.set('limit', String(params.limit));
+  if (params.page != null) qs.set('page', String(params.page));
+  if (params.pageSize != null) qs.set('pageSize', String(params.pageSize));
 
   return api.get<LocationValueListResponse>(`/location-groups/values?${qs.toString()}`);
 }
@@ -222,6 +243,93 @@ export async function listLocationGroupSuggestions(params: {
   return api.get<LocationGroupSuggestionListResponse>(
     `/location-groups/suggestions?${qs.toString()}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Merge (issue #407)
+// ---------------------------------------------------------------------------
+
+/**
+ * Body for `POST /api/location-groups/merge`.
+ *
+ * Exactly ONE of `targetGroupId` / `canonicalName` must be supplied: the first
+ * folds the values into an existing group (leaving its name alone), the second
+ * creates a new group named `canonicalName`.
+ *
+ * `countryCode` is a real value, not an absent one — `''` is the deliberate
+ * UNSCOPED sentinel meaning "applies in every country", which is what the
+ * region/city tiers submit because `GET /api/media/explore/locations/:level`
+ * aggregates those tiers ACROSS countries and never carries a code.
+ *
+ * On the `targetGroupId` path the API INHERITS the target group's scope from an
+ * omitted (or `''`) `countryCode`, but rejects a non-empty one that disagrees
+ * with a 400 — so a caller adding to an existing group should simply omit it
+ * and let the group's own scope govern.
+ */
+export interface MergeLocationGroupsBody {
+  level: LocationGroupLevel;
+  countryCode?: string;
+  values: string[];
+  targetGroupId?: string;
+  canonicalName?: string;
+}
+
+export interface MergeLocationGroupsResult {
+  groupId: string;
+  /** True when the merge created the group rather than extending one. */
+  created: boolean;
+  /** Member values actually attached. */
+  added: number;
+  /** Values the target already owned, folded away rather than re-added. */
+  skipped: number;
+  /**
+   * The `location_group_rebuild` job the merge enqueued — pollable exactly like
+   * the one `POST /api/admin/location-groups/rebuild` returns. It may be a job
+   * an EARLIER mutation enqueued, since the rebuild service deliberately does
+   * not pass `skipDedup` and a burst of merges collapses into one.
+   */
+  jobId: string | null;
+  status: string | null;
+  /** The resulting group, refetched server-side. Carries the display name. */
+  group: LocationGroupDetail;
+}
+
+/**
+ * Display name of the group a merge landed in.
+ *
+ * The name lives at `group.canonicalName`, not at the top level — on the
+ * merge-into path there IS no new name, only the target group's existing one.
+ * Read defensively so a UI success message can never render "undefined".
+ */
+export function mergedGroupName(result: MergeLocationGroupsResult): string {
+  return result.group?.canonicalName ?? 'the group';
+}
+
+/**
+ * Merge many raw location values into one group in a single atomic call.
+ *
+ * ⚠️ A value already owned by a different group comes back as a **409** whose
+ * owner lives at `details.groupId` / `details.groupName` — read it with
+ * `extractLocationGroupConflict()`, never a top-level field (see the 409 gotcha
+ * in CLAUDE.md).
+ */
+export async function mergeLocationGroups(
+  body: MergeLocationGroupsBody,
+): Promise<MergeLocationGroupsResult> {
+  // Built key-by-key rather than spread so an empty-string `countryCode` (the
+  // unscoped sentinel) is preserved, and so exactly one target field is sent.
+  const payload: Record<string, unknown> = {
+    level: body.level,
+    values: body.values,
+  };
+  if (body.countryCode !== undefined) payload.countryCode = body.countryCode;
+  if (body.targetGroupId) {
+    payload.targetGroupId = body.targetGroupId;
+  } else if (body.canonicalName) {
+    payload.canonicalName = body.canonicalName.trim();
+  }
+
+  return api.post<MergeLocationGroupsResult>('/location-groups/merge', payload);
 }
 
 // ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ import {
   listLocationGroups,
   listLocationValues,
   locationGroupErrorMessage,
+  mergeLocationGroups,
   rebuildLocationGroups,
   removeLocationGroupMembers,
   updateLocationGroup,
@@ -118,6 +119,21 @@ describe('services/locationGroups', () => {
       expect(seen.url?.searchParams.get('limit')).toBe('50');
     });
 
+    it('listLocationValues forwards page/pageSize and unwraps meta.total (#407)', async () => {
+      const seen = capture('/location-groups/values', {
+        items: [{ value: 'Conroe', countryCode: 'US', itemCount: 12, groupId: null }],
+        meta: { total: 812, page: 2, pageSize: 50 },
+      });
+
+      const res = await listLocationValues({ level: 'locality', page: 2, pageSize: 50 });
+
+      expect(seen.url?.searchParams.get('page')).toBe('2');
+      expect(seen.url?.searchParams.get('pageSize')).toBe('50');
+      // `total` counts BEFORE slicing, so "showing 1 of 812" is honest.
+      expect(res.meta.total).toBe(812);
+      expect(res.items).toHaveLength(1);
+    });
+
     it('listLocationGroupSuggestions sends level and limit', async () => {
       const seen = capture('/location-groups/suggestions', { items: [], meta: { total: 0, limit: 25 } });
 
@@ -193,6 +209,92 @@ describe('services/locationGroups', () => {
       expect(seen.method).toBe('POST');
       expect(seen.url?.pathname).toBe('/api/admin/location-groups/rebuild');
       expect(res).toEqual({ jobId: 'job-1', status: 'pending' });
+    });
+
+    it('mergeLocationGroups POSTs canonicalName when creating a group (#407)', async () => {
+      const seen = capture('/location-groups/merge', {
+        groupId: 'g-new',
+        created: true,
+        added: 3,
+        skipped: 0,
+        jobId: 'job-1',
+        status: 'pending',
+        group: { id: 'g-new', canonicalName: 'The Woodlands' },
+      });
+
+      const res = await mergeLocationGroups({
+        level: 'locality',
+        countryCode: 'US',
+        values: ['Conroe', 'Shenandoah', 'The Woodlands'],
+        canonicalName: '  The Woodlands  ',
+      });
+
+      expect(seen.method).toBe('POST');
+      expect(seen.url?.pathname).toBe('/api/location-groups/merge');
+      expect(seen.body).toEqual({
+        level: 'locality',
+        countryCode: 'US',
+        values: ['Conroe', 'Shenandoah', 'The Woodlands'],
+        canonicalName: 'The Woodlands',
+      });
+      expect(res.groupId).toBe('g-new');
+      // The display name lives on `group`, never at the top level.
+      expect(res.group.canonicalName).toBe('The Woodlands');
+    });
+
+    it('mergeLocationGroups sends targetGroupId and NO canonicalName when adding to a group', async () => {
+      const seen = capture('/location-groups/merge', { groupId: 'g-1' });
+
+      await mergeLocationGroups({
+        level: 'region',
+        countryCode: '',
+        values: ['Heredia Province'],
+        targetGroupId: 'g-1',
+        // A stray name must never rename the target group.
+        canonicalName: 'Something Else',
+      });
+
+      const body = seen.body as Record<string, unknown>;
+      expect(body.targetGroupId).toBe('g-1');
+      expect('canonicalName' in body).toBe(false);
+    });
+
+    it('mergeLocationGroups PRESERVES an empty-string countryCode (the unscoped sentinel)', async () => {
+      const seen = capture('/location-groups/merge', { groupId: 'g-1' });
+
+      await mergeLocationGroups({
+        level: 'locality',
+        countryCode: '',
+        values: ['Heredia'],
+        canonicalName: 'Heredia',
+      });
+
+      const body = seen.body as Record<string, unknown>;
+      expect('countryCode' in body).toBe(true);
+      expect(body.countryCode).toBe('');
+    });
+
+    it('mergeLocationGroups surfaces details.groupName on a 409', async () => {
+      server.use(
+        http.post(`${BASE}/location-groups/merge`, () =>
+          HttpResponse.json(
+            {
+              message: '"conroe" is already a member of "Conroe TX"',
+              code: 'LOCATION_GROUP_MEMBER_CONFLICT',
+              details: { groupId: 'g-owner', groupName: 'Conroe TX' },
+            },
+            { status: 409 },
+          ),
+        ),
+      );
+
+      const err = await mergeLocationGroups({
+        level: 'locality',
+        values: ['Conroe'],
+        canonicalName: 'The Woodlands',
+      }).catch((e: unknown) => e);
+
+      expect(extractLocationGroupConflict(err)?.groupName).toBe('Conroe TX');
     });
 
     it('getLocationGroup returns the alias list', async () => {

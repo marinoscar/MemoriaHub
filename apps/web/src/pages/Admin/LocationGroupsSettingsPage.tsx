@@ -19,6 +19,7 @@ import {
   Avatar,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Container,
@@ -53,7 +54,9 @@ import {
   deleteLocationGroup,
   listLocationGroupSuggestions,
   listLocationGroups,
+  listLocationValues,
   locationGroupErrorMessage,
+  mergedGroupName,
   rebuildLocationGroups,
   updateLocationGroup,
 } from '../../services/locationGroups';
@@ -61,7 +64,10 @@ import type {
   LocationGroupLevel,
   LocationGroupSuggestion,
   LocationGroupSummary,
+  LocationValue,
 } from '../../services/locationGroups';
+import MergeLocationsDialog from '../../components/locations/MergeLocationsDialog';
+import type { MergeLocationCandidate } from '../../components/locations/MergeLocationsDialog';
 import LocationGroupEditorDialog from './LocationGroupEditorDialog';
 
 const LEVEL_TABS: Array<{ level: LocationGroupLevel; label: string }> = [
@@ -72,6 +78,9 @@ const LEVEL_TABS: Array<{ level: LocationGroupLevel; label: string }> = [
 
 const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed']);
 const REBUILD_POLL_MS = 3000;
+
+/** Page size for the "All locations" browser (issue #407). */
+const VALUES_PAGE_SIZE = 50;
 
 function LocationGroupsSettingsContent() {
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
@@ -91,6 +100,20 @@ function LocationGroupsSettingsContent() {
   const [suggestionNames, setSuggestionNames] = useState<Record<string, string>>({});
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [mergingKey, setMergingKey] = useState<string | null>(null);
+
+  // ---- All locations (issue #407) -----------------------------------------
+  const [values, setValues] = useState<LocationValue[]>([]);
+  const [valuesTotal, setValuesTotal] = useState(0);
+  const [valuesLoading, setValuesLoading] = useState(false);
+  const [valuesSearch, setValuesSearch] = useState('');
+  const [valuesPage, setValuesPage] = useState(1);
+  /**
+   * Selection is a KEYED map, never row indices — it has to survive both a
+   * search-term change and a page change so a user can tick two under
+   * "Heredia", search "Woodlands", tick two more, and merge all four at once.
+   */
+  const [selectedValues, setSelectedValues] = useState<Map<string, LocationValue>>(new Map());
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   // ---- Groups -------------------------------------------------------------
   const [groups, setGroups] = useState<LocationGroupSummary[]>([]);
@@ -197,6 +220,30 @@ function LocationGroupsSettingsContent() {
       });
   }, [level]);
 
+  const loadValues = useCallback(() => {
+    setValuesLoading(true);
+    listLocationValues({
+      level,
+      q: valuesSearch || undefined,
+      grouped: 'all',
+      page: valuesPage,
+      pageSize: VALUES_PAGE_SIZE,
+    })
+      .then((res) => {
+        if (!mountedRef.current) return;
+        setValues(res.items);
+        setValuesTotal(res.meta?.total ?? res.items.length);
+      })
+      .catch((err: unknown) => {
+        if (mountedRef.current) {
+          setLocalError(locationGroupErrorMessage(err, 'Failed to load location values'));
+        }
+      })
+      .finally(() => {
+        if (mountedRef.current) setValuesLoading(false);
+      });
+  }, [level, valuesSearch, valuesPage]);
+
   useEffect(() => {
     loadGroups();
   }, [loadGroups]);
@@ -204,6 +251,57 @@ function LocationGroupsSettingsContent() {
   useEffect(() => {
     loadSuggestions();
   }, [loadSuggestions]);
+
+  useEffect(() => {
+    loadValues();
+  }, [loadValues]);
+
+  // Changing tier resets the browser: a country value is not a city value, so
+  // carrying the selection across levels would be nonsense. The reset lands one
+  // render after `loadValues` has already refired for the new level, so a tier
+  // switch made while searching costs one superseded request — the rendered
+  // page is always the reset one.
+  useEffect(() => {
+    setValuesPage(1);
+    setValuesSearch('');
+    setSelectedValues(new Map());
+  }, [level]);
+
+  // A new search term restarts paging, but NEVER touches the selection.
+  useEffect(() => {
+    setValuesPage(1);
+  }, [valuesSearch]);
+
+  // -------------------------------------------------------------------------
+  // All locations → selection + merge
+  // -------------------------------------------------------------------------
+
+  const toggleValue = useCallback((value: LocationValue) => {
+    setSelectedValues((prev) => {
+      const next = new Map(prev);
+      if (next.has(value.value)) next.delete(value.value);
+      else next.set(value.value, value);
+      return next;
+    });
+  }, []);
+
+  const mergeCandidates = useMemo<MergeLocationCandidate[]>(
+    () =>
+      Array.from(selectedValues.values()).map((v) => ({
+        value: v.value,
+        itemCount: v.itemCount,
+        countryCode: v.countryCode,
+        groupCanonicalName: v.groupCanonicalName,
+      })),
+    [selectedValues],
+  );
+
+  const selectedValuePhotos = useMemo(
+    () => mergeCandidates.reduce((sum, c) => sum + c.itemCount, 0),
+    [mergeCandidates],
+  );
+
+  const valuesPageCount = Math.max(1, Math.ceil(valuesTotal / VALUES_PAGE_SIZE));
 
   // -------------------------------------------------------------------------
   // Suggestions → merge
@@ -546,7 +644,131 @@ function LocationGroupsSettingsContent() {
         </Paper>
 
         {/* ---------------------------------------------------------------- */}
-        {/* Section 3: Groups                                                 */}
+        {/* Section 3: All locations (issue #407)                             */}
+        {/* ---------------------------------------------------------------- */}
+        <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1}
+            sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', mb: 1 }}
+          >
+            <Typography variant="h6">All locations</Typography>
+            <TextField
+              size="small"
+              label="Search locations"
+              value={valuesSearch}
+              onChange={(e) => setValuesSearch(e.target.value)}
+              sx={{ width: { xs: '100%', sm: 260 } }}
+            />
+          </Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Every raw geocoder value in the library. Tick the ones that mean the same place — even
+            when the names look nothing alike, like "Conroe", "Shenandoah" and "The Woodlands" — and
+            merge them in one step. Your ticks survive a new search term and a page change.
+          </Typography>
+
+          {/* Selection bar */}
+          {selectedValues.size > 0 && (
+            <Alert
+              severity="info"
+              sx={{ mb: 2 }}
+              data-testid="values-selection-bar"
+              action={
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" variant="contained" onClick={() => setMergeOpen(true)}>
+                    Merge…
+                  </Button>
+                  <Button size="small" onClick={() => setSelectedValues(new Map())}>
+                    Clear
+                  </Button>
+                </Stack>
+              }
+            >
+              {selectedValues.size} selected · {selectedValuePhotos.toLocaleString()} photos
+            </Alert>
+          )}
+
+          {valuesLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : values.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No location values at this level.
+            </Typography>
+          ) : (
+            <Stack divider={<Divider />} spacing={0}>
+              {values.map((value) => (
+                <Box
+                  key={value.value}
+                  data-testid={`value-row-${value.value}`}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    py: 0.5,
+                    minWidth: 0,
+                  }}
+                >
+                  <Checkbox
+                    size="small"
+                    checked={selectedValues.has(value.value)}
+                    onChange={() => toggleValue(value)}
+                    slotProps={{ input: { 'aria-label': `Select ${value.value}` } }}
+                  />
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
+                      {value.value}
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+                      {value.countryCode && (
+                        <Chip size="small" variant="outlined" label={value.countryCode} />
+                      )}
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={`${value.itemCount.toLocaleString()} photos`}
+                      />
+                      {value.groupCanonicalName && (
+                        <Chip size="small" label={`in "${value.groupCanonicalName}"`} />
+                      )}
+                    </Box>
+                  </Box>
+                </Box>
+              ))}
+            </Stack>
+          )}
+
+          {/* Honest count + paging */}
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1}
+            sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', mt: 2 }}
+          >
+            <Typography variant="caption" color="text.secondary">
+              Showing {values.length.toLocaleString()} of {valuesTotal.toLocaleString()}
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+              <Button
+                size="small"
+                disabled={valuesPage <= 1 || valuesLoading}
+                onClick={() => setValuesPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="small"
+                disabled={valuesPage >= valuesPageCount || valuesLoading}
+                onClick={() => setValuesPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </Stack>
+          </Stack>
+        </Paper>
+
+        {/* ---------------------------------------------------------------- */}
+        {/* Section 4: Groups                                                 */}
         {/* ---------------------------------------------------------------- */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
           <Stack
@@ -654,7 +876,7 @@ function LocationGroupsSettingsContent() {
         </Paper>
 
         {/* ---------------------------------------------------------------- */}
-        {/* Section 4: Rebuild                                                */}
+        {/* Section 5: Rebuild                                                */}
         {/* ---------------------------------------------------------------- */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>
           <Typography variant="h6" sx={{ mb: 1 }}>
@@ -681,6 +903,28 @@ function LocationGroupsSettingsContent() {
           </Button>
         </Paper>
       </Box>
+
+      <MergeLocationsDialog
+        open={mergeOpen}
+        level={level}
+        selection={mergeCandidates}
+        onClose={() => setMergeOpen(false)}
+        onMerged={(result) => {
+          setSelectedValues(new Map());
+          // The merge already enqueued the rebuild server-side; surface the job
+          // the same way the Rebuild section does so the two never disagree.
+          if (result.jobId) {
+            setRebuildJobId(result.jobId);
+            setRebuildStatus(result.status ?? 'pending');
+          }
+          setSuccessMessage(
+            `Merged into "${mergedGroupName(result)}". A rebuild is queued — canonical names update once it finishes.`,
+          );
+          loadValues();
+          loadGroups();
+          loadSuggestions();
+        }}
+      />
 
       <LocationGroupEditorDialog
         open={editorOpen}

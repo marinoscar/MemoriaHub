@@ -47,9 +47,11 @@ vi.mock('../../services/locationGroups', async () => {
     ...actual,
     listLocationGroups: vi.fn(),
     listLocationGroupSuggestions: vi.fn(),
+    listLocationValues: vi.fn(),
     createLocationGroup: vi.fn(),
     updateLocationGroup: vi.fn(),
     deleteLocationGroup: vi.fn(),
+    mergeLocationGroups: vi.fn(),
     rebuildLocationGroups: vi.fn(),
   };
 });
@@ -73,18 +75,24 @@ import {
   deleteLocationGroup,
   listLocationGroupSuggestions,
   listLocationGroups,
+  listLocationValues,
+  mergeLocationGroups,
   rebuildLocationGroups,
   updateLocationGroup,
 } from '../../services/locationGroups';
 import type {
   LocationGroupSuggestion,
   LocationGroupSummary,
+  LocationValue,
+  MergeLocationGroupsResult,
 } from '../../services/locationGroups';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
 const mockListGroups = vi.mocked(listLocationGroups);
 const mockListSuggestions = vi.mocked(listLocationGroupSuggestions);
+const mockListValues = vi.mocked(listLocationValues);
+const mockMerge = vi.mocked(mergeLocationGroups);
 const mockCreateGroup = vi.mocked(createLocationGroup);
 const mockUpdateGroup = vi.mocked(updateLocationGroup);
 const mockDeleteGroup = vi.mocked(deleteLocationGroup);
@@ -154,6 +162,37 @@ function makeGroup(overrides: Partial<LocationGroupSummary> = {}): LocationGroup
   };
 }
 
+function makeValue(overrides: Partial<LocationValue> = {}): LocationValue {
+  return {
+    value: 'Conroe',
+    countryCode: 'US',
+    itemCount: 12,
+    groupId: null,
+    groupCanonicalName: null,
+    ...overrides,
+  };
+}
+
+/** Mirrors the real merge payload — the name lives at `group.canonicalName`. */
+function makeMergeResult(
+  overrides: Partial<MergeLocationGroupsResult> = {},
+): MergeLocationGroupsResult {
+  return {
+    groupId: 'g-new',
+    created: true,
+    added: 2,
+    skipped: 0,
+    jobId: 'job-7',
+    status: 'pending',
+    group: {
+      ...makeGroup({ id: 'g-new', canonicalName: 'The Woodlands' }),
+      normalizedName: 'the woodlands',
+      aliases: [],
+    },
+    ...overrides,
+  };
+}
+
 function makeSuggestion(
   overrides: Partial<LocationGroupSuggestion> = {},
 ): LocationGroupSuggestion {
@@ -184,6 +223,11 @@ describe('LocationGroupsSettingsPage', () => {
       meta: { total: 0, page: 1, pageSize: 100 },
     });
     mockListSuggestions.mockResolvedValue({ items: [], meta: { total: 0, limit: 25 } });
+    mockListValues.mockResolvedValue({
+      items: [],
+      meta: { total: 0, page: 1, pageSize: 50 },
+    });
+    mockMerge.mockResolvedValue(makeMergeResult());
     mockListJobs.mockResolvedValue({
       items: [],
       meta: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
@@ -399,6 +443,217 @@ describe('LocationGroupsSettingsPage', () => {
       await user.click(await screen.findByRole('button', { name: /merge/i }));
 
       expect(await screen.findByText(/already in group "Heredia"/i)).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('all locations (#407)', () => {
+    /** Three ungrouped US cities that look nothing alike — the #407 motivator. */
+    const WOODLANDS_PAGE: LocationValue[] = [
+      makeValue({ value: 'Conroe', itemCount: 12 }),
+      makeValue({ value: 'Shenandoah', itemCount: 4 }),
+    ];
+
+    it('lists raw values with country, count and owning group', async () => {
+      mockListValues.mockResolvedValue({
+        items: [
+          makeValue({ value: 'Conroe', itemCount: 12 }),
+          makeValue({
+            value: 'The Woodlands',
+            itemCount: 1188,
+            groupId: 'g-1',
+            groupCanonicalName: 'Woodlands Area',
+          }),
+        ],
+        meta: { total: 812, page: 1, pageSize: 50 },
+      });
+
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const row = await screen.findByTestId('value-row-The Woodlands');
+      expect(within(row).getByText('The Woodlands')).toBeInTheDocument();
+      expect(within(row).getByText('US')).toBeInTheDocument();
+      expect(within(row).getByText('1,188 photos')).toBeInTheDocument();
+      expect(within(row).getByText('in "Woodlands Area"')).toBeInTheDocument();
+    });
+
+    it('reports an honest total from meta.total, not the page length', async () => {
+      mockListValues.mockResolvedValue({
+        items: WOODLANDS_PAGE,
+        meta: { total: 812, page: 1, pageSize: 50 },
+      });
+
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(await screen.findByText(/showing 2 of 812/i)).toBeInTheDocument();
+    });
+
+    it('scopes the query to the active level tab', async () => {
+      const user = userEvent.setup();
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await waitFor(() => {
+        expect(mockListValues).toHaveBeenCalledWith(
+          expect.objectContaining({ level: 'locality', page: 1 }),
+        );
+      });
+
+      await user.click(screen.getByRole('tab', { name: 'Regions' }));
+
+      await waitFor(() => {
+        expect(mockListValues).toHaveBeenCalledWith(
+          expect.objectContaining({ level: 'region' }),
+        );
+      });
+    });
+
+    it('keeps the selection across a search-term change', async () => {
+      mockListValues.mockResolvedValue({
+        items: WOODLANDS_PAGE,
+        meta: { total: 812, page: 1, pageSize: 50 },
+      });
+
+      const user = userEvent.setup();
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await user.click(await screen.findByLabelText('Select Conroe'));
+      expect(screen.getByTestId('values-selection-bar').textContent).toMatch(/1 selected/);
+
+      // A new search term returns a completely different page…
+      mockListValues.mockResolvedValue({
+        items: [makeValue({ value: 'The Woodlands', itemCount: 1188 })],
+        meta: { total: 1, page: 1, pageSize: 50 },
+      });
+      await user.type(screen.getByLabelText(/search locations/i), 'Woodlands');
+
+      await waitFor(() => {
+        expect(mockListValues).toHaveBeenCalledWith(
+          expect.objectContaining({ q: 'Woodlands', page: 1 }),
+        );
+      });
+
+      // …and the earlier tick is still counted, off-page.
+      await user.click(await screen.findByLabelText('Select The Woodlands'));
+      expect(screen.getByTestId('values-selection-bar').textContent).toMatch(/2 selected/);
+    });
+
+    it('keeps the selection across a page change', async () => {
+      mockListValues.mockResolvedValue({
+        items: WOODLANDS_PAGE,
+        meta: { total: 120, page: 1, pageSize: 50 },
+      });
+
+      const user = userEvent.setup();
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await user.click(await screen.findByLabelText('Select Conroe'));
+
+      mockListValues.mockResolvedValue({
+        items: [makeValue({ value: 'Spring', itemCount: 30 })],
+        meta: { total: 120, page: 2, pageSize: 50 },
+      });
+      await user.click(screen.getByRole('button', { name: /next/i }));
+
+      await waitFor(() => {
+        expect(mockListValues).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+      });
+
+      expect(await screen.findByTestId('value-row-Spring')).toBeInTheDocument();
+      expect(screen.getByTestId('values-selection-bar').textContent).toMatch(/1 selected/);
+    });
+
+    it('merges the accumulated selection and reports the queued rebuild', async () => {
+      mockListValues.mockResolvedValue({
+        items: WOODLANDS_PAGE,
+        meta: { total: 2, page: 1, pageSize: 50 },
+      });
+      mockMerge.mockResolvedValue(makeMergeResult({ jobId: 'job-7', status: 'pending' }));
+
+      const user = userEvent.setup();
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await user.click(await screen.findByLabelText('Select Conroe'));
+      await user.click(screen.getByLabelText('Select Shenandoah'));
+      await user.click(screen.getByRole('button', { name: /merge…/i }));
+
+      const name = await screen.findByLabelText(/canonical name/i);
+      await user.clear(name);
+      await user.type(name, 'The Woodlands');
+      await user.click(screen.getByRole('button', { name: /^merge$/i }));
+
+      await waitFor(() => {
+        expect(mockMerge).toHaveBeenCalledWith({
+          level: 'locality',
+          countryCode: 'US',
+          values: ['Conroe', 'Shenandoah'],
+          canonicalName: 'The Woodlands',
+        });
+      });
+
+      // The merge's own rebuild job is surfaced the way the Rebuild section does.
+      await waitFor(
+        () => {
+          expect(screen.getByText(/rebuild job job-7 — pending/i)).toBeInTheDocument();
+          expect(screen.queryByTestId('values-selection-bar')).not.toBeInTheDocument();
+        },
+        { timeout: 5000 },
+      );
+    });
+
+    it('keeps the selection when the merge is rejected with a 409', async () => {
+      const { ApiError } = await import('../../services/api');
+      mockListValues.mockResolvedValue({
+        items: WOODLANDS_PAGE,
+        meta: { total: 2, page: 1, pageSize: 50 },
+      });
+      mockMerge.mockRejectedValue(
+        new ApiError('"conroe" is already a member of "Conroe TX"', 409, undefined, {
+          groupId: 'g-owner',
+          groupName: 'Conroe TX',
+        }),
+      );
+
+      const user = userEvent.setup();
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await user.click(await screen.findByLabelText('Select Conroe'));
+      await user.click(screen.getByRole('button', { name: /merge…/i }));
+      await user.click(await screen.findByRole('button', { name: /^merge$/i }));
+
+      await waitFor(
+        () => {
+          expect(screen.getByText(/already in group "Conroe TX"/i)).toBeInTheDocument();
+        },
+        { timeout: 5000 },
+      );
+      expect(screen.getByTestId('values-selection-bar').textContent).toMatch(/1 selected/);
+    });
+
+    it('asks before merging a selection that spans two countries', async () => {
+      mockListValues.mockResolvedValue({
+        items: [
+          makeValue({ value: 'Ontario', countryCode: 'CA', itemCount: 30 }),
+          makeValue({ value: 'Ontario CA', countryCode: 'US', itemCount: 10 }),
+        ],
+        meta: { total: 2, page: 1, pageSize: 50 },
+      });
+
+      const user = userEvent.setup();
+      render(<LocationGroupsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      await user.click(await screen.findByLabelText('Select Ontario'));
+      await user.click(screen.getByLabelText('Select Ontario CA'));
+      await user.click(screen.getByRole('button', { name: /merge…/i }));
+
+      expect(await screen.findByText(/span 2 countries/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^merge$/i })).toBeDisabled();
+
+      await user.click(screen.getByRole('checkbox', { name: /apply in every country/i }));
+      await user.click(screen.getByRole('button', { name: /^merge$/i }));
+
+      await waitFor(() => {
+        expect(mockMerge).toHaveBeenCalledWith(expect.objectContaining({ countryCode: '' }));
+      });
     });
   });
 
