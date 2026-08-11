@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -6,292 +7,152 @@ import {
   CardContent,
   Chip,
   Grid,
+  IconButton,
+  InputAdornment,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  TextField,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
-  AdminPanelSettings as AdminIcon,
-  People as PeopleIcon,
-  SmartToy as AiIcon,
-  LocalOffer as LocalOfferIcon,
-  Face as FaceIcon,
-  BurstMode as BurstModeIcon,
-  ContentCopy as ContentCopyIcon,
-  MyLocation as MyLocationIcon,
-  Map as MapIcon,
-  Storage as StorageIcon,
-  Insights as InsightsIcon,
-  WorkHistory as WorkHistoryIcon,
-  Archive as ArchiveIcon,
-  QueryStats as QueryStatsIcon,
-  Public as PublicIcon,
-  MonitorHeart as MonitorHeartIcon,
-  Movie as MovieIcon,
-  Hub as HubIcon,
-  Email as EmailIcon,
-  AccountTree as AccountTreeIcon,
-  AutoFixHigh as AutoFixHighIcon,
-  AutoAwesomeMotion as AutoAwesomeMotionIcon,
+  Search as SearchIcon,
+  Clear as ClearIcon,
+  ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material';
 import { usePermissions } from '../../hooks/usePermissions';
-
-interface CardDef {
-  title: string;
-  description: string;
-  icon: React.ReactElement;
-  path?: string;
-  disabled?: boolean;
-  permission?: string;
-  alwaysShow?: boolean;
-}
-
-interface SectionDef {
-  label: string;
-  cards: CardDef[];
-}
+import { useScrollRestoration } from '../../hooks/useScrollRestoration';
+import { visibleAdminSections } from '../../config/adminSections';
 
 export default function SettingsHubPage() {
   const navigate = useNavigate();
+  const theme = useTheme();
   const { isAdmin, hasPermission } = usePermissions();
+  // Phone treatment is a drill-down list rather than a card grid (spec §4.4):
+  // there is no rail to swap into Console mode at this size, so the hub IS the
+  // navigation and iOS Settings is the model every phone user already holds.
+  const isPhone = useMediaQuery(theme.breakpoints.down('md'));
+  const [query, setQuery] = useState('');
+
+  // The make-or-break detail of the drill-down (spec §4.4 requirement 1):
+  // returning from a page near the bottom of a 20-card list must land where the
+  // user left it, not at the top.
+  useScrollRestoration('admin-settings-hub');
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
   }
 
-  const sections: SectionDef[] = [
-    {
-      label: 'General',
-      cards: [
-        {
-          title: 'System',
-          description: 'Configure core system settings, application behavior, and global defaults.',
-          icon: <AdminIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/general',
-          permission: 'system_settings:read',
+  // ONE declaration, three consumers — see `config/adminSections.tsx`. The
+  // permission gate and the "Search settings" title match both live in the
+  // shared helper, so the hub, the Console rail, and the AppBar title resolver
+  // can never disagree about what an admin may see.
+  const sections = visibleAdminSections(hasPermission, query);
+  const trimmedQuery = query.trim();
+
+  const searchField = (
+    <TextField
+      value={query}
+      onChange={(e) => setQuery(e.target.value)}
+      size="small"
+      placeholder="Search settings"
+      // Client-side only over an in-memory array, so no debounce is warranted.
+      // 23 items across five groups is past the point where scanning beats
+      // typing, and unlike a rail or a tab strip it stays constant-effort for
+      // the user as the admin surface grows (spec §4.4 requirement 4).
+      sx={{ mb: 3, width: '100%', maxWidth: { xs: '100%', sm: 420 } }}
+      slotProps={{
+        htmlInput: { 'aria-label': 'Search settings' },
+        input: {
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon fontSize="small" color="disabled" />
+            </InputAdornment>
+          ),
+          endAdornment: query ? (
+            <InputAdornment position="end">
+              <IconButton
+                size="small"
+                aria-label="Clear settings search"
+                onClick={() => setQuery('')}
+              >
+                <ClearIcon fontSize="small" />
+              </IconButton>
+            </InputAdornment>
+          ) : null,
         },
-        {
-          title: 'Users & Allowlist',
-          description: 'Manage user accounts, roles, and control who can access the application.',
-          icon: <PeopleIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/users',
-          permission: 'users:read',
-        },
-        {
-          title: 'Archiving & Deletion',
-          description: 'Manage the Trash retention period and review how archiving and deletion work.',
-          icon: <ArchiveIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/archiving',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'Email',
-          description: 'Configure the outbound email provider (AWS SES or SMTP) and test delivery.',
-          icon: <EmailIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/email',
-          permission: 'system_settings:read',
-        },
-      ],
-    },
-    {
-      label: 'AI & Enrichment',
-      cards: [
-        {
-          title: 'AI Providers',
-          description: 'Configure AI provider credentials and set the active model for search and tagging.',
-          icon: <AiIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/ai',
-          permission: 'ai_settings:read',
-        },
-        {
-          title: 'Tagging & Descriptions',
-          description: 'Manage the tag vocabulary and configure automatic photo tagging behavior.',
-          icon: <LocalOfferIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/tagging',
-          permission: 'ai_settings:read',
-        },
-        {
-          title: 'Face Recognition',
-          description: 'Set up face detection providers and configure recognition thresholds.',
-          icon: <FaceIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/face',
-          permission: 'face_settings:read',
-        },
-        {
-          title: 'Bursts & Similar Pictures',
-          description: 'Tune burst detection sensitivity, time windows, and review queue settings.',
-          icon: <BurstModeIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/bursts',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'Near-Duplicate Detection',
-          description: 'Tune visual-duplicate matching sensitivity and run global backfills.',
-          icon: <ContentCopyIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/duplicates',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'AI Picture Enhancer',
-          description:
-            'Enable AI photo enhancement and set the quality, strength, and review presets.',
-          icon: <AutoFixHighIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/enhancer',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'Memories',
-          description: 'Automatic memory curation, story feed, and email digests.',
-          icon: <AutoAwesomeMotionIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/memories',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'Social Media Detection',
-          description: 'Detect TikTok/Instagram/Facebook videos and skip enrichment',
-          icon: <MovieIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/social-media',
-          permission: 'system_settings:read',
-        },
-      ],
-    },
-    {
-      label: 'Media',
-      cards: [
-        {
-          title: 'Geo Location',
-          description: 'Configure reverse geocoding providers and forward search settings.',
-          icon: <MapIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/geo',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'Location Inference',
-          description: 'Tune GPS interpolation from nearby photos, auto-apply thresholds, and run global backfills.',
-          icon: <MyLocationIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/location-inference',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'Location Groups',
-          description:
-            'Collapse duplicate geocoder spellings of a place into one canonical name; merge suggestions and define capture areas.',
-          icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/location-groups',
-          permission: 'geo_settings:read',
-        },
-      ],
-    },
-    {
-      label: 'Storage',
-      cards: [
-        {
-          title: 'Storage Providers',
-          description:
-            'Manage S3, R2, and local storage credentials, set the active provider, and run migrations.',
-          icon: <StorageIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/storage/providers',
-          permission: 'storage_settings:read',
-        },
-        {
-          title: 'Storage Insights',
-          description: 'View precomputed storage usage metrics and trigger manual snapshot refreshes.',
-          icon: <InsightsIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/storage/insights',
-          permission: 'system_settings:read',
-        },
-      ],
-    },
-    {
-      label: 'Operations',
-      cards: [
-        {
-          title: 'Job Queue',
-          description: 'Monitor enrichment jobs, retry failed items, and reset stuck workers.',
-          icon: <WorkHistoryIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/jobs',
-          permission: 'jobs:read',
-        },
-        {
-          title: 'Job Queue Insights',
-          description: 'Live queue stats, per-type durations, and an ETA for the backlog.',
-          icon: <QueryStatsIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/jobs/insights',
-          permission: 'jobs:read',
-        },
-        {
-          title: 'Worker Nodes',
-          description: 'Distributed CLI worker nodes: fleet health, heartbeats, and per-node job stats.',
-          icon: <HubIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/nodes',
-          permission: 'jobs:read',
-        },
-        {
-          title: 'Database Backup',
-          description:
-            'Schedule and run PostgreSQL dumps to object storage; browse, download, and delete backups.',
-          icon: <StorageIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/db-backup',
-          permission: 'db_backup:read',
-        },
-        {
-          title: 'Public Sharing',
-          description: 'View and manage all public share links; revoke or set expirations in bulk.',
-          icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/sharing',
-          permission: 'shares:manage_any',
-        },
-        {
-          title: 'Workflow Automation',
-          description: 'Control workflow blast radius, throughput, and safety; oversee runs across all circles.',
-          icon: <AccountTreeIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/workflows',
-          permission: 'system_settings:read',
-        },
-        {
-          title: 'Doctor',
-          description: 'Run configuration health diagnostics and see required action items',
-          icon: <MonitorHeartIcon sx={{ fontSize: 40 }} color="primary" />,
-          path: '/admin/settings/doctor',
-          permission: 'system_settings:read',
-        },
-      ],
-    },
-  ];
+      }}
+    />
+  );
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 } }}>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 700 }}>
         Settings
       </Typography>
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
         Manage system configuration, providers, and operational settings.
       </Typography>
 
-      {sections.map((section) => {
-        const visibleCards = section.cards.filter((card) => {
-          if (card.alwaysShow) return true;
-          if (!card.permission) return true;
-          return hasPermission(card.permission);
-        });
+      {searchField}
 
-        if (visibleCards.length === 0) return null;
+      {/* Only ever an empty SEARCH result — an admin with no visible sections
+          at all is a permission problem, not something to phrase as a miss. */}
+      {sections.length === 0 && trimmedQuery !== '' && (
+        <Typography variant="body2" color="text.secondary">
+          No settings match “{trimmedQuery}”.
+        </Typography>
+      )}
 
-        return (
-          <Box key={section.label} sx={{ mb: 4 }}>
-            <Typography
-              variant="overline"
-              sx={{
-                display: 'block',
-                mb: 1.5,
-                color: 'text.secondary',
-                fontWeight: 600,
-                letterSpacing: '0.1em',
-              }}
-            >
-              {section.label}
-            </Typography>
+      {sections.map((section) => (
+        <Box key={section.label} sx={{ mb: 4 }}>
+          <Typography
+            variant="overline"
+            sx={{
+              display: 'block',
+              mb: isPhone ? 0.5 : 1.5,
+              color: 'text.secondary',
+              fontWeight: 600,
+              letterSpacing: '0.1em',
+            }}
+          >
+            {section.label}
+          </Typography>
 
+          {isPhone ? (
+            // Title + chevron is the WHOLE row. Descriptions are deliberately
+            // dropped here: at this width they would triple the list's height
+            // and defeat the point of a scannable hierarchy — they stay on the
+            // tablet/desktop card grid below.
+            <List disablePadding>
+              {section.cards.map((card) => (
+                <ListItemButton
+                  key={card.title}
+                  disabled={card.disabled || !card.path}
+                  onClick={() => card.path && navigate(card.path)}
+                  sx={{
+                    borderRadius: 1,
+                    borderBottom: `1px solid ${theme.palette.divider}`,
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 40, color: 'primary.main' }}>
+                    <card.Icon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText primary={card.title} />
+                  {card.disabled ? (
+                    <Chip label="Coming soon" size="small" />
+                  ) : (
+                    <ChevronRightIcon fontSize="small" color="disabled" />
+                  )}
+                </ListItemButton>
+              ))}
+            </List>
+          ) : (
             <Grid container spacing={2}>
-              {visibleCards.map((card) => (
+              {section.cards.map((card) => (
                 <Grid key={card.title} size={{ xs: 12, sm: 6, md: 4 }}>
                   {card.disabled ? (
                     <Card
@@ -303,7 +164,7 @@ export default function SettingsHubPage() {
                       variant="outlined"
                     >
                       <CardContent>
-                        {card.icon}
+                        <card.Icon sx={{ fontSize: 40 }} color="primary" />
                         <Typography
                           variant="subtitle1"
                           sx={{ fontWeight: 600, mt: 1 }}
@@ -323,7 +184,7 @@ export default function SettingsHubPage() {
                         sx={{ height: '100%', alignItems: 'flex-start' }}
                       >
                         <CardContent>
-                          {card.icon}
+                          <card.Icon sx={{ fontSize: 40 }} color="primary" />
                           <Typography
                             variant="subtitle1"
                             sx={{ fontWeight: 600, mt: 1 }}
@@ -340,9 +201,9 @@ export default function SettingsHubPage() {
                 </Grid>
               ))}
             </Grid>
-          </Box>
-        );
-      })}
+          )}
+        </Box>
+      ))}
     </Box>
   );
 }
