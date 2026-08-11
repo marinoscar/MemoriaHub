@@ -38,6 +38,10 @@ vi.mock('../../hooks/useSystemSettings', () => ({
   useSystemSettings: vi.fn(),
 }));
 
+vi.mock('../../hooks/useFeatureFlags', () => ({
+  useFeatureFlags: vi.fn(),
+}));
+
 vi.mock('../../hooks/useDuplicates', () => ({
   useDuplicateGroups: vi.fn(),
 }));
@@ -60,6 +64,7 @@ import DuplicatesPage from '../../pages/Duplicates/DuplicatesPage';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useDuplicateGroups } from '../../hooks/useDuplicates';
 import { ApiError } from '../../services/api';
 import type { DuplicateGroupSummary } from '../../services/duplicates';
@@ -67,6 +72,7 @@ import type { DuplicateGroupSummary } from '../../services/duplicates';
 const mockUseCircle = vi.mocked(useCircle);
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUseDuplicateGroups = vi.mocked(useDuplicateGroups);
 
 // ---------------------------------------------------------------------------
@@ -167,6 +173,26 @@ function makeSystemSettingsHook(autoResolveThreshold = 60): ReturnType<typeof us
   };
 }
 
+/**
+ * Default matches the real MSW `GET /api/features` handler's response
+ * (`{ features: {} }`) so tests that don't care about the flag keep behaving
+ * exactly as they did before `useFeatureFlags` was mocked directly here —
+ * `duplicateDetection` is absent, so the feature-off banner (issue #404)
+ * shows by default just as it did under the real network round trip.
+ */
+function makeFeatureFlagsHook(
+  overrides: Partial<ReturnType<typeof useFeatureFlags>> = {},
+): ReturnType<typeof useFeatureFlags> {
+  return {
+    features: {},
+    pictureEnhancement: null,
+    isLoading: false,
+    error: null,
+    refresh: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
 function makeSummary(
   id = 'group-1',
   kind: DuplicateGroupSummary['kind'] = 'exact_variant',
@@ -192,6 +218,7 @@ describe('DuplicatesPage', () => {
     mockUseCircle.mockReturnValue(makeCircleContext());
     mockUsePermissions.mockReturnValue(makePermissions(false));
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
+    mockUseFeatureFlags.mockReturnValue(makeFeatureFlagsHook());
     mockUseDuplicateGroups.mockReturnValue(makeDuplicateGroupsHook());
   });
 
@@ -772,6 +799,43 @@ describe('DuplicatesPage', () => {
       const call = fetchGroups.mock.calls[0][0];
       expect(call).not.toHaveProperty('sortBy');
       expect(call).not.toHaveProperty('sortOrder');
+    });
+  });
+
+  describe('feature-disabled banner (issue #404)', () => {
+    it('renders the banner above the existing groups when the flag is off — the groups still render', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ features: { duplicateDetection: false } }),
+      );
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1'), makeSummary('g-2')] }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/duplicate detection is turned off/i)).toBeInTheDocument();
+      });
+      // Above the content, never instead of it — real, resolvable groups are
+      // exactly why the page has to stay reachable with the flag off.
+      const photoLabels = screen.getAllByText(/2 photos/i);
+      expect(photoLabels.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('does not render the banner when the flag is on', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ features: { duplicateDetection: true } }),
+      );
+      mockUseDuplicateGroups.mockReturnValue(
+        makeDuplicateGroupsHook({ items: [makeSummary('g-1')] }),
+      );
+
+      render(<DuplicatesPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/review duplicates/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/duplicate detection is turned off/i)).not.toBeInTheDocument();
     });
   });
 });

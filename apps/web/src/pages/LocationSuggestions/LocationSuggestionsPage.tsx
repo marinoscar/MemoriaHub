@@ -32,7 +32,9 @@ import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-d
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useLocationSuggestions } from '../../hooks/useLocationSuggestions';
+import { FeatureDisabledNotice } from '../../components/review/FeatureDisabledNotice';
 import {
   startLocationAcceptRun,
   startLocationRejectRun,
@@ -245,6 +247,11 @@ export default function LocationSuggestionsPage() {
   const { activeCircle, activeCircleId } = useCircle();
   const { isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
+  // See `DuplicatesPage` for the inversion rule: a LOADED flag record that does
+  // not say `true` means off; still-loading and a flags outage (`features:
+  // null`) must both stay silent rather than claim the feature is disabled.
+  const { features } = useFeatureFlags();
+  const featureDisabled = features !== null && features.locationInference !== true;
   const { items, meta, isLoading, error, fetchSuggestions, accept, reject, actingIds } =
     useLocationSuggestions();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -432,6 +439,16 @@ export default function LocationSuggestionsPage() {
           </Button>
         </Box>
       </Box>
+
+      {/* Feature-off notice (issue #404). Above the content, never instead of
+          it: any suggestions below are still real and still acceptable. */}
+      {featureDisabled && (
+        <FeatureDisabledNotice
+          featureLabel="Location inference"
+          settingsPath="/admin/settings/location-inference"
+          hasExistingWork={items.length > 0}
+        />
+      )}
 
       {actionError && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>

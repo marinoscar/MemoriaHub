@@ -66,6 +66,10 @@ vi.mock('../../hooks/useSystemSettings', () => ({
   useSystemSettings: vi.fn(),
 }));
 
+vi.mock('../../hooks/useFeatureFlags', () => ({
+  useFeatureFlags: vi.fn(),
+}));
+
 vi.mock('../../hooks/useLocationSuggestions', () => ({
   useLocationSuggestions: vi.fn(),
 }));
@@ -130,6 +134,7 @@ import LocationSuggestionsPage from '../../pages/LocationSuggestions/LocationSug
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useLocationSuggestions } from '../../hooks/useLocationSuggestions';
 import { startLocationAcceptRun, startLocationRejectRun } from '../../services/locationSuggestionRuns';
 import { searchPlaces, reverseGeocode } from '../../services/media';
@@ -139,6 +144,7 @@ import type { LocationSuggestionSummary } from '../../services/locationSuggestio
 const mockUseCircle = vi.mocked(useCircle);
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUseLocationSuggestions = vi.mocked(useLocationSuggestions);
 const mockStartLocationAcceptRun = vi.mocked(startLocationAcceptRun);
 const mockStartLocationRejectRun = vi.mocked(startLocationRejectRun);
@@ -229,6 +235,26 @@ function makeLocationSuggestionsHook(
   } as unknown as ReturnType<typeof useLocationSuggestions>;
 }
 
+/**
+ * Default matches the real MSW `GET /api/features` handler's response
+ * (`{ features: {} }`) so tests that don't care about the flag keep behaving
+ * exactly as they did before `useFeatureFlags` was mocked directly here —
+ * `locationInference` is absent, so the feature-off banner (issue #404)
+ * shows by default just as it did under the real network round trip.
+ */
+function makeFeatureFlagsHook(
+  overrides: Partial<ReturnType<typeof useFeatureFlags>> = {},
+): ReturnType<typeof useFeatureFlags> {
+  return {
+    features: {},
+    pictureEnhancement: null,
+    isLoading: false,
+    error: null,
+    refresh: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
 function makeSuggestion(overrides: Partial<LocationSuggestionSummary> = {}): LocationSuggestionSummary {
   return {
     id: 'suggestion-1',
@@ -262,6 +288,7 @@ describe('LocationSuggestionsPage', () => {
     mockUseCircle.mockReturnValue(makeCircleContext());
     mockUsePermissions.mockReturnValue(makePermissions(false));
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
+    mockUseFeatureFlags.mockReturnValue(makeFeatureFlagsHook());
     mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook());
     mockSearchPlaces.mockResolvedValue([]);
     mockReverseGeocode.mockResolvedValue({
@@ -955,6 +982,43 @@ describe('LocationSuggestionsPage', () => {
       const call = fetchSuggestions.mock.calls[0][0];
       expect(call).not.toHaveProperty('sortBy');
       expect(call).not.toHaveProperty('sortOrder');
+    });
+  });
+
+  describe('feature-disabled banner (issue #404)', () => {
+    it('renders the banner above the existing suggestions when the flag is off — the suggestions still render', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ features: { locationInference: false } }),
+      );
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ id: 's-1' }), makeSuggestion({ id: 's-2' })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/location inference is turned off/i)).toBeInTheDocument();
+      });
+      // Above the content, never instead of it — the suggestions are still
+      // real and still acceptable, which is exactly why the page has to stay
+      // reachable with the flag off.
+      expect(screen.getAllByTestId('location-mini-map')).toHaveLength(2);
+    });
+
+    it('does not render the banner when the flag is on', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ features: { locationInference: true } }),
+      );
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Location Suggestions')).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/location inference is turned off/i)).not.toBeInTheDocument();
     });
   });
 });

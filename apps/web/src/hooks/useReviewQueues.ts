@@ -8,8 +8,24 @@
  *
  * It issues NO new request for the flags: `useFeatureFlags` and
  * `useWorkflowsEnabled` are both module-level caches the sidebar already reads.
- * The only network call is the counts one, and it is gated (below) so a
- * deployment with every review feature off never makes it.
+ * The only network call is the counts one.
+ *
+ * RESOLUTION RULE — enabled OR has pending work (issue #404)
+ * ---------------------------------------------------------
+ * A `queue` entry resolves when its feature flag is on **or** the server says it
+ * still holds pending items. Pure flag gating (the #390 behaviour) hid a row
+ * whose queue was full: `MediaService.computeReviewCounts` reports
+ * `pendingDuplicateGroups` UNCONDITIONALLY — it is not feature-gated — and
+ * `DuplicatesPage` (like `BurstsPage` and `LocationSuggestionsPage`) renders and
+ * works with the flag off, so the row was hiding a working page from a user who
+ * had real work waiting. Groups created while the flag was on, or by
+ * `POST /api/admin/duplicates/backfill`, stay resolvable in `duplicate_groups`
+ * forever; gating them away orphans them. These three rows were ungated
+ * entirely before #390, and spec §6.3 already states the principle: *keep the
+ * destination, drop the badge*.
+ *
+ * `secondary` entries (Insights, Automations) keep PURE flag gating — they carry
+ * no count, so "has pending work" is not a question that can be asked of them.
  */
 
 import { useMemo } from 'react';
@@ -34,13 +50,18 @@ export interface ResolvedReviewQueue extends ReviewQueueDef {
 }
 
 export interface UseReviewQueuesResult {
-  /** Enabled entries only, in the registry's FIXED order — never sorted by count. */
+  /** Resolved entries only, in the registry's FIXED order — never sorted by count. */
   entries: ResolvedReviewQueue[];
   counts: ReviewCountsResponse | null;
-  /** Sum of the enabled queue counts — the aggregate badge on the Review destination. */
+  /**
+   * Sum of the resolved queue counts — the aggregate badge on the Review
+   * destination. Residual work behind a disabled flag COUNTS: the row is
+   * reachable and the page acts on it, so hiding it from the badge would be the
+   * same bug one level up.
+   */
   totalPending: number;
   isLoading: boolean;
-  /** False when every entry is gated off, i.e. no review feature is enabled at all. */
+  /** False when nothing resolves at all — no flag on and no residual work. */
   anyEnabled: boolean;
 }
 
@@ -65,43 +86,73 @@ export function useReviewQueues(): UseReviewQueuesResult {
     };
   }, [features, pictureEnhancement, workflowsEnabled]);
 
-  const enabledDefs = useMemo(
-    () => REVIEW_QUEUES.filter((def) => isFlagEnabled(def.flag)),
-    [isFlagEnabled],
-  );
-
-  // The counts request is gated on at least one COUNTED queue being enabled.
-  // Insights and Automations resolve without counts, so a deployment running
-  // only those two must not pay for the request — this is the broadened form of
-  // the enhancer-only gate the sidebar used to apply (issue #204).
-  const anyQueueEnabled = enabledDefs.some((def) => def.countKey !== null);
-  const { data: counts, isLoading: countsLoading } = useReviewCounts({
-    enabled: anyQueueEnabled,
-  });
+  // The counts request is now UNGATED (issue #404) — `useReviewCounts` still
+  // makes no request without an active circle, and that is the only condition
+  // left on it.
+  //
+  // It has to be. The resolution rule below asks "does this queue hold pending
+  // work?", and the previous gate derived `enabled` from the flag-enabled set —
+  // so with every queue flag off, no request fired, no counts arrived, and
+  // residual work could never be discovered. The row could not appear precisely
+  // in the configuration where it most needed to. That is a genuine
+  // chicken-and-egg, not an ordering bug, and the only way out is to stop asking
+  // the flags for permission to ask the server.
+  //
+  // Paying for it unconditionally is justified: the Review destination itself
+  // renders unconditionally and always wants an aggregate badge, so its counts
+  // are needed unconditionally. `GET /api/media/review-counts` is the
+  // purpose-built counts-only endpoint issue #204 created for exactly this shape
+  // of caller — four integers, no thumbnail signing, no dashboard payload.
+  // #204's concern was avoiding the FULL dashboard response, not this call.
+  //
+  // NOTE: `useReviewCounts`'s own `enabled` option and its `enabled: false` ⇒
+  // no-request contract are untouched. Only this call site stopped passing it.
+  const { data: counts, isLoading: countsLoading } = useReviewCounts();
 
   const entries = useMemo<ResolvedReviewQueue[]>(
     () =>
-      enabledDefs.map((def) => ({
+      REVIEW_QUEUES.map((def) => ({
         ...def,
         count: def.countKey && counts ? counts[def.countKey] : null,
-      })),
-    [enabledDefs, counts],
+      })).filter((entry) => {
+        if (isFlagEnabled(entry.flag)) return true;
+        // Residual work keeps a queue row alive even with its feature off. Not
+        // applied to `secondary` entries: they have no count, so `count` is
+        // always null there and this branch would be dead anyway — spelling the
+        // group check out keeps that a stated rule rather than an accident of
+        // the registry's current shape.
+        return entry.group === 'queue' && (entry.count ?? 0) > 0;
+      }),
+    [isFlagEnabled, counts],
   );
 
-  // Only enabled queues contribute: a feature that is off must not inflate the
-  // badge with work the user has no surface to do.
   const totalPending = entries.reduce((sum, entry) => sum + (entry.count ?? 0), 0);
 
   return {
     entries,
     counts,
     totalPending,
+    // Three things must have answered before a consumer may render, and the
+    // third is new in #404.
+    //
     // `workflowsEnabled === null` means its probe has not resolved. It counts as
     // loading so a deep link to `/review/automations` waits for the answer
     // instead of being bounced to the hub as "disabled" a beat before the probe
     // says otherwise.
-    isLoading:
-      flagsLoading || workflowsEnabled === null || (anyQueueEnabled && countsLoading),
-    anyEnabled: enabledDefs.length > 0,
+    //
+    // `countsLoading` is now UNCONDITIONAL (it used to be `anyQueueEnabled &&
+    // countsLoading`). Counts settle after flags, and a residual row exists only
+    // once the counts arrive — so gating on the flags alone would render the
+    // list, then pop an extra row in a beat later. Holding the existing loading
+    // state until both halves have settled makes the list render ONCE, complete.
+    // Safe against a stuck spinner: with no active circle `useReviewCounts`
+    // reports `isLoading: false` immediately, and it always clears the flag in an
+    // unconditional `finally`.
+    isLoading: flagsLoading || workflowsEnabled === null || countsLoading,
+    // Still meaningful, just measured against what actually resolved rather than
+    // against the flag-enabled set: false means nothing at all is reachable
+    // here — no flag on AND no residual work — which is the condition the
+    // all-disabled empty state describes.
+    anyEnabled: entries.length > 0,
   };
 }
