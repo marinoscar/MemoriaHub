@@ -16,10 +16,9 @@ import {
 } from '@mui/material';
 import {
   Home as HomeIcon,
-  Settings as SettingsIcon,
   AdminPanelSettings as AdminIcon,
+  ArrowBack as ArrowBackIcon,
   Map as MapIcon,
-  GroupWork as GroupWorkIcon,
   Groups as GroupsIcon,
   Explore as ExploreIcon,
   PhotoAlbum as AlbumIcon,
@@ -28,14 +27,10 @@ import {
   Delete as DeleteOutlineIcon,
   ContentCopy as ContentCopyIcon,
   MyLocation as MyLocationIcon,
-  WorkHistory as WorkHistoryIcon,
-  Hub as HubIcon,
   Insights as InsightsIcon,
-  Public as PublicIcon,
   AccountTree as AccountTreeIcon,
   AutoFixHigh as AutoFixHighIcon,
   AutoAwesomeMotion as AutoAwesomeMotionIcon,
-  NotificationsNone as NotificationsNoneIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -43,7 +38,7 @@ import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
 import { useReviewCounts } from '../../hooks/useReviewCounts';
-import { useNotifications } from '../../hooks/useNotifications';
+import { ADMIN_HUB_PATH, visibleAdminSections } from '../../config/adminSections';
 
 interface SidebarProps {
   open: boolean;
@@ -60,10 +55,17 @@ interface NavItemDef {
 
 const DRAWER_WIDTH = 240;
 
-function isActive(itemPath: string, currentPath: string): boolean {
-  if (itemPath === '/') return currentPath === '/';
-  return currentPath.startsWith(itemPath);
-}
+/**
+ * Does `prefix` own `path`? Matches on SEGMENT boundaries — the path must equal
+ * the prefix or continue with a `/`.
+ *
+ * Spec §3.5: a bare `startsWith` makes `/review` match `/reviewer` and
+ * `/bursts` match `/burstsfoo`. That was a latent bug in the old `isActive`,
+ * and it becomes load-bearing here because the same helper now decides whether
+ * the whole drawer renders in Console mode.
+ */
+const owns = (prefix: string, path: string): boolean =>
+  prefix === '/' ? path === '/' : path === prefix || path.startsWith(`${prefix}/`);
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const theme = useTheme();
@@ -83,17 +85,24 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     enabled: pictureEnhancement?.enabled === true,
   });
   const pendingEnhancements = reviewCounts?.pendingEnhancements ?? 0;
-  // The SAME module-level store the AppBar bell reads (issue #249). It is
-  // reference-counted: `acquire()` only starts the 60s timer when the FIRST
-  // enabled subscriber mounts, and `startTimer()` additionally no-ops while a
-  // timer already exists — so this second consumer adds a subscriber, never a
-  // second poller, and the sidebar badge can never drift from the bell's.
-  const { unreadCount } = useNotifications();
   // Same module-level flag cache the enhancer entry above reads — this adds no
   // second request. `=== true` for the same reason documented there: the entry
   // must not flash in while the flags load, and a flags outage must hide it.
   const memoriesEnabled = useMemoriesEnabled();
 
+  // Console mode (spec §3.2): at any `/admin/*` route the drawer swaps its
+  // CONTENTS, not the app shell — same Drawer, same NavItem, no second Layout.
+  // This is what removes the old cost of every admin-to-admin move routing back
+  // through the hub landing page, and it lets the admin surface grow past 25
+  // pages without global navigation ever growing a row.
+  const isConsole = owns('/admin', location.pathname);
+
+  // Eight rows were removed in issue #389 because each duplicates chrome that
+  // is already on screen (spec §1.2): Circles (top-bar circle chip + avatar
+  // menu), Notifications (the AppBar bell, same badge, with a persistent "See
+  // all notifications" footer), User Settings (avatar menu), and the five
+  // ADMINISTRATION shortcuts — an arbitrary sample of a 23-page hub, now
+  // carried in full by Console mode below.
   const primaryItems: NavItemDef[] = [
     { label: 'Photos', icon: <HomeIcon />, path: '/' },
     ...(memoriesEnabled === true
@@ -101,14 +110,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       : []),
     { label: 'Explore', icon: <ExploreIcon />, path: '/search' },
     { label: 'Map', icon: <MapIcon />, path: '/map' },
-    { label: 'Circles', icon: <GroupWorkIcon />, path: '/circles' },
     { label: 'Albums', icon: <AlbumIcon />, path: '/albums' },
-    {
-      label: 'Notifications',
-      icon: <NotificationsNoneIcon />,
-      path: '/notifications',
-      badgeCount: unreadCount,
-    },
   ];
 
   const libraryItems: NavItemDef[] = [
@@ -140,21 +142,24 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       : []),
   ];
 
-  const adminItems: NavItemDef[] = [
-    { label: 'Settings', icon: <AdminIcon />, path: '/admin/settings' },
-    ...(hasPermission('jobs:read')
-      ? [{ label: 'Job Queue', icon: <WorkHistoryIcon />, path: '/admin/settings/jobs' }]
-      : []),
-    ...(hasPermission('jobs:read')
-      ? [{ label: 'Worker Nodes', icon: <HubIcon />, path: '/admin/settings/nodes' }]
-      : []),
-    ...(hasPermission('system_settings:read')
-      ? [{ label: 'Storage Insights', icon: <InsightsIcon />, path: '/admin/settings/storage/insights' }]
-      : []),
-    ...(hasPermission('shares:manage_any')
-      ? [{ label: 'Public Sharing', icon: <PublicIcon />, path: '/admin/settings/sharing' }]
-      : []),
-  ];
+  // Console mode "invents no new admin IA" (spec §3.2) — these are the SAME
+  // five permission-gated sections the hub renders, from the one shared
+  // declaration, so the rail and the hub cannot drift apart.
+  const consoleSections = visibleAdminSections(hasPermission);
+
+  // Console paths genuinely nest (`/admin/settings/jobs` vs
+  // `/admin/settings/jobs/insights`), so `owns` alone would light up TWO rows
+  // and emit `aria-current="page"` twice. Longest prefix wins (spec §3.5) —
+  // the same rule `adminPageTitle` applies to resolve the page title.
+  const consoleActivePath = isConsole
+    ? consoleSections
+        .flatMap((section) => section.cards)
+        .reduce<string | null>((best, card) => {
+          if (!card.path || card.disabled) return best;
+          if (!owns(card.path, location.pathname)) return best;
+          return best === null || card.path.length > best.length ? card.path : best;
+        }, null)
+    : null;
 
   const handleNavigate = useCallback(
     (path: string) => {
@@ -177,12 +182,23 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     backgroundColor: theme.palette.background.paper,
   };
 
-  const NavItem = ({ item }: { item: NavItemDef }) => {
-    const active = isActive(item.path, location.pathname);
+  const NavItem = ({
+    item,
+    active: activeOverride,
+  }: {
+    item: NavItemDef;
+    /** Escape hatch for Console mode, where nesting needs longest-prefix-wins. */
+    active?: boolean;
+  }) => {
+    const active = activeOverride ?? owns(item.path, location.pathname);
     return (
       <ListItem disablePadding>
         <ListItemButton
           selected={active}
+          // `selected` alone is a visual state; assistive technology needs the
+          // explicit landmark (spec §7). Set here, once, so it holds in both
+          // Library and Console mode.
+          aria-current={active ? 'page' : undefined}
           onClick={() => handleNavigate(item.path)}
           sx={{
             borderRadius: 1,
@@ -226,7 +242,49 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     );
   };
 
-  const drawerContent = (
+  const consoleContent = (
+    <>
+      <Toolbar />
+      <Divider />
+      <Box sx={{ overflow: 'auto', flexGrow: 1, py: 1 }}>
+        {/* Console is a MODE, so the way out of it must be permanent and
+            obvious — never a route the user has to guess at (spec §3.2). */}
+        <List dense disablePadding>
+          <NavItem item={{ label: 'Back to library', icon: <ArrowBackIcon />, path: '/' }} />
+        </List>
+        <Divider sx={{ my: 1 }} />
+
+        {consoleSections.map((section) => (
+          <List
+            key={section.label}
+            dense
+            disablePadding
+            subheader={
+              <ListSubheader disableSticky sx={subheaderSx}>
+                {section.label}
+              </ListSubheader>
+            }
+          >
+            {section.cards.map((card) =>
+              !card.path || card.disabled ? null : (
+                <NavItem
+                  key={card.path}
+                  active={card.path === consoleActivePath}
+                  item={{
+                    label: card.title,
+                    icon: <card.Icon />,
+                    path: card.path,
+                  }}
+                />
+              ),
+            )}
+          </List>
+        ))}
+      </Box>
+    </>
+  );
+
+  const libraryContent = (
     <>
       <Toolbar />
       <Divider />
@@ -267,34 +325,25 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <NavItem key={item.path} item={item} />
           ))}
         </List>
-
-        {/* ADMINISTRATION section — only when isAdmin */}
-        {isAdmin && (
-          <List
-            dense
-            disablePadding
-            subheader={
-              <ListSubheader disableSticky sx={subheaderSx}>
-                Administration
-              </ListSubheader>
-            }
-          >
-            {adminItems.map((item) => (
-              <NavItem key={item.path} item={item} />
-            ))}
-          </List>
-        )}
       </Box>
 
-      <Divider />
-      {/* User Settings pinned at bottom */}
-      <List dense disablePadding sx={{ py: 0.5 }}>
-        <NavItem
-          item={{ label: 'User Settings', icon: <SettingsIcon />, path: '/settings' }}
-        />
-      </List>
+      {/* Console pinned at the foot, where User Settings used to sit. It is a
+          MODE affordance rather than one of the 14 rows — the epic counts it
+          separately, which is why it lives below the divider. */}
+      {isAdmin && (
+        <>
+          <Divider />
+          <List dense disablePadding sx={{ py: 0.5 }}>
+            <NavItem
+              item={{ label: 'Console', icon: <AdminIcon />, path: ADMIN_HUB_PATH }}
+            />
+          </List>
+        </>
+      )}
     </>
   );
+
+  const drawerContent = isConsole ? consoleContent : libraryContent;
 
   if (isDesktop) {
     return (
