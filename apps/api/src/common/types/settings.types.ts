@@ -3,6 +3,7 @@
 // =============================================================================
 
 import { encryptSecret } from '../crypto/secret-cipher';
+import type { NavigationPinnableKey } from '../schemas/settings.schema';
 
 /**
  * One table's persisted DataTable layout (issue #255).
@@ -73,6 +74,33 @@ export interface MemoriesPreferencesValue {
 }
 
 /**
+ * Per-user navigation preferences (epic #388, issue #392).
+ *
+ * EVERY field is optional and is NEVER filled in server-side. An absent key
+ * means "use the built-in defaults" — nothing pinned, rail expanded. Same
+ * absent-key contract as `dataTables`, `notifications` and `memories` above,
+ * and the same reason it needs no data migration: every existing row simply
+ * has no namespace.
+ *
+ * `pinned` is typed as the CURRENT pinnable key union, but — like every other
+ * field on this interface — that type is ASPIRATIONAL: the stored blob is
+ * untyped JSON reached through a `value as unknown as UserSettingsValue` cast,
+ * and it may legitimately hold a key this release no longer knows (a
+ * destination an earlier release shipped, the user pinned, and a later one
+ * removed). UserSettingsService.sanitizeNavigation() filtering this array on
+ * read is therefore NOT dead code, however narrow this type looks — it is the
+ * one thing standing between a removed destination and a 500 on every settings
+ * read. Values reaching the WRITE path are enum-validated; values read back
+ * from storage are merely filtered.
+ */
+export interface NavigationPreferencesValue {
+  /** Ordered pinned sub-destinations. Absent = nothing pinned. */
+  pinned?: NavigationPinnableKey[];
+  /** Desktop rail collapse preference. Absent = expanded. */
+  railCollapsed?: boolean;
+}
+
+/**
  * User settings schema - stored in user_settings.value JSONB
  */
 export interface UserSettingsValue {
@@ -111,6 +139,12 @@ export interface UserSettingsValue {
    * namespace needed no data migration. Absent ⇒ nothing filtered.
    */
   memories?: MemoriesPreferencesValue;
+  /**
+   * Per-user navigation preferences (issue #392). Absent for any user who has
+   * never pinned a destination or collapsed the rail — the normal state, and
+   * why this namespace needed no data migration. Absent ⇒ built-in defaults.
+   */
+  navigation?: NavigationPreferencesValue;
 }
 
 /**

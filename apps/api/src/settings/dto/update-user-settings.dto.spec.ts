@@ -7,6 +7,8 @@ import {
   DATA_TABLE_MAX_VISIBLE_COLUMNS,
   DATA_TABLE_MAX_ID_LENGTH,
   DATA_TABLE_MAX_PAGE_SIZE,
+  NAVIGATION_MAX_PINNED,
+  NAVIGATION_PINNABLE_KEYS,
 } from '../../common/schemas/settings.schema';
 
 /** Minimal valid PUT body; spread a `dataTables` onto it per case. */
@@ -543,6 +545,138 @@ describe('UpdateUserSettingsDto (PUT)', () => {
       });
     });
   });
+
+  // ===========================================================================
+  // navigation (issue #392, epic #388)
+  //
+  // These assertions run against the WIRE schema, not the storage schema —
+  // which is the point. A namespace present only in settings.schema.ts
+  // validates and merges perfectly in the service's unit tests while every
+  // real request silently no-ops, because nestjs-zod strips keys the body DTO
+  // does not declare. See the "three hand-maintained copies" pitfall in
+  // CLAUDE.md, and the HTTP round-trip proof in user-settings.controller.spec.ts.
+  // ===========================================================================
+  describe('navigation field', () => {
+    it('should leave the namespace absent when not supplied (absent = defaults)', () => {
+      const result = updateUserSettingsSchema.parse(basePut);
+
+      expect(result.navigation).toBeUndefined();
+    });
+
+    it('should NOT materialize `pinned` / `railCollapsed` for an empty namespace', () => {
+      const result = updateUserSettingsSchema.parse({
+        ...basePut,
+        navigation: {},
+      });
+
+      expect(result.navigation).toEqual({});
+    });
+
+    it('should accept a fully populated namespace', () => {
+      const result = updateUserSettingsSchema.parse({
+        ...basePut,
+        navigation: { pinned: ['albums', 'people'], railCollapsed: true },
+      });
+
+      expect(result.navigation).toEqual({
+        pinned: ['albums', 'people'],
+        railCollapsed: true,
+      });
+    });
+
+    it('should preserve pin ORDER — the list is the user-chosen display order', () => {
+      const result = updateUserSettingsSchema.parse({
+        ...basePut,
+        navigation: { pinned: ['trash', 'albums', 'map'] },
+      });
+
+      expect(result.navigation!.pinned).toEqual(['trash', 'albums', 'map']);
+    });
+
+    it('should accept every pinnable key from the registry', () => {
+      for (const key of NAVIGATION_PINNABLE_KEYS) {
+        const result = updateUserSettingsSchema.parse({
+          ...basePut,
+          navigation: { pinned: [key] },
+        });
+
+        expect(result.navigation!.pinned).toEqual([key]);
+      }
+    });
+
+    it('should accept exactly NAVIGATION_MAX_PINNED pins', () => {
+      const pinned = NAVIGATION_PINNABLE_KEYS.slice(0, NAVIGATION_MAX_PINNED);
+
+      const result = updateUserSettingsSchema.parse({
+        ...basePut,
+        navigation: { pinned: [...pinned] },
+      });
+
+      expect(result.navigation!.pinned).toHaveLength(NAVIGATION_MAX_PINNED);
+    });
+
+    it('should reject more than NAVIGATION_MAX_PINNED pins', () => {
+      const pinned = NAVIGATION_PINNABLE_KEYS.slice(
+        0,
+        NAVIGATION_MAX_PINNED + 1,
+      );
+
+      expect(() =>
+        updateUserSettingsSchema.parse({
+          ...basePut,
+          navigation: { pinned: [...pinned] },
+        }),
+      ).toThrow();
+    });
+
+    it('should REJECT an unknown pin key on the way in (a write naming one is a client bug)', () => {
+      expect(() =>
+        updateUserSettingsSchema.parse({
+          ...basePut,
+          navigation: { pinned: ['albums', 'holodeck'] },
+        }),
+      ).toThrow();
+    });
+
+    it('should reject a PRIMARY destination as a pin — pinnable keys are sub-destinations only', () => {
+      // Pinning "Photos" is meaningless: it is already in the rail (spec §5).
+      for (const primary of ['photos', 'explore', 'review', 'collections']) {
+        expect(() =>
+          updateUserSettingsSchema.parse({
+            ...basePut,
+            navigation: { pinned: [primary] },
+          }),
+        ).toThrow();
+      }
+    });
+
+    it('should reject a non-boolean railCollapsed', () => {
+      expect(() =>
+        updateUserSettingsSchema.parse({
+          ...basePut,
+          navigation: { railCollapsed: 'yes' },
+        }),
+      ).toThrow();
+    });
+
+    it('should reject unknown keys inside the namespace (strict)', () => {
+      expect(() =>
+        updateUserSettingsSchema.parse({
+          ...basePut,
+          navigation: { railHidden: true },
+        }),
+      ).toThrow();
+    });
+
+    it('should reject a null field on PUT (null-delete is PATCH-only)', () => {
+      expect(() =>
+        updateUserSettingsSchema.parse({
+          ...basePut,
+          navigation: { pinned: null },
+        }),
+      ).toThrow();
+    });
+  });
 });
 
 describe('PatchUserSettingsDto (PATCH)', () => {
@@ -804,6 +938,79 @@ describe('PatchUserSettingsDto (PATCH)', () => {
         patchUserSettingsSchema.parse({
           dataTables: { jobs: { columnOrder: ['a'] } },
         }),
+      ).toThrow();
+    });
+  });
+
+  describe('navigation field', () => {
+    it('should make navigation optional', () => {
+      const result = patchUserSettingsSchema.parse({});
+
+      expect(result.navigation).toBeUndefined();
+    });
+
+    it('should accept a partial namespace — only railCollapsed', () => {
+      const result = patchUserSettingsSchema.parse({
+        navigation: { railCollapsed: true },
+      });
+
+      expect(result.navigation).toEqual({ railCollapsed: true });
+    });
+
+    it('should accept a partial namespace — only pinned', () => {
+      const result = patchUserSettingsSchema.parse({
+        navigation: { pinned: ['favorites'] },
+      });
+
+      expect(result.navigation).toEqual({ pinned: ['favorites'] });
+    });
+
+    it('should accept null as a delete marker for a field', () => {
+      const result = patchUserSettingsSchema.parse({
+        navigation: { pinned: null },
+      });
+
+      expect(result.navigation).toEqual({ pinned: null });
+    });
+
+    it('should accept `navigation: null` as a clear-the-namespace marker', () => {
+      const result = patchUserSettingsSchema.parse({ navigation: null });
+
+      expect(result.navigation).toBeNull();
+    });
+
+    it('should accept an empty namespace object', () => {
+      const result = patchUserSettingsSchema.parse({ navigation: {} });
+
+      expect(result.navigation).toEqual({});
+    });
+
+    it('should apply the same bounds as PUT - unknown pin key', () => {
+      expect(() =>
+        patchUserSettingsSchema.parse({ navigation: { pinned: ['holodeck'] } }),
+      ).toThrow();
+    });
+
+    it('should apply the same bounds as PUT - too many pins', () => {
+      const pinned = NAVIGATION_PINNABLE_KEYS.slice(
+        0,
+        NAVIGATION_MAX_PINNED + 1,
+      );
+
+      expect(() =>
+        patchUserSettingsSchema.parse({ navigation: { pinned: [...pinned] } }),
+      ).toThrow();
+    });
+
+    it('should apply the same bounds as PUT - unknown key inside the namespace', () => {
+      expect(() =>
+        patchUserSettingsSchema.parse({ navigation: { railHidden: true } }),
+      ).toThrow();
+    });
+
+    it('should apply the same bounds as PUT - non-boolean railCollapsed', () => {
+      expect(() =>
+        patchUserSettingsSchema.parse({ navigation: { railCollapsed: 1 } }),
       ).toThrow();
     });
   });

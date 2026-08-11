@@ -23,6 +23,19 @@ export interface User {
   createdAt: string;
 }
 
+/**
+ * The `user_settings.navigation` namespace as it travels on the wire.
+ *
+ * Mirrors the API's `navigationPreferencesSchema`. Both fields are optional
+ * with no default, which is what lets the namespace ship without a migration.
+ */
+export interface NavigationPreferences {
+  /** Ordered pin list, ≤ 6 entries. See the note on `UserSettings.navigation`. */
+  pinned?: string[];
+  /** Desktop rail collapse preference. Absent ⇒ expanded. */
+  railCollapsed?: boolean;
+}
+
 export interface UserSettings {
   theme: 'light' | 'dark' | 'system';
   /**
@@ -66,6 +79,21 @@ export interface UserSettings {
    * "no preference", NOT "nothing configured yet".
    */
   memories?: MemoriesPreferences;
+  /**
+   * Per-user navigation preferences (issue #392, epic #388, spec §5): the
+   * desktop rail's pin list and its collapse state.
+   *
+   * Same absent-key contract as the three namespaces above — `undefined` is the
+   * normal state and means "nothing pinned, rail expanded", NOT "not configured
+   * yet". Nothing writes a default back.
+   *
+   * `pinned` is typed as `string[]` rather than the narrower `PinnableKey[]` ON
+   * PURPOSE: this is the WIRE shape, and a blob written by an older release may
+   * legitimately contain a key this build no longer knows. Unknown keys are
+   * dropped on read by `useNavigationPrefs`' `sanitizePinned`; typing them out
+   * of existence here would only push that lie into the compiler.
+   */
+  navigation?: NavigationPreferences;
   activeCircleId?: string | null;
   updatedAt: string;
   version: number;

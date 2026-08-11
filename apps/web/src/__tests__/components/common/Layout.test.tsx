@@ -1,32 +1,43 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+/**
+ * Tests for `Layout` (issue #392, epic #388, spec §4).
+ *
+ * The drawer this used to mount (`Sidebar`, with its open/close state) is
+ * gone from every breakpoint — replaced by three navigation TREATMENTS
+ * selected by MOUNTING, not by rendering-then-hiding: `NavigationRail`,
+ * `NavContextPane`, and `BottomNav`. Each is mocked as a simple stub so this
+ * file tests exactly what belongs to `Layout` itself — WHICH chrome mounts at
+ * which breakpoint, and that exactly one navigation surface exists in the
+ * tree at any width (never a rail and a bottom bar together, never neither).
+ *
+ * `AppBar` takes no props as of #392 (the `onMenuClick` hamburger callback
+ * went away with the drawer it opened), so the mock here is a bare stub.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { screen } from '@testing-library/react';
 import { render, mockUser } from '../../utils/test-utils';
 import { Layout } from '../../../components/common/Layout';
 
-// Mock the child components
+// ---------------------------------------------------------------------------
+// Module mocks — each nav surface is a simple, breakpoint-agnostic stub, so
+// this file's viewport control drives ONLY `Layout`'s own `up('md')`/`up('lg')`
+// gates, never a self-gate belonging to the real components (`BottomNav`
+// self-gates on `down('md')` too; that overlap is exercised in its own spec,
+// not here).
+// ---------------------------------------------------------------------------
+
 vi.mock('../../../components/navigation/AppBar', () => ({
-  AppBar: vi.fn(({ onMenuClick }) => (
-    <div data-testid="mock-appbar">
-      <button onClick={onMenuClick} data-testid="menu-toggle-button">
-        Toggle Menu
-      </button>
-    </div>
-  )),
+  AppBar: vi.fn(() => <div data-testid="mock-appbar">AppBar</div>),
+}));
+vi.mock('../../../components/navigation/NavigationRail', () => ({
+  NavigationRail: vi.fn(() => <nav data-testid="mock-rail">Rail</nav>),
+}));
+vi.mock('../../../components/navigation/NavContextPane', () => ({
+  NavContextPane: vi.fn(() => <nav data-testid="mock-context-pane">Pane</nav>),
+}));
+vi.mock('../../../components/navigation/BottomNav', () => ({
+  BottomNav: vi.fn(() => <div data-testid="mock-bottomnav">BottomNav</div>),
 }));
 
-vi.mock('../../../components/navigation/Sidebar', () => ({
-  Sidebar: vi.fn(({ open, onClose }) => (
-    <div data-testid="mock-sidebar" data-open={open}>
-      <button onClick={onClose} data-testid="sidebar-close-button">
-        Close Sidebar
-      </button>
-    </div>
-  )),
-  DRAWER_WIDTH: 240,
-}));
-
-// Mock react-router-dom Outlet
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
   return {
@@ -35,541 +46,190 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-// Mock usePermissions hook for Sidebar
-vi.mock('../../../hooks/usePermissions', () => ({
-  usePermissions: vi.fn(() => ({
-    permissions: new Set(),
-    roles: new Set(),
-    hasPermission: vi.fn(),
-    hasAnyPermission: vi.fn(),
-    hasAllPermissions: vi.fn(),
-    hasRole: vi.fn(),
-    hasAnyRole: vi.fn(),
-    isAdmin: false,
-  })),
-}));
-
-// Import mocked components to access their mock functions
 import { AppBar } from '../../../components/navigation/AppBar';
-import { Sidebar } from '../../../components/navigation/Sidebar';
 import { Outlet } from 'react-router-dom';
+
+// ---------------------------------------------------------------------------
+// Viewport helper — same technique as AppBar.test.tsx / CollectionsHubPage.test.tsx.
+// The suite baseline (setup.ts) reports every query `matches: false`, which
+// for `up('md')` reads as "below md" — the phone treatment — so phone needs
+// no explicit call; tablet and desktop do.
+// ---------------------------------------------------------------------------
+
+function setViewportWidth(px: number) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => {
+      const min = query.match(/min-width:\s*([\d.]+)px/);
+      const max = query.match(/max-width:\s*([\d.]+)px/);
+      let matches = true;
+      if (min) matches = matches && px >= parseFloat(min[1]);
+      if (max) matches = matches && px <= parseFloat(max[1]);
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      };
+    }),
+  });
+}
+
+function restoreDefaultViewport() {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+const TABLET_WIDTH = 950; // >= md(900), < lg(1200)
+const DESKTOP_WIDTH = 1300; // >= lg(1200)
 
 describe('Layout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    restoreDefaultViewport();
   });
+
+  afterEach(() => {
+    restoreDefaultViewport();
+  });
+
+  // =========================================================================
+  // Basic structure
+  // =========================================================================
 
   describe('Rendering', () => {
-    it('should render the Layout component', () => {
-      const { container } = render(<Layout />);
-
-      expect(container).toBeInTheDocument();
-    });
-
-    it('should render AppBar component', () => {
+    it('renders AppBar', () => {
       render(<Layout />);
-
       expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
     });
 
-    it('should render Sidebar component', () => {
+    it('renders Outlet content inside a <main> element', () => {
       render(<Layout />);
 
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument();
-    });
-
-    it('should render Outlet for nested routes', () => {
-      render(<Layout />);
-
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
+      const outletContent = screen.getByTestId('outlet-content');
+      const mainElement = outletContent.closest('main');
+      expect(mainElement).toBeInTheDocument();
       expect(vi.mocked(Outlet)).toHaveBeenCalled();
     });
 
-    it('should render all major layout sections', () => {
+    it('calls AppBar with no props (the hamburger callback is gone with the drawer)', () => {
       render(<Layout />);
 
-      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument();
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
+      expect(vi.mocked(AppBar)).toHaveBeenCalledWith({}, undefined);
     });
   });
 
-  describe('Sidebar State Management', () => {
-    it('should initialize with sidebar closed', () => {
+  // =========================================================================
+  // Chrome per breakpoint — the epic's success criterion #2: no breakpoint
+  // falls back to "whatever the drawer did". Each treatment is asserted by
+  // WHICH stub is present, not by a hidden/visible style — the chrome is
+  // chosen by mounting.
+  // =========================================================================
+
+  describe('chrome per breakpoint', () => {
+    it('phone (< md): BottomNav only — no rail, no context pane', () => {
       render(<Layout />);
 
-      const sidebar = screen.getByTestId('mock-sidebar');
-      expect(sidebar).toHaveAttribute('data-open', 'false');
+      expect(screen.getByTestId('mock-bottomnav')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-rail')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('mock-context-pane')).not.toBeInTheDocument();
     });
 
-    it('should open sidebar when menu button is clicked', async () => {
-      const user = userEvent.setup();
-
+    it('tablet (md-lg): rail only — no context pane, no bottom bar', () => {
+      setViewportWidth(TABLET_WIDTH);
       render(<Layout />);
 
-      const menuButton = screen.getByTestId('menu-toggle-button');
-      await user.click(menuButton);
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
+      expect(screen.getByTestId('mock-rail')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-context-pane')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('mock-bottomnav')).not.toBeInTheDocument();
     });
 
-    it('should close sidebar when close button is clicked', async () => {
-      const user = userEvent.setup();
-
+    it('desktop (>= lg): rail AND context pane — no bottom bar', () => {
+      setViewportWidth(DESKTOP_WIDTH);
       render(<Layout />);
 
-      // First open the sidebar
-      const menuButton = screen.getByTestId('menu-toggle-button');
-      await user.click(menuButton);
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-
-      // Then close it
-      const closeButton = screen.getByTestId('sidebar-close-button');
-      await user.click(closeButton);
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'false');
-      });
-    });
-
-    it('should toggle sidebar state on multiple clicks', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      const menuButton = screen.getByTestId('menu-toggle-button');
-      const sidebar = screen.getByTestId('mock-sidebar');
-
-      // Initially closed
-      expect(sidebar).toHaveAttribute('data-open', 'false');
-
-      // Open
-      await user.click(menuButton);
-      await waitFor(() => {
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-
-      // Close
-      await user.click(menuButton);
-      await waitFor(() => {
-        expect(sidebar).toHaveAttribute('data-open', 'false');
-      });
-
-      // Open again
-      await user.click(menuButton);
-      await waitFor(() => {
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
+      expect(screen.getByTestId('mock-rail')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-context-pane')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-bottomnav')).not.toBeInTheDocument();
     });
   });
 
-  describe('Component Integration', () => {
-    it('should pass onMenuClick handler to AppBar', () => {
-      render(<Layout />);
+  // =========================================================================
+  // Exactly one PRIMARY nav (rail xor bottom bar) at every breakpoint —
+  // never both together, never neither. `Layout` mounts the rail under
+  // `up('md')` and `BottomNav` under `!showRail`, the exact complement, so
+  // this is a real, assertable guarantee, not a coincidence of the three
+  // cases above.
+  // =========================================================================
 
-      // React 19 passes (props, undefined) — legacy context replaced by undefined
-      expect(vi.mocked(AppBar)).toHaveBeenCalledWith(
-        expect.objectContaining({
-          onMenuClick: expect.any(Function),
-        }),
-        undefined,
-      );
-    });
-
-    it('should pass open state to Sidebar', () => {
-      render(<Layout />);
-
-      // React 19 passes (props, undefined) — legacy context replaced by undefined
-      expect(vi.mocked(Sidebar)).toHaveBeenCalledWith(
-        expect.objectContaining({
-          open: false,
-          onClose: expect.any(Function),
-        }),
-        undefined,
-      );
-    });
-
-    it('should update Sidebar open prop when state changes', async () => {
-      const user = userEvent.setup();
+  describe('exactly one primary nav at each breakpoint', () => {
+    it.each([
+      ['phone', undefined],
+      ['tablet', TABLET_WIDTH],
+      ['desktop', DESKTOP_WIDTH],
+    ] as const)('%s: rail and bottom bar are mutually exclusive', (_label, width) => {
+      if (width) setViewportWidth(width);
 
       render(<Layout />);
 
-      // Initially closed — React 19 passes (props, undefined)
-      expect(vi.mocked(Sidebar)).toHaveBeenCalledWith(
-        expect.objectContaining({ open: false }),
-        undefined,
-      );
+      const railPresent = screen.queryByTestId('mock-rail') !== null;
+      const bottomNavPresent = screen.queryByTestId('mock-bottomnav') !== null;
 
-      const menuButton = screen.getByTestId('menu-toggle-button');
-      await user.click(menuButton);
-
-      // After click, should be open
-      await waitFor(() => {
-        expect(vi.mocked(Sidebar)).toHaveBeenCalledWith(
-          expect.objectContaining({ open: true }),
-          undefined,
-        );
-      });
+      // XOR: exactly one of the two is present.
+      expect(railPresent).toBe(!bottomNavPresent);
+      expect(railPresent || bottomNavPresent).toBe(true);
     });
   });
 
-  describe('Layout Structure', () => {
-    it('should have flexbox layout container', () => {
-      const { container } = render(<Layout />);
+  // =========================================================================
+  // Focus order — rail, then context pane, then main (spec §7), enforced by
+  // DOM order since no tabindex juggling is used to achieve it.
+  // =========================================================================
 
-      const mainContainer = container.firstChild as HTMLElement;
-      expect(mainContainer).toBeInTheDocument();
-    });
+  it('at desktop, the rail precedes the context pane precedes <main> in DOM order', () => {
+    setViewportWidth(DESKTOP_WIDTH);
+    const { container } = render(<Layout />);
 
-    it('should render main content area', () => {
-      render(<Layout />);
+    const rail = screen.getByTestId('mock-rail');
+    const pane = screen.getByTestId('mock-context-pane');
+    const main = screen.getByTestId('outlet-content').closest('main') as HTMLElement;
 
-      // Check that outlet content is within main element
-      const outletContent = screen.getByTestId('outlet-content');
-      const mainElement = outletContent.closest('main');
+    const position = (a: Node, b: Node) =>
+      // eslint-disable-next-line no-bitwise
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
 
-      expect(mainElement).toBeInTheDocument();
-    });
-
-    it('should have proper component hierarchy', () => {
-      const { container } = render(<Layout />);
-
-      // Check the hierarchy: Container > AppBar + Content Row > Sidebar + Main
-      const appBar = screen.getByTestId('mock-appbar');
-      const sidebar = screen.getByTestId('mock-sidebar');
-      const outlet = screen.getByTestId('outlet-content');
-
-      expect(container.contains(appBar)).toBe(true);
-      expect(container.contains(sidebar)).toBe(true);
-      expect(container.contains(outlet)).toBe(true);
-    });
+    expect(container.contains(rail)).toBe(true);
+    expect(position(rail, pane)).toBeTruthy();
+    expect(position(pane, main)).toBeTruthy();
   });
 
-  describe('Main Content Area', () => {
-    it('should render main element with component prop', () => {
-      render(<Layout />);
-
-      const outletContent = screen.getByTestId('outlet-content');
-      const mainElement = outletContent.closest('main');
-
-      expect(mainElement).toBeInTheDocument();
-      expect(mainElement?.tagName).toBe('MAIN');
-    });
-
-    it('should render outlet content within main area', () => {
-      render(<Layout />);
-
-      const outletContent = screen.getByTestId('outlet-content');
-      const mainElement = outletContent.closest('main');
-
-      expect(mainElement).toContainElement(outletContent);
-    });
-
-    it('should apply padding to main content area', () => {
-      render(<Layout />);
-
-      const outletContent = screen.getByTestId('outlet-content');
-      const mainElement = outletContent.closest('main');
-
-      // MUI applies padding via sx prop, verify element exists
-      expect(mainElement).toBeInTheDocument();
-    });
-  });
-
-  describe('Responsive Behavior', () => {
-    it('should render all components on mobile viewport', () => {
-      render(<Layout />);
-
-      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument();
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
-    });
-
-    it('should render all components on desktop viewport', () => {
-      render(<Layout />);
-
-      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument();
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
-    });
-
-    it('should handle sidebar toggle on any viewport size', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      const menuButton = screen.getByTestId('menu-toggle-button');
-      const sidebar = screen.getByTestId('mock-sidebar');
-
-      await user.click(menuButton);
-
-      await waitFor(() => {
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-    });
-  });
-
-  describe('Styling and Theme', () => {
-    it('should apply background color from theme', () => {
-      const { container } = render(<Layout />);
-
-      const mainContainer = container.firstChild as HTMLElement;
-      expect(mainContainer).toBeInTheDocument();
-      // Theme background color is applied via MUI sx prop
-    });
-
-    it('should use theme palette for styling', () => {
-      const { container } = render(<Layout />);
-
-      // Layout should be rendered and styled
-      expect(container.firstChild).toBeInTheDocument();
-    });
-
-    it('should have minimum height of 100vh', () => {
-      const { container } = render(<Layout />);
-
-      const mainContainer = container.firstChild as HTMLElement;
-      expect(mainContainer).toBeInTheDocument();
-      // minHeight: 100vh is applied via MUI sx prop
-    });
-
-    it('should have flex column layout', () => {
-      const { container } = render(<Layout />);
-
-      const mainContainer = container.firstChild as HTMLElement;
-      expect(mainContainer).toBeInTheDocument();
-      // flexDirection: column is applied via MUI sx prop
-    });
-  });
-
-  describe('Outlet Rendering', () => {
-    it('should render child route content via Outlet', () => {
-      render(<Layout />);
-
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
-      expect(screen.getByText('Page Content')).toBeInTheDocument();
-    });
-
-    it('should call Outlet component', () => {
-      render(<Layout />);
-
-      expect(vi.mocked(Outlet)).toHaveBeenCalled();
-    });
-
-    it('should render Outlet without props', () => {
-      render(<Layout />);
-
-      // React 19 passes (props, undefined) — legacy context replaced by undefined.
-      // Outlet is called with empty props and undefined as second arg.
-      expect(vi.mocked(Outlet)).toHaveBeenCalledWith({}, undefined);
-    });
-  });
-
-  describe('Event Handlers', () => {
-    it('should have handleSidebarToggle function', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      const menuButton = screen.getByTestId('menu-toggle-button');
-      const sidebar = screen.getByTestId('mock-sidebar');
-
-      // Test toggle behavior
-      expect(sidebar).toHaveAttribute('data-open', 'false');
-
-      await user.click(menuButton);
-
-      await waitFor(() => {
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-    });
-
-    it('should have handleSidebarClose function', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      // Open sidebar first
-      const menuButton = screen.getByTestId('menu-toggle-button');
-      await user.click(menuButton);
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-
-      // Close it
-      const closeButton = screen.getByTestId('sidebar-close-button');
-      await user.click(closeButton);
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'false');
-      });
-    });
-
-    it('should handle rapid toggle clicks', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      const menuButton = screen.getByTestId('menu-toggle-button');
-
-      // Rapid clicks
-      await user.click(menuButton);
-      await user.click(menuButton);
-      await user.click(menuButton);
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-    });
-  });
-
-  describe('Accessibility', () => {
-    it('should render semantic HTML structure', () => {
-      render(<Layout />);
-
-      const outletContent = screen.getByTestId('outlet-content');
-      const mainElement = outletContent.closest('main');
-
-      expect(mainElement).toBeInTheDocument();
-    });
-
-    it('should have proper landmark structure', () => {
-      render(<Layout />);
-
-      // Main content should be within <main> element
-      const outletContent = screen.getByTestId('outlet-content');
-      const mainElement = outletContent.closest('main');
-
-      expect(mainElement).toBeInTheDocument();
-      expect(mainElement?.tagName).toBe('MAIN');
-    });
-
-    it('should be keyboard navigable through menu toggle', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      const menuButton = screen.getByTestId('menu-toggle-button');
-
-      // Focus and activate with keyboard
-      menuButton.focus();
-      expect(menuButton).toHaveFocus();
-
-      await user.keyboard('{Enter}');
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-    });
-  });
-
-  describe('Integration with Theme Context', () => {
-    it('should render with light theme', () => {
-      render(<Layout />, {
-        wrapperOptions: { theme: 'light' },
-      });
-
-      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
-    });
-
-    it('should render with dark theme', () => {
-      render(<Layout />, {
-        wrapperOptions: { theme: 'dark' },
-      });
-
-      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
-    });
-
-    it('should apply theme colors to layout', () => {
-      const { container } = render(<Layout />);
-
-      const mainContainer = container.firstChild as HTMLElement;
-      expect(mainContainer).toBeInTheDocument();
-      // Theme colors are applied via useTheme hook and MUI sx prop
-    });
-  });
-
-  describe('Integration with Auth Context', () => {
-    it('should render with authenticated user', () => {
-      render(<Layout />, {
-        wrapperOptions: { authenticated: true, user: mockUser },
-      });
-
-      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument();
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
-    });
-
-    it('should render when not authenticated', () => {
-      render(<Layout />, {
-        wrapperOptions: { authenticated: false, user: null },
-      });
-
-      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
-      expect(screen.getByTestId('mock-sidebar')).toBeInTheDocument();
-      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
-    });
-  });
-
-  describe('Performance', () => {
-    it('should not re-render unnecessarily', () => {
-      const { rerender } = render(<Layout />);
-
-      const initialCallCount = vi.mocked(AppBar).mock.calls.length;
-
-      // Re-render with same props
-      rerender(<Layout />);
-
-      // Component should handle re-renders gracefully
-      expect(vi.mocked(AppBar).mock.calls.length).toBeGreaterThanOrEqual(
-        initialCallCount
-      );
-    });
-
-    it('should handle state updates efficiently', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      const menuButton = screen.getByTestId('menu-toggle-button');
-
-      // Multiple state updates
-      await user.click(menuButton); // Open
-      await user.click(menuButton); // Close
-      await user.click(menuButton); // Open
-
-      await waitFor(() => {
-        const sidebar = screen.getByTestId('mock-sidebar');
-        expect(sidebar).toHaveAttribute('data-open', 'true');
-      });
-    });
-  });
-
-  // -------------------------------------------------------------------------
+  // =========================================================================
   // Issue #291 — <main> must be able to shrink below its content
   //
   // <main> is a flex item, and a flex item's `min-width` defaults to `auto`
-  // (its min-content width). Without an explicit `min-width: 0`, any descendant
-  // reporting a large intrinsic inline size — a `content-visibility`
+  // (its min-content width). Without an explicit `min-width: 0`, any
+  // descendant reporting a large intrinsic inline size — a `content-visibility`
   // placeholder, a wide table, a long unbroken string — cannot be shrunk and
-  // widens the entire app shell past the viewport. This is the defence-in-depth
-  // half of the mobile gallery blow-up fix.
-  // -------------------------------------------------------------------------
+  // widens the entire app shell past the viewport. This is the
+  // defence-in-depth half of the mobile gallery blow-up fix, and it must keep
+  // passing unchanged across this rewrite.
+  // =========================================================================
+
   describe('Main flex item shrinkability (issue #291)', () => {
     it('applies min-width: 0 to <main> in the default branch', () => {
       render(<Layout />);
@@ -590,39 +250,31 @@ describe('Layout', () => {
     });
   });
 
-  describe('Edge Cases', () => {
-    it('should handle missing onMenuClick gracefully', () => {
-      render(<Layout />);
+  // =========================================================================
+  // Theme / auth integration — unaffected by the drawer removal, kept as a
+  // smoke test that the shell still composes with the app's other providers.
+  // =========================================================================
 
-      // Component should render even if handlers are called
+  describe('Integration with theme and auth context', () => {
+    it('renders with light theme', () => {
+      render(<Layout />, { wrapperOptions: { theme: 'light' } });
       expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
     });
 
-    it('should handle sidebar state changes while closed', async () => {
-      const user = userEvent.setup();
-
-      render(<Layout />);
-
-      const sidebar = screen.getByTestId('mock-sidebar');
-      expect(sidebar).toHaveAttribute('data-open', 'false');
-
-      // Try to close already closed sidebar
-      const closeButton = screen.getByTestId('sidebar-close-button');
-      await user.click(closeButton);
-
-      // Should remain closed
-      expect(sidebar).toHaveAttribute('data-open', 'false');
+    it('renders with dark theme', () => {
+      render(<Layout />, { wrapperOptions: { theme: 'dark' } });
+      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
     });
 
-    it('should maintain sidebar state during route changes', () => {
-      const { rerender } = render(<Layout />);
+    it('renders with an authenticated user', () => {
+      render(<Layout />, { wrapperOptions: { authenticated: true, user: mockUser } });
+      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
+      expect(screen.getByTestId('outlet-content')).toBeInTheDocument();
+    });
 
-      // Simulate route change by re-rendering
-      rerender(<Layout />);
-
-      // Sidebar should maintain its closed state
-      const sidebar = screen.getByTestId('mock-sidebar');
-      expect(sidebar).toHaveAttribute('data-open', 'false');
+    it('renders when not authenticated', () => {
+      render(<Layout />, { wrapperOptions: { authenticated: false, user: null } });
+      expect(screen.getByTestId('mock-appbar')).toBeInTheDocument();
     });
   });
 });

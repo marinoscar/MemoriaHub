@@ -14,7 +14,6 @@ import {
 import {
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
-  Menu as MenuIcon,
   CloudUpload as UploadIcon,
   ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
@@ -31,11 +30,14 @@ import { ADMIN_HUB_PATH, adminPageTitle } from '../../config/adminSections';
 import { APP_NAME } from '../../constants/app';
 import appLogo from '../../assets/app_logo.png';
 
-interface AppBarProps {
-  onMenuClick?: () => void;
-}
-
-export function AppBar({ onMenuClick }: AppBarProps) {
+/**
+ * The top bar.
+ *
+ * Takes no props as of issue #392: the `onMenuClick` hamburger callback went
+ * away with the drawer it opened. Navigation below `md` is the bottom bar, and
+ * at `md` and up it is the permanent rail — neither needs anything from here.
+ */
+export function AppBar() {
   const theme = useTheme();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -86,21 +88,28 @@ export function AppBar({ onMenuClick }: AppBarProps) {
           zIndex: theme.zIndex.appBar,
         }}
       >
-        {/* `gap` tightens on phone. At 360px the row is hamburger + logo +
-            CIRCLE CHIP + collapsed search + upload + bell + theme + avatar;
-            with the desktop 8px gap the fixed items alone measured ~354px
-            against 360px of viewport — 6px of slack, which a slightly larger
-            system font or a 2-digit badge would blow through. Dropping to 4px
-            below `sm` buys back ~28px so the fixed items measure ~330px. See
-            docs/audits/mobile-topbar-audit.md for the previous regression of
-            this class.
+        {/* THE PHONE ROW, POST-#392 — the crowding documented in
+            docs/audits/mobile-topbar-audit.md is now structurally resolved
+            rather than tuned.
 
-            The chip is added on top of that ~330px, which is why it (alone in
-            this row) shrinks: on a 360px device it renders truncated to
-            whatever is left rather than overflowing, and it reaches its full
-            108px cap around 430px. That squeeze is transitional — issue #390
-            moves search out of the top bar into a tab and #392 deletes the
-            hamburger, together returning ~80px to this row on phone. */}
+            At 360px the row is: logo + CIRCLE CHIP + upload + bell + theme +
+            avatar. Two items that used to be here are gone for good, and both
+            left because a DESTINATION took over their job, not because they
+            were squeezed out:
+              - the hamburger, with the drawer it opened (spec §4.1);
+              - the search pill, because Search is a bottom-bar tab below `md`
+                (see the `isMd` gate on TopbarSearch below).
+            Together they return ~80px. The four fixed icon buttons plus the
+            32px logo now measure ~232px of the 360px viewport, leaving the chip
+            ~120px — comfortably past its 108px cap, so on a phone it renders at
+            full width instead of truncating.
+
+            The tightened 4px gap below `sm` is kept anyway: it costs nothing,
+            and the slack it buys is what absorbs a larger system font or a
+            2-digit notification badge without the row reflowing. The chip
+            remains the only shrinkable item here (every icon button is
+            `flexShrink: 0`), which is what guarantees the toolbar can never
+            push the app shell sideways. */}
         <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, position: 'relative' }}>
           {adminDrillDown ? (
             <>
@@ -143,19 +152,10 @@ export function AppBar({ onMenuClick }: AppBarProps) {
             </>
           ) : (
             <>
-              {/* Hamburger. Stays for this phase — the drawer is not removed
-                  until issue #392. */}
-              <IconButton
-                color="inherit"
-                aria-label="toggle drawer"
-                edge="start"
-                onClick={onMenuClick}
-                sx={{ flexShrink: 0 }}
-              >
-                <MenuIcon />
-              </IconButton>
-
-              {/* Brand — logo always shown; wordmark added on tablet/desktop */}
+              {/* Brand — logo always shown; wordmark added on tablet/desktop.
+                  `edge="start"`-style alignment now belongs to the logo: the
+                  hamburger that used to hold this slot was deleted with the
+                  drawer in #392. */}
               <Box
                 onClick={() => navigate('/')}
                 sx={{
@@ -196,8 +196,24 @@ export function AppBar({ onMenuClick }: AppBarProps) {
                   own comment for the minWidth/maxWidth rule. */}
               <CircleChip />
 
-              {/* Central search pill — takes available space */}
-              <TopbarSearch />
+              {/* Central search pill — `md` and up ONLY (spec §4.1 / §4.2).
+                  Below `md` Search is a bottom-bar destination, so a search
+                  field here would be a second entry point to the same place
+                  competing for the scarcest row in the app; removing it is what
+                  permanently resolves the ~354px-against-360px crowding the
+                  topbar audit documents, rather than tuning gaps a third time.
+                  At `md` and up the destination gives up its RAIL slot instead
+                  and is carried here, where there is width for a real input —
+                  see the header of `NavigationRail`. */}
+              {isMd && <TopbarSearch />}
+
+              {/* The flexible spacer that `TopbarSearch` used to supply.
+                  Removing it without a replacement is EXACTLY the regression
+                  docs/audits/mobile-topbar-audit.md records for issue #95 — the
+                  icons pack to the left with dead space on the right, because
+                  nothing in the row grows. Rendered only where the search pill
+                  is absent, so the two never compete for the same free space. */}
+              {!isMd && <Box aria-hidden sx={{ flexGrow: 1, minWidth: 0 }} />}
 
               {/* Upload button */}
               {activeCircle && (

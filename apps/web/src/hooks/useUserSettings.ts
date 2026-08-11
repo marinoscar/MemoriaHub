@@ -20,7 +20,24 @@ interface UseUserSettingsReturn {
   refresh: () => Promise<void>;
 }
 
-export function useUserSettings(): UseUserSettingsReturn {
+interface UseUserSettingsOptions {
+  /**
+   * Push the fetched `theme` into `ThemeContext` on load. Default `true`.
+   *
+   * Pass `false` when the hook is mounted for some OTHER namespace (issue
+   * #392's `useNavigationPrefs` reads `navigation` from the always-mounted
+   * navigation rail). Without the opt-out, adding a settings consumer to the
+   * app shell would silently make the stored theme authoritative on EVERY page
+   * load and stamp over the AppBar's local light/dark toggle — a behaviour
+   * change that has nothing to do with the namespace the new consumer wanted.
+   */
+  syncTheme?: boolean;
+}
+
+export function useUserSettings(
+  options: UseUserSettingsOptions = {},
+): UseUserSettingsReturn {
+  const { syncTheme = true } = options;
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +52,10 @@ export function useUserSettings(): UseUserSettingsReturn {
       const data = await api.get<UserSettings>('/user-settings');
       if (!isMounted()) return;
       setSettings(data);
-      // Sync theme with settings
-      setMode(data.theme);
+      // Sync theme with settings — unless this consumer opted out (see
+      // `syncTheme`), in which case it is here for a different namespace and
+      // has no business moving the user's theme.
+      if (syncTheme) setMode(data.theme);
     } catch (err) {
       if (!isMounted()) return;
       const message = err instanceof ApiError ? err.message : 'Failed to load settings';
@@ -44,7 +63,7 @@ export function useUserSettings(): UseUserSettingsReturn {
     } finally {
       if (isMounted()) setIsLoading(false);
     }
-  }, [setMode, isMounted]);
+  }, [setMode, isMounted, syncTheme]);
 
   useEffect(() => {
     fetchSettings();
@@ -67,7 +86,9 @@ export function useUserSettings(): UseUserSettingsReturn {
         if (isMounted()) {
           setSettings(data);
 
-          // Sync theme if changed
+          // Sync theme if changed. Unconditional on `syncTheme`: an opted-out
+          // consumer never SENDS a theme, and a caller that explicitly patches
+          // one is asking for it to take effect.
           if (updates.theme) {
             setMode(updates.theme);
           }
