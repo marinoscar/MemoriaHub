@@ -148,5 +148,58 @@ describe('RolesGuard', () => {
       expect((request as any).requestUser).toHaveProperty('roles');
       expect((request as any).requestUser.roles).toContain('admin');
     });
+
+    // Regression test for issue #406: a bare @Auth() route (no roles
+    // required — RolesGuard short-circuits with `return true`) must still
+    // populate request.requestUser, since downstream code (e.g.
+    // @CurrentUser()) falls back to request.requestUser and only has the
+    // raw AuthenticatedUser shape (no `.permissions`) otherwise.
+    it('should populate request.requestUser even when no roles are required', () => {
+      reflector.getAllAndOverride.mockReturnValue(undefined);
+      const user = createUserWithRoles(['viewer', 'contributor']);
+      const request = { user };
+      const context = {
+        switchToHttp: () => ({
+          getRequest: () => request,
+        }),
+        getHandler: () => jest.fn(),
+        getClass: () => jest.fn(),
+      } as any;
+
+      expect(guard.canActivate(context)).toBe(true);
+
+      expect(request).toHaveProperty('requestUser');
+      const requestUser = (request as any).requestUser;
+      expect(requestUser.id).toBe('user-id');
+      expect(requestUser.roles).toEqual(
+        expect.arrayContaining(['viewer', 'contributor']),
+      );
+      expect(Array.isArray(requestUser.permissions)).toBe(true);
+    });
+
+    it('should populate request.requestUser even when the roles array is empty', () => {
+      reflector.getAllAndOverride.mockReturnValue([]);
+      const user = createUserWithRoles(['admin']);
+      const request = { user };
+      const context = {
+        switchToHttp: () => ({
+          getRequest: () => request,
+        }),
+        getHandler: () => jest.fn(),
+        getClass: () => jest.fn(),
+      } as any;
+
+      expect(guard.canActivate(context)).toBe(true);
+      expect((request as any).requestUser).toBeDefined();
+      expect((request as any).requestUser.roles).toContain('admin');
+    });
+
+    it('should still throw when no user is present, even if no roles are required', () => {
+      reflector.getAllAndOverride.mockReturnValue(undefined);
+      const context = createMockContext(null);
+
+      expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
+      expect(() => guard.canActivate(context)).toThrow('No user in request');
+    });
   });
 });

@@ -213,5 +213,63 @@ describe('PermissionsGuard', () => {
       expect((request as any).requestUser.permissions).toContain('users:read');
       expect((request as any).requestUser.permissions).toContain('users:write');
     });
+
+    // Regression test for issue #406: a bare @Auth() route (no permissions
+    // required — PermissionsGuard short-circuits with `return true`) must
+    // still populate request.requestUser with the user's real, correctly
+    // computed permissions array. Before this fix, request.requestUser was
+    // left unset on this path, so @CurrentUser() fell back to the raw
+    // AuthenticatedUser (no `.permissions` field at all), and any downstream
+    // code reading `user.permissions.includes(...)` (e.g.
+    // CircleMembershipService.assertCircleAccess) threw a TypeError
+    // ("Cannot read properties of undefined (reading 'includes')") instead
+    // of performing a real permission check.
+    it('should populate request.requestUser with real permissions even when none are required', () => {
+      reflector.getAllAndOverride.mockReturnValue(undefined);
+      const user = createUserWithPermissions(['circles:read', 'circles:write']);
+      const request = { user };
+      const context = {
+        switchToHttp: () => ({
+          getRequest: () => request,
+        }),
+        getHandler: () => jest.fn(),
+        getClass: () => jest.fn(),
+      } as any;
+
+      expect(guard.canActivate(context)).toBe(true);
+
+      expect(request).toHaveProperty('requestUser');
+      const requestUser = (request as any).requestUser;
+      expect(requestUser.id).toBe('user-id');
+      expect(Array.isArray(requestUser.permissions)).toBe(true);
+      expect(requestUser.permissions).toEqual(
+        expect.arrayContaining(['circles:read', 'circles:write']),
+      );
+    });
+
+    it('should populate request.requestUser even when the permissions array is empty', () => {
+      reflector.getAllAndOverride.mockReturnValue([]);
+      const user = createUserWithPermissions(['users:read']);
+      const request = { user };
+      const context = {
+        switchToHttp: () => ({
+          getRequest: () => request,
+        }),
+        getHandler: () => jest.fn(),
+        getClass: () => jest.fn(),
+      } as any;
+
+      expect(guard.canActivate(context)).toBe(true);
+      expect((request as any).requestUser).toBeDefined();
+      expect((request as any).requestUser.permissions).toContain('users:read');
+    });
+
+    it('should still throw when no user is present, even if no permissions are required', () => {
+      reflector.getAllAndOverride.mockReturnValue(undefined);
+      const context = createMockContext(null);
+
+      expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
+      expect(() => guard.canActivate(context)).toThrow('No user in request');
+    });
   });
 });

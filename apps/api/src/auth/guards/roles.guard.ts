@@ -13,6 +13,22 @@ export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest();
+    const user = request.user as AuthenticatedUser;
+
+    if (!user) {
+      throw new ForbiddenException('No user in request');
+    }
+
+    // Attach the simplified user to the request unconditionally, regardless of
+    // whether this route requires any specific role. Downstream code (e.g.
+    // @CurrentUser()) falls back to request.requestUser, and a bare @Auth()
+    // route (no roles/permissions) must still get the derived RequestUser
+    // shape — including its `permissions`/`roles` arrays — not the raw
+    // AuthenticatedUser, which has neither.
+    const requestUser = toRequestUser(user);
+    request.requestUser = requestUser;
+
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
@@ -22,15 +38,6 @@ export class RolesGuard implements CanActivate {
     if (!requiredRoles || requiredRoles.length === 0) {
       return true;
     }
-
-    const request = context.switchToHttp().getRequest();
-    const user = request.user as AuthenticatedUser;
-
-    if (!user) {
-      throw new ForbiddenException('No user in request');
-    }
-
-    const requestUser = toRequestUser(user);
 
     // Check if user has at least one required role
     const hasRole = requiredRoles.some((role) =>
@@ -42,9 +49,6 @@ export class RolesGuard implements CanActivate {
         `Required roles: ${requiredRoles.join(', ')}`,
       );
     }
-
-    // Attach simplified user to request for convenience
-    request.requestUser = requestUser;
 
     return true;
   }
