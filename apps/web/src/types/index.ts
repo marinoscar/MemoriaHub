@@ -138,6 +138,17 @@ export interface SystemSettings {
     maxImpliedSpeedKmh?: number;
     bulkAcceptThreshold?: number;
   };
+  /**
+   * Location Grouping (epic #373). `features.locationGrouping` is the master
+   * toggle; these are the tuning knobs. `maxRadiusKm` is the ceiling the API
+   * validates a group's `radiusKm` against, so the admin UI's radius slider
+   * binds its max to this value rather than a hard-coded constant.
+   */
+  locationGrouping?: {
+    radiusCaptureEnabled?: boolean;
+    maxRadiusKm?: number;
+    suggestionMinItems?: number;
+  };
   geo?: {
     reverseProvider?: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled?: boolean;

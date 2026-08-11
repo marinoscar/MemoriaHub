@@ -46,6 +46,7 @@ const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSett
 const EnhancerSettingsPage = lazy(() => import('./pages/Admin/EnhancerSettingsPage'));
 const MemoriesSettingsPage = lazy(() => import('./pages/Admin/MemoriesSettingsPage'));
 const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
+const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
@@ -129,6 +130,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/enhancer" element={<EnhancerSettingsPage />} />
                 <Route path="/admin/settings/memories" element={<MemoriesSettingsPage />} />
                 <Route path="/admin/settings/location-inference" element={<LocationInferenceSettingsPage />} />
+                <Route path="/admin/settings/location-groups" element={<LocationGroupsSettingsPage />} />
                 <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
                 <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
                 <Route path="/admin/settings/email" element={<EmailSettingsPage />} />

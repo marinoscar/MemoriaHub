@@ -93,6 +93,15 @@ export interface MediaItem {
   geoLocality: string | null;
   geoPlaceName: string | null;
   geoSource: string | null;
+  /**
+   * Location Grouping (epic #373) — the admin-curated canonical name each raw
+   * geocoder value collapses into. Derived columns maintained by the rebuild
+   * job; equal to the raw value when no group claims it. Optional here because
+   * not every list endpoint selects them.
+   */
+  geoCanonicalCountry?: string | null;
+  geoCanonicalAdmin1?: string | null;
+  geoCanonicalLocality?: string | null;
   geocodedAt: string | null;
   coordSource: string | null;
   createdAt: string;

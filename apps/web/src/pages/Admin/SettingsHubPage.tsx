@@ -170,6 +170,14 @@ export default function SettingsHubPage() {
           path: '/admin/settings/location-inference',
           permission: 'system_settings:read',
         },
+        {
+          title: 'Location Groups',
+          description:
+            'Collapse duplicate geocoder spellings of a place into one canonical name; merge suggestions and define capture areas.',
+          icon: <PublicIcon sx={{ fontSize: 40 }} color="primary" />,
+          path: '/admin/settings/location-groups',
+          permission: 'geo_settings:read',
+        },
       ],
     },
     {
