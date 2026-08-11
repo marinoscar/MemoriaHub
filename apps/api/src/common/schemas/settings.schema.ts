@@ -246,6 +246,136 @@ export type MemoriesPreferencesSettings = z.infer<typeof memoriesPreferencesSche
 export type MemoriesPreferencesPatch = z.infer<typeof memoriesPreferencesPatchSchema>;
 
 // =============================================================================
+// Per-user navigation preferences (issue #392, epic #388)
+// =============================================================================
+//
+// Stored inside the existing `user_settings` JSONB blob — no new table, no new
+// endpoint, no migration, no new RBAC permission. Read/written exclusively
+// through GET/PATCH/PUT /api/user-settings, exactly like `dataTables`,
+// `notifications` and `memories` above. See docs/specs/navigation-ia.md §5.
+//
+// ABSENT-KEY RULE (load-bearing — same contract as the three namespaces above):
+//   Every field is `.optional()` with NO `.default()`, and `navigation` itself
+//   is optional. An absent key means "use the built-in defaults": nothing
+//   pinned, rail expanded. That is what lets the namespace ship without a data
+//   migration, and it means a future field added here is opt-IN rather than
+//   silently applied to everyone who ever saved a preference. Do NOT add
+//   `.default()` to anything in this block — a `.default([])` on `pinned` or a
+//   `.default(false)` on `railCollapsed` would pin a stored blob to a snapshot
+//   of today's defaults and make it indistinguishable from "never expressed
+//   one", so a later change to those defaults would silently skip every user
+//   who had ever touched navigation.
+
+/**
+ * The destinations a user may pin (spec §5).
+ *
+ * These are SUB-destinations only — never one of the four primaries. Pinning
+ * "Photos" would be meaningless because it is already in the rail; the
+ * pinnable set is exactly the entries that live one level down, inside the two
+ * hubs (Collections §4.6, Review §4.5).
+ */
+export const NAVIGATION_PINNABLE_KEYS = [
+  // Collections (§4.6)
+  'albums',
+  'people',
+  'places',
+  'memories',
+  'map',
+  'favorites',
+  'archive',
+  'trash',
+  // Review (§4.5)
+  'bursts',
+  'duplicates',
+  'locations',
+  'enhancements',
+  'review-insights',
+  'automations',
+] as const;
+
+export type NavigationPinnableKey = (typeof NAVIGATION_PINNABLE_KEYS)[number];
+
+/** Max pinned destinations one user may persist. */
+export const NAVIGATION_MAX_PINNED = 6;
+
+const navigationPinnableKeySet: ReadonlySet<string> = new Set(
+  NAVIGATION_PINNABLE_KEYS,
+);
+
+/**
+ * Runtime membership test for a stored pin key.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM THE ZOD ENUM BELOW — the deliberate asymmetry
+ * between writing and reading, and the reason it is not an inconsistency:
+ *
+ *   - On WRITE the enum REJECTS an unknown key (400). A client naming a
+ *     destination that does not exist is a client bug, and surfacing it is how
+ *     it gets fixed rather than silently persisted.
+ *   - On READ an unknown key is DROPPED, not rejected — see
+ *     UserSettingsService.sanitizeNavigation(). A stored unknown key is not a
+ *     client bug, it is OUR OWN PAST SELF: a destination this deployment
+ *     shipped, the user pinned, and a later release removed. Rejecting it would
+ *     make the user's entire settings blob unreadable — a 500 on every settings
+ *     read and every subsequent PATCH — over a single dead pin. The only
+ *     acceptable degradation is "that entry is simply not pinned".
+ *
+ * This is also what keeps the strict enum SAFE: without the read-side drop, a
+ * removed key stored at rest would fail `userSettingsSchema.parse(merged)` on
+ * the next unrelated PATCH and brick the user's settings.
+ */
+export function isNavigationPinnableKey(
+  value: string,
+): value is NavigationPinnableKey {
+  return navigationPinnableKeySet.has(value);
+}
+
+const navigationPinnableKeySchema = z.enum(NAVIGATION_PINNABLE_KEYS);
+
+/** The `navigation` namespace as accepted by PUT and stored at rest. */
+export const navigationPreferencesSchema = z
+  .object({
+    /**
+     * Ordered pin list. Order is the user's chosen display order, so this is a
+     * list rather than a set. Capped at NAVIGATION_MAX_PINNED — the cap is a
+     * UI-affordance bound, and the post-merge re-check in
+     * UserSettingsService.patchSettings is what keeps an over-cap merge a 400
+     * rather than a raw ZodError -> 500 (same precedent as dataTables' 40-id
+     * cap).
+     */
+    pinned: z
+      .array(navigationPinnableKeySchema)
+      .max(NAVIGATION_MAX_PINNED)
+      .optional(),
+    /** Desktop rail collapse preference. Absent = expanded. */
+    railCollapsed: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * The `navigation` namespace as accepted by PATCH. Identical, except any field
+ * may be set to `null` to DELETE it (JSON Merge Patch), resetting it to its
+ * absent default rather than pinning an explicit `[]` / `false` that would
+ * survive a future default change.
+ */
+export const navigationPreferencesPatchSchema = z
+  .object({
+    pinned: z
+      .array(navigationPinnableKeySchema)
+      .max(NAVIGATION_MAX_PINNED)
+      .nullable()
+      .optional(),
+    railCollapsed: z.boolean().nullable().optional(),
+  })
+  .strict();
+
+export type NavigationPreferencesSettings = z.infer<
+  typeof navigationPreferencesSchema
+>;
+export type NavigationPreferencesPatch = z.infer<
+  typeof navigationPreferencesPatchSchema
+>;
+
+// =============================================================================
 // User Settings Schema
 // =============================================================================
 
@@ -271,6 +401,7 @@ export const userSettingsSchema = z.object({
   dataTables: dataTablesSchema.optional(),
   notifications: notificationPreferencesSchema.optional(),
   memories: memoriesPreferencesSchema.optional(),
+  navigation: navigationPreferencesSchema.optional(),
 });
 
 export type UserSettingsDto = z.infer<typeof userSettingsSchema>;
@@ -296,6 +427,10 @@ export const userSettingsPatchSchema = z.object({
   // replaces, an unlisted one is untouched, `null` clears that field, and
   // `memories: null` clears the whole namespace.
   memories: memoriesPreferencesPatchSchema.nullable().optional(),
+  // Merged field-wise (see UserSettingsService.mergeNavigation): a listed field
+  // replaces, an unlisted one is untouched, `null` clears that field, and
+  // `navigation: null` clears the whole namespace.
+  navigation: navigationPreferencesPatchSchema.nullable().optional(),
 });
 
 // =============================================================================

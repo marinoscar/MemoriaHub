@@ -7,6 +7,8 @@ import {
   notificationPreferencesPatchSchema,
   memoriesPreferencesSchema,
   memoriesPreferencesPatchSchema,
+  navigationPreferencesSchema,
+  navigationPreferencesPatchSchema,
 } from '../../common/schemas/settings.schema';
 
 // Full replacement (PUT)
@@ -38,6 +40,10 @@ export const updateUserSettingsSchema = z.object({
   // Per-user Memories preferences (issue #307). Optional with NO default: an
   // absent namespace / field means "no preference". See settings.schema.ts.
   memories: memoriesPreferencesSchema.optional(),
+  // Per-user navigation preferences (issue #392). Optional with NO default: an
+  // absent namespace / field means "use the built-in defaults" (nothing
+  // pinned, rail expanded). See settings.schema.ts for the absent-key rule.
+  navigation: navigationPreferencesSchema.optional(),
 });
 
 export class UpdateUserSettingsDto extends createZodDto(
@@ -74,6 +80,10 @@ export const patchUserSettingsSchema = z.object({
   // replaces, an unlisted one is untouched, a `null` field clears it, and
   // `memories: null` clears the whole namespace.
   memories: memoriesPreferencesPatchSchema.nullable().optional(),
+  // Merged field-wise (see UserSettingsService.mergeNavigation): a listed field
+  // replaces, an unlisted one is untouched, a `null` field clears it, and
+  // `navigation: null` clears the whole namespace.
+  navigation: navigationPreferencesPatchSchema.nullable().optional(),
 }).default({});
 
 export class PatchUserSettingsDto extends createZodDto(

@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
-import { DATA_TABLE_MAX_TABLES } from '../../common/schemas/settings.schema';
+import {
+  DATA_TABLE_MAX_TABLES,
+  NAVIGATION_MAX_PINNED,
+  NAVIGATION_PINNABLE_KEYS,
+} from '../../common/schemas/settings.schema';
 import { UserSettingsService } from './user-settings.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -1227,6 +1231,357 @@ describe('UserSettingsService', () => {
 
         expect(callOrder).toEqual(['write', 'dismiss']);
       });
+    });
+  });
+
+  // ===========================================================================
+  // Per-user navigation preferences (issue #392, epic #388)
+  // ===========================================================================
+
+  describe('patchSettings (PATCH) — navigation', () => {
+    const persistedValue = (): UserSettingsValue =>
+      (mockPrisma.userSettings.update.mock.calls[0][0] as any).data
+        .value as UserSettingsValue;
+
+    const seed = (navigation?: Record<string, unknown>) => {
+      const stored: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        ...(navigation ? { navigation: navigation as any } : {}),
+      };
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: stored as any,
+      } as any);
+      mockPrisma.userSettings.update.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.data.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+    };
+
+    it('leaves the namespace absent when absent and unpatched (absent = default)', async () => {
+      seed();
+
+      const result = await service.patchSettings(mockUserId, { theme: 'dark' });
+
+      expect(result.navigation).toBeUndefined();
+      expect(persistedValue().navigation).toBeUndefined();
+    });
+
+    it('persists a new namespace', async () => {
+      seed();
+
+      const result = await service.patchSettings(mockUserId, {
+        navigation: { pinned: ['albums', 'people'], railCollapsed: true },
+      });
+
+      expect(result.navigation).toEqual({
+        pinned: ['albums', 'people'],
+        railCollapsed: true,
+      });
+    });
+
+    it('merges FIELD-WISE — an unlisted field is untouched', async () => {
+      seed({ pinned: ['albums'], railCollapsed: true });
+
+      const result = await service.patchSettings(mockUserId, {
+        navigation: { railCollapsed: false },
+      });
+
+      expect(result.navigation).toEqual({
+        pinned: ['albums'],
+        railCollapsed: false,
+      });
+    });
+
+    it('REPLACES `pinned` wholesale rather than appending — which is how unpin and reorder work', async () => {
+      seed({ pinned: ['albums', 'people', 'map'] });
+
+      const result = await service.patchSettings(mockUserId, {
+        navigation: { pinned: ['map', 'albums'] },
+      });
+
+      expect(result.navigation!.pinned).toEqual(['map', 'albums']);
+    });
+
+    it('deletes a field set to null, resetting it to its absent default', async () => {
+      seed({ pinned: ['albums'], railCollapsed: true });
+
+      const result = await service.patchSettings(mockUserId, {
+        navigation: { railCollapsed: null },
+      });
+
+      expect(result.navigation).toEqual({ pinned: ['albums'] });
+      expect('railCollapsed' in result.navigation!).toBe(false);
+    });
+
+    it('clears the whole namespace on `navigation: null`', async () => {
+      seed({ pinned: ['albums'], railCollapsed: true });
+
+      const result = await service.patchSettings(mockUserId, {
+        navigation: null,
+      });
+
+      expect(result.navigation).toBeUndefined();
+      expect(persistedValue().navigation).toBeUndefined();
+    });
+
+    it('collapses an emptied namespace back to undefined rather than storing {}', async () => {
+      seed({ pinned: ['albums'] });
+
+      const result = await service.patchSettings(mockUserId, {
+        navigation: { pinned: null },
+      });
+
+      expect(result.navigation).toBeUndefined();
+    });
+
+    it('never persists an unknown key', async () => {
+      // `.strict()` rejects one at the HTTP boundary (the zod DTO pipe); the
+      // merge is the second line of defence — it copies only known fields.
+      seed();
+
+      const result = await service.patchSettings(mockUserId, {
+        navigation: { railHidden: true },
+      } as any);
+
+      expect(result.navigation).toBeUndefined();
+      expect(persistedValue().navigation).toBeUndefined();
+    });
+
+    it('rejects a pin naming an unknown destination on the WRITE path (400, not silently stored)', async () => {
+      seed();
+
+      await expect(
+        service.patchSettings(mockUserId, {
+          navigation: { pinned: ['albums', 'teleporter'] },
+        } as any),
+      ).rejects.toThrow();
+      expect(mockPrisma.userSettings.update).not.toHaveBeenCalled();
+    });
+
+    describe('the ≤ NAVIGATION_MAX_PINNED cap', () => {
+      it('accepts exactly NAVIGATION_MAX_PINNED pins', async () => {
+        seed();
+        const pinned = NAVIGATION_PINNABLE_KEYS.slice(0, NAVIGATION_MAX_PINNED);
+
+        const result = await service.patchSettings(mockUserId, {
+          navigation: { pinned: [...pinned] },
+        });
+
+        expect(result.navigation!.pinned).toHaveLength(NAVIGATION_MAX_PINNED);
+      });
+
+      it('rejects an over-cap patch payload with a 400 — NOT a raw ZodError -> 500', async () => {
+        seed();
+        const pinned = NAVIGATION_PINNABLE_KEYS.slice(
+          0,
+          NAVIGATION_MAX_PINNED + 1,
+        );
+
+        await expect(
+          service.patchSettings(mockUserId, {
+            navigation: { pinned: [...pinned] },
+          } as any),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(mockPrisma.userSettings.update).not.toHaveBeenCalled();
+      });
+
+      it('rejects an over-cap POST-MERGE result with a 400 even when the patch itself never mentions `pinned`', async () => {
+        // The stored blob is over-cap (an internal caller such as updateTheme()
+        // never passes through the HTTP DTO, and an older/looser release could
+        // have written one). Merging an unrelated field carries it forward, so
+        // the post-merge re-check — not the schema — is what turns this into a
+        // 400 instead of a ZodError escaping as a 500.
+        seed({
+          pinned: NAVIGATION_PINNABLE_KEYS.slice(0, NAVIGATION_MAX_PINNED + 1),
+        });
+
+        await expect(
+          service.patchSettings(mockUserId, { theme: 'dark' }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(mockPrisma.userSettings.update).not.toHaveBeenCalled();
+      });
+
+      it('names the cap and the offending count in the 400 message', async () => {
+        seed({
+          pinned: NAVIGATION_PINNABLE_KEYS.slice(0, NAVIGATION_MAX_PINNED + 1),
+        });
+
+        await expect(
+          service.patchSettings(mockUserId, { theme: 'dark' }),
+        ).rejects.toThrow(
+          `navigation.pinned may hold at most ${NAVIGATION_MAX_PINNED} destinations (patch would produce ${NAVIGATION_MAX_PINNED + 1})`,
+        );
+      });
+    });
+  });
+
+  describe('getSettings — navigation unknown-key drop (read path)', () => {
+    /**
+     * The asymmetry that makes this feature safe: a WRITE naming an unknown
+     * destination is a client bug and 400s (asserted above), but a STORED
+     * unknown key is our own past self — a destination this app shipped, the
+     * user pinned, and a later release removed. It must degrade to "not
+     * pinned", never to a 500 on every settings read.
+     */
+    const seedStored = (navigation: Record<string, unknown>) => {
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: {
+          ...DEFAULT_USER_SETTINGS,
+          navigation,
+        } as any,
+      } as any);
+    };
+
+    it('drops a pin naming a destination this release no longer knows, keeping the rest in order', async () => {
+      seedStored({ pinned: ['albums', 'holodeck', 'people'] });
+
+      const result = await service.getSettings(mockUserId);
+
+      expect(result.navigation).toEqual({ pinned: ['albums', 'people'] });
+    });
+
+    it('does not throw when EVERY stored pin is unknown — the settings blob must never brick', async () => {
+      seedStored({ pinned: ['holodeck', 'teleporter'] });
+
+      const result = await service.getSettings(mockUserId);
+
+      // An emptied list collapses to absent, matching the merge rule that the
+      // absent field IS "nothing persisted".
+      expect(result.navigation).toBeUndefined();
+    });
+
+    it('keeps sibling fields when every pin is dropped', async () => {
+      seedStored({ pinned: ['holodeck'], railCollapsed: true });
+
+      const result = await service.getSettings(mockUserId);
+
+      expect(result.navigation).toEqual({ railCollapsed: true });
+    });
+
+    it('returns the stored value untouched when every pin is known', async () => {
+      seedStored({ pinned: ['albums', 'people'], railCollapsed: false });
+
+      const result = await service.getSettings(mockUserId);
+
+      expect(result.navigation).toEqual({
+        pinned: ['albums', 'people'],
+        railCollapsed: false,
+      });
+    });
+
+    it('does NOT enforce the cap on read — an over-cap blob still READS fine, only a write is refused', async () => {
+      const pinned = NAVIGATION_PINNABLE_KEYS.slice(
+        0,
+        NAVIGATION_MAX_PINNED + 1,
+      );
+      seedStored({ pinned: [...pinned] });
+
+      const result = await service.getSettings(mockUserId);
+
+      expect(result.navigation!.pinned).toHaveLength(NAVIGATION_MAX_PINNED + 1);
+    });
+
+    it('leaves an absent namespace absent — GET never materializes defaults', async () => {
+      mockPrisma.userSettings.findUnique.mockResolvedValue(
+        mockUserSettings as any,
+      );
+
+      const result = await service.getSettings(mockUserId);
+
+      expect(result.navigation).toBeUndefined();
+    });
+
+    it('an unknown stored pin does not break an unrelated PATCH (it is dropped before re-validation)', async () => {
+      // Without the read-side drop this would be the real-world failure mode:
+      // `userSettingsSchema.parse(merged)` would reject the legacy pin and a
+      // plain theme change would 500.
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: {
+          ...DEFAULT_USER_SETTINGS,
+          navigation: { pinned: ['albums', 'holodeck'] },
+        } as any,
+      } as any);
+      mockPrisma.userSettings.update.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.data.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+
+      const result = await service.patchSettings(mockUserId, { theme: 'dark' });
+
+      expect(result.theme).toBe('dark');
+      expect(result.navigation).toEqual({ pinned: ['albums'] });
+    });
+  });
+
+  describe('replaceSettings (PUT) — navigation', () => {
+    const wireUpsert = () => {
+      mockPrisma.userSettings.upsert.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.update?.value ?? args.create?.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+    };
+
+    it('round-trips the namespace', async () => {
+      wireUpsert();
+
+      const result = await service.replaceSettings(mockUserId, {
+        theme: 'system',
+        profile: { useProviderImage: true },
+        navigation: { pinned: ['bursts', 'duplicates'], railCollapsed: true },
+      } as any);
+
+      expect(result.navigation).toEqual({
+        pinned: ['bursts', 'duplicates'],
+        railCollapsed: true,
+      });
+    });
+
+    it('stores the namespace as absent when omitted — PUT never materializes defaults', async () => {
+      wireUpsert();
+
+      const result = await service.replaceSettings(mockUserId, {
+        theme: 'system',
+        profile: { useProviderImage: true },
+      } as any);
+
+      expect(result.navigation).toBeUndefined();
+    });
+
+    it('rejects an over-cap `pinned` on PUT', async () => {
+      wireUpsert();
+
+      await expect(
+        service.replaceSettings(mockUserId, {
+          theme: 'system',
+          profile: { useProviderImage: true },
+          navigation: {
+            pinned: NAVIGATION_PINNABLE_KEYS.slice(0, NAVIGATION_MAX_PINNED + 1),
+          },
+        } as any),
+      ).rejects.toThrow();
+      expect(mockPrisma.userSettings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown pin key on PUT', async () => {
+      wireUpsert();
+
+      await expect(
+        service.replaceSettings(mockUserId, {
+          theme: 'system',
+          profile: { useProviderImage: true },
+          navigation: { pinned: ['warp-core'] },
+        } as any),
+      ).rejects.toThrow();
+      expect(mockPrisma.userSettings.upsert).not.toHaveBeenCalled();
     });
   });
 });

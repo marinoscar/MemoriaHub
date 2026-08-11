@@ -4,6 +4,7 @@ import { isoDateTime } from '../../common/schemas/iso-date';
 import {
   dataTablesSchema,
   notificationPreferencesSchema,
+  navigationPreferencesSchema,
 } from '../../common/schemas/settings.schema';
 
 export const userSettingsResponseSchema = z.object({
@@ -31,6 +32,13 @@ export const userSettingsResponseSchema = z.object({
   // `workflowMicroRuns`, whose absent default is false); the API never
   // materializes them, so the client applies the same defaults.
   notifications: notificationPreferencesSchema.optional(),
+  // Absent when the user has never pinned a destination or collapsed the rail
+  // — the normal state. Absent namespace / field means "use the built-in
+  // defaults" (nothing pinned, rail expanded); the API never materializes
+  // them, so the client applies the same defaults. A pin naming a destination
+  // this release no longer knows is dropped on read, so what is returned here
+  // is always a subset of the current pinnable set.
+  navigation: navigationPreferencesSchema.optional(),
   updatedAt: isoDateTime,
   version: z.number(),
 });
