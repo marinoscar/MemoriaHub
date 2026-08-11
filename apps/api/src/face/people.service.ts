@@ -824,33 +824,50 @@ export class PeopleService {
     // Capture affected media items BEFORE the transaction releases faces to the unknown pool
     const deleteAffected = await this.fetchAffectedMediaItemsByPersonId(personId);
 
-    await this.prisma.$transaction(async (tx) => {
-      // 1. Release faces back to unknown pool
-      await tx.face.updateMany({
-        where: { personId },
-        data: { personId: null, manuallyAssigned: false },
-      });
+    const { unlinkedUserIds, resetUserIds } = await this.prisma.$transaction(
+      async (tx) => {
+        // 1. Release faces back to unknown pool
+        await tx.face.updateMany({
+          where: { personId },
+          data: { personId: null, manuallyAssigned: false },
+        });
 
-      // 2. Soft-delete person
-      await tx.person.update({
-        where: { id: personId },
-        data: {
-          deletedAt: new Date(),
-          coverFaceId: null, // clear FK
-        },
-      });
+        // 2. Soft-delete person
+        await tx.person.update({
+          where: { id: personId },
+          data: {
+            deletedAt: new Date(),
+            coverFaceId: null, // clear FK
+          },
+        });
 
-      // 3. Audit
-      await tx.auditEvent.create({
-        data: {
-          actorUserId: userId,
-          action: 'person:delete',
-          targetType: 'person',
-          targetId: personId,
-          meta: { circleId: person.circleId, name: person.name } as any,
-        },
-      });
-    });
+        // 3. Detach every account linked to the person being deleted
+        //    (issue #406) — a soft-delete does NOT trigger
+        //    User.linkedPersonId's `onDelete: SetNull` FK action (that only
+        //    fires on a genuine row delete), so the link would otherwise
+        //    dangle forever. Must run in THIS transaction so it can never be
+        //    left half-cleaned by a later failure. The avatar-state reset for
+        //    any actively 'person'-sourced account happens after commit —
+        //    see resetAvatarsAfterUnlink below.
+        const unlinkResult = await this.userAvatarService.unlinkUsersFromPerson(
+          tx,
+          personId,
+        );
+
+        // 4. Audit
+        await tx.auditEvent.create({
+          data: {
+            actorUserId: userId,
+            action: 'person:delete',
+            targetType: 'person',
+            targetId: personId,
+            meta: { circleId: person.circleId, name: person.name } as any,
+          },
+        });
+
+        return unlinkResult;
+      },
+    );
 
     // Re-enqueue auto-tagging for all media items that lost a person assignment
     await this.enqueueAutoTaggingForMediaItems(deleteAffected);
@@ -858,8 +875,22 @@ export class PeopleService {
     // Backup change feed: faces released to the unknown pool (issue #310)
     await this.mediaTouch.touchMediaItems(deleteAffected.map((m) => m.mediaItemId));
 
+    // Best-effort: fall any account that was actively displaying this
+    // now-deleted person's derived picture back to the OAuth picture
+    // (issue #406). Must run AFTER the transaction commits — it reaps
+    // storage bytes, which does not belong inside a DB transaction.
+    if (resetUserIds.length > 0) {
+      await this.userAvatarService.resetAvatarsAfterUnlink(resetUserIds);
+    }
+
     this.logger.log(
-      `Person ${personId} soft-deleted by user ${userId}; faces returned to unknown pool`,
+      `Person ${personId} soft-deleted by user ${userId}; faces returned to unknown pool` +
+        (unlinkedUserIds.length > 0
+          ? `; unlinked ${unlinkedUserIds.length} account(s) from the person` +
+            (resetUserIds.length > 0
+              ? ` (${resetUserIds.length} avatar reset to oauth)`
+              : '')
+          : ''),
     );
   }
 
