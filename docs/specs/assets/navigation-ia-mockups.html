@@ -1,0 +1,1402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Standalone copy of the navigation IA proposal. Open directly in a browser.
+     Companion to docs/specs/navigation-ia.md -->
+<title>MemoriaHub Navigation — Redesign Proposal</title>
+<style>
+  /* ============================================================
+     TOKENS — light is the base; dark redefines tokens only.
+     ============================================================ */
+  :root {
+    --ground:        #EEF1F5;
+    --surface:       #FFFFFF;
+    --surface-sunk:  #E3E8EF;
+    --line:          #D2D9E3;
+    --line-soft:     #E4E9F0;
+    --ink:           #16191F;
+    --ink-2:         #3D4552;
+    --muted:         #6B7482;
+    --faint:         #97A0AE;
+
+    --accent:        #C8791A;   /* safelight amber — graphics */
+    --accent-text:   #8F5107;   /* text-safe on light ground */
+    --accent-wash:   #FBF1E4;
+    --accent-line:   #E8C79A;
+
+    --keep:          #2F6B4F;
+    --keep-wash:     #E6F0EA;
+    --cut:           #A33A2E;
+    --cut-wash:      #F7E7E4;
+
+    --frame:         #C6CEDA;   /* device bezel */
+    --chrome:        #F6F8FB;   /* app chrome inside mockups */
+    --tile:          #DDE3EC;   /* photo placeholder */
+    --tile-2:        #CCD5E1;
+
+    --shadow: 0 1px 2px rgba(16,25,40,.06), 0 8px 24px -12px rgba(16,25,40,.18);
+    --shadow-lift: 0 2px 4px rgba(16,25,40,.07), 0 18px 44px -20px rgba(16,25,40,.28);
+
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, ui-serif, serif;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace;
+
+    --spine: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:        #0F1216;
+      --surface:       #171B21;
+      --surface-sunk:  #12161B;
+      --line:          #2A313B;
+      --line-soft:     #222831;
+      --ink:           #E6E9EE;
+      --ink-2:         #C3CAD4;
+      --muted:         #939BA8;
+      --faint:         #6E7684;
+
+      --accent:        #E5A257;
+      --accent-text:   #E9B071;
+      --accent-wash:   #241C11;
+      --accent-line:   #4A3820;
+
+      --keep:          #6FBF95;
+      --keep-wash:     #14231C;
+      --cut:           #E08579;
+      --cut-wash:      #261715;
+
+      --frame:         #333B47;
+      --chrome:        #1D222A;
+      --tile:          #262D37;
+      --tile-2:        #2F3742;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+      --shadow-lift: 0 2px 4px rgba(0,0,0,.45), 0 18px 44px -20px rgba(0,0,0,.75);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:        #0F1216;
+    --surface:       #171B21;
+    --surface-sunk:  #12161B;
+    --line:          #2A313B;
+    --line-soft:     #222831;
+    --ink:           #E6E9EE;
+    --ink-2:         #C3CAD4;
+    --muted:         #939BA8;
+    --faint:         #6E7684;
+
+    --accent:        #E5A257;
+    --accent-text:   #E9B071;
+    --accent-wash:   #241C11;
+    --accent-line:   #4A3820;
+
+    --keep:          #6FBF95;
+    --keep-wash:     #14231C;
+    --cut:           #E08579;
+    --cut-wash:      #261715;
+
+    --frame:         #333B47;
+    --chrome:        #1D222A;
+    --tile:          #262D37;
+    --tile-2:        #2F3742;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    --shadow-lift: 0 2px 4px rgba(0,0,0,.45), 0 18px 44px -20px rgba(0,0,0,.75);
+  }
+
+  /* ============================================================
+     BASE
+     ============================================================ */
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+  .spine { max-width: var(--spine); margin-inline: auto; }
+
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2.1rem, 1.4rem + 2.6vw, 3.3rem); line-height: 1.08; letter-spacing: -.015em; }
+  h2 { font-size: clamp(1.5rem, 1.2rem + 1.1vw, 2rem); line-height: 1.2; letter-spacing: -.01em; }
+  h3 { font-size: 1.12rem; line-height: 1.35; }
+  p { margin: 0; }
+  a { color: var(--accent-text); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .69rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  .lede { font-size: 1.16rem; line-height: 1.6; color: var(--ink-2); }
+  .note { font-size: .92rem; color: var(--muted); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ============================================================
+     MASTHEAD
+     ============================================================ */
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .masthead-inner { padding: 56px 0 44px; display: flex; flex-direction: column; gap: 22px; }
+  .masthead .spine { display: flex; flex-direction: column; gap: 18px; }
+
+  .metrics {
+    display: flex; flex-wrap: wrap; gap: 10px 28px;
+    padding-top: 20px; border-top: 1px solid var(--line-soft);
+  }
+  .metric { display: flex; align-items: baseline; gap: 9px; }
+  .metric b {
+    font-family: var(--mono); font-size: 1.5rem; font-weight: 600;
+    color: var(--accent-text); font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  }
+  .metric span { font-size: .84rem; color: var(--muted); max-width: 17ch; line-height: 1.35; }
+
+  /* ============================================================
+     SECTIONS
+     ============================================================ */
+  section { padding: 62px 0; }
+  section + section { border-top: 1px solid var(--line-soft); }
+  .sec-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 34px; }
+  .stack { display: flex; flex-direction: column; gap: 20px; }
+  .stack-tight { display: flex; flex-direction: column; gap: 12px; }
+
+  /* ============================================================
+     TABLES
+     ============================================================ */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  thead th {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--faint); font-weight: 500; background: var(--surface-sunk);
+    border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.dest { font-family: var(--mono); font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
+
+  .pill {
+    display: inline-block; font-family: var(--mono); font-size: .68rem; letter-spacing: .06em;
+    padding: 2px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap;
+  }
+  .pill.keep { color: var(--keep); background: var(--keep-wash); border-color: var(--keep); }
+  .pill.cut  { color: var(--cut);  background: var(--cut-wash);  border-color: var(--cut); }
+  .pill.move { color: var(--accent-text); background: var(--accent-wash); border-color: var(--accent-line); }
+
+  /* ============================================================
+     MOVES (ranked — number encodes payoff rank)
+     ============================================================ */
+  .moves { display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--line); }
+  .move {
+    display: grid; grid-template-columns: 46px 1fr auto; gap: 4px 20px;
+    padding: 22px 0; border-bottom: 1px solid var(--line-soft); align-items: start;
+  }
+  .move__rank {
+    font-family: var(--mono); font-size: 1.5rem; font-weight: 600; line-height: 1;
+    color: var(--accent); font-variant-numeric: tabular-nums; padding-top: 2px;
+  }
+  .move__body { display: flex; flex-direction: column; gap: 7px; }
+  .move__delta {
+    font-family: var(--mono); font-size: .82rem; color: var(--keep);
+    background: var(--keep-wash); border: 1px solid var(--keep);
+    padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+  }
+  @media (max-width: 620px) {
+    .move { grid-template-columns: 34px 1fr; }
+    .move__delta { grid-column: 2; justify-self: start; }
+  }
+
+  /* ============================================================
+     RESEARCH CARDS
+     ============================================================ */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow);
+  }
+  .card h3 { font-family: var(--sans); font-size: .95rem; font-weight: 650; letter-spacing: -.005em; }
+  .card p { font-size: .88rem; color: var(--ink-2); line-height: 1.55; }
+  .card .src { font-family: var(--mono); font-size: .7rem; color: var(--faint); margin-top: auto; padding-top: 4px; }
+
+  /* ============================================================
+     DEVICE MOCKUPS
+     ============================================================ */
+  .lab {
+    background: var(--surface-sunk);
+    border-block: 1px solid var(--line);
+    padding: 54px 0;
+  }
+  .rack { display: flex; gap: 26px; align-items: flex-end; overflow-x: auto; padding-bottom: 10px; }
+  .rack::-webkit-scrollbar { height: 8px; }
+  .rack::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+  .spec { display: flex; flex-direction: column; gap: 12px; flex: 0 0 auto; }
+  .spec__cap { display: flex; flex-direction: column; gap: 3px; }
+  .spec__cap b { font-size: .92rem; font-weight: 650; }
+  .spec__cap span { font-family: var(--mono); font-size: .7rem; color: var(--faint); letter-spacing: .05em; }
+
+  .device {
+    background: var(--chrome);
+    border: 1px solid var(--frame);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lift);
+    display: flex; flex-direction: column;
+    font-size: 10px;
+  }
+  .d-phone   { width: 186px; height: 372px; }
+  .d-tablet  { width: 300px; height: 372px; }
+  .d-desktop { width: 560px; height: 372px; }
+
+  /* top bar inside device */
+  .d-top {
+    height: 30px; flex: 0 0 30px; background: var(--surface);
+    border-bottom: 1px solid var(--line-soft);
+    display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  }
+  .d-logo { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); flex: 0 0 auto; }
+  .d-chip {
+    font-family: var(--mono); font-size: 8px; color: var(--ink-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 6px;
+    white-space: nowrap; background: var(--ground);
+  }
+  .d-searchpill {
+    flex: 1 1 auto; min-width: 0; height: 17px; border-radius: 999px;
+    background: var(--ground); border: 1px solid var(--line);
+    display: flex; align-items: center; padding: 0 7px; gap: 5px;
+    font-family: var(--mono); font-size: 8px; color: var(--faint);
+  }
+  .d-spacer { flex: 1 1 auto; }
+  .d-ico { width: 13px; height: 13px; color: var(--muted); flex: 0 0 auto; }
+  .d-ico svg { width: 100%; height: 100%; display: block; }
+  .d-avatar { width: 14px; height: 14px; border-radius: 50%; background: var(--tile-2); flex: 0 0 auto; }
+  .d-dot {
+    position: relative;
+  }
+  .d-dot::after {
+    content: ""; position: absolute; top: -1px; right: -1px;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); border: 1px solid var(--surface);
+  }
+
+  .d-main { flex: 1 1 auto; display: flex; min-height: 0; }
+  .d-canvas { flex: 1 1 auto; min-width: 0; padding: 7px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+
+  .d-sectlabel {
+    font-family: var(--mono); font-size: 7.5px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint);
+  }
+  .d-grid { display: grid; gap: 3px; }
+  .d-grid.c3 { grid-template-columns: repeat(3, 1fr); }
+  .d-grid.c4 { grid-template-columns: repeat(4, 1fr); }
+  .d-grid.c6 { grid-template-columns: repeat(6, 1fr); }
+  .d-tile { aspect-ratio: 1; background: var(--tile); border-radius: 2px; }
+  .d-tile.alt { background: var(--tile-2); }
+  .d-strip { display: flex; gap: 4px; }
+  .d-mem {
+    flex: 1 1 0; height: 40px; border-radius: 4px;
+    background: linear-gradient(160deg, var(--tile-2), var(--tile));
+  }
+
+  /* bottom nav (phone) */
+  .d-bottom {
+    flex: 0 0 34px; background: var(--surface); border-top: 1px solid var(--line-soft);
+    display: grid; grid-template-columns: repeat(4, 1fr); align-items: center;
+  }
+  .d-nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-family: var(--mono); font-size: 7px; color: var(--faint); letter-spacing: .02em;
+  }
+  .d-nav-item .d-ico { width: 14px; height: 14px; }
+  .d-nav-item.on { color: var(--accent-text); }
+  .d-nav-item.on .d-ico { color: var(--accent); }
+
+  /* rail (tablet / desktop) */
+  .d-rail {
+    flex: 0 0 auto; background: var(--surface); border-right: 1px solid var(--line-soft);
+    display: flex; flex-direction: column; padding: 7px 5px; gap: 3px;
+  }
+  .d-rail.collapsed { width: 52px; align-items: stretch; }
+  .d-rail.expanded { width: 128px; }
+  .d-rail-item {
+    display: flex; align-items: center; gap: 7px; border-radius: 6px;
+    padding: 5px 6px; color: var(--muted);
+    font-family: var(--mono); font-size: 8px; letter-spacing: .02em; white-space: nowrap;
+  }
+  .d-rail.collapsed .d-rail-item { flex-direction: column; gap: 2px; padding: 5px 2px; font-size: 6.5px; }
+  .d-rail-item.on { background: var(--accent-wash); color: var(--accent-text); }
+  .d-rail-item.on .d-ico { color: var(--accent); }
+  .d-rail-badge {
+    margin-left: auto; background: var(--accent); color: #fff;
+    border-radius: 999px; font-size: 6.5px; padding: 0 4px; line-height: 11px; min-width: 11px; text-align: center;
+  }
+  :root[data-theme="dark"] .d-rail-badge { color: #1A1206; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .d-rail-badge { color: #1A1206; } }
+  .d-rail-sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
+  .d-rail-foot { margin-top: auto; }
+
+  /* context pane (desktop) */
+  .d-pane {
+    flex: 0 0 118px; background: var(--surface); border-right: 1px solid var(--line-soft);
+    padding: 8px 7px; display: flex; flex-direction: column; gap: 4px; overflow: hidden;
+  }
+  .d-pane-row {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 7.5px; color: var(--ink-2); padding: 3px 4px; border-radius: 4px;
+  }
+  .d-pane-row.on { background: var(--ground); }
+  .d-pane-sw { width: 12px; height: 12px; border-radius: 3px; background: var(--tile-2); flex: 0 0 auto; }
+  .d-pane-n { margin-left: auto; color: var(--faint); }
+
+  /* callout ticks under a device */
+  .ticks { display: flex; flex-direction: column; gap: 5px; max-width: 320px; }
+  .tick { display: flex; gap: 8px; font-size: .8rem; color: var(--ink-2); line-height: 1.45; }
+  .tick::before {
+    content: ""; flex: 0 0 auto; width: 5px; height: 5px; margin-top: 7px;
+    border-radius: 50%; background: var(--accent);
+  }
+
+  /* ============================================================
+     BEFORE / AFTER
+     ============================================================ */
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 700px) { .ba { grid-template-columns: 1fr; } }
+  .ba-col { display: flex; flex-direction: column; gap: 10px; }
+  .ba-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .ba-head b { font-size: .9rem; }
+  .ba-list {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px; display: flex; flex-direction: column; gap: 1px;
+  }
+  .ba-row {
+    font-family: var(--mono); font-size: .74rem; padding: 3px 8px; border-radius: 4px;
+    color: var(--ink-2); display: flex; align-items: center; gap: 7px;
+  }
+  .ba-row.sub {
+    font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint); padding-top: 8px;
+  }
+  .ba-row.gone { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--cut); }
+  .ba-row.new { background: var(--accent-wash); color: var(--accent-text); }
+  .ba-row.nest { padding-left: 22px; font-size: .7rem; color: var(--muted); }
+
+  /* ============================================================
+     TRADE-OFFS
+     ============================================================ */
+  .tradeoff {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 8px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .tradeoff b { font-size: .92rem; }
+  .tradeoff p { font-size: .88rem; color: var(--ink-2); }
+
+  /* ============================================================
+     PHASES
+     ============================================================ */
+  .phases { display: flex; flex-direction: column; }
+  .phase {
+    display: grid; grid-template-columns: 116px 1fr; gap: 18px;
+    padding: 18px 0; border-bottom: 1px solid var(--line-soft); align-items: start;
+  }
+  .phase:first-child { border-top: 1px solid var(--line); }
+  .phase__k { font-family: var(--mono); font-size: .74rem; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; padding-top: 3px; }
+  .phase__b { display: flex; flex-direction: column; gap: 5px; }
+  .phase__b b { font-size: .95rem; }
+  .phase__b p { font-size: .88rem; color: var(--ink-2); }
+  @media (max-width: 620px) { .phase { grid-template-columns: 1fr; gap: 6px; } }
+
+  /* ============================================================
+     SURFACE MOCKUPS — list rows, search, card grid, empty state
+     ============================================================ */
+  .d-bar2 {
+    height: 26px; flex: 0 0 26px; background: var(--surface);
+    border-bottom: 1px solid var(--line-soft);
+    display: flex; align-items: center; gap: 7px; padding: 0 8px;
+    font-size: 9px; font-weight: 650; color: var(--ink);
+  }
+  .d-backarrow {
+    width: 12px; height: 12px; color: var(--muted); flex: 0 0 auto;
+  }
+  .d-backarrow svg { width: 100%; height: 100%; display: block; }
+
+  .d-search {
+    display: flex; align-items: center; gap: 5px;
+    height: 18px; border-radius: 999px; padding: 0 8px;
+    background: var(--ground); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 7.5px; color: var(--faint);
+    flex: 0 0 auto;
+  }
+
+  .d-listrow {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 4px; border-radius: 4px;
+    font-size: 9px; color: var(--ink-2);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .d-listrow:last-child { border-bottom: 0; }
+  .d-listrow__chev { margin-left: auto; color: var(--faint); font-size: 9px; }
+  .d-listrow__n {
+    margin-left: auto; font-family: var(--mono); font-size: 8.5px;
+    color: var(--accent-text); font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  .d-listrow__n.zero { color: var(--faint); font-weight: 400; }
+  .d-listrow__ico { width: 11px; height: 11px; color: var(--faint); flex: 0 0 auto; }
+  .d-listrow__ico svg { width: 100%; height: 100%; display: block; }
+
+  .d-cardgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .d-card2 { display: flex; flex-direction: column; gap: 3px; }
+  .d-card2__cover {
+    aspect-ratio: 4/3; border-radius: 4px;
+    background: linear-gradient(145deg, var(--tile-2), var(--tile));
+    position: relative; overflow: hidden;
+  }
+  .d-card2__cover::after {
+    content: ""; position: absolute; inset: 0;
+    background:
+      linear-gradient(115deg, transparent 46%, rgba(200,121,26,.16) 46% 54%, transparent 54%),
+      radial-gradient(circle at 72% 30%, rgba(200,121,26,.13), transparent 46%);
+  }
+  .d-card2__meta { display: flex; align-items: baseline; gap: 4px; padding: 0 1px; }
+  .d-card2__meta b { font-size: 8.5px; font-weight: 600; color: var(--ink); }
+  .d-card2__meta span {
+    font-family: var(--mono); font-size: 7.5px; color: var(--faint);
+    margin-left: auto; font-variant-numeric: tabular-nums;
+  }
+
+  .d-secondary {
+    display: flex; gap: 4px; padding-top: 5px; margin-top: 3px;
+    border-top: 1px solid var(--line-soft);
+  }
+  .d-secondary span {
+    flex: 1 1 0; text-align: center; font-size: 7.5px; color: var(--muted);
+    padding: 3px 0; border-radius: 4px; background: var(--ground);
+  }
+
+  .d-allclear {
+    flex: 1 1 auto; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px; padding: 0 14px;
+    text-align: center;
+  }
+  .d-allclear__mark {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--keep-wash); border: 1px solid var(--keep);
+    color: var(--keep); display: flex; align-items: center; justify-content: center;
+  }
+  .d-allclear__mark svg { width: 15px; height: 15px; display: block; }
+  .d-allclear b { font-size: 10px; color: var(--ink); }
+  .d-allclear span { font-size: 8px; color: var(--muted); line-height: 1.45; }
+
+  .d-chain {
+    margin-top: auto; display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-radius: 6px;
+    background: var(--accent-wash); border: 1px solid var(--accent-line);
+    font-size: 8.5px; color: var(--accent-text);
+  }
+  .d-chain span { margin-left: auto; font-family: var(--mono); }
+
+  footer { padding: 40px 0 64px; color: var(--faint); font-size: .82rem; }
+  footer a { color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-photos" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/>
+      <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>
+    </symbol>
+    <symbol id="i-collections" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3 3 7.5l9 4.5 9-4.5L12 3Z"/><path d="M3 12.5 12 17l9-4.5"/><path d="M3 17.5 12 22l9-4.5"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.7-4.7"/>
+    </symbol>
+    <symbol id="i-review" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20.5 11.2V12a8.5 8.5 0 1 1-5-7.8"/><path d="m9 11.5 3 3 8.5-8.5"/>
+    </symbol>
+    <symbol id="i-console" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/>
+    </symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/>
+    </symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+    </symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m5 13 4.5 4.5L19 8"/>
+    </symbol>
+  </defs>
+</svg>
+
+
+<header class="masthead">
+  <div class="wrap masthead-inner">
+    <div class="spine">
+      <p class="eyebrow">MemoriaHub · Information architecture · August 2026</p>
+      <h1>The sidebar is a feature list. It should be a map.</h1>
+      <p class="lede">
+        The drawer has 22 rows because every feature that shipped earned one. That is an
+        accurate picture of the codebase and a poor picture of what anyone is trying to do.
+        This proposal cuts primary navigation to four destinations and gives phone, tablet,
+        and desktop three genuinely different treatments instead of one drawer stretched
+        across all of them.
+      </p>
+      <div class="metrics">
+        <div class="metric"><b>22&nbsp;→&nbsp;4</b><span>primary destinations</span></div>
+        <div class="metric"><b>11</b><span>rows that duplicate visible chrome</span></div>
+        <div class="metric"><b>0</b><span>features made unreachable</span></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+
+<!-- ============================ DIAGNOSIS ============================ -->
+<section>
+  <div class="wrap spine stack">
+    <div class="sec-head">
+      <p class="eyebrow">01 — Diagnosis</p>
+      <h2>Half the drawer is already on screen</h2>
+    </div>
+
+    <p>
+      Item count is the symptom, not the disease. The disease is that the drawer accumulated
+      one row per shipped feature, so it now mirrors the API surface rather than anyone's
+      mental model — and eleven of those rows lead somewhere the user can already reach
+      without opening the drawer at all.
+    </p>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Drawer row</th><th>Already reachable from</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="dest">Notifications</td><td>the bell in the AppBar, same badge</td><td><span class="pill cut">duplicate</span></td></tr>
+          <tr><td class="dest">Circles</td><td>UserMenu — switcher <em>and</em> “Manage Circles”</td><td><span class="pill cut">duplicate</span></td></tr>
+          <tr><td class="dest">User Settings</td><td>UserMenu → Settings</td><td><span class="pill cut">duplicate</span></td></tr>
+          <tr><td class="dest">Job Queue</td><td rowspan="4" style="vertical-align:middle">the <span class="mono">/admin/settings</span> hub, which already indexes all 25 admin pages</td><td><span class="pill cut">duplicate</span></td></tr>
+          <tr><td class="dest">Worker Nodes</td><td><span class="pill cut">duplicate</span></td></tr>
+          <tr><td class="dest">Storage Insights</td><td><span class="pill cut">duplicate</span></td></tr>
+          <tr><td class="dest">Public Sharing</td><td><span class="pill cut">duplicate</span></td></tr>
+          <tr><td class="dest">Photos · Explore · Map · Albums</td><td>BottomNav — visible on the same screen, on mobile</td><td><span class="pill cut">duplicate</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">
+      The four admin shortcuts are the clearest case: they are an arbitrary sample of a
+      25-page hub, hoisted into global navigation. That does not scale — the next admin page
+      shipped has no principled reason to be excluded, and no room to be included.
+    </p>
+
+    <p>
+      There is a second, structural problem underneath. MemoriaHub is self-hosted, so the
+      same person is both the family photo browser and the system operator. Those are two
+      different jobs with two different cadences — daily versus monthly — and right now they
+      compete for the same 240&nbsp;pixels. Every other photo app avoids this by not having an
+      operator at all. The fix is to separate the modes, not to keep re-ranking rows within one list.
+    </p>
+  </div>
+</section>
+
+
+<!-- ============================ RESEARCH ============================ -->
+<section>
+  <div class="wrap stack">
+    <div class="spine sec-head">
+      <p class="eyebrow">02 — What the field settled on</p>
+      <h2>Four findings that shaped this</h2>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Google Photos went to three tabs</h3>
+        <p>
+          The year-long redesign collapsed navigation to <b>Photos, Collections, Search</b>.
+          People &amp; pets, Places, Albums, Documents and Moments all moved <em>into</em>
+          Collections; Create and the Updates bell moved to the top bar. They accepted the
+          extra tap explicitly, in exchange for organized groupings over a flat list.
+        </p>
+        <p class="src">9to5google, Mar 2025</p>
+      </div>
+
+      <div class="card">
+        <h3>Material 3 deprecated the drawer</h3>
+        <p>
+          In the M3 Expressive update the navigation drawer is deprecated, replaced by an
+          <b>expanded navigation rail</b> — same functionality, adapts far better across
+          window size classes. A rail is always visible; a drawer costs a tap before any
+          navigation can begin.
+        </p>
+        <p class="src">m3.material.io · 9to5google, May 2025</p>
+      </div>
+
+      <div class="card">
+        <h3>Apple showed the failure mode</h3>
+        <p>
+          iOS&nbsp;18 Photos removed the tab bar for one scrolling page. The backlash was
+          immediate — “Albums particularly difficult to reach” — and Apple partially rolled
+          back in 18.1/18.2, adding <b>Customize&nbsp;&amp;&nbsp;Reorder</b>. Consolidation
+          works; deleting stable destinations does not.
+        </p>
+        <p class="src">MacRumors · TechRadar, Nov–Dec 2024</p>
+      </div>
+
+      <div class="card">
+        <h3>Three to five, and no more</h3>
+        <p>
+          Bottom tab navigation is the settled mobile standard, with <b>3–5 destinations</b>
+          the consistent recommendation and odd counts giving better visual rhythm. Four is
+          the ceiling that still leaves each label readable at 360&nbsp;px.
+        </p>
+        <p class="src">Mobile navigation UX surveys, 2025–26</p>
+      </div>
+    </div>
+
+    <p class="spine note" style="margin-top:8px">
+      The through-line: <b>every serious photo app consolidated into a small set of stable
+      destinations plus one rich hub</b> — and the one that instead removed destinations
+      entirely had to reverse course. This proposal sits deliberately on the Google side of
+      that line, with Apple's correction (user pinning) built in from the start rather than
+      bolted on after complaints.
+    </p>
+  </div>
+</section>
+
+
+<!-- ============================ THE IA ============================ -->
+<section>
+  <div class="wrap spine stack">
+    <div class="sec-head">
+      <p class="eyebrow">03 — The recommendation</p>
+      <h2>Four destinations, two modes</h2>
+    </div>
+
+    <p>
+      Everything the user does falls into four verbs: <b>look</b> at the timeline,
+      <b>browse</b> something curated, <b>find</b> one specific thing, and <b>decide</b> on
+      what the system has queued up for them. That last one is MemoriaHub's genuine
+      differentiator — unlike Google Photos, this app <em>generates work</em>: bursts to
+      resolve, duplicates to merge, locations to confirm, enhancements to approve. It
+      currently costs six drawer rows. It should cost one badged destination.
+    </p>
+
+    <div class="ba">
+      <div class="ba-col">
+        <div class="ba-head"><b>Today</b><span class="pill cut">22 rows</span></div>
+        <div class="ba-list">
+          <div class="ba-row gone">Photos</div>
+          <div class="ba-row gone">Memories</div>
+          <div class="ba-row gone">Explore</div>
+          <div class="ba-row gone">Map</div>
+          <div class="ba-row gone">Circles</div>
+          <div class="ba-row gone">Albums</div>
+          <div class="ba-row gone">Notifications</div>
+          <div class="ba-row sub">Library</div>
+          <div class="ba-row gone">People</div>
+          <div class="ba-row gone">Archive</div>
+          <div class="ba-row gone">Trash</div>
+          <div class="ba-row sub">Utilities</div>
+          <div class="ba-row gone">Review Bursts</div>
+          <div class="ba-row gone">Review Duplicates</div>
+          <div class="ba-row gone">Review Insights</div>
+          <div class="ba-row gone">Location Suggestions</div>
+          <div class="ba-row gone">Workflows</div>
+          <div class="ba-row gone">AI Enhancements</div>
+          <div class="ba-row sub">Administration</div>
+          <div class="ba-row gone">Settings</div>
+          <div class="ba-row gone">Job Queue</div>
+          <div class="ba-row gone">Worker Nodes</div>
+          <div class="ba-row gone">Storage Insights</div>
+          <div class="ba-row gone">Public Sharing</div>
+          <div class="ba-row sub">Pinned</div>
+          <div class="ba-row gone">User Settings</div>
+        </div>
+      </div>
+
+      <div class="ba-col">
+        <div class="ba-head"><b>Proposed</b><span class="pill keep">4 rows</span></div>
+        <div class="ba-list">
+          <div class="ba-row new">Photos</div>
+          <div class="ba-row nest">timeline · memories carousel</div>
+          <div class="ba-row new">Collections</div>
+          <div class="ba-row nest">Albums · People · Places</div>
+          <div class="ba-row nest">Memories · Map</div>
+          <div class="ba-row nest">Favorites · Archive · Trash</div>
+          <div class="ba-row new">Search</div>
+          <div class="ba-row nest">text · semantic · agentic</div>
+          <div class="ba-row new">Review <span style="margin-left:auto">12</span></div>
+          <div class="ba-row nest">Bursts · Duplicates</div>
+          <div class="ba-row nest">Locations · Enhancements</div>
+          <div class="ba-row nest">Insights · Automations</div>
+          <div class="ba-row sub">Top bar</div>
+          <div class="ba-row">Circle chip · Upload · Bell · Avatar</div>
+          <div class="ba-row sub">Second mode</div>
+          <div class="ba-row">Console → own rail at /admin</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      Nothing is deleted. Every one of the 22 rows lands somewhere specific — the mapping is
+      exhaustive, and it is the part worth arguing with:
+    </p>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Today</th><th>New home</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="dest">Photos</td><td class="dest">Photos</td><td>unchanged — the daily destination</td></tr>
+          <tr><td class="dest">Memories</td><td class="dest">Photos carousel + Collections</td><td>the feed already renders on Home; Google removed its Memories tab for the same reason</td></tr>
+          <tr><td class="dest">Explore</td><td class="dest">Search</td><td>it routes to <span class="mono">/search</span> — name it what it is</td></tr>
+          <tr><td class="dest">Map</td><td class="dest">Collections › Places</td><td>a browse mode over places, not a peer of the timeline</td></tr>
+          <tr><td class="dest">Circles</td><td class="dest">top-bar circle chip</td><td>the app's most important state, currently buried two taps deep</td></tr>
+          <tr><td class="dest">Albums</td><td class="dest">Collections › Albums</td><td>the canonical curated container</td></tr>
+          <tr><td class="dest">Notifications</td><td class="dest">bell → “See all”</td><td>the bell is always visible and already badged</td></tr>
+          <tr><td class="dest">People</td><td class="dest">Collections › People</td><td>a collection of faces</td></tr>
+          <tr><td class="dest">Archive · Trash</td><td class="dest">Collections, bottom group</td><td>where every peer app puts them</td></tr>
+          <tr><td class="dest">Bursts · Duplicates · Locations · Enhancements</td><td class="dest">Review, as tabs</td><td>one inbox, one aggregate badge, one existing endpoint</td></tr>
+          <tr><td class="dest">Review Insights</td><td class="dest">Review › Insights tab</td><td>analytics about the queues, not a queue</td></tr>
+          <tr><td class="dest">Workflows</td><td class="dest">Review › Automations</td><td>“make the reviewing happen without me”</td></tr>
+          <tr><td class="dest">Settings + 4 admin pages</td><td class="dest">Console</td><td>separate mode, own rail, own cadence</td></tr>
+          <tr><td class="dest">User Settings</td><td class="dest">avatar menu</td><td>already there</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      One implementation note worth flagging early: the Review badge needs no new backend.
+      <span class="mono">GET&nbsp;/api/media/review-counts</span> already returns exactly the
+      four integers in a single counts-only request — it was built for the sidebar's
+      enhancements badge. The aggregate is a sum of what you already fetch.
+    </p>
+  </div>
+</section>
+
+
+<!-- ============================ MOVES ============================ -->
+<section>
+  <div class="wrap spine stack">
+    <div class="sec-head">
+      <p class="eyebrow">04 — Ranked by payoff</p>
+      <h2>Four moves, largest first</h2>
+    </div>
+
+    <div class="moves">
+      <div class="move">
+        <div class="move__rank">1</div>
+        <div class="move__body">
+          <h3>Collapse the review queues into one badged destination</h3>
+          <p class="note">
+            Six rows become one. These queues are empty most of the time and full right after
+            an import — a burst of work, not a permanent fixture. A single badged inbox matches
+            that rhythm; six always-present rows do not.
+          </p>
+        </div>
+        <div class="move__delta">−5 rows</div>
+      </div>
+
+      <div class="move">
+        <div class="move__rank">2</div>
+        <div class="move__body">
+          <h3>Move the admin surface into its own mode</h3>
+          <p class="note">
+            Console gets its own rail at <span class="mono">/admin</span>, reached from the
+            avatar menu. The library nav stops carrying four arbitrary operator shortcuts, and
+            the 25-page hub finally has somewhere to grow.
+          </p>
+        </div>
+        <div class="move__delta">−5 rows</div>
+      </div>
+
+      <div class="move">
+        <div class="move__rank">3</div>
+        <div class="move__body">
+          <h3>Fold browse targets into Collections</h3>
+          <p class="note">
+            Albums, People, Places, Map, Memories, Archive and Trash become a visual hub with
+            cover thumbnails and counts — not a text list. This is the move that buys the extra
+            tap, so the hub has to be worth arriving at.
+          </p>
+        </div>
+        <div class="move__delta">−6 rows</div>
+      </div>
+
+      <div class="move">
+        <div class="move__rank">4</div>
+        <div class="move__body">
+          <h3>Give the top bar what belongs to the top bar</h3>
+          <p class="note">
+            Circle chip, upload, bell, avatar. Removing Circles, Notifications and User
+            Settings from the drawer costs nothing — all three are one tap away in chrome
+            that never scrolls off.
+          </p>
+        </div>
+        <div class="move__delta">−3 rows</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ============================ THE THREE LAYOUTS ============================ -->
+<div class="lab">
+  <div class="wrap stack">
+    <div class="spine sec-head">
+      <p class="eyebrow">05 — Three form factors</p>
+      <h2>Same four destinations, three different machines</h2>
+    </div>
+    <p class="spine note" style="margin-bottom:12px">
+      Drawn to relative scale. The destinations never change between breakpoints — what changes
+      is the chrome that carries them, and what each screen does with the space it saves.
+    </p>
+
+    <div class="rack">
+
+      <!-- ============ PHONE ============ -->
+      <div class="spec">
+        <div class="spec__cap">
+          <b>Phone</b>
+          <span>&lt; 600 px · compact · bottom bar, no drawer</span>
+        </div>
+        <div class="device d-phone">
+          <div class="d-top">
+            <div class="d-logo"></div>
+            <div class="d-chip">Familia ▾</div>
+            <div class="d-spacer"></div>
+            <div class="d-ico"><svg><use href="#i-upload"/></svg></div>
+            <div class="d-ico d-dot"><svg><use href="#i-bell"/></svg></div>
+            <div class="d-avatar"></div>
+          </div>
+          <div class="d-main">
+            <div class="d-canvas">
+              <div class="d-sectlabel">Memories</div>
+              <div class="d-strip">
+                <div class="d-mem"></div><div class="d-mem"></div><div class="d-mem"></div>
+              </div>
+              <div class="d-sectlabel">Sat 8 Aug</div>
+              <div class="d-grid c3">
+                <div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div>
+                <div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div>
+                <div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div>
+                <div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div>
+              </div>
+            </div>
+          </div>
+          <div class="d-bottom">
+            <div class="d-nav-item on"><div class="d-ico"><svg><use href="#i-photos"/></svg></div>Photos</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>Collections</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-search"/></svg></div>Search</div>
+            <div class="d-nav-item"><div class="d-ico d-dot"><svg><use href="#i-review"/></svg></div>Review</div>
+          </div>
+        </div>
+        <div class="ticks">
+          <div class="tick"><span><b>No hamburger, no drawer.</b> The screen in the bug report stops existing.</span></div>
+          <div class="tick"><span><b>Search becomes a tab</b>, which frees the search field out of a toolbar that already measures ~354&nbsp;px against 360&nbsp;px of viewport — the crowding your own topbar audit documents.</span></div>
+          <div class="tick"><span><b>Circle chip replaces the wordmark.</b> On a phone, which circle you're in matters more than the app's name.</span></div>
+        </div>
+      </div>
+
+      <!-- ============ TABLET ============ -->
+      <div class="spec">
+        <div class="spec__cap">
+          <b>Tablet</b>
+          <span>600–1239 px · medium · collapsed rail</span>
+        </div>
+        <div class="device d-tablet">
+          <div class="d-top">
+            <div class="d-logo"></div>
+            <div class="d-chip">Familia ▾</div>
+            <div class="d-searchpill"><svg class="d-ico" style="width:9px;height:9px"><use href="#i-search"/></svg>Search your photos</div>
+            <div class="d-ico"><svg><use href="#i-upload"/></svg></div>
+            <div class="d-ico d-dot"><svg><use href="#i-bell"/></svg></div>
+            <div class="d-avatar"></div>
+          </div>
+          <div class="d-main">
+            <div class="d-rail collapsed">
+              <div class="d-rail-item on"><div class="d-ico"><svg><use href="#i-photos"/></svg></div>Photos</div>
+              <div class="d-rail-item"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>Collect</div>
+              <div class="d-rail-item"><div class="d-ico d-dot"><svg><use href="#i-review"/></svg></div>Review</div>
+              <div class="d-rail-item d-rail-foot"><div class="d-ico"><svg><use href="#i-console"/></svg></div>Console</div>
+            </div>
+            <div class="d-canvas">
+              <div class="d-sectlabel">Memories</div>
+              <div class="d-strip">
+                <div class="d-mem"></div><div class="d-mem"></div><div class="d-mem"></div><div class="d-mem"></div>
+              </div>
+              <div class="d-sectlabel">Sat 8 Aug</div>
+              <div class="d-grid c4">
+                <div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div>
+                <div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div>
+                <div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ticks">
+          <div class="tick"><span><b>Rail instead of drawer</b> — Material 3's own replacement. Always visible, so navigating costs zero taps instead of one.</span></div>
+          <div class="tick"><span><b>~52&nbsp;px of chrome instead of 240.</b> That is roughly one extra column of photos on a 768&nbsp;px screen.</span></div>
+          <div class="tick"><span><b>Search returns to the top bar</b> where there's width for it, and gives up its rail slot.</span></div>
+        </div>
+      </div>
+
+      <!-- ============ DESKTOP ============ -->
+      <div class="spec">
+        <div class="spec__cap">
+          <b>Desktop</b>
+          <span>≥ 1240 px · expanded · rail + context pane</span>
+        </div>
+        <div class="device d-desktop">
+          <div class="d-top">
+            <div class="d-logo"></div>
+            <div class="d-chip">Familia ▾</div>
+            <div class="d-searchpill"><svg class="d-ico" style="width:9px;height:9px"><use href="#i-search"/></svg>Search your photos, people, places…</div>
+            <div class="d-ico"><svg><use href="#i-upload"/></svg></div>
+            <div class="d-ico d-dot"><svg><use href="#i-bell"/></svg></div>
+            <div class="d-avatar"></div>
+          </div>
+          <div class="d-main">
+            <div class="d-rail expanded">
+              <div class="d-rail-item"><div class="d-ico"><svg><use href="#i-photos"/></svg></div>Photos</div>
+              <div class="d-rail-item on"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>Collections</div>
+              <div class="d-rail-item"><div class="d-ico"><svg><use href="#i-review"/></svg></div>Review<span class="d-rail-badge">12</span></div>
+              <div class="d-rail-sep"></div>
+              <div class="d-rail-item" style="color:var(--faint)">Pinned</div>
+              <div class="d-rail-item"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>People</div>
+              <div class="d-rail-item d-rail-foot"><div class="d-ico"><svg><use href="#i-console"/></svg></div>Console</div>
+            </div>
+            <div class="d-pane">
+              <div class="d-sectlabel" style="padding:2px 4px 4px">Collections</div>
+              <div class="d-pane-row on"><div class="d-pane-sw"></div>Albums<span class="d-pane-n">24</span></div>
+              <div class="d-pane-row"><div class="d-pane-sw"></div>People<span class="d-pane-n">61</span></div>
+              <div class="d-pane-row"><div class="d-pane-sw"></div>Places<span class="d-pane-n">38</span></div>
+              <div class="d-pane-row"><div class="d-pane-sw"></div>Memories<span class="d-pane-n">17</span></div>
+              <div class="d-pane-row"><div class="d-pane-sw"></div>Map</div>
+              <div class="d-rail-sep"></div>
+              <div class="d-pane-row"><div class="d-pane-sw"></div>Favorites</div>
+              <div class="d-pane-row"><div class="d-pane-sw"></div>Archive</div>
+              <div class="d-pane-row"><div class="d-pane-sw"></div>Trash</div>
+            </div>
+            <div class="d-canvas">
+              <div class="d-sectlabel">Albums · 24</div>
+              <div class="d-grid c6">
+                <div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div>
+                <div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div>
+                <div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div>
+                <div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div>
+                <div class="d-tile"></div><div class="d-tile alt"></div><div class="d-tile"></div>
+                <div class="d-tile alt"></div><div class="d-tile"></div><div class="d-tile alt"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ticks">
+          <div class="tick"><span><b>Expanded rail + context pane.</b> The second column shows what's <em>inside</em> the selected destination — so depth costs a glance, not a tap.</span></div>
+          <div class="tick"><span><b>Pinning lives here.</b> A user who works in People every day pins it to the rail; persisted in <span class="mono">user_settings.navigation</span>, alongside the existing <span class="mono">dataTables</span> namespace. This is Apple's post-backlash correction, built in up front.</span></div>
+          <div class="tick"><span><b>The rail collapses</b> to the tablet treatment on demand, and remembers the choice.</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================ THE SURFACES ============================ -->
+<div class="lab" style="background: var(--ground)">
+  <div class="wrap stack">
+    <div class="spine sec-head">
+      <p class="eyebrow">06 — The surfaces</p>
+      <h2>What the destinations actually land on</h2>
+    </div>
+    <p class="spine note" style="margin-bottom:12px">
+      The frames above are <em>chrome</em> — how you move between destinations. These are the
+      surfaces themselves, all shown at phone size because that is where each decision was
+      hardest. Three of the four were designed after the chrome, and each replaced a tab-based
+      proposal that research ruled out.
+    </p>
+
+    <div class="rack">
+
+      <!-- ============ CONSOLE ON PHONE ============ -->
+      <div class="spec">
+        <div class="spec__cap">
+          <b>Console on phone</b>
+          <span>drill-down · no mode, no tabs</span>
+        </div>
+        <div class="device d-phone">
+          <div class="d-bar2">
+            <div class="d-backarrow"><svg><use href="#i-back"/></svg></div>
+            Settings
+            <div class="d-spacer"></div>
+            <div class="d-avatar"></div>
+          </div>
+          <div class="d-main">
+            <div class="d-canvas" style="gap:5px">
+              <div class="d-search">
+                <svg style="width:8px;height:8px"><use href="#i-search"/></svg>Search settings
+              </div>
+              <div class="d-sectlabel">General</div>
+              <div>
+                <div class="d-listrow">System<span class="d-listrow__chev">›</span></div>
+                <div class="d-listrow">Users &amp; Allowlist<span class="d-listrow__chev">›</span></div>
+                <div class="d-listrow">Email<span class="d-listrow__chev">›</span></div>
+              </div>
+              <div class="d-sectlabel">Operations</div>
+              <div>
+                <div class="d-listrow">Job Queue<span class="d-listrow__chev">›</span></div>
+                <div class="d-listrow">Worker Nodes<span class="d-listrow__chev">›</span></div>
+                <div class="d-listrow">Database Backup<span class="d-listrow__chev">›</span></div>
+                <div class="d-listrow">Doctor<span class="d-listrow__chev">›</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="d-bottom">
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-photos"/></svg></div>Photos</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>Collections</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-search"/></svg></div>Search</div>
+            <div class="d-nav-item"><div class="d-ico d-dot"><svg><use href="#i-review"/></svg></div>Review</div>
+          </div>
+        </div>
+        <div class="ticks">
+          <div class="tick"><span><b>Console mode does not exist here.</b> There is no rail to swap, so the admin area is a drill-down and the settings hub is the navigation.</span></div>
+          <div class="tick"><span><b>A tab strip was rejected.</b> 23 pages in a horizontal scroll is the documented anti-pattern; Apple's phone tab ceiling is 3–5; iOS Settings is a drill-down, so users already hold the model.</span></div>
+          <div class="tick"><span><b>The bottom bar stays Library nav</b> — you are always one tap from Photos, so this is a place you drilled into, not a mode you are stuck in.</span></div>
+          <div class="tick"><span><b>Search settings</b> is the piece that scales. At 40 admin pages a rail degrades; typing stays constant-effort.</span></div>
+        </div>
+      </div>
+
+      <!-- ============ REVIEW QUEUE LIST ============ -->
+      <div class="spec">
+        <div class="spec__cap">
+          <b>Review</b>
+          <span>a queue list · not tabs, at any size</span>
+        </div>
+        <div class="device d-phone">
+          <div class="d-bar2">
+            Review
+            <div class="d-spacer"></div>
+            <div class="d-avatar"></div>
+          </div>
+          <div class="d-main">
+            <div class="d-canvas" style="gap:5px">
+              <div>
+                <div class="d-listrow">
+                  <div class="d-listrow__ico"><svg><use href="#i-photos"/></svg></div>
+                  Bursts<span class="d-listrow__n">4</span>
+                </div>
+                <div class="d-listrow">
+                  <div class="d-listrow__ico"><svg><use href="#i-collections"/></svg></div>
+                  Duplicates<span class="d-listrow__n">6</span>
+                </div>
+                <div class="d-listrow">
+                  <div class="d-listrow__ico"><svg><use href="#i-search"/></svg></div>
+                  Locations<span class="d-listrow__n">2</span>
+                </div>
+                <div class="d-listrow">
+                  <div class="d-listrow__ico"><svg><use href="#i-review"/></svg></div>
+                  Enhancements<span class="d-listrow__n zero">—</span>
+                </div>
+              </div>
+              <div class="d-secondary" style="margin-top:2px">
+                <span>Insights</span><span>Automations</span>
+              </div>
+              <div class="d-chain">Next: 6 duplicates<span>→</span></div>
+            </div>
+          </div>
+          <div class="d-bottom">
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-photos"/></svg></div>Photos</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>Collections</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-search"/></svg></div>Search</div>
+            <div class="d-nav-item on"><div class="d-ico d-dot"><svg><use href="#i-review"/></svg></div>Review</div>
+          </div>
+        </div>
+        <div class="ticks">
+          <div class="tick"><span><b>Review is an inbox, not six parallel views.</b> The job is clearing the badge, not visiting Duplicates — so counts are the content, and a tab bar buries them in labels.</span></div>
+          <div class="tick"><span><b>The row count is variable, 1–6, with feature flags.</b> A tab bar whose width swings with configuration destroys spatial memory; a list absorbs it.</span></div>
+          <div class="tick"><span><b>A drained queue reads as an em dash</b>, never "0". Fixed row order — sorting by count would make rows jump between visits.</span></div>
+          <div class="tick"><span><b>Chain-to-next</b> keeps you moving without a trip back to the hub. The counts are already loaded, so it is nearly free.</span></div>
+        </div>
+      </div>
+
+      <!-- ============ REVIEW ALL CLEAR ============ -->
+      <div class="spec">
+        <div class="spec__cap">
+          <b>Review · all clear</b>
+          <span>the payoff state</span>
+        </div>
+        <div class="device d-phone">
+          <div class="d-bar2">
+            Review
+            <div class="d-spacer"></div>
+            <div class="d-avatar"></div>
+          </div>
+          <div class="d-main">
+            <div class="d-canvas">
+              <div class="d-allclear">
+                <div class="d-allclear__mark"><svg><use href="#i-check"/></svg></div>
+                <b>You're all caught up</b>
+                <span>Nothing waiting on you. New suggestions appear here after your next import.</span>
+              </div>
+              <div class="d-secondary">
+                <span>Insights</span><span>Automations</span>
+              </div>
+            </div>
+          </div>
+          <div class="d-bottom">
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-photos"/></svg></div>Photos</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>Collections</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-search"/></svg></div>Search</div>
+            <div class="d-nav-item on"><div class="d-ico"><svg><use href="#i-review"/></svg></div>Review</div>
+          </div>
+        </div>
+        <div class="ticks">
+          <div class="tick"><span><b>Not six rows of zero.</b> When every queue drains, the list is replaced by one confident state — the Inbox Zero payoff that makes clearing the backlog feel like something.</span></div>
+          <div class="tick"><span><b>The Review entry itself never disappears</b>, it just loses its badge. Navigation that changes shape is worse than navigation that is slightly long.</span></div>
+          <div class="tick"><span><b>Insights and Automations remain</b> — they are not queues, so they are unaffected by an empty inbox.</span></div>
+        </div>
+      </div>
+
+      <!-- ============ COLLECTIONS CARD GRID ============ -->
+      <div class="spec">
+        <div class="spec__cap">
+          <b>Collections</b>
+          <span>the hub that has to earn its tap</span>
+        </div>
+        <div class="device d-phone">
+          <div class="d-bar2">
+            Collections
+            <div class="d-spacer"></div>
+            <div class="d-avatar"></div>
+          </div>
+          <div class="d-main">
+            <div class="d-canvas" style="gap:6px">
+              <div class="d-cardgrid">
+                <div class="d-card2">
+                  <div class="d-card2__cover"></div>
+                  <div class="d-card2__meta"><b>Albums</b><span>24</span></div>
+                </div>
+                <div class="d-card2">
+                  <div class="d-card2__cover"></div>
+                  <div class="d-card2__meta"><b>People</b><span>61</span></div>
+                </div>
+                <div class="d-card2">
+                  <div class="d-card2__cover"></div>
+                  <div class="d-card2__meta"><b>Places</b><span>38</span></div>
+                </div>
+                <div class="d-card2">
+                  <div class="d-card2__cover"></div>
+                  <div class="d-card2__meta"><b>Memories</b><span>17</span></div>
+                </div>
+                <div class="d-card2">
+                  <div class="d-card2__cover"></div>
+                  <div class="d-card2__meta"><b>Map</b><span></span></div>
+                </div>
+              </div>
+              <div class="d-secondary">
+                <span>Favorites</span><span>Archive</span><span>Trash</span>
+              </div>
+            </div>
+          </div>
+          <div class="d-bottom">
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-photos"/></svg></div>Photos</div>
+            <div class="d-nav-item on"><div class="d-ico"><svg><use href="#i-collections"/></svg></div>Collections</div>
+            <div class="d-nav-item"><div class="d-ico"><svg><use href="#i-search"/></svg></div>Search</div>
+            <div class="d-nav-item"><div class="d-ico d-dot"><svg><use href="#i-review"/></svg></div>Review</div>
+          </div>
+        </div>
+        <div class="ticks">
+          <div class="tick"><span><b>This screen decides whether the whole proposal was worth it.</b> It is the one place an extra tap is spent — so real cover art and live counts are requirements, not polish.</span></div>
+          <div class="tick"><span><b>If this ships as a text list, the redesign makes the app worse.</b> That is the stated kill criterion on the issue.</span></div>
+          <div class="tick"><span><b>Favorites, Archive and Trash sit below a divider</b> — lower frequency, and Trash should never read as a primary browse target.</span></div>
+          <div class="tick"><span><b>Desktop never sees this grid.</b> The context pane already gives the overview, so a grid beside it would be a menu next to a menu — and desktop pays no extra tap at all.</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================ CONSOLE ============================ -->
+<section>
+  <div class="wrap spine stack">
+    <div class="sec-head">
+      <p class="eyebrow">07 — The second mode</p>
+      <h2>Console is a place, not five shortcuts</h2>
+    </div>
+    <p>
+      Entering <span class="mono">/admin</span> swaps the rail's contents rather than the app
+      shell. The circle chip stays, the search pill goes, and a persistent “← Back to library”
+      sits at the top of the rail so the mode is always obviously escapable.
+    </p>
+    <p>
+      It invents no information architecture. <span class="mono">SettingsHubPage</span>
+      <em>already</em> groups all 23 admin pages into five sections — General, AI &amp;
+      Enrichment, Media, Storage, Operations — each card carrying its own permission gate.
+      That structure is good; it is just trapped in a <em>page</em>, which is why every
+      admin-to-admin move routes back through a landing screen today. Getting from Job Queue
+      to Doctor means returning to the hub, scrolling to Operations, and clicking.
+      <b>Console mode promotes that existing structure from a destination into navigation</b> —
+      a conditional on <span class="mono">location.pathname.startsWith('/admin')</span> inside
+      one component, reusing the hub's groups, labels and gates verbatim.
+    </p>
+    <p>
+      <b>On a phone the mode does not exist</b> — there is no rail to swap, so the admin area
+      is a drill-down instead (section 06). That is not a compromise: it is the pattern every
+      phone user already knows from iOS Settings, and the one that still works at 40 admin
+      pages.
+    </p>
+  </div>
+</section>
+
+
+<!-- ============================ TRADE-OFFS ============================ -->
+<section>
+  <div class="wrap spine stack">
+    <div class="sec-head">
+      <p class="eyebrow">08 — What this costs</p>
+      <h2>Three honest objections</h2>
+    </div>
+
+    <div class="tradeoff">
+      <b>People, Map and Albums each cost one more tap — on phone and tablet only.</b>
+      <p>
+        Real, and unavoidable — it's the same trade Google made deliberately. It's only worth
+        it if Collections is visually rich enough to be a destination in its own right: cover
+        thumbnails, live counts, recently-viewed first. If Collections ships as a text list,
+        this proposal makes the app worse. On desktop the context pane means no tap is paid at
+        all — so the expensive card grid is required precisely where the cost it offsets is
+        real, and nowhere else.
+      </p>
+    </div>
+
+    <div class="tradeoff">
+      <b>Queues get harder to notice.</b>
+      <p>
+        Mitigated three ways that already exist: the aggregate badge on Review, the
+        review-queue notifications the reconcile task writes hourly, and the Home banners. If
+        anything the current design under-signals — six quiet rows read as furniture, one
+        badge reads as work.
+      </p>
+    </div>
+
+    <div class="tradeoff">
+      <b>Don't hide Review when the count is zero.</b>
+      <p>
+        Tempting, and wrong. Navigation that changes shape is worse than navigation that's
+        slightly long — users can't find a feature they know exists, and can't build muscle
+        memory against a moving target. Keep the destination, drop the badge.
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ============================ BUILD ============================ -->
+<section>
+  <div class="wrap spine stack">
+    <div class="sec-head">
+      <p class="eyebrow">09 — Sequencing</p>
+      <h2>Shippable in four increments</h2>
+    </div>
+    <p class="note">
+      Ordered so each phase stands alone and is independently revertible. Phase&nbsp;1 alone
+      removes eight rows without a single new page. Tracked as epic&nbsp;#388 with issues
+      #389&nbsp;–&nbsp;#392.
+    </p>
+
+    <div class="phases">
+      <div class="phase">
+        <div class="phase__k">#389 · deletions</div>
+        <div class="phase__b">
+          <b>Console mode + drop the duplicated rows</b>
+          <p>
+            Conditional rail at <span class="mono">/admin</span>; remove Circles,
+            Notifications, User Settings and the four admin shortcuts. Add the circle chip to
+            the top bar. No new routes, no new API. <span class="mono">−8 rows.</span>
+          </p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase__k">#390 · one new page</div>
+        <div class="phase__b">
+          <b>The Review hub</b>
+          <p>
+            <span class="mono">/review</span> as a queue list (section 06) wrapping the pages that
+            already exist, plus the aggregate badge off
+            <span class="mono">review-counts</span>. <span class="mono">−5 rows.</span>
+          </p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase__k">#391 · one new page</div>
+        <div class="phase__b">
+          <b>The Collections hub</b>
+          <p>
+            <span class="mono">/collections</span> as a visual grid over Albums, People,
+            Places, Memories, Map, Favorites, Archive, Trash. The riskiest phase — it's the
+            one that spends the extra tap. <span class="mono">−6 rows.</span>
+          </p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase__k">#392 · chrome</div>
+        <div class="phase__b">
+          <b>Rail, bottom bar, pinning</b>
+          <p>
+            Replace the drawer with a collapsed rail at <span class="mono">md</span> and an
+            expanded rail at <span class="mono">lg</span>; phone bottom bar goes to four items
+            and the drawer is deleted. Add
+            <span class="mono">user_settings.navigation.pinned</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<footer>
+  <div class="wrap spine">
+    <p>
+      Sources —
+      <a href="https://9to5google.com/2025/03/23/year-long-google-photos-redesign/">Google Photos redesign</a> ·
+      <a href="https://m3.material.io/components/navigation-rail/guidelines">M3 navigation rail</a> ·
+      <a href="https://9to5google.com/2025/05/14/material-3-expressive-navigation/">M3 Expressive navigation</a> ·
+      <a href="https://www.macrumors.com/2024/11/21/apples-photos-app-overhaul-controversial/">iOS 18 Photos reaction</a> ·
+      <a href="https://developer.android.com/develop/ui/views/layout/build-responsive-navigation">Android responsive navigation</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
