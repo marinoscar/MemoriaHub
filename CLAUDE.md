@@ -228,7 +228,7 @@ If the diff feels “big,” you waited too long. **Split the work and commit so
 ## Architecture Principles
 
 1. **Separation of Concerns**: UI handles presentation only; API handles all business logic and authorization
-2. **Same-Origin Hosting**: UI at `/`, API at `/api`, Swagger at `/api/docs`
+2. **Same-Origin Hosting**: UI at `/`, API at `/api`, API reference at `/api/docs`, OpenAPI document at `/api/openapi.json`
 3. **Security by Default**: All API endpoints require authentication unless explicitly public
 4. **API-First**: All business logic resides in the API layer
 
@@ -269,7 +269,7 @@ cd apps/api && npm run prisma:migrate
 ## Service URLs (Development)
 
 - **Application**: http://localhost:3535 (via Nginx)
-- **Swagger UI**: http://localhost:3535/api/docs
+- **API Reference (Scalar)**: http://localhost:3535/api/docs — see the [API Documentation spec](docs/specs/api-documentation.md)
 - **Uptrace**: http://localhost:14318 (when otel stack running)
 
 ## API Endpoints (MVP)
@@ -1466,6 +1466,7 @@ The `maintenance.*` namespace (no dedicated admin settings-page panel as of this
 ## Feature Specifications
 
 Detailed specs live under `docs/specs/`:
+- [API Documentation](docs/specs/api-documentation.md) — the Scalar reference at `/api/docs` and the OpenAPI 3.1 document at `/api/openapi.json`: the tag taxonomy and `x-tagGroups` sidebar, RBAC requirements generated from `@Auth()` metadata (and why that is a document pass rather than a decorator), the `{ data: … }` envelope pass that mirrors the global `TransformInterceptor` instead of editing ~70 controllers, the 3.0-`nullable`-to-3.1-union rewrite the version switch made necessary, one-click session pre-authorization and the two constraints that forced a hand-written page template, and the Spectral/CI/test gates that stop the spec rotting
 - [Enrichment Queue](docs/specs/enrichment-queue.md) — worker lifecycle, retry, priority, adding new handlers
 - [Face Recognition](docs/specs/face-recognition.md) — face detection (photos + videos), video frame sampling, cross-frame dedup, recognition, clustering, people management, global feature toggle, global admin backfill
 - [AI Auto-Tagging](docs/specs/auto-tagging.md) — vocabulary-driven vision model tagging, description generation, global feature toggle, global admin backfill, embedding step

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **API documentation overhaul (epic #414)** — `/api/docs` is now a branded, interactive [Scalar](https://scalar.com) reference in place of the scaffold's unconfigured Swagger UI, and `/api/openapi.json` is a valid OpenAPI **3.1** document. See the [API Documentation spec](docs/specs/api-documentation.md).
+  - **Branding and orientation** — "MemoriaHub API" at the deployed build's real version (was "Enterprise App API" at a hardcoded `1.0`), a same-origin server, and a Markdown getting-started guide covering the four ways to get a token, the response envelope, both pagination styles, the error shape, and the two-layer permission model.
+  - **Taxonomy** — every tag declared once with a description and a deliberate order, grouped into `x-tagGroups` sidebar sections. The three coexisting admin-tag conventions (`Admin - X`, `Admin — X`, `Admin: X`) are normalized to `Admin: X`.
+  - **One-click session auth** — signed in to MemoriaHub in the same browser, the page authorizes itself from your refresh cookie before mounting the client; no token to copy, and a reload re-authorizes. PATs (`pat_…`) and node credentials (`nod_…`) are documented as first-class schemes, offered on the operations that actually accept them.
+  - **Self-documenting RBAC** — every guarded operation states its required role, permissions, and per-circle role, generated from the same `@Auth()` decorator the guards read.
+  - **Accurate response shapes** — the global `TransformInterceptor` wraps every JSON response in `{ data, meta }`, so almost every `@ApiResponse({ type: Dto })` described a shape the server never sends. The document now applies the same wrapper the interceptor does.
+  - **OpenAPI 3.1** — required by zod v4's JSON Schema 2020-12 output, which 3.0 rejected. `nullable: true` is rewritten to `type: [..., "null"]`, since 3.1 removed the keyword and a consumer that ignores it generates non-nullable fields.
+  - **Quality gates** — `npm run openapi:dump` / `openapi:lint`, a Spectral ruleset, and a CI job that lints the spec and posts a diff against the base branch on pull requests.
+
+### Fixed
+
+- **15 controllers advertised an undefined `bearer` security scheme** — `@ApiBearerAuth()` was called with no scheme name, so the docs page's Authorize dialog had nothing to attach to those operations and a reader who had authorized still got `401` from every one of them. They now name the existing `JWT-auth` scheme. No guard changed.
+- **Several published schemas contradicted the wire** — `GET /api/users?isActive=` was documented as a boolean though it is a query string parsed into one; the device-session pagination parameters carried numeric examples on an implicitly-string schema; and `displayName`, `profileImageUrl` and the three share `expiresAt` fields published `type: object` because `string | null` reflects as `Object` without an explicit `type`.
+
 ### Removed
 
 - **v0 server-side media backup** — The Admin-triggered S3-to-API-server-disk replication feature has been removed entirely, superseded by epic #308's node-based Local Media Backup (`/api/nodes/:id/backup/*`), which mirrors original bytes to a *separate* machine incrementally, with sha256 verification, sidecars, a SQLite catalog, and restore. The v0 feature was also non-functional in practice: it ran the whole copy inside the `POST` request (504 behind nginx's 60s `proxy_read_timeout`), only wrote run history on completion (so history was always empty), resolved the boot-env `STORAGE_PROVIDER` rather than each object's own provider, and could copy files onto themselves under `STORAGE_PROVIDER=local`. Removed surface area:

@@ -62,7 +62,7 @@ Off by default (`features.memories`) — an admin turns it on in Admin Settings,
 - **User Management**: Admin interface for managing users, role assignments, and allowlist
 - **Settings Framework**: System-wide and per-user settings with type-safe schemas (includes `activeCircleId`)
 - **Observability**: OpenTelemetry instrumentation with traces, metrics, and structured logging
-- **API Documentation**: Swagger/OpenAPI documentation at `/api/docs`
+- **API Documentation**: Interactive Scalar API reference at `/api/docs`, OpenAPI 3.1 document at `/api/openapi.json`
 - **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
 
 ### Planned Capabilities
@@ -148,7 +148,7 @@ exit
 
 - **Frontend**: http://localhost:3535
 - **API**: http://localhost:3535/api
-- **Swagger Docs**: http://localhost:3535/api/docs
+- **API Reference**: http://localhost:3535/api/docs
 
 ### 6. First Login
 
@@ -287,7 +287,10 @@ MemoriaHub/
 
 ## API Documentation
 
-Interactive API documentation is available at `/api/docs` when running the application.
+An interactive Scalar API reference is available at `/api/docs` when running the application, with
+the OpenAPI 3.1 document at `/api/openapi.json`. If you are signed in to MemoriaHub in the same
+browser, the page authorizes itself from your session — no token to copy. See the
+[API Documentation spec](docs/specs/api-documentation.md).
 
 ### Key Endpoints
 
