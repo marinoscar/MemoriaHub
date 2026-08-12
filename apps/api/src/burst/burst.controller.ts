@@ -29,7 +29,7 @@ import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 
 @ApiTags('Bursts')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('media')
 export class BurstController {
   constructor(private readonly burstService: BurstService) {}

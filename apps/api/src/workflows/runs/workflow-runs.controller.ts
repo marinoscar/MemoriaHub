@@ -31,7 +31,7 @@ import { ListRunItemsQueryDto } from './dto/list-run-items-query.dto';
  * per-circle viewer; approve/cancel require media:write + collaborator.
  */
 @ApiTags('Workflow Runs')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('workflow-runs')
 export class WorkflowRunsController {
   constructor(private readonly runService: WorkflowRunService) {}

@@ -7,7 +7,7 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 
 @ApiTags('Review Insights')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('media')
 export class ReviewInsightsController {
   constructor(private readonly reviewInsights: ReviewInsightsService) {}

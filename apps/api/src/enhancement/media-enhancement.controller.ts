@@ -33,7 +33,7 @@ import {
 } from './dto/list-enhancements-query.dto';
 
 @ApiTags('Picture Enhancement')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('media')
 export class MediaEnhancementController {
   constructor(private readonly service: MediaEnhancementService) {}

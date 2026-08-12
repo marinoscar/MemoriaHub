@@ -29,7 +29,7 @@ import { ListTrashEmptyRunItemsQueryDto } from './dto/list-trash-empty-run-items
  * cancel requires media:delete + per-circle circle_admin.
  */
 @ApiTags('Trash Empty Runs')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('trash-empty-runs')
 export class TrashEmptyRunsController {
   constructor(private readonly runService: TrashEmptyRunService) {}

@@ -34,7 +34,7 @@ import { ListAdminWorkflowRunsQueryDto } from './dto/list-admin-workflow-runs-qu
  * mirroring the admin jobs/nodes controllers.
  */
 @ApiTags('Admin: Workflows')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('admin')
 export class WorkflowsAdminController {
   constructor(private readonly adminService: WorkflowsAdminService) {}
