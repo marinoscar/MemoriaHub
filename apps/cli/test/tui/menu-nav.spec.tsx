@@ -27,6 +27,7 @@ import {
   findSubmenu,
   visibleChildren,
   breadcrumb,
+  menuItemLabel,
   type MenuNode,
 } from '../../src/tui/menu-config.js';
 import { waitForFrame } from './wait-for.js';
@@ -64,11 +65,10 @@ function NavHarness(): React.ReactElement {
     // Leaf actions are no-ops in this harness — navigation is what's under test.
   }
 
-  function toItem(node: MenuNode): { label: string; value: string } {
-    if (node.kind === 'submenu') {
-      return { label: `${node.label} ▸`, value: `submenu:${node.id}` };
-    }
-    return { label: node.label, value: `action:${node.action}` };
+  function toItem(node: MenuNode, index: number): { label: string; value: string; color?: string } {
+    const label = menuItemLabel(node, index + 1);
+    const value = node.kind === 'submenu' ? `submenu:${node.id}` : `action:${node.action}`;
+    return node.color ? { label, value, color: node.color } : { label, value };
   }
 
   function selectChild(menuId: string, value: string): void {
@@ -100,7 +100,7 @@ function NavHarness(): React.ReactElement {
   return (
     <Menu
       title={breadcrumb(top.menuId)}
-      subtitle="Use arrow keys and Enter to navigate"
+      subtitle={submenu?.subtitle}
       items={items}
       onSelect={(value) => selectChild(top.menuId, value)}
       onBack={pop}
@@ -125,54 +125,51 @@ describe('menu navigation stack: root -> Sync -> back', () => {
     expect(plain).toContain('Sync ▸');
   });
 
-  it('navigates into the Sync submenu and shows its breadcrumb + child label', async () => {
+  it('navigates into the Sync submenu and shows its breadcrumb + child labels', async () => {
     const { lastFrame, stdin } = render(<NavHarness />);
 
-    // Move down from Login to Sync, and wait for the highlight to actually
-    // move before pressing Enter — ink-select-input tracks its own selected
-    // index internally, so sending Enter before that update (and the
-    // useInput re-subscription that follows it) has committed can be
-    // processed against the PREVIOUS selection instead of Sync. We detect
-    // "moved" by diffing the Sync row against its unselected baseline rather
-    // than matching a specific pointer glyph — ink-select-input's default
-    // indicator character varies by environment (Unicode-support detection),
-    // so a hardcoded glyph like '>' or '❯' is not portable across machines/CI
-    // (this is what broke this test in GitHub Actions CI despite passing
-    // locally). Diffing the raw (non-stripped) line also catches a
-    // color-only change, not just a glyph change.
-    const syncLineBaseline = (lastFrame() ?? '')
-      .split('\n')
-      .find((l) => l.includes('Sync ▸'));
-
-    stdin.write('\x1B[B'); // down arrow
-    await waitForFrame(lastFrame, (f) => {
-      const line = f.split('\n').find((l) => l.includes('Sync ▸'));
-      return !!line && line !== syncLineBaseline;
-    });
-
+    // Sync is the first logged-in root item after the #413 restructure, so it
+    // is already highlighted — no arrow press to race against
+    // ink-select-input's internally-tracked selected index.
     stdin.write('\r'); // Enter
     const plain = await waitForFrame(lastFrame, (f) =>
       stripAnsi(f).includes('Menu › Sync'),
     ).then(stripAnsi);
 
     expect(plain).toContain('Menu › Sync');
-    expect(plain).toContain('Sync all folders');
-    expect(plain).toContain('Sync selected folders');
+    // Multi-step leaves carry the '…' convention; the immediate one does not.
+    expect(plain).toContain('Sync all folders…');
+    expect(plain).toContain('Sync selected folders…');
     expect(plain).toContain('Retry failed files');
+    expect(plain).not.toContain('Retry failed files…');
+  });
+
+  it('jumps straight into a submenu with its digit accelerator', async () => {
+    const { lastFrame, stdin } = render(<NavHarness />);
+
+    stdin.write('4'); // 4. Worker Node
+    const plain = await waitForFrame(lastFrame, (f) =>
+      stripAnsi(f).includes('Menu › Worker Node'),
+    ).then(stripAnsi);
+
+    expect(plain).toContain('Node dashboard');
+    expect(plain).toContain('Stop worker');
+  });
+
+  it('shows the tree-supplied subtitle instead of the generic navigation hint', async () => {
+    const { lastFrame, stdin } = render(<NavHarness />);
+
+    stdin.write('2'); // 2. Scan
+    const plain = await waitForFrame(lastFrame, (f) =>
+      stripAnsi(f).includes('Menu › Scan'),
+    ).then(stripAnsi);
+
+    expect(plain).toContain('Dry-run preview');
   });
 
   it('returns to the root menu after pressing Esc from the Sync submenu', async () => {
     const { lastFrame, stdin } = render(<NavHarness />);
 
-    const syncLineBaseline = (lastFrame() ?? '')
-      .split('\n')
-      .find((l) => l.includes('Sync ▸'));
-
-    stdin.write('\x1B[B');
-    await waitForFrame(lastFrame, (f) => {
-      const line = f.split('\n').find((l) => l.includes('Sync ▸'));
-      return !!line && line !== syncLineBaseline;
-    });
     stdin.write('\r');
     await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Menu › Sync'));
 
