@@ -859,6 +859,11 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           <Text>Use the interactive menu to manage folders, scan, and run syncs.</Text>
           <Text dimColor>Run `memoriahub` (no args) or `memoriahub menu` to open this UI.</Text>
           <Text> </Text>
+          <Text dimColor>Navigating the menu:</Text>
+          <Text>  ↑/↓ or j/k   move   ·   Enter select   ·   1-9 jump straight to an item</Text>
+          <Text>  Esc/q        back one level (not all the way to the root)</Text>
+          <Text>  ▸ marks a submenu   ·   … marks an action that asks something first</Text>
+          <Text> </Text>
           <Text dimColor>Headless commands (bypass TUI):</Text>
           <Text>  memoriahub login      Configure server + PAT</Text>
           <Text>  memoriahub import     Import a folder once (add + sync)</Text>
@@ -874,6 +879,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           <Text>  memoriahub jobs       Live job queue monitor</Text>
           <Text>  memoriahub reports    Show reports (overview, runs, storage, duplicates)</Text>
           <Text>  memoriahub backup     Back up circle media to a local folder</Text>
+          <Text>  memoriahub node       Worker node: enroll, install-deps, register, start/stop</Text>
           <Text>  memoriahub settings   Manage settings</Text>
           <Text> </Text>
           <Text dimColor>[Esc/q] back</Text>
