@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger, runnable against any ref. Exists because a PR opened by a
+  # token-authenticated app does not raise a `pull_request` event (GitHub's
+  # recursion prevention), so a change to this workflow cannot otherwise be
+  # exercised on its own branch before landing on main.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
