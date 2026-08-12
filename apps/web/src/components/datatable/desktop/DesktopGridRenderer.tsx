@@ -43,10 +43,8 @@ import {
 import { GRID_CHECKBOX_SELECTION_FIELD } from '@mui/x-data-grid';
 import { Alert, Box, Checkbox, IconButton, useMediaQuery, useTheme } from '@mui/material';
 import visuallyHidden from '@mui/utils/visuallyHidden';
-import {
-  KeyboardArrowDown as KeyboardArrowDownIcon,
-  KeyboardArrowRight as KeyboardArrowRightIcon,
-} from '@mui/icons-material';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import type { DataTableRendererProps } from '../types';
 import { buildColumnVisibilityModel, rowAccessibleName, toGridColumns } from './columnAdapter';
 import { DataTableEmptyOverlay, DataTableLoadingOverlay } from './cells';

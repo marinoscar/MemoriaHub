@@ -35,7 +35,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { NotificationsNone as NotificationsNoneIcon } from '@mui/icons-material';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useNotifications } from '../../hooks/useNotifications';

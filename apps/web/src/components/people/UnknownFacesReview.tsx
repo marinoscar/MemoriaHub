@@ -10,7 +10,8 @@ import {
   Divider,
   Chip,
 } from '@mui/material';
-import { Groups as GroupsIcon, AutoFixHigh as ClusterIcon } from '@mui/icons-material';
+import GroupsIcon from '@mui/icons-material/Groups';
+import ClusterIcon from '@mui/icons-material/AutoFixHigh';
 import { PersonGrid } from './PersonGrid';
 import type { PersonListItem, ClusterResult } from '../../services/face';
 

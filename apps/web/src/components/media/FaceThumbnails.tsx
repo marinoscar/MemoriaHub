@@ -12,7 +12,8 @@ import {
   TextField,
   Autocomplete,
 } from '@mui/material';
-import { Face as FaceIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+import FaceIcon from '@mui/icons-material/Face';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import { useMediaFaces } from '../../hooks/useMediaFaces';

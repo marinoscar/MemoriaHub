@@ -22,12 +22,10 @@ import {
   Stack,
   Pagination,
 } from '@mui/material';
-import {
-  TouchApp as TouchAppIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  Schedule as ScheduleIcon,
-  History as HistoryIcon,
-} from '@mui/icons-material';
+import TouchAppIcon from '@mui/icons-material/TouchApp';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import HistoryIcon from '@mui/icons-material/History';
 import type { WorkflowRun, WorkflowTriggerType } from '../../types/workflows';
 import {
   triggerLabel,

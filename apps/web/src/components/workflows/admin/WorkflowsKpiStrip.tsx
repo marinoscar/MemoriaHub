@@ -1,10 +1,8 @@
 import { Grid, useTheme } from '@mui/material';
-import {
-  PlayCircleOutlined,
-  DoneAll,
-  ErrorOutlined,
-  Bolt,
-} from '@mui/icons-material';
+import PlayCircleOutlined from '@mui/icons-material/PlayCircleOutlined';
+import DoneAll from '@mui/icons-material/DoneAll';
+import ErrorOutlined from '@mui/icons-material/ErrorOutlined';
+import Bolt from '@mui/icons-material/Bolt';
 import { KpiCard } from '../../insights/KpiCard';
 import { KpiSkeleton } from '../../insights/KpiSkeleton';
 import type { AdminWorkflowStats } from '../../../services/adminWorkflows';

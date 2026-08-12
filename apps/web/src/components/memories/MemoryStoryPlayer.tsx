@@ -55,21 +55,19 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import {
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-  Close as CloseIcon,
-  Favorite as FavoriteIcon,
-  FavoriteBorder as FavoriteBorderIcon,
-  IosShare as IosShareIcon,
-  Pause as PauseIcon,
-  PhotoAlbum as PhotoAlbumIcon,
-  PhotoLibrary as PhotoLibraryIcon,
-  PlayArrow as PlayArrowIcon,
-  Replay as ReplayIcon,
-  VolumeOff as VolumeOffIcon,
-  VolumeUp as VolumeUpIcon,
-} from '@mui/icons-material';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import CloseIcon from '@mui/icons-material/Close';
+import FavoriteIcon from '@mui/icons-material/Favorite';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import IosShareIcon from '@mui/icons-material/IosShare';
+import PauseIcon from '@mui/icons-material/Pause';
+import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import ReplayIcon from '@mui/icons-material/Replay';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 
 import { getMedia } from '../../services/media';
 import type { MediaItem } from '../../types/media';

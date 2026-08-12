@@ -11,7 +11,7 @@ import {
   DialogActions,
   CircularProgress,
 } from '@mui/material';
-import { DeleteOutlined as TrashIcon } from '@mui/icons-material';
+import TrashIcon from '@mui/icons-material/DeleteOutlined';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { MediaGallery } from '../../components/media/MediaGallery';

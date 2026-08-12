@@ -36,10 +36,8 @@ import {
   Typography,
   ButtonBase,
 } from '@mui/material';
-import {
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-} from '@mui/icons-material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import type { DataTableColumn, DataTableDensity, DataTableRowAction } from '../types';
 import { RowActionsCell } from '../desktop/RowActionsCell';
 import { CardField, columnContent, columnText } from './CardField';

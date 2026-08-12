@@ -15,7 +15,7 @@ import {
   Snackbar,
   Link,
 } from '@mui/material';
-import { BurstMode as BurstModeIcon } from '@mui/icons-material';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalBurstBackfill } from '../../services/adminBackfill';

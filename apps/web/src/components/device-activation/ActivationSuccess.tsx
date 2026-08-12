@@ -1,9 +1,7 @@
 import { useEffect } from 'react';
 import { Box, Typography, Alert, Button, Stack } from '@mui/material';
-import {
-  CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
-} from '@mui/icons-material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
 import { useNavigate } from 'react-router-dom';
 
 /**

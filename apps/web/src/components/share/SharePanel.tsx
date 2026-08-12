@@ -15,10 +15,8 @@ import {
   Stack,
   InputAdornment,
 } from '@mui/material';
-import {
-  ContentCopy as ContentCopyIcon,
-  LinkOff as LinkOffIcon,
-} from '@mui/icons-material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
 import type { SelectChangeEvent } from '@mui/material';
 import type { MediaShare, ShareTargetType } from '../../types/sharing';
 import { createShare, updateShare, revokeShare } from '../../services/shareService';

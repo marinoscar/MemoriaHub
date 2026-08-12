@@ -1,6 +1,6 @@
 import { useRef, Fragment } from 'react';
 import { Box, Typography, Button, Skeleton } from '@mui/material';
-import { ChevronRight as ChevronRightIcon } from '@mui/icons-material';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useFittedCount } from '../../hooks/useFittedCount';
 
 // ---------------------------------------------------------------------------

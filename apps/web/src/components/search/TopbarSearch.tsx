@@ -16,12 +16,10 @@ import {
   Tooltip,
   useMediaQuery,
 } from '@mui/material';
-import {
-  Search as SearchIcon,
-  Tune as TuneIcon,
-  Close as ClearIcon,
-  ArrowBack as ArrowBackIcon,
-} from '@mui/icons-material';
+import SearchIcon from '@mui/icons-material/Search';
+import TuneIcon from '@mui/icons-material/Tune';
+import ClearIcon from '@mui/icons-material/Close';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useTheme } from '@mui/material/styles';
 import { useCircle } from '../../hooks/useCircle';
 import { useSearch } from '../../contexts/SearchContext';

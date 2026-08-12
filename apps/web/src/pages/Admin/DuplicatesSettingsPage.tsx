@@ -16,7 +16,7 @@ import {
   Link,
   Slider,
 } from '@mui/material';
-import { ContentCopy as ContentCopyIcon } from '@mui/icons-material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalDuplicatesBackfill, getDuplicatesStatus } from '../../services/adminDuplicates';

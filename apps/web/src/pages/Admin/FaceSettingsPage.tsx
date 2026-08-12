@@ -20,11 +20,9 @@ import {
   Snackbar,
   Link,
 } from '@mui/material';
-import {
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Face as FaceIcon,
-} from '@mui/icons-material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import FaceIcon from '@mui/icons-material/Face';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
 import { useSystemSettings } from '../../hooks/useSystemSettings';

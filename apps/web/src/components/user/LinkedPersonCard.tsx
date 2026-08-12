@@ -13,7 +13,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { LinkOff as LinkOffIcon } from '@mui/icons-material';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
 import { Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';

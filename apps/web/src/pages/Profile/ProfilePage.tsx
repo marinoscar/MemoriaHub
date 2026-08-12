@@ -17,12 +17,10 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  CloudUpload as UploadIcon,
-  Face as FaceIcon,
-  Google as GoogleIcon,
-  RestartAlt as ResetIcon,
-} from '@mui/icons-material';
+import UploadIcon from '@mui/icons-material/CloudUpload';
+import FaceIcon from '@mui/icons-material/Face';
+import GoogleIcon from '@mui/icons-material/Google';
+import ResetIcon from '@mui/icons-material/RestartAlt';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAuthedImage } from '../../hooks/useAuthedImage';
 import { AvatarCropDialog } from '../../components/user/AvatarCropDialog';

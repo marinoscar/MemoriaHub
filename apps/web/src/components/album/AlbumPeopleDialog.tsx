@@ -15,7 +15,7 @@ import {
   Box,
   Alert,
 } from '@mui/material';
-import { Close as CloseIcon } from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
 import { useNavigate } from 'react-router-dom';
 import { PersonGrid } from '../people/PersonGrid';
 import { listPeople } from '../../services/face';

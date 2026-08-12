@@ -9,7 +9,7 @@ import {
   Button,
   Divider,
 } from '@mui/material';
-import { Settings as SettingsIcon } from '@mui/icons-material';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAuthedImage } from '../../hooks/useAuthedImage';

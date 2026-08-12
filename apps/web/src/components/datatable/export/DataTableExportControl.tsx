@@ -48,12 +48,10 @@ import {
   MenuItem,
   Tooltip,
 } from '@mui/material';
-import {
-  Download as DownloadIcon,
-  MoreVert as MoreVertIcon,
-  TableRows as TableRowsIcon,
-  Storage as StorageIcon,
-} from '@mui/icons-material';
+import DownloadIcon from '@mui/icons-material/Download';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import TableRowsIcon from '@mui/icons-material/TableRows';
+import StorageIcon from '@mui/icons-material/Storage';
 import type { DataTableColumn, DataTableExportConfig, DataTableLayout } from '../types';
 import {
   DATA_TABLE_EXPORT_MAX_ROWS,

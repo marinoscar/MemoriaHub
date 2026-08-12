@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Box, Alert, Tabs, Tab, Typography, Stack } from '@mui/material';
-import { AutoFixHigh as AutoFixHighIcon } from '@mui/icons-material';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useCircle } from '../../hooks/useCircle';
 import { PendingEnhancementsTab } from './PendingEnhancementsTab';
 

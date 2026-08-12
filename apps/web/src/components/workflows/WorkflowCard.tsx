@@ -13,15 +13,13 @@ import {
   ListItemIcon,
   ListItemText,
 } from '@mui/material';
-import {
-  MoreVert as MoreVertIcon,
-  PlayArrow as PlayArrowIcon,
-  ContentCopy as ContentCopyIcon,
-  Delete as DeleteIcon,
-  TouchApp as TouchAppIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  Schedule as ScheduleIcon,
-} from '@mui/icons-material';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DeleteIcon from '@mui/icons-material/Delete';
+import TouchAppIcon from '@mui/icons-material/TouchApp';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import type { Workflow } from '../../types/workflows';
 import {
   triggerLabel,

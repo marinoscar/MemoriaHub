@@ -1,12 +1,10 @@
 import type { ReactElement } from 'react';
-import {
-  AutoAwesome as AutoAwesomeIcon,
-  Face as FaceIcon,
-  FlightTakeoff as FlightTakeoffIcon,
-  History as HistoryIcon,
-  Stars as StarsIcon,
-  WbSunny as WbSunnyIcon,
-} from '@mui/icons-material';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import FaceIcon from '@mui/icons-material/Face';
+import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
+import HistoryIcon from '@mui/icons-material/History';
+import StarsIcon from '@mui/icons-material/Stars';
+import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import type { MemoryType } from '../../types/memories';
 
 /**

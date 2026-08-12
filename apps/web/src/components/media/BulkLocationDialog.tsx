@@ -10,10 +10,8 @@ import {
   Alert,
   Stack,
 } from '@mui/material';
-import {
-  LocationOn as LocationOnIcon,
-  Clear as ClearIcon,
-} from '@mui/icons-material';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import ClearIcon from '@mui/icons-material/Clear';
 import { LocationSearchPicker } from './LocationSearchPicker';
 import { bulkUpdateMedia } from '../../services/media';
 

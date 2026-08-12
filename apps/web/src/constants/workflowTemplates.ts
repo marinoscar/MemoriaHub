@@ -1,11 +1,9 @@
 import type { SvgIconComponent } from '@mui/icons-material';
-import {
-  DeleteSweep,
-  Movie,
-  PhotoAlbum,
-  Label,
-  ContentCopy,
-} from '@mui/icons-material';
+import DeleteSweep from '@mui/icons-material/DeleteSweep';
+import Movie from '@mui/icons-material/Movie';
+import PhotoAlbum from '@mui/icons-material/PhotoAlbum';
+import Label from '@mui/icons-material/Label';
+import ContentCopy from '@mui/icons-material/ContentCopy';
 import type { WorkflowDefinition, WorkflowTriggerType } from '../types/workflows';
 
 // ---------------------------------------------------------------------------

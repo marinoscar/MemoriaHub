@@ -21,7 +21,7 @@ import {
   ListItemText,
   Typography,
 } from '@mui/material';
-import { CheckCircleOutlined as CheckCircleOutlinedIcon } from '@mui/icons-material';
+import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
 import { Link as RouterLink } from 'react-router-dom';
 import { LoadingSpinner } from '../common/LoadingSpinner';
 import type { ReviewQueueKey } from '../../config/reviewQueues';

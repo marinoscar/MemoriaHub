@@ -6,11 +6,9 @@ import {
   ToggleButton,
   Box,
 } from '@mui/material';
-import {
-  LightMode as LightIcon,
-  DarkMode as DarkIcon,
-  SettingsBrightness as SystemIcon,
-} from '@mui/icons-material';
+import LightIcon from '@mui/icons-material/LightMode';
+import DarkIcon from '@mui/icons-material/DarkMode';
+import SystemIcon from '@mui/icons-material/SettingsBrightness';
 
 interface ThemeSettingsProps {
   currentTheme: 'light' | 'dark' | 'system';

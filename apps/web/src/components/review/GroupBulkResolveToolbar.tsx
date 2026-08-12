@@ -12,12 +12,10 @@ import {
   DialogContentText,
   DialogActions,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  SelectAll as SelectAllIcon,
-  Archive as ArchiveIcon,
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import DeleteIcon from '@mui/icons-material/Delete';
 import type { GroupResolveAction } from '../../services/bursts';
 
 interface GroupBulkResolveToolbarProps {

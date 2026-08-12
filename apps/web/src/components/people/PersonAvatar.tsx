@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Avatar, Box } from '@mui/material';
-import { Person as PersonIcon } from '@mui/icons-material';
+import PersonIcon from '@mui/icons-material/Person';
 import { FaceCrop } from './FaceCrop';
 import { getMedia } from '../../services/media';
 import type { MediaItem } from '../../types/media';

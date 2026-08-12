@@ -20,30 +20,28 @@
  */
 
 import type { SvgIconComponent } from '@mui/icons-material';
-import {
-  AdminPanelSettings as AdminIcon,
-  People as PeopleIcon,
-  SmartToy as AiIcon,
-  LocalOffer as LocalOfferIcon,
-  Face as FaceIcon,
-  BurstMode as BurstModeIcon,
-  ContentCopy as ContentCopyIcon,
-  MyLocation as MyLocationIcon,
-  Map as MapIcon,
-  Storage as StorageIcon,
-  Insights as InsightsIcon,
-  WorkHistory as WorkHistoryIcon,
-  Archive as ArchiveIcon,
-  QueryStats as QueryStatsIcon,
-  Public as PublicIcon,
-  MonitorHeart as MonitorHeartIcon,
-  Movie as MovieIcon,
-  Hub as HubIcon,
-  Email as EmailIcon,
-  AccountTree as AccountTreeIcon,
-  AutoFixHigh as AutoFixHighIcon,
-  AutoAwesomeMotion as AutoAwesomeMotionIcon,
-} from '@mui/icons-material';
+import AdminIcon from '@mui/icons-material/AdminPanelSettings';
+import PeopleIcon from '@mui/icons-material/People';
+import AiIcon from '@mui/icons-material/SmartToy';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import FaceIcon from '@mui/icons-material/Face';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import MapIcon from '@mui/icons-material/Map';
+import StorageIcon from '@mui/icons-material/Storage';
+import InsightsIcon from '@mui/icons-material/Insights';
+import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import QueryStatsIcon from '@mui/icons-material/QueryStats';
+import PublicIcon from '@mui/icons-material/Public';
+import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
+import MovieIcon from '@mui/icons-material/Movie';
+import HubIcon from '@mui/icons-material/Hub';
+import EmailIcon from '@mui/icons-material/Email';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
 
 export interface AdminCardDef {
   title: string;

@@ -7,7 +7,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { AccountCircle as ProfileIcon } from '@mui/icons-material';
+import ProfileIcon from '@mui/icons-material/AccountCircle';
 import { Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAuthedImage } from '../../hooks/useAuthedImage';

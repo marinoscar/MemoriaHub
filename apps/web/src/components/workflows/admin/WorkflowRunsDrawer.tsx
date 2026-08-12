@@ -36,7 +36,8 @@ import {
   Alert,
   Divider,
 } from '@mui/material';
-import { Close as CloseIcon, Stop as StopIcon } from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import StopIcon from '@mui/icons-material/Stop';
 import type { AdminWorkflowRun } from '../../../services/adminWorkflows';
 import { isTerminalRunStatus } from '../../../utils/workflowFormat';
 import { DataTable, type DataTableRowAction } from '../../datatable';

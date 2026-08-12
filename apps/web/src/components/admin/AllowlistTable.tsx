@@ -24,7 +24,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Paper, Snackbar, Typography } from '@mui/material';
-import { Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import AddIcon from '@mui/icons-material/Add';
 import { useAllowlist } from '../../hooks/useAllowlist';
 import { usePermissions } from '../../hooks/usePermissions';
 import { AddEmailDialog } from './AddEmailDialog';

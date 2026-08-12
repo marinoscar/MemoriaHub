@@ -10,12 +10,10 @@ import {
   Alert,
   Divider,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  RotateLeft as RotateLeftIcon,
-  RotateRight as RotateRightIcon,
-  Flip as FlipIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import RotateLeftIcon from '@mui/icons-material/RotateLeft';
+import RotateRightIcon from '@mui/icons-material/RotateRight';
+import FlipIcon from '@mui/icons-material/Flip';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaItem } from '../../types/media';

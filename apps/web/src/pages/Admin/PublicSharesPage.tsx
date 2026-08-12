@@ -50,13 +50,11 @@ import {
   Tab,
   Link,
 } from '@mui/material';
-import {
-  Edit as EditIcon,
-  Block as RevokeIcon,
-  Delete as DeleteIcon,
-  Public as PublicIcon,
-  Refresh as RefreshIcon,
-} from '@mui/icons-material';
+import EditIcon from '@mui/icons-material/Edit';
+import RevokeIcon from '@mui/icons-material/Block';
+import DeleteIcon from '@mui/icons-material/Delete';
+import PublicIcon from '@mui/icons-material/Public';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useMediaShares } from '../../hooks/useMediaShares';
 import type { MediaShare } from '../../types/sharing';

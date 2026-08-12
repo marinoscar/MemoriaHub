@@ -28,7 +28,7 @@
  */
 
 import { Box, Button, MenuItem, Stack, TextField } from '@mui/material';
-import { Add as AddIcon } from '@mui/icons-material';
+import AddIcon from '@mui/icons-material/Add';
 import type { DataTableColumn, DataTableFilter, DataTableFilterValue } from '../types';
 import {
   filterTypeOf,

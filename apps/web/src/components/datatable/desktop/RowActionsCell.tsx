@@ -25,7 +25,7 @@ import {
   ListItemText,
   Stack,
 } from '@mui/material';
-import { MoreVert as MoreVertIcon } from '@mui/icons-material';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import type { DataTableRowAction } from '../types';
 
 export interface RowActionsCellProps<Row> {

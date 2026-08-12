@@ -18,11 +18,9 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import {
-  Search as SearchIcon,
-  Clear as ClearIcon,
-  ChevronRight as ChevronRightIcon,
-} from '@mui/icons-material';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useScrollRestoration } from '../../hooks/useScrollRestoration';
 import { visibleAdminSections } from '../../config/adminSections';

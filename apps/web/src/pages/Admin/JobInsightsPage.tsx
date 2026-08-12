@@ -10,20 +10,18 @@ import {
   Link,
   useTheme,
 } from '@mui/material';
-import {
-  HourglassEmpty,
-  Schedule,
-  Replay,
-  Refresh as RefreshIcon,
-  ErrorOutlined,
-  Speed,
-  Timeline,
-  QueryStats,
-  PlayCircleOutlined,
-  Inventory2Outlined,
-  CheckCircleOutlined,
-  HistoryToggleOff,
-} from '@mui/icons-material';
+import HourglassEmpty from '@mui/icons-material/HourglassEmpty';
+import Schedule from '@mui/icons-material/Schedule';
+import Replay from '@mui/icons-material/Replay';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import ErrorOutlined from '@mui/icons-material/ErrorOutlined';
+import Speed from '@mui/icons-material/Speed';
+import Timeline from '@mui/icons-material/Timeline';
+import QueryStats from '@mui/icons-material/QueryStats';
+import PlayCircleOutlined from '@mui/icons-material/PlayCircleOutlined';
+import Inventory2Outlined from '@mui/icons-material/Inventory2Outlined';
+import CheckCircleOutlined from '@mui/icons-material/CheckCircleOutlined';
+import HistoryToggleOff from '@mui/icons-material/HistoryToggleOff';
 import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobInsights } from '../../hooks/useJobInsights';

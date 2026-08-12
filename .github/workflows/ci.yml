@@ -5,14 +5,39 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger, runnable against any ref. Exists because a PR opened by a
+  # token-authenticated app does not raise a `pull_request` event (GitHub's
+  # recursion prevention), so a change to this workflow cannot otherwise be
+  # exercised on its own branch before landing on main.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every job below runs CONCURRENTLY — none declares `needs`. Wall-clock time to
+# all-green is the SLOWEST job, never the sum, so the whole design is about
+# flattening the longest job rather than removing work (issue #417).
+#
+# The five definitions expand to 15 runtime jobs (4 API shards + 8 web shards +
+# typecheck + OpenAPI + CLI). Two rules keep that honest:
+#
+#   1. Test counts across a matrix MUST sum to the single-job total. Verified at
+#      4x API = 8051 tests and 8x web = 249 files / 4988 tests. If a sum ever
+#      drops, the split is losing files, not balancing them.
+#   2. Both tools shard by hashing the file path, which balances FILE COUNT and
+#      ignores duration — so the slowest shard, not the average, sets the wall
+#      clock, and the spread widens as files-per-shard shrinks. Measured: web at
+#      6 shards ran 55-97s, at 8 shards 37-82s. Halving the files bought only
+#      15% off the max, and past that the fixed per-job floor (checkout +
+#      setup-node + `npm ci`) dominates. That is why the counts are 4 and 8
+#      rather than as high as possible — re-measure before changing them.
 jobs:
-  build:
-    name: Build & Test
+  # Typechecking is separated from the test jobs deliberately: it is pure CPU on
+  # already-provisioned inputs, so parking it behind the API suite (as it used to
+  # be) added its full duration to the critical path for no reason.
+  typecheck:
+    name: Typecheck (api, web, cli)
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
@@ -28,29 +53,108 @@ jobs:
 
       # apps/api and apps/cli both import @memoriahub/enrichment-compute by
       # subpath (e.g. .../clip, .../dto) resolved against its built dist/ —
-      # that output is git-ignored, so it must be built here on every fresh
-      # checkout before anything that imports it can typecheck or run.
+      # that output is git-ignored, so it must be built on every fresh checkout
+      # before anything importing it can typecheck. (apps/web imports neither
+      # this package nor Prisma — see the web-test job.)
       - run: npm run build --workspace=@memoriahub/enrichment-compute
 
       - run: npx prisma generate
         working-directory: apps/api
 
-      - run: npm run typecheck --workspace=api
+      # `--ignore-scripts` skips api's `pretypecheck` hook, which would otherwise
+      # re-run `setup:deps` — rebuilding enrichment-compute and regenerating the
+      # Prisma client the two steps above just produced. The hook exists so a
+      # fresh local checkout self-provisions on `npm run typecheck`; in CI the
+      # provisioning is explicit, so the hook is pure duplicated work.
+      - run: npm run typecheck --workspace=api --ignore-scripts
       - run: npm run typecheck --workspace=web
+      - run: npm run typecheck --workspace=@memoriahub/cli
+
+  api-test:
+    name: API Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    # To change the shard count, edit this list and nothing else: the
+    # `--shard=i/n` denominator reads `strategy.job-total`, which GitHub derives
+    # from the matrix, so the two can never drift out of sync. (Same pattern in
+    # web-test below.)
+    strategy:
+      # Surface every failing shard in one run instead of cancelling siblings on
+      # the first red — a partial picture would cost a full extra CI cycle.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run build --workspace=@memoriahub/enrichment-compute
+
+      - run: npx prisma generate
+        working-directory: apps/api
 
       # Unit + integration test runs. The API's integration specs boot the full
       # AppModule over a mocked Prisma — they need no database, and since #220
-      # they run here rather than being excluded wholesale. The remaining
-      # exclusions (media.integration, known-rotted UI suites) are tracked in
-      # docs/ci-known-failing-tests.md.
-      - run: npm run test:ci --workspace=api
-      - run: npm run test:ci --workspace=web
+      # they run here rather than being excluded wholesale. Remaining exclusions
+      # are tracked in docs/ci-known-failing-tests.md.
+      #
+      # `test:ci` needs no `--ignore-scripts`: npm fires `pre<script>` only for an
+      # exactly-matching name, and there is no `pretest:ci`, so nothing to skip.
+      - run: npm run test:ci --workspace=api -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  web-test:
+    name: Web Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    # The web suite (249 files / ~5k tests) was a single ~14-minute step and, on
+    # its own, ~75% of this workflow's wall clock. It is import-bound rather than
+    # test-bound: each file re-evaluates its whole module graph, because Vitest's
+    # default `isolate: true` resets the worker's module registry per file. That
+    # is the correct setting for this suite — it leans heavily on `vi.mock`, and
+    # turning isolation off made the failure set depend on which files share a
+    # worker (measured: 5 files failed in one shard vs a completely different 45
+    # files on the full suite). So the fix is splitting FILES across runners,
+    # which scales where adding local workers does not.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Installs ONLY apps/web's dependencies plus the workspace root, not the
+      # other workspaces' — apps/web needs none of the API/CLI tree (Nest,
+      # Prisma, onnxruntime, sharp). Measured: 22s and 465 MB against 56s and
+      # 1.5 GB for the full install, and the suite passes identically on the
+      # reduced tree. Worth doing here specifically because eight shards each
+      # pay this cost. If apps/web ever depends on another workspace, this
+      # filter must gain it or the job will fail to resolve it.
+      - run: npm ci --workspace=web --include-workspace-root
+
+      # Deliberately NO enrichment-compute build and NO `prisma generate` here:
+      # apps/web imports neither (verified — no @memoriahub/* dependency and no
+      # source reference), so both would be dead weight on all eight shards. If
+      # web ever gains such an import, add the build step back.
+      - run: npm run test:ci --workspace=web -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   openapi:
     name: OpenAPI Spec
     runs-on: ubuntu-latest
-    # No `needs: build` — same rationale as cli-test below: this runs
-    # concurrently and adds no wall-clock time to an all-green workflow.
+    # Declares no `needs`, like every other job here — it runs concurrently
+    # and adds no wall-clock time as long as it stays under the slowest job.
     env:
       NODE_ENV: test
     steps:
@@ -142,14 +246,12 @@ jobs:
           path: openapi.json
 
   cli-test:
-    name: CLI Build & Test
+    name: CLI Test
     runs-on: ubuntu-latest
-    # No `needs: build` — this job runs CONCURRENTLY with `build` on GitHub's
-    # default parallel scheduling, not after it, so adding CLI coverage does
-    # not add to the wall-clock time until the workflow shows all-green. Keep
-    # it that way: this job is unit tests only (no docker/QEMU/image build —
-    # that's the separate, deliberately slow multi-arch worker image build in
-    # deploy.yml, which this job must never touch or depend on).
+    # Tests only — the CLI typecheck moved to the typecheck job above. No
+    # docker/QEMU/image build either: that's the separate, deliberately slow
+    # multi-arch worker image build in deploy.yml, which this must never touch
+    # or depend on.
     env:
       NODE_ENV: test
     steps:
@@ -162,11 +264,9 @@ jobs:
 
       - run: npm ci
 
-      # Same rationale as the build job: apps/cli imports @memoriahub/enrichment-compute
-      # by subpath resolved against its git-ignored dist/, built fresh here.
+      # Same rationale as the typecheck job: apps/cli imports
+      # @memoriahub/enrichment-compute by subpath against its git-ignored dist/.
       - run: npm run build --workspace=@memoriahub/enrichment-compute
-
-      - run: npm run typecheck --workspace=@memoriahub/cli
 
       # Unit-scoped test run. Fixture-drift and one concurrency-flaky suite are
       # excluded and tracked in docs/ci-known-failing-tests.md.

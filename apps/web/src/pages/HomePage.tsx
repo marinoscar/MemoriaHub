@@ -25,7 +25,7 @@
 
 import { useMemo } from 'react';
 import { Box, Alert, Link, Typography } from '@mui/material';
-import { PhotoLibrary as PhotoLibraryIcon } from '@mui/icons-material';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import { Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../hooks/useCircle';
 import { MediaGallery } from '../components/media/MediaGallery';

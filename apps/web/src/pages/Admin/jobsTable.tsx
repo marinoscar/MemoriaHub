@@ -37,7 +37,7 @@
  */
 
 import { Box, Chip, Tooltip, Typography } from '@mui/material';
-import { Schedule as ScheduleIcon } from '@mui/icons-material';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import type {
   DataTableColumn,
   DataTableFilterModel,

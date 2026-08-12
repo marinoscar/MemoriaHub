@@ -43,10 +43,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import {
-  SettingsBackupRestore as BackupIcon,
-  Refresh as RefreshIcon,
-} from '@mui/icons-material';
+import BackupIcon from '@mui/icons-material/SettingsBackupRestore';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useNodeBackup } from '../../hooks/useNodeBackup';
 import { useCircles } from '../../hooks/useCircles';

@@ -13,10 +13,8 @@
  */
 
 import { Box, IconButton, MenuItem, TextField, Tooltip } from '@mui/material';
-import {
-  ArrowUpward as ArrowUpwardIcon,
-  ArrowDownward as ArrowDownwardIcon,
-} from '@mui/icons-material';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import type { DataTableColumn, DataTableSortConfig } from '../types';
 
 const DEFAULT_VALUE = '__default__';

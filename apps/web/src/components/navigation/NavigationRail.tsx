@@ -61,15 +61,13 @@ import {
   useTheme,
 } from '@mui/material';
 import type { SvgIconComponent } from '@mui/icons-material';
-import {
-  Home as HomeIcon,
-  Collections as CollectionsIcon,
-  FactCheck as FactCheckIcon,
-  AdminPanelSettings as AdminIcon,
-  ArrowBack as ArrowBackIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-} from '@mui/icons-material';
+import HomeIcon from '@mui/icons-material/Home';
+import CollectionsIcon from '@mui/icons-material/Collections';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
+import AdminIcon from '@mui/icons-material/AdminPanelSettings';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useReviewQueues } from '../../hooks/useReviewQueues';

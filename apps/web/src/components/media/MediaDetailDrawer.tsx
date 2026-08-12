@@ -20,29 +20,27 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  Star as StarIcon,
-  StarBorder as StarBorderIcon,
-  Edit as EditIcon,
-  Save as SaveIcon,
-  Cancel as CancelIcon,
-  Download as DownloadIcon,
-  BrokenImage as BrokenImageIcon,
-  AddLocation as AddLocationIcon,
-  LocalOffer as LocalOfferIcon,
-  Refresh as RefreshIcon,
-  InfoOutlined as InfoOutlinedIcon,
-  Archive as ArchiveIcon,
-  Unarchive as UnarchiveIcon,
-  Delete as DeleteIcon,
-  IosShare as IosShareIcon,
-  Undo as UndoIcon,
-  MyLocation as MyLocationIcon,
-  AutoFixHigh as AutoFixHighIcon,
-  BurstMode as BurstModeIcon,
-  ContentCopy as ContentCopyIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
+import CancelIcon from '@mui/icons-material/Cancel';
+import DownloadIcon from '@mui/icons-material/Download';
+import BrokenImageIcon from '@mui/icons-material/BrokenImage';
+import AddLocationIcon from '@mui/icons-material/AddLocation';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import UnarchiveIcon from '@mui/icons-material/Unarchive';
+import DeleteIcon from '@mui/icons-material/Delete';
+import IosShareIcon from '@mui/icons-material/IosShare';
+import UndoIcon from '@mui/icons-material/Undo';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { SharePanel } from '../share/SharePanel';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';

@@ -14,7 +14,8 @@ import {
   DialogContentText,
   DialogActions,
 } from '@mui/material';
-import { Add as AddIcon, AccountTree as AccountTreeIcon } from '@mui/icons-material';
+import AddIcon from '@mui/icons-material/Add';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';

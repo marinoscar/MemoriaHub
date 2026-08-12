@@ -21,11 +21,9 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { Box, IconButton, InputBase, Paper, Tooltip } from '@mui/material';
-import {
-  Search as SearchIcon,
-  Tune as TuneIcon,
-  Close as ClearIcon,
-} from '@mui/icons-material';
+import SearchIcon from '@mui/icons-material/Search';
+import TuneIcon from '@mui/icons-material/Tune';
+import ClearIcon from '@mui/icons-material/Close';
 import { useCircle } from '../../hooks/useCircle';
 import { useSearch } from '../../contexts/SearchContext';
 import { SearchPanel } from './SearchPanel';

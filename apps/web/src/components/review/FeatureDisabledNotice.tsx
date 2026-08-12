@@ -23,7 +23,7 @@
  */
 
 import { Alert, AlertTitle, Box, Button, Typography } from '@mui/material';
-import { Settings as SettingsIcon } from '@mui/icons-material';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { Link as RouterLink } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 

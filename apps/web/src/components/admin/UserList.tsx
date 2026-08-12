@@ -43,11 +43,9 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import {
-  Block as DeactivateIcon,
-  CheckCircleOutlined as ActivateIcon,
-  ManageAccounts as RolesIcon,
-} from '@mui/icons-material';
+import DeactivateIcon from '@mui/icons-material/Block';
+import ActivateIcon from '@mui/icons-material/CheckCircleOutlined';
+import RolesIcon from '@mui/icons-material/ManageAccounts';
 import { useUsers } from '../../hooks/useUsers';
 import { usePermissions } from '../../hooks/usePermissions';
 import { DataTable, type DataTableFilterModel, type DataTableRowAction } from '../datatable';

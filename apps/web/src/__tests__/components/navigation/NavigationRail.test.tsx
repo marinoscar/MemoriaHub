@@ -26,7 +26,7 @@ import { NavigationRail } from '../../../components/navigation/NavigationRail';
 import { ADMIN_SECTIONS } from '../../../config/adminSections';
 import type { UseReviewQueuesResult } from '../../../hooks/useReviewQueues';
 import type { PinnableDestination } from '../../../hooks/useNavigationPrefs';
-import { Star as StarIcon } from '@mui/icons-material';
+import StarIcon from '@mui/icons-material/Star';
 
 // ---------------------------------------------------------------------------
 // Module mocks

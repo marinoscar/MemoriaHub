@@ -16,10 +16,8 @@
 
 import { useState, useCallback } from 'react';
 import { Box, Button, Divider, ListItemText, Menu, MenuItem } from '@mui/material';
-import {
-  ArrowDropDown as ArrowDropDownIcon,
-  GroupWork as GroupWorkIcon,
-} from '@mui/icons-material';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import GroupWorkIcon from '@mui/icons-material/GroupWork';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 

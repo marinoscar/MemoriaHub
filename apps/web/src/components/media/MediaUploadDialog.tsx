@@ -16,14 +16,12 @@ import {
   Alert,
   Chip,
 } from '@mui/material';
-import {
-  CloudUpload as UploadIcon,
-  CheckCircle as CheckIcon,
-  Error as ErrorIcon,
-  Close as CloseIcon,
-  Replay as RetryIcon,
-  ContentCopy as DuplicateIcon,
-} from '@mui/icons-material';
+import UploadIcon from '@mui/icons-material/CloudUpload';
+import CheckIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import CloseIcon from '@mui/icons-material/Close';
+import RetryIcon from '@mui/icons-material/Replay';
+import DuplicateIcon from '@mui/icons-material/ContentCopy';
 import { useTheme } from '@mui/material/styles';
 import {
   initUpload,

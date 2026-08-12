@@ -27,7 +27,8 @@ import {
   Paper,
   useTheme,
 } from '@mui/material';
-import { Close as CloseIcon, Map as MapIcon } from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import MapIcon from '@mui/icons-material/Map';
 import '../../lib/leaflet-setup';
 import {
   aggregateLocations,

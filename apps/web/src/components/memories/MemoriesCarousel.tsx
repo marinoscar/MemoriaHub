@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, IconButton, Stack, Typography, useMediaQuery, useTheme } from '@mui/material';
-import {
-  AutoAwesomeMotion as AutoAwesomeMotionIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-} from '@mui/icons-material';
+import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
 import { useMemoriesFeed } from '../../hooks/useMemoriesFeed';

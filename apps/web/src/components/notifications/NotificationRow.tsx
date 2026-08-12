@@ -17,7 +17,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { Close as CloseIcon } from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
 import { relativeTime } from '../../utils/formatBytes';
 import { notificationMeta } from './notificationMeta';
 import type { NotificationItem } from '../../types/notifications';

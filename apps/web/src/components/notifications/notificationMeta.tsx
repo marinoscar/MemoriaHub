@@ -9,18 +9,16 @@
  */
 
 import type { ReactElement } from 'react';
-import {
-  AutoAwesome as AutoAwesomeIcon,
-  AutoFixHigh as AutoFixHighIcon,
-  BurstMode as BurstModeIcon,
-  CloudUpload as CloudUploadIcon,
-  ContentCopy as ContentCopyIcon,
-  ErrorOutlined as ErrorOutlineIcon,
-  MyLocation as MyLocationIcon,
-  NotificationsNone as NotificationsNoneIcon,
-  AccountTree as AccountTreeIcon,
-  Public as PublicIcon,
-} from '@mui/icons-material';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import PublicIcon from '@mui/icons-material/Public';
 
 /** Theme palette key used to tint the row's icon. */
 export type NotificationTone = 'primary' | 'warning' | 'error' | 'success' | 'info';

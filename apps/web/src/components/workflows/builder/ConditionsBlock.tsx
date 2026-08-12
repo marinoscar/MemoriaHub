@@ -9,7 +9,9 @@ import {
   Tooltip,
   Paper,
 } from '@mui/material';
-import { Add, DeleteOutlined, AccountTree } from '@mui/icons-material';
+import Add from '@mui/icons-material/Add';
+import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
+import AccountTree from '@mui/icons-material/AccountTree';
 import { ConditionRow } from './ConditionRow';
 import { useConditionEditorData } from './ConditionValueEditor';
 import { BuilderBlock } from './BuilderBlock';

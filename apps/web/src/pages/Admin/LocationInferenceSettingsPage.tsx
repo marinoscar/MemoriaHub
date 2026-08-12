@@ -17,7 +17,7 @@ import {
   Slider,
   Divider,
 } from '@mui/material';
-import { MyLocation as MyLocationIcon } from '@mui/icons-material';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalLocationInferenceBackfill } from '../../services/adminLocationInference';

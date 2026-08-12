@@ -22,10 +22,8 @@ import {
   Link,
   Divider,
 } from '@mui/material';
-import {
-  AutoFixHigh as AutoFixHighIcon,
-  Refresh as RefreshIcon,
-} from '@mui/icons-material';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { getEnhancerAdminStatus } from '../../services/enhance';

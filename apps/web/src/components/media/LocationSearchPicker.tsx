@@ -24,7 +24,8 @@ import {
   InputAdornment,
   TextField,
 } from '@mui/material';
-import { Search as SearchIcon, Place as PlaceIcon } from '@mui/icons-material';
+import SearchIcon from '@mui/icons-material/Search';
+import PlaceIcon from '@mui/icons-material/Place';
 import { LocationPickerMap } from './LocationPickerMap';
 import { searchPlaces, reverseGeocode } from '../../services/media';
 import type { GeoSearchResult, GeoReverseResult } from '../../types/media';

@@ -55,12 +55,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import {
-  CheckCircle as OkIcon,
-  Error as BlockedIcon,
-  MenuBook as RunbookIcon,
-  Warning as WarningIcon,
-} from '@mui/icons-material';
+import OkIcon from '@mui/icons-material/CheckCircle';
+import BlockedIcon from '@mui/icons-material/Error';
+import RunbookIcon from '@mui/icons-material/MenuBook';
+import WarningIcon from '@mui/icons-material/Warning';
 import {
   RESTORE_CONFIRMATION,
   RESTORE_RUNBOOK_PATH,

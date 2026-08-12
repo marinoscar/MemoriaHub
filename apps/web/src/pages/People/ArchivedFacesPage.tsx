@@ -14,13 +14,11 @@ import {
   Paper,
   Stack,
 } from '@mui/material';
-import {
-  ArrowBack as ArrowBackIcon,
-  DeleteForever as DeleteForeverIcon,
-  Restore as RestoreIcon,
-  SelectAll as SelectAllIcon,
-  VisibilityOff as VisibilityOffIcon,
-} from '@mui/icons-material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import RestoreIcon from '@mui/icons-material/Restore';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';

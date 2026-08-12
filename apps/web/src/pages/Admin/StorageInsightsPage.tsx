@@ -13,17 +13,15 @@ import {
   useTheme,
   Link,
 } from '@mui/material';
-import {
-  Storage as StorageIcon,
-  Refresh as RefreshIcon,
-  Insights as InsightsIcon,
-  PhotoLibrary as PhotoIcon,
-  Videocam as VideoIcon,
-  Face as FaceIcon,
-  LocalOffer as TagIcon,
-  HourglassEmpty as QueuedIcon,
-  QueryStats as ComputingIcon,
-} from '@mui/icons-material';
+import StorageIcon from '@mui/icons-material/Storage';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import InsightsIcon from '@mui/icons-material/Insights';
+import PhotoIcon from '@mui/icons-material/PhotoLibrary';
+import VideoIcon from '@mui/icons-material/Videocam';
+import FaceIcon from '@mui/icons-material/Face';
+import TagIcon from '@mui/icons-material/LocalOffer';
+import QueuedIcon from '@mui/icons-material/HourglassEmpty';
+import ComputingIcon from '@mui/icons-material/QueryStats';
 import { Navigate, Link as RouterLink } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useInsights } from '../../hooks/useInsights';

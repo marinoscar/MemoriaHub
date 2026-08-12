@@ -27,11 +27,9 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import {
-  CheckCircle as CheckCircleIcon,
-  Place as PlaceIcon,
-  RadioButtonUnchecked as UncheckedIcon,
-} from '@mui/icons-material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PlaceIcon from '@mui/icons-material/Place';
+import UncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
 import { getExploreLocationLevel } from '../../services/media';

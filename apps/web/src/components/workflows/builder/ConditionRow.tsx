@@ -9,7 +9,7 @@ import {
   IconButton,
   Tooltip,
 } from '@mui/material';
-import { DeleteOutlined } from '@mui/icons-material';
+import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
 import { ConditionValueEditor } from './ConditionValueEditor';
 import type { ExploreItem } from '../../../services/media';
 import type { Album } from '../../../types/media';

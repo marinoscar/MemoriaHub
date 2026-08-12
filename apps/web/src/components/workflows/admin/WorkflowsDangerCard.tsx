@@ -7,7 +7,7 @@ import {
   FormControlLabel,
   Alert,
 } from '@mui/material';
-import { WarningAmber as WarningAmberIcon } from '@mui/icons-material';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
 // ---------------------------------------------------------------------------
 // Workflows danger card (issue #143).

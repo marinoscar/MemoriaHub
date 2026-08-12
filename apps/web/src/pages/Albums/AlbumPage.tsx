@@ -29,15 +29,13 @@ import {
   Stack,
   Tooltip,
 } from '@mui/material';
-import {
-  ArrowBack as ArrowBackIcon,
-  MoreVert as MoreVertIcon,
-  Share as ShareIcon,
-  Map as MapIcon,
-  Slideshow as SlideshowIcon,
-  People as PeopleIcon,
-  Image as ImageIcon,
-} from '@mui/icons-material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import ShareIcon from '@mui/icons-material/Share';
+import MapIcon from '@mui/icons-material/Map';
+import SlideshowIcon from '@mui/icons-material/Slideshow';
+import PeopleIcon from '@mui/icons-material/People';
+import ImageIcon from '@mui/icons-material/Image';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../services/media';

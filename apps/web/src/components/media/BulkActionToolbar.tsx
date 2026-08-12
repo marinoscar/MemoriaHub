@@ -16,24 +16,22 @@ import {
   ListItemText,
   Divider,
 } from '@mui/material';
-import {
-  LocationOn as LocationOnIcon,
-  Label as LabelIcon,
-  Delete as DeleteIcon,
-  Close as CloseIcon,
-  RemoveCircleOutlined as RemoveCircleOutlineIcon,
-  SelectAll as SelectAllIcon,
-  Add as AddIcon,
-  MoreVert as MoreVertIcon,
-  StarBorder as StarBorderIcon,
-  Archive as ArchiveIcon,
-  Unarchive as UnarchiveIcon,
-  EditCalendar as EditCalendarIcon,
-  PhotoSizeSelectActual as PhotoSizeSelectActualIcon,
-  Face as FaceIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  AutoFixHigh as AutoFixHighIcon,
-} from '@mui/icons-material';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import LabelIcon from '@mui/icons-material/Label';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CloseIcon from '@mui/icons-material/Close';
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlined';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
+import AddIcon from '@mui/icons-material/Add';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import UnarchiveIcon from '@mui/icons-material/Unarchive';
+import EditCalendarIcon from '@mui/icons-material/EditCalendar';
+import PhotoSizeSelectActualIcon from '@mui/icons-material/PhotoSizeSelectActual';
+import FaceIcon from '@mui/icons-material/Face';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import type { CircleRole } from '../../types/circles';
 import type { MediaItem } from '../../types/media';
 import {

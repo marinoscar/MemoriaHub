@@ -15,7 +15,7 @@ import {
   Snackbar,
   Link,
 } from '@mui/material';
-import { LocalOffer as LocalOfferIcon } from '@mui/icons-material';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalTaggingBackfill } from '../../services/adminBackfill';

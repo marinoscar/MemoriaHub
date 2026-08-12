@@ -13,12 +13,10 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  AutoAwesomeMotion as AutoAwesomeMotionIcon,
-  Favorite as FavoriteIcon,
-  FavoriteBorder as FavoriteBorderIcon,
-  MoreVert as MoreVertIcon,
-} from '@mui/icons-material';
+import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
+import FavoriteIcon from '@mui/icons-material/Favorite';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useCircleRole } from '../../hooks/useCircleRole';

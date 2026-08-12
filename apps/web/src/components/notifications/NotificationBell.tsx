@@ -12,10 +12,8 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { Badge, IconButton, Tooltip } from '@mui/material';
-import {
-  Notifications as NotificationsIcon,
-  NotificationsNone as NotificationsNoneIcon,
-} from '@mui/icons-material';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import { useNotifications } from '../../hooks/useNotifications';
 import { NotificationPanel } from './NotificationPanel';
 

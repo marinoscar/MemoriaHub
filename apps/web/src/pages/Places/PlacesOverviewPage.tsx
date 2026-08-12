@@ -9,10 +9,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Alert } from '@mui/material';
-import {
-  Place as PlaceIcon,
-  Public as PublicIcon,
-} from '@mui/icons-material';
+import PlaceIcon from '@mui/icons-material/Place';
+import PublicIcon from '@mui/icons-material/Public';
 import { useCircle } from '../../hooks/useCircle';
 import { getExploreLocations } from '../../services/media';
 import type { ExploreLocations } from '../../services/media';

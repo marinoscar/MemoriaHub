@@ -1,5 +1,5 @@
 import { Box, Typography, Grid, Card, CardActionArea, CardContent } from '@mui/material';
-import { AddCircle as AddCircleIcon } from '@mui/icons-material';
+import AddCircleIcon from '@mui/icons-material/AddCircle';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from '../../constants/workflowTemplates';
 
 interface WorkflowTemplatesGalleryProps {

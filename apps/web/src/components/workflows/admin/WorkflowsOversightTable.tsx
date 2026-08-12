@@ -27,10 +27,8 @@
  */
 
 import { Card, CardContent, Typography } from '@mui/material';
-import {
-  Block as BlockIcon,
-  History as HistoryIcon,
-} from '@mui/icons-material';
+import BlockIcon from '@mui/icons-material/Block';
+import HistoryIcon from '@mui/icons-material/History';
 import { useMemo } from 'react';
 import type { AdminWorkflowListItem } from '../../../services/adminWorkflows';
 import { DataTable, type DataTableRowAction } from '../../datatable';

@@ -13,10 +13,8 @@
 
 import { Suspense, lazy } from 'react';
 import { Box, Button, Typography } from '@mui/material';
-import {
-  ArrowBack as ArrowBackIcon,
-  ArrowForward as ArrowForwardIcon,
-} from '@mui/icons-material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { Link as RouterLink, Navigate, useParams } from 'react-router-dom';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { reviewQueuePath } from '../../components/review/ReviewQueueList';

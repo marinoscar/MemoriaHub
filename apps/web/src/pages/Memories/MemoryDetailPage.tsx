@@ -12,18 +12,16 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  ArrowBack as ArrowBackIcon,
-  DeleteOutlined as DeleteIcon,
-  Favorite as FavoriteIcon,
-  FavoriteBorder as FavoriteBorderIcon,
-  IosShare as IosShareIcon,
-  PhotoAlbum as PhotoAlbumIcon,
-  PlayArrow as PlayArrowIcon,
-  Videocam as VideocamIcon,
-  Visibility as VisibilityIcon,
-  VisibilityOff as VisibilityOffIcon,
-} from '@mui/icons-material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import DeleteIcon from '@mui/icons-material/DeleteOutlined';
+import FavoriteIcon from '@mui/icons-material/Favorite';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import IosShareIcon from '@mui/icons-material/IosShare';
+import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import VideocamIcon from '@mui/icons-material/Videocam';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import {
   Link as RouterLink,
   useNavigate,

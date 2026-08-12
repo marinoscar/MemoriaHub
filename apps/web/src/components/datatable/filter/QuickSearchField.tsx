@@ -24,7 +24,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { IconButton, InputAdornment, TextField } from '@mui/material';
-import { Search as SearchIcon, Close as CloseIcon } from '@mui/icons-material';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
 import type { DataTableColumn, DataTableQuickSearchConfig } from '../types';
 import { searchableColumns } from './operators';
 

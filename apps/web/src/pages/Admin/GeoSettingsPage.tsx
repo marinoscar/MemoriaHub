@@ -20,11 +20,9 @@ import {
   Snackbar,
   Link,
 } from '@mui/material';
-import {
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  LocationOn as LocationOnIcon,
-} from '@mui/icons-material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useGeoSettings } from '../../hooks/useGeoSettings';
 import { useSystemSettings } from '../../hooks/useSystemSettings';

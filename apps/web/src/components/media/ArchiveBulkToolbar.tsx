@@ -21,13 +21,11 @@ import {
   Divider,
   CircularProgress,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  SelectAll as SelectAllIcon,
-  Delete as DeleteIcon,
-  MoreVert as MoreVertIcon,
-  Unarchive as UnarchiveIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
+import DeleteIcon from '@mui/icons-material/Delete';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import UnarchiveIcon from '@mui/icons-material/Unarchive';
 import type { CircleRole } from '../../types/circles';
 import { bulkUnarchive, bulkDelete } from '../../services/media';
 

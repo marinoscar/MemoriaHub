@@ -17,12 +17,10 @@ import {
   Alert,
   Chip,
 } from '@mui/material';
-import {
-  Add as AddIcon,
-  GroupWork as CircleIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
+import AddIcon from '@mui/icons-material/Add';
+import CircleIcon from '@mui/icons-material/GroupWork';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useNavigate } from 'react-router-dom';
 import { useCircles } from '../../hooks/useCircles';
 import { useCircleContext } from '../../contexts/CircleContext';

@@ -12,7 +12,7 @@ import {
   Snackbar,
   Link,
 } from '@mui/material';
-import { Archive as ArchiveIcon } from '@mui/icons-material';
+import ArchiveIcon from '@mui/icons-material/Archive';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';

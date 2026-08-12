@@ -11,7 +11,7 @@ import {
   Divider,
   Typography,
 } from '@mui/material';
-import { Label as LabelIcon } from '@mui/icons-material';
+import LabelIcon from '@mui/icons-material/Label';
 import { TagAutocomplete } from './TagAutocomplete';
 import { bulkTags } from '../../services/media';
 

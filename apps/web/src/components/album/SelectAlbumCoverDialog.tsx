@@ -19,7 +19,8 @@ import {
   Typography,
   CircularProgress,
 } from '@mui/material';
-import { Close as CloseIcon, Check as CheckIcon } from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import CheckIcon from '@mui/icons-material/Check';
 import type { MediaItem } from '../../types/media';
 
 interface SelectAlbumCoverDialogProps {
