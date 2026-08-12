@@ -36,7 +36,7 @@ export class UsersController {
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'role', required: false, type: String })
-  @ApiQuery({ name: 'isActive', required: false, type: Boolean })
+  @ApiQuery({ name: 'isActive', required: false, enum: ['true', 'false'] })
   @ApiQuery({ name: 'sortBy', required: false, enum: ['email', 'createdAt', 'updatedAt'] })
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
   @ApiResponse({ status: 200, description: 'Paginated user list' })

@@ -34,7 +34,7 @@ const reprocessFailedBodySchema = z.object({
 
 export class ReprocessFailedBodyDto extends createZodDto(reprocessFailedBodySchema) {}
 
-@ApiTags('Admin - Media')
+@ApiTags('Admin: Media Recovery')
 @Controller('admin/media')
 export class MediaReprocessController {
   constructor(

@@ -34,7 +34,7 @@ import { ListReviewRunItemsQueryDto } from './dto/list-review-run-items-query.dt
  * cancel requires media:write + per-circle collaborator.
  */
 @ApiTags('Review Runs')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('review-runs')
 export class ReviewRunsController {
   constructor(private readonly runService: ReviewRunService) {}

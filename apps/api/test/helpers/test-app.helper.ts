@@ -77,6 +77,19 @@ export interface TestAppOptions {
    * Set to false only for true E2E tests that need a real database
    */
   useMockDatabase?: boolean;
+
+  /**
+   * Hook to register raw Fastify routes, called after the global prefix is set
+   * and BEFORE `app.init()`.
+   *
+   * The timing is the whole point. Fastify refuses to accept a route once its
+   * root plugin has booted ("Root plugin has already booted"), and `app.init()`
+   * boots it — so a spec that registers a route after `createTestApp` returns
+   * cannot work at all. `main.ts` registers the documentation routes at exactly
+   * this point in its own boot sequence, so a spec using this hook is exercising
+   * the same ordering the server uses.
+   */
+  registerRoutes?: (app: NestFastifyApplication) => void;
 }
 
 /**
@@ -125,6 +138,9 @@ export async function createTestApp(
   app.setGlobalPrefix('api');
   // Note: ZodValidationPipe is already registered globally via APP_PIPE in AppModule
   // Do NOT add a standard ValidationPipe here as it conflicts with Zod DTOs
+
+  // Must precede init(): see `registerRoutes` on TestAppOptions.
+  options.registerRoutes?.(app);
 
   await app.init();
   await app.getHttpAdapter().getInstance().ready();

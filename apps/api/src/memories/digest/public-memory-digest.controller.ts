@@ -117,7 +117,13 @@ export class PublicMemoryDigestController {
    */
   @Get('digest-image/:token')
   @Public()
-  @ApiOperation({ summary: 'Stream a digest cover thumbnail (no auth required)' })
+  @ApiOperation({
+    summary: 'Stream a digest cover thumbnail (no auth required)',
+    description:
+      'Serves the cover image embedded in a Memories digest email. Authorized by an HMAC-signed ' +
+      'capability token in the path rather than a session, because an email client cannot carry ' +
+      'one; the token encodes the single image it grants and expires.',
+  })
   @ApiParam({ name: 'token', description: 'HMAC-signed digest image token' })
   @ApiResponse({ status: 200, description: 'Thumbnail bytes (JPEG)' })
   @ApiResponse({ status: 404, description: 'Invalid, expired, or unknown token' })
@@ -200,7 +206,14 @@ export class PublicMemoryDigestController {
    */
   @Get('digest-unsubscribe/:token')
   @Public()
-  @ApiOperation({ summary: 'Digest unsubscribe confirmation page (no auth required)' })
+  @ApiOperation({
+    summary: 'Digest unsubscribe confirmation page (no auth required)',
+    description:
+      'Renders the one-click unsubscribe confirmation for a Memories digest. Like the cover ' +
+      'image above, it is authorized by an HMAC-signed capability token so a recipient can opt ' +
+      'out without logging in. The POST form of this route is the RFC 8058 endpoint mail ' +
+      'clients call directly.',
+  })
   @ApiParam({ name: 'token', description: 'HMAC-signed unsubscribe token' })
   @ApiResponse({ status: 200, description: 'HTML confirmation page' })
   @ApiResponse({ status: 404, description: 'Invalid or expired token' })

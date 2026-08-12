@@ -52,3 +52,4 @@ worktrees/
 *.tgz
 .cache/
 nul
+openapi.json

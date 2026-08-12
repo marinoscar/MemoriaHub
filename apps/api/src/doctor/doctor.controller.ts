@@ -13,7 +13,7 @@ import { DoctorReport } from './doctor.types';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
-@ApiTags('Admin - Doctor')
+@ApiTags('Admin: Doctor')
 @Controller('admin/doctor')
 export class DoctorController {
   constructor(private readonly doctorService: DoctorService) {}

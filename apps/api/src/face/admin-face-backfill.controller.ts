@@ -31,7 +31,7 @@ const adminFaceBackfillSchema = z.object({
 }).prefault({});
 class AdminFaceBackfillDto extends createZodDto(adminFaceBackfillSchema) {}
 
-@ApiTags('Admin — Face Recognition')
+@ApiTags('Admin: Face Recognition')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/face')
 export class AdminFaceBackfillController {

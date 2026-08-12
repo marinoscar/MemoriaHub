@@ -40,7 +40,7 @@ import { ListRunsQueryDto } from './runs/dto/list-runs-query.dto';
  * (per-circle roles are enforced in the service, mirroring bulk-media ops).
  */
 @ApiTags('Workflows')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('workflows')
 export class WorkflowsController {
   constructor(

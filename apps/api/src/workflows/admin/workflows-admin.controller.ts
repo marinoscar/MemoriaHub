@@ -33,8 +33,8 @@ import { ListAdminWorkflowRunsQueryDto } from './dto/list-admin-workflow-runs-qu
  * system_settings:write and the runaway-run cancel requires jobs:write —
  * mirroring the admin jobs/nodes controllers.
  */
-@ApiTags('Admin - Workflows')
-@ApiBearerAuth()
+@ApiTags('Admin: Workflows')
+@ApiBearerAuth('JWT-auth')
 @Controller('admin')
 export class WorkflowsAdminController {
   constructor(private readonly adminService: WorkflowsAdminService) {}

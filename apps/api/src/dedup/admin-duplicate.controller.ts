@@ -38,7 +38,7 @@ class AdminDuplicateConfidenceBackfillDto extends createZodDto(
   adminDuplicateConfidenceBackfillSchema,
 ) {}
 
-@ApiTags('Admin — Duplicates')
+@ApiTags('Admin: Duplicates')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/duplicates')
 export class AdminDuplicateController {

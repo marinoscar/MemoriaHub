@@ -26,7 +26,7 @@ const adminBackfillSchema = z.object({
 }).prefault({});
 class AdminBackfillDto extends createZodDto(adminBackfillSchema) {}
 
-@ApiTags('Admin — Tagging')
+@ApiTags('Admin: Tagging')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/tagging')
 export class AdminTaggingController {

@@ -37,7 +37,7 @@ import { ListLocationSuggestionRunItemsQueryDto } from '../dto/list-location-sug
  * Prefer `/api/review-runs/:id` for new clients.
  */
 @ApiTags('Location Suggestion Runs (deprecated)')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('location-suggestion-runs')
 export class LocationSuggestionRunsController {
   constructor(private readonly runService: ReviewRunService) {}

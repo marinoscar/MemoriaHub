@@ -194,12 +194,14 @@ export class DeviceAuthController {
   @ApiQuery({
     name: 'page',
     required: false,
+    type: Number,
     description: 'Page number',
     example: 1,
   })
   @ApiQuery({
     name: 'limit',
     required: false,
+    type: Number,
     description: 'Page size',
     example: 10,
   })

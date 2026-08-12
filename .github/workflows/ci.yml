@@ -46,6 +46,101 @@ jobs:
       - run: npm run test:ci --workspace=api
       - run: npm run test:ci --workspace=web
 
+  openapi:
+    name: OpenAPI Spec
+    runs-on: ubuntu-latest
+    # No `needs: build` — same rationale as cli-test below: this runs
+    # concurrently and adds no wall-clock time to an all-green workflow.
+    env:
+      NODE_ENV: test
+    steps:
+      # Full history so the base branch can be checked out for the spec diff.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Same rationale as the build job: apps/api imports
+      # @memoriahub/enrichment-compute by subpath against its git-ignored dist/.
+      - run: npm run build --workspace=@memoriahub/enrichment-compute
+
+      - run: npx prisma generate
+        working-directory: apps/api
+
+      # The dump script boots the app in Nest's preview mode: every module is
+      # loaded and every controller's metadata read, but no provider is
+      # instantiated — so this needs no database, no object storage, and no
+      # credentials, and starts no cron or worker loops.
+      - name: Generate the spec
+        run: npm run openapi:dump
+
+      - name: Lint the spec
+        run: npm run openapi:lint
+
+      - name: Type-check the dump script
+        run: npm run openapi:typecheck --workspace=api
+
+      # A breaking API change should be visible in review rather than found by a
+      # client. The base spec is produced from a worktree of the base branch that
+      # borrows this checkout's installed node_modules and generated Prisma
+      # client, so no second `npm ci` is needed.
+      #
+      # Best-effort by construction: a base branch that predates this job cannot
+      # dump a spec at all, and dependency drift between the branches can make
+      # the borrowed modules wrong. Both outcomes report "skipped" rather than
+      # failing a PR over a diff that is informational.
+      - name: Diff the spec against the base branch
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          git worktree add --detach /tmp/base "origin/${{ github.base_ref }}" || {
+            echo "Could not check out the base branch; skipping spec diff." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/base/node_modules
+          cp -r packages/enrichment-compute/dist /tmp/base/packages/enrichment-compute/dist
+
+          if ! (cd /tmp/base && npm run openapi:dump >/tmp/base-dump.log 2>&1); then
+            {
+              echo "### OpenAPI spec diff skipped"
+              echo
+              echo 'The base branch could not produce a spec (it may predate this job, or its'
+              echo 'dependencies differ from this branch). The generated spec is attached as an'
+              echo 'artifact.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if diff -u /tmp/base/openapi.json openapi.json > /tmp/spec.diff; then
+            echo "No OpenAPI changes in this PR." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### OpenAPI spec changes"
+            echo
+            echo "<details><summary>$(grep -c '^[+-]' /tmp/spec.diff) changed lines</summary>"
+            echo
+            echo '```diff'
+            # Bounded: a job summary is capped at 1 MiB, and a full 1 MB spec
+            # rewrite would blow past it and lose the summary entirely.
+            head -c 60000 /tmp/spec.diff
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openapi.json
+          path: openapi.json
+
   cli-test:
     name: CLI Build & Test
     runs-on: ubuntu-latest

@@ -10,7 +10,7 @@ import { ROLES, PERMISSIONS } from '../common/constants/roles.constants';
  * system-settings read permission (no new scope), Admin role.
  */
 @ApiTags('Admin: AI Picture Enhancer')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('admin/ai/enhance')
 export class AdminEnhancementController {
   constructor(private readonly service: MediaEnhancementService) {}

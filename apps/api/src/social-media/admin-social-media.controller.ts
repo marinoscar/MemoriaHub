@@ -37,7 +37,7 @@ class AdminSocialMediaBackfillDto extends createZodDto(
   adminSocialMediaBackfillSchema,
 ) {}
 
-@ApiTags('Admin — Social Media Detection')
+@ApiTags('Admin: Social Media Detection')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/social-media')
 export class AdminSocialMediaController {

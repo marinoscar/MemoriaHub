@@ -17,7 +17,7 @@ const adminLocationInferenceBackfillSchema = z.object({
 }).prefault({});
 class AdminLocationInferenceBackfillDto extends createZodDto(adminLocationInferenceBackfillSchema) {}
 
-@ApiTags('Admin — Location Inference')
+@ApiTags('Admin: Location Inference')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/location-inference')
 export class AdminLocationInferenceController {

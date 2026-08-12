@@ -25,7 +25,7 @@ const adminBurstBackfillSchema = z.object({
 }).prefault({});
 class AdminBurstBackfillDto extends createZodDto(adminBurstBackfillSchema) {}
 
-@ApiTags('Admin — Bursts')
+@ApiTags('Admin: Bursts')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/bursts')
 export class AdminBurstController {
