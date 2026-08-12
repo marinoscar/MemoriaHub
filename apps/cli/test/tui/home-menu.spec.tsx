@@ -46,16 +46,20 @@ describe('HomeMenu', () => {
       expect(plain).toContain('Not logged in');
     });
 
-    it('shows only Login, Settings, Help, and Quit top-level menu items', () => {
+    it('shows only Login, Scan, File Tools, Settings, Help, and Quit top-level menu items', () => {
       const { lastFrame } = render(
         <HomeMenu config={null} identity={null} onSelect={() => {}} />,
       );
       const plain = stripAnsi(lastFrame()!);
-      // These four items must appear
       expect(plain).toContain('Login');
-      expect(plain).toContain('Settings');
+      expect(plain).toContain('Scan ▸');
+      expect(plain).toContain('File Tools ▸');
+      expect(plain).toContain('Settings ▸');
       expect(plain).toContain('Help');
       expect(plain).toContain('Quit');
+      // Login-gated branches stay hidden.
+      expect(plain).not.toContain('Backup');
+      expect(plain).not.toContain('Worker Node');
     });
 
     it('does NOT show Sync or Reports submenus when logged out', () => {
@@ -72,12 +76,14 @@ describe('HomeMenu', () => {
       expect(plain).not.toContain('Retry failed files');
     });
 
-    it('DOES show the Tools submenu when logged out (it hosts the offline convert/organize tools)', () => {
+    it('DOES show the File Tools submenu when logged out (it hosts the offline convert/organize tools)', () => {
       const { lastFrame } = render(
         <HomeMenu config={null} identity={null} onSelect={() => {}} />,
       );
       const plain = stripAnsi(lastFrame()!);
-      expect(plain).toContain('Tools ▸');
+      expect(plain).toContain('File Tools ▸');
+      // The old grab-bag submenu is gone.
+      expect(plain).not.toContain('Tools ▸\n');
     });
 
     it('DOES show the Settings submenu when logged out (it contains a loggedOut leaf)', () => {
@@ -129,7 +135,7 @@ describe('HomeMenu', () => {
       expect(plain).toContain('alice@example.com');
     });
 
-    it('shows the full top-level menu including Sync, Reports, Settings, and Tools submenus', () => {
+    it('shows the restructured root: Sync, Scan, Backup, Worker Node, Reports, File Tools, Settings', () => {
       const { lastFrame } = render(
         <HomeMenu
           config={FAKE_CONFIG}
@@ -139,12 +145,15 @@ describe('HomeMenu', () => {
       );
       const plain = stripAnsi(lastFrame()!);
       expect(plain).toContain('Sync ▸');
+      expect(plain).toContain('Scan ▸');
+      expect(plain).toContain('Backup');
+      expect(plain).toContain('Worker Node ▸');
       expect(plain).toContain('Reports ▸');
+      expect(plain).toContain('File Tools ▸');
       expect(plain).toContain('Settings ▸');
-      expect(plain).toContain('Tools ▸');
     });
 
-    it('still shows Login, Help, and Quit when logged in', () => {
+    it('numbers the root items 1–9 as digit accelerators, in the documented order', () => {
       const { lastFrame } = render(
         <HomeMenu
           config={FAKE_CONFIG}
@@ -153,9 +162,72 @@ describe('HomeMenu', () => {
         />,
       );
       const plain = stripAnsi(lastFrame()!);
-      expect(plain).toContain('Login');
+      for (const [i, label] of [
+        'Sync ▸',
+        'Scan ▸',
+        'Backup',
+        'Worker Node ▸',
+        'Reports ▸',
+        'File Tools ▸',
+        'Settings ▸',
+        'Help',
+        'Quit',
+      ].entries()) {
+        expect(plain).toContain(`${i + 1}. ${label}`);
+      }
+    });
+
+    it('drops the root Login entry once logged in (it moves into Settings)', () => {
+      const { lastFrame } = render(
+        <HomeMenu
+          config={FAKE_CONFIG}
+          identity="alice@example.com"
+          onSelect={() => {}}
+        />,
+      );
+      const plain = stripAnsi(lastFrame()!);
+      expect(plain).not.toContain('Login / Change server');
       expect(plain).toContain('Help');
       expect(plain).toContain('Quit');
+    });
+
+    it('shows the no-folders first-run hint when folderCount is 0', () => {
+      const { lastFrame } = render(
+        <HomeMenu
+          config={FAKE_CONFIG}
+          identity="alice@example.com"
+          folderCount={0}
+          onSelect={() => {}}
+        />,
+      );
+      expect(stripAnsi(lastFrame()!)).toContain(
+        'No folders registered — start with Settings › Manage folders',
+      );
+    });
+
+    it('hides the hint once folders exist, and while the count is still unknown', () => {
+      const withFolders = render(
+        <HomeMenu
+          config={FAKE_CONFIG}
+          identity="alice@example.com"
+          folderCount={3}
+          onSelect={() => {}}
+        />,
+      );
+      expect(stripAnsi(withFolders.lastFrame()!)).not.toContain('No folders registered');
+      cleanup();
+
+      const unknown = render(
+        <HomeMenu config={FAKE_CONFIG} identity="alice@example.com" onSelect={() => {}} />,
+      );
+      expect(stripAnsi(unknown.lastFrame()!)).not.toContain('No folders registered');
+    });
+
+    it('never shows the hint when logged out, even with zero folders', () => {
+      const { lastFrame } = render(
+        <HomeMenu config={null} identity={null} folderCount={0} onSelect={() => {}} />,
+      );
+      expect(stripAnsi(lastFrame()!)).not.toContain('No folders registered');
     });
   });
 
@@ -200,7 +272,7 @@ describe('HomeMenu', () => {
       expect(node.label).toBe('Login / Change server');
     });
 
-    it('calls onSelect with the submenu node (not an action) when navigating to Sync', async () => {
+    it('calls onSelect with the submenu node (not an action) for the first logged-in item, Sync', async () => {
       const onSelect = jest.fn<(node: MenuNode) => void>();
       const { stdin } = render(
         <HomeMenu
@@ -210,9 +282,6 @@ describe('HomeMenu', () => {
         />,
       );
 
-      // Move down from Login to Sync, then select it.
-      stdin.write('\x1B[B'); // down arrow
-      await new Promise((r) => setTimeout(r, 50));
       stdin.write('\r');
       await new Promise((r) => setTimeout(r, 50));
 
@@ -220,6 +289,35 @@ describe('HomeMenu', () => {
       const node = onSelect.mock.calls[0]![0];
       expect(node.kind).toBe('submenu');
       expect(node.label).toBe('Sync');
+    });
+
+    it('selects an item directly by its digit accelerator', async () => {
+      const onSelect = jest.fn<(node: MenuNode) => void>();
+      const { stdin } = render(
+        <HomeMenu
+          config={FAKE_CONFIG}
+          identity="alice@example.com"
+          onSelect={onSelect}
+        />,
+      );
+
+      stdin.write('4'); // Worker Node — four rows below the highlight
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(onSelect.mock.calls[0]![0].label).toBe('Worker Node');
+    });
+
+    it('ignores a digit past the end of the list', async () => {
+      const onSelect = jest.fn<(node: MenuNode) => void>();
+      const { stdin } = render(
+        <HomeMenu config={null} identity={null} onSelect={onSelect} />,
+      );
+
+      stdin.write('9'); // logged out there are only 6 items
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(onSelect).not.toHaveBeenCalled();
     });
   });
 

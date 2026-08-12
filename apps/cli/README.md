@@ -135,36 +135,56 @@ When run in a non-TTY context (piped output, CI), bare invocation falls back to 
 The root menu displays the ASCII banner, your connected server and account, the DB path, and a navigable hierarchical list of actions. Items marked `▸` are submenus:
 
 ```
-  Login / Change server
-  Sync ▸
-    Sync all folders
-    Sync selected folders
-    Retry failed files
-  Reports ▸
-    Folder overview
-    Recent runs
-    Storage synced
-    Duplicates
-  Settings ▸
-    Manage folders
-    Manage circles
-    App settings
-    Factory reset (delete all local data)
-  Tools ▸
-    Convert videos to MP4 ▸
-      Convert a single file
-      Convert selected folder(s)
-      Convert all registered folders
-    Organize folder by date
-    Job queue monitor
-    Backup
-  Help
-  Quit
+  1. Sync ▸
+       Sync all folders…
+       Sync selected folders…
+       Retry failed files
+  2. Scan ▸                       (dry-run preview — reports what a sync would do)
+       Scan all folders
+       Scan selected folders…
+       View last scan report
+  3. Backup                       → opens the backup dashboard directly
+  4. Worker Node ▸                (daily operations first, first-run setup below)
+       Node dashboard
+       Start worker (background)
+       Stop worker
+       Node logs
+       Node doctor
+       Enroll node (login + credential)
+       Install dependencies (Linux)
+       Register node
+       Node config
+       List nodes
+       Node service (systemd)
+  5. Reports ▸
+       Folder overview
+       Recent runs
+       Storage synced
+       Duplicates
+       Job queue monitor
+  6. File Tools ▸                 (offline — no server connection required)
+       Convert videos to MP4 ▸
+         Convert a single file…
+         Convert selected folder(s)…
+         Convert all registered folders
+       Organize folder by date…
+       Find/Clean Screenshots ▸
+       Date Inference ▸
+  7. Settings ▸
+       Manage folders
+       Manage circles
+       App settings
+       Login / Change server
+       Factory reset (delete all local data)
+  8. Help
+  9. Quit
 ```
 
-When not logged in, only Login, Scan ▸, Tools ▸ (Convert videos to MP4 and Organize folder by date — the offline utilities), Settings ▸ (Factory reset only), Help, and Quit are shown.
+When not logged in the root menu shows `Login / Change server`, `Scan ▸`, `File Tools ▸` (all of the offline utilities), `Settings ▸` (Factory reset only), `Help`, and `Quit`. Once logged in, `Login / Change server` moves into `Settings ▸` so the root menu stays focused on day-to-day work.
 
-Navigate with arrow keys and Enter — selecting a `▸` item descends one level into its submenu. Press `Esc` or `q` to go back one level (not all the way to the root). The ASCII banner and the connected-server/account identity box render only on the root menu; submenus instead show a breadcrumb trail, e.g. `Menu › Sync`. Every item in the menu is the interactive equivalent of a direct CLI command.
+Navigate with arrow keys and Enter, or press the item's digit (`1`–`9`) to jump straight to it. Selecting a `▸` item descends one level into its submenu. Press `Esc` or `q` to go back one level (not all the way to the root).
+
+Two label conventions: an entry ending in `…` opens a further step (a folder picker, a date filter, a path prompt) before anything happens — so `Find & delete screenshots…` opens a picker rather than deleting immediately — while a bare label acts straight away. Destructive entries (`Factory reset`, `Find & delete screenshots…`) render in red. The ASCII banner and the connected-server/account identity box render only on the root menu; submenus instead show a breadcrumb trail, e.g. `Menu › Sync`. Every item in the menu is the interactive equivalent of a direct CLI command.
 
 The Reports submenu is generated from a shared reports registry (see [`memoriahub reports`](#memoriahub-reports) below), so it grows automatically as new reports are added — no menu wiring is required per report.
 
@@ -253,32 +273,32 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `sync [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` / `--from <date>` / `--to <date>` | Incremental sync of registered or specified folders | Sync ▸ Sync all folders / Sync selected folders |
 | `status` | `--runs` / `--json` | Quick per-folder sync status or recent run history; covers the same underlying data as `reports show overview` / `reports show runs`, just with a fixed, non-extensible output shape | Reports ▸ Folder overview / Recent runs |
 | `retry` | `--all` / `--folder <id\|path>` / `--force` | Retry failed uploads; `--force` resets files blocked at the attempts cap | Sync ▸ Retry failed files |
-| `screenshots [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` / `--move-to <dir>` / `--delete` / `--json` | Find files whose name contains "screenshot" (case-insensitive); list-only by default, or move/delete matches | Tools ▸ Find/Clean Screenshots ▸ |
+| `screenshots [folder...] --all` | `--all` / `--dry-run` / `-r, --recursive` / `--concurrency <n>` / `--move-to <dir>` / `--delete` / `--json` | Find files whose name contains "screenshot" (case-insensitive); list-only by default, or move/delete matches | File Tools ▸ Find/Clean Screenshots ▸ |
 | `settings list` | (none) | Print all settings and their current values | Settings ▸ App settings |
 | `settings get <key>` | (none) | Get the current value of one setting | Settings ▸ App settings |
 | `settings set <key> <value>` | (none) | Set a setting value | Settings ▸ App settings |
 | `reports list` | `--json` | List available reports (id, label, description) from the shared reports registry | Reports ▸ |
 | `reports show <id>` | `--json` | Run one report (`overview`, `runs`, `storage`, `duplicates`) and print a table (or JSON with `--json`) | Reports ▸ |
-| `date-infer diagnose [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Report-only: show which files have no capture date and what would be inferred from their filenames | Tools ▸ Date Inference ▸ Diagnose (report only) |
-| `date-infer apply [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Infer missing capture dates from filenames AND write them into each file via ExifTool | Tools ▸ Date Inference ▸ Infer & write dates |
-| `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Tools ▸ Job queue monitor |
-| `backup init` | `--dest <dir>` / `--node-name <name>` / `--circles <ids>` | Bind this machine to a local backup root (see [Local backup](#local-backup-mirror-your-library)) | Tools ▸ Backup |
-| `backup run` | `--concurrency <n>` / `--max-mbps <x>` / `--page-size <n>` / `--reconcile` / `--embedded` / `--json` / `--strict` | Run an incremental (or full reconcile) backup sync | Tools ▸ Backup ▸ Run backup now |
-| `backup status` | `--json` | Merged local catalog + daemon + server backup status | Tools ▸ Backup ▸ Backup dashboard |
-| `backup verify` | `--deep` / `--concurrency <n>` / `--json` | Verify local backup integrity against the catalog (existence, size, sha256) | Tools ▸ Backup ▸ Verify backup |
-| `backup prune` | `--yes` / `--older-than <days>` / `--json` | List (and with `--yes`, permanently delete) quarantined backup files | Tools ▸ Backup |
+| `date-infer diagnose [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Report-only: show which files have no capture date and what would be inferred from their filenames | File Tools ▸ Date Inference ▸ Diagnose (report only) |
+| `date-infer apply [folder...]` | `--all` / `-r, --recursive` / `--concurrency <n>` / `--json` / `--format xlsx\|csv` | Infer missing capture dates from filenames AND write them into each file via ExifTool | File Tools ▸ Date Inference ▸ Infer & write dates |
+| `jobs` (alias `queue`) | `--interval <sec>` / `--once` / `--json` / `--window <days>` | Live job queue dashboard (server load, ETA); requires an Admin PAT with `jobs:read` | Reports ▸ Job queue monitor |
+| `backup init` | `--dest <dir>` / `--node-name <name>` / `--circles <ids>` | Bind this machine to a local backup root (see [Local backup](#local-backup-mirror-your-library)) | Backup |
+| `backup run` | `--concurrency <n>` / `--max-mbps <x>` / `--page-size <n>` / `--reconcile` / `--embedded` / `--json` / `--strict` | Run an incremental (or full reconcile) backup sync | Backup ▸ Run backup now |
+| `backup status` | `--json` | Merged local catalog + daemon + server backup status | Backup ▸ Backup dashboard |
+| `backup verify` | `--deep` / `--concurrency <n>` / `--json` | Verify local backup integrity against the catalog (existence, size, sha256) | Backup ▸ Verify backup |
+| `backup prune` | `--yes` / `--older-than <days>` / `--json` | List (and with `--yes`, permanently delete) quarantined backup files | Backup |
 | `backup restore` | `--root <dir>` / `--dry-run` / `--into-circle <id>` / `--map-circle <src=dst>` / `--include <what>` / `--concurrency <n>` / `--skip-metadata` / `--json` | Rebuild a MemoriaHub library from a backup root | — |
-| `backup schedule [cron]` | `--tz <iana>` / `--show` / `--disable` | Manage the server-computed backup cron schedule | Tools ▸ Backup ▸ Backup settings |
-| `backup set-rate` | `--concurrency <n>` / `--max-mbps <x>` | Set backup throttle knobs, applied live to a running daemon | Tools ▸ Backup ▸ Backup settings |
+| `backup schedule [cron]` | `--tz <iana>` / `--show` / `--disable` | Manage the server-computed backup cron schedule | Backup ▸ Backup settings |
+| `backup set-rate` | `--concurrency <n>` / `--max-mbps <x>` | Set backup throttle knobs, applied live to a running daemon | Backup ▸ Backup settings |
 | `node install-deps` | `--dry-run` / `--skip-compreface` / `--compreface-port <port>` | Linux-only one-command installer for everything a machine needs to become a worker node (ffmpeg/ffprobe, npm native compute libs, tesseract OCR language data, model files, Docker + compreface-core) | — |
 | `node register` | `--name <name>` / `--concurrency <n>` / `--types <csv>` / `--face-provider <compreface>` / `--compreface-url <url>` | Register this machine as a worker node (one-time, PAT-based) | — |
-| `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` / `--face-provider <compreface>` / `--compreface-url <url>` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Tools ▸ Worker Node ▸ Node dashboard (`[s]` start) |
-| `node stop` | (none) | Stop a running node: IPC (graceful drain + deregister) → `SIGTERM` via pidfile → server-side deregister | Tools ▸ Worker Node ▸ Node dashboard (`[d]` drain / `[x]` stop daemon) |
-| `node status` | (none) | Live snapshot via IPC when a daemon is running, else a local config + capability summary | Tools ▸ Worker Node ▸ Node dashboard |
+| `node start` | `--concurrency <n>` / `--types <csv>` / `--poll <ms>` / `--daemon` / `--face-provider <compreface>` / `--compreface-url <url>` | Run the claim → compute → submit loop; `--daemon` detaches into the background | Worker Node ▸ Node dashboard (`[s]` start) |
+| `node stop` | (none) | Stop a running node: IPC (graceful drain + deregister) → `SIGTERM` via pidfile → server-side deregister | Worker Node ▸ Node dashboard (`[d]` drain / `[x]` stop daemon) |
+| `node status` | (none) | Live snapshot via IPC when a daemon is running, else a local config + capability summary | Worker Node ▸ Node dashboard |
 | `node list` | (none) | List worker nodes registered under the caller's PAT | — |
-| `node doctor` | (none) | Capability self-test, API access, model, and daemon-liveness report | Tools ▸ Worker Node ▸ Node dashboard (`[r]` doctor — capability probe only, lighter than the full CLI command) |
+| `node doctor` | (none) | Capability self-test, API access, model, and daemon-liveness report | Worker Node ▸ Node dashboard (`[r]` doctor — capability probe only, lighter than the full CLI command) |
 | `node logs` | `--follow` / `-n, --lines <n>` | Print or tail the JSONL worker-node log | — |
-| `node set-concurrency <n>` | (none) | Adjust concurrency live over IPC when a daemon is running, else persist to config | Tools ▸ Worker Node ▸ Node config |
+| `node set-concurrency <n>` | (none) | Adjust concurrency live over IPC when a daemon is running, else persist to config | Worker Node ▸ Node config |
 | `node heap-snapshot` | (none) | Ask the running daemon to write a V8 heap snapshot to the log directory (memory-leak diagnosis, [issue #156](https://github.com/marinoscar/MemoriaHub/issues/156)) | — |
 | `node service install\|uninstall\|status` | (none) | Install/remove/inspect the systemd user unit that keeps the node always on | — |
 | `import <folder>` | `-r, --recursive` / `--dry-run` | One-shot import alias for `sync <folder>` (legacy back-compat) | — |
@@ -771,13 +791,13 @@ Photos/
 
 Files with no EXIF capture date are moved into a top-level `NODATE/` folder instead. **This currently includes every video** — the CLI does not probe video metadata for a capture date, so all video files land in `NODATE/` regardless of any date embedded in the container. This EXIF-only date read is specific to `organize`; unlike sync's [capture-date inference](#capture-date-inference), `organize` does not fall back to filesystem timestamps when EXIF is absent.
 
-GPS presence is read from EXIF using the same full-file read as the capture date. Since videos never have GPS extracted, a video with no capture date lands specifically in `NODATE/NO-GPS/`, as shown above. The organize summary now reports a **No GPS** count alongside the existing NODATE count, and this grouping — along with the No GPS count — is visible in the Tools ▸ Organize folder by date TUI screen (see [Interactive UI](#interactive-ui) below) too.
+GPS presence is read from EXIF using the same full-file read as the capture date. Since videos never have GPS extracted, a video with no capture date lands specifically in `NODATE/NO-GPS/`, as shown above. The organize summary now reports a **No GPS** count alongside the existing NODATE count, and this grouping — along with the No GPS count — is visible in the File Tools ▸ Organize folder by date TUI screen (see [Interactive UI](#interactive-ui) below) too.
 
 `organize` is idempotent: files already sitting in their correct `YEAR/MM - Month/` (or `NODATE/`) bucket are skipped, so re-running the command after it has already organized a folder moves nothing. It is also non-destructive to data — if a move would collide with an existing file of different content at the destination, the CLI appends ` (1)`, ` (2)`, … to the filename rather than overwriting anything. Moves are cross-device safe: if a direct rename fails with `EXDEV` (source and destination are on different filesystems/mount points), the CLI falls back to a copy-then-delete.
 
 ### Interactive UI
 
-`organize` is also reachable from the interactive menu under **Tools ▸ Organize folder by date**. It runs a plan → confirm → execute flow: it first computes and shows the full plan (what would move, what would go to `NODATE/`), asks for a `y` confirmation before touching anything (since it moves files), and then executes with a live progress bar.
+`organize` is also reachable from the interactive menu under **File Tools ▸ Organize folder by date**. It runs a plan → confirm → execute flow: it first computes and shows the full plan (what would move, what would go to `NODATE/`), asks for a `y` confirmation before touching anything (since it moves files), and then executes with a live progress bar.
 
 ---
 
@@ -851,7 +871,7 @@ A file matches if its base filename contains "screenshot" anywhere, case-insensi
 
 ### Interactive UI
 
-`screenshots` is also reachable from the interactive menu under **Tools ▸ Find/Clean Screenshots ▸**, which offers three modes:
+`screenshots` is also reachable from the interactive menu under **File Tools ▸ Find/Clean Screenshots ▸**, which offers three modes:
 
 - **Find screenshots (list only)** — scans and shows a green results screen with the total match count, total size, and a capped sample of matches (12 shown, "… and N more" if truncated). Nothing here is destructive, so there's no confirmation step.
 - **Find & move screenshots** — first prompts for a destination folder path, then scans and shows a plan/confirm screen (matched count, total size, a sample of up to 12 files, the destination path, and a yellow warning that this moves files on disk and isn't automatically reversible). Press `y` to proceed or `q`/`Esc` to cancel — the same plan → confirm → execute flow and warning style as `organize`.
@@ -928,7 +948,7 @@ If any files fail, `convert` shows the distinct error causes (grouped with count
 
 ### Interactive UI
 
-`convert` is also reachable from the interactive menu under **Tools ▸ Convert videos to MP4 ▸**, which offers three modes:
+`convert` is also reachable from the interactive menu under **File Tools ▸ Convert videos to MP4 ▸**, which offers three modes:
 
 - **Convert a single file** — type/paste a path to one video file.
 - **Convert selected folder(s)** — pick from your registered folders.
@@ -994,7 +1014,7 @@ Both commands write a Summary + Detail report (or Detail-only for `--format csv`
 
 ### Interactive UI
 
-`date-infer` is also reachable from the interactive menu under **Tools ▸ Date Inference**, with two entries: **Diagnose (report only)** and **Infer & write dates**. Both always run a read-only diagnose pass first and show the same report (counts plus a sample of matched filename → date pairs), auto-exported the same way as the headless command. From **Infer & write dates**, if candidates were found, pressing `[a]` checks ExifTool availability, then shows an explicit confirm step (`[y]` writes, `[q]`/Esc cancels back to the report) before the real write pass runs with live progress.
+`date-infer` is also reachable from the interactive menu under **File Tools ▸ Date Inference**, with two entries: **Diagnose (report only)** and **Infer & write dates**. Both always run a read-only diagnose pass first and show the same report (counts plus a sample of matched filename → date pairs), auto-exported the same way as the headless command. From **Infer & write dates**, if candidates were found, pressing `[a]` checks ExifTool availability, then shows an explicit confirm step (`[y]` writes, `[q]`/Esc cancels back to the report) before the real write pass runs with live progress.
 
 ---
 
@@ -1118,9 +1138,9 @@ memoriahub node set-concurrency 4
 
 `node heap-snapshot` asks the running daemon to serialize its V8 heap to `~/.memoriahub/logs/heap-manual-<pid>-<timestamp>.heapsnapshot` and prints the path. It exists for memory-leak diagnosis ([issue #156](https://github.com/marinoscar/MemoriaHub/issues/156)): the useful snapshot is one taken from a worker that is *already* leaking, and restarting it to attach `--heapsnapshot-near-heap-limit` throws away exactly the accumulated state you need. Check `heapGrowthMbPerHour` in `node logs` first — capture once it is clearly climbing. The write blocks the daemon for a few seconds on a large heap, is refused unless free disk is at least 1.5× the heap, and older snapshots are pruned to the newest two. Open the file in Chrome DevTools → Memory → Load and sort by Retained Size.
 
-### The TUI: Tools ▸ Worker Node
+### The TUI: Worker Node
 
-The flagship way to operate a node day-to-day is the interactive dashboard, reachable from the main menu under **Tools ▸ Worker Node**:
+The flagship way to operate a node day-to-day is the interactive dashboard, reachable from the main menu under **Worker Node**:
 
 - **Node dashboard** — live per-slot job state (active jobs with elapsed time and progress), a rolling history of recent completions/failures, aggregate counters (claimed/succeeded/failed, throughput), heartbeat status, and a quick doctor overlay (`[r]`, a capability probe). Crucially, this screen can either **own** an embedded engine (press `[s]` to start it in-process — a quick foreground session) or **attach** to an already-running `node start --daemon` process over the same IPC socket the `node status`/`stop`/`set-concurrency` commands use. Attaching hydrates from a snapshot and then live-updates from the daemon's own event stream — leaving the screen (`[q]`) only closes the socket, it never stops an attached daemon. This is what makes a systemd-managed, headless node genuinely observable: open the TUI from any terminal (or a fresh SSH session) at any time to watch it work, without stopping or restarting it.
 - **Node config** — edit node name, concurrency (pushed live to a running daemon), poll interval, and the eligible-job-type checkbox list, all persisted immediately.
@@ -1231,9 +1251,9 @@ memoriahub backup set-rate --concurrency 4
 
 The cron expression and timezone are validated and evaluated **server-side** — the CLI never parses cron itself. Scheduled runs fire only from a running worker-node daemon (`memoriahub node start --daemon` or `node service install`), which polls the server every minute and starts a run the moment the server-computed next-run time is due; a machine that was offline at the scheduled time self-heals on the very next poll after it comes back up. `set-rate` persists the new concurrency/bandwidth cap and, when a daemon is currently running a backup, pushes the change live over IPC so the very next page/chunk uses it — no restart required.
 
-### The TUI: Tools ▸ Backup
+### The TUI: Backup
 
-The interactive menu's **Tools ▸ Backup** submenu offers **Backup dashboard** (live status, mirroring `backup status`), **Run backup now**, **Verify backup**, and **Backup settings** (schedule + throttle, mirroring `backup schedule`/`backup set-rate`) — the same underlying engines as the headless commands above, with live progress rendering.
+The interactive menu's **Backup** submenu offers **Backup dashboard** (live status, mirroring `backup status`), **Run backup now**, **Verify backup**, and **Backup settings** (schedule + throttle, mirroring `backup schedule`/`backup set-rate`) — the same underlying engines as the headless commands above, with live progress rendering.
 
 ---
 

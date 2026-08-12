@@ -2,29 +2,25 @@
  * tui/Menu.tsx — Generic bordered submenu renderer.
  *
  * Presentational only: given a title, optional subtitle, and a list of
- * {label,value} items, renders an ink-select-input inside the standard cyan
- * bordered box and wires Esc/q → onBack. Used for every NON-root submenu; the
- * root menu keeps its bespoke chrome in HomeMenu.
+ * {label,value,color} items, renders a <MenuList> (ink-select-input plus digit
+ * accelerators and per-item colour) inside the standard cyan bordered box and
+ * wires Esc/q → onBack. Used for every NON-root submenu; the root menu keeps
+ * its bespoke chrome in HomeMenu but shares the same <MenuList>.
  */
 
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
-import SelectInput from 'ink-select-input';
 import { BOX_BORDER } from './theme.js';
+import { MenuList, type MenuListItem } from './MenuList.js';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
-interface MenuItem {
-  label: string;
-  value: string;
-}
-
 interface MenuProps {
   title: string;
   subtitle?: string;
-  items: MenuItem[];
+  items: MenuListItem[];
   onSelect: (value: string) => void;
   onBack: () => void;
   footerHint?: string;
@@ -46,10 +42,6 @@ export function Menu({
     if (key.escape || input === 'q') onBack();
   });
 
-  function handleSelect(item: MenuItem): void {
-    onSelect(item.value);
-  }
-
   return (
     <Box
       borderStyle={BOX_BORDER}
@@ -62,11 +54,11 @@ export function Menu({
       {subtitle && <Text dimColor>{subtitle}</Text>}
 
       <Box marginTop={1}>
-        <SelectInput items={items} onSelect={handleSelect} />
+        <MenuList items={items} onSelect={(item) => onSelect(item.value)} />
       </Box>
 
       <Box marginTop={1}>
-        <Text dimColor>{footerHint ?? '[Esc] back'}</Text>
+        <Text dimColor>{footerHint ?? '[1-9] jump   [↑/↓] move   [Enter] select   [Esc] back'}</Text>
       </Box>
     </Box>
   );

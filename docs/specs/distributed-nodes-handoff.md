@@ -123,7 +123,7 @@ All 9 commits after `357497a`. Each was typecheck-gated.
 | `feat(web)` | Workers-health page `/admin/settings/nodes` + "Node" column on the Job Queue | `apps/web/src/pages/Admin/WorkersPage.tsx`, `services/workers.ts`, `hooks/useWorkers.ts`, `pages/Admin/JobsPage.tsx`, `services/jobs.ts`, `App.tsx`, `SettingsHubPage.tsx`, `Sidebar.tsx` |
 | `feat(api)` doctor | Doctor "Worker Nodes" section: registered nodes, heartbeat freshness, expired leases, per-node capability health | `apps/api/src/.../doctor.service.ts` (search `nodes` section) |
 | `feat(cli)` engine | `node register/start/stop/status/list/doctor`; event-driven claim→download→compute→submit engine; capability detection; model manager; config | `apps/cli/src/commands/node.ts`, `apps/cli/src/node/*` (`node-engine.ts`, `node-events.ts`, `capabilities.ts`, `models.ts`, `download.ts`, `compute/*`), `api.ts`, `config.ts`, `paths.ts` |
-| `feat(cli)` TUI | Tools ▸ Worker Node: live `NodeDashboard` + `NodeConfig` | `apps/cli/src/tui/NodeDashboard.tsx`, `NodeConfig.tsx`, `menu-config.ts`, `app.tsx` |
+| `feat(cli)` TUI | Worker Node (a root menu entry since issue #413; previously Tools ▸ Worker Node): live `NodeDashboard` + `NodeConfig` | `apps/cli/src/tui/NodeDashboard.tsx`, `NodeConfig.tsx`, `menu-config.ts`, `app.tsx` |
 | `docs` | CLAUDE.md updated | `CLAUDE.md` |
 
 **Contracts already frozen** (do not change without updating both sides):
@@ -265,7 +265,7 @@ once, `sha256sum`, record). This is the anti-drift guard for parity.
    node dist/index.js node register --name laptop-A --concurrency 2 \
         --types face_detection,duplicate_detection,thumbnail_regen,metadata
    node dist/index.js node start --concurrency 2
-   #   ...or launch the TUI: node dist/index.js  → Tools ▸ Worker Node ▸ Node dashboard → press s
+   #   ...or launch the TUI: node dist/index.js  → Worker Node ▸ Node dashboard → press s
    ```
 3. **Drive work:** upload a batch of photos (via web or `memoriahub import`). With
    `ENRICHMENT_WORKER_CONCURRENCY=1` on the server, most jobs should be claimed by the node

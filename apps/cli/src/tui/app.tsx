@@ -53,15 +53,21 @@ import { NodeRegister } from './NodeRegister.js';
 import { NodeList } from './NodeList.js';
 import { NodeLogs } from './NodeLogs.js';
 import { NodeService } from './NodeService.js';
+import { NodeEnroll } from './NodeEnroll.js';
+import { NodeInstallDeps } from './NodeInstallDeps.js';
+import { NodeStop } from './NodeStop.js';
+import { FolderRepo } from '../repo/folders.js';
 import { BOX_BORDER } from './theme.js';
 import {
   MENU_TREE,
   findSubmenu,
   visibleChildren,
   breadcrumb,
+  menuItemLabel,
   type MenuNode,
   type MenuActionId,
 } from './menu-config.js';
+import type { MenuListItem } from './MenuList.js';
 
 // ---------------------------------------------------------------------------
 // Screen + navigation types
@@ -96,7 +102,10 @@ type Screen =
   | { kind: 'nodeRegister' }
   | { kind: 'nodeList' }
   | { kind: 'nodeLogs' }
-  | { kind: 'nodeService' };
+  | { kind: 'nodeService' }
+  | { kind: 'nodeEnroll' }
+  | { kind: 'nodeInstallDeps' }
+  | { kind: 'nodeStop' };
 
 type NavFrame =
   | { kind: 'menu'; menuId: string }
@@ -114,6 +123,49 @@ function KeyHandler({ onBack }: { onBack: () => void }): null {
 }
 
 // ---------------------------------------------------------------------------
+// Login guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Screens that cannot render without a config. Checked ONCE before the screen
+ * switch — this used to be ~10 copies of the same inline `if (!config)` block,
+ * where a newly-added screen could simply forget the guard and crash on a
+ * null config (issue #413).
+ *
+ * Deliberately NOT listed: 'nodeEnroll' (it IS the login), 'nodeInstallDeps'
+ * (a purely local dependency install), and 'nodeStop' (stops a LOCAL daemon
+ * over IPC and only needs a config for its last-resort server-side
+ * deregister, which it reports on rather than requiring).
+ */
+const LOGIN_REQUIRED_SCREENS: ReadonlySet<Screen['kind']> = new Set<Screen['kind']>([
+  'circles',
+  'dashboard',
+  'jobs',
+  'backupDashboard',
+  'backupSettings',
+  'nodeDashboard',
+  'nodeConfig',
+  'nodeStart',
+  'nodeDoctor',
+  'nodeRegister',
+  'nodeList',
+]);
+
+/** Shown in place of a login-required screen when there is no config. */
+function NotLoggedIn({ onBack, onLogin }: { onBack: () => void; onLogin: () => void }): React.ReactElement {
+  useInput((input, key) => {
+    if (input === 'l') onLogin();
+    else if (key.escape || input === 'q') onBack();
+  });
+  return (
+    <Box paddingX={1} flexDirection="column" gap={1}>
+      <Text color="yellow">Not logged in. Please login first.</Text>
+      <Text dimColor>[l] login   [q/Esc] back</Text>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App component
 // ---------------------------------------------------------------------------
 
@@ -123,6 +175,8 @@ interface AppState {
   db: BetterSqlite3.Database | null;
   circles: Circle[];
   updateInfo: { updateAvailable: boolean; latestVersion: string | null } | null;
+  /** Registered-folder count backing HomeMenu's first-run hint (null = not read yet). */
+  folderCount: number | null;
 }
 
 function App({ currentVersion }: { currentVersion: string }): React.ReactElement {
@@ -135,6 +189,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
     db: null,
     circles: [],
     updateInfo: null,
+    folderCount: null,
   });
 
   // Load config + db + identity on mount; also fire a throttled update check.
@@ -142,12 +197,22 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
     const cfg = loadConfig();
     const db  = openDb();
 
+    // Cheap local read — drives HomeMenu's "no folders registered" hint. A
+    // failure here must never block the menu, so it degrades to "unknown"
+    // (null), which renders no hint at all.
+    let folderCount: number | null = null;
+    try {
+      folderCount = new FolderRepo(db).list().length;
+    } catch {
+      folderCount = null;
+    }
+
     let cancelled = false;
 
     async function loadIdentity(): Promise<void> {
       if (!cfg) {
         if (!cancelled) {
-          setAppState((prev) => ({ ...prev, config: null, identity: null, db, circles: [] }));
+          setAppState((prev) => ({ ...prev, config: null, identity: null, db, circles: [], folderCount }));
         }
         return;
       }
@@ -159,12 +224,12 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           api.listCircles().catch(() => [] as Circle[]),
         ]);
         if (!cancelled) {
-          setAppState((prev) => ({ ...prev, config: cfg, identity: me.email ?? null, db, circles }));
+          setAppState((prev) => ({ ...prev, config: cfg, identity: me.email ?? null, db, circles, folderCount }));
         }
       } catch {
         // Not logged in / server unreachable
         if (!cancelled) {
-          setAppState((prev) => ({ ...prev, config: cfg, identity: null, db, circles: [] }));
+          setAppState((prev) => ({ ...prev, config: cfg, identity: null, db, circles: [], folderCount }));
         }
       }
     }
@@ -318,6 +383,15 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       case 'node-service':
         push({ kind: 'screen', screen: { kind: 'nodeService' } });
         break;
+      case 'node-enroll':
+        push({ kind: 'screen', screen: { kind: 'nodeEnroll' } });
+        break;
+      case 'node-install-deps':
+        push({ kind: 'screen', screen: { kind: 'nodeInstallDeps' } });
+        break;
+      case 'node-stop':
+        push({ kind: 'screen', screen: { kind: 'nodeStop' } });
+        break;
       case 'help':
         push({ kind: 'screen', screen: { kind: 'help' } });
         break;
@@ -336,11 +410,13 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
   }
 
   // Encode a menu node into a stable string value for the generic <Menu>.
-  function toItem(node: MenuNode): { label: string; value: string } {
-    if (node.kind === 'submenu') {
-      return { label: `${node.label} ▸`, value: `submenu:${node.id}` };
-    }
-    return { label: node.label, value: `action:${node.action}` };
+  // Label decoration (chevron / ellipsis / digit accelerator) lives in
+  // menuItemLabel so this renderer and HomeMenu cannot drift.
+  function toItem(node: MenuNode, index: number): MenuListItem {
+    const label = menuItemLabel(node, index + 1);
+    const color = node.color;
+    const value = node.kind === 'submenu' ? `submenu:${node.id}` : `action:${node.action}`;
+    return color ? { label, value, color } : { label, value };
   }
 
   function selectChild(menuId: string, value: string): void {
@@ -388,6 +464,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           onSelect={handleSelect}
           updateInfo={appState.updateInfo}
           currentVersion={currentVersion}
+          folderCount={appState.folderCount ?? undefined}
         />
       );
     }
@@ -397,7 +474,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
     return (
       <Menu
         title={breadcrumb(top.menuId)}
-        subtitle="Use arrow keys and Enter to navigate"
+        subtitle={submenu?.subtitle}
         items={items}
         onSelect={(value) => selectChild(top.menuId, value)}
         onBack={pop}
@@ -407,6 +484,17 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
 
   // top.kind === 'screen'
   const screen = top.screen;
+
+  // Single login gate for every screen that needs a config — see
+  // LOGIN_REQUIRED_SCREENS above.
+  if (LOGIN_REQUIRED_SCREENS.has(screen.kind) && !config) {
+    return (
+      <NotLoggedIn
+        onBack={pop}
+        onLogin={() => replaceTop({ kind: 'screen', screen: { kind: 'login' } })}
+      />
+    );
+  }
 
   switch (screen.kind) {
     case 'login':
@@ -436,21 +524,28 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       );
 
     case 'folders':
-      return <FolderManager db={db} onBack={pop} />;
+      return (
+        <FolderManager
+          db={db}
+          onBack={() => {
+            // Re-read the count so HomeMenu's first-run hint clears as soon as
+            // the user adds their first folder (and returns if they remove it).
+            let folderCount: number | null = null;
+            try {
+              folderCount = new FolderRepo(db).list().length;
+            } catch {
+              folderCount = null;
+            }
+            setAppState((prev) => ({ ...prev, folderCount }));
+            pop();
+          }}
+        />
+      );
 
     case 'circles':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <CircleManager
-          config={config}
+          config={config!}
           onConfigChange={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
           onBack={() => {
             // Refresh circles after returning (user may have changed active circle)
@@ -610,18 +705,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       return <ScanScreen db={db} mode="view" onHome={resetToRoot} onBack={pop} />;
 
     case 'dashboard':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <SyncDashboard
-          config={config}
+          config={config!}
           db={db}
           all={screen.all}
           folderIds={screen.folderIds}
@@ -636,38 +722,20 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       return <ReportView db={db} reportId={screen.reportId} onBack={pop} />;
 
     case 'jobs':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <JobsDashboard
-          api={new ApiClient(config)}
+          api={new ApiClient(config!)}
           intervalMs={5000}
           windowDays={7}
-          serverUrl={config.serverUrl}
+          serverUrl={config!.serverUrl}
           onBack={pop}
         />
       );
 
     case 'backupDashboard':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <BackupDashboard
-          config={config}
+          config={config!}
           autoRun={screen.autoRun}
           onBack={pop}
           onOpenVerify={() => push({ kind: 'screen', screen: { kind: 'backupVerify' } })}
@@ -679,118 +747,73 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       return <BackupVerify onBack={pop} />;
 
     case 'backupSettings':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
-      return <BackupSettings config={config} onBack={pop} />;
+      return <BackupSettings config={config!} onBack={pop} />;
 
     case 'nodeDashboard':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <NodeDashboard
-          config={config}
+          config={config!}
           onBack={pop}
           onOpenConfig={() => push({ kind: 'screen', screen: { kind: 'nodeConfig' } })}
         />
       );
 
     case 'nodeConfig':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <NodeConfig
-          config={config}
+          config={config!}
           onSaved={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
           onBack={pop}
         />
       );
 
     case 'nodeStart':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <NodeStart
-          config={config}
+          config={config!}
           onStarted={() => replaceTop({ kind: 'screen', screen: { kind: 'nodeDashboard' } })}
           onBack={pop}
         />
       );
 
     case 'nodeDoctor':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
-      return <NodeDoctor config={config} onBack={pop} />;
+      return <NodeDoctor config={config!} onBack={pop} />;
 
     case 'nodeRegister':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
       return (
         <NodeRegister
-          config={config}
+          config={config!}
           onRegistered={(cfg) => setAppState((prev) => ({ ...prev, config: cfg }))}
           onBack={pop}
         />
       );
 
     case 'nodeList':
-      if (!config) {
-        return (
-          <Box paddingX={1} flexDirection="column" gap={1}>
-            <Text color="yellow">Not logged in. Please login first.</Text>
-            <Text dimColor>Press q to go back.</Text>
-            <KeyHandler onBack={pop} />
-          </Box>
-        );
-      }
-      return <NodeList config={config} onBack={pop} />;
+      return <NodeList config={config!} onBack={pop} />;
 
     case 'nodeLogs':
       return <NodeLogs onBack={pop} />;
 
     case 'nodeService':
       return <NodeService onBack={pop} />;
+
+    case 'nodeEnroll':
+      return (
+        <NodeEnroll
+          config={config}
+          onEnrolled={(cfg) => {
+            setAppState((prev) => ({ ...prev, config: cfg }));
+            pop();
+          }}
+          onBack={pop}
+        />
+      );
+
+    case 'nodeInstallDeps':
+      return <NodeInstallDeps onBack={pop} />;
+
+    case 'nodeStop':
+      return <NodeStop config={config} onBack={pop} />;
 
     case 'settings':
       return <SettingsScreen db={db} onBack={pop} />;
@@ -809,6 +832,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
               db: freshDb,
               circles: [],
               updateInfo: appState.updateInfo,
+              folderCount: 0,
             });
             resetToRoot();
           }}
@@ -835,6 +859,11 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           <Text>Use the interactive menu to manage folders, scan, and run syncs.</Text>
           <Text dimColor>Run `memoriahub` (no args) or `memoriahub menu` to open this UI.</Text>
           <Text> </Text>
+          <Text dimColor>Navigating the menu:</Text>
+          <Text>  ↑/↓ or j/k   move   ·   Enter select   ·   1-9 jump straight to an item</Text>
+          <Text>  Esc/q        back one level (not all the way to the root)</Text>
+          <Text>  ▸ marks a submenu   ·   … marks an action that asks something first</Text>
+          <Text> </Text>
           <Text dimColor>Headless commands (bypass TUI):</Text>
           <Text>  memoriahub login      Configure server + PAT</Text>
           <Text>  memoriahub import     Import a folder once (add + sync)</Text>
@@ -850,6 +879,7 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
           <Text>  memoriahub jobs       Live job queue monitor</Text>
           <Text>  memoriahub reports    Show reports (overview, runs, storage, duplicates)</Text>
           <Text>  memoriahub backup     Back up circle media to a local folder</Text>
+          <Text>  memoriahub node       Worker node: enroll, install-deps, register, start/stop</Text>
           <Text>  memoriahub settings   Manage settings</Text>
           <Text> </Text>
           <Text dimColor>[Esc/q] back</Text>

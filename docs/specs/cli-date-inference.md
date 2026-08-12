@@ -194,9 +194,9 @@ memoriahub date-infer apply    [folder...] [--all] [-r] [--concurrency <n>] [--j
 
 `diagnose` is fully read-only: no PAT, no network, no writes. `apply` checks ExifTool availability up front (§5) and shuts down the shared ExifTool child process (`endExiftool()`) in a `finally` block once the run completes or fails. Neither command prompts for interactive confirmation in headless mode — like `organize`/`convert`, the documented workflow is "run `diagnose` first to preview, then `apply`."
 
-### TUI: Tools ▸ Date Inference
+### TUI: File Tools ▸ Date Inference
 
-Two menu leaves under **Tools ▸ Date Inference** (`apps/cli/src/tui/menu-config.ts`), both marked `loggedOut: true` since the tool is a fully offline local file operation:
+Two menu leaves under **File Tools ▸ Date Inference** (`apps/cli/src/tui/menu-config.ts`). Neither carries its own `loggedOut` flag: since issue #413 the flag cascades from the offline `File Tools` submenu to every descendant, so a new leaf added here stays visible when logged out without repeating it.
 
 - **Diagnose (report only)**
 - **Infer & write dates**
@@ -252,7 +252,7 @@ Source files (all under `apps/cli/src/`):
 | `export/date-inference-export.ts` | xlsx/csv report writer (§6). |
 | `commands/date-infer.ts` | `memoriahub date-infer diagnose\|apply` command wiring, folder resolution/auto-registration, ExifTool pre-flight check, report export, headless rendering. |
 | `tui/DateInferenceScreen.tsx` | Ink/React TUI screen (§7) — phase state machine, diagnose-first flow, confirm step before writing. |
-| `tui/menu-config.ts` | Menu entries: **Tools ▸ Date Inference ▸** Diagnose (report only) / Infer & write dates. |
+| `tui/menu-config.ts` | Menu entries: **File Tools ▸ Date Inference ▸** Diagnose (report only) / Infer & write dates. |
 
 `date-infer` reuses two pieces of shared CLI infrastructure rather than reimplementing them: `readExifPlacement()` from `apps/cli/src/metadata.ts` (the same full-file EXIF/container read `organize` uses) for the existing-date check, and `runPool()` from `apps/cli/src/sync/worker-pool.ts` for bounded-concurrency processing.
 
