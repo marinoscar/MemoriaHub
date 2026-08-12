@@ -14,16 +14,19 @@ concurrency:
 # all-green is the SLOWEST job, never the sum, so the whole design is about
 # flattening the longest job rather than removing work (issue #417).
 #
-# The four definitions expand to 11 runtime jobs (3 API shards + 6 web shards +
+# The four definitions expand to 14 runtime jobs (4 API shards + 8 web shards +
 # typecheck + CLI). Two rules keep that honest:
 #
 #   1. Test counts across a matrix MUST sum to the single-job total. Verified at
-#      3x API = 336 suites / 8051 tests and 3x web = 249 files / 4988 tests. If a
-#      sum ever drops, the split is losing files, not balancing them.
-#   2. Every job pays a fixed ~45s floor (checkout + setup-node + `npm ci`).
-#      Past a certain point extra shards buy nothing because that floor, not the
-#      tests, dominates — which is why the counts below are 3 and 6 rather than
-#      as high as possible. Re-measure before changing them.
+#      4x API = 8051 tests and 8x web = 249 files / 4988 tests. If a sum ever
+#      drops, the split is losing files, not balancing them.
+#   2. Both tools shard by hashing the file path, which balances FILE COUNT and
+#      ignores duration — so the slowest shard, not the average, sets the wall
+#      clock, and the spread widens as files-per-shard shrinks. Measured: web at
+#      6 shards ran 55-97s, at 8 shards 37-82s. Halving the files bought only
+#      15% off the max, and past that the fixed per-job floor (checkout +
+#      setup-node + `npm ci`) dominates. That is why the counts are 4 and 8
+#      rather than as high as possible — re-measure before changing them.
 jobs:
   # Typechecking is separated from the test jobs deliberately: it is pure CPU on
   # already-provisioned inputs, so parking it behind the API suite (as it used to
@@ -74,7 +77,7 @@ jobs:
       # the first red — a partial picture would cost a full extra CI cycle.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     env:
       NODE_ENV: test
     steps:
@@ -116,7 +119,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       NODE_ENV: test
     steps:
@@ -127,11 +130,18 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - run: npm ci
+      # Installs ONLY apps/web's dependencies plus the workspace root, not the
+      # other workspaces' — apps/web needs none of the API/CLI tree (Nest,
+      # Prisma, onnxruntime, sharp). Measured: 22s and 465 MB against 56s and
+      # 1.5 GB for the full install, and the suite passes identically on the
+      # reduced tree. Worth doing here specifically because eight shards each
+      # pay this cost. If apps/web ever depends on another workspace, this
+      # filter must gain it or the job will fail to resolve it.
+      - run: npm ci --workspace=web --include-workspace-root
 
       # Deliberately NO enrichment-compute build and NO `prisma generate` here:
       # apps/web imports neither (verified — no @memoriahub/* dependency and no
-      # source reference), so both would be dead weight on all six shards. If
+      # source reference), so both would be dead weight on all eight shards. If
       # web ever gains such an import, add the build step back.
       - run: npm run test:ci --workspace=web -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
