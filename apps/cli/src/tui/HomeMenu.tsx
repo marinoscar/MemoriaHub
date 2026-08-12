@@ -12,17 +12,17 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import SelectInput from 'ink-select-input';
 import type { CliConfig } from '../config.js';
 import { dbPath } from '../paths.js';
 import { BOX_BORDER, brandColorize, dim } from './theme.js';
-import { MENU_TREE, visibleChildren, type MenuNode } from './menu-config.js';
+import { MENU_TREE, menuItemLabel, visibleChildren, type MenuNode } from './menu-config.js';
+import { MenuList, type MenuListItem } from './MenuList.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type MenuItem = { label: string; value: string; node: MenuNode };
+type MenuItem = MenuListItem & { node: MenuNode };
 
 interface HomeMenuProps {
   config: CliConfig | null;
@@ -31,6 +31,12 @@ interface HomeMenuProps {
   onSelect: (node: MenuNode) => void;
   updateInfo?: { updateAvailable: boolean; latestVersion: string | null } | null;
   currentVersion?: string;
+  /**
+   * Number of registered folders. When logged in with zero folders the
+   * identity box shows a first-run hint pointing at Settings › Manage folders.
+   * Undefined = not known yet (still loading) → no hint.
+   */
+  folderCount?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,18 +65,22 @@ export function HomeMenu({
   onSelect,
   updateInfo,
   currentVersion,
+  folderCount,
 }: HomeMenuProps): React.ReactElement {
   const isLoggedIn = Boolean(config && identity);
 
   const nodes = visibleChildren(MENU_TREE, isLoggedIn);
 
   const items: MenuItem[] = nodes.map((node, i) => ({
-    label: node.kind === 'submenu' ? `${node.label} ▸` : node.label,
+    label: menuItemLabel(node, i + 1),
     value: String(i),
+    ...(node.color ? { color: node.color } : {}),
     node,
   }));
 
-  function handleSelect(item: { value: string }): void {
+  const showNoFoldersHint = isLoggedIn && folderCount === 0;
+
+  function handleSelect(item: MenuListItem): void {
     const match = items.find((it) => it.value === item.value);
     if (match) onSelect(match.node);
   }
@@ -120,14 +130,21 @@ export function HomeMenu({
           <Text dimColor>DB:</Text>
           <Text dimColor>{dim(dbPath())}</Text>
         </Box>
+        {showNoFoldersHint && (
+          <Box marginTop={1}>
+            <Text color="yellow">
+              No folders registered — start with Settings › Manage folders
+            </Text>
+          </Box>
+        )}
       </Box>
 
       {/* Menu */}
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Menu</Text>
-        <Text dimColor>Use arrow keys and Enter to navigate</Text>
+        <Text dimColor>[1-9] jump   [↑/↓] move   [Enter] select</Text>
         <Box marginTop={1}>
-          <SelectInput items={items} onSelect={handleSelect} />
+          <MenuList items={items} onSelect={handleSelect} />
         </Box>
       </Box>
     </Box>
