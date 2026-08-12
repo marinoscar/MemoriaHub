@@ -18,9 +18,10 @@ import { ErrorDto } from '../common/dto/error.dto';
 import { RBAC_EXTENSION_KEY } from '../auth/decorators/auth.decorator';
 import { applyDataEnvelope } from './data-envelope';
 import { buildApiDescription } from './description';
+import { applyNullableFor31 } from './nullable';
 import { applyRbacDocs } from './rbac-docs';
 import { OPENAPI_TAGS, OPENAPI_TAG_GROUPS } from './tags';
-import { MutableDocument, forEachOperation } from './types';
+import { DocOperation, MutableDocument, forEachOperation } from './types';
 import { resolveApiVersion } from './version';
 
 /** Security scheme names. `JWT_AUTH` is referenced by name from `@Auth()`. */
@@ -50,6 +51,12 @@ export function buildOpenApiConfig(version: string = resolveApiVersion()) {
     .setTitle('MemoriaHub API')
     .setDescription(buildApiDescription(version))
     .setVersion(version)
+    // OpenAPI 3.1, not the 3.0 default. zod v4 emits JSON Schema 2020-12, which
+    // 3.1 adopts wholesale and 3.0 rejects — under 3.0 the zod-derived DTOs
+    // published numeric `exclusiveMinimum` and `propertyNames` keywords that are
+    // invalid there, so a schema-validating consumer (or Spectral) rightly
+    // failed on them. Scalar renders 3.1 natively.
+    .setOpenAPIVersion('3.1.0')
     .setContact('MemoriaHub', 'https://github.com/marinoscar/MemoriaHub', '')
     .setExternalDoc(
       'Architecture and feature specifications',
@@ -95,7 +102,18 @@ export function buildOpenApiConfig(version: string = resolveApiVersion()) {
     builder.addTag(tag.name, tag.description);
   }
 
-  return builder.build();
+  const config = builder.build();
+
+  // `setContact` takes all three fields positionally, so an omitted email is an
+  // empty string — which is not a valid `email`, and a schema-validating
+  // consumer rejects the whole document over it. A contact with a name and a URL
+  // is perfectly valid; fabricating an address to satisfy the field would be
+  // worse than not having one.
+  if (config.info.contact && !config.info.contact.email) {
+    delete (config.info.contact as { email?: string }).email;
+  }
+
+  return config;
 }
 
 /**
@@ -139,6 +157,9 @@ export function enrichOpenApiDocument<T extends MutableDocument>(document: T): T
   applyDataEnvelope(document);
   applyDefaultErrorResponse(document);
   applyTagGroups(document);
+  // Last: every earlier pass may introduce schemas of its own, and this one has
+  // to see all of them.
+  applyNullableFor31(document);
   return document;
 }
 
@@ -156,6 +177,22 @@ export function buildOperationId(controllerKey: string, methodKey: string): stri
 }
 
 /**
+ * Whether an operation requires a bearer token.
+ *
+ * Two signals, because two things put one there. `@Auth()` stamps `x-rbac`,
+ * which is the richer marker. A handful of routes instead compose
+ * `@UseGuards(JwtAuthGuard)` with a bare `@ApiBearerAuth('JWT-auth')` — mostly
+ * on the auth controller itself, where the RBAC guards would have nothing to
+ * check — and those are just as authenticated.
+ */
+export function isAuthenticatedOperation(operation: DocOperation): boolean {
+  if (operation[RBAC_EXTENSION_KEY] !== undefined) return true;
+  return (operation.security ?? []).some(
+    (entry) => SECURITY_SCHEMES.JWT_AUTH in entry,
+  );
+}
+
+/**
  * Adds the PAT and node-credential schemes to operations they actually work on.
  *
  * `@Auth()` can only declare the session scheme, because that is the one it
@@ -170,7 +207,7 @@ export function buildOperationId(controllerKey: string, methodKey: string): stri
  */
 function applyAlternativeAuthSchemes(document: MutableDocument): void {
   forEachOperation(document, (operation, path) => {
-    if (operation[RBAC_EXTENSION_KEY] === undefined) return;
+    if (!isAuthenticatedOperation(operation)) return;
 
     const security = (operation.security ??= []);
     const has = (name: string) => security.some((entry) => name in entry);
@@ -215,7 +252,22 @@ function applyDefaultErrorResponse(document: MutableDocument): void {
  * Emits `x-tagGroups`, the vendor extension Scalar and Redoc read to render a
  * sectioned sidebar. Renderers without support fall back to the flat `tags`
  * array, which `buildOpenApiConfig` emits in the same order.
+ *
+ * Tags no operation uses are pruned from both. The taxonomy is declared for the
+ * whole application, but not every module is registered in every environment —
+ * `Test Authentication` exists only outside production — and a declared-but-
+ * unused tag renders as an empty sidebar section. Pruning is what makes one
+ * static taxonomy correct in both environments.
  */
 function applyTagGroups(document: MutableDocument): void {
-  document['x-tagGroups'] = OPENAPI_TAG_GROUPS;
+  const used = new Set<string>();
+  forEachOperation(document, (operation) => {
+    for (const tag of operation.tags ?? []) used.add(tag);
+  });
+
+  document.tags = OPENAPI_TAGS.filter((tag) => used.has(tag.name));
+  document['x-tagGroups'] = OPENAPI_TAG_GROUPS.map((group) => ({
+    name: group.name,
+    tags: group.tags.filter((tag) => used.has(tag)),
+  })).filter((group) => group.tags.length > 0);
 }

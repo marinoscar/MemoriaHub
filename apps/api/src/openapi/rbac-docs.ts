@@ -44,10 +44,17 @@ export function describeRequirements(operation: DocOperation): string | null {
   const rbac = operation[RBAC_EXTENSION_KEY] as RbacExtension | undefined;
 
   if (!rbac || rbac.authenticated !== true) {
-    // No `@Auth()` on this handler. It is either `@Public()` or guarded by
-    // something bespoke; either way there is no decorator metadata to render,
-    // and inventing a claim about it would be worse than saying nothing.
-    return null;
+    // No `@Auth()` on this handler. A few routes — chiefly on the auth
+    // controller — instead compose `@UseGuards(JwtAuthGuard)` with a bare
+    // `@ApiBearerAuth(...)`, where the RBAC guards would have nothing to check.
+    // Those declare a security requirement and nothing more, which is exactly
+    // what the authentication-only line says.
+    //
+    // Everything else is `@Public()` or guarded by something bespoke: no
+    // decorator metadata to render, and inventing a claim about it would be
+    // worse than saying nothing.
+    const declaresSecurity = (operation.security ?? []).length > 0;
+    return declaresSecurity ? authenticationOnly() : null;
   }
 
   const clauses: string[] = [];
@@ -73,10 +80,14 @@ export function describeRequirements(operation: DocOperation): string | null {
   }
 
   if (clauses.length === 0) {
-    return `${REQUIREMENTS_MARKER} authentication only — any signed-in user may call this.`;
+    return authenticationOnly();
   }
 
   return `${REQUIREMENTS_MARKER} authentication, plus ${joinClauses(clauses)}.`;
+}
+
+function authenticationOnly(): string {
+  return `${REQUIREMENTS_MARKER} authentication only — any signed-in user may call this.`;
 }
 
 function code(value: string): string {

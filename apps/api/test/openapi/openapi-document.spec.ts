@@ -1,5 +1,9 @@
 import { createTestApp, closeTestApp, TestContext } from '../helpers/test-app.helper';
-import { createOpenApiDocument, SECURITY_SCHEMES } from '../../src/openapi/document';
+import {
+  createOpenApiDocument,
+  isAuthenticatedOperation,
+  SECURITY_SCHEMES,
+} from '../../src/openapi/document';
 import { OPENAPI_TAGS, OPENAPI_TAG_GROUPS } from '../../src/openapi/tags';
 import { REQUIREMENTS_MARKER } from '../../src/openapi/rbac-docs';
 import { RBAC_EXTENSION_KEY } from '../../src/auth/decorators/auth.decorator';
@@ -58,6 +62,22 @@ describe('OpenAPI document', () => {
       expect(document.servers).toEqual([
         expect.objectContaining({ url: '/' }),
       ]);
+    });
+
+    it('publishes OpenAPI 3.1, which zod v4 schemas require', () => {
+      expect(document.openapi).toBe('3.1.0');
+    });
+
+    it('carries no 3.0-only `nullable` keyword, which a 3.1 consumer would ignore', () => {
+      // Ignoring it means generating a non-nullable field — wrong about exactly
+      // the values most likely to break a client.
+      expect(JSON.stringify(document)).not.toContain('"nullable"');
+    });
+
+    it('omits the contact email rather than publishing an invalid empty one', () => {
+      const contact = (document.info as { contact?: Record<string, unknown> }).contact;
+      expect(contact).toBeDefined();
+      expect(contact).not.toHaveProperty('email');
     });
 
     it('documents the getting-started essentials in the description', () => {
@@ -143,6 +163,8 @@ describe('OpenAPI document', () => {
   describe('self-documenting RBAC', () => {
     const guarded = () =>
       operations.filter(({ operation }) => operation[RBAC_EXTENSION_KEY] !== undefined);
+    const authenticated = () =>
+      operations.filter(({ operation }) => isAuthenticatedOperation(operation));
 
     it('guards a substantial share of the surface', () => {
       expect(guarded().length).toBeGreaterThan(150);
@@ -169,6 +191,16 @@ describe('OpenAPI document', () => {
       expect(withProse).toBeDefined();
     });
 
+    it('states requirements on routes guarded by JwtAuthGuard alone too', () => {
+      // A few auth-controller routes compose `@UseGuards(JwtAuthGuard)` with a
+      // bare `@ApiBearerAuth(...)` rather than `@Auth()`; they are still
+      // authenticated and must still say so.
+      const silent = authenticated()
+        .filter(({ operation }) => !(operation.description ?? '').includes(REQUIREMENTS_MARKER))
+        .map(({ path, method }) => `${method} ${path}`);
+      expect(silent).toEqual([]);
+    });
+
     it('leaves public operations alone', () => {
       const providers = operations.find(
         ({ path, method }) => path === '/api/auth/providers' && method === 'get',
@@ -190,9 +222,9 @@ describe('OpenAPI document', () => {
       );
     });
 
-    it('offers session and PAT auth as alternatives on every guarded operation', () => {
+    it('offers session and PAT auth as alternatives on every authenticated operation', () => {
       const missing = operations
-        .filter(({ operation }) => operation[RBAC_EXTENSION_KEY] !== undefined)
+        .filter(({ operation }) => isAuthenticatedOperation(operation))
         .filter(({ operation }) => {
           const names = (operation.security ?? []).flatMap((entry) => Object.keys(entry));
           return (
@@ -209,8 +241,7 @@ describe('OpenAPI document', () => {
         const names = (operation.security ?? []).flatMap((entry) => Object.keys(entry));
         const offered = names.includes(SECURITY_SCHEMES.NODE_CREDENTIAL);
         const isNodeRoute = /^\/api\/nodes(\/|$)/.test(path);
-        const guarded = operation[RBAC_EXTENSION_KEY] !== undefined;
-        expect(offered).toBe(isNodeRoute && guarded);
+        expect(offered).toBe(isNodeRoute && isAuthenticatedOperation(operation));
       }
     });
   });
@@ -236,7 +267,7 @@ describe('OpenAPI document', () => {
       expect(missing).toEqual([]);
     });
 
-    it('documents 401 and 403 on guarded operations', () => {
+    it('documents 401 and 403 on operations guarded by @Auth()', () => {
       const missing = operations
         .filter(({ operation }) => operation[RBAC_EXTENSION_KEY] !== undefined)
         .filter(({ operation }) => !operation.responses?.['401'] || !operation.responses?.['403'])
