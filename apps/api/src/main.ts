@@ -12,11 +12,11 @@ import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
 import { fastifyAdapterOptions } from './common/fastify-setup';
 import { createOpenApiDocument } from './openapi/document';
-import { renderDocsPage } from './openapi/docs-page';
-import { resolveApiVersion } from './openapi/version';
-
-const OPENAPI_JSON_PATH = '/api/openapi.json';
-const DOCS_PATH = '/api/docs';
+import {
+  DOCS_PATH,
+  OPENAPI_JSON_PATH,
+  registerDocsRoutes,
+} from './openapi/register-docs-routes';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -62,30 +62,9 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // ---------------------------------------------------------------------------
-  // OpenAPI: the spec at /api/openapi.json, the Scalar reference at /api/docs
-  // ---------------------------------------------------------------------------
-  // Served as two raw Fastify routes rather than through `SwaggerModule.setup`,
-  // because the docs page is our own template (see `openapi/docs-page.ts` for
-  // why) and `setup` would additionally mount the stock Swagger UI on the same
-  // path. Registering directly also keeps both routes outside the Nest guard
-  // pipeline — matching what `SwaggerModule.setup` already did, and keeping the
-  // reference readable during maintenance mode.
-  const version = resolveApiVersion();
-  const document = createOpenApiDocument(app);
-  const docsPage = renderDocsPage({
-    title: 'MemoriaHub API Reference',
-    version,
-    specUrl: OPENAPI_JSON_PATH,
-  });
-
-  const fastify = app.getHttpAdapter().getInstance();
-  fastify.get(OPENAPI_JSON_PATH, (_req, reply) =>
-    reply.type('application/json').send(document),
-  );
-  for (const path of [DOCS_PATH, `${DOCS_PATH}/`]) {
-    fastify.get(path, (_req, reply) => reply.type('text/html').send(docsPage));
-  }
+  // OpenAPI: the spec at /api/openapi.json, the Scalar reference at /api/docs.
+  // See openapi/register-docs-routes.ts for why these are raw Fastify routes.
+  registerDocsRoutes(app, createOpenApiDocument(app));
 
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
