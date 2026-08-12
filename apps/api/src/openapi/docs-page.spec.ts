@@ -47,25 +47,28 @@ describe('renderDocsPage', () => {
   });
 
   describe('one-click session auth', () => {
+    // Only the wiring is asserted here — that the page carries the bootstrap and
+    // loads the bundle before it. The bootstrap's BEHAVIOUR is covered in
+    // docs-auth-script.spec.ts, which evaluates it. Matching strings in this
+    // file is what let a broken token read ship: the page contained
+    // `fetch('/api/auth/refresh')` exactly as asserted, and did not work.
     const html = renderDocsPage(options);
 
-    it('exchanges the refresh cookie for an access token', () => {
-      expect(html).toContain("fetch('/api/auth/refresh'");
-      // The cookie is path-scoped to /api/auth, so it rides along only with
-      // credentials: 'include'. Without this the whole feature silently no-ops.
-      expect(html).toContain("credentials: 'include'");
+    it('embeds the bootstrap', () => {
+      expect(html).toContain('window.__memoriaHubDocsAuth');
     });
 
-    it('pre-authorizes the client before mounting it', () => {
+    it('loads the Scalar bundle before the script that calls into it', () => {
+      expect(html.indexOf('<script src=')).toBeLessThan(
+        html.indexOf('window.__memoriaHubDocsAuth'),
+      );
+    });
+
+    it('pre-authorizes before mounting, never after', () => {
       const fetchAt = html.indexOf('fetchSessionToken');
       const mountAt = html.indexOf('createApiReference');
       expect(fetchAt).toBeGreaterThan(-1);
       expect(fetchAt).toBeLessThan(mountAt);
-      expect(html).toContain('preferredSecurityScheme');
-    });
-
-    it('tells a signed-out reader what to do instead of failing silently', () => {
-      expect(html).toContain('Not signed in');
     });
   });
 

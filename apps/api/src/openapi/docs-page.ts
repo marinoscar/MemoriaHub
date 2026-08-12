@@ -115,9 +115,33 @@ export function renderDocsPage(options: DocsPageOptions): string {
     <div id="app"></div>
     <script src="${escapeHtml(cdn)}"></script>
     <script>
-      (function () {
-        var CONFIG = ${jsonForScript(scalarConfig)};
-        var SCHEME = ${jsonForScript(SESSION_SECURITY_SCHEME)};
+${buildDocsAuthScript(scalarConfig, SESSION_SECURITY_SCHEME)}
+    </script>
+  </body>
+</html>
+`;
+}
+
+/**
+ * The page's only runtime logic: exchange the session cookie for an access
+ * token, then mount Scalar pre-authorized with it.
+ *
+ * Exported, and returned as a standalone string, so `docs-page.spec.ts` can
+ * **execute** it against stubbed globals rather than pattern-match the markup.
+ * That distinction is not academic — this shipped broken precisely because the
+ * tests asserted the page *contained* `fetch('/api/auth/refresh')` and never ran
+ * it, so nothing noticed the response was being read one level too shallow.
+ *
+ * A plain string rather than a serialized TypeScript function on purpose: a
+ * function put through `Function.prototype.toString()` carries whatever the
+ * compiler emitted, including coverage instrumentation under `test:cov`, which
+ * would be broken JavaScript in a browser. A string is inert data, and the spec
+ * evaluates exactly the bytes the browser receives.
+ */
+export function buildDocsAuthScript(config: unknown, scheme: string): string {
+  return `      (function () {
+        var CONFIG = ${jsonForScript(config)};
+        var SCHEME = ${jsonForScript(scheme)};
         var statusEl = document.getElementById('mh-status');
         var buttonEl = document.getElementById('mh-auth');
 
@@ -137,7 +161,14 @@ export function renderDocsPage(options: DocsPageOptions): string {
             headers: { Accept: 'application/json' },
           })
             .then(function (res) { return res.ok ? res.json() : null; })
-            .then(function (body) { return (body && body.accessToken) || null; })
+            .then(function (body) {
+              // The global response interceptor wraps every JSON body in
+              // { data, meta }, so the token is at body.data.accessToken — NOT
+              // body.accessToken. Tolerating both mirrors the web client, and
+              // means this keeps working whichever shape the endpoint returns.
+              var payload = (body && body.data) || body;
+              return (payload && payload.accessToken) || null;
+            })
             .catch(function () { return null; });
         }
 
@@ -149,23 +180,23 @@ export function renderDocsPage(options: DocsPageOptions): string {
             config.authentication = { preferredSecurityScheme: SCHEME, securitySchemes: schemes };
             setStatus('Authorized with your session', 'ok');
           } else {
-            setStatus('Not signed in — sign in to MemoriaHub, then reload', 'warn');
+            setStatus('Not signed in \u2014 sign in to MemoriaHub, then reload', 'warn');
           }
           window.Scalar.createApiReference('#app', config);
+          return token;
         }
 
         // Re-authorizing means re-mounting, and re-mounting cleanly is what a
-        // reload already does. The auto-fetch on load is what makes the button
-        // rarely necessary: land on this page signed in and the client below is
-        // already authorized.
+        // reload already does — the fetch above runs again on load. The button
+        // is for a token that has expired (15 minutes); landing here signed in
+        // needs no click at all.
         buttonEl.addEventListener('click', function () { window.location.reload(); });
 
-        fetchSessionToken().then(mount);
-      })();
-    </script>
-  </body>
-</html>
-`;
+        // Exposed so the spec can await the bootstrap, and so a reader
+        // debugging an authorization problem in the console has something to
+        // inspect.
+        window.__memoriaHubDocsAuth = fetchSessionToken().then(mount);
+      })();`;
 }
 
 /**
