@@ -1,8 +1,10 @@
 /**
  * test/tui/backup-menu-nav.spec.tsx
  *
- * Navigation coverage for the Tools ▸ Backup submenu (issue #320), which
- * replaced the single "Backup" placeholder leaf with four entries.
+ * Navigation coverage for the two branches the issue #413 restructure moved
+ * out of the old `Tools` grab-bag and onto the root menu: Backup (collapsed
+ * from a four-entry submenu to a single leaf opening the dashboard) and Worker
+ * Node (promoted, reordered, and given its three missing onboarding entries).
  *
  * Same harness rationale as test/tui/menu-nav.spec.tsx: app.tsx's `App` is not
  * exported and rendering it end-to-end would require stubbing config/db/network
@@ -10,9 +12,13 @@
  * menu-config helpers) through a minimal local nav harness mirroring app.tsx's
  * push/pop stack.
  *
- * The dispatcher test at the bottom closes the gap that a render test alone
+ * The dispatcher tests at the bottom close the gap that a render test alone
  * cannot: a menu entry wired into the tree but forgotten in app.tsx's
- * openAction switch would render fine and do nothing when selected.
+ * openAction switch would render fine and do nothing when selected. Collapsing
+ * the Backup submenu makes the reverse check matter too — `backup-run` /
+ * `backup-verify` / `backup-settings` no longer appear in the tree, but their
+ * screens are still reached from inside BackupDashboard, so they must stay
+ * wired.
  */
 
 import { jest } from '@jest/globals';
@@ -27,6 +33,7 @@ import {
   MENU_TREE,
   breadcrumb,
   findSubmenu,
+  menuItemLabel,
   visibleChildren,
   type MenuActionId,
   type MenuNode,
@@ -38,19 +45,22 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*m/g, '');
 }
 
-const BACKUP_ACTIONS: MenuActionId[] = [
-  'backup-dashboard',
+/** Backup screens still reachable from within BackupDashboard after the collapse. */
+const IN_DASHBOARD_BACKUP_ACTIONS: MenuActionId[] = [
   'backup-run',
   'backup-verify',
   'backup-settings',
 ];
+
+/** The three Worker Node entries added by #413. */
+const NEW_NODE_ACTIONS: MenuActionId[] = ['node-stop', 'node-enroll', 'node-install-deps'];
 
 // ---------------------------------------------------------------------------
 // Nav harness — mirrors app.tsx's stack/push/pop/toItem/selectChild
 // ---------------------------------------------------------------------------
 
 function NavHarness({
-  startMenuId = 'backup',
+  startMenuId = 'node',
   onAction,
 }: {
   startMenuId?: string;
@@ -67,9 +77,10 @@ function NavHarness({
     else onAction?.(node.action);
   }
 
-  function toItem(node: MenuNode): { label: string; value: string } {
-    if (node.kind === 'submenu') return { label: `${node.label} ▸`, value: `submenu:${node.id}` };
-    return { label: node.label, value: `action:${node.action}` };
+  function toItem(node: MenuNode, index: number): { label: string; value: string; color?: string } {
+    const label = menuItemLabel(node, index + 1);
+    const value = node.kind === 'submenu' ? `submenu:${node.id}` : `action:${node.action}`;
+    return node.color ? { label, value, color: node.color } : { label, value };
   }
 
   function selectChild(menuId: string, value: string): void {
@@ -92,7 +103,7 @@ function NavHarness({
   return (
     <Menu
       title={breadcrumb(top)}
-      subtitle="Use arrow keys and Enter to navigate"
+      subtitle={submenu?.subtitle}
       items={items}
       onSelect={(value) => selectChild(top, value)}
       onBack={pop}
@@ -109,48 +120,46 @@ afterEach(() => {
 // Tree shape
 // ---------------------------------------------------------------------------
 
-describe('Tools ▸ Backup submenu', () => {
-  it('is a submenu under Tools, not a leaf', () => {
-    const tools = findSubmenu('tools')!;
-    const backup = tools.children.find((c) => c.label === 'Backup');
+describe('Backup, collapsed to a root leaf', () => {
+  it('is a root-level action opening the dashboard, with no Backup submenu left', () => {
+    const backup = MENU_TREE.children.find((c) => c.label === 'Backup');
     expect(backup).toBeDefined();
-    expect(backup!.kind).toBe('submenu');
+    expect(backup!.kind).toBe('action');
+    expect(backup!.kind === 'action' && backup!.action).toBe('backup-dashboard');
+    expect(findSubmenu('backup')).toBeUndefined();
   });
 
-  it('exposes exactly the four backup screens in order', () => {
-    const backup = findSubmenu('backup')!;
-    expect(backup.children.map((c) => c.label)).toEqual([
-      'Backup dashboard',
-      'Run backup now',
-      'Verify backup',
-      'Backup settings',
-    ]);
-    expect(backup.children.map((c) => (c.kind === 'action' ? c.action : null))).toEqual(
-      BACKUP_ACTIONS,
-    );
+  it('requires login', () => {
+    expect(visibleChildren(MENU_TREE, false).map((c) => c.label)).not.toContain('Backup');
+    expect(visibleChildren(MENU_TREE, true).map((c) => c.label)).toContain('Backup');
   });
 
-  it('requires login (no backup entry is visible logged out)', () => {
-    const tools = findSubmenu('tools')!;
-    const loggedOut = visibleChildren(tools, false).map((c) => c.label);
-    expect(loggedOut).not.toContain('Backup');
-    expect(visibleChildren(tools, true).map((c) => c.label)).toContain('Backup');
+  it('acts immediately, so it carries no ellipsis', () => {
+    const backup = MENU_TREE.children.find((c) => c.label === 'Backup')!;
+    expect(menuItemLabel(backup)).toBe('Backup');
+  });
+});
+
+describe('Worker Node, promoted to the root menu', () => {
+  it('is a root-level submenu, no longer nested under Tools', () => {
+    expect(MENU_TREE.children.some((c) => c.kind === 'submenu' && c.id === 'node')).toBe(true);
+    expect(breadcrumb('node')).toBe('Menu › Worker Node');
   });
 
-  it('breadcrumbs as Menu › Tools › Backup', () => {
-    expect(breadcrumb('backup')).toBe('Menu › Tools › Backup');
-  });
-
-  it('leaves the rest of the Tools menu order untouched', () => {
-    const tools = findSubmenu('tools')!;
-    expect(visibleChildren(tools, true).map((c) => c.label)).toEqual([
-      'Convert videos to MP4',
-      'Organize folder by date',
-      'Find/Clean Screenshots',
-      'Date Inference',
-      'Job queue monitor',
-      'Backup',
-      'Worker Node',
+  it('lists the eleven entries operations-first', () => {
+    const node = findSubmenu('node')!;
+    expect(node.children.map((c) => (c.kind === 'action' ? c.action : null))).toEqual([
+      'node-dashboard',
+      'node-start',
+      'node-stop',
+      'node-logs',
+      'node-doctor',
+      'node-enroll',
+      'node-install-deps',
+      'node-register',
+      'node-config',
+      'node-list',
+      'node-service',
     ]);
   });
 });
@@ -159,75 +168,75 @@ describe('Tools ▸ Backup submenu', () => {
 // Rendering + selection
 // ---------------------------------------------------------------------------
 
-describe('backup submenu navigation', () => {
-  it('renders all four entries under the Backup breadcrumb', async () => {
+describe('Worker Node submenu navigation', () => {
+  it('renders the daily-operations entries first under the Worker Node breadcrumb', async () => {
     const { lastFrame } = render(<NavHarness />);
     const plain = await waitForFrame(lastFrame, (f) =>
-      stripAnsi(f).includes('Backup dashboard'),
+      stripAnsi(f).includes('Node dashboard'),
     ).then(stripAnsi);
 
-    expect(plain).toContain('Menu › Tools › Backup');
-    expect(plain).toContain('Backup dashboard');
-    expect(plain).toContain('Run backup now');
-    expect(plain).toContain('Verify backup');
-    expect(plain).toContain('Backup settings');
+    expect(plain).toContain('Menu › Worker Node');
+    expect(plain).toContain('1. Node dashboard');
+    expect(plain).toContain('2. Start worker (background)');
+    expect(plain).toContain('3. Stop worker');
+    expect(plain).toContain('6. Enroll node (login + credential)');
+    expect(plain).toContain('7. Install dependencies (Linux)');
   });
 
-  it('selecting the first entry dispatches backup-dashboard', async () => {
+  it('selecting the first entry dispatches node-dashboard', async () => {
     const actions: MenuActionId[] = [];
     const { lastFrame, stdin } = render(<NavHarness onAction={(a) => actions.push(a)} />);
-    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Backup dashboard'));
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Node dashboard'));
 
     stdin.write('\r'); // Enter on the first (already-highlighted) item
     await waitForFrame(lastFrame, () => actions.length > 0);
-    expect(actions).toEqual(['backup-dashboard']);
+    expect(actions).toEqual(['node-dashboard']);
   });
 
-  it('arrowing down and selecting dispatches the NEXT entry', async () => {
+  it('a digit accelerator dispatches that entry directly', async () => {
     const actions: MenuActionId[] = [];
     const { lastFrame, stdin } = render(<NavHarness onAction={(a) => actions.push(a)} />);
-    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Run backup now'));
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Stop worker'));
 
-    // Diff the target row against its unselected baseline rather than matching
-    // a pointer glyph — ink-select-input's indicator varies by environment.
-    const baseline = (lastFrame() ?? '').split('\n').find((l) => l.includes('Run backup now'));
-    stdin.write('\x1B[B');
-    await waitForFrame(lastFrame, (f) => {
-      const line = f.split('\n').find((l) => l.includes('Run backup now'));
-      return !!line && line !== baseline;
-    });
-
-    stdin.write('\r');
+    stdin.write('3'); // 3. Stop worker
     await waitForFrame(lastFrame, () => actions.length > 0);
-    expect(actions).toEqual(['backup-run']);
+    expect(actions).toEqual(['node-stop']);
   });
 
-  it('Esc from the Backup submenu pops back to Tools', async () => {
-    const { lastFrame, stdin } = render(<NavHarness startMenuId="tools" />);
-    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Backup ▸'));
+  it('Esc from the Worker Node submenu pops back to the parent frame', async () => {
+    const { lastFrame, stdin } = render(<NavHarness startMenuId="root" />);
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Worker Node ▸'));
 
-    // Tools order: Convert, Organize, Screenshots, Date Inference, Jobs, Backup.
-    // Each arrow is awaited individually — ink-select-input tracks its selected
-    // index internally, so writing five arrows back to back races that state and
-    // only some of them land.
-    for (let i = 0; i < 5; i++) {
-      const before = lastFrame() ?? '';
-      stdin.write('\x1B[B');
-      // eslint-disable-next-line no-await-in-loop
-      await waitForFrame(lastFrame, (f) => f !== before);
-    }
-
-    stdin.write('\r');
-    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Menu › Tools › Backup'));
+    stdin.write('4'); // 4. Worker Node
+    await waitForFrame(lastFrame, (f) => stripAnsi(f).includes('Menu › Worker Node'));
 
     stdin.write('\x1B'); // Esc
     const plain = await waitForFrame(lastFrame, (f) => {
       const p = stripAnsi(f);
-      return p.includes('Menu › Tools') && !p.includes('Backup dashboard');
+      return p.includes('Worker Node ▸') && !p.includes('Node dashboard');
     }).then(stripAnsi);
 
-    expect(plain).toContain('Job queue monitor');
-    expect(plain).not.toContain('Backup dashboard');
+    expect(plain).toContain('Backup');
+    expect(plain).not.toContain('Node dashboard');
+  });
+});
+
+describe('File Tools submenu', () => {
+  it('renders the offline utilities, including the red delete entry with its ellipsis', async () => {
+    const { lastFrame, stdin } = render(<NavHarness startMenuId="file-tools" />);
+    const plain = await waitForFrame(lastFrame, (f) =>
+      stripAnsi(f).includes('Find/Clean Screenshots'),
+    ).then(stripAnsi);
+
+    expect(plain).toContain('Menu › File Tools');
+    expect(plain).toContain('Organize folder by date…');
+
+    stdin.write('3'); // 3. Find/Clean Screenshots
+    const nested = await waitForFrame(lastFrame, (f) =>
+      stripAnsi(f).includes('Find & delete screenshots'),
+    ).then(stripAnsi);
+    // The scary entry reads as the folder picker it actually opens.
+    expect(nested).toContain('Find & delete screenshots…');
   });
 });
 
@@ -241,20 +250,27 @@ describe('app.tsx dispatcher', () => {
     'utf8',
   );
 
-  it.each(BACKUP_ACTIONS)('handles the %s action and pushes a screen', (action) => {
+  it.each(NEW_NODE_ACTIONS)('handles the %s action and pushes a screen', (action) => {
     expect(appSource).toContain(`case '${action}':`);
   });
 
-  it.each(['backupDashboard', 'backupVerify', 'backupSettings'])(
-    'renders the %s screen',
-    (screenKind) => {
-      expect(appSource).toContain(`case '${screenKind}':`);
+  it.each(['nodeEnroll', 'nodeInstallDeps', 'nodeStop'])('renders the %s screen', (screenKind) => {
+    expect(appSource).toContain(`case '${screenKind}':`);
+  });
+
+  it.each(IN_DASHBOARD_BACKUP_ACTIONS)(
+    'keeps %s wired even though it left the menu tree (BackupDashboard still navigates to it)',
+    (action) => {
+      expect(appSource).toContain(`case '${action}':`);
     },
   );
 
-  it('no longer references the removed placeholder BackupScreen', () => {
-    expect(appSource).not.toContain('BackupScreen');
-    expect(fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/tui/BackupScreen.tsx'))).toBe(false);
+  it('still renders the backup verify/settings screens the dashboard opens', () => {
+    for (const screenKind of ['backupDashboard', 'backupVerify', 'backupSettings']) {
+      expect(appSource).toContain(`case '${screenKind}':`);
+    }
+    expect(appSource).toContain('onOpenVerify');
+    expect(appSource).toContain('onOpenSettings');
   });
 
   it('every action id in the tree is reachable from the dispatcher', () => {
@@ -266,5 +282,12 @@ describe('app.tsx dispatcher', () => {
       if (action.startsWith('report:')) continue; // handled by a prefix branch
       expect(appSource).toContain(`case '${action}':`);
     }
+  });
+
+  it('replaces the ~10 copied login guards with one pre-switch check', () => {
+    // The old inline block appeared once per login-required screen.
+    expect(appSource).not.toContain('<Text dimColor>Press q to go back.</Text>');
+    expect(appSource).toContain('LOGIN_REQUIRED_SCREENS');
+    expect(appSource.match(/Not logged in\. Please login first\./g) ?? []).toHaveLength(1);
   });
 });

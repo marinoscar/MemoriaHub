@@ -120,7 +120,7 @@ A backup-configured machine that never runs `node start --daemon` still works fo
 | CLI daemon integration | `apps/cli/src/backup/backup-host.ts`, `backup-scheduler.ts`, `run-via-daemon.ts` | Daemon hosting, pull-based cron polling, IPC delegation |
 | CLI commands | `apps/cli/src/commands/backup.ts` | `init`, `run`, `status`, `verify`, `prune`, `restore`, `schedule`, `set-rate` |
 | CLI renderers | `apps/cli/src/render/headless-backup.ts`, `headless-verify.ts`, `headless-restore.ts` | Human/`--json` terminal output — engines never print |
-| CLI TUI | `apps/cli/src/tui/BackupDashboard.tsx`, `BackupVerify.tsx`, `BackupSettings.tsx` | Tools ▸ Backup screens |
+| CLI TUI | `apps/cli/src/tui/BackupDashboard.tsx`, `BackupVerify.tsx`, `BackupSettings.tsx` | Backup screens (a root menu entry opening the dashboard directly since issue #413; run/verify/settings are reached from inside it) |
 | Web admin UI | `apps/web/src/pages/Admin/NodeBackupPage.tsx` | Per-node config editor + run history at `/admin/settings/nodes/:id/backup` |
 
 ---

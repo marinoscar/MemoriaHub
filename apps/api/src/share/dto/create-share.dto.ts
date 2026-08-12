@@ -34,6 +34,7 @@ export class CreateShareDto {
   albumId?: string;
 
   @ApiPropertyOptional({
+    type: String,
     description: 'ISO 8601 expiration datetime; null or omitted means never expires',
     example: '2026-12-31T23:59:59Z',
     nullable: true,

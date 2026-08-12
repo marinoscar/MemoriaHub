@@ -34,7 +34,7 @@ export interface InsightsRefreshDto {
 // Controller
 // ---------------------------------------------------------------------------
 
-@ApiTags('Admin - Insights')
+@ApiTags('Admin: Storage Insights')
 @Controller('admin/insights')
 export class InsightsController {
   constructor(private readonly insightsService: InsightsService) {}

@@ -39,7 +39,7 @@ const adminMemoriesBackfillSchema = z
   .prefault({});
 class AdminMemoriesBackfillDto extends createZodDto(adminMemoriesBackfillSchema) {}
 
-@ApiTags('Admin — Memories')
+@ApiTags('Admin: Memories')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/memories')
 export class AdminMemoriesController {

@@ -22,7 +22,7 @@ import { Auth } from '../auth/decorators/auth.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { AdminNodeCredentialListItemDto } from './dto/node-credential-response.dto';
 
-@ApiTags('Admin - Nodes')
+@ApiTags('Admin: Worker Nodes')
 @Controller('admin/nodes')
 export class NodesAdminController {
   constructor(

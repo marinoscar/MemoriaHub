@@ -2928,17 +2928,30 @@ GET  /admin/insights         → refresh.state === "idle"     (done; metrics upd
 
 ---
 
-## Swagger/OpenAPI Documentation
+## Interactive API Reference
 
-Interactive API documentation with request/response examples is available at:
+A [Scalar](https://scalar.com) API reference is served same-origin at `/api/docs`
+(development: http://localhost:3535/api/docs), with the machine-readable OpenAPI
+3.1 document at `/api/openapi.json`. See the
+[API Documentation spec](specs/api-documentation.md) for how it is built.
 
-**Development:** http://localhost:3535/api/docs
+The reference gives you:
+- A sidebar grouped into product sections (`x-tagGroups`), each tag described
+- A built-in request client with generated code samples (curl, JS, Python, …)
+- Full-text search over every operation (`k`)
+- The permissions each operation requires, generated from the `@Auth()` decorator
+  the guards are configured by — so they cannot drift from what is enforced
+- Dark mode following your OS setting
 
-The Swagger UI allows you to:
-- Explore all endpoints
-- View request/response schemas
-- Test API calls directly from the browser
-- Authenticate with JWT tokens
+**Authorizing takes no copy-paste.** If you are signed in to MemoriaHub in the
+same browser, the page exchanges your refresh cookie for an access token on load
+and pre-authorizes the client; the header bar shows the result, and the
+**Authorize with my session** button re-runs it. Personal access tokens (`pat_…`)
+and node credentials (`nod_…`) are documented as first-class alternatives, and
+the reference page offers whichever schemes an operation actually accepts.
+
+The reference bundle is loaded from a CDN by default. An air-gapped deployment
+can self-host it and point the page at its own copy with `API_DOCS_CDN`.
 
 ---
 

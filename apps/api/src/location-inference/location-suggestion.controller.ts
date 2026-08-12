@@ -22,7 +22,7 @@ import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dt
 import { BulkResolveLocationSuggestionsDto } from './dto/bulk-resolve-location-suggestions.dto';
 
 @ApiTags('Location Inference')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('media')
 export class LocationSuggestionController {
   constructor(

@@ -19,7 +19,7 @@ const backfillGeoSchema = z.object({
 }).prefault({});
 class BackfillGeoDto extends createZodDto(backfillGeoSchema) {}
 
-@ApiTags('Admin - Geocode')
+@ApiTags('Admin: Geocode')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/geocode')
 export class GeocodeAdminController {

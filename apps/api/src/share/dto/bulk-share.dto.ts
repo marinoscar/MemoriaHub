@@ -32,6 +32,7 @@ export class BulkShareDto {
   action!: BulkShareAction;
 
   @ApiPropertyOptional({
+    type: String,
     description: 'New expiration datetime; null clears expiration. Required when action is set_expiration.',
     nullable: true,
   })

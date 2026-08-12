@@ -29,7 +29,7 @@ import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-t
 import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
 
 @ApiTags('Duplicates')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('media')
 export class DuplicateController {
   constructor(private readonly duplicateService: DuplicateService) {}

@@ -59,7 +59,7 @@ import {
  * routine while restoring one renames the live database and restarts the
  * process.
  */
-@ApiTags('Admin - Database Backup')
+@ApiTags('Admin: Database Backup')
 @Controller('admin/db-backup')
 export class DatabaseBackupController {
   constructor(

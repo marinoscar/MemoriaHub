@@ -213,7 +213,7 @@ export class AuthController {
   @Get('me')
   @AllowDuringMaintenance()
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get current user',
     description: 'Returns information about the currently authenticated user',
@@ -285,7 +285,7 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Logout',
     description: 'Logout endpoint and revoke refresh token',
@@ -320,7 +320,7 @@ export class AuthController {
   @Post('logout-all')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Logout from all devices',
     description: 'Revoke all refresh tokens for the current user',

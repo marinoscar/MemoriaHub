@@ -33,7 +33,7 @@ For a complete configuration-settings reference across the API and worker contai
 
 ## 1. Overview
 
-A worker node (`apps/cli`'s `memoriahub node start`) needs four things before it is fully operational: the native compute libraries (`sharp`, `onnxruntime-node`, `tesseract.js`), the `ffmpeg`/`ffprobe` system binaries, the model files those libraries load at runtime, and — optionally, for a household running a node unattended — a persistent daemon or systemd service. Face detection is a fifth prerequisite of its own kind: CompreFace (issue #113 made it the sole face-recognition provider server- and node-side) is a separate long-running local service, not an npm dependency — see §5. `memoriahub node doctor` (a CLI command, and identically a full-screen TUI screen under Tools ▸ Worker Node ▸ Node doctor) is the single command that tells you exactly which of these four things is missing and where, distinguishing a library that merely **resolves** (installed) from one that has been proven to **actually work** (operational) — see §8 for why that distinction matters and is the most common source of confusion.
+A worker node (`apps/cli`'s `memoriahub node start`) needs four things before it is fully operational: the native compute libraries (`sharp`, `onnxruntime-node`, `tesseract.js`), the `ffmpeg`/`ffprobe` system binaries, the model files those libraries load at runtime, and — optionally, for a household running a node unattended — a persistent daemon or systemd service. Face detection is a fifth prerequisite of its own kind: CompreFace (issue #113 made it the sole face-recognition provider server- and node-side) is a separate long-running local service, not an npm dependency — see §5. `memoriahub node doctor` (a CLI command, and identically a full-screen TUI screen under Worker Node ▸ Node doctor) is the single command that tells you exactly which of these four things is missing and where, distinguishing a library that merely **resolves** (installed) from one that has been proven to **actually work** (operational) — see §8 for why that distinction matters and is the most common source of confusion.
 
 The containerized worker bundle described in the Quick Start immediately below satisfies all four of these automatically — a fresh container is dependency-complete, model-complete, and always-on by construction, with no doctor pass needed before first use. §2 onward is the native install path, where doctor is the primary tool for finding what's still missing.
 
@@ -268,7 +268,7 @@ memoriahub node start
 
 Both flags exist mainly for explicitness and for pointing at a non-default sidecar URL — `--face-provider` no longer selects between alternatives, since CompreFace is the only option; passing any other value is a startup error, not a silent fallback. Settings are stored in local node config only (`faceProvider`, `comprefaceUrl`) — never sent to the server, which learns only the resulting `eligibleTypes` the node ends up advertising.
 
-The equivalent TUI path is Tools ▸ Worker Node ▸ Register node / Node config.
+The equivalent TUI path is Worker Node ▸ Register node / Node config.
 
 ### 5.4 Hard-fail behavior — no silent fallback
 
@@ -313,7 +313,7 @@ memoriahub node start --daemon # background
 memoriahub node service install # always-on systemd user service
 ```
 
-Equivalent TUI menu items: Tools ▸ Worker Node ▸ Register node / Start worker (background) / Node service (systemd). See `apps/cli/README.md`'s ["Worker Nodes (distributed compute)"](../apps/cli/README.md#worker-nodes-distributed-compute) section for full command reference, flags, and the TUI dashboard's own doctor overlay — this document's job is dependency setup, not day-to-day operation.
+Equivalent TUI menu items: Worker Node ▸ Enroll node / Install dependencies / Register node / Start worker (background) / Node service (systemd) — issue #413 promoted Worker Node to a root menu entry and added the enroll/install-deps/stop entries. See `apps/cli/README.md`'s ["Worker Nodes (distributed compute)"](../apps/cli/README.md#worker-nodes-distributed-compute) section for full command reference, flags, and the TUI dashboard's own doctor overlay — this document's job is dependency setup, not day-to-day operation.
 
 **Per-machine concurrency tuning.** `memoriahub node set-concurrency <n>` (and the `--concurrency` flag on `node register`/`node start`) lets you match a node's concurrency to the machine it runs on. Note that with the new multi-process CompreFace default (§5.2), face detection can now actually use multiple cores in parallel, which changes what a sensible concurrency value looks like on a given machine.
 
@@ -330,7 +330,7 @@ The single most important concept in this whole guide: **installed** and **opera
 
 Job-type readiness (step 4) is gated on the **operational** result, not mere presence — a node whose `sharp` package resolves but crashes on first real use is correctly reported not-ready for every job type that needs it, rather than silently claiming jobs it cannot actually process.
 
-Both the CLI command (`memoriahub node doctor`) and the TUI screen (Tools ▸ Worker Node ▸ Node doctor, and the dashboard's `[r]` quick-doctor overlay) run the identical six-step sweep and share the same classification logic (`apps/cli/src/node/doctor-summary.ts`). The report display is **collapsed by default**: capabilities and job types that are fully healthy (installed AND operational, or ready) are rolled up into a one-line summary count, and only rows with a real issue — not installed, installed-but-not-operational, or not job-ready — are expanded with their full detail message. This means a clean node's doctor output is short; a node with a genuine problem gets the detail surfaced without having to scroll past everything that's already fine.
+Both the CLI command (`memoriahub node doctor`) and the TUI screen (Worker Node ▸ Node doctor, and the dashboard's `[r]` quick-doctor overlay) run the identical six-step sweep and share the same classification logic (`apps/cli/src/node/doctor-summary.ts`). The report display is **collapsed by default**: capabilities and job types that are fully healthy (installed AND operational, or ready) are rolled up into a one-line summary count, and only rows with a real issue — not installed, installed-but-not-operational, or not job-ready — are expanded with their full detail message. This means a clean node's doctor output is short; a node with a genuine problem gets the detail surfaced without having to scroll past everything that's already fine.
 
 ---
 
