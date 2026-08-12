@@ -26,22 +26,20 @@ import {
   Tabs,
   Badge,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  PhotoLibrary as PhotoLibraryIcon,
-  Edit as EditIcon,
-  Check as CheckIcon,
-  Settings as SettingsIcon,
-  Delete as DeleteIcon,
-  CallMerge as CallMergeIcon,
-  PhotoCamera as PhotoCameraIcon,
-  Star as StarIcon,
-  StarBorder as StarBorderIcon,
-  ImageSearch as ImageSearchIcon,
-  VisibilityOff as VisibilityOffIcon,
-  Visibility as VisibilityIcon,
-  SelectAll as SelectAllIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import EditIcon from '@mui/icons-material/Edit';
+import CheckIcon from '@mui/icons-material/Check';
+import SettingsIcon from '@mui/icons-material/Settings';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CallMergeIcon from '@mui/icons-material/CallMerge';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import ImageSearchIcon from '@mui/icons-material/ImageSearch';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import SelectAllIcon from '@mui/icons-material/SelectAll';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
 import type { Area } from 'react-easy-crop';

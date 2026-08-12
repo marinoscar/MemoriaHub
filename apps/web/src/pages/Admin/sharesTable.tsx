@@ -40,11 +40,9 @@
 
 import type { ReactNode } from 'react';
 import { Avatar, Box, Chip, IconButton, Stack, Tooltip, Typography } from '@mui/material';
-import {
-  ContentCopy as CopyIcon,
-  Image as ImageIcon,
-  PhotoLibrary as AlbumIcon,
-} from '@mui/icons-material';
+import CopyIcon from '@mui/icons-material/ContentCopy';
+import ImageIcon from '@mui/icons-material/Image';
+import AlbumIcon from '@mui/icons-material/PhotoLibrary';
 import type {
   DataTableColumn,
   DataTableFilterModel,

@@ -33,12 +33,10 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import {
-  Home as HomeIcon,
-  Collections as CollectionsIcon,
-  Search as SearchIcon,
-  FactCheck as FactCheckIcon,
-} from '@mui/icons-material';
+import HomeIcon from '@mui/icons-material/Home';
+import CollectionsIcon from '@mui/icons-material/Collections';
+import SearchIcon from '@mui/icons-material/Search';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { resolveActiveDestination } from '../../config/destinations';
 import type { DestinationKey } from '../../config/destinations';

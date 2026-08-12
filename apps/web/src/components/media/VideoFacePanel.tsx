@@ -27,13 +27,11 @@ import {
   Autocomplete,
   CircularProgress,
 } from '@mui/material';
-import {
-  Face as FaceIcon,
-  Refresh as RefreshIcon,
-  AccessTime as AccessTimeIcon,
-  Person as PersonIcon,
-  Edit as EditIcon,
-} from '@mui/icons-material';
+import FaceIcon from '@mui/icons-material/Face';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import PersonIcon from '@mui/icons-material/Person';
+import EditIcon from '@mui/icons-material/Edit';
 import { useMediaFaces } from '../../hooks/useMediaFaces';
 import type { MediaFaceStatusType, DetectedFaceDto } from '../../services/face';
 import {

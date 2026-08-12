@@ -9,10 +9,8 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import {
-  Favorite as FavoriteIcon,
-  PhotoLibrary as PhotoLibraryIcon,
-} from '@mui/icons-material';
+import FavoriteIcon from '@mui/icons-material/Favorite';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import { memoryAriaLabel, formatMemoryPeriod } from './memoryFormat';
 import { memoryTypeMeta } from './memoryTypeMeta';
 import type { MemoryCard as MemoryCardDto, MemoryFeedCard } from '../../types/memories';

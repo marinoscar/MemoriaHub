@@ -35,10 +35,8 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material';
-import {
-  FilterList as FilterListIcon,
-  Close as CloseIcon,
-} from '@mui/icons-material';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import CloseIcon from '@mui/icons-material/Close';
 import visuallyHidden from '@mui/utils/visuallyHidden';
 import type {
   DataTableColumn,

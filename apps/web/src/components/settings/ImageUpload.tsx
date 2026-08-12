@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Button, Box, Typography, CircularProgress } from '@mui/material';
-import { CloudUpload as UploadIcon } from '@mui/icons-material';
+import UploadIcon from '@mui/icons-material/CloudUpload';
 import { uploadMyAvatar } from '../../services/userProfile';
 import type { UserProfile } from '../../services/userProfile';
 

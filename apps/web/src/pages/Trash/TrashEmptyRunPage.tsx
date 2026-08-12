@@ -10,10 +10,8 @@ import {
   CardContent,
   Snackbar,
 } from '@mui/material';
-import {
-  ArrowBack as ArrowBackIcon,
-  Visibility as VisibilityIcon,
-} from '@mui/icons-material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useTrashEmptyRun } from '../../hooks/useTrashEmptyRun';

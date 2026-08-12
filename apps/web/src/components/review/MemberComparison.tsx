@@ -14,7 +14,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { Star as StarIcon } from '@mui/icons-material';
+import StarIcon from '@mui/icons-material/Star';
 
 /**
  * Member comparison matrix for the review screens (duplicate group detail today,

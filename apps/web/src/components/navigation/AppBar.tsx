@@ -11,12 +11,10 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import {
-  Brightness4 as DarkModeIcon,
-  Brightness7 as LightModeIcon,
-  CloudUpload as UploadIcon,
-  ArrowBack as ArrowBackIcon,
-} from '@mui/icons-material';
+import DarkModeIcon from '@mui/icons-material/Brightness4';
+import LightModeIcon from '@mui/icons-material/Brightness7';
+import UploadIcon from '@mui/icons-material/CloudUpload';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useThemeContext } from '../../contexts/ThemeContext';
 import { useCircle } from '../../hooks/useCircle';

@@ -19,7 +19,8 @@ import {
   Tabs,
   Tab,
 } from '@mui/material';
-import { Close as CloseIcon, Save as SaveIcon } from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import SaveIcon from '@mui/icons-material/Save';
 import {
   useParams,
   useLocation,

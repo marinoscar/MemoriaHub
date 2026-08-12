@@ -11,12 +11,10 @@ import {
   Button,
   CircularProgress,
 } from '@mui/material';
-import {
-  Devices as DevicesIcon,
-  Computer as ComputerIcon,
-  AccessTime as AccessTimeIcon,
-  LocationOn as LocationIcon,
-} from '@mui/icons-material';
+import DevicesIcon from '@mui/icons-material/Devices';
+import ComputerIcon from '@mui/icons-material/Computer';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import LocationIcon from '@mui/icons-material/LocationOn';
 import type { DeviceActivationInfo } from '../../types';
 
 interface DeviceInfoCardProps {

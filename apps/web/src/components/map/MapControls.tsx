@@ -14,12 +14,10 @@
 import { useState, useCallback } from 'react';
 import L from 'leaflet';
 import { Paper, IconButton, Divider, Tooltip, Snackbar, Alert } from '@mui/material';
-import {
-  Add,
-  Remove,
-  CenterFocusStrong,
-  MyLocation,
-} from '@mui/icons-material';
+import Add from '@mui/icons-material/Add';
+import Remove from '@mui/icons-material/Remove';
+import CenterFocusStrong from '@mui/icons-material/CenterFocusStrong';
+import MyLocation from '@mui/icons-material/MyLocation';
 import type { LocationExtent } from '../../types/media';
 
 interface MapControlsProps {

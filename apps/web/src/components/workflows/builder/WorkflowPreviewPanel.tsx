@@ -12,7 +12,8 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
-import { ExpandMore, AutoAwesome } from '@mui/icons-material';
+import ExpandMore from '@mui/icons-material/ExpandMore';
+import AutoAwesome from '@mui/icons-material/AutoAwesome';
 import { useWorkflowPreview } from '../../../hooks/useWorkflowPreview';
 import { definitionToSentence } from '../../../utils/workflowSentence';
 import { sanitizeDefinitionForPreview } from '../../../pages/Workflows/builderState';

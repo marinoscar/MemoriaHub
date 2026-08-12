@@ -59,17 +59,15 @@ import {
   Badge,
   Link,
 } from '@mui/material';
-import {
-  WorkHistory as WorkHistoryIcon,
-  Refresh as RefreshIcon,
-  Replay as RetryIcon,
-  Delete as DeleteIcon,
-  Warning as WarningIcon,
-  Download as DownloadIcon,
-  Schedule as ScheduleIcon,
-  QueryStats as QueryStatsIcon,
-  AutoFixHigh as HealingIcon,
-} from '@mui/icons-material';
+import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import RetryIcon from '@mui/icons-material/Replay';
+import DeleteIcon from '@mui/icons-material/Delete';
+import WarningIcon from '@mui/icons-material/Warning';
+import DownloadIcon from '@mui/icons-material/Download';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import QueryStatsIcon from '@mui/icons-material/QueryStats';
+import HealingIcon from '@mui/icons-material/AutoFixHigh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
 import { listJobs } from '../../services/jobs';

@@ -1,5 +1,5 @@
 import { Box, Button, Stack, Typography, Alert } from '@mui/material';
-import { Add } from '@mui/icons-material';
+import Add from '@mui/icons-material/Add';
 import { ActionRow } from './ActionRow';
 import { useConditionEditorData } from './ConditionValueEditor';
 import { BuilderBlock } from './BuilderBlock';

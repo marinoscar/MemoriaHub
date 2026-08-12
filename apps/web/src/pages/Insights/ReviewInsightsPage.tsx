@@ -7,15 +7,13 @@ import {
   Grid,
   Divider,
 } from '@mui/material';
-import {
-  Insights as InsightsIcon,
-  BurstMode as BurstModeIcon,
-  ContentCopy as ContentCopyIcon,
-  HourglassEmpty as PendingIcon,
-  CheckCircle as ResolvedIcon,
-  Cancel as DismissedIcon,
-  PhotoLibrary as IdentifiedIcon,
-} from '@mui/icons-material';
+import InsightsIcon from '@mui/icons-material/Insights';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import PendingIcon from '@mui/icons-material/HourglassEmpty';
+import ResolvedIcon from '@mui/icons-material/CheckCircle';
+import DismissedIcon from '@mui/icons-material/Cancel';
+import IdentifiedIcon from '@mui/icons-material/PhotoLibrary';
 import { useCircle } from '../../hooks/useCircle';
 import { useReviewInsights } from '../../hooks/useReviewInsights';
 import { KpiCard } from '../../components/insights/KpiCard';

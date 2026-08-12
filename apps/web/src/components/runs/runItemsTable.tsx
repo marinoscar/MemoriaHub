@@ -47,7 +47,7 @@
 
 import type { ReactNode } from 'react';
 import { Avatar, Box, Chip, Stack, Typography } from '@mui/material';
-import { BrokenImage as BrokenImageIcon } from '@mui/icons-material';
+import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 import type { DataTableColumn } from '../datatable';
 import type { BaseRunItem, RunItemStatus } from '../../types/runs';
 import { formatCaptureDate } from '../../utils/runFormat';

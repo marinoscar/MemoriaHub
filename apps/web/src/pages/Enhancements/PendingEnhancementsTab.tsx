@@ -18,13 +18,11 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  AutoFixHigh as AutoFixHighIcon,
-  CompareArrows as CompareArrowsIcon,
-  ErrorOutlined as ErrorOutlineIcon,
-  Schedule as ScheduleIcon,
-  WarningAmber as WarningAmberIcon,
-} from '@mui/icons-material';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useEnhancements } from '../../hooks/useEnhancements';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { getMedia } from '../../services/media';

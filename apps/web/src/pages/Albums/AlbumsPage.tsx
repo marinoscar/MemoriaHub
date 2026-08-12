@@ -10,7 +10,8 @@ import {
   CardActionArea,
   CardContent,
 } from '@mui/material';
-import { Add as AddIcon, PhotoAlbum as PhotoAlbumIcon } from '@mui/icons-material';
+import AddIcon from '@mui/icons-material/Add';
+import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { useAlbums } from '../../hooks/useAlbums';

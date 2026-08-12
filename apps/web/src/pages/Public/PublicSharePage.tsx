@@ -8,12 +8,10 @@ import {
   DialogContent,
   IconButton,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  ChevronLeft as ChevronLeftIcon,
-  ChevronRight as ChevronRightIcon,
-  PlayCircleOutlined as PlayCircleOutlinedIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
 import { getPublicShare, publicMediaUrl } from '../../services/publicApi';
 import type { PublicShareResponse, PublicShareMediaItem } from '../../types/sharing';
 

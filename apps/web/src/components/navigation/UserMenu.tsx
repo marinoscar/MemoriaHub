@@ -10,12 +10,10 @@ import {
   Typography,
   Box,
 } from '@mui/material';
-import {
-  Settings as SettingsIcon,
-  AdminPanelSettings as AdminIcon,
-  AccountCircle as ProfileIcon,
-  Logout as LogoutIcon,
-} from '@mui/icons-material';
+import SettingsIcon from '@mui/icons-material/Settings';
+import AdminIcon from '@mui/icons-material/AdminPanelSettings';
+import ProfileIcon from '@mui/icons-material/AccountCircle';
+import LogoutIcon from '@mui/icons-material/Logout';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAuthedImage } from '../../hooks/useAuthedImage';

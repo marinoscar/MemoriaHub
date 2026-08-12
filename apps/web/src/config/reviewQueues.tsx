@@ -24,14 +24,12 @@
  */
 
 import type { SvgIconComponent } from '@mui/icons-material';
-import {
-  BurstMode as BurstModeIcon,
-  ContentCopy as ContentCopyIcon,
-  MyLocation as MyLocationIcon,
-  AutoFixHigh as AutoFixHighIcon,
-  Insights as InsightsIcon,
-  AccountTree as AccountTreeIcon,
-} from '@mui/icons-material';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import InsightsIcon from '@mui/icons-material/Insights';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import type { ReviewCountsResponse } from '../types/media';
 
 /** Stable identifiers — also the `:queue` segment of `/review/:queue`. */

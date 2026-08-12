@@ -20,14 +20,12 @@ import {
   Tooltip,
   TextField,
 } from '@mui/material';
-import {
-  MyLocation as MyLocationIcon,
-  Warning as WarningIcon,
-  Check as CheckIcon,
-  EditLocationAlt as EditLocationAltIcon,
-  Close as CloseIcon,
-  Settings as SettingsIcon,
-} from '@mui/icons-material';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import WarningIcon from '@mui/icons-material/Warning';
+import CheckIcon from '@mui/icons-material/Check';
+import EditLocationAltIcon from '@mui/icons-material/EditLocationAlt';
+import CloseIcon from '@mui/icons-material/Close';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';

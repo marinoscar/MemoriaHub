@@ -10,7 +10,7 @@ import {
   CircularProgress,
   Alert,
 } from '@mui/material';
-import { EditCalendar as EditCalendarIcon } from '@mui/icons-material';
+import EditCalendarIcon from '@mui/icons-material/EditCalendar';
 import { bulkUpdateMedia } from '../../services/media';
 import { ApiError } from '../../services/api';
 

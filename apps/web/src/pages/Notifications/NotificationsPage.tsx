@@ -65,14 +65,12 @@ import {
   Tabs,
   Typography,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  DoneAll as DoneAllIcon,
-  DoneOutlined as DoneIcon,
-  NotificationsNone as NotificationsNoneIcon,
-  OpenInNew as OpenInNewIcon,
-  Refresh as RefreshIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import DoneAllIcon from '@mui/icons-material/DoneAll';
+import DoneIcon from '@mui/icons-material/DoneOutlined';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import {
   DataTable,
   type DataTableFilterModel,

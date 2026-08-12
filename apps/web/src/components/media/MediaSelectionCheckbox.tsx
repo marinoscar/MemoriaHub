@@ -1,8 +1,6 @@
 import { IconButton } from '@mui/material';
-import {
-  CheckBox as CheckBoxIcon,
-  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
-} from '@mui/icons-material';
+import CheckBoxIcon from '@mui/icons-material/CheckBox';
+import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
 
 interface MediaSelectionCheckboxProps {
   checked: boolean;

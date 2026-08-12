@@ -21,29 +21,27 @@ import {
   Alert,
   useMediaQuery,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  Star as StarIcon,
-  StarBorder as StarBorderIcon,
-  Download as DownloadIcon,
-  InfoOutlined,
-  IosShare as IosShareIcon,
-  Tune as TuneIcon,
-  Archive as ArchiveIcon,
-  Unarchive as UnarchiveIcon,
-  Delete as DeleteIcon,
-  MoreVert as MoreVertIcon,
-  Add as AddIcon,
-  LocalOffer as LocalOfferIcon,
-  Face as FaceIcon,
-  InfoOutlined as InfoOutlinedIcon,
-  Refresh as RefreshIcon,
-  ChevronLeft,
-  ChevronRight,
-  PlayArrow as PlayArrowIcon,
-  Pause as PauseIcon,
-  AutoFixHigh as AutoFixHighIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import DownloadIcon from '@mui/icons-material/Download';
+import InfoOutlined from '@mui/icons-material/InfoOutlined';
+import IosShareIcon from '@mui/icons-material/IosShare';
+import TuneIcon from '@mui/icons-material/Tune';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import UnarchiveIcon from '@mui/icons-material/Unarchive';
+import DeleteIcon from '@mui/icons-material/Delete';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import AddIcon from '@mui/icons-material/Add';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
+import FaceIcon from '@mui/icons-material/Face';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import ChevronLeft from '@mui/icons-material/ChevronLeft';
+import ChevronRight from '@mui/icons-material/ChevronRight';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTheme } from '@mui/material/styles';
 import type { MediaItem } from '../../types/media';
 import {

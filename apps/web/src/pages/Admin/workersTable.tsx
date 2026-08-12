@@ -24,11 +24,9 @@
  */
 
 import { Box, Chip, Tooltip, Typography } from '@mui/material';
-import {
-  CheckCircle as HealthyIcon,
-  Warning as StaleIcon,
-  Cancel as OfflineIcon,
-} from '@mui/icons-material';
+import HealthyIcon from '@mui/icons-material/CheckCircle';
+import StaleIcon from '@mui/icons-material/Warning';
+import OfflineIcon from '@mui/icons-material/Cancel';
 import type { DataTableColumn } from '../../components/datatable';
 import type {
   AdminNodeCredentialDto,

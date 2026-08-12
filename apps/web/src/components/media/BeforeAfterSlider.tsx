@@ -10,12 +10,10 @@ import {
   Typography,
   CircularProgress,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  CompareArrows as CompareArrowsIcon,
-  ViewColumn as ViewColumnIcon,
-  OpenInFull as OpenInFullIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 
 // ---------------------------------------------------------------------------
 // Props

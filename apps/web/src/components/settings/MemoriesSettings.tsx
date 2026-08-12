@@ -56,10 +56,8 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  Add as AddIcon,
-  DeleteOutlined as DeleteOutlineIcon,
-} from '@mui/icons-material';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 
 import { useCircle } from '../../hooks/useCircle';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';

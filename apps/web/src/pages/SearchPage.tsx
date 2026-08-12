@@ -27,12 +27,10 @@ import {
   CircularProgress,
   Alert,
 } from '@mui/material';
-import {
-  Person as PersonIcon,
-  Place as PlaceIcon,
-  Public as PublicIcon,
-  LocalOffer as TagIcon,
-} from '@mui/icons-material';
+import PersonIcon from '@mui/icons-material/Person';
+import PlaceIcon from '@mui/icons-material/Place';
+import PublicIcon from '@mui/icons-material/Public';
+import TagIcon from '@mui/icons-material/LocalOffer';
 import { useCircle } from '../hooks/useCircle';
 import { usePeople } from '../hooks/usePeople';
 import { performSearch } from '../services/search';

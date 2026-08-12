@@ -14,7 +14,7 @@
  */
 
 import { Box, Typography } from '@mui/material';
-import { Place as PlaceIcon } from '@mui/icons-material';
+import PlaceIcon from '@mui/icons-material/Place';
 import type { useNavigate } from 'react-router-dom';
 import type { ExploreLocationItem } from '../../services/media';
 

@@ -20,7 +20,10 @@ import {
   Snackbar,
   Link,
 } from '@mui/material';
-import { CheckCircle as CheckCircleIcon, Error as ErrorIcon, Info as InfoIcon, Warning as WarningIcon } from '@mui/icons-material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import InfoIcon from '@mui/icons-material/Info';
+import WarningIcon from '@mui/icons-material/Warning';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAiSettings } from '../../hooks/useAiSettings';
 

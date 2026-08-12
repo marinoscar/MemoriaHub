@@ -17,12 +17,10 @@ import {
   LinearProgress,
   Tooltip,
 } from '@mui/material';
-import {
-  ArrowBack as BackIcon,
-  BurstMode as BurstModeIcon,
-  Archive as ArchiveIcon,
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
+import BackIcon from '@mui/icons-material/ArrowBack';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useBurstGroupDetail } from '../../hooks/useBursts';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';

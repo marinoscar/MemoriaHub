@@ -44,12 +44,10 @@ import {
   InputLabel,
   Snackbar,
 } from '@mui/material';
-import {
-  Delete as DeleteIcon,
-  ArrowBack as BackIcon,
-  PersonAdd as InviteIcon,
-  Edit as EditIcon,
-} from '@mui/icons-material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BackIcon from '@mui/icons-material/ArrowBack';
+import InviteIcon from '@mui/icons-material/PersonAdd';
+import EditIcon from '@mui/icons-material/Edit';
 import { useCircleMembers } from '../../hooks/useCircleMembers';
 import { useCircleInvites } from '../../hooks/useCircleInvites';
 import { useCircleContext } from '../../contexts/CircleContext';

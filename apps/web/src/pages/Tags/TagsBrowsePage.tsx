@@ -6,7 +6,7 @@ import {
   Alert,
   Skeleton,
 } from '@mui/material';
-import { LocalOffer as TagIcon } from '@mui/icons-material';
+import TagIcon from '@mui/icons-material/LocalOffer';
 import { useCircle } from '../../hooks/useCircle';
 import { getExploreTags } from '../../services/media';
 import type { ExploreItem } from '../../services/media';

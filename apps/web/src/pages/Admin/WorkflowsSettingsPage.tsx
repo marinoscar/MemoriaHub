@@ -21,7 +21,7 @@ import {
   DialogContentText,
   DialogActions,
 } from '@mui/material';
-import { AccountTree as AccountTreeIcon } from '@mui/icons-material';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import type { SystemSettings } from '../../types';

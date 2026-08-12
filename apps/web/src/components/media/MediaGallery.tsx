@@ -60,14 +60,12 @@ import {
   Alert,
   useMediaQuery,
 } from '@mui/material';
-import {
-  PhotoLibrary as PhotoLibraryIcon,
-  BrokenImage as BrokenImageIcon,
-  PlayCircleOutlined as PlayCircleOutlinedIcon,
-  Star as StarIcon,
-  BurstMode as BurstModeIcon,
-  ContentCopy as ContentCopyIcon,
-} from '@mui/icons-material';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import BrokenImageIcon from '@mui/icons-material/BrokenImage';
+import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
+import StarIcon from '@mui/icons-material/Star';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useTheme } from '@mui/material/styles';
 import { useNavigate } from 'react-router-dom';
 import { useInfiniteMedia } from '../../hooks/useInfiniteMedia';

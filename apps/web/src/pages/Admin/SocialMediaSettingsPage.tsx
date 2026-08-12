@@ -16,7 +16,8 @@ import {
   Link,
   Slider,
 } from '@mui/material';
-import { Movie as MovieIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+import MovieIcon from '@mui/icons-material/Movie';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { backfillSocialMedia, getSocialMediaStatus } from '../../services/adminSocialMedia';

@@ -26,11 +26,9 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material';
-import {
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Email as EmailIcon,
-} from '@mui/icons-material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import EmailIcon from '@mui/icons-material/Email';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useEmailSettings } from '../../hooks/useEmailSettings';
 import type {

@@ -6,7 +6,7 @@ import {
   Typography,
   Tooltip,
 } from '@mui/material';
-import { InfoOutlined } from '@mui/icons-material';
+import InfoOutlined from '@mui/icons-material/InfoOutlined';
 import { BuilderBlock } from './BuilderBlock';
 import type { SubjectRegistryEntry, WorkflowSubjectType } from '../../../types/workflows';
 

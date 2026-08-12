@@ -25,11 +25,9 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
-import {
-  Close as CloseIcon,
-  Tune as TuneIcon,
-  ExpandMore as ExpandMoreIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import TuneIcon from '@mui/icons-material/Tune';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { PersonMultiSelect } from './PersonMultiSelect';
 import { LocationPickerMap } from '../media/LocationPickerMap';
 import type { SearchRequest } from '../../services/search';

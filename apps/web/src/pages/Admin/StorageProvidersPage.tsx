@@ -49,14 +49,12 @@ import {
   Radio,
   Link,
 } from '@mui/material';
-import {
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Cloud as CloudIcon,
-  Settings as SettingsIcon,
-  NetworkCheck as TestIcon,
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorIcon from '@mui/icons-material/Error';
+import CloudIcon from '@mui/icons-material/Cloud';
+import SettingsIcon from '@mui/icons-material/Settings';
+import TestIcon from '@mui/icons-material/NetworkCheck';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useStorageProviders } from '../../hooks/useStorageProviders';
 import { useStorageMigration } from '../../hooks/useStorageMigration';

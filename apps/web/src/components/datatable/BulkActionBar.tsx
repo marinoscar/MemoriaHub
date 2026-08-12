@@ -13,7 +13,7 @@
  */
 
 import { Paper, Stack, Button, Typography, Box } from '@mui/material';
-import { Close as CloseIcon } from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
 import type { DataTableBulkAction } from './types';
 
 export interface BulkActionBarProps {

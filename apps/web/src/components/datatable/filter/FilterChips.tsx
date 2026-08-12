@@ -24,7 +24,7 @@
  */
 
 import { Box, Button, Chip } from '@mui/material';
-import { Cancel as CancelIcon } from '@mui/icons-material';
+import CancelIcon from '@mui/icons-material/Cancel';
 import type { DataTableColumn, DataTableFilterModel } from '../types';
 import { filterChipLabel, filterKey } from './filterModel';
 

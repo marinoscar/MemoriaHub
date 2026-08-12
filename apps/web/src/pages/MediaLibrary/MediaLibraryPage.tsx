@@ -30,13 +30,11 @@ import {
   Switch,
   FormControlLabel,
 } from '@mui/material';
-import {
-  Star as StarIcon,
-  FilterList as FilterIcon,
-  Search as SearchIcon,
-  FileDownload as ExportIcon,
-  Person as PersonIcon,
-} from '@mui/icons-material';
+import StarIcon from '@mui/icons-material/Star';
+import FilterIcon from '@mui/icons-material/FilterList';
+import SearchIcon from '@mui/icons-material/Search';
+import ExportIcon from '@mui/icons-material/FileDownload';
+import PersonIcon from '@mui/icons-material/Person';
 import { useSearchParams } from 'react-router-dom';
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';

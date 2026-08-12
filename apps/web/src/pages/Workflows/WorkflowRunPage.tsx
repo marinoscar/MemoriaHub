@@ -35,11 +35,9 @@ import {
   ListItemText,
   Tooltip,
 } from '@mui/material';
-import {
-  BrokenImage as BrokenImageIcon,
-  ArrowBack as ArrowBackIcon,
-  Visibility as VisibilityIcon,
-} from '@mui/icons-material';
+import BrokenImageIcon from '@mui/icons-material/BrokenImage';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';

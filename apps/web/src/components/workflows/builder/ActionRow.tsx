@@ -9,12 +9,10 @@ import {
   Alert,
   Typography,
 } from '@mui/material';
-import {
-  DeleteOutlined,
-  ArrowUpward,
-  ArrowDownward,
-  WarningAmber,
-} from '@mui/icons-material';
+import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
+import ArrowUpward from '@mui/icons-material/ArrowUpward';
+import ArrowDownward from '@mui/icons-material/ArrowDownward';
+import WarningAmber from '@mui/icons-material/WarningAmber';
 import { ActionParamEditor } from './ActionParamEditor';
 import type { ExploreItem } from '../../../services/media';
 import type { Album } from '../../../types/media';

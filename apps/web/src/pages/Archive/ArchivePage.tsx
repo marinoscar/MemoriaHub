@@ -1,5 +1,5 @@
 import { Box, Typography } from '@mui/material';
-import { Archive as ArchiveIcon } from '@mui/icons-material';
+import ArchiveIcon from '@mui/icons-material/Archive';
 import { useCircle } from '../../hooks/useCircle';
 import { MediaGallery } from '../../components/media/MediaGallery';
 import { listArchived } from '../../services/media';

@@ -10,7 +10,7 @@ import {
   Alert,
   Stack,
 } from '@mui/material';
-import { EditLocationAlt as EditLocationAltIcon } from '@mui/icons-material';
+import EditLocationAltIcon from '@mui/icons-material/EditLocationAlt';
 import { LocationSearchPicker } from '../../components/media/LocationSearchPicker';
 import { acceptLocationSuggestion } from '../../services/locationSuggestions';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';

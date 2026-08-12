@@ -1,13 +1,11 @@
 import { Divider, ListItemIcon, ListItemText, Menu, MenuItem } from '@mui/material';
-import {
-  DeleteOutlined as DeleteIcon,
-  Favorite as FavoriteIcon,
-  FavoriteBorder as FavoriteBorderIcon,
-  IosShare as IosShareIcon,
-  PhotoAlbum as PhotoAlbumIcon,
-  PlayArrow as PlayArrowIcon,
-  VisibilityOff as VisibilityOffIcon,
-} from '@mui/icons-material';
+import DeleteIcon from '@mui/icons-material/DeleteOutlined';
+import FavoriteIcon from '@mui/icons-material/Favorite';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import IosShareIcon from '@mui/icons-material/IosShare';
+import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 
 export interface MemoryActionMenuProps {
   anchorEl: HTMLElement | null;

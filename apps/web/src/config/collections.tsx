@@ -27,16 +27,14 @@
  */
 
 import type { SvgIconComponent } from '@mui/icons-material';
-import {
-  PhotoAlbum as AlbumIcon,
-  Groups as GroupsIcon,
-  Public as PublicIcon,
-  AutoAwesomeMotion as AutoAwesomeMotionIcon,
-  Map as MapIcon,
-  Star as StarIcon,
-  Archive as ArchiveIcon,
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
+import AlbumIcon from '@mui/icons-material/PhotoAlbum';
+import GroupsIcon from '@mui/icons-material/Groups';
+import PublicIcon from '@mui/icons-material/Public';
+import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
+import MapIcon from '@mui/icons-material/Map';
+import StarIcon from '@mui/icons-material/Star';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 /** Stable identifiers. These are also the `pinned` keys in `user_settings.navigation`. */
 export type CollectionKey =

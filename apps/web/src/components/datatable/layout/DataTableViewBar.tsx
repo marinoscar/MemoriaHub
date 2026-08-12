@@ -47,15 +47,13 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  DensityLarge as DensityLargeIcon,
-  DensityMedium as DensityMediumIcon,
-  DensitySmall as DensitySmallIcon,
-  RestartAlt as RestartAltIcon,
-  Tune as TuneIcon,
-  ViewColumn as ViewColumnIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import DensityLargeIcon from '@mui/icons-material/DensityLarge';
+import DensityMediumIcon from '@mui/icons-material/DensityMedium';
+import DensitySmallIcon from '@mui/icons-material/DensitySmall';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import TuneIcon from '@mui/icons-material/Tune';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import type { DataTableColumn, DataTableDensity, DataTableLayout } from '../types';
 import { DENSITY_LABELS, DENSITY_OPTIONS, pickerColumns } from './layoutModel';
 

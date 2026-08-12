@@ -49,15 +49,13 @@ import {
   FormLabel,
   InputAdornment,
 } from '@mui/material';
-import {
-  Hub as HubIcon,
-  Refresh as RefreshIcon,
-  Delete as DeleteIcon,
-  Add as AddIcon,
-  ContentCopy as ContentCopyIcon,
-  Check as CheckIcon,
-  SettingsBackupRestore as BackupSettingsIcon,
-} from '@mui/icons-material';
+import HubIcon from '@mui/icons-material/Hub';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import DeleteIcon from '@mui/icons-material/Delete';
+import AddIcon from '@mui/icons-material/Add';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CheckIcon from '@mui/icons-material/Check';
+import BackupSettingsIcon from '@mui/icons-material/SettingsBackupRestore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkers } from '../../hooks/useWorkers';
 import { useNodeCredentials } from '../../hooks/useNodeCredentials';

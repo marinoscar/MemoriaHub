@@ -28,20 +28,18 @@ import {
   DialogContentText,
   DialogActions,
 } from '@mui/material';
-import {
-  Close as CloseIcon,
-  AutoFixHigh as AutoFixHighIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  Healing as HealingIcon,
-  Nightlight as NightlightIcon,
-  Palette as PaletteIcon,
-  FaceRetouchingNatural as FaceRetouchingNaturalIcon,
-  Tune as TuneIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  WarningAmber as WarningAmberIcon,
-  Schedule as ScheduleIcon,
-} from '@mui/icons-material';
+import CloseIcon from '@mui/icons-material/Close';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import HealingIcon from '@mui/icons-material/Healing';
+import NightlightIcon from '@mui/icons-material/Nightlight';
+import PaletteIcon from '@mui/icons-material/Palette';
+import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
+import TuneIcon from '@mui/icons-material/Tune';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { SvgIconProps } from '@mui/material';

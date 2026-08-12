@@ -16,10 +16,8 @@ import { MediaPlayer, MediaProvider, Gesture, PlayButton, useMediaState } from '
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { defaultLayoutIcons, DefaultVideoLayout } from '@vidstack/react/player/layouts/default';
 import { Box } from '@mui/material';
-import {
-  PlayArrowRounded as PlayArrowRoundedIcon,
-  PauseRounded as PauseRoundedIcon,
-} from '@mui/icons-material';
+import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded';
+import PauseRoundedIcon from '@mui/icons-material/PauseRounded';
 import type React from 'react';
 
 // ---------------------------------------------------------------------------

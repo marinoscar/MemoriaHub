@@ -17,15 +17,13 @@ import {
   LinearProgress,
   Tooltip,
 } from '@mui/material';
-import {
-  ArrowBack as BackIcon,
-  ContentCopy as ContentCopyIcon,
-  Star as StarIcon,
-  CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
-  Archive as ArchiveIcon,
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
+import BackIcon from '@mui/icons-material/ArrowBack';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import StarIcon from '@mui/icons-material/Star';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useDuplicateGroupDetail } from '../../hooks/useDuplicates';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';

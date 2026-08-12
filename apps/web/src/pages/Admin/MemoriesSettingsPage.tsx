@@ -22,7 +22,7 @@ import {
   Link,
   Divider,
 } from '@mui/material';
-import { AutoAwesomeMotion as AutoAwesomeMotionIcon } from '@mui/icons-material';
+import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useAiSettings } from '../../hooks/useAiSettings';

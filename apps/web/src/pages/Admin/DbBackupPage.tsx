@@ -60,13 +60,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import {
-  Backup as BackupIcon,
-  Download as DownloadIcon,
-  Delete as DeleteIcon,
-  Refresh as RefreshIcon,
-  SettingsBackupRestore as RestoreIcon,
-} from '@mui/icons-material';
+import BackupIcon from '@mui/icons-material/Backup';
+import DownloadIcon from '@mui/icons-material/Download';
+import DeleteIcon from '@mui/icons-material/Delete';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import RestoreIcon from '@mui/icons-material/SettingsBackupRestore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useDbBackup } from '../../hooks/useDbBackup';
 import { getStorageSettings } from '../../services/storage-providers';

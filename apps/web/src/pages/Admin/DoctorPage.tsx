@@ -11,14 +11,12 @@ import {
   Alert,
   Link,
 } from '@mui/material';
-import {
-  MonitorHeart as MonitorHeartIcon,
-  Refresh as RefreshIcon,
-  CheckCircle as CheckCircleIcon,
-  WarningAmber as WarningAmberIcon,
-  Error as ErrorIcon,
-  RemoveCircleOutlined as RemoveCircleOutlineIcon,
-} from '@mui/icons-material';
+import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ErrorIcon from '@mui/icons-material/Error';
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlined';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useDoctor } from '../../hooks/useDoctor';
 import type { DoctorCheck, DoctorCheckStatus, DoctorSection } from '../../services/doctor';

@@ -20,13 +20,11 @@ import {
   DialogContentText,
   DialogActions,
 } from '@mui/material';
-import {
-  BurstMode as BurstModeIcon,
-  Settings as SettingsIcon,
-  Archive as ArchiveIcon,
-  Delete as DeleteIcon,
-  Block as BlockIcon,
-} from '@mui/icons-material';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import SettingsIcon from '@mui/icons-material/Settings';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
 import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 import { usePermissions } from '../../hooks/usePermissions';
