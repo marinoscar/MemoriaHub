@@ -25,7 +25,7 @@ const adminMetadataBackfillSchema = z.object({
 }).prefault({});
 class AdminMetadataBackfillDto extends createZodDto(adminMetadataBackfillSchema) {}
 
-@ApiTags('Admin — Metadata')
+@ApiTags('Admin: Metadata')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/metadata')
 export class AdminMetadataController {

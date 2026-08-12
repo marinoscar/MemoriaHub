@@ -26,7 +26,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 
-@ApiTags('Nodes - Backup')
+@ApiTags('Nodes: Backup')
 @Controller('nodes/:id/backup')
 @Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
 export class NodeBackupController {

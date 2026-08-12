@@ -12,7 +12,7 @@ import { RebuildLocationGroupsDto } from './dto/location-group.dto';
  * Split from `LocationGroupsController` only because the route prefix differs;
  * both reuse the same Admin-only `geo_settings:*` pair (no new permission).
  */
-@ApiTags('Admin - Location Groups')
+@ApiTags('Admin: Location Groups')
 @Controller('admin/location-groups')
 export class LocationGroupsAdminController {
   constructor(private readonly service: LocationGroupsService) {}

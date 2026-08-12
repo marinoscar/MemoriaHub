@@ -76,7 +76,7 @@ export class ResetStuckDto extends createZodDto(resetStuckSchema) {}
 // Controller
 // ---------------------------------------------------------------------------
 
-@ApiTags('Admin - Jobs')
+@ApiTags('Admin: Job Queue')
 @Controller('admin/jobs')
 export class EnrichmentAdminController {
   constructor(private readonly adminService: EnrichmentAdminService) {}
