@@ -28,6 +28,7 @@ export class CurrentUserDto {
   email!: string;
 
   @ApiProperty({
+    type: String,
     example: 'John Doe',
     description: 'Display name (computed from override or provider)',
     nullable: true,
@@ -35,6 +36,7 @@ export class CurrentUserDto {
   displayName!: string | null;
 
   @ApiProperty({
+    type: String,
     example: 'https://example.com/avatar.jpg',
     description: 'Profile image URL (computed from override or provider)',
     nullable: true,

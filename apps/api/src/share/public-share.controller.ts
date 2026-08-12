@@ -35,7 +35,14 @@ export class PublicShareController {
    */
   @Get(':token')
   @Public()
-  @ApiOperation({ summary: 'Get public share info (no auth required)' })
+  @ApiOperation({
+    summary: 'Get public share info (no auth required)',
+    description:
+      'Returns a metadata-stripped view of a shared media item or album: media type and ' +
+      'dimensions only, never EXIF, location, owner, or a storage URL. A revoked, expired, or ' +
+      'trashed target returns the same generic 404 as an unknown token, so a token cannot be ' +
+      'probed for existence.',
+  })
   @ApiParam({ name: 'token', description: 'Share token' })
   @ApiResponse({
     status: 200,
@@ -91,7 +98,14 @@ export class PublicShareController {
    */
   @Get(':token/media/:idx')
   @Public()
-  @ApiOperation({ summary: 'Proxy media bytes (no auth required)' })
+  @ApiOperation({
+    summary: 'Proxy media bytes (no auth required)',
+    description:
+      'Streams the shared file through the API — the storage URL is never exposed. Video ' +
+      'responses honour Range requests (206). `variant=thumb` returns the thumbnail for album ' +
+      'grids. Note that bytes are the raw original: EXIF embedded in the file, including GPS, ' +
+      'is NOT stripped.',
+  })
   @ApiParam({ name: 'token', description: 'Share token' })
   @ApiParam({ name: 'idx', description: 'Zero-based item index', type: Number })
   @ApiQuery({ name: 'variant', required: false, enum: ['original', 'thumb'] })
