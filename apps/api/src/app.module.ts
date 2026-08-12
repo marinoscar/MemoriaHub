@@ -1,4 +1,4 @@
-import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule, DynamicModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -54,6 +54,23 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { MaintenanceGuard } from './common/maintenance/maintenance.guard';
 
 import configuration from './config/configuration';
+
+/**
+ * Modules registered only outside production.
+ *
+ * `TestAuthModule` mints tokens without a real OAuth round-trip, so it must
+ * never exist in a production process — and, because a controller that is not
+ * registered is invisible to `SwaggerModule.createDocument`, keeping it out of
+ * the module list is also what keeps its routes out of the published API
+ * document.
+ *
+ * Extracted from the inline conditional so that fact is directly testable.
+ * `main.ts` additionally refuses to boot when `TEST_AUTH_ENABLED=true` in
+ * production, but nothing asserted the module gate itself.
+ */
+export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
+  return process.env.NODE_ENV !== 'production' ? [TestAuthModule] : [];
+}
 
 @Module({
   imports: [
@@ -116,7 +133,7 @@ import configuration from './config/configuration';
     DbBackupModule,
 
     // Test modules (non-production only)
-    ...(process.env.NODE_ENV !== 'production' ? [TestAuthModule] : []),
+    ...testOnlyModules(),
   ],
   providers: [
     // Global validation pipe (Zod)

@@ -6,12 +6,17 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from '@nestjs/common';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
 import { fastifyAdapterOptions } from './common/fastify-setup';
+import { createOpenApiDocument } from './openapi/document';
+import { renderDocsPage } from './openapi/docs-page';
+import { resolveApiVersion } from './openapi/version';
+
+const OPENAPI_JSON_PATH = '/api/openapi.json';
+const DOCS_PATH = '/api/docs';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -57,32 +62,36 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Swagger/OpenAPI setup
-  const config = new DocumentBuilder()
-    .setTitle('Enterprise App API')
-    .setDescription('API documentation for the Enterprise App Foundation')
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Enter JWT token',
-      },
-      'JWT-auth',
-    )
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
-    jsonDocumentUrl: 'api/openapi.json',
+  // ---------------------------------------------------------------------------
+  // OpenAPI: the spec at /api/openapi.json, the Scalar reference at /api/docs
+  // ---------------------------------------------------------------------------
+  // Served as two raw Fastify routes rather than through `SwaggerModule.setup`,
+  // because the docs page is our own template (see `openapi/docs-page.ts` for
+  // why) and `setup` would additionally mount the stock Swagger UI on the same
+  // path. Registering directly also keeps both routes outside the Nest guard
+  // pipeline — matching what `SwaggerModule.setup` already did, and keeping the
+  // reference readable during maintenance mode.
+  const version = resolveApiVersion();
+  const document = createOpenApiDocument(app);
+  const docsPage = renderDocsPage({
+    title: 'MemoriaHub API Reference',
+    version,
+    specUrl: OPENAPI_JSON_PATH,
   });
+
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.get(OPENAPI_JSON_PATH, (_req, reply) =>
+    reply.type('application/json').send(document),
+  );
+  for (const path of [DOCS_PATH, `${DOCS_PATH}/`]) {
+    fastify.get(path, (_req, reply) => reply.type('text/html').send(docsPage));
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
 
   logger.log(`Application running on port ${port}`);
-  logger.log(`Swagger UI available at /api/docs`);
+  logger.log(`API reference available at ${DOCS_PATH} (spec: ${OPENAPI_JSON_PATH})`);
 }
 
 bootstrap();
