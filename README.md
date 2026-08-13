@@ -66,7 +66,7 @@ Off by default (`features.memories`) — an admin turns it on in Admin Settings,
 - **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
 
 ### Planned Capabilities
-The roadmap covers further long-term enrichment such as platform import paths (Google Photos Takeout, OneDrive), Azure storage, and additional duplicate-detection tiers (Phase 09). The Android MVP (Phase 08), cross-cutting enrichment features (face recognition, AI auto-tagging, agentic search), and trip/event grouping (now shipped as part of Memories, above) are already shipped. See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
+The roadmap covers further long-term enrichment such as platform import paths (Google Photos Takeout, OneDrive), Azure storage, and additional duplicate-detection tiers (Phase 09). The Android MVP (Phase 08), cross-cutting enrichment features (face recognition, AI auto-tagging, agentic search), and trip/event grouping (now shipped as part of Memories, above) are already shipped. See the [Epic issues on GitHub](https://github.com/marinoscar/MemoriaHub/issues?q=is%3Aissue+label%3Aepic) for details.
 
 ## Technology Stack
 
@@ -250,8 +250,7 @@ MemoriaHub/
 │       │   └── services/      # API client
 │       └── src/__tests__/     # Component tests
 ├── docs/
-│   ├── plan/                  # Implementation roadmap and phase specs
-│   │   ├── ROADMAP.md         # Phase-by-phase implementation plan
+│   ├── plan/                  # Phase implementation specs (see GitHub Epic issues for the roadmap)
 │   │   └── phase-01-media-domain.md  # (and other phase docs)
 │   ├── ARCHITECTURE.md        # System architecture
 │   ├── API.md                 # Complete API reference
@@ -276,7 +275,7 @@ MemoriaHub/
 ## Documentation
 
 - **[VISION.MD](VISION.MD)** - Product vision, MVP definition, and guiding principles
-- **[docs/plan/ROADMAP.md](docs/plan/ROADMAP.md)** - Phase-by-phase implementation plan
+- **[Epic issues on GitHub](https://github.com/marinoscar/MemoriaHub/issues?q=is%3Aissue+label%3Aepic)** - Roadmap and phase-by-phase implementation plan
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture and design decisions
 - **[docs/API.md](docs/API.md)** - Complete API reference
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development setup, common patterns, and troubleshooting
