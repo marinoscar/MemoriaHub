@@ -572,4 +572,185 @@ describe('BulkActionToolbar', () => {
       expect(onOpenEnhance).toHaveBeenCalledTimes(1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // AI Enhance gate — multi-photo selection via `selectedItems` (issue #422,
+  // epic #420 phase 2).
+  //
+  // `selectedItems` is the source of truth once a caller migrates to it (the
+  // block above still pins down the `singleSelectedItem`-only fallback). The
+  // gate counts PHOTOS ONLY:
+  //   - exactly 1 photo  -> the single-item drawer (onOpenEnhance)
+  //   - 2+ photos        -> the batch dialog (onOpenBatchEnhance)
+  //   - a mix of 1 photo + N videos is still exactly 1 photo -> single drawer
+  //   - videos alone contribute nothing -> button absent
+  // -------------------------------------------------------------------------
+  describe('AI Enhance gate — multi-photo selection (selectedItems)', () => {
+    const photo = (id: string) => makeMediaItem({ id, type: 'photo' });
+    const video = (id: string) => makeMediaItem({ id, type: 'video' });
+
+    it('exactly 1 photo selected calls onOpenEnhance, not onOpenBatchEnhance', async () => {
+      const onOpenEnhance = vi.fn();
+      const onOpenBatchEnhance = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1'])}
+          selectedItems={[photo('p1')]}
+          enhanceEnabled
+          onOpenEnhance={onOpenEnhance}
+          onOpenBatchEnhance={onOpenBatchEnhance}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /ai enhance/i }));
+      expect(onOpenEnhance).toHaveBeenCalledTimes(1);
+      expect(onOpenBatchEnhance).not.toHaveBeenCalled();
+    });
+
+    it('2+ photos selected calls onOpenBatchEnhance, not onOpenEnhance', async () => {
+      const onOpenEnhance = vi.fn();
+      const onOpenBatchEnhance = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2'])}
+          selectedItems={[photo('p1'), photo('p2')]}
+          enhanceEnabled
+          onOpenEnhance={onOpenEnhance}
+          onOpenBatchEnhance={onOpenBatchEnhance}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /ai enhance/i }));
+      expect(onOpenBatchEnhance).toHaveBeenCalledTimes(1);
+      expect(onOpenEnhance).not.toHaveBeenCalled();
+    });
+
+    it('videos only: the AI Enhance button is absent', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['v1', 'v2'])}
+          selectedItems={[video('v1'), video('v2')]}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('mixed selection: the count reflects PHOTOS ONLY (3 photos + 2 videos -> "AI Enhance 3 photos")', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2', 'p3', 'v1', 'v2'])}
+          selectedItems={[
+            photo('p1'),
+            photo('p2'),
+            photo('p3'),
+            video('v1'),
+            video('v2'),
+          ]}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: 'AI Enhance 3 photos' }),
+      ).toBeInTheDocument();
+    });
+
+    it('1 photo + 1 video: still routes to the SINGLE drawer, not the batch dialog', async () => {
+      const onOpenEnhance = vi.fn();
+      const onOpenBatchEnhance = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'v1'])}
+          selectedItems={[photo('p1'), video('v1')]}
+          enhanceEnabled
+          onOpenEnhance={onOpenEnhance}
+          onOpenBatchEnhance={onOpenBatchEnhance}
+        />,
+      );
+
+      // The count reflects the single photo, not the size-2 raw selection.
+      const button = screen.getByRole('button', { name: 'AI Enhance 1 photo' });
+      await user.click(button);
+
+      expect(onOpenEnhance).toHaveBeenCalledTimes(1);
+      expect(onOpenBatchEnhance).not.toHaveBeenCalled();
+    });
+
+    it('is absent for viewer role even with a multi-photo selection', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2'])}
+          selectedItems={[photo('p1'), photo('p2')]}
+          activeCircleRole="viewer"
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('is absent when the feature flag is off, even with photos selected', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2'])}
+          selectedItems={[photo('p1'), photo('p2')]}
+          enhanceEnabled={false}
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('is absent while flags are still loading (enhanceEnabled undefined) — must not flash in', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2'])}
+          selectedItems={[photo('p1'), photo('p2')]}
+          // enhanceEnabled deliberately omitted, mirroring useFeatureFlags()
+          // before its first response resolves (pictureEnhancement === null).
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('the aria-label names the photo count', () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2', 'p3'])}
+          selectedItems={[photo('p1'), photo('p2'), photo('p3')]}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      const button = screen.getByRole('button', { name: 'AI Enhance 3 photos' });
+      expect(button).toHaveAttribute('aria-label', 'AI Enhance 3 photos');
+    });
+  });
 });
