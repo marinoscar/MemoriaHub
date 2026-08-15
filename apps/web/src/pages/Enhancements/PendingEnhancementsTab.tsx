@@ -105,8 +105,14 @@ export function formatElapsedSince(from: string, now: number = Date.now()): stri
   return `${m}m ${String(s).padStart(2, '0')}s`;
 }
 
-/** Human summary of the params a run was launched with. */
-export function describeParams(item: EnhancementListItem): string {
+/**
+ * Human summary of the params a run was launched with.
+ *
+ * Typed on the `params` field alone rather than the whole list row, so a
+ * bulk-enhance BATCH — which carries the one params object its whole batch was
+ * launched with — reuses this instead of growing a second formatter.
+ */
+export function describeParams(item: Pick<EnhancementListItem, 'params'>): string {
   const p = item.params ?? {};
   const bits: string[] = [];
   if (p.preset) bits.push(p.preset.replace(/_/g, ' '));

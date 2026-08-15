@@ -76,6 +76,9 @@ const WorkflowListPage = lazy(() => import('./pages/Workflows/WorkflowListPage')
 const WorkflowBuilderPage = lazy(() => import('./pages/Workflows/WorkflowBuilderPage'));
 const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
 const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
+const EnhancementBatchPage = lazy(
+  () => import('./pages/Enhancements/EnhancementBatchPage'),
+);
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));
 const MemoriesPage = lazy(() => import('./pages/Memories/MemoriesPage'));
 const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'));
@@ -184,6 +187,13 @@ function AppRoutes() {
                 <Route path="/workflows/:id" element={<WorkflowBuilderPage />} />
                 <Route path="/workflows/:id/runs/:runId" element={<WorkflowRunPage />} />
                 <Route path="/enhancements" element={<EnhancementsPage />} />
+                {/* Bulk-enhance batch progress (epic #420). Sits beside the
+                    other run pages and, like them, renders its own not-found
+                    for an unknown id or another circle's batch. */}
+                <Route
+                  path="/enhancement-batches/:batchId"
+                  element={<EnhancementBatchPage />}
+                />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 {/* Memories (epic #300). The routes always resolve — a bookmark
                     must not 404 — and each page renders its own disabled state
