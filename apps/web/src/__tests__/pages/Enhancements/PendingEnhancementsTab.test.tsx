@@ -5,8 +5,9 @@
  *  - card rendering per status (pending / processing / ready / failed)
  *  - the downscale badge on a ready+downscaled row
  *  - expiry countdown formatting and the 24h / 6h severity thresholds
- *  - replace policy: hidden when allowReplace=false, disabled (with a reason)
- *    when blockReplaceOnDownscale && downscaled
+ *  - replace policy: hidden when allowReplace=false; and, when
+ *    blockReplaceOnDownscale && downscaled, an ALWAYS-RENDERED reason (never a
+ *    hover-only tooltip) plus a confirm-through acknowledgement (issue #426)
  *  - the decision actions calling the right service functions
  *  - filters (status + sort) feeding through to the list params
  *  - empty state
@@ -17,7 +18,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
+import { render, mockAdminUser } from '../../utils/test-utils';
 import {
   PendingEnhancementsTab,
   formatExpiresIn,
@@ -349,14 +350,56 @@ describe('PendingEnhancementsTab', () => {
       expect(within(card).getByRole('button', { name: 'Keep both' })).toBeEnabled();
     });
 
-    it('disables Replace when blockReplaceOnDownscale applies to a downscaled result', () => {
+    /**
+     * Issue #426. Replace used to be disabled here with the reason living only
+     * in a hover tooltip on the disabled button — invisible on touch, and
+     * permanent in practice since gpt-image-1 caps output at ~1.6 MP. The
+     * reason must now be plain DOM text, and the guard must be passable.
+     * These assertions deliberately perform NO hover or pointer interaction.
+     */
+    it('states the reason on the card without any hover when blockReplaceOnDownscale applies', () => {
+      mockPolicy(true, true);
+      mockList([makeItem({ downscaled: true })]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      const card = cardFor('enh-1');
+      expect(
+        within(card).getByText(/an administrator has set replacing to be blocked/i),
+      ).toBeInTheDocument();
+      expect(
+        within(card).getByText(/4000×3000 \(12\.0 MP\) → 1024×1024 \(1\.0 MP\)/),
+      ).toBeInTheDocument();
+    });
+
+    it('keeps Replace usable under blockReplaceOnDownscale so the block can be passed knowingly', () => {
       mockPolicy(true, true);
       mockList([makeItem({ downscaled: true })]);
       render(<PendingEnhancementsTab circleId="circle-1" />);
 
       expect(
         within(cardFor('enh-1')).getByRole('button', { name: 'Replace original' }),
-      ).toBeDisabled();
+      ).toBeEnabled();
+    });
+
+    it('links an admin to the responsible setting, and does not for a non-admin', () => {
+      mockPolicy(true, true);
+      mockList([makeItem({ downscaled: true })]);
+
+      const { unmount } = render(<PendingEnhancementsTab circleId="circle-1" />, {
+        wrapperOptions: { user: mockAdminUser },
+      });
+      expect(
+        within(cardFor('enh-1')).getByRole('link', { name: /change this setting/i }),
+      ).toHaveAttribute('href', '/admin/settings/enhancer');
+      unmount();
+
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+      const card = cardFor('enh-1');
+      expect(within(card).queryByRole('link', { name: /change this setting/i })).toBeNull();
+      // The explanation itself is still shown to everyone.
+      expect(
+        within(card).getByText(/an administrator has set replacing to be blocked/i),
+      ).toBeInTheDocument();
     });
 
     it('leaves Replace enabled when the policy is on but the result is not downscaled', () => {
@@ -394,8 +437,51 @@ describe('PendingEnhancementsTab', () => {
       );
 
       await waitFor(() => {
-        expect(applyEnhancement).toHaveBeenCalledWith('item-1', 'enh-1', 'replace');
+        // No acknowledgement on an ordinary replace (#426).
+        expect(applyEnhancement).toHaveBeenCalledWith('item-1', 'enh-1', 'replace', {
+          acknowledgeDownscale: false,
+        });
       });
+    });
+
+    it('confirms before replacing under the downscale guard, then acknowledges it', async () => {
+      const user = userEvent.setup();
+      mockPolicy(true, true);
+      mockList([makeItem({ downscaled: true })]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      await user.click(
+        within(cardFor('enh-1')).getByRole('button', { name: 'Replace original' }),
+      );
+      // Informed consent: nothing is committed on the first tap.
+      expect(applyEnhancement).not.toHaveBeenCalled();
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/you will lose resolution/i)).toBeInTheDocument();
+      expect(within(dialog).getByText(/4000×3000 \(12\.0 MP\) → 1024×1024 \(1\.0 MP\)/)).toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', { name: /replace anyway/i }));
+
+      await waitFor(() => {
+        expect(applyEnhancement).toHaveBeenCalledWith('item-1', 'enh-1', 'replace', {
+          acknowledgeDownscale: true,
+        });
+      });
+    });
+
+    it('cancelling the downscale confirmation commits nothing', async () => {
+      const user = userEvent.setup();
+      mockPolicy(true, true);
+      mockList([makeItem({ downscaled: true })]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      await user.click(
+        within(cardFor('enh-1')).getByRole('button', { name: 'Replace original' }),
+      );
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+      expect(applyEnhancement).not.toHaveBeenCalled();
     });
 
     it('Discard discards the staged preview', async () => {

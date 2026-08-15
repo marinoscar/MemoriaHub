@@ -382,6 +382,7 @@ describe('MediaEnhancementController — route dispatch + RBAC + validation (sup
         ENH_ID,
         'keep_both',
         expect.anything(),
+        { acknowledgeDownscale: false },
       );
       expect(res.body).toMatchObject({ data: { decision: 'keep_both' } });
     });
@@ -396,6 +397,59 @@ describe('MediaEnhancementController — route dispatch + RBAC + validation (sup
         .post(`/media/${MEDIA_ID}/enhance/${ENH_ID}/apply`)
         .send({ decision: 'replace' })
         .expect(200);
+    });
+
+    // Issue #426: the downscale guard is a confirm-through speed bump, so the
+    // client's explicit acknowledgement has to reach the service.
+    it('forwards acknowledgeDownscale:true to the service', async () => {
+      mockService.applyEnhancement.mockResolvedValueOnce({
+        data: { status: 'ready', width: 1536, height: 1024 },
+      });
+      app = await buildApp(WRITER);
+
+      await request(app.getHttpServer())
+        .post(`/media/${MEDIA_ID}/enhance/${ENH_ID}/apply`)
+        .send({ decision: 'replace', acknowledgeDownscale: true })
+        .expect(200);
+
+      expect(mockService.applyEnhancement).toHaveBeenCalledWith(
+        MEDIA_ID,
+        ENH_ID,
+        'replace',
+        expect.anything(),
+        { acknowledgeDownscale: true },
+      );
+    });
+
+    it('defaults acknowledgeDownscale to false when the body omits it', async () => {
+      mockService.applyEnhancement.mockResolvedValueOnce({
+        data: { status: 'ready', width: 1536, height: 1024 },
+      });
+      app = await buildApp(WRITER);
+
+      await request(app.getHttpServer())
+        .post(`/media/${MEDIA_ID}/enhance/${ENH_ID}/apply`)
+        .send({ decision: 'replace' })
+        .expect(200);
+
+      expect(mockService.applyEnhancement).toHaveBeenCalledWith(
+        MEDIA_ID,
+        ENH_ID,
+        'replace',
+        expect.anything(),
+        { acknowledgeDownscale: false },
+      );
+    });
+
+    it('400s on a non-boolean acknowledgeDownscale', async () => {
+      app = await buildApp(WRITER);
+
+      await request(app.getHttpServer())
+        .post(`/media/${MEDIA_ID}/enhance/${ENH_ID}/apply`)
+        .send({ decision: 'replace', acknowledgeDownscale: 'yes' })
+        .expect(400);
+
+      expect(mockService.applyEnhancement).not.toHaveBeenCalled();
     });
 
     it('403s for a caller missing media:write', async () => {

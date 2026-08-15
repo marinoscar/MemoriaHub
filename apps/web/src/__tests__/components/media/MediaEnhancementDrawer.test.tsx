@@ -238,9 +238,12 @@ describe('MediaEnhancementDrawer', () => {
 
       render(<MediaEnhancementDrawer {...baseProps} />);
 
+      // The reason is plain text in the DOM, not a hover-only tooltip (#426),
+      // and names the exact resolution loss.
       expect(
-        screen.getByText(/enhanced image is smaller than the original/i),
+        screen.getByText(/enhanced image is lower resolution than the original/i),
       ).toBeInTheDocument();
+      expect(screen.getByText(/4032×3024 \(12\.2 MP\) → 2016×1512 \(3\.0 MP\)/)).toBeInTheDocument();
     });
 
     it('does not show a downscale warning when dimensions are unchanged', () => {
@@ -251,7 +254,7 @@ describe('MediaEnhancementDrawer', () => {
       render(<MediaEnhancementDrawer {...baseProps} />);
 
       expect(
-        screen.queryByText(/enhanced image is smaller than the original/i),
+        screen.queryByText(/enhanced image is lower resolution than the original/i),
       ).not.toBeInTheDocument();
     });
   });
@@ -310,7 +313,9 @@ describe('MediaEnhancementDrawer', () => {
       await user.click(within(dialog).getByRole('button', { name: /^replace$/i }));
 
       await waitFor(() => {
-        expect(apply).toHaveBeenCalledWith('replace');
+        // No acknowledgement on an ordinary replace: the flag is only ever sent
+        // when the admin downscale guard is actually in force (#426).
+        expect(apply).toHaveBeenCalledWith('replace', { acknowledgeDownscale: false });
       });
       expect(onReplaced).toHaveBeenCalledTimes(1);
       expect(reset).toHaveBeenCalled();
@@ -550,7 +555,17 @@ describe('MediaEnhancementDrawer', () => {
       expect(screen.getByRole('button', { name: /keep both/i })).toBeInTheDocument();
     });
 
-    it('renders the Replace button DISABLED when blockReplaceOnDownscale is true and the result is downscaled', () => {
+    /**
+     * Issue #426. `blockReplaceOnDownscale` used to disable the button outright
+     * with the reason living only in a hover tooltip — unreachable on touch,
+     * and (because gpt-image-1 caps output at ~1.6 MP) permanent for every real
+     * photo. It is now a confirm-through guard whose reason is always in the
+     * DOM. The assertions below deliberately perform NO hover or pointer
+     * interaction before reading the reason.
+     */
+    function renderBlockedByDownscale(
+      overrides: Partial<Parameters<typeof makeHook>[0]> = {},
+    ) {
       mockUseMediaEnhance.mockReturnValue(
         makeHook({
           status: 'ready',
@@ -563,17 +578,49 @@ describe('MediaEnhancementDrawer', () => {
               size: '900000',
             },
           }),
+          ...overrides,
         }),
       );
 
-      render(
+      return render(
         <MediaEnhancementDrawer
           {...baseProps}
           replacePolicy={{ allowReplace: true, blockReplaceOnDownscale: true }}
         />,
       );
+    }
 
-      expect(screen.getByRole('button', { name: /replace original/i })).toBeDisabled();
+    it('states the reason in the DOM without any hover when blockReplaceOnDownscale applies', () => {
+      renderBlockedByDownscale();
+
+      expect(
+        screen.getByText(/an administrator has set replacing to be blocked/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/4032×3024 \(12\.2 MP\) → 2016×1512 \(3\.0 MP\)/)).toBeInTheDocument();
+    });
+
+    it('keeps Replace usable under blockReplaceOnDownscale so the block can be passed knowingly', () => {
+      renderBlockedByDownscale();
+
+      expect(screen.getByRole('button', { name: /replace original/i })).not.toBeDisabled();
+    });
+
+    it('sends acknowledgeDownscale only after the escalated confirmation', async () => {
+      const apply = vi.fn().mockResolvedValue({ data: { status: 'ready' } });
+      const user = userEvent.setup();
+      renderBlockedByDownscale({ apply });
+
+      await user.click(screen.getByRole('button', { name: /replace original/i }));
+      expect(apply).not.toHaveBeenCalled();
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/you will lose resolution/i)).toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', { name: /^replace$/i }));
+
+      await waitFor(() => {
+        expect(apply).toHaveBeenCalledWith('replace', { acknowledgeDownscale: true });
+      });
     });
 
     it('renders the Replace button ENABLED when blockReplaceOnDownscale is true but the result is not downscaled', () => {

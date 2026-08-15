@@ -578,6 +578,7 @@ export class MediaEnhancementService {
     enhancementId: string,
     decision: 'keep_both' | 'replace',
     user: RequestUser,
+    options: { acknowledgeDownscale?: boolean } = {},
   ) {
     const row = await this.loadRowForItem(mediaItemId, enhancementId, user, 'collaborator');
 
@@ -588,7 +589,7 @@ export class MediaEnhancementService {
     if (decision === 'keep_both') {
       return this.applyKeepBoth(mediaItemId, row, user);
     }
-    return this.applyReplace(mediaItemId, row, user);
+    return this.applyReplace(mediaItemId, row, user, options.acknowledgeDownscale === true);
   }
 
   private async applyKeepBoth(
@@ -776,10 +777,12 @@ export class MediaEnhancementService {
     mediaItemId: string,
     row: Awaited<ReturnType<PrismaService['mediaEnhancement']['findUniqueOrThrow']>>,
     user: RequestUser,
+    acknowledgeDownscale = false,
   ) {
     const settings = await this.systemSettings.getSettings();
     const enhCfg = settings.pictureEnhancement;
 
+    // HARD policy — no acknowledgement can pass this one (issue #426).
     if (enhCfg && enhCfg.allowReplace === false) {
       throw new BadRequestException('Replace is disabled by administrator policy');
     }
@@ -799,14 +802,21 @@ export class MediaEnhancementService {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    // Downscale-block policy.
+    // Downscale guard — a CONFIRM-THROUGH speed bump, not a wall (issue #426).
+    // `gpt-image-1` caps its output at ~1.6 MP, so `downscaled` is true for
+    // essentially every real photo; treating this as absolute made replace
+    // permanently unreachable. The client only sends the acknowledgement from
+    // behind an escalated confirmation that states the exact resolution loss,
+    // and the decision is recorded in the `media_enhancement:applied` audit
+    // event below.
     const downscaled =
       !!source.width &&
       !!source.height &&
       !!row.enhancedWidth &&
       !!row.enhancedHeight &&
       row.enhancedWidth * row.enhancedHeight < source.width * source.height;
-    if (enhCfg?.blockReplaceOnDownscale === true && downscaled) {
+    const downscaleAcknowledged = downscaled && acknowledgeDownscale;
+    if (enhCfg?.blockReplaceOnDownscale === true && downscaled && !acknowledgeDownscale) {
       throw new BadRequestException(
         'Replace is blocked because the enhanced image is lower resolution than the original',
       );
@@ -905,6 +915,10 @@ export class MediaEnhancementService {
       decision: 'replace',
       model: row.model,
       status,
+      downscaled,
+      // Only meaningful when the admin guard was actually in force; recorded so
+      // an informed override is distinguishable from an ordinary replace.
+      downscaleAcknowledged,
     });
 
     this.logger.log(

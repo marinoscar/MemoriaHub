@@ -167,7 +167,9 @@ export class MediaEnhancementController {
     @CurrentUser() user: RequestUser,
     @Res({ passthrough: true }) res: FastifyReply,
   ) {
-    const result = await this.service.applyEnhancement(id, enhancementId, dto.decision, user);
+    const result = await this.service.applyEnhancement(id, enhancementId, dto.decision, user, {
+      acknowledgeDownscale: dto.acknowledgeDownscale === true,
+    });
     res.status(dto.decision === 'keep_both' ? HttpStatus.CREATED : HttpStatus.OK);
     return result;
   }

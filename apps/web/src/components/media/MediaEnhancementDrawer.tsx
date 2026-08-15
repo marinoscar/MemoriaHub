@@ -21,7 +21,6 @@ import {
   Select,
   MenuItem,
   TextField,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -38,7 +37,6 @@ import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural
 import TuneIcon from '@mui/icons-material/Tune';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
@@ -47,6 +45,7 @@ import type { MediaItem } from '../../types/media';
 import { useMediaEnhance } from '../../hooks/useMediaEnhance';
 import type { EnhanceUiStatus } from '../../hooks/useMediaEnhance';
 import { BeforeAfterSlider } from './BeforeAfterSlider';
+import { ReplaceDownscaleNotice, describeResolutionLoss } from './ReplaceDownscaleNotice';
 import type {
   EnhanceParams,
   EnhancePreset,
@@ -491,7 +490,9 @@ export function MediaEnhancementDrawer({
         reset();
         handleClose();
       } else {
-        await apply('replace');
+        // The acknowledgement is only sent when the admin guard is actually in
+        // force for THIS result — never as a blanket flag (issue #426).
+        await apply('replace', { acknowledgeDownscale: replaceNeedsDownscaleAck });
         onReplaced?.();
         reset();
         handleClose();
@@ -513,9 +514,20 @@ export function MediaEnhancementDrawer({
       enhanced.width * (enhanced.height ?? 0) < original.width * (original.height ?? 0));
 
   // ---- Replace policy ------------------------------------------------------
+  // `allowReplace: false` is a HARD policy (button hidden entirely).
+  // `blockReplaceOnDownscale` is a CONFIRM-THROUGH guard (issue #426): the
+  // button stays usable, but the commit carries an explicit acknowledgement
+  // and the confirmation dialog escalates to name the exact resolution loss.
   const allowReplace = replacePolicy?.allowReplace ?? true;
   const blockReplaceOnDownscale = replacePolicy?.blockReplaceOnDownscale ?? false;
-  const replaceBlockedByDownscale = allowReplace && blockReplaceOnDownscale && Boolean(downscaled);
+  const replaceNeedsDownscaleAck =
+    allowReplace && blockReplaceOnDownscale && Boolean(downscaled);
+  const resolutionLoss = describeResolutionLoss(
+    original?.width ?? item.width ?? null,
+    original?.height ?? item.height ?? null,
+    enhanced?.width ?? null,
+    enhanced?.height ?? null,
+  );
 
   // ---- Progress ticker -----------------------------------------------------
   const [now, setNow] = useState(() => Date.now());
@@ -833,11 +845,12 @@ export function MediaEnhancementDrawer({
                 </Typography>
               )}
 
+              {/* Always rendered — never a hover-only tooltip (issue #426). */}
               {downscaled && (
-                <Alert severity="warning" icon={<WarningAmberIcon fontSize="inherit" />}>
-                  The enhanced image is smaller than the original. Replacing will
-                  lower this photo&apos;s resolution.
-                </Alert>
+                <ReplaceDownscaleNotice
+                  policyBlocked={replaceNeedsDownscaleAck}
+                  resolutionLoss={resolutionLoss}
+                />
               )}
 
               <Divider />
@@ -853,27 +866,15 @@ export function MediaEnhancementDrawer({
                 </Button>
 
                 {allowReplace ? (
-                  <Tooltip
-                    title={
-                      replaceBlockedByDownscale
-                        ? 'Replacing is blocked because the enhanced image is lower resolution than the original. Choose "Keep both" instead.'
-                        : ''
-                    }
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    color="warning"
+                    onClick={() => setPendingDecision('replace')}
+                    sx={{ minHeight: 44 }}
                   >
-                    {/* span keeps the tooltip working on a disabled button */}
-                    <span>
-                      <Button
-                        fullWidth
-                        variant="outlined"
-                        color="warning"
-                        disabled={replaceBlockedByDownscale}
-                        onClick={() => setPendingDecision('replace')}
-                        sx={{ minHeight: 44 }}
-                      >
-                        Replace original
-                      </Button>
-                    </span>
-                  </Tooltip>
+                    Replace original
+                  </Button>
                 ) : (
                   <Typography variant="caption" color="text.secondary">
                     An administrator has disabled replacing originals, so the enhanced
@@ -914,9 +915,24 @@ export function MediaEnhancementDrawer({
             )}
             {pendingDecision === 'replace' && (
               <>
-                The original file is overwritten with the enhanced version.{' '}
+                The original file is overwritten in place with the enhanced
+                version — there is no version history.{' '}
                 <strong>The original cannot be recovered afterwards.</strong> The
                 photo&apos;s date, location and camera details are preserved.
+                {downscaled && (
+                  <Box component="span" sx={{ display: 'block', mt: 1.5 }}>
+                    <strong>You will lose resolution:</strong>{' '}
+                    {resolutionLoss ?? 'the enhanced image is smaller than the original'}
+                    .
+                    {replaceNeedsDownscaleAck && (
+                      <>
+                        {' '}
+                        An administrator has set replacing to be blocked when the
+                        result is smaller; continuing records your acknowledgement.
+                      </>
+                    )}
+                  </Box>
+                )}
               </>
             )}
             {pendingDecision === 'discard' && (

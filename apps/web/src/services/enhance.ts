@@ -257,15 +257,27 @@ export async function getLatestEnhancement(
   }
 }
 
-/** Commit the result: create a new item (keep_both) or overwrite the original (replace). */
+/**
+ * Commit the result: create a new item (keep_both) or overwrite the original
+ * (replace).
+ *
+ * `acknowledgeDownscale` passes the `blockReplaceOnDownscale` guard (issue
+ * #426). Send it ONLY from behind an explicit confirmation that names the
+ * resolution loss — it is informed consent, not a default. It has no effect on
+ * `allowReplace: false`, which stays an absolute block.
+ */
 export async function applyEnhancement(
   id: string,
   enhancementId: string,
   decision: ApplyDecision,
+  options: { acknowledgeDownscale?: boolean } = {},
 ): Promise<ApplyEnhancementResult> {
   return api.post<ApplyEnhancementResult>(
     `/media/${id}/enhance/${enhancementId}/apply`,
-    { decision },
+    {
+      decision,
+      ...(options.acknowledgeDownscale ? { acknowledgeDownscale: true } : {}),
+    },
   );
 }
 

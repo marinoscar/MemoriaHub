@@ -425,7 +425,7 @@ describe('useMediaEnhance', () => {
         await result.current.apply('keep_both');
       });
 
-      expect(mockApplyEnhancement).toHaveBeenCalledWith('media-1', 'enh-older', 'keep_both');
+      expect(mockApplyEnhancement).toHaveBeenCalledWith('media-1', 'enh-older', 'keep_both', {});
     });
 
     it('still resolves the latest when called with no argument', async () => {
@@ -463,7 +463,7 @@ describe('useMediaEnhance', () => {
 
       const res = await result.current.apply('replace');
 
-      expect(mockApplyEnhancement).toHaveBeenCalledWith('media-1', 'enh-1', 'replace');
+      expect(mockApplyEnhancement).toHaveBeenCalledWith('media-1', 'enh-1', 'replace', {});
       expect(res).toEqual({ status: 'ready', width: 100, height: 100 });
     });
   });

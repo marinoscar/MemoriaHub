@@ -55,7 +55,10 @@ function EnhancerSettingsContent() {
   const [allowReplace, setAllowReplace] = useState(true);
   const [blockReplaceOnDownscale, setBlockReplaceOnDownscale] = useState(false);
   const [maxInputMegapixels, setMaxInputMegapixels] = useState('50');
-  const [retentionHours, setRetentionHours] = useState('72');
+  // Mirrors the server default (settings.schema.ts), raised to 168h in #201.
+  // Keeping a stale 72 here would silently downgrade a 7-day retention to 3
+  // days on the next save if the server ever omitted the field.
+  const [retentionHours, setRetentionHours] = useState('168');
   const [paramSaving, setParamSaving] = useState(false);
 
   // Feedback
@@ -89,7 +92,7 @@ function EnhancerSettingsContent() {
     setAllowReplace(pe?.allowReplace ?? true);
     setBlockReplaceOnDownscale(pe?.blockReplaceOnDownscale ?? false);
     setMaxInputMegapixels(String(pe?.maxInputMegapixels ?? 50));
-    setRetentionHours(String(pe?.retentionHours ?? 72));
+    setRetentionHours(String(pe?.retentionHours ?? 168));
   }, [settings]);
 
   const featureEnabled = settings?.features?.pictureEnhancement ?? false;
@@ -434,8 +437,12 @@ function EnhancerSettingsContent() {
               sx={{ display: 'block' }}
             />
             <Typography variant="body2" color="text.secondary">
-              The AI model caps output resolution, so an enhanced photo is often smaller than the
-              original; turn this on to forbid replacing a higher-resolution original.
+              The image model caps its output at roughly 1.6 megapixels, so an enhanced photo is
+              smaller than essentially <em>every</em> real photo — anything above ~1.6 MP, which
+              includes any phone or scanner image. Turning this on therefore affects nearly every
+              enhancement, not a rare edge case. Users are still told exactly what resolution they
+              would lose and can go ahead after confirming it — the switch above is the one that
+              forbids replacing outright.
             </Typography>
           </Box>
 

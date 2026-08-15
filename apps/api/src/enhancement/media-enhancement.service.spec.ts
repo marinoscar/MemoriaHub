@@ -23,7 +23,8 @@
  *     - replace: overwrites the ORIGINAL object's key, nulls contentHash,
  *       merges the _aiEnhanced breadcrumb into existing metadata,
  *       reprocesses, re-enqueues face_detection, staging deleted, row ->
- *       applied/replace; allowReplace=false 400; downscale-block 400
+ *       applied/replace; allowReplace=false 400 (HARD, no override);
+ *       downscale-block 400 unless acknowledgeDownscale passes it (#426)
  *   - discardEnhancement: RBAC (collaborator), deletes staging, row -> discarded
  */
 
@@ -887,6 +888,95 @@ describe('MediaEnhancementService', () => {
         );
 
         await expect(service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER)).resolves.toBeDefined();
+      });
+
+      // Issue #426. gpt-image-1 caps output at ~1.6 MP, so `downscaled` is true
+      // for essentially every real photo; treating the guard as absolute made
+      // replace permanently unreachable. It is a confirm-through speed bump.
+      it('allows a downscaled replace when the caller acknowledges the downscale', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue(
+          makeSettings({
+            pictureEnhancement: { ...makeSettings().pictureEnhancement, blockReplaceOnDownscale: true },
+          }),
+        );
+        (mockPrisma.mediaEnhancement.findUnique as jest.Mock).mockResolvedValue(
+          makeEnhancementRow({ enhancedWidth: 512, enhancedHeight: 384 }),
+        );
+
+        await expect(
+          service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER, {
+            acknowledgeDownscale: true,
+          }),
+        ).resolves.toBeDefined();
+        expect(mockObjectProvider.upload).toHaveBeenCalled();
+      });
+
+      it('records the acknowledged override in the audit event', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue(
+          makeSettings({
+            pictureEnhancement: { ...makeSettings().pictureEnhancement, blockReplaceOnDownscale: true },
+          }),
+        );
+        (mockPrisma.mediaEnhancement.findUnique as jest.Mock).mockResolvedValue(
+          makeEnhancementRow({ enhancedWidth: 512, enhancedHeight: 384 }),
+        );
+
+        await service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER, {
+          acknowledgeDownscale: true,
+        });
+
+        expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              meta: expect.objectContaining({
+                decision: 'replace',
+                downscaled: true,
+                downscaleAcknowledged: true,
+              }),
+            }),
+          }),
+        );
+      });
+
+      // `allowReplace: false` is a HARD policy — no acknowledgement passes it.
+      it('still 400s on allowReplace:false even with acknowledgeDownscale', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue(
+          makeSettings({
+            pictureEnhancement: { ...makeSettings().pictureEnhancement, allowReplace: false },
+          }),
+        );
+
+        await expect(
+          service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER, {
+            acknowledgeDownscale: true,
+          }),
+        ).rejects.toThrow('Replace is disabled by administrator policy');
+        expect(mockObjectProvider.upload).not.toHaveBeenCalled();
+      });
+
+      // The acknowledgement must not become a blanket "skip the guard" flag —
+      // it only ever applies to a result that IS downscaled.
+      it('leaves a non-downscaled acknowledged replace unaffected', async () => {
+        mockSystemSettings.getSettings.mockResolvedValue(
+          makeSettings({
+            pictureEnhancement: { ...makeSettings().pictureEnhancement, blockReplaceOnDownscale: true },
+          }),
+        );
+
+        await service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER, {
+          acknowledgeDownscale: true,
+        });
+
+        expect(mockPrisma.auditEvent.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              meta: expect.objectContaining({
+                downscaled: false,
+                downscaleAcknowledged: false,
+              }),
+            }),
+          }),
+        );
       });
     });
   });

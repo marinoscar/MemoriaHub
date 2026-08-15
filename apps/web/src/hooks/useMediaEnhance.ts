@@ -158,11 +158,14 @@ export function useMediaEnhance(mediaId: string) {
 
   /** Commit the current enhancement (keep_both / replace). */
   const apply = useCallback(
-    async (decision: ApplyDecision): Promise<ApplyEnhancementResult> => {
+    async (
+      decision: ApplyDecision,
+      options: { acknowledgeDownscale?: boolean } = {},
+    ): Promise<ApplyEnhancementResult> => {
       if (!idRef.current) {
         throw new Error('No enhancement to apply');
       }
-      return applyEnhancement(mediaId, idRef.current, decision);
+      return applyEnhancement(mediaId, idRef.current, decision, options);
     },
     [mediaId],
   );
