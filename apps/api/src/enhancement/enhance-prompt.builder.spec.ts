@@ -197,6 +197,58 @@ describe('buildEnhancePrompt', () => {
       expect(presetIdx).toBeLessThan(adjustmentIdx);
     });
 
+    // Issue #436: restoring a scan of an old family photo was coming back with
+    // redrawn faces. The generic always-on preserveFaces sentence is not enough
+    // on THIS preset, because "repair the damage" and "don't alter the face"
+    // are in direct conflict on a damaged face and repair was winning. These
+    // assertions pin the three obligations named in PRESET_CLAUSE's comment;
+    // the exact wording may be rewritten, the obligations may not be dropped.
+    it('restore_old_photo: names the specific facial geometry, not just "the face"', () => {
+      const prompt = buildEnhancePrompt({ preset: 'restore_old_photo' }, 'balanced');
+
+      expect(prompt).toContain(
+        'Do NOT redraw, reshape, re-detail or re-age any face: leave facial features, eyes, mouth, and jawline exactly as they appear in the original, even where they remain soft, blurred, or damaged.',
+      );
+    });
+
+    it('restore_old_photo: explicitly permits leaving facial damage unrepaired', () => {
+      const prompt = buildEnhancePrompt({ preset: 'restore_old_photo' }, 'balanced');
+
+      expect(prompt).toContain(
+        'It is better to leave a face imperfect than to change who the person looks like.',
+      );
+    });
+
+    it('restore_old_photo: asks for the original grain and paper texture to be preserved', () => {
+      const prompt = buildEnhancePrompt({ preset: 'restore_old_photo' }, 'balanced');
+
+      expect(prompt).toContain('Preserve the original film grain and paper texture.');
+    });
+
+    it('restore_old_photo: the identity clause survives intent=custom with free-text instructions', () => {
+      const prompt = buildEnhancePrompt(
+        {
+          preset: 'restore_old_photo',
+          intent: 'custom',
+          instructions: 'Focus on the torn top-left corner.',
+          adjustments: { tone: true, sharpness: false },
+        },
+        'subtle',
+      );
+
+      expect(prompt).toContain(
+        'Do NOT redraw, reshape, re-detail or re-age any face: leave facial features, eyes, mouth, and jawline exactly as they appear in the original, even where they remain soft, blurred, or damaged.',
+      );
+      expect(prompt).toContain(
+        'It is better to leave a face imperfect than to change who the person looks like.',
+      );
+      // The preset clause precedes the appended free text, so the user's own
+      // guidance cannot displace it.
+      expect(prompt.indexOf('It is better to leave a face imperfect')).toBeLessThan(
+        prompt.indexOf('Additional guidance: Focus on the torn top-left corner.'),
+      );
+    });
+
     it('low_light: includes the low-light characteristic clause', () => {
       const prompt = buildEnhancePrompt({ preset: 'low_light' }, 'balanced');
 
