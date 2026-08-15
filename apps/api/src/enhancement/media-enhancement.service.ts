@@ -29,8 +29,10 @@ import { SystemSettingsService } from '../settings/system-settings/system-settin
 import { isPictureEnhancementEnabled } from '../common/types/settings.types';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
+import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
 import { ListEnhancementBatchesQuery } from './dto/list-enhancement-batches-query.dto';
 import {
   ListEnhancementsQuery,
@@ -321,6 +323,209 @@ export class MediaEnhancementService {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // POST /api/media/bulk/enhance/by-filter — batch enhance a filter (issue #424)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Queue an AI enhancement for every photo matching a gallery filter.
+   *
+   * This is the ONLY path where a single click enqueues a set the user never
+   * enumerated, so it is also the only one that can spend real money on items
+   * nobody named. Three guards exist purely for that reason, all below:
+   *
+   *   1. `deletedAt` and `archivedAt` are pinned EXPLICITLY, because
+   *      buildMediaWhere pins neither for us (see resolveFilterWhere).
+   *   2. Photo-only is expressed in SQL, not as a post-filter, so the count the
+   *      user is refused with is the count that would actually have run.
+   *   3. An over-cap match is REFUSED with both numbers. It is never truncated.
+   *
+   * Gate ORDER matches startBatch (feature → model → …) so the disabled and
+   * unconfigured paths are byte-identical between the two endpoints. The one
+   * deliberate difference: authorization runs BEFORE the cap check here, not
+   * after. startBatch's cap is a pure count of client-supplied ids, but this
+   * one's requires counting rows in the circle — reporting `matchedCount` to a
+   * caller who turned out not to be a member would leak the circle's contents.
+   */
+  async startBatchByFilter(dto: BulkEnhanceByFilter, user: RequestUser) {
+    const settings = await this.systemSettings.getSettings();
+
+    // Feature gate: the SHARED helper (system setting + env kill-switch),
+    // identical to startBatch's — never a second hand-rolled gate.
+    if (!isPictureEnhancementEnabled(settings)) {
+      throw new BadRequestException('Picture enhancement is disabled');
+    }
+
+    const enhanceCfg = settings.ai?.features?.enhance;
+    if (!enhanceCfg?.provider || !enhanceCfg?.model) {
+      throw new BadRequestException(
+        'No enhancement model configured (ai.features.enhance is unset)',
+      );
+    }
+
+    // ONE authorization pass for the whole batch — and before any count, per
+    // the ordering note above.
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      dto.circleId,
+      user.permissions,
+      CircleRole.collaborator,
+    );
+
+    const where = this.resolveFilterWhere(dto);
+
+    const maxBatchSize = settings.pictureEnhancement?.maxBatchSize ?? 25;
+    const matchedCount = await this.prisma.mediaItem.count({ where });
+
+    if (matchedCount === 0) {
+      throw new BadRequestException('No photos match this filter');
+    }
+
+    if (matchedCount > maxBatchSize) {
+      // NEVER truncate to the first `maxBatchSize` matches. A user who filters
+      // to 400 photos and silently gets 25 enhanced — chosen by an ordering
+      // they cannot see — has been charged for a result they did not ask for
+      // and cannot reason about. Refusing with BOTH numbers lets them narrow
+      // the filter or ask an admin to raise the cap.
+      //
+      // `matchedCount`/`maxBatchSize` MUST live under `details`: the app-wide
+      // HttpExceptionFilter rebuilds every error body from a fixed key
+      // allowlist (message, code, details, error, error_description,
+      // startedAt), so a top-level custom field is silently dropped and never
+      // reaches the client — while err.getResponse() in a unit test still
+      // shows it present. Documented repo gotcha; it has bitten before.
+      throw new BadRequestException({
+        message: `${matchedCount} photos match this filter; the limit is ${maxBatchSize} per batch.`,
+        details: { matchedCount, maxBatchSize },
+      });
+    }
+
+    // A plain findMany with no pagination is safe ONLY because the cap check
+    // above already bounded the result to maxBatchSize rows. This deliberately
+    // does NOT copy addAlbumItemsByFilter's unbounded id fetch, which is fine
+    // for cheap album joins and not for a set that costs money to process.
+    const matches = await this.prisma.mediaItem.findMany({
+      where,
+      select: { id: true },
+    });
+
+    return this.createBatchFrom(
+      matches.map((m) => m.id),
+      dto.circleId,
+      dto.params ?? {},
+      'filter',
+      user,
+      // Provenance: the resolved filter is snapshotted onto the BATCH row so a
+      // reviewer can later see what the user actually asked for, not just how
+      // many items it happened to match.
+      this.snapshotFilter(dto),
+    );
+  }
+
+  /**
+   * Compile a by-filter request into the Prisma `where` the batch is resolved
+   * from. Three predicates are pinned here that buildMediaWhere will NOT add:
+   *
+   *  - `deletedAt: null` — buildMediaWhere never filters trash for us. Its
+   *    `excludeArchived` flag touches ONLY `archivedAt`. Without this pin a
+   *    by-filter enhance would spend real money re-rendering photos sitting in
+   *    the Trash.
+   *  - `archivedAt: null` — pinned directly rather than via `excludeArchived`,
+   *    so the guarantee does not depend on a flag another caller could stop
+   *    passing.
+   *  - `type: photo` — enhancement is photo-only, and this belongs in the SQL
+   *    rather than a post-filter: counting videos and then skipping them would
+   *    make the cap check (and the number the user is refused with) lie.
+   *
+   * A caller that explicitly filters `type=video` therefore matches nothing and
+   * gets the "no photos match" 400 — which is the honest answer.
+   */
+  private resolveFilterWhere(dto: BulkEnhanceByFilter): Prisma.MediaItemWhereInput {
+    const {
+      circleId,
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      albumId,
+      favorite,
+      tag,
+      country,
+      region,
+      locality,
+      place,
+      location,
+      contentHash,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
+      missingCapturedAt,
+      missingCamera,
+      noFaces,
+      personId,
+      personIds,
+      peopleMatch,
+    } = dto;
+
+    // People filtering is NOT part of buildMediaWhere — it is the separate
+    // wherePeople() export (same split as MediaService.addAlbumItemsByFilter).
+    const effectivePersonIds =
+      personIds && personIds.length > 0 ? personIds : personId ? [personId] : [];
+
+    return {
+      ...buildMediaWhere(circleId, {
+        type,
+        capturedAtFrom,
+        capturedAtTo,
+        albumId,
+        favorite,
+        tag,
+        country,
+        region,
+        locality,
+        place,
+        location,
+        contentHash,
+        cameraMake,
+        cameraModel,
+        sourceDeviceId,
+        sourceDeviceName,
+        missingGeo,
+        missingCapturedAt,
+        missingCamera,
+        noFaces,
+      }),
+      ...(effectivePersonIds.length > 0
+        ? wherePeople(effectivePersonIds, peopleMatch ?? 'any')
+        : {}),
+      // The three pins — see the doc comment above. Kept last so they can never
+      // be shadowed by a spread.
+      deletedAt: null,
+      archivedAt: null,
+      type: MediaType.photo,
+    };
+  }
+
+  /**
+   * Project a by-filter request down to the filter fields that were actually
+   * supplied, for storage on the batch row. `params` is excluded (it is stored
+   * on its own), and `undefined` values are dropped so the snapshot reads as
+   * "what the user set", not "every field the DTO knows about".
+   *
+   * The two date fields arrive as JS `Date`s (the DTO pipes them through
+   * `z.coerce.date()`), which is not a JSON value — so they are stringified
+   * here explicitly rather than leaning on Prisma's Date-in-JSONB coercion.
+   */
+  private snapshotFilter(dto: BulkEnhanceByFilter): Record<string, unknown> {
+    const { params: _params, ...filter } = dto;
+    return Object.fromEntries(
+      Object.entries(filter)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, v instanceof Date ? v.toISOString() : v]),
+    );
+  }
+
   /**
    * Post-authorization half of a batch enhance: partition the ids, create the
    * batch row, then create + enqueue one enhancement per eligible item.
@@ -335,6 +540,14 @@ export class MediaEnhancementService {
     params: EnhanceParams,
     source: 'selection' | 'filter',
     user: RequestUser,
+    /**
+     * Optional provenance for a `source: 'filter'` batch — the resolved filter,
+     * recorded on the BATCH row's params under `_filter` (the repo-wide
+     * underscore convention for internal/derived keys). Deliberately NOT copied
+     * onto the per-item enhancement rows: those carry the enhance params the
+     * prompt was compiled from, and a filter is not one of them.
+     */
+    filterSnapshot?: Record<string, unknown>,
   ) {
     // Cached (5 s TTL) — no extra DB read path.
     const settings = await this.systemSettings.getSettings();
@@ -437,7 +650,9 @@ export class MediaEnhancementService {
         requestedCount: ids.length,
         queuedCount: 0,
         skipped: skipped as unknown as Prisma.InputJsonValue,
-        params: (params ?? {}) as Prisma.InputJsonValue,
+        params: (filterSnapshot
+          ? { ...(params ?? {}), _filter: filterSnapshot }
+          : (params ?? {})) as Prisma.InputJsonValue,
         source,
         createdById: user.id,
       },
