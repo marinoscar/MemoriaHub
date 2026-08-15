@@ -338,9 +338,18 @@ export class MediaEnhancementService {
   ) {
     // Cached (5 s TTL) — no extra DB read path.
     const settings = await this.systemSettings.getSettings();
+
+    // Re-checked rather than assumed from the caller: this helper is the reuse
+    // seam for #424's by-filter entry point, and a future caller that forgot the
+    // gate would otherwise write rows with an undefined provider/model.
     const enhanceCfg = settings.ai?.features?.enhance;
-    const provider = enhanceCfg!.provider;
-    const model = params.model ?? enhanceCfg!.model;
+    if (!enhanceCfg?.provider || !enhanceCfg?.model) {
+      throw new BadRequestException(
+        'No enhancement model configured (ai.features.enhance is unset)',
+      );
+    }
+    const provider = enhanceCfg.provider;
+    const model = params.model ?? enhanceCfg.model;
 
     const items = await this.prisma.mediaItem.findMany({
       where: { id: { in: ids } },
