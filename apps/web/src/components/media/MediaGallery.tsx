@@ -82,6 +82,7 @@ import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BatchEnhanceDialog } from './BatchEnhanceDialog';
+import type { BatchEnhanceTarget } from './BatchEnhanceDialog';
 import { BulkActionToolbar } from './BulkActionToolbar';
 import type { BulkEffect, BulkSuccessOptions } from './BulkActionToolbar';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
@@ -736,7 +737,16 @@ export function MediaGallery({
   const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
 
-  const [batchEnhanceOpen, setBatchEnhanceOpen] = useState(false);
+  /**
+   * Which batch-enhance target the dialog is open for (issue #424), or null
+   * when closed. A single piece of state rather than two booleans, so the two
+   * modes can never both be open — they answer the same question differently
+   * ("these photos" vs "every photo matching this filter") and showing both at
+   * once would be ambiguous about what a click actually enqueues.
+   */
+  const [batchEnhanceKind, setBatchEnhanceKind] = useState<'selection' | 'filter' | null>(
+    null,
+  );
 
   const singleSelectedItem = useMemo<MediaItem | null>(() => {
     if (selected.size !== 1) return null;
@@ -763,6 +773,50 @@ export function MediaGallery({
 
   /** The item the single-photo enhance drawer acts on, if exactly one. */
   const enhanceTargetItem = selectedPhotos.length === 1 ? selectedPhotos[0] : null;
+
+  /**
+   * "Enhance all matching" target (issue #424) — null when the view has no
+   * active filter, which is also how the menu item stays hidden.
+   *
+   * `photoCount` is deliberately null: the gallery is keyset-paginated, so
+   * there is no COUNT(*) to report and the loaded pages are NOT the match set.
+   * The server's over-cap 400 supplies the real `matchedCount` instead — a
+   * plausible-looking number from the loaded pages would be worse than none.
+   */
+  const filterEnhanceTarget = useMemo<BatchEnhanceTarget | null>(() => {
+    // Trash and Archive render their own toolbars and are out of scope for
+    // enhancement entirely; controlled mode has no filter to speak of.
+    if (mode !== 'home' || !queryParams) return null;
+
+    const {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      page: _p, pageSize: _ps, cursor: _c, sortBy: _sb, sortOrder: _so,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      circleId: _cid,
+      ...rest
+    } = queryParams;
+
+    const filters = Object.fromEntries(
+      Object.entries(rest).filter(([key, value]) => {
+        if (value === undefined || value === null || value === '') return false;
+        if (Array.isArray(value) && value.length === 0) return false;
+        // In album mode the albumId is the view, not a filter the user applied
+        // — AlbumPage carries its own, better-worded entry point for that set.
+        if (albumId && key === 'albumId') return false;
+        return true;
+      }),
+    );
+
+    if (Object.keys(filters).length === 0) return null;
+
+    return {
+      kind: 'filter',
+      circleId,
+      scope: 'filter',
+      filters,
+      photoCount: null,
+    };
+  }, [mode, queryParams, albumId, circleId]);
 
   // -------------------------------------------------------------------------
   // Bulk success handler
@@ -1063,7 +1117,12 @@ export function MediaGallery({
           enhanceEnabled={enhanceEnabled}
           maxBatchSize={pictureEnhancement?.maxBatchSize}
           onOpenEnhance={() => setEnhanceOpen(true)}
-          onOpenBatchEnhance={() => setBatchEnhanceOpen(true)}
+          onOpenBatchEnhance={() => setBatchEnhanceKind('selection')}
+          // Passed only when a filter is genuinely active — its absence is what
+          // hides the menu item, so no view has to opt out of it explicitly.
+          onOpenFilterEnhance={
+            filterEnhanceTarget ? () => setBatchEnhanceKind('filter') : undefined
+          }
         />
       )}
 
@@ -1326,16 +1385,20 @@ export function MediaGallery({
         />
       )}
 
-      {/* AI enhancement dialog (multi-photo batch) */}
+      {/* AI enhancement dialog (multi-photo batch — selection or filter) */}
       <BatchEnhanceDialog
-        open={batchEnhanceOpen}
-        onClose={() => setBatchEnhanceOpen(false)}
-        target={{
-          kind: 'selection',
-          circleId,
-          photoIds: selectedPhotos.map((it) => it.id),
-          nonPhotoCount: selectedItems.length - selectedPhotos.length,
-        }}
+        open={batchEnhanceKind !== null}
+        onClose={() => setBatchEnhanceKind(null)}
+        target={
+          batchEnhanceKind === 'filter' && filterEnhanceTarget
+            ? filterEnhanceTarget
+            : {
+                kind: 'selection',
+                circleId,
+                photoIds: selectedPhotos.map((it) => it.id),
+                nonPhotoCount: selectedItems.length - selectedPhotos.length,
+              }
+        }
         maxBatchSize={pictureEnhancement?.maxBatchSize ?? 25}
         modelLabel={pictureEnhancement?.model ?? undefined}
         // Queueing changes nothing about the items yet, so this is the ordinary
@@ -1343,7 +1406,7 @@ export function MediaGallery({
         // toast is then re-set with the batch id so it carries a link to the
         // progress page — without it a queued batch vanishes from view.
         onSuccess={(msg, batchId) => {
-          setBatchEnhanceOpen(false);
+          setBatchEnhanceKind(null);
           handleBulkSuccess(msg);
           setSnackbar({ message: msg, severity: 'success', batchId });
         }}

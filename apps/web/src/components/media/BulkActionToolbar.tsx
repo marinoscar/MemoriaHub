@@ -125,6 +125,15 @@ interface BulkActionToolbarProps {
   onOpenEnhance?: () => void;
   /** Open the batch enhance dialog for a multi-photo selection. */
   onOpenBatchEnhance?: () => void;
+  /**
+   * Open the batch enhance dialog for EVERY photo matching the view's active
+   * filter, not just the selected ones (issue #424).
+   *
+   * Supplied only when a filter is actually active — the host owns that
+   * decision, since only it knows what its query params mean. Absent (the
+   * default) simply hides the menu item, so no caller has to opt out.
+   */
+  onOpenFilterEnhance?: () => void;
 }
 
 export function BulkActionToolbar({
@@ -148,6 +157,7 @@ export function BulkActionToolbar({
   maxBatchSize,
   onOpenEnhance,
   onOpenBatchEnhance,
+  onOpenFilterEnhance,
 }: BulkActionToolbarProps) {
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -172,6 +182,14 @@ export function BulkActionToolbar({
   const openEnhance = isBatchEnhance ? onOpenBatchEnhance : onOpenEnhance;
   const canEnhance =
     Boolean(enhanceEnabled) && enhancePhotoCount > 0 && !isViewer && Boolean(openEnhance);
+
+  /**
+   * "Enhance all matching" — deliberately NOT counted from `selectedItems`.
+   * It acts on the server-resolved match set, which is exactly why the dialog
+   * behind it spells out that off-screen photos are included.
+   */
+  const canFilterEnhance =
+    Boolean(enhanceEnabled) && !isViewer && Boolean(onOpenFilterEnhance);
 
   const enhanceLabel = `AI Enhance ${enhancePhotoCount} photo${enhancePhotoCount !== 1 ? 's' : ''}`;
   const enhanceTooltip =
@@ -398,6 +416,25 @@ export function BulkActionToolbar({
           <ListItemIcon><AutoAwesomeIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Re-run AI tagging</ListItemText>
         </MenuItem>
+        {canFilterEnhance && [
+          <Divider key="filter-enhance-divider" />,
+          <MenuItem
+            key="filter-enhance"
+            onClick={() => {
+              setMoreAnchor(null);
+              onOpenFilterEnhance?.();
+            }}
+            // MenuItem defaults to `white-space: nowrap`; the secondary line is
+            // a sentence, so without this it runs off the popover on a phone.
+            sx={{ whiteSpace: 'normal', maxWidth: 320 }}
+          >
+            <ListItemIcon><AutoFixHighIcon fontSize="small" /></ListItemIcon>
+            <ListItemText
+              primary="Enhance all matching"
+              secondary="Every photo in this filter, not just the selection"
+            />
+          </MenuItem>,
+        ]}
         <Divider />
         <MenuItem onClick={() => { setMoreAnchor(null); void handleFavorite(false); }}>
           <ListItemIcon><StarBorderIcon fontSize="small" /></ListItemIcon>
