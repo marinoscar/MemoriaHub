@@ -10,6 +10,11 @@ import {
   renderThumbnailBuffer,
   THUMBNAIL_CACHE_CONTROL,
 } from '../thumbnail-render.util';
+import {
+  buildThumbnailKey,
+  THUMBNAIL_KEY_PREFIX,
+  thumbnailVersionFromBytes,
+} from '../thumbnail-key.util';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
@@ -29,6 +34,14 @@ import { streamToBuffer, streamToTempFile } from './stream-utils';
  *   'thumbnails/', so the newly-created thumbnail StorageObject row never
  *   enters the pipeline.  Thumbnail objects are also given status 'ready' at
  *   creation time, so they would never be queued even if the guard were absent.
+ *
+ * Storage key (issue #434):
+ *   `thumbnails/<sourceObjectId>-<sha256(thumbBytes).slice(0,16)>.jpg` — versioned
+ *   and content-addressed, so re-rendering unchanged bytes reuses the same key
+ *   (idempotent upsert) while a destructive overwrite of the ORIGINAL lands at a
+ *   brand-new key. That is what makes the year-long `immutable` Cache-Control on
+ *   thumbnails, and MediaThumbnailService's signed-URL reuse, safe. See
+ *   ../thumbnail-key.util.ts.
  *
  * Image path:
  *   Buffers the stream → sharp resize to ≤THUMBNAIL_MAX_DIM px JPEG → upload → StorageObject.
@@ -89,7 +102,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
 
   canProcess(object: StorageObject): boolean {
     // Recursion guard: thumbnail objects live under 'thumbnails/' prefix
-    if (object.storageKey.startsWith('thumbnails/')) {
+    if (object.storageKey.startsWith(THUMBNAIL_KEY_PREFIX)) {
       return false;
     }
     return object.mimeType.startsWith('image/') || object.mimeType.startsWith('video/');
@@ -198,7 +211,12 @@ export class ThumbnailProcessor implements ObjectProcessor {
     object: StorageObject,
     thumbBuffer: Buffer,
   ): Promise<ObjectProcessorResult> {
-    const thumbKey = `thumbnails/${object.id}.jpg`;
+    // Content-addressed, versioned key (issue #434): identical bytes re-render
+    // to the identical key, so an ordinary reprocess stays a no-op upsert,
+    // while a destructive overwrite of the original lands its new thumbnail at
+    // a URL no cache has ever seen. Superseded keys are cleaned up afterwards
+    // by ThumbnailPruneService, once the MediaItem points at the new one.
+    const thumbKey = buildThumbnailKey(object.id, thumbnailVersionFromBytes(thumbBuffer));
 
     // Resolve the currently active storage provider so the thumbnail lands in
     // the same provider/bucket that new uploads are routed to.
@@ -216,8 +234,9 @@ export class ThumbnailProcessor implements ObjectProcessor {
     // Upsert a StorageObject row directly via Prisma (NOT emitting
     // OBJECT_UPLOADED_EVENT) so the pipeline never recurses.  status='ready'
     // means it will never be queued for processing even without the guard.
-    // Using upsert (keyed on the deterministic storageKey) makes reprocessing
-    // idempotent — no unique-constraint violation on repeated runs.
+    // Using upsert (keyed on the content-addressed storageKey) makes
+    // reprocessing idempotent — unchanged source bytes hash to the same key, so
+    // a repeated run updates the same row instead of violating its uniqueness.
     const thumbObject = await this.prisma.storageObject.upsert({
       where: { storageKey: thumbKey },
       update: {

@@ -32,6 +32,10 @@ import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.ser
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import {
+  buildThumbnailKey,
+  randomThumbnailVersion,
+} from '../storage/processing/thumbnail-key.util';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
@@ -473,12 +477,18 @@ export class NodesService {
    * The SERVER chooses the storage key — never the node — with a
    * per-job-type convention:
    *
-   *   - `thumbnail_regen` / `thumbnail_repair`: DETERMINISTIC key, matching
-   *     the exact convention the in-process pipeline uses
-   *     (`ThumbnailProcessor.uploadThumbnail`): `thumbnails/<originalObjectId>.jpg`,
-   *     keyed off the target MediaItem's StorageObject id, so a node-produced
-   *     thumbnail is indistinguishable in storage layout from a
-   *     server-produced one. Re-running the job overwrites the same key.
+   *   - `thumbnail_regen` / `thumbnail_repair`: a VERSIONED key under the same
+   *     convention the in-process pipeline uses
+   *     (`ThumbnailProcessor.uploadThumbnail`):
+   *     `thumbnails/<originalObjectId>-<version>.jpg`, keyed off the target
+   *     MediaItem's StorageObject id, so a node-produced thumbnail is
+   *     indistinguishable in storage layout from a server-produced one. The
+   *     server hashes the thumbnail BYTES for its version (issue #434); here
+   *     the key must be named before any bytes exist, so the version is
+   *     random. Re-running the job therefore writes a fresh key rather than
+   *     overwriting — which is the point: the old key may be cached as
+   *     `immutable` by browsers and CDNs. ThumbnailNodePersistService prunes
+   *     the superseded one once the MediaItem points at the new one.
    *
    *   - `video_face_detection`: a FRESH randomized key per call —
    *     `video-faces/<mediaItemId>/<uuid>.jpg` — matching the in-process
@@ -516,7 +526,10 @@ export class NodesService {
         );
       }
 
-      storageKey = `thumbnails/${mediaItem.storageObjectId}.jpg`;
+      storageKey = buildThumbnailKey(
+        mediaItem.storageObjectId,
+        randomThumbnailVersion(),
+      );
     } else if (job.type === 'video_face_detection') {
       storageKey = `video-faces/${job.mediaItemId}/${randomUUID()}.jpg`;
     } else {

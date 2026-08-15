@@ -6,6 +6,13 @@ import { STORAGE_PROVIDER } from '../../providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../../../test/mocks/prisma.mock';
 import { createMockStorageProvider } from '../../../../test/mocks/storage-provider.mock';
+import { buildThumbnailKey, thumbnailVersionFromBytes } from '../thumbnail-key.util';
+
+// The mocked sharp below always renders these exact bytes, so the versioned,
+// content-addressed thumbnail key (issue #434) is fully determined here.
+const FAKE_THUMB_BYTES = Buffer.from('fake-jpeg-data');
+const expectedThumbKey = (objectId: string) =>
+  buildThumbnailKey(objectId, thumbnailVersionFromBytes(FAKE_THUMB_BYTES));
 
 // ---------------------------------------------------------------------------
 // Mock sharp so the image path can be exercised without real image data
@@ -160,7 +167,7 @@ describe('ThumbnailProcessor', () => {
       await processor.process(object as any, getStream);
 
       expect(mockActiveProvider.upload).toHaveBeenCalledWith(
-        `thumbnails/${object.id}.jpg`,
+        expectedThumbKey(object.id),
         expect.any(Readable),
         expect.objectContaining({ mimeType: 'image/jpeg' }),
       );
@@ -174,7 +181,7 @@ describe('ThumbnailProcessor', () => {
       await processor.process(object as any, getStream);
 
       expect(mockActiveProvider.upload).toHaveBeenCalledWith(
-        `thumbnails/${object.id}.jpg`,
+        expectedThumbKey(object.id),
         expect.any(Readable),
         expect.objectContaining({
           cacheControl: 'public, max-age=31536000, immutable',
@@ -236,8 +243,60 @@ describe('ThumbnailProcessor', () => {
       expect(result.success).toBe(true);
       expect(result.metadata).toMatchObject({
         thumbnailObjectId: 'thumb-obj-1',
-        thumbnailStorageKey: `thumbnails/${object.id}.jpg`,
+        thumbnailStorageKey: expectedThumbKey(object.id),
       });
+    });
+
+    // -----------------------------------------------------------------------
+    // Issue #434 — the key is VERSIONED and CONTENT-ADDRESSED
+    // -----------------------------------------------------------------------
+
+    it('writes to a versioned thumbnails/<objectId>-<hash>.jpg key, never the bare <objectId>.jpg', async () => {
+      const object = makeStorageObject({ mimeType: 'image/jpeg' });
+      const getStream = async () => Readable.from([Buffer.from('fake')]);
+
+      await processor.process(object as any, getStream);
+
+      const [key] = mockActiveProvider.upload.mock.calls[0];
+      expect(key).toMatch(/^thumbnails\/obj-123-[0-9a-f]{16}\.jpg$/);
+      expect(key).not.toBe('thumbnails/obj-123.jpg');
+    });
+
+    it('reuses the SAME key when the rendered bytes are unchanged (reprocess stays an idempotent upsert)', async () => {
+      const object = makeStorageObject({ mimeType: 'image/jpeg' });
+      const getStream = async () => Readable.from([Buffer.from('fake')]);
+
+      await processor.process(object as any, getStream);
+      await processor.process(object as any, getStream);
+
+      const [firstKey] = mockActiveProvider.upload.mock.calls[0];
+      const [secondKey] = mockActiveProvider.upload.mock.calls[1];
+      expect(secondKey).toBe(firstKey);
+      expect(mockPrisma.storageObject.upsert).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ where: { storageKey: firstKey } }),
+      );
+    });
+
+    it('moves to a NEW key when the rendered bytes change — the destructive-overwrite case the stale grid tile came from', async () => {
+      const object = makeStorageObject({ mimeType: 'image/jpeg' });
+      const getStream = async () => Readable.from([Buffer.from('fake')]);
+
+      await processor.process(object as any, getStream);
+      const [firstKey] = mockActiveProvider.upload.mock.calls[0];
+
+      // Simulate the original's bytes having been overwritten (AI enhance
+      // replace / orientation edit): sharp now renders different thumbnail bytes.
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      sharpMock().toBuffer.mockResolvedValueOnce(Buffer.from('enhanced-jpeg-data'));
+
+      await processor.process(object as any, getStream);
+      const [secondKey] = mockActiveProvider.upload.mock.calls[1];
+
+      expect(secondKey).not.toBe(firstKey);
+      expect(secondKey).toBe(
+        buildThumbnailKey(object.id, thumbnailVersionFromBytes(Buffer.from('enhanced-jpeg-data'))),
+      );
     });
   });
 });
