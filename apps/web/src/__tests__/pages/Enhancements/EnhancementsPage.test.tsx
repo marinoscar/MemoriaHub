@@ -62,7 +62,12 @@ describe('EnhancementsPage', () => {
 
   it('passes the active circle id down to the pending tab', () => {
     render(<EnhancementsPage />);
-    expect(pendingTabSpy).toHaveBeenCalledWith({ circleId: 'circle-1' });
+    // `batchId` is undefined unless the URL carries one (epic #420, issue #423).
+    expect(pendingTabSpy).toHaveBeenCalledWith({
+      circleId: 'circle-1',
+      batchId: undefined,
+      onClearBatchFilter: expect.any(Function),
+    });
   });
 
   it('opens the tab named by ?tab= on mount', () => {

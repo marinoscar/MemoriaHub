@@ -37,6 +37,10 @@ vi.mock('../../../hooks/useFeatureFlags', () => ({
 vi.mock('../../../services/enhance', () => ({
   applyEnhancement: vi.fn().mockResolvedValue({}),
   discardEnhancement: vi.fn().mockResolvedValue(undefined),
+  // Called by the tab's "Recent batches" section (epic #420, issue #423).
+  // Empty by default: that section renders nothing without batches, leaving
+  // every assertion below about the inbox itself.
+  listEnhancementBatches: vi.fn().mockResolvedValue({ items: [], meta: null }),
 }));
 
 vi.mock('../../../services/media', () => ({

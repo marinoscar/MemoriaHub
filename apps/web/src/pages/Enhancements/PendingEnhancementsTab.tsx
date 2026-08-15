@@ -34,6 +34,7 @@ import type {
 } from '../../services/enhance';
 import type { MediaItem } from '../../types/media';
 import { MediaEnhancementDrawer } from '../../components/media/MediaEnhancementDrawer';
+import { RecentBatches } from './RecentBatches';
 
 const PAGE_SIZE = 24;
 
@@ -590,6 +591,10 @@ export function PendingEnhancementsTab({
         </Stack>
       )}
 
+      {/* The way back to a batch after the submit toast is gone. Suppressed
+          while already looking at one — the chip above says where you are. */}
+      {!batchId && <RecentBatches circleId={circleId} />}
+
       {/* ---------- Filters ---------- */}
       <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <FormControl size="small" sx={{ minWidth: 180 }}>
@@ -653,12 +658,16 @@ export function PendingEnhancementsTab({
               Results appear here as they finish enhancing.
             </Typography>
           ) : (
-          <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 480, mx: 'auto' }}>
-            AI Enhance improves a photo&apos;s exposure, color, clarity and noise.
-            Start one from a photo&apos;s viewer or the gallery selection bar — the
-            result waits here for you to compare and decide, and nothing is
-            changed until you do.
-          </Typography>
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ maxWidth: 480, mx: 'auto' }}
+            >
+              AI Enhance improves a photo&apos;s exposure, color, clarity and
+              noise. Start one from a photo&apos;s viewer or the gallery
+              selection bar — the result waits here for you to compare and
+              decide, and nothing is changed until you do.
+            </Typography>
           )}
         </Box>
       ) : (

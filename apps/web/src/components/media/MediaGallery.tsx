@@ -532,6 +532,9 @@ export function MediaGallery({
   const feedLoadMore = feedResult.loadMore;
   const feedReset = feedResult.reset;
 
+  // Used only by the bulk-enhance toast's "View progress" action (issue #423).
+  const navigate = useNavigate();
+
   // Infinite scroll sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
   // `feedIsLoading` is deliberately NOT part of `disabled`: flipping it tears
@@ -708,6 +711,12 @@ export function MediaGallery({
   const [snackbar, setSnackbar] = useState<{
     message: string;
     severity: 'success' | 'error';
+    /**
+     * Set only by the bulk-enhance path (issue #423). A batch runs for minutes
+     * and costs real AI credits, so its toast is the ONE toast here that has to
+     * lead somewhere: it carries a "View progress" action to the batch page.
+     */
+    batchId?: string;
   } | null>(null);
 
   // -------------------------------------------------------------------------
@@ -1330,17 +1339,21 @@ export function MediaGallery({
         maxBatchSize={pictureEnhancement?.maxBatchSize ?? 25}
         modelLabel={pictureEnhancement?.model ?? undefined}
         // Queueing changes nothing about the items yet, so this is the ordinary
-        // metadata path: toast + clear the selection, never a feed reset.
-        onSuccess={(msg) => {
+        // metadata path: toast + clear the selection, never a feed reset. The
+        // toast is then re-set with the batch id so it carries a link to the
+        // progress page — without it a queued batch vanishes from view.
+        onSuccess={(msg, batchId) => {
           setBatchEnhanceOpen(false);
           handleBulkSuccess(msg);
+          setSnackbar({ message: msg, severity: 'success', batchId });
         }}
       />
 
       {/* Snackbar for bulk operation feedback */}
       <Snackbar
         open={snackbar !== null}
-        autoHideDuration={4000}
+        // An actionable toast needs long enough to actually be acted on.
+        autoHideDuration={snackbar?.batchId ? 10000 : 4000}
         onClose={() => setSnackbar(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
@@ -1348,6 +1361,21 @@ export function MediaGallery({
           onClose={() => setSnackbar(null)}
           severity={snackbar?.severity ?? 'success'}
           sx={{ width: '100%' }}
+          action={
+            snackbar?.batchId ? (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  const id = snackbar.batchId;
+                  setSnackbar(null);
+                  navigate(`/enhancement-batches/${id}`);
+                }}
+              >
+                View progress
+              </Button>
+            ) : undefined
+          }
         >
           {snackbar?.message}
         </Alert>
