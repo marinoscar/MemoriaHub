@@ -1712,6 +1712,14 @@ enum MediaEnhancementStatus {
   applied
   discarded
   expired
+  // Bulk-enhance batching (epic #420, issue #421): the row was superseded or
+  // withdrawn before a render ever ran — "never rendered at all". Deliberately
+  // distinct from `discarded`, which means a human reviewed a completed
+  // `ready` result and chose not to keep it. Placed LAST, matching the
+  // append-only `ALTER TYPE ... ADD VALUE` in the migration (no BEFORE/AFTER
+  // clause) — same precedent as MediaTagSource.system and
+  // NotificationType.memories_ready.
+  cancelled
 }
 
 enum MediaEnhancementDecision {
