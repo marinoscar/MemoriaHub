@@ -5,7 +5,8 @@
  * - Back link to /albums
  * - Album title + optional description (loaded via getAlbum)
  * - Icon toolbar: Map, Slideshow, People, Share
- * - Kebab menu (non-viewers): Select album cover / Rename / Delete album
+ * - Kebab menu (non-viewers): Enhance all photos in this album / Select album
+ *   cover / Rename / Delete album
  * - Rename (PATCH) and Delete (DELETE → navigate /albums) dialogs
  * - MediaGallery in FEED + album mode for the album's media items
  * - A dedicated fullscreen slideshow (MediaLightbox with autoPlay)
@@ -26,6 +27,7 @@ import {
   TextField,
   Menu,
   MenuItem,
+  Snackbar,
   Stack,
   Tooltip,
 } from '@mui/material';
@@ -36,11 +38,14 @@ import MapIcon from '@mui/icons-material/Map';
 import SlideshowIcon from '@mui/icons-material/Slideshow';
 import PeopleIcon from '@mui/icons-material/People';
 import ImageIcon from '@mui/icons-material/Image';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../services/media';
 import type { MediaItem } from '../../types/media';
 import { MediaGallery } from '../../components/media/MediaGallery';
+import { BatchEnhanceDialog } from '../../components/media/BatchEnhanceDialog';
 import { MediaLightbox } from '../../components/media/MediaLightbox';
 import { ShareDialog } from '../../components/share/ShareDialog';
 import { AlbumMapDialog } from '../../components/album/AlbumMapDialog';
@@ -84,6 +89,17 @@ export default function AlbumPage() {
   const [mapOpen, setMapOpen] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+
+  // Batch AI enhance for the whole album (issue #424)
+  const [enhanceAllOpen, setEnhanceAllOpen] = useState(false);
+  const [snackbar, setSnackbar] = useState<{ message: string; batchId: string } | null>(
+    null,
+  );
+
+  // `useFeatureFlags` (GET /api/features), never `useSystemSettings` — that one
+  // is Admin-gated and 403s for exactly the collaborators this affordance is for.
+  const { pictureEnhancement } = useFeatureFlags();
+  const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
 
   // Slideshow lightbox — null = closed. Self-contained; does not fight the
   // MediaGallery's own lightbox.
@@ -192,6 +208,11 @@ export default function AlbumPage() {
   }
 
   const isEmpty = albumItems.length === 0;
+
+  // Photos only, matching what the server counts: `startBatchByFilter` pins
+  // `type: photo` (plus non-deleted, non-archived), so counting every member
+  // would promise a batch bigger than the one that actually runs.
+  const albumPhotoCount = albumItems.filter((item) => item.type === 'photo').length;
 
   // No minHeight/pb on this Box — the Layout shell owns viewport height and
   // the BottomNav clearance (issue #237); duplicating either stacks dead
@@ -304,6 +325,18 @@ export default function AlbumPage() {
                   open={Boolean(menuAnchor)}
                   onClose={() => setMenuAnchor(null)}
                 >
+                  {enhanceEnabled && (
+                    <MenuItem
+                      disabled={albumPhotoCount === 0}
+                      onClick={() => {
+                        setMenuAnchor(null);
+                        setEnhanceAllOpen(true);
+                      }}
+                    >
+                      <AutoFixHighIcon fontSize="small" sx={{ mr: 1 }} />
+                      Enhance all photos in this album
+                    </MenuItem>
+                  )}
                   <MenuItem
                     disabled={isEmpty}
                     onClick={() => {
@@ -403,12 +436,63 @@ export default function AlbumPage() {
         onSave={handleSaveCover}
       />
 
+      {/* Batch AI enhance — every photo in the album, not a selection (#424).
+          The count is exact: getAlbum returns the album's whole item list and
+          already excludes deleted/archived, the same rows the server counts. */}
+      <BatchEnhanceDialog
+        open={enhanceAllOpen}
+        onClose={() => setEnhanceAllOpen(false)}
+        target={{
+          kind: 'filter',
+          circleId: activeCircle.id,
+          scope: 'album',
+          filters: { albumId },
+          photoCount: albumPhotoCount,
+        }}
+        maxBatchSize={pictureEnhancement?.maxBatchSize ?? 25}
+        modelLabel={pictureEnhancement?.model ?? undefined}
+        onSuccess={(message, batchId) => {
+          setEnhanceAllOpen(false);
+          setSnackbar({ message, batchId });
+        }}
+      />
+
       {/* Share dialog */}
       <ShareDialog
         open={shareDialogOpen}
         onClose={() => setShareDialogOpen(false)}
         target={{ type: 'album', id: albumId }}
       />
+
+      {/* Queued-batch toast. Actionable, and long enough to actually act on —
+          without the link a queued batch has no visible home to go back to. */}
+      <Snackbar
+        open={snackbar !== null}
+        autoHideDuration={10000}
+        onClose={() => setSnackbar(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(null)}
+          severity="success"
+          sx={{ width: '100%' }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                const id = snackbar?.batchId;
+                setSnackbar(null);
+                if (id) navigate(`/enhancement-batches/${id}`);
+              }}
+            >
+              View progress
+            </Button>
+          }
+        >
+          {snackbar?.message}
+        </Alert>
+      </Snackbar>
 
       {/* Rename dialog */}
       <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} maxWidth="xs" fullWidth>

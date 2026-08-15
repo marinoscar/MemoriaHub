@@ -753,4 +753,116 @@ describe('BulkActionToolbar', () => {
       expect(button).toHaveAttribute('aria-label', 'AI Enhance 3 photos');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // "Enhance all matching" — the filter-driven batch entry point (issue #424).
+  //
+  // Lives in the overflow "More actions" menu, deliberately NOT counted from
+  // the selection (`selectedItems`): it acts on the server-resolved filter
+  // match set. Its presence is controlled entirely by whether
+  // `onOpenFilterEnhance` was supplied at all — MediaGallery passes it ONLY
+  // when a filter is genuinely active, which is what hides the menu item with
+  // no view having to opt out explicitly. Gated the same three ways as the
+  // single/batch AI Enhance action: feature flag, `onOpenFilterEnhance`
+  // presence, and non-viewer role.
+  // -------------------------------------------------------------------------
+  describe('"Enhance all matching" action (onOpenFilterEnhance, issue #424)', () => {
+    it('appears in the overflow menu when a filter is active, the feature is on, and the caller is not a viewer', async () => {
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          enhanceEnabled
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+
+      expect(screen.getByText('Enhance all matching')).toBeInTheDocument();
+      expect(
+        screen.getByText('Every photo in this filter, not just the selection'),
+      ).toBeInTheDocument();
+    });
+
+    it('is ABSENT when no onOpenFilterEnhance callback is supplied (no active filter) — even with the feature on', async () => {
+      const user = userEvent.setup();
+      render(<BulkActionToolbar {...defaultProps} enhanceEnabled />);
+
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+
+      expect(screen.queryByText('Enhance all matching')).not.toBeInTheDocument();
+    });
+
+    it('is ABSENT when the feature flag is off, even with an active filter', async () => {
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          enhanceEnabled={false}
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+
+      expect(screen.queryByText('Enhance all matching')).not.toBeInTheDocument();
+    });
+
+    it('is ABSENT for viewer role, even with the feature on and an active filter', async () => {
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          activeCircleRole="viewer"
+          enhanceEnabled
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      // Viewers get no "More actions" button at all (see the viewer-role
+      // describe block above) — the entry point is unreachable full stop.
+      expect(screen.queryByRole('button', { name: /more actions/i })).not.toBeInTheDocument();
+    });
+
+    it('calls onOpenFilterEnhance and closes the menu when clicked', async () => {
+      const onOpenFilterEnhance = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          enhanceEnabled
+          onOpenFilterEnhance={onOpenFilterEnhance}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      await user.click(screen.getByText('Enhance all matching'));
+
+      expect(onOpenFilterEnhance).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(screen.queryByText('Enhance all matching')).not.toBeInTheDocument();
+      });
+    });
+
+    it('is independent of the selection-scoped AI Enhance action — both can be gated on simultaneously without colliding', async () => {
+      const photoItem = makeMediaItem({ id: 'item-1', type: 'photo' });
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['item-1'])}
+          singleSelectedItem={photoItem}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      // The single-photo AI Enhance icon button still renders on the bar itself...
+      expect(screen.getByRole('button', { name: /ai enhance/i })).toBeInTheDocument();
+      // ...and "Enhance all matching" is reachable in the overflow menu too.
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+      expect(screen.getByText('Enhance all matching')).toBeInTheDocument();
+    });
+  });
 });

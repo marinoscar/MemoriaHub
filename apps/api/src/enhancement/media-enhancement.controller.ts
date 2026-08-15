@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -27,6 +28,7 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParamsDto } from './dto/enhance-params.dto';
 import { BulkEnhanceDto } from './dto/bulk-enhance.dto';
+import { BulkEnhanceByFilterDto } from './dto/bulk-enhance-by-filter.dto';
 import { ApplyEnhancementDto } from './dto/apply-enhancement.dto';
 import {
   ENHANCEMENT_STATUS_ALIASES,
@@ -139,6 +141,53 @@ export class MediaEnhancementController {
   @ApiResponse({ status: 404, description: 'One or more ids are not live items of the circle' })
   async startBatch(@Body() dto: BulkEnhanceDto, @CurrentUser() user: RequestUser) {
     return this.service.startBatch(dto, user);
+  }
+
+  /**
+   * POST /api/media/bulk/enhance/by-filter — queue an enhancement per photo
+   * matching a gallery filter, resolved server-side. Declared in the
+   * static-routes block for the same reason as `bulk/enhance` above.
+   */
+  @Post('bulk/enhance/by-filter')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Queue AI enhancements for every photo matching a filter (bulk)',
+    description:
+      'Same outcome as POST /api/media/bulk/enhance, but the server resolves the match set ' +
+      'from a gallery filter instead of an explicit id list. The body takes the SAME filter ' +
+      'shape as GET /api/media and POST /api/media/albums/:id/items/by-filter (so one filter ' +
+      'object works against any of them), plus an optional `params`.\n\n' +
+      'Three things are pinned server-side regardless of the filter: trashed items, archived ' +
+      'items, and non-photos are always excluded — the last in SQL, so the match count is the ' +
+      'count that would actually run.\n\n' +
+      'If the filter matches MORE than `pictureEnhancement.maxBatchSize` photos the request is ' +
+      'REFUSED with 400 — it is never truncated to the first N, since silently enhancing an ' +
+      'unseen subset spends money on a result the caller did not ask for. The refusal carries ' +
+      '`details.matchedCount` and `details.maxBatchSize` so the caller can narrow the filter. ' +
+      'A filter matching zero photos is likewise a 400, not an empty batch.\n\n' +
+      'Everything after the match set is resolved is identical to the id-list endpoint: an ' +
+      'ineligible item is skipped and counted rather than failing the request, and an existing ' +
+      'live (pending/processing/ready) enhancement is NEVER superseded.',
+  })
+  @ApiBody({ type: BulkEnhanceByFilterDto })
+  @ApiResponse({
+    status: 202,
+    description:
+      'Batch created: { batchId, requested, queued, skipped: { notPhoto, tooLarge, alreadyLive } }',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Feature disabled / no model configured / no photos match the filter / the match ' +
+      'exceeds maxBatchSize (with details.matchedCount and details.maxBatchSize)',
+  })
+  @ApiResponse({ status: 403, description: 'Caller is not a collaborator of the circle' })
+  async startBatchByFilter(
+    @Body() dto: BulkEnhanceByFilterDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.startBatchByFilter(dto, user);
   }
 
   // ===========================================================================

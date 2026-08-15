@@ -1,5 +1,6 @@
 /**
- * BatchEnhanceDialog — unit tests (issue #422, epic #420 phase 2).
+ * BatchEnhanceDialog — unit tests (issue #422, epic #420 phase 2; filter mode
+ * added in issue #424, epic #420 phase 4).
  *
  * Multi-photo AI enhance: params step (preset picker + optional Customize) ->
  * submit -> either an immediate close (nothing skipped) or a result step
@@ -10,6 +11,12 @@
  * `resolvePreset` from the shared `enhancePresets` module (also consumed by
  * MediaEnhancementDrawer) rather than hard-coding an expected literal, so the
  * two enhance surfaces can never silently drift apart.
+ *
+ * Filter mode (`BatchEnhanceFilterTarget`, issue #424) submits through the
+ * SEPARATE `bulkEnhanceByFilter` service call, resolves a match set the client
+ * never enumerated, and surfaces the server's two "normal" 400s (over-cap
+ * refusal, empty match) as distinct, non-failure UI states rather than a
+ * generic error.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -18,7 +25,10 @@ import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { render } from '../../utils/test-utils';
 import { BatchEnhanceDialog } from '../../../components/media/BatchEnhanceDialog';
-import type { BatchEnhanceSelectionTarget } from '../../../components/media/BatchEnhanceDialog';
+import type {
+  BatchEnhanceSelectionTarget,
+  BatchEnhanceFilterTarget,
+} from '../../../components/media/BatchEnhanceDialog';
 import {
   buildEnhanceParams,
   resolvePreset,
@@ -26,17 +36,20 @@ import {
 } from '../../../components/media/enhancePresets';
 import type { EnhanceFormState } from '../../../components/media/enhancePresets';
 import type { BulkEnhanceResult } from '../../../services/media';
+import { ApiError } from '../../../services/api';
 
 // ---------------------------------------------------------------------------
 // Mock media service
 // ---------------------------------------------------------------------------
 vi.mock('../../../services/media', () => ({
   bulkEnhance: vi.fn(),
+  bulkEnhanceByFilter: vi.fn(),
 }));
 
-import { bulkEnhance } from '../../../services/media';
+import { bulkEnhance, bulkEnhanceByFilter } from '../../../services/media';
 
 const mockBulkEnhance = vi.mocked(bulkEnhance);
+const mockBulkEnhanceByFilter = vi.mocked(bulkEnhanceByFilter);
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -50,6 +63,32 @@ function makeTarget(overrides: Partial<BatchEnhanceSelectionTarget> = {}): Batch
     nonPhotoCount: 0,
     ...overrides,
   };
+}
+
+function makeFilterTarget(
+  overrides: Partial<BatchEnhanceFilterTarget> = {},
+): BatchEnhanceFilterTarget {
+  return {
+    kind: 'filter',
+    circleId: 'circle-1',
+    scope: 'filter',
+    filters: { tag: 'Beach' },
+    photoCount: null,
+    ...overrides,
+  };
+}
+
+/** Builds the `ApiError` shape `readOverCapRefusal` reads (issue #424). */
+function overCapError(matchedCount: number, maxBatchSize: number): ApiError {
+  return new ApiError('Too many photos match this filter', 400, 'BAD_REQUEST', {
+    matchedCount,
+    maxBatchSize,
+  });
+}
+
+/** The server's honest empty-match 400 — never an empty batch. */
+function noMatchError(): ApiError {
+  return new ApiError('No photos match this filter', 400, 'BAD_REQUEST');
 }
 
 function makeResult(overrides: Partial<BulkEnhanceResult> = {}): BulkEnhanceResult {
@@ -90,6 +129,7 @@ describe('BatchEnhanceDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockBulkEnhance.mockResolvedValue(makeResult());
+    mockBulkEnhanceByFilter.mockResolvedValue(makeResult());
   });
 
   // -------------------------------------------------------------------------
@@ -485,6 +525,237 @@ describe('BatchEnhanceDialog', () => {
         expect.stringMatching(/Queued AI enhancement for 0/i),
         expect.anything(),
       );
+    });
+  });
+
+  // ===========================================================================
+  // Filter mode (BatchEnhanceFilterTarget, issue #424)
+  //
+  // A filter target resolves its match set SERVER-SIDE — the user never
+  // enumerated it, and in keyset mode there is no COUNT(*) to show up front.
+  // Everything below is specific to that: the copy that says so explicitly,
+  // the two server 400s rendered as normal outcomes rather than failures, and
+  // the by-filter submit path.
+  // ===========================================================================
+  describe('filter mode', () => {
+    // -------------------------------------------------------------------------
+    // Copy
+    // -------------------------------------------------------------------------
+    describe('copy', () => {
+      it('states the filter-scope title and the load-bearing "photos off screen are included" sentence verbatim', () => {
+        render(
+          <BatchEnhanceDialog {...defaultProps} target={makeFilterTarget({ photoCount: 12 })} />,
+        );
+
+        expect(
+          screen.getByText('Enhance all 12 photos matching your current filter?'),
+        ).toBeInTheDocument();
+        // Verbatim: this sentence is the entire point of the filter-mode
+        // dialog — the user must be told outright that the match set reaches
+        // beyond what they can currently see.
+        expect(
+          screen.getByText('Photos you cannot currently see on screen are included.'),
+        ).toBeInTheDocument();
+      });
+
+      it('falls back to "Enhance all photos matching your current filter?" when photoCount is unknown (keyset gallery, no COUNT(*))', () => {
+        render(
+          <BatchEnhanceDialog {...defaultProps} target={makeFilterTarget({ photoCount: null })} />,
+        );
+
+        expect(
+          screen.getByText('Enhance all photos matching your current filter?'),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole('button', { name: /^Enhance all matching photos$/i }),
+        ).toBeInTheDocument();
+      });
+
+      it('uses the ALBUM-scope copy variant (title + submit label) when target.scope is "album"', () => {
+        render(
+          <BatchEnhanceDialog
+            {...defaultProps}
+            target={makeFilterTarget({ scope: 'album', photoCount: 8 })}
+          />,
+        );
+
+        expect(screen.getByText('Enhance all 8 photos in this album?')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Enhance 8 photos$/i })).toBeInTheDocument();
+      });
+
+      it('album-scope submit label falls back to "Enhance all photos in this album" when photoCount is unknown', () => {
+        render(
+          <BatchEnhanceDialog
+            {...defaultProps}
+            target={makeFilterTarget({ scope: 'album', photoCount: null })}
+          />,
+        );
+
+        expect(
+          screen.getByRole('button', { name: /^Enhance all photos in this album$/i }),
+        ).toBeInTheDocument();
+        // "Photos off screen" still applies — an album's own gallery may be
+        // paginated too, so the same disclosure is warranted.
+        expect(
+          screen.getByText('Photos you cannot currently see on screen are included.'),
+        ).toBeInTheDocument();
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Over-cap refusal — a REFUSAL, not a failure
+    // -------------------------------------------------------------------------
+    describe('over-cap refusal', () => {
+      it('renders the server-reported matchedCount/maxBatchSize as a refusal Alert (not the generic error message) and disables submit', async () => {
+        mockBulkEnhanceByFilter.mockRejectedValueOnce(overCapError(412, 25));
+        const user = userEvent.setup();
+        render(
+          <BatchEnhanceDialog
+            {...defaultProps}
+            target={makeFilterTarget({ photoCount: null })}
+            maxBatchSize={25}
+          />,
+        );
+
+        await user.click(screen.getByRole('button', { name: /^Enhance all matching photos$/i }));
+
+        expect(await screen.findByText(/too many photos for one batch/i)).toBeInTheDocument();
+        expect(
+          screen.getByText(
+            /412 photos match your filter; the limit is 25 per batch\. Narrow the filter/i,
+          ),
+        ).toBeInTheDocument();
+        // NEVER the generic-failure copy — this is a normal, actionable outcome.
+        expect(
+          screen.queryByText('Failed to queue AI enhancements'),
+        ).not.toBeInTheDocument();
+
+        expect(
+          screen.getByRole('button', { name: /^Enhance all matching photos$/i }),
+        ).toBeDisabled();
+      });
+
+      it('uses the album-scope refusal wording ("are in this album" / select individually)', async () => {
+        mockBulkEnhanceByFilter.mockRejectedValueOnce(overCapError(60, 25));
+        const user = userEvent.setup();
+        render(
+          <BatchEnhanceDialog
+            {...defaultProps}
+            target={makeFilterTarget({ scope: 'album', photoCount: null })}
+            maxBatchSize={25}
+          />,
+        );
+
+        await user.click(
+          screen.getByRole('button', { name: /^Enhance all photos in this album$/i }),
+        );
+
+        expect(
+          await screen.findByText(/60 photos are in this album; the limit is 25 per batch/i),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByText(/Select photos individually instead/i),
+        ).toBeInTheDocument();
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Zero-match — its own distinct state, not a failure either
+    // -------------------------------------------------------------------------
+    describe('zero-match', () => {
+      it('renders a distinct "Nothing to enhance" state for the empty-match 400, not the over-cap refusal or a generic failure', async () => {
+        mockBulkEnhanceByFilter.mockRejectedValueOnce(noMatchError());
+        const user = userEvent.setup();
+        render(
+          <BatchEnhanceDialog {...defaultProps} target={makeFilterTarget({ photoCount: null })} />,
+        );
+
+        await user.click(screen.getByRole('button', { name: /^Enhance all matching photos$/i }));
+
+        expect(await screen.findByText('Nothing to enhance')).toBeInTheDocument();
+        expect(
+          screen.getByText(/No photos match your current filter\. Adjust the filter and try again\./i),
+        ).toBeInTheDocument();
+        expect(screen.queryByText(/too many photos for one batch/i)).not.toBeInTheDocument();
+        expect(screen.queryByText('Failed to queue AI enhancements')).not.toBeInTheDocument();
+      });
+
+      it('uses the album-scope empty-match wording ("This album has no photos to enhance")', async () => {
+        mockBulkEnhanceByFilter.mockRejectedValueOnce(noMatchError());
+        const user = userEvent.setup();
+        render(
+          <BatchEnhanceDialog
+            {...defaultProps}
+            target={makeFilterTarget({ scope: 'album', photoCount: null })}
+          />,
+        );
+
+        await user.click(
+          screen.getByRole('button', { name: /^Enhance all photos in this album$/i }),
+        );
+
+        expect(
+          await screen.findByText('This album has no photos to enhance.'),
+        ).toBeInTheDocument();
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Submit payload — the by-filter endpoint, with the FILTER OBJECT, never
+    // an id list.
+    // -------------------------------------------------------------------------
+    describe('submit payload', () => {
+      it('posts to bulkEnhanceByFilter with the filter object (never an id list), merging circleId from the target', async () => {
+        const user = userEvent.setup();
+        render(
+          <BatchEnhanceDialog
+            {...defaultProps}
+            target={makeFilterTarget({
+              circleId: 'circle-42',
+              filters: { tag: 'Beach', favorite: true },
+              photoCount: 5,
+            })}
+          />,
+        );
+
+        await user.click(screen.getByRole('button', { name: /^Enhance 5 photos$/i }));
+
+        await waitFor(() => {
+          expect(mockBulkEnhanceByFilter).toHaveBeenCalledTimes(1);
+        });
+        expect(mockBulkEnhanceByFilter).toHaveBeenCalledWith({
+          filters: { tag: 'Beach', favorite: true, circleId: 'circle-42' },
+          params: {},
+        });
+        // The id-list endpoint is never touched by a filter-mode submit.
+        expect(mockBulkEnhance).not.toHaveBeenCalled();
+      });
+
+      it('the circle the dialog runs in always wins over anything (incorrectly) present in filters.circleId', async () => {
+        const user = userEvent.setup();
+        render(
+          <BatchEnhanceDialog
+            {...defaultProps}
+            target={makeFilterTarget({
+              circleId: 'circle-real',
+              // A stray circleId inside `filters` (should never happen, but
+              // the target's own circleId must still win if it does).
+              filters: { tag: 'Beach', circleId: 'circle-stale' } as any,
+              photoCount: 3,
+            })}
+          />,
+        );
+
+        await user.click(screen.getByRole('button', { name: /^Enhance 3 photos$/i }));
+
+        await waitFor(() => {
+          expect(mockBulkEnhanceByFilter).toHaveBeenCalledWith(
+            expect.objectContaining({
+              filters: expect.objectContaining({ circleId: 'circle-real' }),
+            }),
+          );
+        });
+      });
     });
   });
 });
