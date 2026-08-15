@@ -103,14 +103,28 @@ interface BulkActionToolbarProps {
   /** Controls archive-related actions shown. Default: 'home'. */
   mode?: BulkActionMode;
   /**
-   * The single selected item (present only when exactly one is selected). Used
-   * to decide whether the photo-only "AI Enhance" action can appear.
+   * The single selected item (present only when exactly one is selected). Kept
+   * as the fallback source for the AI Enhance gate for callers that do not yet
+   * pass `selectedItems`.
    */
   singleSelectedItem?: MediaItem | null;
+  /**
+   * The full set of selected items. Drives the AI Enhance gate: one selected
+   * photo opens the single-item drawer, several open the batch dialog. Videos
+   * never count toward either.
+   */
+  selectedItems?: MediaItem[];
   /** Feature flag: features.pictureEnhancement. Gates the AI Enhance trigger. */
   enhanceEnabled?: boolean;
+  /**
+   * Server-enforced batch ceiling (`pictureEnhancement.maxBatchSize`). Used
+   * only to warn in the tooltip; the batch dialog owns the actual gate.
+   */
+  maxBatchSize?: number;
   /** Open the AI enhancement drawer for the single selected photo. */
   onOpenEnhance?: () => void;
+  /** Open the batch enhance dialog for a multi-photo selection. */
+  onOpenBatchEnhance?: () => void;
 }
 
 export function BulkActionToolbar({
@@ -129,8 +143,11 @@ export function BulkActionToolbar({
   onRemoveFromAlbum,
   mode = 'home',
   singleSelectedItem,
+  selectedItems,
   enhanceEnabled,
+  maxBatchSize,
   onOpenEnhance,
+  onOpenBatchEnhance,
 }: BulkActionToolbarProps) {
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -141,11 +158,26 @@ export function BulkActionToolbar({
   const ids = Array.from(selected);
   const count = ids.length;
 
+  // --- AI Enhance gate ------------------------------------------------------
+  //
+  // Counted over PHOTOS only, so a mixed selection of one photo and one video
+  // is still a single-photo enhance rather than a batch of one. `selectedItems`
+  // is the source of truth; `singleSelectedItem` is the fallback for callers
+  // that have not been migrated.
+  const enhancePhotos =
+    selectedItems?.filter((item) => item.type === 'photo') ??
+    (singleSelectedItem?.type === 'photo' ? [singleSelectedItem] : []);
+  const enhancePhotoCount = enhancePhotos.length;
+  const isBatchEnhance = enhancePhotoCount > 1;
+  const openEnhance = isBatchEnhance ? onOpenBatchEnhance : onOpenEnhance;
   const canEnhance =
-    Boolean(enhanceEnabled) &&
-    Boolean(onOpenEnhance) &&
-    count === 1 &&
-    singleSelectedItem?.type === 'photo';
+    Boolean(enhanceEnabled) && enhancePhotoCount > 0 && !isViewer && Boolean(openEnhance);
+
+  const enhanceLabel = `AI Enhance ${enhancePhotoCount} photo${enhancePhotoCount !== 1 ? 's' : ''}`;
+  const enhanceTooltip =
+    maxBatchSize != null && enhancePhotoCount > maxBatchSize
+      ? `${enhanceLabel} (limit ${maxBatchSize} per batch)`
+      : enhanceLabel;
 
   if (count === 0) return null;
 
@@ -296,10 +328,10 @@ export function BulkActionToolbar({
         {!isViewer && (
           <>
             {canEnhance && (
-              <Tooltip title="AI Enhance">
+              <Tooltip title={enhanceTooltip}>
                 <IconButton
-                  aria-label="AI Enhance"
-                  onClick={onOpenEnhance}
+                  aria-label={enhanceLabel}
+                  onClick={openEnhance}
                   disabled={loading}
                   color="primary"
                 >

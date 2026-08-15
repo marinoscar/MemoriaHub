@@ -81,6 +81,7 @@ import { MediaDetailDrawer } from './MediaDetailDrawer';
 import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
+import { BatchEnhanceDialog } from './BatchEnhanceDialog';
 import { BulkActionToolbar } from './BulkActionToolbar';
 import type { BulkEffect, BulkSuccessOptions } from './BulkActionToolbar';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
@@ -726,11 +727,33 @@ export function MediaGallery({
   const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
 
+  const [batchEnhanceOpen, setBatchEnhanceOpen] = useState(false);
+
   const singleSelectedItem = useMemo<MediaItem | null>(() => {
     if (selected.size !== 1) return null;
     const [onlyId] = Array.from(selected);
     return mergedItems.find((it) => it.id === onlyId) ?? null;
   }, [selected, mergedItems]);
+
+  /** The selected items, resolved against the current feed. */
+  const selectedItems = useMemo(
+    () => mergedItems.filter((it) => selected.has(it.id)),
+    [selected, mergedItems],
+  );
+
+  /**
+   * Photos in the selection. AI Enhance is photo-only, so a mixed selection of
+   * one photo and one video is still a single-photo enhance — the per-item
+   * drawer, with its live compare and immediate decision, is a better
+   * experience than a batch of one.
+   */
+  const selectedPhotos = useMemo(
+    () => selectedItems.filter((it) => it.type === 'photo'),
+    [selectedItems],
+  );
+
+  /** The item the single-photo enhance drawer acts on, if exactly one. */
+  const enhanceTargetItem = selectedPhotos.length === 1 ? selectedPhotos[0] : null;
 
   // -------------------------------------------------------------------------
   // Bulk success handler
@@ -1027,8 +1050,11 @@ export function MediaGallery({
           onSuccess={handleBulkSuccess}
           onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
           singleSelectedItem={singleSelectedItem}
+          selectedItems={selectedItems}
           enhanceEnabled={enhanceEnabled}
+          maxBatchSize={pictureEnhancement?.maxBatchSize}
           onOpenEnhance={() => setEnhanceOpen(true)}
+          onOpenBatchEnhance={() => setBatchEnhanceOpen(true)}
         />
       )}
 
@@ -1247,9 +1273,9 @@ export function MediaGallery({
       />
 
       {/* AI enhancement drawer (single photo) */}
-      {singleSelectedItem && singleSelectedItem.type === 'photo' && (
+      {enhanceTargetItem && (
         <MediaEnhancementDrawer
-          item={singleSelectedItem}
+          item={enhanceTargetItem}
           open={enhanceOpen}
           onClose={() => setEnhanceOpen(false)}
           modelLabel={pictureEnhancement?.model ?? undefined}
@@ -1290,6 +1316,26 @@ export function MediaGallery({
           }
         />
       )}
+
+      {/* AI enhancement dialog (multi-photo batch) */}
+      <BatchEnhanceDialog
+        open={batchEnhanceOpen}
+        onClose={() => setBatchEnhanceOpen(false)}
+        target={{
+          kind: 'selection',
+          circleId,
+          photoIds: selectedPhotos.map((it) => it.id),
+          nonPhotoCount: selectedItems.length - selectedPhotos.length,
+        }}
+        maxBatchSize={pictureEnhancement?.maxBatchSize ?? 25}
+        modelLabel={pictureEnhancement?.model ?? undefined}
+        // Queueing changes nothing about the items yet, so this is the ordinary
+        // metadata path: toast + clear the selection, never a feed reset.
+        onSuccess={(msg) => {
+          setBatchEnhanceOpen(false);
+          handleBulkSuccess(msg);
+        }}
+      />
 
       {/* Snackbar for bulk operation feedback */}
       <Snackbar
