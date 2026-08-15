@@ -8,6 +8,7 @@ import { ObjectsService } from './objects/objects.service';
 import { StorageCleanupTask } from './tasks/storage-cleanup.task';
 import { StorageProcessingRecoveryService } from './tasks/storage-processing-recovery.service';
 import { StorageProcessingRecoveryTask } from './tasks/storage-processing-recovery.task';
+import { ThumbnailPruneService } from './processing/thumbnail-prune.service';
 
 @Module({
   imports: [
@@ -22,7 +23,11 @@ import { StorageProcessingRecoveryTask } from './tasks/storage-processing-recove
     StorageCleanupTask,
     StorageProcessingRecoveryService,
     StorageProcessingRecoveryTask,
+    // Exported so the two destructive-overwrite call sites (MediaModule's
+    // orientation editor + node thumbnail persist, EnhancementModule's replace)
+    // can prune superseded thumbnail keys — see thumbnail-prune.service.ts.
+    ThumbnailPruneService,
   ],
-  exports: [ObjectsService, StorageProcessingRecoveryService],
+  exports: [ObjectsService, StorageProcessingRecoveryService, ThumbnailPruneService],
 })
 export class StorageModule {}

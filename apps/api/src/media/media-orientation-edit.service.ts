@@ -10,6 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
@@ -46,7 +48,12 @@ export interface OrientationEditResult {
  *      (StorageProcessingRecoveryService.reprocessObjectNow) — the same path the
  *      thumbnail-rerun action uses; this also re-derives dimensions and content
  *      hash from the new bytes.
- *   7. Best-effort re-enqueue face detection (rotation invalidates normalized
+ *   7. Await MediaMetadataSyncService.syncFromStorageObject so the MediaItem
+ *      points at the NEW content-addressed thumbnail key before the response
+ *      returns, then prune the superseded thumbnail (issue #434). Without this
+ *      the rotated photo kept its pre-rotation grid tile, because the pipeline's
+ *      sync runs on a fire-and-forget `emit()` that races the request.
+ *   8. Best-effort re-enqueue face detection (rotation invalidates normalized
  *      bounding boxes); enqueue failures never fail the request.
  */
 @Injectable()
@@ -58,6 +65,8 @@ export class MediaOrientationEditService {
     private readonly circleMembershipService: CircleMembershipService,
     private readonly resolver: StorageProviderResolver,
     private readonly recoveryService: StorageProcessingRecoveryService,
+    private readonly metadataSync: MediaMetadataSyncService,
+    private readonly thumbnailPrune: ThumbnailPruneService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: SystemSettingsService,
   ) {}
@@ -156,6 +165,18 @@ export class MediaOrientationEditService {
     });
     if (refreshed) {
       await this.recoveryService.reprocessObjectNow(refreshed);
+
+      // Repoint the MediaItem at the freshly-rendered thumbnail INSIDE the
+      // request (issue #434). The pipeline's OBJECT_PROCESSED_EVENT listener
+      // does this too, but it is emitted with `emit()`, not `emitAsync()`, so
+      // it races the response — and the new thumbnail lives at a new,
+      // content-addressed key, so until it lands every grid surface keeps
+      // signing the pre-rotation key. Also recomputes contentHash/dimensions.
+      await this.metadataSync.syncFromStorageObject(storageObject.id);
+
+      // Only now is it safe to delete the superseded thumbnail bytes.
+      await this.thumbnailPrune.pruneSupersededThumbnails(storageObject.id);
+
       const after = await this.prisma.storageObject.findUnique({
         where: { id: storageObject.id },
         select: { status: true },

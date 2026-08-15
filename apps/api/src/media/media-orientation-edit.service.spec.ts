@@ -22,6 +22,9 @@
  *    rejection from it propagates without touching storage or Prisma writes.
  *  - Face re-enqueue is best-effort: an EnrichmentJobService.enqueue failure
  *    must not fail editOrientation.
+ *  - Issue #434: the metadata sync is AWAITED inside the request (so the
+ *    MediaItem points at the new, content-addressed thumbnail key before the
+ *    response returns) and the superseded thumbnail is pruned only afterwards.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -34,6 +37,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import {
@@ -99,6 +104,10 @@ describe('MediaOrientationEditService', () => {
   let mockResolver: { getProviderFor: jest.Mock };
   let mockStorageProvider: ReturnType<typeof createMockStorageProvider>;
   let mockRecoveryService: { reprocessObjectNow: jest.Mock };
+  let mockMetadataSync: { syncFromStorageObject: jest.Mock };
+  let mockThumbnailPrune: { pruneSupersededThumbnails: jest.Mock };
+  /** Records sync-vs-prune ordering (issue #434). */
+  let callOrder: string[];
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
 
@@ -123,6 +132,19 @@ describe('MediaOrientationEditService', () => {
 
     mockRecoveryService = { reprocessObjectNow: jest.fn().mockResolvedValue(undefined) };
 
+    callOrder = [];
+    mockMetadataSync = {
+      syncFromStorageObject: jest.fn().mockImplementation(async () => {
+        callOrder.push('sync');
+      }),
+    };
+    mockThumbnailPrune = {
+      pruneSupersededThumbnails: jest.fn().mockImplementation(async () => {
+        callOrder.push('prune');
+        return 1;
+      }),
+    };
+
     mockEnrichmentJobService = {
       enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }),
     };
@@ -144,6 +166,8 @@ describe('MediaOrientationEditService', () => {
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
+        { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
+        { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
       ],
@@ -214,6 +238,25 @@ describe('MediaOrientationEditService', () => {
       await service.editOrientation('media-1', 'rotate_right', makeUser());
 
       expect(mockRecoveryService.reprocessObjectNow).toHaveBeenCalledTimes(1);
+    });
+
+    // -----------------------------------------------------------------------
+    // Issue #434 — the rotated photo must not keep its pre-rotation grid tile
+    // -----------------------------------------------------------------------
+
+    it('awaits syncFromStorageObject inside the request rather than relying on the fire-and-forget OBJECT_PROCESSED_EVENT listener', async () => {
+      await service.editOrientation('media-1', 'rotate_right', makeUser());
+
+      expect(mockMetadataSync.syncFromStorageObject).toHaveBeenCalledWith('obj-1');
+    });
+
+    it('prunes the superseded thumbnail ONLY AFTER the MediaItem has been repointed at the new key', async () => {
+      await service.editOrientation('media-1', 'rotate_right', makeUser());
+
+      expect(mockThumbnailPrune.pruneSupersededThumbnails).toHaveBeenCalledWith('obj-1');
+      // Order is load-bearing: pruning first would delete bytes a concurrent
+      // gallery request could still be signing.
+      expect(callOrder).toEqual(['sync', 'prune']);
     });
 
     it('resolves with { status, width, height } reflecting the post-reprocess status and transform dims', async () => {

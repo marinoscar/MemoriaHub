@@ -173,6 +173,15 @@ jest.mock('fs', () => {
 
 const OBJECT_ID = 'obj-thumb-001';
 const THUMB_ID = 'thumb-obj-001';
+
+/**
+ * Thumbnail keys are versioned and content-addressed (issue #434):
+ * `thumbnails/<sourceObjectId>-<sha256(thumbBytes).slice(0,16)>.jpg`. sharp is
+ * real in this spec, so the hash is asserted by shape rather than by value —
+ * the content-addressing property itself is pinned by the "same key twice for
+ * identical source bytes" test below and by thumbnail-key.util.spec.ts.
+ */
+const VERSIONED_KEY_RE = new RegExp(`^thumbnails/${OBJECT_ID}-[0-9a-f]{16}\\.jpg$`);
 const BUCKET_NAME = 'test-bucket';
 
 function makeObject(overrides: { mimeType?: string; storageKey?: string } = {}) {
@@ -345,7 +354,7 @@ describe('ThumbnailProcessor', () => {
     it('should include thumbnailStorageKey in returned metadata', async () => {
       const buf = await getPlainJpegBuffer();
       const result = await processor.process(makeObject(), makeGetStream(buf));
-      expect(result.metadata?.thumbnailStorageKey).toBe(`thumbnails/${OBJECT_ID}.jpg`);
+      expect(result.metadata?.thumbnailStorageKey).toMatch(VERSIONED_KEY_RE);
     });
 
     it('should call storageProvider.upload exactly once', async () => {
@@ -359,7 +368,7 @@ describe('ThumbnailProcessor', () => {
       await processor.process(makeObject(), makeGetStream(buf));
       const [key, , options] = mockUpload.mock.calls[0];
       expect(options).toMatchObject({ mimeType: 'image/jpeg' });
-      expect(key).toBe(`thumbnails/${OBJECT_ID}.jpg`);
+      expect(key).toMatch(VERSIONED_KEY_RE);
     });
 
     it('should call storageProvider.upload with a key starting with "thumbnails/"', async () => {
@@ -375,11 +384,23 @@ describe('ThumbnailProcessor', () => {
       expect(mockStorageObjectUpsert).toHaveBeenCalledTimes(1);
     });
 
-    it('should upsert with where: { storageKey: thumbnails/<id>.jpg }', async () => {
+    it('should upsert with where: { storageKey: thumbnails/<id>-<version>.jpg }', async () => {
       const buf = await getPlainJpegBuffer();
       await processor.process(makeObject(), makeGetStream(buf));
       const upsertArg = mockStorageObjectUpsert.mock.calls[0][0];
-      expect(upsertArg.where).toEqual({ storageKey: `thumbnails/${OBJECT_ID}.jpg` });
+      expect(upsertArg.where.storageKey).toMatch(VERSIONED_KEY_RE);
+    });
+
+    // Issue #434: the key carries a hash of the thumbnail bytes, so an
+    // unchanged source re-renders to the SAME key (the upsert stays idempotent)
+    // while changed bytes move to a key no cache has ever seen.
+    it('should derive the same key twice for identical source bytes', async () => {
+      const buf = await getPlainJpegBuffer();
+      await processor.process(makeObject(), makeGetStream(buf));
+      await processor.process(makeObject(), makeGetStream(buf));
+      const [firstKey] = mockUpload.mock.calls[0];
+      const [secondKey] = mockUpload.mock.calls[1];
+      expect(secondKey).toBe(firstKey);
     });
 
     it('should create StorageObject with status "ready"', async () => {
@@ -604,21 +625,21 @@ describe('ThumbnailProcessor', () => {
       expect(result.metadata?.thumbnailObjectId).toBe(THUMB_ID);
     });
 
-    it('should return thumbnailStorageKey = thumbnails/<id>.jpg in metadata', async () => {
+    it('should return thumbnailStorageKey = thumbnails/<id>-<version>.jpg in metadata', async () => {
       const result = await processor.process(
         makeObject({ mimeType: 'video/mp4' }),
         makeGetStream(jpegBuf),
       );
-      expect(result.metadata?.thumbnailStorageKey).toBe(`thumbnails/${OBJECT_ID}.jpg`);
+      expect(result.metadata?.thumbnailStorageKey).toMatch(VERSIONED_KEY_RE);
     });
 
-    it('should call storageProvider.upload with thumbnails/<id>.jpg key', async () => {
+    it('should call storageProvider.upload with a thumbnails/<id>-<version>.jpg key', async () => {
       await processor.process(
         makeObject({ mimeType: 'video/mp4' }),
         makeGetStream(jpegBuf),
       );
       const [uploadedKey, , options] = mockUpload.mock.calls[0];
-      expect(uploadedKey).toBe(`thumbnails/${OBJECT_ID}.jpg`);
+      expect(uploadedKey).toMatch(VERSIONED_KEY_RE);
       expect(options).toMatchObject({ mimeType: 'image/jpeg' });
     });
 

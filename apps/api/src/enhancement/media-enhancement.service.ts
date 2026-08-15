@@ -19,6 +19,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -58,6 +59,7 @@ export class MediaEnhancementService {
     private readonly circleMembership: CircleMembershipService,
     private readonly resolver: StorageProviderResolver,
     private readonly recoveryService: StorageProcessingRecoveryService,
+    private readonly thumbnailPrune: ThumbnailPruneService,
     private readonly metadataSync: MediaMetadataSyncService,
     private readonly mediaEnrichment: MediaEnrichmentService,
     private readonly thumbnails: MediaThumbnailService,
@@ -879,6 +881,21 @@ export class MediaEnhancementService {
     let height = row.enhancedHeight ?? source.height ?? 0;
     if (refreshed) {
       await this.recoveryService.reprocessObjectNow(refreshed);
+
+      // Await the metadata sync INSIDE the request rather than letting the
+      // pipeline's fire-and-forget OBJECT_PROCESSED_EVENT listener race it
+      // (issue #434). Two things depend on it: the MediaItem must be repointed
+      // at the new content-addressed thumbnail key before the old one is
+      // pruned (otherwise every grid surface keeps rendering the pre-enhancement
+      // image), and the contentHash nulled above must actually be recomputed —
+      // if that listener throws it only logs, silently leaving the item out of
+      // exact-hash dedup forever. `applyKeepBoth` already calls this explicitly.
+      await this.metadataSync.syncFromStorageObject(storageObject.id);
+
+      // Superseded thumbnail bytes are only safe to delete now that nothing
+      // points at them.
+      await this.thumbnailPrune.pruneSupersededThumbnails(storageObject.id);
+
       const after = await this.prisma.storageObject.findUnique({
         where: { id: storageObject.id },
         select: { status: true },
