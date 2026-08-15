@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ComponentType } from 'react';
 import {
   Drawer,
   Box,
@@ -7,8 +6,6 @@ import {
   IconButton,
   Stack,
   Button,
-  ButtonBase,
-  Chip,
   CircularProgress,
   LinearProgress,
   Alert,
@@ -30,26 +27,26 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import HealingIcon from '@mui/icons-material/Healing';
-import NightlightIcon from '@mui/icons-material/Nightlight';
-import PaletteIcon from '@mui/icons-material/Palette';
-import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
-import TuneIcon from '@mui/icons-material/Tune';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
-import type { SvgIconProps } from '@mui/material';
 import type { MediaItem } from '../../types/media';
 import { useMediaEnhance } from '../../hooks/useMediaEnhance';
 import type { EnhanceUiStatus } from '../../hooks/useMediaEnhance';
 import { BeforeAfterSlider } from './BeforeAfterSlider';
+import {
+  ADJUSTMENT_FIELDS,
+  DEFAULT_ADJUSTMENTS,
+  PRESETS,
+  PresetCard,
+  buildEnhanceParams,
+  resolvePreset,
+} from './enhancePresets';
+import type { AdjustmentsState, PresetKey } from './enhancePresets';
 import type {
-  EnhanceParams,
-  EnhancePreset,
   EnhanceQuality,
   EnhanceStrength,
   EnhanceImageInfo,
@@ -93,141 +90,6 @@ interface MediaEnhancementDrawerProps {
    * current call sites do); reopening restores the review via `resumeLatest`.
    */
   onFinishedInBackground?: (status: 'ready' | 'failed') => void;
-}
-
-// ---------------------------------------------------------------------------
-// Adjustments
-// ---------------------------------------------------------------------------
-
-interface AdjustmentsState {
-  color: boolean;
-  tone: boolean;
-  sharpness: boolean;
-  denoise: boolean;
-  dehaze: boolean;
-  straighten: boolean;
-}
-
-const ADJUSTMENT_FIELDS: { key: keyof AdjustmentsState; label: string }[] = [
-  { key: 'color', label: 'Correct color & white balance' },
-  { key: 'tone', label: 'Balance exposure & tone' },
-  { key: 'sharpness', label: 'Increase clarity & sharpness' },
-  { key: 'denoise', label: 'Reduce noise' },
-  { key: 'dehaze', label: 'Remove haze' },
-  { key: 'straighten', label: 'Straighten horizon' },
-];
-
-/** Mirrors the server-side defaults in `enhance-prompt.builder.ts`. */
-const DEFAULT_ADJUSTMENTS: AdjustmentsState = {
-  color: true,
-  tone: true,
-  sharpness: true,
-  denoise: true,
-  dehaze: false,
-  straighten: false,
-};
-
-// ---------------------------------------------------------------------------
-// Presets
-// ---------------------------------------------------------------------------
-
-/**
- * `auto` and `custom` are UI-only choices — neither sends a `preset` to the
- * API. The four real values map 1:1 onto the server's preset enum.
- */
-type PresetKey = 'auto' | EnhancePreset | 'custom';
-
-interface PresetDef {
-  key: PresetKey;
-  label: string;
-  description: string;
-  Icon: ComponentType<SvgIconProps>;
-  /** Shown as a warning chip for presets whose output is an AI invention. */
-  interpretive?: boolean;
-  /** Prefill applied when the preset is picked; every field stays editable. */
-  prefill: {
-    adjustments: AdjustmentsState;
-    strength: EnhanceStrength;
-    preserveFaces: boolean;
-  };
-}
-
-const PRESETS: PresetDef[] = [
-  {
-    key: 'auto',
-    label: 'Auto',
-    description: 'Balanced all-round improvement',
-    Icon: AutoAwesomeIcon,
-    prefill: {
-      adjustments: DEFAULT_ADJUSTMENTS,
-      strength: 'balanced',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'restore_old_photo',
-    label: 'Restore old photo',
-    description: 'Repair scratches, fading and creases in scans of old prints',
-    Icon: HealingIcon,
-    prefill: {
-      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, sharpness: true, denoise: true, dehaze: true },
-      strength: 'strong',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'low_light',
-    label: 'Low-light rescue',
-    description: 'Brighten dim indoor and night photos without washing them out',
-    Icon: NightlightIcon,
-    prefill: {
-      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, denoise: true },
-      strength: 'strong',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'colorize_bw',
-    label: 'Colorize B&W',
-    description: 'Add natural color to a black-and-white photo',
-    Icon: PaletteIcon,
-    interpretive: true,
-    prefill: {
-      adjustments: DEFAULT_ADJUSTMENTS,
-      strength: 'balanced',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'portrait_polish',
-    label: 'Portrait polish',
-    description: 'Even out skin tone and lighting on faces, gently',
-    Icon: FaceRetouchingNaturalIcon,
-    prefill: {
-      adjustments: { ...DEFAULT_ADJUSTMENTS, sharpness: true, denoise: true },
-      strength: 'subtle',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'custom',
-    label: 'Custom',
-    description: 'Choose the corrections yourself',
-    Icon: TuneIcon,
-    prefill: {
-      adjustments: DEFAULT_ADJUSTMENTS,
-      strength: 'balanced',
-      preserveFaces: true,
-    },
-  },
-];
-
-const PRESET_BY_KEY = new Map(PRESETS.map((p) => [p.key, p]));
-
-function adjustmentsEqual(a: AdjustmentsState, b: AdjustmentsState): boolean {
-  return (ADJUSTMENT_FIELDS as { key: keyof AdjustmentsState }[]).every(
-    ({ key }) => a[key] === b[key],
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -275,69 +137,6 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-// ---------------------------------------------------------------------------
-// Preset card
-// ---------------------------------------------------------------------------
-
-function PresetCard({
-  def,
-  selected,
-  onSelect,
-}: {
-  def: PresetDef;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const { Icon } = def;
-  return (
-    <ButtonBase
-      onClick={onSelect}
-      aria-pressed={selected}
-      aria-label={`${def.label} — ${def.description}`}
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-start',
-        textAlign: 'left',
-        gap: 0.5,
-        p: 1.25,
-        minHeight: 96,
-        width: '100%',
-        borderRadius: 1.5,
-        border: '2px solid',
-        borderColor: selected ? 'primary.main' : 'divider',
-        bgcolor: selected ? 'action.selected' : 'transparent',
-        transition: 'border-color 120ms, background-color 120ms',
-        '&:hover': { borderColor: selected ? 'primary.main' : 'text.disabled' },
-        '&:focus-visible': {
-          outline: '3px solid',
-          outlineColor: 'primary.main',
-          outlineOffset: 2,
-        },
-      }}
-    >
-      <Stack direction="row" spacing={0.75} sx={{ width: '100%', alignItems: 'center' }}>
-        <Icon fontSize="small" color={selected ? 'primary' : 'action'} />
-        <Typography variant="body2" sx={{ flex: 1, minWidth: 0, fontWeight: 600 }}>
-          {def.label}
-        </Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.3 }}>
-        {def.description}
-      </Typography>
-      {def.interpretive && (
-        <Chip
-          size="small"
-          color="warning"
-          variant="outlined"
-          label="Interpretive"
-          sx={{ height: 20, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }}
-        />
-      )}
-    </ButtonBase>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -408,9 +207,8 @@ export function MediaEnhancementDrawer({
 
   // ---- Preset selection ----------------------------------------------------
   const selectPreset = useCallback((key: PresetKey) => {
-    const def = PRESET_BY_KEY.get(key);
+    const def = resolvePreset(key);
     setPresetKey(key);
-    if (!def) return;
     // Prefill, but leave everything editable — subsequent tweaks are sent.
     setAdjustments(def.prefill.adjustments);
     setStrength(def.prefill.strength);
@@ -418,62 +216,21 @@ export function MediaEnhancementDrawer({
     if (key === 'custom') setCustomize(true);
   }, []);
 
-  const activePreset = PRESET_BY_KEY.get(presetKey) ?? PRESETS[0];
-
   /**
-   * True when the user has actually deviated from the selected preset's
-   * prefill (or typed free-text guidance) — NOT merely because the Customize
-   * panel is expanded. This drives `intent`, which changes the prompt's opening
-   * sentence server-side and is the only thing that makes `instructions` count.
+   * The shared form state both enhance surfaces collect. `buildEnhanceParams`
+   * lives in `./enhancePresets` (together with its `isEnhanceCustomized` rule,
+   * which decides when `intent: 'custom'` is sent) so the single-item drawer
+   * and the multi-photo batch dialog can never drift apart on what a preset
+   * means or which params it produces.
    */
-  const isCustomized = useMemo(
-    () =>
-      !adjustmentsEqual(adjustments, activePreset.prefill.adjustments) ||
-      strength !== activePreset.prefill.strength ||
-      preserveFaces !== activePreset.prefill.preserveFaces ||
-      instructions.trim().length > 0,
-    [adjustments, strength, preserveFaces, instructions, activePreset],
+  const formState = useMemo(
+    () => ({ presetKey, adjustments, strength, preserveFaces, instructions, quality }),
+    [presetKey, adjustments, strength, preserveFaces, instructions, quality],
   );
-
-  /**
-   * Param mapping (deliberate, see issue #98 commit set E):
-   *  - `preset` is sent for the four real presets only; `auto`/`custom` are UI
-   *    affordances and send none.
-   *  - `intent: 'custom'` is sent ONLY when the user genuinely customized. It
-   *    swaps the prompt's base sentence and is the gate for `instructions`.
-   *  - A preset's prefilled adjustments/strength/preserveFaces are still sent
-   *    even when untouched, because they differ from the SERVER's defaults
-   *    (e.g. portrait_polish = subtle). They are honored regardless of intent.
-   *  - Full-auto with nothing touched sends `{}` so every server default wins.
-   */
-  const buildParams = (): EnhanceParams => {
-    const params: EnhanceParams = {};
-
-    if (presetKey !== 'auto' && presetKey !== 'custom') {
-      params.preset = presetKey;
-    }
-
-    if (isCustomized) {
-      params.intent = 'custom';
-      params.adjustments = { ...adjustments };
-      params.strength = strength;
-      params.preserveFaces = preserveFaces;
-      const trimmed = instructions.trim();
-      if (trimmed) params.instructions = trimmed;
-    } else if (presetKey !== 'auto') {
-      params.adjustments = { ...adjustments };
-      params.strength = strength;
-      params.preserveFaces = preserveFaces;
-    }
-
-    if (quality) params.quality = quality;
-
-    return params;
-  };
 
   const handleStart = () => {
     setCommitError(null);
-    void start(buildParams());
+    void start(buildEnhanceParams(formState));
   };
 
   const confirmDecision = async () => {
