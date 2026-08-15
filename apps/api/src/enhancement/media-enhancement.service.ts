@@ -6,7 +6,9 @@ import {
 } from '@nestjs/common';
 import {
   CircleRole,
+  JobStatus,
   MediaType,
+  MediaEnhancementBatch,
   MediaEnhancementStatus,
   MediaEnhancementDecision,
   MediaTagSource,
@@ -29,6 +31,7 @@ import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
+import { ListEnhancementBatchesQuery } from './dto/list-enhancement-batches-query.dto';
 import {
   ListEnhancementsQuery,
   resolveStatusFilter,
@@ -42,6 +45,22 @@ import { randomUUID } from 'crypto';
 import { extname } from 'path';
 
 const SYSTEM_TAG = 'AI Enhanced';
+
+/** Derived batch statuses past which no further transition is possible. */
+const TERMINAL_BATCH_STATUSES: string[] = [
+  'completed',
+  'completed_with_errors',
+  'cancelled',
+];
+
+/** Per-batch status tally derived from its media_enhancements rows. */
+interface BatchTally {
+  counts: Record<string, number>;
+  maxUpdatedAt: Date | null;
+}
+
+/** Tally for a batch with no rows at all (nothing was eligible). */
+const EMPTY_TALLY: BatchTally = { counts: {}, maxUpdatedAt: null };
 
 interface CompareSection {
   url: string | null;
@@ -478,6 +497,249 @@ export class MediaEnhancementService {
         queued,
         skipped,
       },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/enhancement-batches  ·  GET|POST /api/enhancement-batches/:id[/cancel]
+  // ---------------------------------------------------------------------------
+
+  /** Paginated batch list for a circle, newest first (circle viewer). */
+  async listBatches(query: ListEnhancementBatchesQuery, user: RequestUser) {
+    const { circleId, page, pageSize } = query;
+
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    // Served by the existing @@index([circleId, createdAt]); `id` tiebreak keeps
+    // paging deterministic when two batches share a createdAt.
+    const where: Prisma.MediaEnhancementBatchWhereInput = { circleId };
+    const [batches, totalItems] = await this.prisma.$transaction([
+      this.prisma.mediaEnhancementBatch.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.mediaEnhancementBatch.count({ where }),
+    ]);
+
+    // ONE groupBy for the whole page — never one per batch.
+    const tallies = await this.tallyBatches(batches.map((b) => b.id));
+
+    return {
+      items: batches.map((b) =>
+        this.serializeBatch(b, tallies.get(b.id) ?? EMPTY_TALLY),
+      ),
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /** Single batch detail — the BaseRun-shaped progress payload (circle viewer). */
+  async getBatch(batchId: string, user: RequestUser) {
+    const batch = await this.loadBatch(batchId, user, CircleRole.viewer);
+    const tallies = await this.tallyBatches([batch.id]);
+    return this.serializeBatch(batch, tallies.get(batch.id) ?? EMPTY_TALLY);
+  }
+
+  /**
+   * Cancel a non-terminal batch (circle collaborator).
+   *
+   * Only rows still at `pending` are affected: their queued job row is deleted
+   * and the row is marked `cancelled`. A row already at `processing` is left
+   * running ON PURPOSE — its gpt-image-1 call is already billed, so aborting it
+   * spends the money and throws away the result. A `running` job row is likewise
+   * left alone; deleting it out from under the worker buys nothing.
+   *
+   * The handler's own batch-cancellation check (see PictureEnhancementHandler)
+   * covers the row whose job was already claimed when this landed.
+   */
+  async cancelBatch(batchId: string, user: RequestUser) {
+    const batch = await this.loadBatch(batchId, user, CircleRole.collaborator);
+
+    const tallies = await this.tallyBatches([batch.id]);
+    const view = this.serializeBatch(batch, tallies.get(batch.id) ?? EMPTY_TALLY);
+    if (batch.cancelledAt || TERMINAL_BATCH_STATUSES.includes(view.status)) {
+      throw new BadRequestException('Batch already finished');
+    }
+
+    await this.prisma.mediaEnhancementBatch.update({
+      where: { id: batch.id },
+      data: { cancelledAt: new Date() },
+    });
+
+    const pendingRows = await this.prisma.mediaEnhancement.findMany({
+      where: { batchId: batch.id, status: MediaEnhancementStatus.pending },
+      select: { id: true },
+    });
+
+    let cancelled = 0;
+    if (pendingRows.length > 0) {
+      // Delete only the still-PENDING job rows, matched precisely on the
+      // enhancement id in their payload (never by mediaItemId, which could
+      // catch an unrelated job for the same item).
+      await this.prisma.enrichmentJob.deleteMany({
+        where: {
+          type: 'picture_enhancement',
+          status: JobStatus.pending,
+          OR: pendingRows.map((r) => ({
+            payload: { path: ['enhancementId'], equals: r.id },
+          })),
+        },
+      });
+
+      // Re-filtered on `pending` so a row that started processing between the
+      // read above and this write is not clobbered mid-render.
+      const res = await this.prisma.mediaEnhancement.updateMany({
+        where: {
+          batchId: batch.id,
+          status: MediaEnhancementStatus.pending,
+        },
+        data: { status: MediaEnhancementStatus.cancelled },
+      });
+      cancelled = res.count;
+    }
+
+    this.logger.log(
+      `Enhancement batch ${batch.id} cancelled by user ${user.id} — ${cancelled} pending enhancement(s) withdrawn`,
+    );
+
+    return { batchId: batch.id, status: 'cancelled' as const, cancelled };
+  }
+
+  private async loadBatch(
+    batchId: string,
+    user: RequestUser,
+    role: CircleRole,
+  ): Promise<MediaEnhancementBatch> {
+    const batch = await this.prisma.mediaEnhancementBatch.findUnique({
+      where: { id: batchId },
+    });
+    if (!batch) {
+      throw new NotFoundException(`Enhancement batch ${batchId} not found`);
+    }
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      batch.circleId,
+      user.permissions,
+      role,
+    );
+    return batch;
+  }
+
+  /**
+   * Per-batch status tally + newest row timestamp, from ONE groupBy over
+   * media_enhancements. Nothing about a batch's progress is stored on the batch
+   * row itself: there are no counter columns and no finalize job, so a count can
+   * never drift from the rows it describes.
+   */
+  private async tallyBatches(batchIds: string[]): Promise<Map<string, BatchTally>> {
+    const out = new Map<string, BatchTally>();
+    if (batchIds.length === 0) return out;
+
+    const groups = await this.prisma.mediaEnhancement.groupBy({
+      by: ['batchId', 'status'],
+      where: { batchId: { in: batchIds } },
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    });
+
+    for (const g of groups) {
+      if (!g.batchId) continue;
+      const tally =
+        out.get(g.batchId) ?? { counts: {} as Record<string, number>, maxUpdatedAt: null };
+      tally.counts[g.status] = g._count._all;
+      const max = g._max.updatedAt;
+      if (max && (!tally.maxUpdatedAt || max > tally.maxUpdatedAt)) {
+        tally.maxUpdatedAt = max;
+      }
+      out.set(g.batchId, tally);
+    }
+    return out;
+  }
+
+  /**
+   * Project a batch into the BaseRun shape every other async-run backend emits
+   * (workflow runs, trash-empty runs, review runs), so the web RunProgressPanel
+   * and useRunPolling work against it with no new component.
+   *
+   * Every number is DERIVED from the row tally — see tallyBatches.
+   *
+   *  - succeeded = ready | applied | discarded | expired. All four mean the
+   *    render completed successfully; what the human did with it afterwards is
+   *    a separate axis from whether the batch's work succeeded.
+   *  - skipped   = cancelled (withdrawn before any render ran).
+   *
+   * STATUS KEYS OFF "no rows remain pending/processing", NEVER off
+   * processedCount === matchedCount. MediaEnhancement.mediaItemId is
+   * onDelete: Cascade, so hard-deleting a photo mid-batch removes its
+   * enhancement row and SHRINKS the work set — under a counter-equality check
+   * the batch would sit at `running` forever. This is the exact failure mode
+   * documented for review_runs at schema.prisma:2036-2043.
+   *
+   * A batch with zero rows (nothing was eligible) therefore renders as a
+   * terminal `completed`, not a stuck `running`.
+   */
+  private serializeBatch(batch: MediaEnhancementBatch, tally: BatchTally) {
+    const c = tally.counts;
+    const n = (s: MediaEnhancementStatus) => c[s] ?? 0;
+
+    const pending = n(MediaEnhancementStatus.pending);
+    const processing = n(MediaEnhancementStatus.processing);
+    const succeededCount =
+      n(MediaEnhancementStatus.ready) +
+      n(MediaEnhancementStatus.applied) +
+      n(MediaEnhancementStatus.discarded) +
+      n(MediaEnhancementStatus.expired);
+    const failedCount = n(MediaEnhancementStatus.failed);
+    const skippedCount = n(MediaEnhancementStatus.cancelled);
+
+    const matchedCount = pending + processing + succeededCount + failedCount + skippedCount;
+    const processedCount = succeededCount + failedCount + skippedCount;
+
+    const inFlight = pending + processing > 0;
+    let status: 'running' | 'completed' | 'completed_with_errors' | 'cancelled';
+    if (batch.cancelledAt) {
+      status = 'cancelled';
+    } else if (!inFlight) {
+      status = failedCount > 0 ? 'completed_with_errors' : 'completed';
+    } else {
+      status = 'running';
+    }
+
+    return {
+      id: batch.id,
+      circleId: batch.circleId,
+      status,
+      matchedCount,
+      processedCount,
+      succeededCount,
+      failedCount,
+      skippedCount,
+      // Batch creation is synchronous (there is no evaluating phase), so the
+      // batch's own createdAt IS its start time.
+      startedById: batch.createdById,
+      createdAt: batch.createdAt,
+      updatedAt: batch.updatedAt,
+      startedAt: batch.createdAt,
+      finishedAt: status === 'running' ? null : tally.maxUpdatedAt ?? batch.updatedAt,
+      lastError: batch.lastError,
+      // Batch-specific extras, outside the BaseRun contract.
+      requestedCount: batch.requestedCount,
+      queuedCount: batch.queuedCount,
+      skipped: batch.skipped ?? null,
+      params: batch.params ?? {},
+      source: batch.source,
+      cancelledAt: batch.cancelledAt,
     };
   }
 
