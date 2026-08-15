@@ -187,6 +187,16 @@ export class MediaEnhancementService {
       circleId: mediaItem.circleId,
       reason: JobReason.rerun,
       priority: 0,
+      // skipDedup is REQUIRED here, not an optimization. EnrichmentJobService
+      // dedups on (type, mediaItemId, status in pending|running) and returns the
+      // EXISTING job — whose payload points at the enhancement id superseded by
+      // the supersedeLive() call two statements up. Without this flag,
+      // re-enhancing an item whose previous job is still `pending` silently
+      // hands back that stale job, the handler resolves the now-`discarded` row
+      // and early-returns, and the row just created sits at `pending` forever.
+      // The media_enhancements row (one live per item, enforced by
+      // supersedeLive) is the real idempotency unit here — not the job row.
+      skipDedup: true,
       providerKey: provider,
       modelVersion: model,
       payload: { enhancementId: row.id },

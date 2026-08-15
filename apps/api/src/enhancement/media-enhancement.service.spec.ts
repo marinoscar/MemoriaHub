@@ -394,6 +394,8 @@ describe('MediaEnhancementService', () => {
         circleId: CIRCLE_ID,
         reason: 'rerun',
         priority: 0,
+        // Required: dedup would otherwise return the superseded row's job.
+        skipDedup: true,
         providerKey: 'openai',
         modelVersion: 'gpt-image-1',
         payload: { enhancementId: ENH_ID },
