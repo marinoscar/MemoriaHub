@@ -1056,6 +1056,45 @@ describe('MediaEnhancementService', () => {
         ]);
       });
 
+      it('mode "all" combined with another filter keeps BOTH — wherePeople\'s AND must never clobber buildMediaWhere\'s AND (which would silently drop the other filters and widen the paid match set)', async () => {
+        // Both fragments emit a top-level `AND` array; an object spread would let
+        // the people one overwrite the tag one, resolving MORE photos than the
+        // filter describes and paying gpt-image-1 for them.
+        const dto = makeFilterDto({
+          tag: 'Beach',
+          personIds: ['person-1', 'person-2'],
+          peopleMatch: 'all',
+        });
+
+        await service.startBatchByFilter(dto, USER);
+
+        const tagFragment = buildMediaWhere(CIRCLE_ID, { tag: 'Beach' }).AND as any[];
+        expect(tagFragment).toHaveLength(1);
+
+        // The tag fragment survives ALONGSIDE the per-person faces.some clauses.
+        expect(lastFilterWhere.AND).toEqual([
+          tagFragment[0],
+          { faces: { some: { personId: 'person-1' } } },
+          { faces: { some: { personId: 'person-2' } } },
+        ]);
+      });
+
+      it('mode "any" combined with another filter keeps both the AND array and the faces key', async () => {
+        const dto = makeFilterDto({
+          tag: 'Beach',
+          personIds: ['person-1', 'person-2'],
+          peopleMatch: 'any',
+        });
+
+        await service.startBatchByFilter(dto, USER);
+
+        const tagFragment = buildMediaWhere(CIRCLE_ID, { tag: 'Beach' }).AND as any[];
+        expect(lastFilterWhere.AND).toEqual([tagFragment[0]]);
+        expect(lastFilterWhere).toMatchObject({
+          faces: { some: { personId: { in: ['person-1', 'person-2'] } } },
+        });
+      });
+
       it('a single `personId` (no `personIds` array) is folded into a one-element people filter', async () => {
         const dto = makeFilterDto({ personId: 'person-solo', peopleMatch: 'any' });
 

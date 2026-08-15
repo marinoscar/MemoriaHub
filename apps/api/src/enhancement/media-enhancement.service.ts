@@ -473,32 +473,62 @@ export class MediaEnhancementService {
     const effectivePersonIds =
       personIds && personIds.length > 0 ? personIds : personId ? [personId] : [];
 
-    return {
-      ...buildMediaWhere(circleId, {
-        type,
-        capturedAtFrom,
-        capturedAtTo,
-        albumId,
-        favorite,
-        tag,
-        country,
-        region,
-        locality,
-        place,
-        location,
-        contentHash,
-        cameraMake,
-        cameraModel,
-        sourceDeviceId,
-        sourceDeviceName,
-        missingGeo,
-        missingCapturedAt,
-        missingCamera,
-        noFaces,
-      }),
-      ...(effectivePersonIds.length > 0
+    const base = buildMediaWhere(circleId, {
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      albumId,
+      favorite,
+      tag,
+      country,
+      region,
+      locality,
+      place,
+      location,
+      contentHash,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
+      missingCapturedAt,
+      missingCamera,
+      noFaces,
+    });
+    const people =
+      effectivePersonIds.length > 0
         ? wherePeople(effectivePersonIds, peopleMatch ?? 'any')
-        : {}),
+        : {};
+
+    // ---- AND-key collision: MERGE, never spread. Do not "simplify" this back. --
+    // buildMediaWhere collects EVERY filter fragment into a single top-level
+    // `AND` array (deliberately, so two fragments that each emit an `OR` cannot
+    // clobber each other). wherePeople(ids, 'all') ALSO returns a top-level
+    // `AND` array. Object-spreading the two therefore lets the people `AND`
+    // silently OVERWRITE the filter `AND`, dropping every other condition the
+    // user asked for and WIDENING the match set — which on this endpoint means
+    // paying gpt-image-1 to enhance photos the filter never described.
+    // ('any' mode is unaffected: it returns a `faces` key, not `AND`.)
+    //
+    // The same collision exists at the two pre-existing buildMediaWhere +
+    // wherePeople call sites (MediaService.listMedia and
+    // addAlbumItemsByFilter), which still spread. Fixing it in the shared
+    // builder would change gallery/album behaviour app-wide and is tracked
+    // separately; it is fixed HERE only. The resulting asymmetry is safe in
+    // this direction: this endpoint resolves the NARROWER, correct set and
+    // refuses rather than truncates, so it can never overcharge.
+    const { AND: baseAnd, ...baseRest } = base;
+    const { AND: peopleAnd, ...peopleRest } = people;
+    const asArray = (
+      and: Prisma.MediaItemWhereInput['AND'],
+    ): Prisma.MediaItemWhereInput[] =>
+      and === undefined ? [] : Array.isArray(and) ? and : [and];
+    const mergedAnd = [...asArray(baseAnd), ...asArray(peopleAnd)];
+
+    return {
+      ...baseRest,
+      ...peopleRest,
+      ...(mergedAnd.length > 0 ? { AND: mergedAnd } : {}),
       // The three pins — see the doc comment above. Kept last so they can never
       // be shadowed by a spread.
       deletedAt: null,
