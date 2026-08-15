@@ -17,8 +17,21 @@ const STRENGTH_WORD: Record<Strength, string> = {
  * adjustment toggles/instructions still steer the individual corrections.
  */
 const PRESET_CLAUSE: Record<Preset, string> = {
+  // The identity language here is DELIBERATELY heavier than the generic
+  // always-on `preserveFaces` sentence, and heavier than any other preset's
+  // clause. This preset is pointed at damaged FACES essentially every time it
+  // is used, and the generic sentence alone is demonstrably insufficient: the
+  // model resolves the conflict between "repair the damage" and "don't alter
+  // the face" in favour of repair, and repairs a face by inventing one.
+  // Three obligations must survive any rewording (issue #436):
+  //   1. name the specific geometry (features, eyes, mouth, jawline), not just
+  //      "the face";
+  //   2. explicitly PERMIT leaving damage unrepaired on faces — this is what
+  //      resolves the conflict above;
+  //   3. preserve grain/texture, so a restored face isn't a smooth synthetic
+  //      patch on a grainy print.
   restore_old_photo:
-    "This is an old or damaged photograph. Repair scratches, dust, creases, tears, stains, and faded areas, and recover lost contrast and detail. Keep the photo's period character — do not modernize it or colorize it unless asked.",
+    "This is an old or damaged photograph. Repair scratches, dust, creases, tears, stains, and faded areas, and recover lost contrast and detail. Keep the photo's period character — do not modernize it or colorize it unless asked. Do NOT redraw, reshape, re-detail or re-age any face: leave facial features, eyes, mouth, and jawline exactly as they appear in the original, even where they remain soft, blurred, or damaged. It is better to leave a face imperfect than to change who the person looks like. Preserve the original film grain and paper texture.",
   low_light:
     'This photo was taken in low light. Brighten the exposure naturally, recover shadow detail, reduce heavy noise, and correct color casts from artificial lighting, while keeping the night-time or indoor atmosphere believable — do not make it look like daytime.',
   colorize_bw:

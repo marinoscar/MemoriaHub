@@ -419,19 +419,28 @@ describe('MediaEnhancementDrawer', () => {
 
       await user.click(screen.getByRole('button', { name: /customize/i }));
 
-      // restore_old_photo prefill: dehaze:true, strength:'strong'
+      // restore_old_photo prefill: dehaze:true, sharpness:false, strength:'balanced'.
+      // Issue #436 softened strength from 'strong' and turned sharpness off —
+      // both were pushing the model to re-detail (invent) damaged faces. Haze
+      // removal stays on because it acts on the paper, not the face.
       const dehazeSwitch = screen
         .getByText(/remove haze/i)
         .closest('.MuiFormControlLabel-root')!
         .querySelector('input[type="checkbox"]') as HTMLInputElement;
       expect(dehazeSwitch.checked).toBe(true);
 
+      const sharpnessSwitch = screen
+        .getByText(/clarity & sharpness/i)
+        .closest('.MuiFormControlLabel-root')!
+        .querySelector('input[type="checkbox"]') as HTMLInputElement;
+      expect(sharpnessSwitch.checked).toBe(false);
+
       // The Strength <Select> has no explicit labelId association in the
       // component, so getByLabelText can't resolve it — scope by DOM order
       // instead: Strength is the first combobox in the Customize panel,
       // Output quality the second.
       const [strengthSelect] = screen.getAllByRole('combobox');
-      expect(strengthSelect).toHaveTextContent(/strong/i);
+      expect(strengthSelect).toHaveTextContent(/balanced/i);
     });
 
     it('selecting "Portrait polish" pre-fills a subtle strength', async () => {

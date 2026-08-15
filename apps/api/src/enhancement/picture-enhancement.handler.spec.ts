@@ -403,6 +403,24 @@ describe('PictureEnhancementHandler', () => {
       expect(req.inputFidelity).toBe('low');
     });
 
+    // Issue #436 regression guard: the drawer's restore_old_photo prefill was
+    // softened from strength:'strong' to 'balanced'. That change must NOT move
+    // inputFidelity — it was already 'high' on this path (preserveFaces short-
+    // circuits the condition), and the point of the softening is the adverb in
+    // the prompt, nothing else.
+    it('a default "restore old photo" run still resolves to "high" fidelity after the strength softening', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(
+        makeEnhancementRow({
+          params: { preset: 'restore_old_photo', strength: 'balanced', preserveFaces: true },
+        }),
+      );
+
+      await handler.process(makeJob());
+
+      const [, req] = mockEnhanceImage.mock.calls[0];
+      expect(req.inputFidelity).toBe('high');
+    });
+
     it('uses "high" fidelity when preserveFaces is false but strength is not "strong"', async () => {
       mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(
         makeEnhancementRow({ params: { preserveFaces: false, strength: 'balanced' } }),
