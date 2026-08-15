@@ -124,6 +124,7 @@ describe('PictureEnhancementHandler', () => {
   let mockRegistry: { register: jest.Mock };
   let mockPrisma: {
     mediaEnhancement: { findUnique: jest.Mock; update: jest.Mock };
+    mediaEnhancementBatch: { findUnique: jest.Mock };
     mediaItem: { findUnique: jest.Mock };
   };
   let mockDownload: jest.Mock;
@@ -152,6 +153,11 @@ describe('PictureEnhancementHandler', () => {
       mediaEnhancement: {
         findUnique: jest.fn().mockResolvedValue(makeEnhancementRow()),
         update: jest.fn().mockResolvedValue({}),
+      },
+      // Batch-cancellation gate (issue #421). Only consulted when the row
+      // carries a batchId; the default row is a single-item enhancement.
+      mediaEnhancementBatch: {
+        findUnique: jest.fn().mockResolvedValue(null),
       },
       mediaItem: {
         findUnique: jest.fn().mockResolvedValue(makeMediaItem()),

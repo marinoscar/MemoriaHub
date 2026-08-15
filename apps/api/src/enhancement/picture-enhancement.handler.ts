@@ -92,6 +92,28 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       return;
     }
 
+    // Second cancellation gate (epic #420, issue #421). MediaEnhancementService
+    // .cancelBatch deletes the still-PENDING job rows, but a job already claimed
+    // by a worker when the cancel landed is past that point — it would otherwise
+    // go on to make a billed gpt-image-1 call for a batch the user just stopped.
+    // One cheap read closes that window.
+    if (row.batchId) {
+      const batch = await this.prisma.mediaEnhancementBatch.findUnique({
+        where: { id: row.batchId },
+        select: { cancelledAt: true },
+      });
+      if (batch?.cancelledAt) {
+        await this.prisma.mediaEnhancement.update({
+          where: { id: row.id },
+          data: { status: MediaEnhancementStatus.cancelled },
+        });
+        this.logger.log(
+          `picture_enhancement job ${job.id}: batch ${row.batchId} was cancelled; skipping enhancement ${row.id}`,
+        );
+        return;
+      }
+    }
+
     await this.prisma.mediaEnhancement.update({
       where: { id: row.id },
       data: { status: MediaEnhancementStatus.processing, lastError: null },
