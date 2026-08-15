@@ -64,6 +64,8 @@ export interface PublicFeatures {
     blockReplaceOnDownscale: boolean;
     /** Configured enhancement model NAME (never a credential); null when unset. */
     model: string | null;
+    /** Max items one POST /api/media/bulk/enhance may queue (issue #421). */
+    maxBatchSize: number;
   };
 }
 
@@ -193,6 +195,9 @@ export class SystemSettingsService {
         blockReplaceOnDownscale:
           settings.pictureEnhancement?.blockReplaceOnDownscale ?? false,
         model: settings.ai?.features?.enhance?.model ?? null,
+        // The client needs the bulk cap without an Admin-only settings read, so
+        // a selection can be capped/labelled up front rather than 400'd.
+        maxBatchSize: settings.pictureEnhancement?.maxBatchSize ?? 25,
       },
     };
   }
@@ -580,6 +585,10 @@ export class SystemSettingsService {
           (dto as any).pictureEnhancement?.retentionHours ??
           (current as any).pictureEnhancement?.retentionHours ??
           168,
+        maxBatchSize:
+          (dto as any).pictureEnhancement?.maxBatchSize ??
+          (current as any).pictureEnhancement?.maxBatchSize ??
+          25,
       },
       workflows: {
         maxItemsPerRun:
