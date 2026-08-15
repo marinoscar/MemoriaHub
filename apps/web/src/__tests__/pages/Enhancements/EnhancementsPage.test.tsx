@@ -9,7 +9,7 @@
  *  - only the active tab's data is fetched
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useSearchParams } from 'react-router-dom';
 import { render } from '../../utils/test-utils';
@@ -62,7 +62,12 @@ describe('EnhancementsPage', () => {
 
   it('passes the active circle id down to the pending tab', () => {
     render(<EnhancementsPage />);
-    expect(pendingTabSpy).toHaveBeenCalledWith({ circleId: 'circle-1' });
+    // `batchId` is undefined unless the URL carries one (epic #420, issue #423).
+    expect(pendingTabSpy).toHaveBeenCalledWith({
+      circleId: 'circle-1',
+      batchId: undefined,
+      onClearBatchFilter: expect.any(Function),
+    });
   });
 
   it('opens the tab named by ?tab= on mount', () => {
@@ -121,6 +126,46 @@ describe('EnhancementsPage', () => {
     expect(
       await screen.findByText(/History — the full audit trail of past enhancements/),
     ).toBeInTheDocument();
+  });
+
+  it('reads ?batchId= from the URL and passes it to the pending tab (epic #420, issue #423)', () => {
+    render(<EnhancementsPage />, {
+      wrapperOptions: { route: '/enhancements?batchId=batch-1' },
+    });
+
+    expect(pendingTabSpy).toHaveBeenCalledWith({
+      circleId: 'circle-1',
+      batchId: 'batch-1',
+      onClearBatchFilter: expect.any(Function),
+    });
+  });
+
+  it('clearing the batch filter drops ?batchId= from the URL and re-renders the tab unfiltered', async () => {
+    render(
+      <>
+        <EnhancementsPage />
+        <SearchParamsProbe />
+      </>,
+      { wrapperOptions: { route: '/enhancements?batchId=batch-1' } },
+    );
+
+    expect(screen.getByTestId('search-params')).toHaveTextContent('batchId=batch-1');
+    const { onClearBatchFilter } = pendingTabSpy.mock.calls.at(-1)![0] as {
+      onClearBatchFilter: () => void;
+    };
+
+    act(() => {
+      onClearBatchFilter();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search-params')).not.toHaveTextContent('batchId');
+    });
+    await waitFor(() => {
+      expect(pendingTabSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ batchId: undefined }),
+      );
+    });
   });
 
   it('mirrors a non-default tab into the URL and removes it again on return', async () => {

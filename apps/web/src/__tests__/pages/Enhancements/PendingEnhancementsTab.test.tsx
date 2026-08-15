@@ -37,6 +37,10 @@ vi.mock('../../../hooks/useFeatureFlags', () => ({
 vi.mock('../../../services/enhance', () => ({
   applyEnhancement: vi.fn().mockResolvedValue({}),
   discardEnhancement: vi.fn().mockResolvedValue(undefined),
+  // Called by the tab's "Recent batches" section (epic #420, issue #423).
+  // Empty by default: that section renders nothing without batches, leaving
+  // every assertion below about the inbox itself.
+  listEnhancementBatches: vi.fn().mockResolvedValue({ items: [], meta: null }),
 }));
 
 vi.mock('../../../services/media', () => ({
@@ -53,7 +57,11 @@ vi.mock('../../../components/media/MediaEnhancementDrawer', () => ({
 
 import { useEnhancements } from '../../../hooks/useEnhancements';
 import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
-import { applyEnhancement, discardEnhancement } from '../../../services/enhance';
+import {
+  applyEnhancement,
+  discardEnhancement,
+  listEnhancementBatches,
+} from '../../../services/enhance';
 import { getMedia } from '../../../services/media';
 
 const mockUseEnhancements = vi.mocked(useEnhancements);
@@ -503,6 +511,98 @@ describe('PendingEnhancementsTab', () => {
 
       expect(screen.queryByRole('checkbox')).toBeNull();
       expect(screen.queryByRole('button', { name: /Select all/i })).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Batch narrowing (epic #420, issue #423)
+  // ---------------------------------------------------------------------
+  describe('batch narrowing', () => {
+    it('narrows the request passed to listEnhancements and renders the explanatory chip', () => {
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 3, totalPages: 1 },
+      });
+      render(<PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />);
+
+      expect(mockUseEnhancements).toHaveBeenCalledWith(
+        expect.objectContaining({ circleId: 'circle-1', batchId: 'batch-1' }),
+      );
+      expect(
+        screen.getByText('Showing 3 results from one batch'),
+      ).toBeInTheDocument();
+    });
+
+    it('singularizes the chip copy for exactly one result', () => {
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 1, totalPages: 1 },
+      });
+      render(<PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />);
+
+      expect(screen.getByText('Showing 1 result from one batch')).toBeInTheDocument();
+    });
+
+    it('suppresses the "Recent batches" section (and its request) while narrowed to one batch', async () => {
+      // `RecentBatches` isn't mounted at all while `batchId` is set — proven
+      // by the fact its data call never fires, not merely that it renders
+      // nothing because the mock happens to return no items.
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 1, totalPages: 1 },
+      });
+      render(<PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />);
+
+      // Give any stray effect a chance to have fired at all.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // The chip already says where the user is; a second "recent batches"
+      // list beside it would be redundant navigation.
+      expect(screen.queryByText('Recent batches')).not.toBeInTheDocument();
+      expect(listEnhancementBatches).not.toHaveBeenCalled();
+    });
+
+    it('calls onClearBatchFilter when the chip is cleared, and the tab then requests the unfiltered list', async () => {
+      const user = userEvent.setup();
+      const onClearBatchFilter = vi.fn();
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 1, totalPages: 1 },
+      });
+      const { rerender } = render(
+        <PendingEnhancementsTab
+          circleId="circle-1"
+          batchId="batch-1"
+          onClearBatchFilter={onClearBatchFilter}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Show all' }));
+      expect(onClearBatchFilter).toHaveBeenCalledTimes(1);
+
+      // The tab itself owns no URL state — clearing the param is the parent's
+      // job (EnhancementsPage). Once the parent re-renders with batchId gone,
+      // the tab must go back to requesting the unfiltered list.
+      mockUseEnhancements.mockClear();
+      rerender(<PendingEnhancementsTab circleId="circle-1" />);
+
+      const lastCallParams = mockUseEnhancements.mock.calls.at(-1)?.[0];
+      expect(lastCallParams).not.toHaveProperty('batchId');
+      expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull();
+    });
+
+    it('behaves EXACTLY as before when batchId is absent — the regression pin', () => {
+      mockList([makeItem()]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      // No batch narrowing chip, no batchId on the wire, and the hub's own
+      // recovery list (Recent batches) is free to render.
+      expect(screen.queryByText(/from one batch/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull();
+      const lastCallParams = mockUseEnhancements.mock.calls.at(-1)?.[0];
+      expect(lastCallParams).not.toHaveProperty('batchId');
+      expect(lastCallParams).toEqual({
+        circleId: 'circle-1',
+        page: 1,
+        pageSize: 24,
+        sortOrder: 'desc',
+      });
     });
   });
 });

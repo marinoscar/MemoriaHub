@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Box, Alert, Tabs, Tab, Typography, Stack } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
@@ -45,6 +45,21 @@ export default function EnhancementsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, setSearchParams]);
 
+  // Batch narrowing (epic #420, issue #423): a link from a batch's progress
+  // page lands here with `?batchId=`. The param IS the state — clearing the
+  // chip drops it from the URL, so the back button restores the narrowed view.
+  const batchId = searchParams.get('batchId') ?? undefined;
+  const clearBatchFilter = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('batchId');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
   if (!activeCircle) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -79,7 +94,13 @@ export default function EnhancementsPage() {
 
       {/* Only the active tab's data is fetched — each tab owns its own hook
           call, so mounting one never triggers the others' requests. */}
-      {tab === 'pending' && <PendingEnhancementsTab circleId={activeCircle.id} />}
+      {tab === 'pending' && (
+        <PendingEnhancementsTab
+          circleId={activeCircle.id}
+          batchId={batchId}
+          onClearBatchFilter={clearBatchFilter}
+        />
+      )}
 
       {tab === 'enhanced' && (
         <Alert severity="info">

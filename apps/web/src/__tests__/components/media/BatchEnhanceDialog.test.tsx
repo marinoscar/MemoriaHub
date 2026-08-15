@@ -404,6 +404,7 @@ describe('BatchEnhanceDialog', () => {
 
       expect(onSuccess).toHaveBeenCalledWith(
         expect.stringMatching(/Queued AI enhancement for 1 photo · 2 skipped/i),
+        'batch-1',
       );
       expect(onClose).toHaveBeenCalledTimes(1);
     });
@@ -420,7 +421,10 @@ describe('BatchEnhanceDialog', () => {
       await user.click(screen.getByRole('button', { name: /^Enhance 2 photos$/i }));
 
       await waitFor(() => {
-        expect(onSuccess).toHaveBeenCalledWith('Queued AI enhancement for 2 photos');
+        expect(onSuccess).toHaveBeenCalledWith(
+          'Queued AI enhancement for 2 photos',
+          'batch-1',
+        );
       });
       expect(onClose).toHaveBeenCalledTimes(1);
       // No result step ever rendered.
@@ -443,10 +447,11 @@ describe('BatchEnhanceDialog', () => {
       await user.click(screen.getByRole('button', { name: /^Enhance 2 photos$/i }));
 
       await waitFor(() => {
-        expect(onSuccess).toHaveBeenCalledWith('No photos were queued');
+        expect(onSuccess).toHaveBeenCalledWith('No photos were queued', 'batch-1');
       });
       expect(onSuccess).not.toHaveBeenCalledWith(
         expect.stringMatching(/Queued AI enhancement for 0/i),
+        expect.anything(),
       );
     });
 
@@ -472,9 +477,13 @@ describe('BatchEnhanceDialog', () => {
       ).not.toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /^done$/i }));
-      expect(onSuccess).toHaveBeenCalledWith('No photos queued — 2 photos were skipped');
+      expect(onSuccess).toHaveBeenCalledWith(
+        'No photos queued — 2 photos were skipped',
+        'batch-1',
+      );
       expect(onSuccess).not.toHaveBeenCalledWith(
         expect.stringMatching(/Queued AI enhancement for 0/i),
+        expect.anything(),
       );
     });
   });

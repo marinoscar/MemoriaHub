@@ -84,8 +84,12 @@ interface BatchEnhanceDialogProps {
   maxBatchSize: number;
   /** Optional model label, shown alongside the presets (ai.features.enhance). */
   modelLabel?: string | null;
-  /** Called with the one-line, SERVER-derived summary once the batch is queued. */
-  onSuccess: (message: string) => void;
+  /**
+   * Called with the one-line, SERVER-derived summary once the batch is queued,
+   * plus the batch id so the host can make its toast ACTIONABLE — a link to the
+   * batch's progress page is the main way a user ever reaches it (issue #423).
+   */
+  onSuccess: (message: string, batchId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +211,7 @@ export function BatchEnhanceDialog({
         // the toast only ever carries the one-line summary.
         setResult(res);
       } else {
-        onSuccess(message);
+        onSuccess(message, res.batchId);
         onClose();
       }
     } catch (err) {
@@ -221,7 +225,7 @@ export function BatchEnhanceDialog({
   };
 
   const finishAfterResult = () => {
-    if (result) onSuccess(buildResultMessage(result));
+    if (result) onSuccess(buildResultMessage(result), result.batchId);
     onClose();
   };
 

@@ -1,4 +1,6 @@
 import { api, ApiError } from './api';
+import type { BaseRun } from '../types/runs';
+import type { BulkEnhanceSkipped } from './media';
 
 // ---------------------------------------------------------------------------
 // Types — AI Picture Enhancer (see docs/specs/picture-enhancer.md §4.1, §8)
@@ -166,11 +168,68 @@ export interface EnhancementListResponse {
 export interface ListEnhancementsParams {
   circleId: string;
   status?: EnhancementStatusFilter;
+  /**
+   * Narrow the listing to one bulk-enhance batch (epic #420, issue #421).
+   * Server-side, composes with `status` — e.g. a batch's failed rows.
+   */
+  batchId?: string;
   page?: number;
   /** Server caps this at 50 (default 24). */
   pageSize?: number;
   sortBy?: EnhancementSortBy;
   sortOrder?: EnhancementSortOrder;
+}
+
+// ---------------------------------------------------------------------------
+// Types — bulk-enhance batches (epic #420, issue #421)
+// GET /api/enhancement-batches[/:id] · POST /api/enhancement-batches/:id/cancel
+// ---------------------------------------------------------------------------
+
+/**
+ * A bulk-enhance batch, as the API serializes it.
+ *
+ * Deliberately a {@link BaseRun}: issue #421 shaped this payload with the same
+ * field set as trash-empty runs, workflow runs and review runs precisely so the
+ * shared `RunProgressPanel` + `useRunPolling` drive it with no new component.
+ * Everything below `lastError` is a batch-specific extra outside that contract.
+ *
+ * Note what the shared counters MEAN here, which is not what they mean
+ * elsewhere: `succeededCount` counts renders that COMPLETED (ready, applied,
+ * discarded, expired) — a `ready` row is waiting for a human, not finished —
+ * and `skippedCount` counts rows a cancel withdrew before any render ran. The
+ * page relabels both tiles accordingly.
+ */
+export interface EnhancementBatch extends BaseRun {
+  /** Distinct ids the server considered when the batch was created. */
+  requestedCount: number;
+  /** Enhancements actually enqueued at creation time. */
+  queuedCount: number;
+  /** Per-reason tally of items declined at creation; null for older batches. */
+  skipped: BulkEnhanceSkipped | null;
+  /** The one params object every photo in the batch was enhanced with. */
+  params: EnhanceParams | null;
+  /** How the batch was started (currently always `selection`). */
+  source: string;
+  cancelledAt: string | null;
+}
+
+export interface EnhancementBatchListResponse {
+  items: EnhancementBatch[];
+  meta: EnhancementListMeta;
+}
+
+export interface ListEnhancementBatchesParams {
+  circleId: string;
+  page?: number;
+  /** Server caps this at 50 (default 20). */
+  pageSize?: number;
+}
+
+export interface CancelEnhancementBatchResult {
+  batchId: string;
+  status: 'cancelled';
+  /** Number of still-pending enhancements withdrawn. */
+  cancelled: number;
 }
 
 /**
@@ -219,6 +278,7 @@ export async function listEnhancements(
 ): Promise<EnhancementListResponse> {
   const p = new URLSearchParams({ circleId: params.circleId });
   if (params.status) p.set('status', params.status);
+  if (params.batchId) p.set('batchId', params.batchId);
   if (params.page) p.set('page', String(params.page));
   if (params.pageSize) p.set('pageSize', String(params.pageSize));
   if (params.sortBy) p.set('sortBy', params.sortBy);
@@ -266,6 +326,43 @@ export async function applyEnhancement(
   return api.post<ApplyEnhancementResult>(
     `/media/${id}/enhance/${enhancementId}/apply`,
     { decision },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bulk-enhance batches (epic #420)
+// ---------------------------------------------------------------------------
+
+/** Paginated batch list for a circle, newest first. */
+export async function listEnhancementBatches(
+  params: ListEnhancementBatchesParams,
+): Promise<EnhancementBatchListResponse> {
+  const p = new URLSearchParams({ circleId: params.circleId });
+  if (params.page) p.set('page', String(params.page));
+  if (params.pageSize) p.set('pageSize', String(params.pageSize));
+  const result = await api.get<EnhancementBatchListResponse>(
+    `/enhancement-batches?${p.toString()}`,
+  );
+  return { items: result.items ?? [], meta: result.meta };
+}
+
+/** Poll one batch's progress. The payload is BaseRun-shaped — see EnhancementBatch. */
+export async function getEnhancementBatch(batchId: string): Promise<EnhancementBatch> {
+  return api.get<EnhancementBatch>(`/enhancement-batches/${batchId}`);
+}
+
+/**
+ * Withdraw every enhancement in the batch that is still QUEUED.
+ *
+ * An enhancement already rendering is deliberately left to finish server-side:
+ * its model call is already billed, so aborting spends the money and discards
+ * the result. `cancelled` is how many queued rows were actually withdrawn.
+ */
+export async function cancelEnhancementBatch(
+  batchId: string,
+): Promise<CancelEnhancementBatchResult> {
+  return api.post<CancelEnhancementBatchResult>(
+    `/enhancement-batches/${batchId}/cancel`,
   );
 }
 
