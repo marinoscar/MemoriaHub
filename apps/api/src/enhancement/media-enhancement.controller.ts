@@ -84,6 +84,14 @@ export class MediaEnhancementController {
       '`in_progress` (pending, processing), `awaiting_decision` (ready), ' +
       '`terminal` (applied, discarded, expired).',
   })
+  @ApiQuery({
+    name: 'batchId',
+    required: false,
+    type: String,
+    format: 'uuid',
+    description:
+      'Narrow to one bulk-enhance batch (see GET /api/enhancement-batches). Composes with `status`.',
+  })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Default 1' })
   @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Default 24, max 50' })
   @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'updatedAt'], description: 'Default createdAt' })

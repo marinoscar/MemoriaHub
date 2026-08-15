@@ -828,6 +828,8 @@ export class MediaEnhancementService {
     const where: Prisma.MediaEnhancementWhereInput = {
       circleId,
       ...(statuses ? { status: { in: statuses } } : {}),
+      // Optional batch narrowing (issue #421), served by @@index([batchId]).
+      ...(query.batchId ? { batchId: query.batchId } : {}),
     };
 
     const [rows, totalItems] = await this.prisma.$transaction([
