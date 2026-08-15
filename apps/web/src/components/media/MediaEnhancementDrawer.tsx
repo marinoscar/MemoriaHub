@@ -168,9 +168,15 @@ const PRESETS: PresetDef[] = [
     label: 'Restore old photo',
     description: 'Repair scratches, fading and creases in scans of old prints',
     Icon: HealingIcon,
+    // Issue #436: this preset is aimed at damaged FACES essentially every time
+    // it is used, and "strongly ... increase clarity and sharpness" was being
+    // applied to the face just as much as to the creases — inviting the model
+    // to re-detail (i.e. invent) features it has too few pixels to preserve.
+    // dehaze/tone/denoise stay on: those act on the paper, not the face.
+    // Both knobs remain raisable by hand under Customize.
     prefill: {
-      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, sharpness: true, denoise: true, dehaze: true },
-      strength: 'strong',
+      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, sharpness: false, denoise: true, dehaze: true },
+      strength: 'balanced',
       preserveFaces: true,
     },
   },
