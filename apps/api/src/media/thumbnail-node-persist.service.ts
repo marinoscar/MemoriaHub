@@ -31,6 +31,8 @@ import { EnrichmentJob, Prisma } from '@prisma/client';
 import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { thumbnailKeyPrefixFor } from '../storage/processing/thumbnail-key.util';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 
 @Injectable()
@@ -41,6 +43,7 @@ export class ThumbnailNodePersistService {
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
+    private readonly thumbnailPrune: ThumbnailPruneService,
   ) {}
 
   async persistThumbnail(job: EnrichmentJob, result: ThumbnailResult): Promise<void> {
@@ -68,6 +71,18 @@ export class ThumbnailNodePersistService {
     }
 
     const originalObject = mediaItem.storageObject;
+
+    // The key was chosen by the SERVER (NodesService.getJobUploadUrl); a node
+    // that submits anything else is either buggy or hostile. Re-asserting the
+    // convention here also keeps ThumbnailPruneService's prefix scan honest —
+    // it prunes by `thumbnails/<objectId>` and keeps whatever the object
+    // currently points at, which must be one of them.
+    if (!result.storageKey.startsWith(thumbnailKeyPrefixFor(originalObject.id))) {
+      throw new Error(
+        `persistThumbnail: storageKey "${result.storageKey}" is not a thumbnail key for ` +
+          `StorageObject ${originalObject.id} — refusing to persist`,
+      );
+    }
 
     // The node uploads via whichever provider is currently active — the same
     // resolution ThumbnailProcessor.uploadThumbnail uses, so a thumbnail
@@ -145,6 +160,12 @@ export class ThumbnailNodePersistService {
     });
 
     await this.mediaMetadataSyncService.syncFromStorageObject(originalObject.id);
+
+    // The node's key carries a RANDOM version (it must be named before the
+    // bytes exist), so a re-run always supersedes the previous thumbnail rather
+    // than overwriting it. Drop the old one now that the MediaItem points at
+    // the new key — best-effort, never fatal (issue #434).
+    await this.thumbnailPrune.pruneSupersededThumbnails(originalObject.id);
 
     this.logger.log(
       `persistThumbnail: job ${job.id}: thumbnail persisted for MediaItem ${mediaItem.id} ` +

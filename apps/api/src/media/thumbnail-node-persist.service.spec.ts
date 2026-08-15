@@ -9,6 +9,11 @@
  * ThumbnailProcessor.uploadThumbnail's writes exactly (see the acceptance
  * note in thumbnail-node-persist.service.ts: both paths must converge on
  * identical columns).
+ *
+ * Also covers issue #434: the node's key is versioned, so a re-run supersedes
+ * rather than overwrites — the previous thumbnail is pruned, but only after the
+ * MediaItem has been repointed at the new key — and a submitted key that is not
+ * one of this object's thumbnails is rejected outright.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -16,6 +21,7 @@ import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import type { EnrichmentJob } from '@prisma/client';
 import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
@@ -85,6 +91,9 @@ describe('ThumbnailNodePersistService', () => {
     getBucket: jest.Mock;
   };
   let mockSync: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
+  let mockPrune: { pruneSupersededThumbnails: jest.Mock };
+  /** Records sync-vs-prune ordering (issue #434). */
+  let callOrder: string[];
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -97,7 +106,18 @@ describe('ThumbnailNodePersistService', () => {
     mockResolver = {
       getActiveProvider: jest.fn().mockResolvedValue({ id: 's3', provider: mockActiveProvider }),
     };
-    mockSync = { syncFromStorageObject: jest.fn().mockResolvedValue(undefined) };
+    callOrder = [];
+    mockSync = {
+      syncFromStorageObject: jest.fn().mockImplementation(async () => {
+        callOrder.push('sync');
+      }),
+    };
+    mockPrune = {
+      pruneSupersededThumbnails: jest.fn().mockImplementation(async () => {
+        callOrder.push('prune');
+        return 1;
+      }),
+    };
 
     (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
     (mockPrisma.storageObject.upsert as jest.Mock).mockResolvedValue({ id: 'thumb-obj-1' });
@@ -109,6 +129,7 @@ describe('ThumbnailNodePersistService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: MediaMetadataSyncService, useValue: mockSync },
+        { provide: ThumbnailPruneService, useValue: mockPrune },
       ],
     }).compile();
 
@@ -243,6 +264,37 @@ describe('ThumbnailNodePersistService', () => {
 
       await expect(service.persistThumbnail(makeJob(), makeResult())).resolves.toBeUndefined();
       expect(mockResolver.getActiveProvider).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // Issue #434 — versioned keys: prune the superseded thumbnail, reject a key
+  // that does not belong to this object
+  // =========================================================================
+
+  describe('superseded thumbnail pruning (issue #434)', () => {
+    it('accepts a VERSIONED key and prunes the previous thumbnail after the sync', async () => {
+      await service.persistThumbnail(
+        makeJob(),
+        makeResult({ storageKey: 'thumbnails/so-original-a1b2c3d4e5f60718.jpg' }),
+      );
+
+      expect(mockPrune.pruneSupersededThumbnails).toHaveBeenCalledWith('so-original');
+      // Order is load-bearing: pruning before the MediaItem is repointed would
+      // delete bytes a concurrent gallery request could still be signing.
+      expect(callOrder).toEqual(['sync', 'prune']);
+    });
+
+    it('rejects a storageKey that is not one of this object’s thumbnails', async () => {
+      await expect(
+        service.persistThumbnail(
+          makeJob(),
+          makeResult({ storageKey: 'thumbnails/some-other-object-abc.jpg' }),
+        ),
+      ).rejects.toThrow(/not a thumbnail key/i);
+
+      expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+      expect(mockPrune.pruneSupersededThumbnails).not.toHaveBeenCalled();
     });
   });
 });

@@ -36,6 +36,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -151,6 +152,9 @@ describe('MediaEnhancementService', () => {
   };
   let mockRecoveryService: { reprocessObjectNow: jest.Mock };
   let mockMetadataSync: { syncFromStorageObject: jest.Mock };
+  let mockThumbnailPrune: { pruneSupersededThumbnails: jest.Mock };
+  /** Records sync-vs-prune ordering on the replace path (issue #434). */
+  let replaceCallOrder: string[];
   let mockMediaEnrichment: { enqueueUploadEnrichment: jest.Mock };
   let mockThumbnails: { signThumbsBatched: jest.Mock; extractThumbKey: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
@@ -194,7 +198,18 @@ describe('MediaEnhancementService', () => {
     };
 
     mockRecoveryService = { reprocessObjectNow: jest.fn().mockResolvedValue(undefined) };
-    mockMetadataSync = { syncFromStorageObject: jest.fn().mockResolvedValue(undefined) };
+    replaceCallOrder = [];
+    mockMetadataSync = {
+      syncFromStorageObject: jest.fn().mockImplementation(async () => {
+        replaceCallOrder.push('sync');
+      }),
+    };
+    mockThumbnailPrune = {
+      pruneSupersededThumbnails: jest.fn().mockImplementation(async () => {
+        replaceCallOrder.push('prune');
+        return 1;
+      }),
+    };
     mockMediaEnrichment = { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined) };
     mockThumbnails = {
       signThumbsBatched: jest.fn().mockResolvedValue(new Map()),
@@ -228,6 +243,7 @@ describe('MediaEnhancementService', () => {
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
+        { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
         { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichment },
         { provide: MediaThumbnailService, useValue: mockThumbnails },
@@ -810,6 +826,25 @@ describe('MediaEnhancementService', () => {
         expect(mockRecoveryService.reprocessObjectNow).toHaveBeenCalledWith(
           expect.objectContaining({ id: 'obj-1' }),
         );
+      });
+
+      // -------------------------------------------------------------------
+      // Issue #434 — the grid tile must not keep the pre-enhancement image
+      // -------------------------------------------------------------------
+
+      it('AWAITS syncFromStorageObject instead of racing the fire-and-forget OBJECT_PROCESSED_EVENT listener', async () => {
+        await service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER);
+
+        // Both repoints the MediaItem at the NEW content-addressed thumbnail key
+        // and delivers the contentHash recompute the nulled column depends on.
+        expect(mockMetadataSync.syncFromStorageObject).toHaveBeenCalledWith('obj-1');
+      });
+
+      it('prunes the superseded thumbnail ONLY AFTER the MediaItem has been repointed at the new key', async () => {
+        await service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER);
+
+        expect(mockThumbnailPrune.pruneSupersededThumbnails).toHaveBeenCalledWith('obj-1');
+        expect(replaceCallOrder).toEqual(['sync', 'prune']);
       });
 
       it('re-enqueues face_detection when features.faceRecognition is on', async () => {
