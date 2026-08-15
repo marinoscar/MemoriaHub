@@ -28,6 +28,7 @@ import { isPictureEnhancementEnabled } from '../common/types/settings.types';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
+import { BulkEnhance } from './dto/bulk-enhance.dto';
 import {
   ListEnhancementsQuery,
   resolveStatusFilter,
@@ -238,6 +239,280 @@ export class MediaEnhancementService {
         },
       });
       this.logger.log(`Superseded live enhancement ${row.id} for MediaItem ${mediaItemId}`);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // POST /api/media/bulk/enhance — batch enhance a selection (issue #421)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Queue an AI enhancement for every eligible item in a selection.
+   *
+   * FOUR deliberate divergences from the single-item startEnhance path. Each is
+   * commented at its site; collected here because "simplifying" any of them back
+   * toward startEnhance reintroduces a real defect:
+   *
+   *   1. A live enhancement is SKIPPED AND COUNTED, never superseded.
+   *   2. A non-photo / oversized item is SKIPPED AND COUNTED, never a 400.
+   *   3. Jobs are enqueued at priority 50, not 0.
+   *   4. Jobs are enqueued with skipDedup: true.
+   *
+   * Authorization and the batch-size cap happen here; the actual batch creation
+   * lives in createBatchFrom() so a future by-filter entry point (#424) can
+   * resolve its own id list server-side and reuse the rest verbatim.
+   */
+  async startBatch(dto: BulkEnhance, user: RequestUser) {
+    const settings = await this.systemSettings.getSettings();
+
+    // Feature gate: the SHARED helper (system setting + env kill-switch), never
+    // a second hand-rolled gate that could drift from startEnhance's.
+    if (!isPictureEnhancementEnabled(settings)) {
+      throw new BadRequestException('Picture enhancement is disabled');
+    }
+
+    const enhanceCfg = settings.ai?.features?.enhance;
+    if (!enhanceCfg?.provider || !enhanceCfg?.model) {
+      throw new BadRequestException(
+        'No enhancement model configured (ai.features.enhance is unset)',
+      );
+    }
+
+    const uniqueIds = [...new Set(dto.ids)];
+
+    // The AUTHORITATIVE cap (the DTO's array max is only a schema backstop).
+    // Deduplicated ids are counted, so pasting the same id twice never costs a
+    // caller part of their budget.
+    const maxBatchSize = settings.pictureEnhancement?.maxBatchSize ?? 25;
+    if (uniqueIds.length > maxBatchSize) {
+      throw new BadRequestException(
+        `Cannot enhance ${uniqueIds.length} items in one batch; the limit is ${maxBatchSize}`,
+      );
+    }
+
+    // ONE authorization pass for the whole batch (never per item).
+    await this.assertAllInCircle(uniqueIds, dto.circleId, user, 'collaborator');
+
+    return this.createBatchFrom(
+      uniqueIds,
+      dto.circleId,
+      dto.params ?? {},
+      'selection',
+      user,
+    );
+  }
+
+  /**
+   * Post-authorization half of a batch enhance: partition the ids, create the
+   * batch row, then create + enqueue one enhancement per eligible item.
+   *
+   * Deliberately takes an already-authorized id list so #424's by-filter entry
+   * point can resolve ids server-side and call straight into here — the caller
+   * owns "which items", this owns "what happens to them".
+   */
+  private async createBatchFrom(
+    ids: string[],
+    circleId: string,
+    params: EnhanceParams,
+    source: 'selection' | 'filter',
+    user: RequestUser,
+  ) {
+    // Cached (5 s TTL) — no extra DB read path.
+    const settings = await this.systemSettings.getSettings();
+    const enhanceCfg = settings.ai?.features?.enhance;
+    const provider = enhanceCfg!.provider;
+    const model = params.model ?? enhanceCfg!.model;
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        circleId: true,
+        type: true,
+        width: true,
+        height: true,
+        storageObject: { select: { id: true, mimeType: true } },
+      },
+    });
+
+    // ONE query for every id's live-enhancement state, not one per item.
+    const liveRows = await this.prisma.mediaEnhancement.findMany({
+      where: {
+        mediaItemId: { in: ids },
+        status: {
+          in: [
+            MediaEnhancementStatus.pending,
+            MediaEnhancementStatus.processing,
+            MediaEnhancementStatus.ready,
+          ],
+        },
+      },
+      select: { mediaItemId: true },
+    });
+    const liveItemIds = new Set(liveRows.map((r) => r.mediaItemId));
+
+    const maxMp = settings.pictureEnhancement?.maxInputMegapixels ?? 50;
+
+    // Partition. Precedence is notPhoto → tooLarge → alreadyLive, so every id
+    // lands in EXACTLY ONE bucket and the four counts always sum to `requested`.
+    const skipped = { notPhoto: 0, tooLarge: 0, alreadyLive: 0 };
+    const eligible: typeof items = [];
+
+    for (const item of items) {
+      // DIVERGENCE 2a: startEnhance throws 400 for a non-photo. A batch must
+      // not fail wholesale because one video slipped into a mixed selection —
+      // the ineligible item is reported in `skipped` and the rest proceed.
+      if (
+        item.type !== MediaType.photo ||
+        !item.storageObject ||
+        !item.storageObject.mimeType.startsWith('image/')
+      ) {
+        skipped.notPhoto++;
+        continue;
+      }
+
+      // DIVERGENCE 2b: same reasoning for the megapixel guard.
+      if (item.width && item.height && (item.width * item.height) / 1_000_000 > maxMp) {
+        skipped.tooLarge++;
+        continue;
+      }
+
+      // DIVERGENCE 1 — THE most important rule in this method. startEnhance
+      // calls supersedeLive(), which DISCARDS a live enhancement and deletes its
+      // staged bytes. A batch must NEVER do that: a `ready` row is a completed,
+      // already-billed gpt-image-1 result awaiting a human keep/replace/discard
+      // decision, and silently destroying it because the item happened to be in
+      // a later selection loses both the work and the money. Skip and report.
+      //
+      // This rule is also what makes DIVERGENCE 4 (skipDedup) safe: at most one
+      // live enhancement — and therefore at most one in-flight job — can exist
+      // per item, enforced here rather than by the queue's dedup.
+      if (liveItemIds.has(item.id)) {
+        skipped.alreadyLive++;
+        continue;
+      }
+
+      eligible.push(item);
+    }
+
+    // An id that vanished between the authorization read and this one (a
+    // concurrent hard delete) is counted as notPhoto — it is ineligible, and
+    // failing the whole batch over a race would be worse than reporting it.
+    skipped.notPhoto += ids.length - items.length;
+
+    // The batch row is created even when nothing is eligible: the caller asked
+    // for something and deserves a record (and a pollable id) explaining why
+    // zero items were queued, rather than a bare 202 with no trace.
+    const batch = await this.prisma.mediaEnhancementBatch.create({
+      data: {
+        circleId,
+        requestedCount: ids.length,
+        queuedCount: 0,
+        skipped: skipped as unknown as Prisma.InputJsonValue,
+        params: (params ?? {}) as Prisma.InputJsonValue,
+        source,
+        createdById: user.id,
+      },
+    });
+
+    const effectiveStrength =
+      params.strength ?? settings.pictureEnhancement?.defaultStrength ?? 'balanced';
+    const prompt = buildEnhancePrompt(params, effectiveStrength);
+
+    let queued = 0;
+    for (const item of eligible) {
+      const row = await this.prisma.mediaEnhancement.create({
+        data: {
+          mediaItemId: item.id,
+          circleId: item.circleId,
+          batchId: batch.id,
+          status: MediaEnhancementStatus.pending,
+          params: (params ?? {}) as Prisma.InputJsonValue,
+          provider,
+          model,
+          prompt,
+          originalWidth: item.width,
+          originalHeight: item.height,
+          createdById: user.id,
+        },
+      });
+
+      await this.enrichmentJobService.enqueue({
+        type: 'picture_enhancement',
+        mediaItemId: item.id,
+        circleId: item.circleId,
+        reason: JobReason.rerun,
+        // DIVERGENCE 3: a single-item enhance is an interactive request the user
+        // is watching, so it jumps the queue at priority 0. A batch is bulk work
+        // — it sits BELOW upload enrichment (5/10) and workflow evaluate (20) so
+        // a large selection never starves a live import, and ABOVE the purges
+        // (100) so it still drains promptly.
+        priority: 50,
+        // DIVERGENCE 4: queue dedup on (type, mediaItemId, pending|running)
+        // would collapse a legitimate re-queue into a stale job pointing at an
+        // older enhancement row. The enhancement row is the idempotency unit,
+        // and the alreadyLive skip above guarantees at most one live row (hence
+        // at most one in-flight job) per item.
+        skipDedup: true,
+        providerKey: provider,
+        modelVersion: model,
+        payload: { enhancementId: row.id },
+      });
+      queued++;
+    }
+
+    await this.prisma.mediaEnhancementBatch.update({
+      where: { id: batch.id },
+      data: { queuedCount: queued },
+    });
+
+    this.logger.log(
+      `Enhancement batch ${batch.id} (${source}) in circle ${circleId}: requested=${ids.length} queued=${queued} ` +
+        `skipped=${JSON.stringify(skipped)}`,
+    );
+
+    return {
+      data: {
+        batchId: batch.id,
+        requested: ids.length,
+        queued,
+        skipped,
+      },
+    };
+  }
+
+  /**
+   * Verify circle access, then confirm every id is a live member of circleId.
+   *
+   * Deliberately a private re-implementation of MediaService.assertAllInCircle
+   * (which is private and in another module); the shape and the error message
+   * are kept identical so the two stay recognisably the same guard.
+   */
+  private async assertAllInCircle(
+    ids: string[],
+    circleId: string,
+    user: RequestUser,
+    role: 'viewer' | 'collaborator',
+  ): Promise<void> {
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      role as CircleRole,
+    );
+
+    const uniqueIds = [...new Set(ids)];
+    const found = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (found.length !== uniqueIds.length) {
+      const foundSet = new Set(found.map((f) => f.id));
+      const missing = uniqueIds.filter((id) => !foundSet.has(id));
+      throw new NotFoundException(
+        `MediaItems not found or not accessible: ${missing.join(', ')}`,
+      );
     }
   }
 
