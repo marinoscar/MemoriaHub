@@ -43,6 +43,26 @@ vi.mock('../../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
+// Default matches the MSW `/api/features` fixture's shape (pictureEnhancement
+// disabled) so every pre-existing test in this file is unaffected; tests that
+// specifically cover the "Enhance all photos in this album" entry point
+// (issue #424) override it with `mockUseFeatureFlags.mockReturnValue(...)`.
+vi.mock('../../../hooks/useFeatureFlags', () => ({
+  useFeatureFlags: vi.fn(() => ({
+    features: {},
+    pictureEnhancement: {
+      enabled: false,
+      allowReplace: true,
+      blockReplaceOnDownscale: false,
+      model: null,
+      maxBatchSize: 25,
+    },
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(),
+  })),
+}));
+
 vi.mock('../../../services/media', () => ({
   getAlbum: vi.fn(),
   updateAlbum: vi.fn(),
@@ -61,13 +81,76 @@ vi.mock('../../../components/media/MediaGallery', () => ({
 import AlbumPage from '../AlbumPage';
 import { useParams } from 'react-router-dom';
 import { useCircle } from '../../../hooks/useCircle';
+import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../../services/media';
+import type { MediaItem } from '../../../types/media';
 
 const mockUseParams = vi.mocked(useParams);
 const mockUseCircle = vi.mocked(useCircle);
+const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockGetAlbum = vi.mocked(getAlbum);
 const mockUpdateAlbum = vi.mocked(updateAlbum);
 const mockDeleteAlbum = vi.mocked(deleteAlbum);
+
+/** Enables pictureEnhancement in useFeatureFlags for one test. */
+function enableEnhance() {
+  mockUseFeatureFlags.mockReturnValue({
+    features: {},
+    pictureEnhancement: {
+      enabled: true,
+      allowReplace: true,
+      blockReplaceOnDownscale: false,
+      model: 'gpt-image-1',
+      maxBatchSize: 25,
+    },
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(),
+  });
+}
+
+function makeAlbumPhoto(id: string): MediaItem {
+  return {
+    id,
+    storageObjectId: `storage-${id}`,
+    addedById: 'user-1',
+    circleId: 'circle-1',
+    type: 'photo',
+    capturedAt: null,
+    capturedAtOffset: null,
+    importedAt: null,
+    source: 'web',
+    contentHash: null,
+    width: null,
+    height: null,
+    durationMs: null,
+    orientation: null,
+    takenLat: null,
+    takenLng: null,
+    takenAltitude: null,
+    cameraMake: null,
+    cameraModel: null,
+    originalFilename: `${id}.jpg`,
+    description: null,
+    favorite: false,
+    geoCountry: null,
+    geoCountryCode: null,
+    geoAdmin1: null,
+    geoAdmin2: null,
+    geoLocality: null,
+    geoPlaceName: null,
+    geoSource: null,
+    geocodedAt: null,
+    coordSource: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    deletedAt: null,
+    archivedAt: null,
+    metadata: null,
+    thumbnailUrl: null,
+    downloadUrl: null,
+  } as MediaItem;
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -382,6 +465,108 @@ describe('AlbumPage', () => {
 
       expect(screen.getByRole('alert')).toBeInTheDocument();
       expect(screen.getByRole('alert')).toHaveTextContent(/album not found/i);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. "Enhance all photos in this album" — the album-scope batch-enhance
+  // entry point (issue #424, epic #420 phase 4). Gated on the
+  // `pictureEnhancement` feature flag (GET /api/features, via
+  // `useFeatureFlags` — never the Admin-only `useSystemSettings`, since this
+  // affordance is for ordinary collaborators) and, like every item in the
+  // album actions menu, on `canManage` (non-viewer).
+  // -------------------------------------------------------------------------
+  describe('"Enhance all photos in this album" entry point', () => {
+    // `mockUseFeatureFlags.mockReturnValue(...)` persists across tests (only
+    // `.mock.calls` are cleared by the outer `vi.clearAllMocks()`, not the
+    // configured return value) — reset explicitly so "feature off" tests are
+    // never accidentally inheriting a prior test's "feature on" override.
+    beforeEach(() => {
+      mockUseFeatureFlags.mockReturnValue({
+        features: {},
+        pictureEnhancement: {
+          enabled: false,
+          allowReplace: true,
+          blockReplaceOnDownscale: false,
+          model: null,
+          maxBatchSize: 25,
+        },
+        isLoading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+    });
+
+    it('appears in the album actions menu when the feature is enabled and the caller can manage the album', async () => {
+      enableEnhance();
+      setupDefaults();
+      mockGetAlbum.mockResolvedValue({
+        ...defaultAlbumDetail,
+        items: [makeAlbumPhoto('p1'), makeAlbumPhoto('p2')],
+      } as any);
+      const user = userEvent.setup();
+      render(<AlbumPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /summer 2024/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /album actions/i }));
+
+      expect(screen.getByText('Enhance all photos in this album')).toBeInTheDocument();
+    });
+
+    it('is ABSENT when the pictureEnhancement feature flag is off', async () => {
+      // Default mock (feature disabled) applies — enableEnhance() not called.
+      setupDefaults();
+      const user = userEvent.setup();
+      render(<AlbumPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /summer 2024/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /album actions/i }));
+
+      expect(screen.queryByText('Enhance all photos in this album')).not.toBeInTheDocument();
+      // The rest of the menu is unaffected — this is a targeted omission, not
+      // a broken menu.
+      expect(screen.getByText(/^rename$/i)).toBeInTheDocument();
+    });
+
+    it('is ABSENT for viewer role, even with the feature enabled (the whole album actions menu is unreachable)', async () => {
+      enableEnhance();
+      setupDefaults({ role: 'viewer' });
+      render(<AlbumPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /summer 2024/i })).toBeInTheDocument();
+      });
+
+      expect(
+        screen.queryByRole('button', { name: /album actions/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText('Enhance all photos in this album')).not.toBeInTheDocument();
+    });
+
+    it('opens the BatchEnhanceDialog with an album-scope filter target when clicked', async () => {
+      enableEnhance();
+      setupDefaults();
+      mockGetAlbum.mockResolvedValue({
+        ...defaultAlbumDetail,
+        items: [makeAlbumPhoto('p1'), makeAlbumPhoto('p2')],
+      } as any);
+      const user = userEvent.setup();
+      render(<AlbumPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: /summer 2024/i })).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /album actions/i }));
+      await user.click(screen.getByText('Enhance all photos in this album'));
+
+      // Album-scope copy: "in this album", never the generic filter wording.
+      expect(
+        await screen.findByText('Enhance all 2 photos in this album?'),
+      ).toBeInTheDocument();
     });
   });
 });
