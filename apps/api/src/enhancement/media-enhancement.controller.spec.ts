@@ -73,6 +73,9 @@ function makeMockService() {
     startBatch: jest.fn().mockResolvedValue({
       data: { batchId: 'batch-1', requested: 1, queued: 1, skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 0 } },
     }),
+    startBatchByFilter: jest.fn().mockResolvedValue({
+      data: { batchId: 'batch-2', requested: 3, queued: 3, skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 0 } },
+    }),
     getLatestEnhancement: jest.fn().mockResolvedValue({ data: null }),
     getEnhancement: jest.fn().mockResolvedValue({
       data: { id: ENH_ID, status: 'ready' },
@@ -395,6 +398,133 @@ describe('MediaEnhancementController — route dispatch + RBAC + validation (sup
       expect(bulkIdx).toBeGreaterThanOrEqual(0);
       expect(paramIdx).toBeGreaterThanOrEqual(0);
       expect(bulkIdx).toBeLessThan(paramIdx);
+    });
+  });
+
+  // ===========================================================================
+  // POST /media/bulk/enhance/by-filter — route-collision regression (issue #424)
+  //
+  // Same static-routes-before-:id-routes convention as `bulk/enhance` above.
+  // `bulk/enhance/by-filter` has three path segments; the only route in this
+  // controller sharing that segment count is the PARAMETERISED
+  // GET `:id/enhance/:enhancementId` — a different HTTP method, so there is no
+  // literal ambiguity, but the live-dispatch assertion below is still the
+  // strongest proof: if `bulk` were ever parsed as `:id` (e.g. by a future
+  // route declared as `POST :id/enhance/:enhancementId`), the request would
+  // land on startEnhance or applyEnhancement instead of startBatchByFilter.
+  // ===========================================================================
+
+  describe('POST /media/bulk/enhance/by-filter — route-collision regression', () => {
+    it('202s and dispatches to startBatchByFilter() — never captured by any :id-based route', async () => {
+      app = await buildApp(WRITER);
+
+      const res = await request(app.getHttpServer())
+        .post('/media/bulk/enhance/by-filter')
+        .send({ circleId: CIRCLE_ID, tag: 'Beach' })
+        .expect(202);
+
+      expect(mockService.startBatchByFilter).toHaveBeenCalledTimes(1);
+      expect(mockService.startBatchByFilter.mock.calls[0][0]).toMatchObject({
+        circleId: CIRCLE_ID,
+        tag: 'Beach',
+      });
+      // Neither the single-item nor the id-list bulk handler was ever reached —
+      // the strongest proof that 'bulk'/'by-filter' were never parsed as :id
+      // params of a differently-shaped route.
+      expect(mockService.startEnhance).not.toHaveBeenCalled();
+      expect(mockService.startBatch).not.toHaveBeenCalled();
+      expect(mockService.applyEnhancement).not.toHaveBeenCalled();
+      expect(res.body).toMatchObject({ data: { batchId: 'batch-2' } });
+    });
+
+    it('403s for a caller missing media:write, and never reaches any other handler', async () => {
+      app = await buildApp(READER);
+
+      await request(app.getHttpServer())
+        .post('/media/bulk/enhance/by-filter')
+        .send({ circleId: CIRCLE_ID })
+        .expect(403);
+
+      expect(mockService.startBatchByFilter).not.toHaveBeenCalled();
+      expect(mockService.startEnhance).not.toHaveBeenCalled();
+      expect(mockService.startBatch).not.toHaveBeenCalled();
+    });
+
+    it('400s when circleId is missing from the body', async () => {
+      app = await buildApp(WRITER);
+
+      await request(app.getHttpServer())
+        .post('/media/bulk/enhance/by-filter')
+        .send({ tag: 'Beach' })
+        .expect(400);
+
+      expect(mockService.startBatchByFilter).not.toHaveBeenCalled();
+    });
+
+    it('400s when circleId is not a valid UUID', async () => {
+      app = await buildApp(WRITER);
+
+      await request(app.getHttpServer())
+        .post('/media/bulk/enhance/by-filter')
+        .send({ circleId: 'not-a-uuid' })
+        .expect(400);
+
+      expect(mockService.startBatchByFilter).not.toHaveBeenCalled();
+    });
+
+    it('accepts an empty filter (circleId only) — matching every photo in the circle is a valid request', async () => {
+      app = await buildApp(WRITER);
+
+      await request(app.getHttpServer())
+        .post('/media/bulk/enhance/by-filter')
+        .send({ circleId: CIRCLE_ID })
+        .expect(202);
+
+      expect(mockService.startBatchByFilter).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes an optional `params` object through to the service untouched', async () => {
+      app = await buildApp(WRITER);
+
+      await request(app.getHttpServer())
+        .post('/media/bulk/enhance/by-filter')
+        .send({ circleId: CIRCLE_ID, params: { strength: 'strong' } })
+        .expect(202);
+
+      expect(mockService.startBatchByFilter.mock.calls[0][0]).toMatchObject({
+        params: { strength: 'strong' },
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Decorator-metadata-level check, mirroring the `bulk/enhance` one above:
+    // reads the REAL compiled declaration order off the controller prototype.
+    // -------------------------------------------------------------------------
+
+    it('declares POST bulk/enhance/by-filter at a lower prototype index than every POST :id-based route', () => {
+      const prototype = MediaEnhancementController.prototype;
+      const routes = Object.getOwnPropertyNames(prototype)
+        .filter((name) => name !== 'constructor')
+        .map((name) => ({
+          name,
+          path: Reflect.getMetadata(PATH_METADATA, (prototype as any)[name]),
+          method: Reflect.getMetadata(METHOD_METADATA, (prototype as any)[name]),
+        }))
+        .filter((entry) => entry.path !== undefined);
+
+      const byFilterIdx = routes.findIndex(
+        (r) => r.path === 'bulk/enhance/by-filter' && r.method === RequestMethod.POST,
+      );
+      const paramPostRoutes = routes.filter(
+        (r) => r.method === RequestMethod.POST && typeof r.path === 'string' && r.path.startsWith(':id'),
+      );
+
+      expect(byFilterIdx).toBeGreaterThanOrEqual(0);
+      expect(paramPostRoutes.length).toBeGreaterThan(0);
+      for (const paramRoute of paramPostRoutes) {
+        const paramIdx = routes.indexOf(paramRoute);
+        expect(byFilterIdx).toBeLessThan(paramIdx);
+      }
     });
   });
 
