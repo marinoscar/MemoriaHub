@@ -423,6 +423,14 @@ export function EnhancementCard({
 
 interface PendingEnhancementsTabProps {
   circleId: string;
+  /**
+   * Narrow the inbox to one bulk-enhance batch (epic #420, issue #423). Set
+   * from the page's `?batchId=` param when a user arrives from a batch's
+   * progress page. Absent — the normal case — leaves behaviour untouched.
+   */
+  batchId?: string;
+  /** Drop the batch narrowing (and the URL param behind it). */
+  onClearBatchFilter?: () => void;
 }
 
 /**
@@ -431,7 +439,11 @@ interface PendingEnhancementsTabProps {
  *
  * Multi-select and bulk actions are deliberately absent — they land in PR2.
  */
-export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps) {
+export function PendingEnhancementsTab({
+  circleId,
+  batchId,
+  onClearBatchFilter,
+}: PendingEnhancementsTabProps) {
   const { pictureEnhancement } = useFeatureFlags();
   const [status, setStatus] = useState<'all' | EnhancementStatusFilter>('all');
   const [sortOrder, setSortOrder] = useState<EnhancementSortOrder>('desc');
@@ -445,17 +457,18 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
 
   useEffect(() => {
     setPage(1);
-  }, [circleId, status, sortOrder]);
+  }, [circleId, status, sortOrder, batchId]);
 
   const params = useMemo(
     () => ({
       circleId,
       ...(status !== 'all' ? { status } : {}),
+      ...(batchId ? { batchId } : {}),
       page,
       pageSize: PAGE_SIZE,
       sortOrder,
     }),
-    [circleId, status, page, sortOrder],
+    [circleId, status, batchId, page, sortOrder],
   );
 
   const { items, meta, isLoading, error, polling, refresh } = useEnhancements(params);
@@ -545,6 +558,38 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
 
   return (
     <Box>
+      {/*
+        Batch narrowing (epic #420). A user landing here from a batch's progress
+        page must be told WHY the inbox looks short, and must have a one-tap way
+        back out — otherwise a filter set by a link reads as missing data.
+      */}
+      {batchId && (
+        <Stack
+          direction="row"
+          spacing={1}
+          sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap', gap: 1 }}
+        >
+          <Chip
+            color="primary"
+            variant="outlined"
+            icon={<AutoFixHighIcon />}
+            label={
+              meta
+                ? `Showing ${meta.totalItems} result${
+                    meta.totalItems === 1 ? '' : 's'
+                  } from one batch`
+                : 'Showing one batch'
+            }
+            onDelete={onClearBatchFilter}
+          />
+          {onClearBatchFilter && (
+            <Button size="small" onClick={onClearBatchFilter} sx={{ minHeight: 44 }}>
+              Show all
+            </Button>
+          )}
+        </Stack>
+      )}
+
       {/* ---------- Filters ---------- */}
       <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <FormControl size="small" sx={{ minWidth: 180 }}>
@@ -598,12 +643,23 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
           <Typography variant="h6" gutterBottom>
             Nothing waiting for you
           </Typography>
+          {batchId ? (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ maxWidth: 480, mx: 'auto' }}
+            >
+              Nothing from this batch is waiting for a decision right now.
+              Results appear here as they finish enhancing.
+            </Typography>
+          ) : (
           <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 480, mx: 'auto' }}>
             AI Enhance improves a photo&apos;s exposure, color, clarity and noise.
             Start one from a photo&apos;s viewer or the gallery selection bar — the
             result waits here for you to compare and decide, and nothing is
             changed until you do.
           </Typography>
+          )}
         </Box>
       ) : (
         <Stack spacing={2}>
