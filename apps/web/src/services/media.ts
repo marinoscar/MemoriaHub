@@ -458,6 +458,82 @@ export async function bulkEnhance(dto: BulkEnhanceDto): Promise<BulkEnhanceResul
   return api.post<BulkEnhanceResult>('/media/bulk/enhance', dto);
 }
 
+/**
+ * The filter half of a bulk enhance (issue #424). Exactly the filter vocabulary
+ * `GET /api/media` accepts, minus everything that only describes a PAGE of
+ * results — the server resolves the whole match set, so pagination and ordering
+ * are meaningless (and `sortBy`/`sortOrder` would imply a "first N", which this
+ * endpoint deliberately never does: it refuses an over-cap match rather than
+ * truncating it).
+ */
+export type BulkEnhanceByFilterFilters = Omit<
+  MediaQueryParams,
+  'page' | 'pageSize' | 'cursor' | 'sortBy' | 'sortOrder'
+> & { circleId: string };
+
+export interface BulkEnhanceByFilterDto {
+  filters: BulkEnhanceByFilterFilters;
+  /** One params object applies to EVERY match — a batch is a single intent. */
+  params?: EnhanceParams;
+}
+
+/**
+ * Keys the endpoint's DTO does not model, stripped before sending.
+ *
+ * `excludeArchived` is dropped rather than forwarded because the server pins
+ * `archivedAt: null` unconditionally — archived photos are never in the match
+ * set — so sending it would suggest a choice the caller does not have.
+ */
+const BULK_ENHANCE_FILTER_DROP = new Set(['excludeArchived']);
+
+/**
+ * Serialize a filter object for the JSON body.
+ *
+ * `bulkEnhanceByFilterSchema` spreads the API's shared `mediaFilterFields`,
+ * which is written for a QUERY STRING: its boolean-ish fields (`favorite`,
+ * `missingGeo`, `noFaces`, …) are `z.string().transform(...)`, so a real JSON
+ * `true` transforms to `undefined` and the filter is silently DROPPED. Dropping
+ * a filter WIDENS the match set, which on this endpoint means enhancing photos
+ * the user never asked about — so booleans are stringified here rather than
+ * left to chance. Undefined/null entries are omitted entirely.
+ */
+function serializeEnhanceFilters(
+  filters: BulkEnhanceByFilterFilters,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined || value === null) continue;
+    if (BULK_ENHANCE_FILTER_DROP.has(key)) continue;
+    body[key] = typeof value === 'boolean' ? String(value) : value;
+  }
+  return body;
+}
+
+/**
+ * Queue one AI enhancement per photo MATCHING A FILTER, rather than per
+ * explicitly selected id (epic #420, issue #424).
+ *
+ * The server resolves the match set, so the client never enumerates it. Two
+ * failure shapes are normal rather than exceptional and callers are expected to
+ * render both distinctly:
+ *
+ *   400 with `details: { matchedCount, maxBatchSize }` — a REFUSAL. The match
+ *       exceeds the batch cap and nothing was queued; `matchedCount` is the
+ *       only place a keyset-paginated caller can learn the real total.
+ *   400 "No photos match this filter" — an empty match, never an empty batch.
+ *
+ * Both arrive as `ApiError`, which already carries `details` through from the
+ * response body, so no extra plumbing is needed to read `matchedCount`.
+ */
+export async function bulkEnhanceByFilter(
+  dto: BulkEnhanceByFilterDto,
+): Promise<BulkEnhanceResult> {
+  return api.post<BulkEnhanceResult>('/media/bulk/enhance/by-filter', {
+    ...serializeEnhanceFilters(dto.filters),
+    ...(dto.params ? { params: dto.params } : {}),
+  });
+}
+
 export async function bulkUnarchive(dto: BulkArchiveDto): Promise<{ unarchived: number }> {
   return api.patch<{ unarchived: number }>('/media/bulk/unarchive', dto);
 }
