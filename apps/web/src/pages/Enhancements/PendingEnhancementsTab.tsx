@@ -7,6 +7,11 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   FormControl,
   InputLabel,
@@ -34,6 +39,10 @@ import type {
 } from '../../services/enhance';
 import type { MediaItem } from '../../types/media';
 import { MediaEnhancementDrawer } from '../../components/media/MediaEnhancementDrawer';
+import {
+  ReplaceDownscaleNotice,
+  describeResolutionLoss,
+} from '../../components/media/ReplaceDownscaleNotice';
 
 const PAGE_SIZE = 24;
 
@@ -195,10 +204,17 @@ export function EnhancementCard({
   const expiry = formatExpiresIn(item.expiresAt, now);
 
   // Mirrors MediaEnhancementDrawer's replace policy exactly: hidden entirely
-  // when the administrator disabled replacing, and disabled-with-a-reason when
-  // the downscale block applies to THIS result.
-  const replaceBlockedByDownscale =
+  // when the administrator disabled replacing (a HARD policy), and gated behind
+  // an explicit acknowledgement when the downscale guard applies to THIS result
+  // (a CONFIRM-THROUGH guard — issue #426).
+  const replaceNeedsDownscaleAck =
     allowReplace && blockReplaceOnDownscale && item.downscaled;
+  const resolutionLoss = describeResolutionLoss(
+    item.original.width,
+    item.original.height,
+    item.enhanced.width,
+    item.enhanced.height,
+  );
 
   const inProgress = item.status === 'pending' || item.status === 'processing';
 
@@ -326,6 +342,19 @@ export function EnhancementCard({
               </Typography>
             )}
 
+            {/* Always rendered, never a hover-only tooltip: on a touch device
+                a disabled button fires no pointer events and the reason was
+                unreachable (issue #426). */}
+            {item.status === 'ready' && item.downscaled && allowReplace && (
+              <Box sx={{ mt: 1.5 }}>
+                <ReplaceDownscaleNotice
+                  dense
+                  policyBlocked={replaceNeedsDownscaleAck}
+                  resolutionLoss={resolutionLoss}
+                />
+              </Box>
+            )}
+
             {/* ---------- Actions ---------- */}
             {item.status === 'ready' && (
               <>
@@ -350,26 +379,15 @@ export function EnhancementCard({
                   </Button>
 
                   {allowReplace && (
-                    <Tooltip
-                      title={
-                        replaceBlockedByDownscale
-                          ? 'Replacing is blocked because the enhanced image is lower resolution than the original. Choose "Keep both" instead.'
-                          : ''
-                      }
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="warning"
+                      disabled={busy}
+                      onClick={() => onReplace(item)}
                     >
-                      {/* span keeps the tooltip working on a disabled button */}
-                      <span>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="warning"
-                          disabled={busy || replaceBlockedByDownscale}
-                          onClick={() => onReplace(item)}
-                        >
-                          Replace original
-                        </Button>
-                      </span>
-                    </Tooltip>
+                      Replace original
+                    </Button>
                   )}
 
                   <Button
@@ -434,6 +452,8 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
   const [drawerItem, setDrawerItem] = useState<MediaItem | null>(null);
   const [drawerEnhancementId, setDrawerEnhancementId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** Non-null while the downscale-acknowledgement dialog is open for a row. */
+  const [replaceConfirm, setReplaceConfirm] = useState<EnhancementListItem | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -511,14 +531,35 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
     [runAction],
   );
 
-  const handleReplace = useCallback(
-    (item: EnhancementListItem) =>
+  /**
+   * Replacing under the downscale guard is informed consent, so it must never
+   * be a single unconfirmed tap: the click opens a dialog naming the exact
+   * resolution loss, and only confirming sends `acknowledgeDownscale`
+   * (issue #426). An ordinary, non-downscaled replace keeps its existing
+   * one-click behavior.
+   */
+  const replaceNow = useCallback(
+    (item: EnhancementListItem, acknowledgeDownscale: boolean) =>
       void runAction(
         item,
-        () => applyEnhancement(item.mediaItemId, item.id, 'replace'),
+        () =>
+          applyEnhancement(item.mediaItemId, item.id, 'replace', {
+            acknowledgeDownscale,
+          }),
         'Original replaced with the enhanced version',
       ),
     [runAction],
+  );
+
+  const handleReplace = useCallback(
+    (item: EnhancementListItem) => {
+      if (blockReplaceOnDownscale && item.downscaled) {
+        setReplaceConfirm(item);
+        return;
+      }
+      replaceNow(item, false);
+    },
+    [blockReplaceOnDownscale, replaceNow],
   );
 
   const handleDiscard = useCallback(
@@ -642,6 +683,50 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
           onKeptBoth={(message) => setSuccessMsg(message)}
         />
       )}
+
+      {/* Informed-consent gate for replacing under the downscale guard. */}
+      <Dialog
+        open={replaceConfirm !== null}
+        onClose={() => setReplaceConfirm(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Replace the original at lower resolution?</DialogTitle>
+        <DialogContent>
+          <DialogContentText component="div">
+            The original file is overwritten in place with the enhanced version —
+            there is no version history and{' '}
+            <strong>the original cannot be recovered afterwards.</strong>
+            <Box component="span" sx={{ display: 'block', mt: 1.5 }}>
+              <strong>You will lose resolution:</strong>{' '}
+              {replaceConfirm
+                ? (describeResolutionLoss(
+                    replaceConfirm.original.width,
+                    replaceConfirm.original.height,
+                    replaceConfirm.enhanced.width,
+                    replaceConfirm.enhanced.height,
+                  ) ?? 'the enhanced image is smaller than the original')
+                : ''}
+              . An administrator has set replacing to be blocked when the result
+              is smaller; continuing records your acknowledgement.
+            </Box>
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReplaceConfirm(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => {
+              const target = replaceConfirm;
+              setReplaceConfirm(null);
+              if (target) replaceNow(target, true);
+            }}
+          >
+            Replace anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={successMsg !== null}
