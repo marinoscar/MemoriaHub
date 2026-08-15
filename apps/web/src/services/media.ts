@@ -1,5 +1,6 @@
 import { api } from './api';
 import { createTrashEmptyRun } from './trashEmptyRuns';
+import type { EnhanceParams } from './enhance';
 import type { CreateTrashEmptyRunResponse } from '../types/trashEmptyRuns';
 import type {
   MediaItem,
@@ -407,6 +408,54 @@ export async function bulkRerunFaces(dto: BulkRerunDto): Promise<{ queued: numbe
 
 export async function bulkRerunThumbnails(dto: BulkRerunDto): Promise<{ queued: number }> {
   return api.post<{ queued: number }>('/media/bulk/thumbnail/rerun', dto);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk AI enhancement (epic #420)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-reason tally of selected items the server declined to queue. An
+ * ineligible item never fails the request — it is reported here instead.
+ */
+export interface BulkEnhanceSkipped {
+  /** Videos and other non-photo media. */
+  notPhoto: number;
+  /** Photos over `pictureEnhancement.maxInputMegapixels`. */
+  tooLarge: number;
+  /**
+   * Items that already have a pending/processing/ready enhancement. A `ready`
+   * result is deliberately never superseded — it is an already-billed render
+   * awaiting a human decision.
+   */
+  alreadyLive: number;
+}
+
+export interface BulkEnhanceResult {
+  /** Poll target for the batch (GET /api/enhancement-batches/:id). */
+  batchId: string;
+  /** Distinct ids the server considered. */
+  requested: number;
+  /** Enhancements actually enqueued. */
+  queued: number;
+  skipped: BulkEnhanceSkipped;
+}
+
+export interface BulkEnhanceDto {
+  circleId: string;
+  ids: string[];
+  /** One params object applies to EVERY item — a batch is a single intent. */
+  params?: EnhanceParams;
+}
+
+/**
+ * Queue one AI enhancement per eligible photo in a selection.
+ *
+ * Returns 202 with the SERVER's counts; never report the client-side selection
+ * size back to the user, since eligibility is decided server-side.
+ */
+export async function bulkEnhance(dto: BulkEnhanceDto): Promise<BulkEnhanceResult> {
+  return api.post<BulkEnhanceResult>('/media/bulk/enhance', dto);
 }
 
 export async function bulkUnarchive(dto: BulkArchiveDto): Promise<{ unarchived: number }> {

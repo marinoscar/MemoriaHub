@@ -22,6 +22,13 @@ export interface PictureEnhancementPolicy {
   blockReplaceOnDownscale: boolean;
   /** Configured enhancement model NAME (never a credential); null when unset. */
   model: string | null;
+  /**
+   * Server-enforced ceiling on how many distinct items one bulk-enhance request
+   * may carry (`pictureEnhancement.maxBatchSize`, default 25). The UI disables
+   * submission above it so an over-cap selection is explained before it costs a
+   * round trip — POST /api/media/bulk/enhance rejects it with a 400 regardless.
+   */
+  maxBatchSize: number;
 }
 
 export interface FeatureFlags {
