@@ -10,6 +10,10 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api, ApiError } from '../services/api';
 import { User, AuthProvider as AuthProviderType } from '../types';
+import {
+  useTimezoneAutoDetect,
+  type TimezoneMismatch,
+} from '../hooks/useTimezoneAutoDetect';
 
 interface AuthContextValue {
   user: User | null;
@@ -19,6 +23,17 @@ interface AuthContextValue {
   login: (provider: string) => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  /**
+   * Set when the browser's time zone disagrees with the stored one (issue
+   * #444). Rendered by `TimezonePrompt` inside `Layout` — the state lives here
+   * because detection must run once per SESSION, and this provider is the only
+   * thing in the tree that mounts exactly that often.
+   */
+  timezoneMismatch: TimezoneMismatch | null;
+  /** Accept the browser's time zone. */
+  applyDetectedTimezone: () => Promise<void>;
+  /** Keep the stored time zone; do not ask again this session. */
+  dismissTimezoneMismatch: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
@@ -89,6 +104,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
+  /**
+   * Login-time time-zone detection (issue #444). Hung off the SESSION here
+   * rather than off the OAuth callback page: a returning user restored from
+   * the refresh cookie never passes through `/auth/callback`, so a hook there
+   * would leave their zone unset until their next full OAuth round trip. This
+   * effect covers both entry points, and the hook's own ref guard keeps it to
+   * one evaluation per signed-in user.
+   */
+  const applyLocalTimezone = useCallback((timezone: string) => {
+    setUser((prev) => (prev ? { ...prev, timezone } : prev));
+  }, []);
+
+  const {
+    mismatch: timezoneMismatch,
+    applyDetected: applyDetectedTimezone,
+    dismiss: dismissTimezoneMismatch,
+  } = useTimezoneAutoDetect({ user, onTimezoneApplied: applyLocalTimezone });
+
   const login = useCallback((provider: string) => {
     // Compute the same-site relative path to return to after OAuth
     const fromLocation = location.state?.from;
@@ -134,6 +167,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     login,
     logout,
     refreshUser,
+    timezoneMismatch,
+    applyDetectedTimezone,
+    dismissTimezoneMismatch,
   };
 
   return (

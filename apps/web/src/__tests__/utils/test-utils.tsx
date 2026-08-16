@@ -31,6 +31,8 @@ export interface MockUser {
   permissions: string[];
   isActive: boolean;
   createdAt: string;
+  /** RAW stored IANA zone; `null` = never set (issue #444). */
+  timezone: string | null;
 }
 
 export const mockUser: MockUser = {
@@ -42,6 +44,7 @@ export const mockUser: MockUser = {
   permissions: ['user_settings:read', 'user_settings:write'],
   isActive: true,
   createdAt: new Date().toISOString(),
+  timezone: null,
 };
 
 export const mockAdminUser: MockUser = {
@@ -61,6 +64,7 @@ export const mockAdminUser: MockUser = {
   ],
   isActive: true,
   createdAt: new Date().toISOString(),
+  timezone: null,
 };
 
 // Default mock providers
@@ -131,6 +135,9 @@ function MockAuthProvider({
     login: vi.fn(),
     logout: vi.fn().mockResolvedValue(undefined),
     refreshUser: vi.fn().mockResolvedValue(undefined),
+    timezoneMismatch: null,
+    applyDetectedTimezone: vi.fn().mockResolvedValue(undefined),
+    dismissTimezoneMismatch: vi.fn(),
   };
 
   return (
