@@ -229,6 +229,14 @@ and `number` pass through, `boolean` → `'true'`/`'false'`, `Date` → ISO stri
 `'left'` (default), `'center'`, `'right'`. Applied to both the cell and its
 header so the column reads as a unit. Use `'right'` for numerics.
 
+`align` is a GRID-only concern. The desktop/tablet renderer maps it to the
+DataGrid cell + header via `desktop/columnAdapter.ts`; the mobile card
+renderer (`mobile/CardField.tsx`) deliberately ignores it, because a card
+stacks the label above its value and there is no column to align within —
+honouring `align: 'center'` there centred a value across the card while its
+label stayed at the start, breaking the label/value pairing (issue #438, seen
+on the worker-nodes table's `running`/`failed` columns).
+
 ### `sortable` — **defaults to `false`**
 
 This is the one place the contract deliberately departs from DataGrid's own
@@ -1684,6 +1692,15 @@ Every control clears the 44px touch floor and none is hover-revealed; the menu
 and the sheet are mounted only while open, so the issue #243 failure mode
 (invisible but hit-testable) cannot arise. The #243 sweep is re-run against both
 surfaces in `__tests__/DataTableLayoutPrefs.test.tsx`.
+
+The bar is not drawn at all when a table has definitively resolved to zero
+rows: no rows, not loading, no active filter or quick search, and
+`pagination.total` is `0` or absent (see the exported `shouldRenderViewBar` in
+`DataTable.tsx`). Loading, an active query, or a nonzero `total` with a stale
+empty page are all deliberately *not* treated as empty, so the controls don't
+flash out and back or jump the layout — see that function's own comment for
+the full rationale. Below that threshold the empty state is the whole message,
+so column-picker/density/export chrome above "No rows yet" is noise.
 
 ### 15.3 Resolving a stored layout against the CURRENT columns
 
