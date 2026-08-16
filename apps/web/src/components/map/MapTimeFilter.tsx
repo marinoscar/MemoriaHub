@@ -105,6 +105,10 @@ export function MapTimeFilter({ onChange }: MapTimeFilterProps) {
         onChange={handlePreset}
         size="small"
         aria-label="Filter map by time range"
+        // Five options make this the widest toggle group in the app; MUI's
+        // group root is inline-flex/nowrap, so without wrapping "Custom" is
+        // clipped on a narrow map toolbar.
+        sx={{ flexWrap: 'wrap' }}
       >
         <ToggleButton value="3m">3M</ToggleButton>
         <ToggleButton value="12m">12M</ToggleButton>

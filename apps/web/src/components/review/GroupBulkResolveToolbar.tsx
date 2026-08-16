@@ -102,6 +102,13 @@ export function GroupBulkResolveToolbar({
           minHeight: 56,
           display: 'flex',
           alignItems: 'center',
+          // flexWrap + minWidth:0 are load-bearing: without them the action
+          // buttons are compressed below their own text width on a narrow
+          // viewport and the labels break mid-phrase ("Resolve" / "&" /
+          // "Archive"), overrunning the button. Mirrors the DataTable
+          // BulkActionBar, which is the corrected pattern in this repo.
+          flexWrap: 'wrap',
+          minWidth: 0,
           gap: 1,
           bgcolor: 'background.paper',
           color: 'text.primary',
@@ -116,7 +123,11 @@ export function GroupBulkResolveToolbar({
           </IconButton>
         </Tooltip>
 
-        <Typography variant="subtitle1" sx={{ fontWeight: 700, color: 'primary.main' }}>
+        <Typography
+          variant="subtitle1"
+          noWrap
+          sx={{ fontWeight: 700, color: 'primary.main', flexShrink: 0 }}
+        >
           {count} selected
         </Typography>
 
@@ -136,6 +147,13 @@ export function GroupBulkResolveToolbar({
           </span>
         </Tooltip>
 
+        {/*
+          flexShrink:0 + nowrap keep the label on one line — the default
+          flex-shrink:1 is what let these compress below their text width.
+          The "Resolve & " prefix is dropped at xs to buy back the width;
+          aria-label/title keep the full, unambiguous phrase for screen
+          readers and hover, so the shortening is purely visual.
+        */}
         <Button
           variant="contained"
           color="primary"
@@ -143,8 +161,14 @@ export function GroupBulkResolveToolbar({
           startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <ArchiveIcon />}
           disabled={loading}
           onClick={() => handleClick('archive')}
+          aria-label="Resolve & Archive"
+          title="Resolve & Archive"
+          sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
         >
-          Resolve &amp; Archive
+          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+            Resolve&nbsp;&amp;&nbsp;
+          </Box>
+          Archive
         </Button>
 
         {canTrash && (
@@ -155,8 +179,14 @@ export function GroupBulkResolveToolbar({
             startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
             disabled={loading}
             onClick={() => handleClick('trash')}
+            aria-label="Resolve & Delete"
+            title="Resolve & Delete"
+            sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
           >
-            Resolve &amp; Delete
+            <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+              Resolve&nbsp;&amp;&nbsp;
+            </Box>
+            Delete
           </Button>
         )}
       </Box>

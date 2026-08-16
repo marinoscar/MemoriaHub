@@ -65,7 +65,11 @@ export function ExpandableValue({ text, children }: ExpandableValueProps) {
         mx: -0.5,
         py: 0.5,
         borderRadius: 1,
-        textAlign: 'left',
+        // A `button` element's UA default is centred text, so this override is
+        // required to keep the value reading as text. `start`, not `left`: the
+        // card's alignment is always the reading direction's start edge, so it
+        // stays under its label in an RTL locale too (#438).
+        textAlign: 'start',
         justifyContent: 'flex-start',
       }}
     >
@@ -123,6 +127,24 @@ export interface CardFieldProps<Row> {
  * Stacked (label above value) rather than side-by-side: at 320px a two-column
  * layout gives the value ~150px, which re-creates on a card exactly the
  * truncation problem cards exist to solve.
+ *
+ * ## `column.align` is a GRID concern and does not cross into a card (#438)
+ *
+ * `align` exists so a column of numbers reads as a column — the cells and the
+ * header share an edge to scan down (`desktop/columnAdapter.ts` sets both
+ * `align` and `headerAlign` from it). A card has no column: the label sits
+ * ABOVE its value, and the only thing either one can align against is the other.
+ * Honouring `align: 'center'` here centred a value across the whole card width
+ * while its label stayed at the start, so the pair stopped reading as a pair
+ * (`running`/`failed` on the worker-nodes table did exactly this).
+ *
+ * So the value is always start-aligned, and by INHERITING rather than declaring
+ * an alignment — which is also what keeps it correct under RTL. (The one
+ * explicit `textAlign` left in this module is on `ExpandableValue`, and only
+ * because a `button` element's UA default is centred; it sets `start` for the
+ * same reason.) Do not re-add a `textAlign` derived from `column.align`: a
+ * column declaring one is describing the grid, and a card is a different LAYOUT
+ * of the same column contract, not a narrow grid.
  */
 export function CardField<Row>({ column, row }: CardFieldProps<Row>) {
   const content = columnContent(column, row);
@@ -144,7 +166,6 @@ export function CardField<Row>({ column, row }: CardFieldProps<Row>) {
           minWidth: 0,
           // Never let a long unbroken token push the card past the viewport.
           overflowWrap: 'anywhere',
-          textAlign: column.align === 'right' || column.align === 'center' ? column.align : 'left',
         }}
       >
         {column.truncate ? (

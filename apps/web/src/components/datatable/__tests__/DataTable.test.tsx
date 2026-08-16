@@ -21,7 +21,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { screen, within, fireEvent } from '@testing-library/react';
 import { render } from '../../../__tests__/utils/test-utils';
-import { DataTable } from '../DataTable';
+import { DataTable, shouldRenderViewBar } from '../DataTable';
 import { toGridColDef, extractColumnValue, buildColumnVisibilityModel } from '../desktop/columnAdapter';
 import type { DataTableColumn } from '../types';
 
@@ -182,6 +182,78 @@ describe('DataTable — desktop rendering', () => {
     expect(alert).toHaveTextContent('Failed to load jobs');
     // The table is still rendered beneath the error, so a stale page stays readable.
     expect(screen.getByText('face_detection')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The view bar is chrome ABOUT rows (issue #438)
+// ---------------------------------------------------------------------------
+
+describe('shouldRenderViewBar', () => {
+  const empty = { rowCount: 0, hasActiveQuery: false } as const;
+
+  it('draws the bar whenever there are rows', () => {
+    expect(shouldRenderViewBar({ rowCount: 3, hasActiveQuery: false })).toBe(true);
+  });
+
+  it('hides the bar for a table that resolved to zero rows with nothing applied', () => {
+    expect(shouldRenderViewBar(empty)).toBe(false);
+  });
+
+  it('keeps the bar while loading, so a refetch never flashes it out', () => {
+    // The node/job pages poll every 5s and render unconditionally to avoid
+    // remount churn (§18.4); a page that clears `rows` mid-fetch must not make
+    // the chrome row appear and disappear twelve times a minute.
+    expect(shouldRenderViewBar({ ...empty, loading: true })).toBe(true);
+  });
+
+  it('keeps the bar when a filter or quick search produced the empty result', () => {
+    // Zero rows is a RESULT here, not an empty table — the controls must hold
+    // still while the user narrows a query.
+    expect(shouldRenderViewBar({ ...empty, hasActiveQuery: true })).toBe(true);
+  });
+
+  it('keeps the bar when the server reports rows this page is not showing', () => {
+    // A page index past the end: the table HAS rows, so "export all matching
+    // rows" is still meaningful.
+    expect(shouldRenderViewBar({ ...empty, total: 137 })).toBe(true);
+    expect(shouldRenderViewBar({ ...empty, total: 0 })).toBe(false);
+  });
+});
+
+describe('DataTable — empty table chrome (issue #438)', () => {
+  it('leaves the empty state alone, with no column picker or dead export button', () => {
+    renderTable({ rows: [], emptyState: <span>No node credentials yet</span> });
+
+    expect(screen.queryByTestId('datatable-view-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('datatable-columns-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('datatable-export-button')).not.toBeInTheDocument();
+
+    // The renderers below the bars own the empty state and are untouched.
+    expect(
+      within(screen.getByTestId('datatable-empty-overlay')).getByText('No node credentials yet'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the bar on an empty page while a filter is applied', () => {
+    renderTable({
+      rows: [],
+      filters: [{ columnId: 'status', operator: 'is', value: 'failed' }],
+      onFiltersChange: vi.fn(),
+    });
+
+    expect(screen.getByTestId('datatable-view-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('datatable-columns-button')).toBeInTheDocument();
+  });
+
+  it('keeps the bar while an empty table is still loading', () => {
+    renderTable({ rows: [], loading: true });
+    expect(screen.getByTestId('datatable-view-bar')).toBeInTheDocument();
+  });
+
+  it('keeps the bar when there are rows', () => {
+    renderTable();
+    expect(screen.getByTestId('datatable-view-bar')).toBeInTheDocument();
   });
 });
 

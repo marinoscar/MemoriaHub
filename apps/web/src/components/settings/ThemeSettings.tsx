@@ -40,29 +40,38 @@ export function ThemeSettings({
           Choose how the application looks to you
         </Typography>
 
+        {/*
+          size="small" + flexWrap are load-bearing: MUI's group root is
+          inline-flex/nowrap and CardContent sets no overflow, so at a narrow
+          viewport the third ("System") option was clipped off the card's
+          right edge and unreachable. The inner Box also carried its own px:1
+          on top of MUI's button padding — dropped, since that extra ~16px per
+          button is what pushed the group past the card in the first place.
+        */}
         <ToggleButtonGroup
           value={currentTheme}
           exclusive
           onChange={handleChange}
           aria-label="theme selection"
           disabled={disabled}
-          sx={{ mt: 1 }}
+          size="small"
+          sx={{ mt: 1, flexWrap: 'wrap' }}
         >
           <ToggleButton value="light" aria-label="light mode">
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1 }}>
-              <LightIcon />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <LightIcon fontSize="small" />
               <span>Light</span>
             </Box>
           </ToggleButton>
           <ToggleButton value="dark" aria-label="dark mode">
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1 }}>
-              <DarkIcon />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <DarkIcon fontSize="small" />
               <span>Dark</span>
             </Box>
           </ToggleButton>
           <ToggleButton value="system" aria-label="system preference">
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1 }}>
-              <SystemIcon />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <SystemIcon fontSize="small" />
               <span>System</span>
             </Box>
           </ToggleButton>

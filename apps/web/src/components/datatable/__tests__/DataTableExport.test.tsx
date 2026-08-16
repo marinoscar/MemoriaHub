@@ -609,7 +609,15 @@ describe('DataTable — the export control', () => {
   });
 
   it('disables itself when there is nothing to export', () => {
-    renderAtWidth(1400, { rows: [] });
+    // Zero rows because a FILTER matched nothing — the one empty case where the
+    // view bar (and so this button) is still drawn, since the user is mid-query
+    // and the controls must not move under them (#438). A plain empty table
+    // hides the bar outright; that rule is asserted in `DataTable.test.tsx`.
+    renderAtWidth(1400, {
+      rows: [],
+      filters: [{ columnId: 'status', operator: 'is', value: 'failed' }],
+      onFiltersChange: vi.fn(),
+    });
     expect(screen.getByTestId('datatable-export-button')).toBeDisabled();
   });
 
