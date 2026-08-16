@@ -10,7 +10,9 @@ export {
   useDataTableRenderer,
   rendererForLayout,
   drawableColumns,
+  shouldRenderViewBar,
 } from './DataTable';
+export type { ViewBarVisibilityInput } from './DataTable';
 export { BulkActionBar } from './BulkActionBar';
 export type { BulkActionBarProps } from './BulkActionBar';
 

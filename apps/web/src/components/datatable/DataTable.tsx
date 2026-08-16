@@ -39,7 +39,9 @@
  * `DataTableViewBar` (column visibility + density, #255) sits here for exactly
  * the same two reasons — and one more: the visible column SET must be resolved
  * once, from the layout baseline and the user's stored choice together, so the
- * two renderers can never disagree about which columns exist.
+ * two renderers can never disagree about which columns exist. It is also the one
+ * bar that can be absent: see {@link shouldRenderViewBar} for why a table that
+ * has definitively resolved to zero rows shows its empty state alone (#438).
  *
  * `DataTableExportControl` (CSV export, #256) rides in that bar's trailing slot
  * on the same logic: one code path serves every renderer, so a phone and a
@@ -101,6 +103,53 @@ export function drawableColumns<Row>(
     : columns;
 }
 
+/** The inputs that decide whether the view bar has anything to be about. */
+export interface ViewBarVisibilityInput {
+  rowCount: number;
+  loading?: boolean;
+  /** `true` when a filter or a quick-search term is currently applied. */
+  hasActiveQuery: boolean;
+  /** `pagination.total`, when the page is paginated at all. */
+  total?: number;
+}
+
+/**
+ * Whether the view bar is drawn (#438).
+ *
+ * The bar is chrome ABOUT rows — pick columns, set density, export. With no
+ * rows it is chrome about nothing: the node-credentials table shipped a
+ * "View" button opening a column picker for a table with no columns on screen,
+ * plus a permanently-disabled export kebab, floating above "No node credentials
+ * yet". The empty state is the whole message at that point.
+ *
+ * Three cases are deliberately NOT treated as empty, because in each of them
+ * hiding the bar is either a lie or a layout jump:
+ *
+ *  - **`loading`** — a page that clears `rows` while refetching would otherwise
+ *    flash the bar out and back on every poll. Both #258's job queue and #259's
+ *    worker nodes render unconditionally through a 5s auto-refresh precisely to
+ *    avoid remount churn (docs/specs/datatable.md §18.4); this must not
+ *    reintroduce it one row higher.
+ *  - **an active filter or quick search** — zero rows is then a RESULT, not an
+ *    empty table. The controls must stay put while the user narrows a query,
+ *    and the bar disappearing the moment a filter matches nothing is the worst
+ *    possible moment for the layout to shift.
+ *  - **`pagination.total > 0`** — the table HAS rows, this page just isn't
+ *    showing any (a stale page index past the end). Export's "all matching
+ *    rows" scope is still meaningful.
+ */
+export function shouldRenderViewBar({
+  rowCount,
+  loading,
+  hasActiveQuery,
+  total,
+}: ViewBarVisibilityInput): boolean {
+  if (rowCount > 0) return true;
+  if (loading) return true;
+  if (hasActiveQuery) return true;
+  return (total ?? 0) > 0;
+}
+
 /**
  * The card-list registration. This is the seam #252 left behind; it now points
  * at the real renderer.
@@ -154,6 +203,16 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   // exports a column sees only the drawable ones (#258).
   const painted = useMemo(() => drawableColumns(props.columns), [props.columns]);
 
+  // Zero rows with nothing applied and nothing in flight: the view bar is
+  // chrome about rows that do not exist, so the empty state stands alone
+  // (#438). The renderers below are untouched — they own the empty state.
+  const viewBarVisible = shouldRenderViewBar({
+    rowCount: props.rows.length,
+    loading: props.loading,
+    hasActiveQuery: (filters?.length ?? 0) > 0 || Boolean(quickSearch?.value),
+    total: props.pagination?.total,
+  });
+
   const prefs = useDataTableLayoutPrefs({
     tableId,
     columns: painted,
@@ -179,31 +238,33 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       // make the document body scroll sideways, at any viewport width.
       sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}
     >
-      <DataTableViewBar
-        columns={painted}
-        layout={layout}
-        visibleColumnIds={prefs.userVisibleColumnIds}
-        density={prefs.density}
-        onToggleColumn={prefs.toggleColumn}
-        onDensityChange={prefs.setDensity}
-        onReset={prefs.reset}
-        trailing={
-          disableExport ? undefined : (
-            <DataTableExportControl
-              layout={layout}
-              columns={painted}
-              rows={props.rows}
-              // The USER's choice, not the layout's fold: a `detail` column the
-              // tablet tucks into its row expander is still on screen, so a CSV
-              // must not change shape because the window got narrower.
-              visibleColumnIds={prefs.userVisibleColumnIds}
-              config={csvExport}
-              filenameBase={csvExport?.filename ?? tableId ?? props.ariaLabel}
-              total={props.pagination?.total}
-            />
-          )
-        }
-      />
+      {viewBarVisible && (
+        <DataTableViewBar
+          columns={painted}
+          layout={layout}
+          visibleColumnIds={prefs.userVisibleColumnIds}
+          density={prefs.density}
+          onToggleColumn={prefs.toggleColumn}
+          onDensityChange={prefs.setDensity}
+          onReset={prefs.reset}
+          trailing={
+            disableExport ? undefined : (
+              <DataTableExportControl
+                layout={layout}
+                columns={painted}
+                rows={props.rows}
+                // The USER's choice, not the layout's fold: a `detail` column the
+                // tablet tucks into its row expander is still on screen, so a CSV
+                // must not change shape because the window got narrower.
+                visibleColumnIds={prefs.userVisibleColumnIds}
+                config={csvExport}
+                filenameBase={csvExport?.filename ?? tableId ?? props.ariaLabel}
+                total={props.pagination?.total}
+              />
+            )
+          }
+        />
+      )}
 
       <DataTableFilterBar
         columns={props.columns}

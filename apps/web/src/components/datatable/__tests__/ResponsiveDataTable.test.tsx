@@ -37,6 +37,7 @@ import { act, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../__tests__/utils/test-utils';
 import { DataTable } from '../DataTable';
+import { CardField } from '../mobile/CardField';
 import { layoutForWidth, DEFAULT_BREAKPOINTS } from '../useContainerLayout';
 import type { DataTableColumn, DataTableSortState } from '../types';
 import { assertNoInvisibleHitTargets } from './testUtils/a11yGuards';
@@ -500,6 +501,23 @@ describe('CardListRenderer — priority drives the card', () => {
     expect(attempts).toHaveTextContent('3');
   });
 
+  it('does not carry a column’s grid alignment into the card (issue #438)', () => {
+    // `attempts` declares `align: 'right'` for the grid, where the cells and
+    // the header share an edge to scan down. On a card the label sits ABOVE the
+    // value, so aligning the value anywhere but the start edge separates the
+    // pair from its own label.
+    renderAtWidth(400);
+
+    const card = screen
+      .getAllByTestId('datatable-card')
+      .find((c) => c.getAttribute('data-row-id') === 'job-2') as HTMLElement;
+    const field = within(card).getByTestId('datatable-card-field-attempts');
+
+    for (const element of [field, ...Array.from(field.children)] as HTMLElement[]) {
+      expect(['right', 'center']).not.toContain(getComputedStyle(element).textAlign);
+    }
+  });
+
   it('renders an em dash for a null scalar, matching the grid', () => {
     renderAtWidth(400);
     const card = screen
@@ -591,6 +609,42 @@ describe('CardListRenderer — priority drives the card', () => {
       within(screen.getByTestId('datatable-empty-overlay')).getByText('No jobs match these filters'),
     ).toBeInTheDocument();
     expect(screen.getByTestId('datatable-error')).toHaveTextContent('Failed to load jobs');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4b. `column.align` stops at the grid (issue #438)
+// ---------------------------------------------------------------------------
+
+describe('CardField — alignment is a grid-only concern', () => {
+  const centred: DataTableColumn<Job> = {
+    id: 'attempts',
+    label: 'Attempts',
+    priority: 'secondary',
+    align: 'center',
+    value: (job) => job.attempts,
+  };
+
+  it('start-aligns a centre-aligned column’s value, so it stays under its label', () => {
+    render(<CardField column={centred} row={JOBS[1]} />);
+
+    const field = screen.getByTestId('datatable-card-field-attempts');
+    for (const element of [field, ...Array.from(field.children)] as HTMLElement[]) {
+      expect(['right', 'center']).not.toContain(getComputedStyle(element).textAlign);
+    }
+  });
+
+  it('keeps a truncated value’s expand control out of the column’s alignment', () => {
+    render(<CardField column={{ ...centred, truncate: true }} row={JOBS[1]} />);
+
+    // The clamp turns the value into a `ButtonBase`, which must not pick the
+    // column's alignment up either. (The button's own `textAlign: 'start'`
+    // override — a `button`'s UA default is centred — is not assertable here:
+    // jsdom's naive cascade reports MUI's own class, not the `sx` rule.)
+    const field = screen.getByTestId('datatable-card-field-attempts');
+    for (const element of [field, ...Array.from(field.children)] as HTMLElement[]) {
+      expect(['right', 'center']).not.toContain(getComputedStyle(element).textAlign);
+    }
   });
 });
 
