@@ -21,6 +21,16 @@ export interface User {
   permissions: string[];
   isActive: boolean;
   createdAt: string;
+  /**
+   * The user's stored IANA time zone (issue #444, epic #440), RAW — `null`
+   * when the user has never set one.
+   *
+   * Deliberately NOT resolved/defaulted server-side: `null` and `'UTC'` mean
+   * different things to the login-time auto-detection, which must be able to
+   * tell "never chose" (safe to fill in silently) from "deliberately chose
+   * UTC" (must never be overwritten without asking).
+   */
+  timezone: string | null;
 }
 
 /**
@@ -94,6 +104,16 @@ export interface UserSettings {
    * of existence here would only push that lie into the compiler.
    */
   navigation?: NavigationPreferences;
+  /**
+   * The user's IANA time zone (issue #444, epic #440), e.g. `America/Costa_Rica`.
+   *
+   * Same absent-key contract as the namespaces above — the API returns the RAW
+   * stored value and never materializes a default, so `undefined` here is the
+   * normal state for a user who has never set one and means "no preference",
+   * NOT "UTC". Anything that needs an effective zone resolves the fallback
+   * itself rather than writing one back.
+   */
+  timezone?: string;
   activeCircleId?: string | null;
   updatedAt: string;
   version: number;
