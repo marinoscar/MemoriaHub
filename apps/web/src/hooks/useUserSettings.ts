@@ -16,6 +16,8 @@ interface UseUserSettingsReturn {
    */
   updateSettings: (updates: UserSettingsUpdate) => Promise<void>;
   updateTheme: (theme: 'light' | 'dark' | 'system') => Promise<void>;
+  /** Store an IANA time zone, e.g. `America/Costa_Rica` (issue #444). */
+  updateTimezone: (timezone: string) => Promise<void>;
   updateProfile: (profile: UserSettings['profile']) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -116,6 +118,13 @@ export function useUserSettings(
     [updateSettings],
   );
 
+  const updateTimezone = useCallback(
+    async (timezone: string) => {
+      await updateSettings({ timezone });
+    },
+    [updateSettings],
+  );
+
   const updateProfile = useCallback(
     async (profile: UserSettings['profile']) => {
       await updateSettings({ profile });
@@ -130,6 +139,7 @@ export function useUserSettings(
     isSaving,
     updateSettings,
     updateTheme,
+    updateTimezone,
     updateProfile,
     refresh: fetchSettings,
   };

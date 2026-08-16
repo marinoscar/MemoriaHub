@@ -67,6 +67,18 @@ export class CurrentUserDto {
     description: 'User permissions (aggregated from roles)',
   })
   permissions!: string[];
+
+  @ApiProperty({
+    type: String,
+    example: 'America/Costa_Rica',
+    nullable: true,
+    description:
+      "The user's stored IANA time zone preference, RAW — null when they " +
+      'have never expressed one. Deliberately not resolved to a default: null ' +
+      'and an explicit "UTC" are different answers, and only the client can ' +
+      'decide whether to prompt for a zone. Written via PATCH /api/user-settings.',
+  })
+  timezone!: string | null;
 }
 
 /**

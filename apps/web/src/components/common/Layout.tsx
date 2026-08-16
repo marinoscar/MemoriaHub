@@ -8,6 +8,7 @@ import { MediaRefreshProvider } from '../../contexts/MediaRefreshContext';
 import { MediaPreviewProvider } from '../../contexts/MediaPreviewContext';
 import { SearchProvider } from '../../contexts/SearchContext';
 import { MaintenanceBanner } from './MaintenanceBanner';
+import { TimezonePrompt } from '../settings/TimezonePrompt';
 
 interface LayoutProps {
   /**
@@ -139,6 +140,13 @@ export function Layout({ fullBleed = false }: LayoutProps) {
               one. `!showRail` is the exact complement of the rail's gate, so
               there is no width with two navs and none with zero. */}
           {!showRail && <BottomNav />}
+          {/* Renders only when `AuthProvider` detected a time-zone mismatch
+              (issue #444). It is mounted here, rather than in the provider that
+              owns the state, purely because MUI's ThemeProvider sits below
+              AuthProvider — this is the highest themed mount point available.
+              Remounting it (e.g. crossing to the full-bleed map layout) is
+              harmless: the state and the session dismissal both live above. */}
+          <TimezonePrompt />
         </Box>
       </SearchProvider>
       </MediaPreviewProvider>

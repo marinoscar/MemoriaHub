@@ -145,6 +145,19 @@ export interface UserSettingsValue {
    * why this namespace needed no data migration. Absent ⇒ built-in defaults.
    */
   navigation?: NavigationPreferencesValue;
+  /**
+   * Per-user IANA time zone (issue #444), e.g. 'America/Costa_Rica'. Absent for
+   * any user who has never expressed one — the normal state, and why this key
+   * needed no data migration.
+   *
+   * Absent is DISTINCT from an explicit 'UTC' and must stay that way: it is
+   * never materialized into DEFAULT_USER_SETTINGS, never defaulted by the zod
+   * schema, and surfaced RAW (null when absent) by GET /api/auth/me so a client
+   * can tell "never chose" from "chose UTC". Server-side consumers that need a
+   * concrete zone resolve it through UserTimeZoneService, which is the single
+   * place the 'UTC' fallback lives.
+   */
+  timezone?: string;
 }
 
 /**

@@ -8,6 +8,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { DatabaseBackupRun, DatabaseBackupStatus } from '@prisma/client';
 
+import {
+  assertSupportedTimeZone,
+  wallClockParts,
+  wallClockToUtc,
+} from '../common/time/zone.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -442,95 +447,20 @@ function iso(d: Date | null | undefined): string | null {
   return d ? d.toISOString() : null;
 }
 
-/**
- * Reject a `timezone` that `Intl` does not know.
- *
- * `Intl.supportedValuesOf` is the authoritative list on this runtime; where it
- * is unavailable (very old ICU builds) the check degrades to constructing a
- * formatter, which throws a `RangeError` for an unknown zone — so an invalid
- * value is still rejected, just with a less precise list behind it.
- */
-export function assertSupportedTimeZone(timezone: string): void {
-  const supported = (Intl as any).supportedValuesOf?.('timeZone') as
-    | string[]
-    | undefined;
-
-  if (supported) {
-    if (!supported.includes(timezone)) {
-      throw new BadRequestException(`Unknown IANA time zone "${timezone}"`);
-    }
-    return;
-  }
-
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
-  } catch {
-    throw new BadRequestException(`Unknown IANA time zone "${timezone}"`);
-  }
-}
-
-/** Civil (wall-clock) date/time parts of an instant, in a given zone. */
-function wallClockParts(
-  date: Date,
-  timeZone: string,
-): { year: number; month: number; day: number; hour: number; minute: number; second: number } {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(date);
-
-  const map: Record<string, string> = {};
-  for (const p of parts) map[p.type] = p.value;
-
-  // Intl can render midnight as hour "24" in the h23/h24 boundary case.
-  const hour = Number(map['hour']) % 24;
-
-  return {
-    year: Number(map['year']),
-    month: Number(map['month']),
-    day: Number(map['day']),
-    hour,
-    minute: Number(map['minute']),
-    second: Number(map['second']),
-  };
-}
-
-/** Offset (ms) of `timeZone` from UTC at the given instant. */
-function zoneOffsetMs(date: Date, timeZone: string): number {
-  const p = wallClockParts(date, timeZone);
-  const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
-  return asUtc - date.getTime();
-}
-
-/**
- * Convert a wall-clock date/time in `timeZone` to the corresponding UTC instant.
- *
- * Two passes, because the offset depends on the instant we are solving for: the
- * first pass uses the offset at the naive guess, the second re-reads it at the
- * corrected instant. That converges everywhere except inside a DST spring-forward
- * gap, where the nominal time does not exist and the result lands just past it —
- * acceptable for a backup schedule (the run happens once, an hour off, on one day
- * a year) and strictly better than throwing.
- */
-function wallClockToUtc(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  timeZone: string,
-): Date {
-  const naive = Date.UTC(year, month - 1, day, hour, minute, 0);
-  let ts = naive - zoneOffsetMs(new Date(naive), timeZone);
-  ts = naive - zoneOffsetMs(new Date(ts), timeZone);
-  return new Date(ts);
-}
+// The time-zone helpers this file used to define privately now live in
+// common/time/zone.util.ts (issue #444), since per-user time zones need the
+// same validation and the same civil<->UTC conversion. They are re-exported
+// here so existing importers of `assertSupportedTimeZone` from this module keep
+// working; behavior is unchanged apart from 'UTC' now always being accepted
+// (see the util's header — `Intl.supportedValuesOf` omits it on Node 22, and it
+// is `databaseBackup.timezone`'s own default).
+export {
+  assertSupportedTimeZone,
+  isSupportedTimeZone,
+  wallClockParts,
+  zoneOffsetMs,
+  wallClockToUtc,
+} from '../common/time/zone.util';
 
 /** How far ahead `computeNextRunAt` will search before giving up. */
 const MAX_SCHEDULE_LOOKAHEAD_DAYS = 400;

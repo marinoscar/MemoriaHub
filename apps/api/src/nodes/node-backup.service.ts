@@ -33,6 +33,7 @@ import {
   Prisma,
   WorkerNode,
 } from '@prisma/client';
+import { isSupportedTimeZone } from '../common/time/zone.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { NodesService } from './nodes.service';
 import {
@@ -62,16 +63,13 @@ const iso = (d: Date | null | undefined): string | null =>
   d ? d.toISOString() : null;
 
 /**
- * Valid IANA timezone names. Built lazily; 'UTC' is added explicitly since
- * some runtimes canonicalize it out of Intl.supportedValuesOf('timeZone').
+ * Valid IANA timezone names — including 'UTC', which several runtimes
+ * canonicalize out of Intl.supportedValuesOf('timeZone'). This local helper's
+ * lazily-built Set moved to common/time/zone.util.ts (issue #444) when
+ * per-user time zones needed the same predicate; the alias keeps this file's
+ * call site unchanged.
  */
-let timezoneSet: Set<string> | null = null;
-function isSupportedTimezone(tz: string): boolean {
-  if (!timezoneSet) {
-    timezoneSet = new Set([...Intl.supportedValuesOf('timeZone'), 'UTC']);
-  }
-  return timezoneSet.has(tz);
-}
+const isSupportedTimezone = isSupportedTimeZone;
 
 @Injectable()
 export class NodeBackupService {

@@ -13,6 +13,7 @@ const mockUser = {
   permissions: ['user_settings:read', 'user_settings:write'],
   isActive: true,
   createdAt: new Date().toISOString(),
+  timezone: null,
 };
 
 const mockUserSettings = {

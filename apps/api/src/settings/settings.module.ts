@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { UserSettingsController } from './user-settings/user-settings.controller';
 import { UserSettingsService } from './user-settings/user-settings.service';
+import { UserTimeZoneService } from './user-settings/user-timezone.service';
 import { SystemSettingsController } from './system-settings/system-settings.controller';
 import { SystemSettingsService } from './system-settings/system-settings.service';
 import { FeaturesController } from './features.controller';
@@ -19,7 +20,10 @@ import { FeaturesController } from './features.controller';
 @Module({
   imports: [NotificationsModule],
   controllers: [UserSettingsController, SystemSettingsController, FeaturesController],
-  providers: [UserSettingsService, SystemSettingsService],
-  exports: [UserSettingsService, SystemSettingsService],
+  providers: [UserSettingsService, SystemSettingsService, UserTimeZoneService],
+  // UserTimeZoneService is exported for #445's date grouping and any other
+  // server-side consumer that needs a concrete zone for a user — it is the one
+  // place the 'UTC' fallback lives, so nobody should re-derive it.
+  exports: [UserSettingsService, SystemSettingsService, UserTimeZoneService],
 })
 export class SettingsModule {}

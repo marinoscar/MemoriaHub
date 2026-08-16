@@ -584,6 +584,101 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
     });
+
+    // -------------------------------------------------------------------------
+    // timezone (issue #444)
+    // -------------------------------------------------------------------------
+    //
+    // The RAW stored value, null when unset — deliberately NOT resolved to
+    // 'UTC'. A client that cannot tell "chose UTC" from "never chose" either
+    // re-prompts a London user forever or never auto-sets a genuine UTC one.
+
+    describe('timezone', () => {
+      const baseUser = {
+        id: 'user-1',
+        email: 'test@example.com',
+        displayName: null,
+        providerDisplayName: 'Provider Name',
+        profileImageUrl: null,
+        providerProfileImageUrl: null,
+        isActive: true,
+        createdAt: new Date('2026-01-15T10:30:00.000Z'),
+        userRoles: [] as any[],
+      };
+
+      beforeEach(() => {
+        mockPrisma.user.findUnique.mockResolvedValue(baseUser as any);
+      });
+
+      it('returns the stored zone verbatim', async () => {
+        mockPrisma.userSettings.findUnique.mockResolvedValue({
+          value: { timezone: 'America/Costa_Rica' },
+        } as any);
+
+        const result = await service.getCurrentUser('user-1');
+
+        expect(result.timezone).toBe('America/Costa_Rica');
+      });
+
+      it('returns an explicit UTC as UTC, not as null', async () => {
+        mockPrisma.userSettings.findUnique.mockResolvedValue({
+          value: { timezone: 'UTC' },
+        } as any);
+
+        await expect(
+          service.getCurrentUser('user-1').then((r) => r.timezone),
+        ).resolves.toBe('UTC');
+      });
+
+      it('returns null when the key is absent — no preference expressed', async () => {
+        mockPrisma.userSettings.findUnique.mockResolvedValue({
+          value: { theme: 'system' },
+        } as any);
+
+        await expect(
+          service.getCurrentUser('user-1').then((r) => r.timezone),
+        ).resolves.toBeNull();
+      });
+
+      it('returns null when the user has no settings row at all', async () => {
+        mockPrisma.userSettings.findUnique.mockResolvedValue(null);
+
+        await expect(
+          service.getCurrentUser('user-1').then((r) => r.timezone),
+        ).resolves.toBeNull();
+      });
+
+      it('returns null rather than failing /auth/me when the settings read throws', async () => {
+        mockPrisma.userSettings.findUnique.mockRejectedValue(
+          new Error('db down'),
+        );
+
+        await expect(
+          service.getCurrentUser('user-1').then((r) => r.timezone),
+        ).resolves.toBeNull();
+      });
+
+      it('returns null for a malformed stored value', async () => {
+        for (const bad of ['', 3600, null, {}]) {
+          mockPrisma.userSettings.findUnique.mockResolvedValue({
+            value: { timezone: bad },
+          } as any);
+
+          await expect(
+            service.getCurrentUser('user-1').then((r) => r.timezone),
+          ).resolves.toBeNull();
+        }
+      });
+
+      it('never CREATES a settings row — /auth/me is a pure read', async () => {
+        mockPrisma.userSettings.findUnique.mockResolvedValue(null);
+
+        await service.getCurrentUser('user-1');
+
+        expect(mockPrisma.userSettings.create).not.toHaveBeenCalled();
+        expect(mockPrisma.userSettings.upsert).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('refreshAccessToken', () => {

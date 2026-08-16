@@ -1,6 +1,29 @@
 import { NotificationType } from '@prisma/client';
 import { z } from 'zod';
 
+import { isSupportedTimeZone } from '../time/zone.util';
+
+// =============================================================================
+// Per-user time zone (issue #444)
+// =============================================================================
+//
+// The IANA zone the user wants dates rendered in. Defined ONCE and shared by
+// the canonical and patch schemas below (and re-declared, as this file's
+// convention requires, in the wire DTO — see update-user-settings.dto.ts).
+//
+// ABSENT-KEY RULE (same contract as dataTables / notifications / memories /
+// navigation): `.optional()` with NO `.default()`, and it is NEVER materialized
+// server-side. Absent means "no preference expressed", which is deliberately
+// DISTINCT from an explicit 'UTC'. GET /api/auth/me returns the RAW value
+// (null when absent) precisely so a client can tell a Londoner who has never
+// chosen from a user who genuinely picked UTC: defaulting one to the other
+// either re-prompts forever or never prompts at all. Adding a `.default()`
+// here would collapse that distinction permanently.
+export const userTimeZoneSchema = z
+  .string()
+  .min(1)
+  .refine(isSupportedTimeZone, 'Unknown IANA time zone');
+
 // =============================================================================
 // DataTable per-user layout persistence (issue #255, epic #238)
 // =============================================================================
@@ -402,6 +425,8 @@ export const userSettingsSchema = z.object({
   notifications: notificationPreferencesSchema.optional(),
   memories: memoriesPreferencesSchema.optional(),
   navigation: navigationPreferencesSchema.optional(),
+  // Absent = no preference expressed, NOT 'UTC'. See userTimeZoneSchema.
+  timezone: userTimeZoneSchema.optional(),
 });
 
 export type UserSettingsDto = z.infer<typeof userSettingsSchema>;
@@ -431,6 +456,9 @@ export const userSettingsPatchSchema = z.object({
   // replaces, an unlisted one is untouched, `null` clears that field, and
   // `navigation: null` clears the whole namespace.
   navigation: navigationPreferencesPatchSchema.nullable().optional(),
+  // A scalar, so plain JSON Merge Patch: absent = untouched, a value replaces,
+  // `null` clears it back to "no preference".
+  timezone: userTimeZoneSchema.nullable().optional(),
 });
 
 // =============================================================================
