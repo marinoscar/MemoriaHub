@@ -46,10 +46,27 @@ let timezoneSet: Set<string> | null = null;
 /**
  * Does `Intl` know this zone?
  *
- * `Intl.supportedValuesOf` is the authoritative list on this runtime; where it
- * is unavailable (very old ICU builds) the check degrades to constructing a
- * formatter, which throws a `RangeError` for an unknown zone — so an invalid
- * value is still rejected, just with a less precise list behind it.
+ * TWO CHECKS, IN THIS ORDER, AND THE SECOND IS NOT A FALLBACK FOR OLD RUNTIMES
+ * — it is the one that makes this correct for real client-reported zones:
+ *
+ *   1. `Intl.supportedValuesOf('timeZone')` — fast, and the authoritative list
+ *      where it exists. But it returns only CANONICAL names, so on a given ICU
+ *      build it can omit live IANA aliases that `Intl` itself accepts happily:
+ *      Node 22 lists `Asia/Calcutta` but not `Asia/Kolkata`, `Europe/Kiev` but
+ *      not `Europe/Kyiv`, and (see below) `UTC` at all. Those are exactly the
+ *      strings a browser hands us from
+ *      `Intl.DateTimeFormat().resolvedOptions().timeZone`, so treating a miss
+ *      here as "invalid" would 400 a user in Kolkata or Kyiv for reporting
+ *      their real zone.
+ *
+ *   2. Constructing a formatter, which throws `RangeError` for a genuinely
+ *      unknown zone. This is the ACTUAL predicate we care about: "will every
+ *      downstream `Intl` call in this codebase accept the value?" It correctly
+ *      rejects `Etc/Unknown`, `Mars/Olympus`, and the empty string.
+ *
+ * So step 1 is a cache in front of step 2, never a veto over it. 'UTC' is also
+ * added to the set explicitly, both because several runtimes canonicalize it
+ * out of the list and because it is `databaseBackup.timezone`'s own default.
  */
 export function isSupportedTimeZone(timezone: string): boolean {
   if (!timezone) return false;
@@ -62,7 +79,9 @@ export function isSupportedTimeZone(timezone: string): boolean {
     if (!timezoneSet) {
       timezoneSet = new Set([...supportedValuesOf('timeZone'), 'UTC']);
     }
-    return timezoneSet.has(timezone);
+    if (timezoneSet.has(timezone)) return true;
+    // Fall through — an alias this ICU build canonicalizes away is still a
+    // zone every Intl call in this codebase will accept.
   }
 
   try {

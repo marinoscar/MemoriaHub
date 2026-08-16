@@ -1589,4 +1589,169 @@ describe('UserSettingsService', () => {
       expect(mockPrisma.userSettings.upsert).not.toHaveBeenCalled();
     });
   });
+  // ===========================================================================
+  // timezone (issue #444)
+  // ===========================================================================
+  //
+  // Same absent-means-no-preference contract as the namespaces above, with one
+  // difference that matters: `timezone` is a SCALAR, so plain JSON Merge Patch
+  // applies — absent leaves it, a value replaces it, and `null` clears it. The
+  // clear is the only way a user can un-express a preference, which is why the
+  // merge cannot be the `dto.x ?? current.x` shape `theme` uses.
+
+  describe('patchSettings (PATCH) — timezone', () => {
+    const persistedValue = (): UserSettingsValue =>
+      (mockPrisma.userSettings.update.mock.calls[0][0] as any).data
+        .value as UserSettingsValue;
+
+    const seed = (timezone?: string) => {
+      const stored: UserSettingsValue = {
+        ...DEFAULT_USER_SETTINGS,
+        ...(timezone ? { timezone } : {}),
+      };
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: stored as any,
+      } as any);
+      mockPrisma.userSettings.update.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.data.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+    };
+
+    it('leaves it absent when absent and unpatched — absent means "no preference"', async () => {
+      seed();
+
+      const result = await service.patchSettings(mockUserId, { theme: 'dark' });
+
+      expect(result.timezone).toBeUndefined();
+      expect(persistedValue().timezone).toBeUndefined();
+      // Never materialized: the JSONB that actually lands in Postgres must not
+      // gain a 'UTC' the user never chose, or the client can no longer tell it
+      // from a real choice. Asserted post-JSON because that is the serialization
+      // the column goes through — an in-memory `key: undefined` is not stored.
+      expect(JSON.parse(JSON.stringify(persistedValue()))).not.toHaveProperty(
+        'timezone',
+      );
+    });
+
+    it('persists a newly chosen zone', async () => {
+      seed();
+
+      const result = await service.patchSettings(mockUserId, {
+        timezone: 'America/Costa_Rica',
+      });
+
+      expect(result.timezone).toBe('America/Costa_Rica');
+      expect(persistedValue().timezone).toBe('America/Costa_Rica');
+    });
+
+    it('persists an explicit UTC as a real, distinguishable choice', async () => {
+      seed();
+
+      const result = await service.patchSettings(mockUserId, {
+        timezone: 'UTC',
+      });
+
+      expect(result.timezone).toBe('UTC');
+      expect(persistedValue().timezone).toBe('UTC');
+    });
+
+    it('replaces a stored zone', async () => {
+      seed('UTC');
+
+      const result = await service.patchSettings(mockUserId, {
+        timezone: 'Europe/Madrid',
+      });
+
+      expect(result.timezone).toBe('Europe/Madrid');
+    });
+
+    it('SURVIVES an unrelated patch — a theme change must not clear it', async () => {
+      seed('America/Costa_Rica');
+
+      const result = await service.patchSettings(mockUserId, { theme: 'dark' });
+
+      expect(result.theme).toBe('dark');
+      expect(result.timezone).toBe('America/Costa_Rica');
+      expect(persistedValue().timezone).toBe('America/Costa_Rica');
+    });
+
+    it('clears the preference back to absent on `timezone: null`', async () => {
+      seed('America/Costa_Rica');
+
+      const result = await service.patchSettings(mockUserId, {
+        timezone: null,
+      });
+
+      expect(result.timezone).toBeUndefined();
+      expect(JSON.parse(JSON.stringify(persistedValue()))).not.toHaveProperty(
+        'timezone',
+      );
+    });
+
+    it('rejects a zone that is not a real IANA name', async () => {
+      seed();
+
+      await expect(
+        service.patchSettings(mockUserId, { timezone: 'Mars/Olympus' } as any),
+      ).rejects.toThrow();
+      expect(mockPrisma.userSettings.update).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the cached zone after the write, so the change is visible at once', async () => {
+      seed();
+
+      await service.patchSettings(mockUserId, { timezone: 'Europe/Madrid' });
+
+      expect(mockUserTimeZone.invalidate).toHaveBeenCalledWith(mockUserId);
+    });
+  });
+
+  describe('replaceSettings (PUT) — timezone', () => {
+    const basePut = {
+      theme: 'light' as const,
+      profile: { useProviderImage: true },
+    };
+
+    beforeEach(() => {
+      mockPrisma.userSettings.upsert.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.create?.value ?? args.update?.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+    });
+
+    it('round-trips a zone', async () => {
+      const result = await service.replaceSettings(mockUserId, {
+        ...basePut,
+        timezone: 'Pacific/Apia',
+      } as any);
+
+      expect(result.timezone).toBe('Pacific/Apia');
+    });
+
+    it('stores it as absent when omitted', async () => {
+      const result = await service.replaceSettings(mockUserId, basePut as any);
+
+      expect(result.timezone).toBeUndefined();
+    });
+
+    it('DROPS a stored zone when PUT omits it — PUT is a full replacement', async () => {
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: {
+          ...DEFAULT_USER_SETTINGS,
+          timezone: 'America/Costa_Rica',
+        } as any,
+      } as any);
+
+      const result = await service.replaceSettings(mockUserId, basePut as any);
+
+      expect(result.timezone).toBeUndefined();
+    });
+  });
 });

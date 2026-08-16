@@ -1,6 +1,8 @@
 import {
   updateUserSettingsSchema,
   patchUserSettingsSchema,
+  UpdateUserSettingsDto,
+  PatchUserSettingsDto,
 } from './update-user-settings.dto';
 import {
   DATA_TABLE_MAX_TABLES,
@@ -1013,5 +1015,123 @@ describe('PatchUserSettingsDto (PATCH)', () => {
         patchUserSettingsSchema.parse({ navigation: { railCollapsed: 1 } }),
       ).toThrow();
     });
+  });
+});
+
+// =============================================================================
+// timezone (issue #444)
+// =============================================================================
+//
+// These parse through the WIRE DTO, not the canonical schema in
+// settings.schema.ts, and that is the entire point of the block. `z.object`
+// strips unknown keys, so a field declared only canonically would validate in
+// every service-level test and merge correctly in UserSettingsService while
+// every real HTTP request silently dropped it — CLAUDE.md's "three
+// hand-maintained copies" gotcha, in its user-settings form. If someone removes
+// `timezone` from update-user-settings.dto.ts, the "survives" cases below fail.
+
+describe('UpdateUserSettingsDto (PUT) — timezone', () => {
+  it('carries a valid zone through the wire DTO instead of stripping it', () => {
+    const result = updateUserSettingsSchema.parse({
+      ...basePut,
+      timezone: 'America/Costa_Rica',
+    });
+
+    expect(result.timezone).toBe('America/Costa_Rica');
+  });
+
+  it('carries UTC through — Intl.supportedValuesOf omits it on some runtimes', () => {
+    expect(
+      updateUserSettingsSchema.parse({ ...basePut, timezone: 'UTC' }).timezone,
+    ).toBe('UTC');
+  });
+
+  it('leaves the key absent when omitted — absent means "no preference"', () => {
+    const result = updateUserSettingsSchema.parse(basePut);
+
+    expect(result.timezone).toBeUndefined();
+    expect('timezone' in result).toBe(false);
+  });
+
+  it('rejects an unknown zone', () => {
+    expect(() =>
+      updateUserSettingsSchema.parse({ ...basePut, timezone: 'Mars/Olympus' }),
+    ).toThrow();
+  });
+
+  it('rejects Etc/Unknown', () => {
+    expect(() =>
+      updateUserSettingsSchema.parse({ ...basePut, timezone: 'Etc/Unknown' }),
+    ).toThrow();
+  });
+
+  it('rejects the empty string', () => {
+    expect(() =>
+      updateUserSettingsSchema.parse({ ...basePut, timezone: '' }),
+    ).toThrow();
+  });
+
+  it('rejects a non-string', () => {
+    expect(() =>
+      updateUserSettingsSchema.parse({ ...basePut, timezone: 3600 }),
+    ).toThrow();
+  });
+
+  it('rejects null on PUT — a full replacement omits instead of nulling', () => {
+    expect(() =>
+      updateUserSettingsSchema.parse({ ...basePut, timezone: null }),
+    ).toThrow();
+  });
+
+  it('survives the compiled DTO class schema, not just the exported one', () => {
+    const parsed = (UpdateUserSettingsDto as any).schema.parse({
+      ...basePut,
+      timezone: 'Pacific/Apia',
+    });
+
+    expect(parsed.timezone).toBe('Pacific/Apia');
+  });
+});
+
+describe('PatchUserSettingsDto (PATCH) — timezone', () => {
+  it('carries a valid zone through the wire DTO instead of stripping it', () => {
+    expect(
+      patchUserSettingsSchema.parse({ timezone: 'Europe/London' }).timezone,
+    ).toBe('Europe/London');
+  });
+
+  it('accepts null to CLEAR the preference back to absent', () => {
+    expect(patchUserSettingsSchema.parse({ timezone: null }).timezone).toBeNull();
+  });
+
+  it('leaves the key absent when omitted, so an unrelated patch cannot clear it', () => {
+    const result = patchUserSettingsSchema.parse({ theme: 'dark' });
+
+    expect(result.timezone).toBeUndefined();
+    expect('timezone' in result).toBe(false);
+  });
+
+  it('applies the same validation as PUT — unknown zone', () => {
+    expect(() =>
+      patchUserSettingsSchema.parse({ timezone: 'Mars/Olympus' }),
+    ).toThrow();
+  });
+
+  it('applies the same validation as PUT — Etc/Unknown', () => {
+    expect(() =>
+      patchUserSettingsSchema.parse({ timezone: 'Etc/Unknown' }),
+    ).toThrow();
+  });
+
+  it('applies the same validation as PUT — empty string', () => {
+    expect(() => patchUserSettingsSchema.parse({ timezone: '' })).toThrow();
+  });
+
+  it('survives the compiled DTO class schema, not just the exported one', () => {
+    const parsed = (PatchUserSettingsDto as any).schema.parse({
+      timezone: 'Asia/Kolkata',
+    });
+
+    expect(parsed.timezone).toBe('Asia/Kolkata');
   });
 });

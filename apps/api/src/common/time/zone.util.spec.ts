@@ -22,6 +22,18 @@ describe('isSupportedTimeZone', () => {
     expect(isSupportedTimeZone('Pacific/Apia')).toBe(true);
   });
 
+  it('accepts a live IANA alias this ICU build canonicalizes away', () => {
+    // Node 22's supportedValuesOf lists 'Asia/Calcutta' / 'Europe/Kiev' but not
+    // their modern names — which are precisely what a browser reports from
+    // Intl.DateTimeFormat().resolvedOptions().timeZone. A set-membership-only
+    // check would 400 a user in Kolkata or Kyiv for naming their real zone.
+    expect(isSupportedTimeZone('Asia/Kolkata')).toBe(true);
+    expect(isSupportedTimeZone('Europe/Kyiv')).toBe(true);
+    // Both directions, since which name is canonical varies by ICU build.
+    expect(isSupportedTimeZone('Asia/Calcutta')).toBe(true);
+    expect(isSupportedTimeZone('Europe/Kiev')).toBe(true);
+  });
+
   it('rejects Etc/Unknown', () => {
     expect(isSupportedTimeZone('Etc/Unknown')).toBe(false);
   });
