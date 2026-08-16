@@ -221,10 +221,17 @@ export function EnhancementCard({
   return (
     <Card variant="outlined" data-testid={`enhancement-card-${item.id}`}>
       <CardContent>
+        {/*
+          The row pivot is at md, not sm, on purpose: the detail column carries
+          chips, model, dimensions, expiry, a multi-line downscale warning and a
+          four-button action row, so between 600-900px it runs 700px+ tall
+          beside the fixed 148x111 thumbnail pair, leaving a large dead area
+          under the thumbnails. Staying stacked until md keeps the card tight.
+        */}
         <Stack
-          direction={{ xs: 'column', sm: 'row' }}
+          direction={{ xs: 'column', md: 'row' }}
           spacing={2}
-          sx={{ alignItems: { sm: 'flex-start' } }}
+          sx={{ alignItems: { md: 'flex-start' } }}
         >
           {/* ---------- Thumbnails ---------- */}
           {item.status === 'ready' ? (
@@ -359,13 +366,20 @@ export function EnhancementCard({
             {item.status === 'ready' && (
               <>
                 <Divider sx={{ my: 1.5 }} />
-                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                {/*
+                  useFlexGap is required whenever this row wraps: without it
+                  MUI implements `spacing` as negative margins, which misbehave
+                  on wrapped lines. flexShrink:0 + nowrap keep each label on one
+                  line rather than letting "Replace original" break mid-phrase.
+                */}
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
                   <Button
                     size="small"
                     variant="contained"
                     startIcon={<CompareArrowsIcon />}
                     disabled={busy}
                     onClick={() => onReview(item)}
+                    sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
                   >
                     Review
                   </Button>
@@ -374,6 +388,7 @@ export function EnhancementCard({
                     variant="outlined"
                     disabled={busy}
                     onClick={() => onKeepBoth(item)}
+                    sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
                   >
                     Keep both
                   </Button>
@@ -385,6 +400,7 @@ export function EnhancementCard({
                       color="warning"
                       disabled={busy}
                       onClick={() => onReplace(item)}
+                      sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
                     >
                       Replace original
                     </Button>
@@ -395,6 +411,7 @@ export function EnhancementCard({
                     color="inherit"
                     disabled={busy}
                     onClick={() => onDiscard(item)}
+                    sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
                   >
                     Discard
                   </Button>

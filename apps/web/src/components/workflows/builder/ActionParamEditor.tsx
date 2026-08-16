@@ -331,6 +331,9 @@ export function ActionParamEditor({
           onChange={(_, v) => {
             if (v !== null) set({ action: v });
           }}
+          // Longest labels of any toggle group in the app; the group root is
+          // inline-flex/nowrap, so it overflows the builder panel without this.
+          sx={{ flexWrap: 'wrap' }}
         >
           <ToggleButton value="archive">Keep best, archive rest</ToggleButton>
           <ToggleButton value="trash">Keep best, trash rest</ToggleButton>
