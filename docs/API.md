@@ -151,9 +151,12 @@ After login, the callback redirects to `/auth/callback?token=...&expiresIn=...&r
       "description": "Administrator with full access"
     }
   ],
-  "permissions": ["users:read", "users:write", "system_settings:read", ...]
+  "permissions": ["users:read", "users:write", "system_settings:read", ...],
+  "timezone": "America/Costa_Rica"
 }
 ```
+
+**`timezone`** (`string | null`) is the **raw** stored `user_settings.timezone` value (issue #444) — `null` means the user has never expressed a preference. It is deliberately **not** resolved to `UTC` here: the client needs to distinguish "chose UTC" from "never chose" to decide whether to auto-detect/prompt. See `GET /user-settings` below.
 
 ---
 
@@ -852,6 +855,7 @@ Remove email from allowlist.
     "useProviderImage": true,
     "customImageUrl": null
   },
+  "timezone": "America/Costa_Rica",
   "updatedAt": "2024-01-01T00:00:00.000Z",
   "version": 1
 }
@@ -864,6 +868,7 @@ Remove email from allowlist.
 | `profile.displayName` | string \| null | User's display name override |
 | `profile.useProviderImage` | boolean | Whether to use OAuth provider's profile image |
 | `profile.customImageUrl` | string \| null | Custom profile image URL |
+| `timezone` | string, absent, or `null` | IANA time zone name (issue #444). **Absent from the JSONB means "no preference expressed"**, distinct from an explicit `"UTC"` — this field is omitted from the response entirely rather than sent as `null` when unset (it is `.optional()` with no `.default()`, never materialized server-side). `GET /auth/me`'s `timezone` field is the same raw value but always present, as `string \| null`. |
 | `updatedAt` | string | ISO 8601 timestamp of last update |
 | `version` | number | Version number for optimistic concurrency control |
 
@@ -935,6 +940,8 @@ If-Match: 1
 - Include `If-Match: <version>` header to ensure settings haven't been modified by another request
 - Returns **409 Conflict** if version mismatch detected
 - Prevents lost updates in concurrent scenarios
+
+**`timezone` field:** a plain scalar merge — omit it to leave the stored value untouched, send an IANA name (e.g. `"America/Costa_Rica"`) to set/replace it, send `null` to clear it back to "no preference". An unrecognized zone name returns **400**; see the `user_settings` entry in [CLAUDE.md](../CLAUDE.md#database-tables) for why validation accepts more than `Intl.supportedValuesOf('timeZone')` lists.
 
 **Note:** This performs a shallow merge with existing settings.
 
