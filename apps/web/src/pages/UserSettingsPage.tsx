@@ -7,6 +7,7 @@ import {
 } from '@mui/material';
 import { useState } from 'react';
 import { ThemeSettings } from '../components/settings/ThemeSettings';
+import { TimezoneSettings } from '../components/settings/TimezoneSettings';
 import { ProfileSettings } from '../components/settings/ProfileSettings';
 import { SearchFieldsSettings } from '../components/settings/SearchFieldsSettings';
 import { NotificationSettings } from '../components/settings/NotificationSettings';
@@ -22,6 +23,7 @@ export default function UserSettingsPage() {
     error,
     isSaving,
     updateTheme,
+    updateTimezone,
     updateSettings,
   } = useUserSettings();
 
@@ -34,6 +36,17 @@ export default function UserSettingsPage() {
       setSuccessMessage('Theme updated');
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Failed to update theme');
+    }
+  };
+
+  const handleTimezoneChange = async (timezone: string) => {
+    try {
+      await updateTimezone(timezone);
+      setSuccessMessage('Time zone updated');
+    } catch (err) {
+      setLocalError(
+        err instanceof Error ? err.message : 'Failed to update time zone',
+      );
     }
   };
 
@@ -63,6 +76,14 @@ export default function UserSettingsPage() {
             <ThemeSettings
               currentTheme={settings.theme}
               onThemeChange={handleThemeChange}
+              disabled={isSaving}
+            />
+
+            {/* Time zone (issue #444) — sits beside Appearance because both
+                are app-behaviour preferences rather than profile data. */}
+            <TimezoneSettings
+              currentTimezone={settings.timezone}
+              onTimezoneChange={handleTimezoneChange}
               disabled={isSaving}
             />
 
