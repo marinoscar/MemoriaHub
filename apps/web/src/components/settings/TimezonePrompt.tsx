@@ -47,11 +47,18 @@ export function TimezonePrompt() {
     >
       <Alert
         severity={failed ? 'error' : 'info'}
-        onClose={dismissTimezoneMismatch}
         action={
-          <Button color="inherit" size="small" disabled={saving} onClick={handleUpdate}>
-            {saving ? 'Updating…' : 'Update'}
-          </Button>
+          // Both outcomes live in `action`: MUI's Alert suppresses its own
+          // close icon whenever `action` is set, so a bare `onClose` would
+          // leave the prompt with no way out but a click elsewhere.
+          <>
+            <Button color="inherit" size="small" disabled={saving} onClick={handleUpdate}>
+              {saving ? 'Updating…' : 'Update'}
+            </Button>
+            <Button color="inherit" size="small" onClick={dismissTimezoneMismatch}>
+              Not now
+            </Button>
+          </>
         }
       >
         {failed
