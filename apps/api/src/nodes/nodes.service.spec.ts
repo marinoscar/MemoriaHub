@@ -29,6 +29,13 @@
  *     (last writer wins); lookups are owner-scoped so the same name under a
  *     different user creates a separate row; a lost find-then-create race
  *     (P2002) falls back to reattach
+ *  9. markStaleNodesOffline — the issue #438 defect 6 staleness sweep: a
+ *     single set-based updateMany whose predicate transitions online/draining
+ *     nodes silent past NODE_HEARTBEAT_STALE_SECONDS x
+ *     NODE_OFFLINE_STALE_MULTIPLIER to offline, never touches `disabled`
+ *     (explicit admin intent) or fresh-heartbeat nodes, and ages
+ *     never-heartbeated rows by registeredAt; plus the deriveNodeHealth
+ *     follow-through (a swept node reports health 'offline')
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -39,7 +46,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { JobStatus } from '@prisma/client';
+import { JobStatus, NodeStatus } from '@prisma/client';
 import { z } from 'zod';
 import { NodesService } from './nodes.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1025,6 +1032,215 @@ describe('NodesService — result/failure ingestion', () => {
       await expect(service.getNode(USER_ID, NODE_ID)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
+    });
+  });
+
+  // =========================================================================
+  // markStaleNodesOffline (issue #438 defect 6)
+  // =========================================================================
+
+  describe('markStaleNodesOffline', () => {
+    const MINUTE = 60_000;
+
+    /**
+     * Interprets the narrow subset of Prisma predicate shapes this sweep
+     * emits (`status.in`, top-level `OR`, `lt`, explicit `null`) against a
+     * node fixture, so the transition RULES are tested behaviorally rather
+     * than as a shape snapshot — a refactor that changes the predicate's
+     * spelling but preserves its meaning keeps passing.
+     */
+    function matchesWhere(where: any, node: Record<string, any>): boolean {
+      if (!where.status.in.includes(node.status)) return false;
+      return where.OR.some((clause: any) =>
+        Object.entries(clause).every(([field, cond]: [string, any]) => {
+          const actual = node[field];
+          if (cond === null) return actual === null || actual === undefined;
+          if (cond && typeof cond === 'object' && 'lt' in cond) {
+            return actual instanceof Date && actual.getTime() < cond.lt.getTime();
+          }
+          return actual === cond;
+        }),
+      );
+    }
+
+    /** Run the sweep and hand back the predicate it issued. */
+    async function sweepWhere(): Promise<any> {
+      (mockPrisma.workerNode.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      await service.markStaleNodesOffline();
+      return (mockPrisma.workerNode.updateMany as jest.Mock).mock.calls[0][0].where;
+    }
+
+    afterEach(() => {
+      delete process.env.NODE_OFFLINE_STALE_MULTIPLIER;
+      delete process.env.NODE_HEARTBEAT_STALE_SECONDS;
+    });
+
+    it('issues ONE set-based updateMany to offline and returns the count', async () => {
+      (mockPrisma.workerNode.updateMany as jest.Mock).mockResolvedValue({ count: 4 });
+
+      const transitioned = await service.markStaleNodesOffline();
+
+      expect(transitioned).toBe(4);
+      expect(mockPrisma.workerNode.updateMany).toHaveBeenCalledTimes(1);
+      expect(
+        (mockPrisma.workerNode.updateMany as jest.Mock).mock.calls[0][0].data,
+      ).toEqual({ status: NodeStatus.offline });
+      // Never a read-then-write-per-row loop.
+      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
+      expect(mockPrisma.workerNode.findMany).not.toHaveBeenCalled();
+    });
+
+    it('transitions an ONLINE node whose heartbeat is stale past the threshold', async () => {
+      const where = await sweepWhere();
+
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.online,
+          lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
+        }),
+      ).toBe(true);
+    });
+
+    it('transitions a DRAINING node whose heartbeat is stale past the threshold', async () => {
+      const where = await sweepWhere();
+
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.draining,
+          lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
+        }),
+      ).toBe(true);
+    });
+
+    it('NEVER transitions a DISABLED node, no matter how stale — admin intent must survive', async () => {
+      const where = await sweepWhere();
+
+      expect(where.status.in).not.toContain(NodeStatus.disabled);
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.disabled,
+          lastHeartbeatAt: new Date(Date.now() - 365 * 24 * 60 * MINUTE),
+        }),
+      ).toBe(false);
+    });
+
+    it('excludes already-OFFLINE nodes — that status is terminal, so the sweep is a no-op for them', async () => {
+      const where = await sweepWhere();
+
+      expect(where.status.in).toEqual([NodeStatus.online, NodeStatus.draining]);
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.offline,
+          lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
+        }),
+      ).toBe(false);
+    });
+
+    it('does NOT transition a node with a fresh heartbeat', async () => {
+      const where = await sweepWhere();
+
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.online,
+          lastHeartbeatAt: new Date(),
+        }),
+      ).toBe(false);
+      // Nor one that is merely "stale" for a single window — flipping on the
+      // first missed heartbeat would make the status column flap.
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.online,
+          lastHeartbeatAt: new Date(Date.now() - 2 * MINUTE),
+        }),
+      ).toBe(false);
+    });
+
+    it('ages a node that has NEVER heartbeated by registeredAt instead', async () => {
+      const where = await sweepWhere();
+
+      // Registered long ago, never checked in — swept.
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.online,
+          lastHeartbeatAt: null,
+          registeredAt: new Date(Date.now() - 60 * MINUTE),
+        }),
+      ).toBe(true);
+      // Registered seconds ago and still coming up — left alone.
+      expect(
+        matchesWhere(where, {
+          status: NodeStatus.online,
+          lastHeartbeatAt: null,
+          registeredAt: new Date(),
+        }),
+      ).toBe(false);
+    });
+
+    it('derives the cutoff from staleWindowMs x the multiplier (default 60s x 10 = 10 min)', async () => {
+      const before = Date.now();
+      const where = await sweepWhere();
+      const after = Date.now();
+
+      const cutoff: Date = where.OR[0].lastHeartbeatAt.lt;
+      expect(cutoff.getTime()).toBeGreaterThanOrEqual(before - 10 * MINUTE);
+      expect(cutoff.getTime()).toBeLessThanOrEqual(after - 10 * MINUTE);
+      // The never-heartbeated branch ages by registeredAt against the SAME cutoff.
+      expect(where.OR[1]).toEqual({
+        lastHeartbeatAt: null,
+        registeredAt: { lt: cutoff },
+      });
+    });
+
+    it('tracks NODE_HEARTBEAT_STALE_SECONDS so "stale" and "offline" can never drift apart', async () => {
+      process.env.NODE_HEARTBEAT_STALE_SECONDS = '120';
+      const before = Date.now();
+
+      const where = await sweepWhere();
+
+      // 120s x the default multiplier of 10 = 20 minutes.
+      const cutoff: Date = where.OR[0].lastHeartbeatAt.lt;
+      expect(cutoff.getTime()).toBeLessThanOrEqual(Date.now() - 20 * MINUTE);
+      expect(cutoff.getTime()).toBeGreaterThanOrEqual(before - 20 * MINUTE);
+    });
+
+    it('honors a NODE_OFFLINE_STALE_MULTIPLIER override', async () => {
+      process.env.NODE_OFFLINE_STALE_MULTIPLIER = '30';
+      const before = Date.now();
+
+      const where = await sweepWhere();
+
+      const cutoff: Date = where.OR[0].lastHeartbeatAt.lt;
+      expect(cutoff.getTime()).toBeLessThanOrEqual(Date.now() - 30 * MINUTE);
+      expect(cutoff.getTime()).toBeGreaterThanOrEqual(before - 30 * MINUTE);
+    });
+
+    it('falls back to the default multiplier for a garbage or sub-1 override', async () => {
+      for (const bad of ['nonsense', '0', '-5']) {
+        jest.clearAllMocks();
+        process.env.NODE_OFFLINE_STALE_MULTIPLIER = bad;
+
+        const where = await sweepWhere();
+
+        const cutoff: Date = where.OR[0].lastHeartbeatAt.lt;
+        expect(cutoff.getTime()).toBeLessThanOrEqual(Date.now() - 10 * MINUTE);
+      }
+    });
+
+    it('deriveNodeHealth follows through: a swept node reports health "offline"', async () => {
+      // The whole point of the sweep is that the status column and the
+      // heartbeat-derived health stop contradicting each other in the admin
+      // fleet view. Post-sweep, the status short-circuit wins.
+      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+        makeNode({
+          status: NodeStatus.offline,
+          lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
+        }),
+      );
+      (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.getNode(USER_ID, NODE_ID);
+
+      expect(result.health).toBe('offline');
     });
   });
 });

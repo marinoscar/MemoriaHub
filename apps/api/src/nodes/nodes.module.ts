@@ -9,6 +9,7 @@ import { NodesAdminController } from './nodes-admin.controller';
 import { NodeCredentialsController } from './node-credentials.controller';
 import { NodeCredentialModule } from './node-credential.module';
 import { NodeOfflinePruneTask } from './node-offline-prune.task';
+import { NodeStaleOfflineTask } from './node-stale-offline.task';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageModule } from '../storage/storage.module';
@@ -55,6 +56,10 @@ import { TaggingModule } from '../tagging/tagging.module';
   providers: [
     NodesService,
     NodeOfflinePruneTask,
+    // Flips crashed/killed nodes to status='offline' so the admin fleet view
+    // stops contradicting itself AND NodeOfflinePruneTask above can actually
+    // reach them (it selects only status='offline') — issue #438 defect 6.
+    NodeStaleOfflineTask,
     NodeBackupQueryService,
     NodeBackupService,
     NodeBackupStaleTask,

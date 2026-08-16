@@ -75,6 +75,31 @@ function staleWindowMs(): number {
   return (Number(process.env.NODE_HEARTBEAT_STALE_SECONDS) || 60) * 1000;
 }
 
+/**
+ * How many consecutive stale heartbeat windows must elapse before a node is
+ * declared `offline` by the sweep (see `markStaleNodesOffline`).
+ *
+ * Deliberately expressed as a MULTIPLE of `staleWindowMs()` rather than as an
+ * independent duration: "Stale" in the admin UI and "offline" in the database
+ * must never drift apart into two unrelated notions of liveness, so raising
+ * NODE_HEARTBEAT_STALE_SECONDS moves both in lockstep.
+ *
+ * Default 10 (i.e. 10 x 60s = 10 minutes of total silence). One missed
+ * heartbeat is a blip — a GC pause, a brief network partition, a container
+ * restart — and flipping a node to `offline` the instant it goes stale would
+ * make the status column flap. Ten consecutive missed windows is unambiguous
+ * death, not a hiccup.
+ */
+function offlineStaleMultiplier(): number {
+  const raw = Number(process.env.NODE_OFFLINE_STALE_MULTIPLIER);
+  return Number.isFinite(raw) && raw >= 1 ? raw : 10;
+}
+
+/** Silence (ms) after which an online/draining node is declared offline. */
+function offlineThresholdMs(): number {
+  return staleWindowMs() * offlineStaleMultiplier();
+}
+
 @Injectable()
 export class NodesService {
   private readonly logger = new Logger(NodesService.name);
@@ -217,6 +242,58 @@ export class NodesService {
       data: { status: NodeStatus.offline },
     });
     return { status: updated.status };
+  }
+
+  // -------------------------------------------------------------------------
+  // markStaleNodesOffline (staleness sweep — issue #438 defect 6)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Transition nodes whose heartbeat has been silent past `offlineThresholdMs`
+   * to `status = 'offline'`. Returns the number of rows transitioned.
+   *
+   * WHY THIS EXISTS: `deregister` was the ONLY writer of `status='offline'`, so
+   * a node that was killed, crashed, OOM'd or lost the network never
+   * deregistered and sat at `status='online'` forever. Two consequences, both
+   * fixed here at the source:
+   *
+   *  1. The admin fleet view rendered a green "online" chip directly above an
+   *     amber "Stale - 20d ago" pill — two correct readings of two fields that
+   *     were allowed to contradict each other, because `deriveNodeHealth`
+   *     reads the heartbeat while the chip reads the column.
+   *  2. `NodeOfflinePruneTask` selects ONLY `status='offline'`, so a crashed
+   *     node was never even eligible for pruning and NODE_OFFLINE_RETENTION_DAYS
+   *     silently did nothing for exactly the failure mode it exists to clean
+   *     up. This sweep restores that eligibility without touching the prune
+   *     task's own predicate.
+   *
+   * Transition rules:
+   *  - `online` / `draining` + silent past the threshold -> `offline`.
+   *  - `disabled` is NEVER auto-transitioned: an admin explicitly disabled the
+   *    node and that intent must survive a sweep.
+   *  - `offline` is already terminal, so it is not in the predicate (a no-op).
+   *  - A node that has NEVER heartbeated is aged by `registeredAt` instead,
+   *    mirroring how NodeOfflinePruneTask already handles that case.
+   *
+   * Set-based single statement, so it is idempotent and needs no in-process
+   * overlap guard (same posture as NodeBackupStaleTask / NodeOfflinePruneTask).
+   */
+  async markStaleNodesOffline(): Promise<number> {
+    const cutoff = new Date(Date.now() - offlineThresholdMs());
+
+    const { count } = await this.prisma.workerNode.updateMany({
+      where: {
+        status: { in: [NodeStatus.online, NodeStatus.draining] },
+        OR: [
+          { lastHeartbeatAt: { lt: cutoff } },
+          // Never heartbeated at all — age by registration time instead.
+          { lastHeartbeatAt: null, registeredAt: { lt: cutoff } },
+        ],
+      },
+      data: { status: NodeStatus.offline },
+    });
+
+    return count;
   }
 
   // -------------------------------------------------------------------------
