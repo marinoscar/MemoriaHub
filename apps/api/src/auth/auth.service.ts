@@ -621,6 +621,21 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
+    // Per-user IANA time zone (issue #444), surfaced RAW — the stored value, or
+    // null when the user has never expressed a preference.
+    //
+    // NOT resolved to 'UTC' here, and that is the whole point: the client has
+    // to distinguish "chose UTC" from "never chose". Collapsing them would
+    // either re-prompt a Londoner forever or never auto-set a genuine UTC user.
+    // Server-side consumers that need a concrete zone use UserTimeZoneService,
+    // which owns the fallback.
+    //
+    // Read straight off `user_settings` rather than through UserSettingsService
+    // for two reasons: AuthModule does not import SettingsModule (and should
+    // not, for one scalar), and getSettings() would CREATE a default row as a
+    // side effect of what is a pure read.
+    const timezone = await this.readStoredTimeZone(userId);
+
     // Compute display name (override takes precedence)
     const displayName = user.displayName || user.providerDisplayName || null;
 
@@ -651,7 +666,37 @@ export class AuthService {
       createdAt: user.createdAt.toISOString(),
       roles,
       permissions,
+      timezone,
     };
+  }
+
+  /**
+   * The RAW `user_settings.timezone` for a user — never resolved, never
+   * defaulted, `null` when unset (see getCurrentUser above).
+   *
+   * Best-effort: a settings blob that fails to read must not be able to fail
+   * the whole /auth/me call, which the entire client bootstraps on. An
+   * unreadable preference degrades to "none expressed".
+   */
+  private async readStoredTimeZone(userId: string): Promise<string | null> {
+    try {
+      const row = await this.prisma.userSettings.findUnique({
+        where: { userId },
+        select: { value: true },
+      });
+      const value = row?.value;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+      }
+      const tz = (value as Record<string, unknown>)['timezone'];
+      return typeof tz === 'string' && tz.length > 0 ? tz : null;
+    } catch (err) {
+      this.logger.warn(
+        `Failed to read stored time zone for user ${userId}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+      return null;
+    }
   }
 
   /**

@@ -8,6 +8,7 @@ import {
 } from '../../common/schemas/settings.schema';
 import { UserSettingsService } from './user-settings.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { UserTimeZoneService } from './user-timezone.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   createMockPrismaService,
@@ -53,6 +54,8 @@ describe('UserSettingsService', () => {
     dismissTypesForUser: jest.Mock;
     invalidatePreferences: jest.Mock;
   };
+  /** #444: the same write path invalidates the user's cached time zone. */
+  let mockUserTimeZone: { invalidate: jest.Mock };
 
   const mockUserId = 'user-123';
 
@@ -70,12 +73,14 @@ describe('UserSettingsService', () => {
       dismissTypesForUser: jest.fn().mockResolvedValue(0),
       invalidatePreferences: jest.fn(),
     };
+    mockUserTimeZone = { invalidate: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UserSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: UserTimeZoneService, useValue: mockUserTimeZone },
       ],
     }).compile();
 

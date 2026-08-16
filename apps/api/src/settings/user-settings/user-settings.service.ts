@@ -28,6 +28,7 @@ import {
 } from '../../common/schemas/settings.schema';
 import { disabledNotificationTypes } from '../../notifications/notification-preferences.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { UserTimeZoneService } from './user-timezone.service';
 
 @Injectable()
 export class UserSettingsService {
@@ -36,6 +37,7 @@ export class UserSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly userTimeZone: UserTimeZoneService,
   ) {}
 
   /**
@@ -80,6 +82,12 @@ export class UserSettingsService {
       // this release no longer knows are dropped. This is the single place it
       // happens, and it is the read path on purpose — see sanitizeNavigation().
       navigation: this.sanitizeNavigation(value.navigation),
+      // Same contract again (issue #444): the RAW stored value, absent when the
+      // user has never expressed a preference. Never resolved to 'UTC' here —
+      // that fallback lives only in UserTimeZoneService, and collapsing it on
+      // the read path would make "no preference" indistinguishable from an
+      // explicit 'UTC'.
+      timezone: value.timezone,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -131,6 +139,8 @@ export class UserSettingsService {
       // unknown key cannot be present here. Only the stored-blob read path
       // (getSettings) needs the drop.
       navigation: value.navigation,
+      // Raw stored value, absent when unset — see getSettings().
+      timezone: value.timezone,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -192,6 +202,14 @@ export class UserSettingsService {
       // legacy pin would turn every unrelated PATCH (a theme change!) into a
       // 500. The read-side drop is what keeps the strict write-side enum safe.
       navigation: this.mergeNavigation(current.navigation, dto.navigation),
+      // Scalar JSON Merge Patch (issue #444), same shape as `theme` above with
+      // one addition: an explicit `null` CLEARS the preference back to absent,
+      // which is the only way a user can un-express one. `?? current.timezone`
+      // would be wrong here — it cannot express that clear.
+      timezone:
+        dto.timezone !== undefined
+          ? (dto.timezone ?? undefined)
+          : current.timezone,
     };
 
     // The per-table-id merge above can push the namespace past its cap even
@@ -255,6 +273,8 @@ export class UserSettingsService {
       // unknown key cannot be present here. Only the stored-blob read path
       // (getSettings) needs the drop.
       navigation: value.navigation,
+      // Raw stored value, absent when unset — see getSettings().
+      timezone: value.timezone,
       updatedAt: settings.updatedAt,
       version: settings.version,
     };
@@ -310,6 +330,10 @@ export class UserSettingsService {
     // starts producing again on the very next notification instead of up to one
     // 5 s TTL later.
     this.notifications.invalidatePreferences(userId);
+    // Same contract for the #444 zone cache: a user who has just picked their
+    // zone must see dates in it immediately, not up to one TTL later. Also
+    // AFTER the write returns, never inside a transaction that may roll back.
+    this.userTimeZone.invalidate(userId);
 
     return result;
   }

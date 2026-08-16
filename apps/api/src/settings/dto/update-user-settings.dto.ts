@@ -9,6 +9,7 @@ import {
   memoriesPreferencesPatchSchema,
   navigationPreferencesSchema,
   navigationPreferencesPatchSchema,
+  userTimeZoneSchema,
 } from '../../common/schemas/settings.schema';
 
 // Full replacement (PUT)
@@ -44,6 +45,13 @@ export const updateUserSettingsSchema = z.object({
   // absent namespace / field means "use the built-in defaults" (nothing
   // pinned, rail expanded). See settings.schema.ts for the absent-key rule.
   navigation: navigationPreferencesSchema.optional(),
+  // Per-user IANA time zone (issue #444). MUST be declared here as well as in
+  // the canonical schema: this DTO is what nestjs-zod validates the request
+  // body against, and it STRIPS unknown keys — a field present only in
+  // settings.schema.ts validates in unit tests and merges correctly in the
+  // service while every real request silently drops it. See CLAUDE.md's
+  // "three hand-maintained copies" gotcha (the system-settings analog).
+  timezone: userTimeZoneSchema.optional(),
 });
 
 export class UpdateUserSettingsDto extends createZodDto(
@@ -84,6 +92,10 @@ export const patchUserSettingsSchema = z.object({
   // replaces, an unlisted one is untouched, a `null` field clears it, and
   // `navigation: null` clears the whole namespace.
   navigation: navigationPreferencesPatchSchema.nullable().optional(),
+  // Scalar JSON Merge Patch: absent = untouched, a value replaces, `null`
+  // clears it back to "no preference". Same strip-unknown-keys warning as the
+  // PUT schema above — this declaration is load-bearing, not duplication.
+  timezone: userTimeZoneSchema.nullable().optional(),
 }).default({});
 
 export class PatchUserSettingsDto extends createZodDto(

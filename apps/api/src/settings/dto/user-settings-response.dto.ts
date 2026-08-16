@@ -5,6 +5,7 @@ import {
   dataTablesSchema,
   notificationPreferencesSchema,
   navigationPreferencesSchema,
+  userTimeZoneSchema,
 } from '../../common/schemas/settings.schema';
 
 export const userSettingsResponseSchema = z.object({
@@ -39,6 +40,11 @@ export const userSettingsResponseSchema = z.object({
   // this release no longer knows is dropped on read, so what is returned here
   // is always a subset of the current pinnable set.
   navigation: navigationPreferencesSchema.optional(),
+  // The RAW stored IANA zone (issue #444), absent when the user has never
+  // expressed a preference — the normal state. Deliberately not resolved to
+  // 'UTC' here: absent and an explicit 'UTC' are different answers, and only
+  // the client can decide whether to prompt.
+  timezone: userTimeZoneSchema.optional(),
   updatedAt: isoDateTime,
   version: z.number(),
 });
