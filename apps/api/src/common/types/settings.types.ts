@@ -363,6 +363,13 @@ export interface SystemSettingsValue {
      * through over time, so a shorter window silently destroys unreviewed work.
      */
     retentionHours: number;
+    /**
+     * Bulk enhance (epic #420, issue #421): the AUTHORITATIVE cap on items one
+     * POST /api/media/bulk/enhance may queue. Every queued item is a separately
+     * billed model call, so this is the admin's spend guardrail; the request
+     * DTO's own array max is only a schema backstop.
+     */
+    maxBatchSize: number;
   };
   /**
    * Node backup change feed (issue #310, epic #308). Read by
@@ -764,6 +771,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,
     retentionHours: 168,
+    maxBatchSize: 25,
   },
   backup: {
     maxPageSize: 200,

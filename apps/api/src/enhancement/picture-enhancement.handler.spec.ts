@@ -124,6 +124,7 @@ describe('PictureEnhancementHandler', () => {
   let mockRegistry: { register: jest.Mock };
   let mockPrisma: {
     mediaEnhancement: { findUnique: jest.Mock; update: jest.Mock };
+    mediaEnhancementBatch: { findUnique: jest.Mock };
     mediaItem: { findUnique: jest.Mock };
   };
   let mockDownload: jest.Mock;
@@ -152,6 +153,11 @@ describe('PictureEnhancementHandler', () => {
       mediaEnhancement: {
         findUnique: jest.fn().mockResolvedValue(makeEnhancementRow()),
         update: jest.fn().mockResolvedValue({}),
+      },
+      // Batch-cancellation gate (issue #421). Only consulted when the row
+      // carries a batchId; the default row is a single-item enhancement.
+      mediaEnhancementBatch: {
+        findUnique: jest.fn().mockResolvedValue(null),
       },
       mediaItem: {
         findUnique: jest.fn().mockResolvedValue(makeMediaItem()),
@@ -276,6 +282,74 @@ describe('PictureEnhancementHandler', () => {
       expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: MediaEnhancementStatus.processing }) }),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch-cancellation gate (epic #420, issue #421). MediaEnhancementService
+  // .cancelBatch deletes still-PENDING job rows, but a job already claimed by
+  // a worker when the cancel landed is past that point — this second gate is
+  // what stops it from going on to make a billed gpt-image-1 call for a batch
+  // the user just stopped.
+  // -------------------------------------------------------------------------
+
+  describe('cancelled-batch no-op path', () => {
+    it('marks the row cancelled and returns WITHOUT calling the OpenAI provider when the owning batch is cancelled', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(
+        makeEnhancementRow({ batchId: 'batch-1' }),
+      );
+      mockPrisma.mediaEnhancementBatch.findUnique.mockResolvedValue({
+        cancelledAt: new Date('2026-01-01T00:00:00Z'),
+      });
+
+      await handler.process(makeJob());
+
+      expect(mockPrisma.mediaEnhancementBatch.findUnique).toHaveBeenCalledWith({
+        where: { id: 'batch-1' },
+        select: { cancelledAt: true },
+      });
+      expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
+        where: { id: 'enh-1' },
+        data: { status: MediaEnhancementStatus.cancelled },
+      });
+      // Never transitioned to `processing`, and the provider was never invoked.
+      expect(mockPrisma.mediaEnhancement.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: MediaEnhancementStatus.processing }),
+        }),
+      );
+      expect(mockAiProviderRegistry.get).not.toHaveBeenCalled();
+      expect(mockEnhanceImage).not.toHaveBeenCalled();
+      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockDownload).not.toHaveBeenCalled();
+      expect(mockUpload).not.toHaveBeenCalled();
+    });
+
+    it('proceeds normally (no batch query at all) for a row with no batchId — a single-item enhance', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(
+        makeEnhancementRow({ batchId: null }),
+      );
+
+      await handler.process(makeJob());
+
+      expect(mockPrisma.mediaEnhancementBatch.findUnique).not.toHaveBeenCalled();
+      expect(mockEnhanceImage).toHaveBeenCalledTimes(1);
+    });
+
+    it('proceeds normally when the owning batch exists but is NOT cancelled', async () => {
+      mockPrisma.mediaEnhancement.findUnique.mockResolvedValue(
+        makeEnhancementRow({ batchId: 'batch-1' }),
+      );
+      mockPrisma.mediaEnhancementBatch.findUnique.mockResolvedValue({ cancelledAt: null });
+
+      await handler.process(makeJob());
+
+      expect(mockEnhanceImage).toHaveBeenCalledTimes(1);
+      const readyCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
+        (c: any[]) => c[0].data.status === MediaEnhancementStatus.ready,
+      );
+      expect(readyCall).toBeDefined();
     });
   });
 

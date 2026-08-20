@@ -6,7 +6,9 @@ import {
 } from '@nestjs/common';
 import {
   CircleRole,
+  JobStatus,
   MediaType,
+  MediaEnhancementBatch,
   MediaEnhancementStatus,
   MediaEnhancementDecision,
   MediaTagSource,
@@ -29,6 +31,8 @@ import { isPictureEnhancementEnabled } from '../common/types/settings.types';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
+import { BulkEnhance } from './dto/bulk-enhance.dto';
+import { ListEnhancementBatchesQuery } from './dto/list-enhancement-batches-query.dto';
 import {
   ListEnhancementsQuery,
   resolveStatusFilter,
@@ -42,6 +46,22 @@ import { randomUUID } from 'crypto';
 import { extname } from 'path';
 
 const SYSTEM_TAG = 'AI Enhanced';
+
+/** Derived batch statuses past which no further transition is possible. */
+const TERMINAL_BATCH_STATUSES: string[] = [
+  'completed',
+  'completed_with_errors',
+  'cancelled',
+];
+
+/** Per-batch status tally derived from its media_enhancements rows. */
+interface BatchTally {
+  counts: Record<string, number>;
+  maxUpdatedAt: Date | null;
+}
+
+/** Tally for a batch with no rows at all (nothing was eligible). */
+const EMPTY_TALLY: BatchTally = { counts: {}, maxUpdatedAt: null };
 
 interface CompareSection {
   url: string | null;
@@ -189,6 +209,16 @@ export class MediaEnhancementService {
       circleId: mediaItem.circleId,
       reason: JobReason.rerun,
       priority: 0,
+      // skipDedup is REQUIRED here, not an optimization. EnrichmentJobService
+      // dedups on (type, mediaItemId, status in pending|running) and returns the
+      // EXISTING job — whose payload points at the enhancement id superseded by
+      // the supersedeLive() call two statements up. Without this flag,
+      // re-enhancing an item whose previous job is still `pending` silently
+      // hands back that stale job, the handler resolves the now-`discarded` row
+      // and early-returns, and the row just created sits at `pending` forever.
+      // The media_enhancements row (one live per item, enforced by
+      // supersedeLive) is the real idempotency unit here — not the job row.
+      skipDedup: true,
       providerKey: provider,
       modelVersion: model,
       payload: { enhancementId: row.id },
@@ -230,6 +260,532 @@ export class MediaEnhancementService {
         },
       });
       this.logger.log(`Superseded live enhancement ${row.id} for MediaItem ${mediaItemId}`);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // POST /api/media/bulk/enhance — batch enhance a selection (issue #421)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Queue an AI enhancement for every eligible item in a selection.
+   *
+   * FOUR deliberate divergences from the single-item startEnhance path. Each is
+   * commented at its site; collected here because "simplifying" any of them back
+   * toward startEnhance reintroduces a real defect:
+   *
+   *   1. A live enhancement is SKIPPED AND COUNTED, never superseded.
+   *   2. A non-photo / oversized item is SKIPPED AND COUNTED, never a 400.
+   *   3. Jobs are enqueued at priority 50, not 0.
+   *   4. Jobs are enqueued with skipDedup: true.
+   *
+   * Authorization and the batch-size cap happen here; the actual batch creation
+   * lives in createBatchFrom() so a future by-filter entry point (#424) can
+   * resolve its own id list server-side and reuse the rest verbatim.
+   */
+  async startBatch(dto: BulkEnhance, user: RequestUser) {
+    const settings = await this.systemSettings.getSettings();
+
+    // Feature gate: the SHARED helper (system setting + env kill-switch), never
+    // a second hand-rolled gate that could drift from startEnhance's.
+    if (!isPictureEnhancementEnabled(settings)) {
+      throw new BadRequestException('Picture enhancement is disabled');
+    }
+
+    const enhanceCfg = settings.ai?.features?.enhance;
+    if (!enhanceCfg?.provider || !enhanceCfg?.model) {
+      throw new BadRequestException(
+        'No enhancement model configured (ai.features.enhance is unset)',
+      );
+    }
+
+    const uniqueIds = [...new Set(dto.ids)];
+
+    // The AUTHORITATIVE cap (the DTO's array max is only a schema backstop).
+    // Deduplicated ids are counted, so pasting the same id twice never costs a
+    // caller part of their budget.
+    const maxBatchSize = settings.pictureEnhancement?.maxBatchSize ?? 25;
+    if (uniqueIds.length > maxBatchSize) {
+      throw new BadRequestException(
+        `Cannot enhance ${uniqueIds.length} items in one batch; the limit is ${maxBatchSize}`,
+      );
+    }
+
+    // ONE authorization pass for the whole batch (never per item).
+    await this.assertAllInCircle(uniqueIds, dto.circleId, user, 'collaborator');
+
+    return this.createBatchFrom(
+      uniqueIds,
+      dto.circleId,
+      dto.params ?? {},
+      'selection',
+      user,
+    );
+  }
+
+  /**
+   * Post-authorization half of a batch enhance: partition the ids, create the
+   * batch row, then create + enqueue one enhancement per eligible item.
+   *
+   * Deliberately takes an already-authorized id list so #424's by-filter entry
+   * point can resolve ids server-side and call straight into here — the caller
+   * owns "which items", this owns "what happens to them".
+   */
+  private async createBatchFrom(
+    ids: string[],
+    circleId: string,
+    params: EnhanceParams,
+    source: 'selection' | 'filter',
+    user: RequestUser,
+  ) {
+    // Cached (5 s TTL) — no extra DB read path.
+    const settings = await this.systemSettings.getSettings();
+
+    // Re-checked rather than assumed from the caller: this helper is the reuse
+    // seam for #424's by-filter entry point, and a future caller that forgot the
+    // gate would otherwise write rows with an undefined provider/model.
+    const enhanceCfg = settings.ai?.features?.enhance;
+    if (!enhanceCfg?.provider || !enhanceCfg?.model) {
+      throw new BadRequestException(
+        'No enhancement model configured (ai.features.enhance is unset)',
+      );
+    }
+    const provider = enhanceCfg.provider;
+    const model = params.model ?? enhanceCfg.model;
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        circleId: true,
+        type: true,
+        width: true,
+        height: true,
+        storageObject: { select: { id: true, mimeType: true } },
+      },
+    });
+
+    // ONE query for every id's live-enhancement state, not one per item.
+    const liveRows = await this.prisma.mediaEnhancement.findMany({
+      where: {
+        mediaItemId: { in: ids },
+        status: {
+          in: [
+            MediaEnhancementStatus.pending,
+            MediaEnhancementStatus.processing,
+            MediaEnhancementStatus.ready,
+          ],
+        },
+      },
+      select: { mediaItemId: true },
+    });
+    const liveItemIds = new Set(liveRows.map((r) => r.mediaItemId));
+
+    const maxMp = settings.pictureEnhancement?.maxInputMegapixels ?? 50;
+
+    // Partition. Precedence is notPhoto → tooLarge → alreadyLive, so every id
+    // lands in EXACTLY ONE bucket and the four counts always sum to `requested`.
+    const skipped = { notPhoto: 0, tooLarge: 0, alreadyLive: 0 };
+    const eligible: typeof items = [];
+
+    for (const item of items) {
+      // DIVERGENCE 2a: startEnhance throws 400 for a non-photo. A batch must
+      // not fail wholesale because one video slipped into a mixed selection —
+      // the ineligible item is reported in `skipped` and the rest proceed.
+      if (
+        item.type !== MediaType.photo ||
+        !item.storageObject ||
+        !item.storageObject.mimeType.startsWith('image/')
+      ) {
+        skipped.notPhoto++;
+        continue;
+      }
+
+      // DIVERGENCE 2b: same reasoning for the megapixel guard.
+      if (item.width && item.height && (item.width * item.height) / 1_000_000 > maxMp) {
+        skipped.tooLarge++;
+        continue;
+      }
+
+      // DIVERGENCE 1 — THE most important rule in this method. startEnhance
+      // calls supersedeLive(), which DISCARDS a live enhancement and deletes its
+      // staged bytes. A batch must NEVER do that: a `ready` row is a completed,
+      // already-billed gpt-image-1 result awaiting a human keep/replace/discard
+      // decision, and silently destroying it because the item happened to be in
+      // a later selection loses both the work and the money. Skip and report.
+      //
+      // This rule is also what makes DIVERGENCE 4 (skipDedup) safe: at most one
+      // live enhancement — and therefore at most one in-flight job — can exist
+      // per item, enforced here rather than by the queue's dedup.
+      if (liveItemIds.has(item.id)) {
+        skipped.alreadyLive++;
+        continue;
+      }
+
+      eligible.push(item);
+    }
+
+    // An id that vanished between the authorization read and this one (a
+    // concurrent hard delete) is counted as notPhoto — it is ineligible, and
+    // failing the whole batch over a race would be worse than reporting it.
+    skipped.notPhoto += ids.length - items.length;
+
+    // The batch row is created even when nothing is eligible: the caller asked
+    // for something and deserves a record (and a pollable id) explaining why
+    // zero items were queued, rather than a bare 202 with no trace.
+    const batch = await this.prisma.mediaEnhancementBatch.create({
+      data: {
+        circleId,
+        requestedCount: ids.length,
+        queuedCount: 0,
+        skipped: skipped as unknown as Prisma.InputJsonValue,
+        params: (params ?? {}) as Prisma.InputJsonValue,
+        source,
+        createdById: user.id,
+      },
+    });
+
+    const effectiveStrength =
+      params.strength ?? settings.pictureEnhancement?.defaultStrength ?? 'balanced';
+    const prompt = buildEnhancePrompt(params, effectiveStrength);
+
+    let queued = 0;
+    for (const item of eligible) {
+      const row = await this.prisma.mediaEnhancement.create({
+        data: {
+          mediaItemId: item.id,
+          circleId: item.circleId,
+          batchId: batch.id,
+          status: MediaEnhancementStatus.pending,
+          params: (params ?? {}) as Prisma.InputJsonValue,
+          provider,
+          model,
+          prompt,
+          originalWidth: item.width,
+          originalHeight: item.height,
+          createdById: user.id,
+        },
+      });
+
+      await this.enrichmentJobService.enqueue({
+        type: 'picture_enhancement',
+        mediaItemId: item.id,
+        circleId: item.circleId,
+        reason: JobReason.rerun,
+        // DIVERGENCE 3: a single-item enhance is an interactive request the user
+        // is watching, so it jumps the queue at priority 0. A batch is bulk work
+        // — it sits BELOW upload enrichment (5/10) and workflow evaluate (20) so
+        // a large selection never starves a live import, and ABOVE the purges
+        // (100) so it still drains promptly.
+        priority: 50,
+        // DIVERGENCE 4: queue dedup on (type, mediaItemId, pending|running)
+        // would collapse a legitimate re-queue into a stale job pointing at an
+        // older enhancement row. The enhancement row is the idempotency unit,
+        // and the alreadyLive skip above guarantees at most one live row (hence
+        // at most one in-flight job) per item.
+        skipDedup: true,
+        providerKey: provider,
+        modelVersion: model,
+        payload: { enhancementId: row.id },
+      });
+      queued++;
+    }
+
+    await this.prisma.mediaEnhancementBatch.update({
+      where: { id: batch.id },
+      data: { queuedCount: queued },
+    });
+
+    this.logger.log(
+      `Enhancement batch ${batch.id} (${source}) in circle ${circleId}: requested=${ids.length} queued=${queued} ` +
+        `skipped=${JSON.stringify(skipped)}`,
+    );
+
+    return {
+      data: {
+        batchId: batch.id,
+        requested: ids.length,
+        queued,
+        skipped,
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/enhancement-batches  ·  GET|POST /api/enhancement-batches/:id[/cancel]
+  // ---------------------------------------------------------------------------
+
+  /** Paginated batch list for a circle, newest first (circle viewer). */
+  async listBatches(query: ListEnhancementBatchesQuery, user: RequestUser) {
+    const { circleId, page, pageSize } = query;
+
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      CircleRole.viewer,
+    );
+
+    // Served by the existing @@index([circleId, createdAt]); `id` tiebreak keeps
+    // paging deterministic when two batches share a createdAt.
+    const where: Prisma.MediaEnhancementBatchWhereInput = { circleId };
+    const [batches, totalItems] = await this.prisma.$transaction([
+      this.prisma.mediaEnhancementBatch.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.mediaEnhancementBatch.count({ where }),
+    ]);
+
+    // ONE groupBy for the whole page — never one per batch.
+    const tallies = await this.tallyBatches(batches.map((b) => b.id));
+
+    return {
+      items: batches.map((b) =>
+        this.serializeBatch(b, tallies.get(b.id) ?? EMPTY_TALLY),
+      ),
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /** Single batch detail — the BaseRun-shaped progress payload (circle viewer). */
+  async getBatch(batchId: string, user: RequestUser) {
+    const batch = await this.loadBatch(batchId, user, CircleRole.viewer);
+    const tallies = await this.tallyBatches([batch.id]);
+    return this.serializeBatch(batch, tallies.get(batch.id) ?? EMPTY_TALLY);
+  }
+
+  /**
+   * Cancel a non-terminal batch (circle collaborator).
+   *
+   * Only rows still at `pending` are affected: their queued job row is deleted
+   * and the row is marked `cancelled`. A row already at `processing` is left
+   * running ON PURPOSE — its gpt-image-1 call is already billed, so aborting it
+   * spends the money and throws away the result. A `running` job row is likewise
+   * left alone; deleting it out from under the worker buys nothing.
+   *
+   * The handler's own batch-cancellation check (see PictureEnhancementHandler)
+   * covers the row whose job was already claimed when this landed.
+   */
+  async cancelBatch(batchId: string, user: RequestUser) {
+    const batch = await this.loadBatch(batchId, user, CircleRole.collaborator);
+
+    const tallies = await this.tallyBatches([batch.id]);
+    const view = this.serializeBatch(batch, tallies.get(batch.id) ?? EMPTY_TALLY);
+    if (batch.cancelledAt || TERMINAL_BATCH_STATUSES.includes(view.status)) {
+      throw new BadRequestException('Batch already finished');
+    }
+
+    await this.prisma.mediaEnhancementBatch.update({
+      where: { id: batch.id },
+      data: { cancelledAt: new Date() },
+    });
+
+    const pendingRows = await this.prisma.mediaEnhancement.findMany({
+      where: { batchId: batch.id, status: MediaEnhancementStatus.pending },
+      select: { id: true },
+    });
+
+    let cancelled = 0;
+    if (pendingRows.length > 0) {
+      // Delete only the still-PENDING job rows, matched precisely on the
+      // enhancement id in their payload (never by mediaItemId, which could
+      // catch an unrelated job for the same item).
+      await this.prisma.enrichmentJob.deleteMany({
+        where: {
+          type: 'picture_enhancement',
+          status: JobStatus.pending,
+          OR: pendingRows.map((r) => ({
+            payload: { path: ['enhancementId'], equals: r.id },
+          })),
+        },
+      });
+
+      // Re-filtered on `pending` so a row that started processing between the
+      // read above and this write is not clobbered mid-render.
+      const res = await this.prisma.mediaEnhancement.updateMany({
+        where: {
+          batchId: batch.id,
+          status: MediaEnhancementStatus.pending,
+        },
+        data: { status: MediaEnhancementStatus.cancelled },
+      });
+      cancelled = res.count;
+    }
+
+    this.logger.log(
+      `Enhancement batch ${batch.id} cancelled by user ${user.id} — ${cancelled} pending enhancement(s) withdrawn`,
+    );
+
+    return { batchId: batch.id, status: 'cancelled' as const, cancelled };
+  }
+
+  private async loadBatch(
+    batchId: string,
+    user: RequestUser,
+    role: CircleRole,
+  ): Promise<MediaEnhancementBatch> {
+    const batch = await this.prisma.mediaEnhancementBatch.findUnique({
+      where: { id: batchId },
+    });
+    if (!batch) {
+      throw new NotFoundException(`Enhancement batch ${batchId} not found`);
+    }
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      batch.circleId,
+      user.permissions,
+      role,
+    );
+    return batch;
+  }
+
+  /**
+   * Per-batch status tally + newest row timestamp, from ONE groupBy over
+   * media_enhancements. Nothing about a batch's progress is stored on the batch
+   * row itself: there are no counter columns and no finalize job, so a count can
+   * never drift from the rows it describes.
+   */
+  private async tallyBatches(batchIds: string[]): Promise<Map<string, BatchTally>> {
+    const out = new Map<string, BatchTally>();
+    if (batchIds.length === 0) return out;
+
+    const groups = await this.prisma.mediaEnhancement.groupBy({
+      by: ['batchId', 'status'],
+      where: { batchId: { in: batchIds } },
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    });
+
+    for (const g of groups) {
+      if (!g.batchId) continue;
+      const tally =
+        out.get(g.batchId) ?? { counts: {} as Record<string, number>, maxUpdatedAt: null };
+      tally.counts[g.status] = g._count._all;
+      const max = g._max.updatedAt;
+      if (max && (!tally.maxUpdatedAt || max > tally.maxUpdatedAt)) {
+        tally.maxUpdatedAt = max;
+      }
+      out.set(g.batchId, tally);
+    }
+    return out;
+  }
+
+  /**
+   * Project a batch into the BaseRun shape every other async-run backend emits
+   * (workflow runs, trash-empty runs, review runs), so the web RunProgressPanel
+   * and useRunPolling work against it with no new component.
+   *
+   * Every number is DERIVED from the row tally — see tallyBatches.
+   *
+   *  - succeeded = ready | applied | discarded | expired. All four mean the
+   *    render completed successfully; what the human did with it afterwards is
+   *    a separate axis from whether the batch's work succeeded.
+   *  - skipped   = cancelled (withdrawn before any render ran).
+   *
+   * STATUS KEYS OFF "no rows remain pending/processing", NEVER off
+   * processedCount === matchedCount. MediaEnhancement.mediaItemId is
+   * onDelete: Cascade, so hard-deleting a photo mid-batch removes its
+   * enhancement row and SHRINKS the work set — under a counter-equality check
+   * the batch would sit at `running` forever. This is the exact failure mode
+   * documented for review_runs at schema.prisma:2036-2043.
+   *
+   * A batch with zero rows (nothing was eligible) therefore renders as a
+   * terminal `completed`, not a stuck `running`.
+   */
+  private serializeBatch(batch: MediaEnhancementBatch, tally: BatchTally) {
+    const c = tally.counts;
+    const n = (s: MediaEnhancementStatus) => c[s] ?? 0;
+
+    const pending = n(MediaEnhancementStatus.pending);
+    const processing = n(MediaEnhancementStatus.processing);
+    const succeededCount =
+      n(MediaEnhancementStatus.ready) +
+      n(MediaEnhancementStatus.applied) +
+      n(MediaEnhancementStatus.discarded) +
+      n(MediaEnhancementStatus.expired);
+    const failedCount = n(MediaEnhancementStatus.failed);
+    const skippedCount = n(MediaEnhancementStatus.cancelled);
+
+    const matchedCount = pending + processing + succeededCount + failedCount + skippedCount;
+    const processedCount = succeededCount + failedCount + skippedCount;
+
+    const inFlight = pending + processing > 0;
+    let status: 'running' | 'completed' | 'completed_with_errors' | 'cancelled';
+    if (batch.cancelledAt) {
+      status = 'cancelled';
+    } else if (!inFlight) {
+      status = failedCount > 0 ? 'completed_with_errors' : 'completed';
+    } else {
+      status = 'running';
+    }
+
+    return {
+      id: batch.id,
+      circleId: batch.circleId,
+      status,
+      matchedCount,
+      processedCount,
+      succeededCount,
+      failedCount,
+      skippedCount,
+      // Batch creation is synchronous (there is no evaluating phase), so the
+      // batch's own createdAt IS its start time.
+      startedById: batch.createdById,
+      createdAt: batch.createdAt,
+      updatedAt: batch.updatedAt,
+      startedAt: batch.createdAt,
+      finishedAt: status === 'running' ? null : tally.maxUpdatedAt ?? batch.updatedAt,
+      lastError: batch.lastError,
+      // Batch-specific extras, outside the BaseRun contract.
+      requestedCount: batch.requestedCount,
+      queuedCount: batch.queuedCount,
+      skipped: batch.skipped ?? null,
+      params: batch.params ?? {},
+      source: batch.source,
+      cancelledAt: batch.cancelledAt,
+    };
+  }
+
+  /**
+   * Verify circle access, then confirm every id is a live member of circleId.
+   *
+   * Deliberately a private re-implementation of MediaService.assertAllInCircle
+   * (which is private and in another module); the shape and the error message
+   * are kept identical so the two stay recognisably the same guard.
+   */
+  private async assertAllInCircle(
+    ids: string[],
+    circleId: string,
+    user: RequestUser,
+    role: 'viewer' | 'collaborator',
+  ): Promise<void> {
+    await this.circleMembership.assertCircleAccess(
+      user.id,
+      circleId,
+      user.permissions,
+      role as CircleRole,
+    );
+
+    const uniqueIds = [...new Set(ids)];
+    const found = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (found.length !== uniqueIds.length) {
+      const foundSet = new Set(found.map((f) => f.id));
+      const missing = uniqueIds.filter((id) => !foundSet.has(id));
+      throw new NotFoundException(
+        `MediaItems not found or not accessible: ${missing.join(', ')}`,
+      );
     }
   }
 
@@ -283,6 +839,8 @@ export class MediaEnhancementService {
     const where: Prisma.MediaEnhancementWhereInput = {
       circleId,
       ...(statuses ? { status: { in: statuses } } : {}),
+      // Optional batch narrowing (issue #421), served by @@index([batchId]).
+      ...(query.batchId ? { batchId: query.batchId } : {}),
     };
 
     const [rows, totalItems] = await this.prisma.$transaction([

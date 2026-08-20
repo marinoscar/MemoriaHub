@@ -18,7 +18,8 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { APP_PIPE } from '@nestjs/core';
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ZodValidationPipe } from 'nestjs-zod';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
@@ -68,6 +69,9 @@ function makeMockService() {
   return {
     startEnhance: jest.fn().mockResolvedValue({
       data: { enhancementId: ENH_ID, jobId: 'job-1', status: 'pending' },
+    }),
+    startBatch: jest.fn().mockResolvedValue({
+      data: { batchId: 'batch-1', requested: 1, queued: 1, skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 0 } },
     }),
     getLatestEnhancement: jest.fn().mockResolvedValue({ data: null }),
     getEnhancement: jest.fn().mockResolvedValue({
@@ -313,6 +317,84 @@ describe('MediaEnhancementController — route dispatch + RBAC + validation (sup
       await request(app.getHttpServer()).post('/media/not-a-uuid/enhance').send({}).expect(400);
 
       expect(mockService.startEnhance).not.toHaveBeenCalled();
+    });
+  });
+
+  // ===========================================================================
+  // POST /media/bulk/enhance — route-collision regression (issue #421)
+  //
+  // MediaEnhancementController declares `bulk/enhance` in its static-routes
+  // block, BEFORE the parameterised `:id/enhance` route below it — the same
+  // convention (and the same reason) as `GET /media/enhancements` above it.
+  // Without that ordering, a POST to /media/bulk/enhance is the exact same
+  // shape (<segment>/enhance) as POST /media/:id/enhance, so 'bulk' would be
+  // silently parsed as the :id param and routed to startEnhance() instead of
+  // startBatch().
+  // ===========================================================================
+
+  describe('POST /media/bulk/enhance — route-collision regression', () => {
+    it('202s and dispatches to startBatch() — "bulk" is never parsed as the :id param of POST :id/enhance', async () => {
+      app = await buildApp(WRITER);
+
+      const res = await request(app.getHttpServer())
+        .post('/media/bulk/enhance')
+        .send({ circleId: CIRCLE_ID, ids: [MEDIA_ID] })
+        .expect(202);
+
+      expect(mockService.startBatch).toHaveBeenCalledTimes(1);
+      expect(mockService.startBatch.mock.calls[0][0]).toMatchObject({
+        circleId: CIRCLE_ID,
+        ids: [MEDIA_ID],
+      });
+      // The strongest proof of no collision: the :id/enhance handler
+      // (startEnhance, which would have been called with id:'bulk' had the
+      // param route won) was never invoked at all.
+      expect(mockService.startEnhance).not.toHaveBeenCalled();
+      expect(res.body).toMatchObject({ data: { batchId: 'batch-1' } });
+    });
+
+    it('403s for a caller missing media:write, and never reaches startEnhance either', async () => {
+      app = await buildApp(READER);
+
+      await request(app.getHttpServer())
+        .post('/media/bulk/enhance')
+        .send({ circleId: CIRCLE_ID, ids: [MEDIA_ID] })
+        .expect(403);
+
+      expect(mockService.startBatch).not.toHaveBeenCalled();
+      expect(mockService.startEnhance).not.toHaveBeenCalled();
+    });
+
+    // -------------------------------------------------------------------------
+    // Decorator-metadata-level check (mirrors media.controller.spec.ts's
+    // "route ordering — review-counts precedes @Get(:id)" pattern): reads the
+    // REAL compiled declaration order off the controller prototype, which is
+    // what NestJS's RouterExplorer walks to register routes. A future edit
+    // that moves `bulk/enhance` below `:id/enhance` in the source would flip
+    // this ordering and fail here even before a live-dispatch test could catch it.
+    // -------------------------------------------------------------------------
+
+    it('declares POST bulk/enhance at a lower prototype index than POST :id/enhance', () => {
+      const prototype = MediaEnhancementController.prototype;
+      const routes = Object.getOwnPropertyNames(prototype)
+        .filter((name) => name !== 'constructor')
+        .map((name) => ({
+          name,
+          path: Reflect.getMetadata(PATH_METADATA, (prototype as any)[name]),
+          method: Reflect.getMetadata(METHOD_METADATA, (prototype as any)[name]),
+        }))
+        .filter((entry) => entry.path !== undefined);
+
+      const bulkIdx = routes.findIndex(
+        (r) => r.path === 'bulk/enhance' && r.method === RequestMethod.POST,
+      );
+      const paramIdx = routes.findIndex(
+        (r) => r.path === ':id/enhance' && r.method === RequestMethod.POST,
+      );
+
+      expect(bulkIdx).toBeGreaterThanOrEqual(0);
+      expect(paramIdx).toBeGreaterThanOrEqual(0);
+      expect(bulkIdx).toBeLessThan(paramIdx);
     });
   });
 

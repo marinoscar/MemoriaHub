@@ -8,6 +8,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { AiModule } from '../ai/ai.module';
 import { MediaModule } from '../media/media.module';
 import { MediaEnhancementController } from './media-enhancement.controller';
+import { EnhancementBatchesController } from './enhancement-batches.controller';
 import { AdminEnhancementController } from './admin-enhancement.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
 import { ExifCarryoverService } from './exif-carryover.service';
@@ -40,7 +41,11 @@ import { PictureEnhancementPurgeTask } from './picture-enhancement-purge.task';
     AiModule,
     MediaModule,
   ],
-  controllers: [MediaEnhancementController, AdminEnhancementController],
+  controllers: [
+    MediaEnhancementController,
+    EnhancementBatchesController,
+    AdminEnhancementController,
+  ],
   providers: [
     MediaEnhancementService,
     ExifCarryoverService,
