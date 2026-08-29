@@ -2176,13 +2176,29 @@ export class MediaService {
     await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
 
     const uniqueIds = [...new Set(dto.ids)];
+
+    // AI tagging routes on media type (photo -> auto_tagging, video ->
+    // video_auto_tagging), so fetch each item's type — exactly as
+    // bulkRerunFaces below already does. Before issue #458 this loop enqueued
+    // `auto_tagging` for every id with no type filter, so selecting a video in
+    // the gallery and choosing "Re-run AI tagging" — an action the UI offers —
+    // produced a job the handler then failed.
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId: dto.circleId, deletedAt: null },
+      select: { id: true, type: true },
+    });
+
     let queued = 0;
-    for (const id of uniqueIds) {
-      await this.mediaEnrichmentService.enqueueTagRerun({ id, circleId: dto.circleId });
+    for (const item of items) {
+      await this.mediaEnrichmentService.enqueueTagRerun({
+        id: item.id,
+        type: item.type,
+        circleId: dto.circleId,
+      });
       queued++;
     }
 
-    this.logger.log(`bulkRerunTags: queued ${queued} auto_tagging reruns in circle ${dto.circleId} by user ${userId}`);
+    this.logger.log(`bulkRerunTags: queued ${queued} AI tagging reruns in circle ${dto.circleId} by user ${userId}`);
     return { queued };
   }
 

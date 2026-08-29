@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { MediaType, Prisma } from '@prisma/client';
 import { MediaService } from './media.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -3650,7 +3650,7 @@ describe('MediaService', () => {
       const ids = [randomUUID(), randomUUID(), randomUUID()];
       const dto = makeBulkRerunDto({ ids });
       mockPrisma.mediaItem.findMany.mockResolvedValue(
-        ids.map((id) => ({ id })) as any,
+        ids.map((id) => ({ id, type: MediaType.photo })) as any,
       );
 
       const result = await service.bulkRerunTags(dto, 'user-1', ownPerms);
@@ -3659,10 +3659,41 @@ describe('MediaService', () => {
       for (const id of ids) {
         expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledWith({
           id,
+          type: MediaType.photo,
           circleId: CIRCLE_ID,
         });
       }
       expect(result).toEqual({ queued: 3 });
+    });
+
+    // -----------------------------------------------------------------------
+    // Issue #458: this method used to enqueue `auto_tagging` for every id with
+    // NO type filter, so selecting a video in the gallery and choosing "Re-run
+    // AI tagging" — an action the UI offers — produced a failed job. Its
+    // sibling bulkRerunFaces, immediately below, always routed by type.
+    // -----------------------------------------------------------------------
+    it('passes each item\'s TYPE through, so a mixed selection routes per item', async () => {
+      const photoId = randomUUID();
+      const videoId = randomUUID();
+      const dto = makeBulkRerunDto({ ids: [photoId, videoId] });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([
+        { id: photoId, type: MediaType.photo },
+        { id: videoId, type: MediaType.video },
+      ] as any);
+
+      const result = await service.bulkRerunTags(dto, 'user-1', ownPerms);
+
+      expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledWith({
+        id: photoId,
+        type: MediaType.photo,
+        circleId: CIRCLE_ID,
+      });
+      expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledWith({
+        id: videoId,
+        type: MediaType.video,
+        circleId: CIRCLE_ID,
+      });
+      expect(result).toEqual({ queued: 2 });
     });
   });
 

@@ -8,6 +8,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { MediaType } from '@prisma/client';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { Auth } from '../auth/decorators/auth.decorator';
@@ -21,6 +22,15 @@ const adminBackfillSchema = z.object({
   from: flexibleDate.optional(),
   to: flexibleDate.optional(),
   force: z.boolean().optional().default(false),
+  /**
+   * Which media types to back-fill. Videos are OPT-IN (epic #452, issue #458):
+   * an admin used to running photo backfills would otherwise, on their first
+   * run after upgrading, dispatch an AI call for EVERY video in the library —
+   * a large, unexpected bill from a command whose behavior they thought they
+   * understood. Deliberately no `.default()`: an absent value is resolved in
+   * the service, so the default lives in exactly one place.
+   */
+  mediaTypes: z.array(z.enum(['photo', 'video'])).nonempty().optional(),
   // .prefault({}) so a bodyless POST parses exactly like {} (force: false) —
   // see issue #289 (app.module.ts) and admin-metadata.controller.ts.
 }).prefault({});
@@ -40,7 +50,13 @@ export class AdminTaggingController {
   @Post('backfill')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Backfill auto-tagging across ALL circles (Admin)' })
+  @ApiOperation({
+    summary: 'Backfill AI tagging across ALL circles (Admin)',
+    description:
+      'Queues AI tagging for unprocessed (or all, if forced) media across every circle. ' +
+      'Photos only by default — pass mediaTypes: ["photo","video"] to include videos, ' +
+      'which routes each video to video_auto_tagging.',
+  })
   @ApiResponse({ status: 201, description: 'Backfill jobs enqueued' })
   @ApiResponse({ status: 400, description: 'Auto-tagging is disabled globally' })
   async backfillAllCircles(@Body() dto: AdminBackfillDto) {
@@ -52,6 +68,7 @@ export class AdminTaggingController {
       from: dto.from,
       to: dto.to,
       force: dto.force,
+      ...(dto.mediaTypes ? { mediaTypes: dto.mediaTypes as MediaType[] } : {}),
     });
     return { data: result };
   }
