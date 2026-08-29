@@ -190,6 +190,8 @@ function actionPhrase(
       return Array.isArray(a.kinds) && a.kinds.length
         ? `re-run enrichment (${(a.kinds as unknown[]).join(', ')})`
         : 're-run enrichment';
+    case 'rerun_ai_tagging':
+      return 're-run AI tagging';
     case 'resolve_burst_group':
       return a.action === 'archive'
         ? 'keep the best shot and archive the rest of its burst'

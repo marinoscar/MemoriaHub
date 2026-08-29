@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CircleRole, JobReason, MediaTagSource, MediaType } from '@prisma/client';
+import { CircleRole, JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaService } from '../../media/media.service';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
@@ -116,6 +116,15 @@ export class WorkflowActionExecutor {
           return await this.moveToCircle(action, item, ctx);
         case 'rerun_enrichment':
           return await this.rerunEnrichment(action, item, ctx);
+        case 'rerun_ai_tagging':
+          // A PRESET, not a second implementation: the one-click form of
+          // "Re-run enrichment → tick Tagging". Same executor path, so video
+          // routing and the tag-status upsert cannot drift between the two.
+          return await this.rerunEnrichment(
+            { ...action, params: { kinds: ['tagging'] } },
+            item,
+            ctx,
+          );
         case 'resolve_burst_group':
           return await this.resolveBurstGroup(action, item, ctx);
         case 'dismiss_burst_group':
@@ -447,8 +456,10 @@ export class WorkflowActionExecutor {
   ): Promise<ActionOutcome> {
     const kinds = action.params['kinds'] as Array<'tagging' | 'faces' | 'metadata' | 'thumbnail' | 'duplicates'>;
 
-    // faces routes on media type (photo → face_detection, video → video_face_detection).
-    const needsType = kinds.includes('faces');
+    // BOTH `faces` and `tagging` route on media type (photo → face_detection /
+    // auto_tagging, video → video_face_detection / video_auto_tagging), so
+    // either kind requires the item's type.
+    const needsType = kinds.includes('faces') || kinds.includes('tagging');
     let type: MediaType | undefined;
     if (needsType) {
       const row = await this.prisma.mediaItem.findUnique({
@@ -463,6 +474,11 @@ export class WorkflowActionExecutor {
       const jobType = this.enrichmentJobTypeForKind(kind, type);
       // Enqueue at priority 100 (bulk/background) via the shared enqueue helper
       // — NOT the priority-0 rerun helpers, which are for interactive reruns.
+      //
+      // `reason: JobReason.rerun` is the LOOP-PROTECTION contract:
+      // workflow-trigger.listener.ts only reacts to JobReason.upload, so a
+      // rerun re-enqueue can never re-trigger the on_media_enriched workflow
+      // that caused it. An enrichment-enqueuing action must never use `upload`.
       await this.enrichmentJobs.enqueue({
         type: jobType,
         mediaItemId: item.id,
@@ -470,8 +486,44 @@ export class WorkflowActionExecutor {
         reason: JobReason.rerun,
         priority: 100,
       });
+
+      // A tagging re-run must also flip MediaTagStatus to `pending`, which
+      // MediaEnrichmentService.enqueueTagRerun already does and this path did
+      // not. Two things were broken by the omission: the UI's tag-status badge
+      // never reflected that a workflow queued anything, and — worse —
+      // buildDependencyState in workflow-trigger.listener.ts reads a stale
+      // `processed`, letting an on_media_enriched workflow fire against tags
+      // that are actively mid-rebuild.
+      if (kind === 'tagging') {
+        await this.markTagStatusPending(item.id, ctx.circleId);
+      }
     }
     return { status: 'applied' };
+  }
+
+  /**
+   * Best-effort `MediaTagStatus → pending`. A status-write failure must not
+   * fail the action — the enrichment job is already queued and will settle the
+   * status itself, so throwing here would turn a cosmetic miss into a failed
+   * run item.
+   */
+  private async markTagStatusPending(mediaItemId: string, circleId: string): Promise<void> {
+    try {
+      await this.prisma.mediaTagStatus.upsert({
+        where: { mediaItemId },
+        create: {
+          mediaItemId,
+          circleId,
+          status: MediaTagStatusType.pending,
+          tagCount: 0,
+        },
+        update: { status: MediaTagStatusType.pending },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `rerun_enrichment: failed to mark MediaTagStatus pending for ${mediaItemId} — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private enrichmentJobTypeForKind(
@@ -480,7 +532,10 @@ export class WorkflowActionExecutor {
   ): string {
     switch (kind) {
       case 'tagging':
-        return 'auto_tagging';
+        // Epic #452: without this branch a video-scoped tagging workflow
+        // enqueued `auto_tagging` for every matched video, and every one of
+        // those jobs failed.
+        return type === MediaType.video ? 'video_auto_tagging' : 'auto_tagging';
       case 'faces':
         return type === MediaType.video ? 'video_face_detection' : 'face_detection';
       case 'metadata':

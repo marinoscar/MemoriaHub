@@ -74,6 +74,7 @@ const SUBJECT: SubjectRegistryEntry = {
     { type: 'add_to_album', label: 'Add to album' },
     { type: 'add_tags', label: 'Add tags' },
     { type: 'resolve_duplicate_group', label: 'Resolve duplicate group' },
+    { type: 'rerun_ai_tagging', label: 'Re-run AI tagging' },
   ],
 };
 
@@ -255,6 +256,35 @@ describe('definitionToSentence', () => {
     };
     const sentence = definitionToSentence(def, SUBJECT, 'manual');
     expect(sentence).toContain('not missing camera');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Epic #452's headline use case: "for videos captured between A and B,
+  // re-run AI tagging."
+  // ---------------------------------------------------------------------------
+
+  it('renders the "Re-tag videos from a date range" template as plain English', () => {
+    const template = WORKFLOW_TEMPLATES.find((t) => t.id === 'retag-videos-in-range')!;
+
+    const sentence = definitionToSentence(template.definition, SUBJECT, template.suggestedTrigger);
+
+    expect(sentence.toLowerCase()).toContain('re-run ai tagging');
+    expect(sentence.toLowerCase()).toContain('capture date');
+  });
+
+  it('phrases rerun_ai_tagging without leaking a params list', () => {
+    const def: WorkflowDefinition = {
+      ...BASE_DEF,
+      conditions: [],
+      actions: [{ type: 'rerun_ai_tagging' }],
+    };
+
+    const sentence = definitionToSentence(def, SUBJECT, 'manual');
+
+    // It is a preset, so there is no kinds list to show — unlike
+    // rerun_enrichment, which renders "(tagging, faces)".
+    expect(sentence).toContain('re-run AI tagging');
+    expect(sentence).not.toContain('(');
   });
 
   it('falls back to a prettified label for an unknown action type', () => {

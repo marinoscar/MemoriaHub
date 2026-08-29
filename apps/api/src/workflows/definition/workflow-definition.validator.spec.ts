@@ -6,6 +6,7 @@
  */
 import { BadRequestException } from '@nestjs/common';
 import { WorkflowDefinitionValidator } from './workflow-definition.validator';
+import { registeredActions } from '../registry/subject-registry';
 
 describe('WorkflowDefinitionValidator', () => {
   let validator: WorkflowDefinitionValidator;
@@ -169,42 +170,153 @@ describe('WorkflowDefinitionValidator', () => {
       ).toThrow(/Unknown action "launch_rocket"/);
     });
 
+    /**
+     * Valid params for each action that requires them. Actions absent from
+     * this map take none.
+     *
+     * Enumerated by hand rather than derived, so adding an action with a
+     * required param forces a deliberate entry here instead of silently
+     * passing with `{}` — which is exactly what happened before issue #459
+     * wired `paramsSchema` into the validator.
+     */
+    const VALID_PARAMS: Record<string, Record<string, unknown>> = {
+      add_to_album: { createAlbumNamed: 'Trip' },
+      remove_from_album: { albumId: '11111111-1111-4111-8111-111111111111' },
+      add_tags: { names: ['beach'] },
+      remove_tags: { names: ['beach'] },
+      set_favorite: { value: true },
+      set_captured_at: { mode: 'set', value: '2026-01-01T00:00:00.000Z' },
+      move_to_circle: { targetCircleId: '22222222-2222-4222-8222-222222222222' },
+      assign_person: { personId: '33333333-3333-4333-8333-333333333333' },
+      remove_person: { personId: '33333333-3333-4333-8333-333333333333' },
+      set_location: { lat: 9.93, lng: -84.08 },
+      resolve_burst_group: { action: 'archive' },
+      resolve_duplicate_group: { action: 'archive' },
+      rerun_enrichment: { kinds: ['tagging'] },
+    };
+
     it('accepts every action type actually registered for media_item', () => {
-      const actionTypes = [
-        'move_to_trash',
-        'hard_delete',
-        'archive',
-        'unarchive',
-        'add_to_album',
-        'remove_from_album',
-        'add_tags',
-        'remove_tags',
-        'set_favorite',
-        'set_captured_at',
-        'move_to_circle',
-        'assign_person',
-        'remove_person',
-        'set_location',
-        'clear_location',
-        'resolve_burst_group',
-        'dismiss_burst_group',
-        'resolve_duplicate_group',
-        'dismiss_duplicate_group',
-        'accept_location_suggestion',
-        'reject_location_suggestion',
-        'rerun_enrichment',
-      ];
+      // Driven off the REGISTRY rather than a hand-listed array, so a newly
+      // registered action is covered automatically instead of being forgotten.
+      const actionTypes = registeredActions('media_item').map((a) => a.type);
+      expect(actionTypes.length).toBeGreaterThan(0);
+
       for (const type of actionTypes) {
+        const params = VALID_PARAMS[type];
         expect(() =>
           validator.validate({
             version: 1,
             subject: 'media_item',
             match: 'all',
             conditions: [],
-            actions: [{ type }],
+            actions: [{ type, ...(params ?? {}) }],
           }),
         ).not.toThrow();
       }
+    });
+
+    // -------------------------------------------------------------------------
+    // Action params validation (epic #452, issue #459)
+    //
+    // `WorkflowActionDescriptor.paramsSchema` was declared on all 22 actions
+    // and never invoked anywhere, so params were structurally unvalidated at
+    // create and run time and the executor blind-cast them. A malformed value
+    // reached the executor and failed at runtime, per item, inside a batch job.
+    // -------------------------------------------------------------------------
+
+    it('rejects an action whose required params are missing, at SAVE time rather than per item at run time', () => {
+      expect(() =>
+        validator.validate({
+          version: 1,
+          subject: 'media_item',
+          match: 'all',
+          conditions: [],
+          actions: [{ type: 'add_tags' }],
+        }),
+      ).toThrow(/Invalid params for action "add_tags"/);
+    });
+
+    it('rejects a malformed rerun_enrichment kinds array — the exact value the executor used to blind-cast', () => {
+      expect(() =>
+        validator.validate({
+          version: 1,
+          subject: 'media_item',
+          match: 'all',
+          conditions: [],
+          actions: [{ type: 'rerun_enrichment', kinds: [] }],
+        }),
+      ).toThrow(/Invalid params for action "rerun_enrichment"/);
+
+      expect(() =>
+        validator.validate({
+          version: 1,
+          subject: 'media_item',
+          match: 'all',
+          conditions: [],
+          actions: [{ type: 'rerun_enrichment', kinds: ['not_a_kind'] }],
+        }),
+      ).toThrow(/Invalid params for action "rerun_enrichment"/);
+    });
+
+    it('rejects unknown keys on a no-param action', () => {
+      expect(() =>
+        validator.validate({
+          version: 1,
+          subject: 'media_item',
+          match: 'all',
+          conditions: [],
+          actions: [{ type: 'archive', surprise: true }],
+        }),
+      ).toThrow(/Invalid params for action "archive"/);
+    });
+
+    it('NORMALIZES params by applying the schema defaults the executor then reads', () => {
+      const def = validator.validate({
+        version: 1,
+        subject: 'media_item',
+        match: 'all',
+        conditions: [],
+        actions: [{ type: 'remove_tags', names: ['beach'] }],
+      });
+
+      // `sources` defaults to AI + system so a cleanup workflow never strips a
+      // user's manually-applied tags. Params are FLAT siblings of `type` —
+      // WorkflowExecuteBatchHandler rebuilds the executor's bag by
+      // destructuring `const { type, ...params } = a`.
+      expect(def.actions[0]).toEqual({
+        type: 'remove_tags',
+        names: ['beach'],
+        sources: ['ai', 'system'],
+      });
+    });
+
+    it('round-trips a no-param action byte-identically', () => {
+      const def = validator.validate({
+        version: 1,
+        subject: 'media_item',
+        match: 'all',
+        conditions: [],
+        actions: [{ type: 'archive' }],
+      });
+
+      // The normalized definition is persisted and snapshotted into
+      // definition_snapshot, so it must not sprout keys the caller never sent.
+      expect(def.actions[0]).toEqual({ type: 'archive' });
+    });
+
+    it('registers rerun_ai_tagging, the epic #452 shortcut, taking no params', () => {
+      const types = registeredActions('media_item').map((a) => a.type);
+      expect(types).toContain('rerun_ai_tagging');
+
+      expect(() =>
+        validator.validate({
+          version: 1,
+          subject: 'media_item',
+          match: 'all',
+          conditions: [],
+          actions: [{ type: 'rerun_ai_tagging' }],
+        }),
+      ).not.toThrow();
     });
   });
 
