@@ -40,10 +40,10 @@ import {
   MediaTagStatusType,
   MediaType,
 } from '@prisma/client';
-import {
-  VideoAutoTaggingService,
-  buildVideoTaggingPrompt,
-} from './video-auto-tagging.service';
+import { VideoAutoTaggingService } from './video-auto-tagging.service';
+// The prompt builder now lives in the shared parity package (issue #460), so
+// a distributed worker node composes the SAME prompt the server would.
+import { buildVideoTaggingPrompt } from '@memoriahub/enrichment-compute/ai';
 import { AutoTaggingService } from './auto-tagging.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
