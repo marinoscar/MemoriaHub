@@ -276,3 +276,154 @@ test('callAnthropicVision routes requests through creds.baseUrl when provided', 
     restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Multi-image support (issue #453)
+// ---------------------------------------------------------------------------
+
+test('callAnthropicVision emits one image block per `images` entry, in array order, before the text block', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const { captured, restore } = stubFetchOnce(makeAnthropicMessageResponse(['ok']));
+
+  try {
+    await callAnthropicVision(
+      { apiKey: 'sk-test-key' },
+      {
+        model: 'claude-3-5-sonnet-20241022',
+        prompt: 'Summarize this video.',
+        images: [
+          { base64: 'ZnJhbWUtMA==', mimeType: 'image/jpeg' },
+          { base64: 'ZnJhbWUtMQ==', mimeType: 'image/png' },
+          { base64: 'ZnJhbWUtMg==', mimeType: 'image/webp' },
+        ],
+      },
+    );
+
+    const [message] = captured.body.messages;
+    assert.equal(message.content.length, 4, 'three image blocks plus one text block');
+
+    // Array order is preserved and per-image mimeType is respected (frames are
+    // JPEG in practice, but the type must not be assumed).
+    assert.deepEqual(
+      message.content.slice(0, 3).map((b) => [b.type, b.source.media_type, b.source.data]),
+      [
+        ['image', 'image/jpeg', 'ZnJhbWUtMA=='],
+        ['image', 'image/png', 'ZnJhbWUtMQ=='],
+        ['image', 'image/webp', 'ZnJhbWUtMg=='],
+      ],
+    );
+
+    assert.equal(message.content[3].type, 'text');
+    assert.equal(message.content[3].text, 'Summarize this video.');
+  } finally {
+    restore();
+  }
+});
+
+test('callAnthropicVision prefers a non-empty `images` array over the single-image fields', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const { captured, restore } = stubFetchOnce(makeAnthropicMessageResponse(['ok']));
+
+  try {
+    await callAnthropicVision(
+      { apiKey: 'sk-test-key' },
+      {
+        model: 'claude-3-5-sonnet-20241022',
+        prompt: 'p',
+        imageBase64: 'c2luZ2xl',
+        mimeType: 'image/jpeg',
+        images: [{ base64: 'bXVsdGk=', mimeType: 'image/jpeg' }],
+      },
+    );
+
+    const [message] = captured.body.messages;
+    assert.equal(message.content.length, 2);
+    assert.equal(message.content[0].source.data, 'bXVsdGk=');
+  } finally {
+    restore();
+  }
+});
+
+test('callAnthropicVision falls back to the single-image fields when `images` is an empty array', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const { captured, restore } = stubFetchOnce(makeAnthropicMessageResponse(['ok']));
+
+  try {
+    await callAnthropicVision(
+      { apiKey: 'sk-test-key' },
+      {
+        model: 'claude-3-5-sonnet-20241022',
+        prompt: 'p',
+        imageBase64: 'c2luZ2xl',
+        mimeType: 'image/jpeg',
+        images: [],
+      },
+    );
+
+    const [message] = captured.body.messages;
+    assert.equal(message.content.length, 2);
+    assert.equal(message.content[0].source.data, 'c2luZ2xl');
+  } finally {
+    restore();
+  }
+});
+
+test('callAnthropicVision honors `maxTokens`, and defaults to 1024 when absent', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const overridden = stubFetchOnce(makeAnthropicMessageResponse(['ok']));
+  try {
+    await callAnthropicVision(
+      { apiKey: 'sk-test-key' },
+      {
+        model: 'claude-3-5-sonnet-20241022',
+        prompt: 'p',
+        imageBase64: 'ZmFrZQ==',
+        mimeType: 'image/jpeg',
+        maxTokens: 4096,
+      },
+    );
+    assert.equal(overridden.captured.body.max_tokens, 4096);
+  } finally {
+    overridden.restore();
+  }
+
+  const defaulted = stubFetchOnce(makeAnthropicMessageResponse(['ok']));
+  try {
+    await callAnthropicVision(
+      { apiKey: 'sk-test-key' },
+      { model: 'claude-3-5-sonnet-20241022', prompt: 'p', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg' },
+    );
+    assert.equal(defaulted.captured.body.max_tokens, 1024);
+  } finally {
+    defaulted.restore();
+  }
+});
+
+test('callAnthropicVision throws before any network call when no image is supplied', async () => {
+  const { callAnthropicVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const originalFetch = globalThis.fetch;
+  let fetched = false;
+  globalThis.fetch = async () => {
+    fetched = true;
+    throw new Error('should never be called');
+  };
+
+  try {
+    await assert.rejects(
+      () => callAnthropicVision({ apiKey: 'sk-test-key' }, { model: 'm', prompt: 'p' }),
+      /at least one image/i,
+    );
+    await assert.rejects(
+      () => callAnthropicVision({ apiKey: 'sk-test-key' }, { model: 'm', prompt: 'p', images: [] }),
+      /at least one image/i,
+    );
+    assert.equal(fetched, false, 'no request should be sent for a request with no image');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

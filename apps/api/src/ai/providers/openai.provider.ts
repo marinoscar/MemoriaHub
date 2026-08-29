@@ -282,6 +282,8 @@ export class OpenAiProvider implements AiProvider {
         prompt: req.prompt,
         imageBase64: req.imageBase64,
         mimeType: req.mimeType,
+        images: req.images,
+        maxTokens: req.maxTokens,
       },
     );
   }

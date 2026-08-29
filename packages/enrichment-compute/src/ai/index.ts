@@ -50,14 +50,60 @@ export interface AnthropicVisionCredentials {
   baseUrl?: string;
 }
 
+/**
+ * Default Anthropic output budget for a vision call. Comfortable for a
+ * photo's tag list plus a one-line description; a multi-frame video summary
+ * raises it per-request via `AnthropicVisionRequest.maxTokens` rather than
+ * moving this default, so the photo path stays byte-identical.
+ */
+const ANTHROPIC_VISION_MAX_TOKENS = 1024;
+
+export interface VisionImage {
+  /** Raw base64-encoded image data — no `data:` URI prefix. */
+  base64: string;
+  /** MIME type, e.g. 'image/jpeg' */
+  mimeType: string;
+}
+
 export interface AnthropicVisionRequest {
   model: string;
   system?: string;
   prompt: string;
-  /** Raw base64-encoded image data — no `data:` URI prefix. */
-  imageBase64: string;
-  /** MIME type, e.g. 'image/jpeg' */
-  mimeType: string;
+  /**
+   * Single-image form. Ignored when `images` is present and non-empty.
+   * Optional only so the multi-image form can omit it — one of the two forms
+   * must supply at least one image or the call throws before any network I/O.
+   */
+  imageBase64?: string;
+  /** MIME type of `imageBase64`, e.g. 'image/jpeg' */
+  mimeType?: string;
+  /**
+   * Multi-image form — ORDERED; the model sees the images in array order.
+   * Used by video auto-tagging to send N frames sampled across a video in a
+   * single call (issue #453). Takes precedence over `imageBase64`/`mimeType`.
+   */
+  images?: VisionImage[];
+  /**
+   * Per-request output token budget. Absent keeps each provider's existing
+   * default, so every pre-existing caller sends a byte-identical request.
+   */
+  maxTokens?: number;
+}
+
+/**
+ * Normalizes the two request forms into one ordered image list. Throws before
+ * any network call when neither form supplies an image — a malformed request
+ * is cheaper to reject here than to have the provider reject it after a
+ * round trip (and, on a rate-limited account, after burning a retry).
+ */
+function resolveVisionImages(req: AnthropicVisionRequest): VisionImage[] {
+  if (req.images && req.images.length > 0) return req.images;
+  if (req.imageBase64 && req.mimeType) {
+    return [{ base64: req.imageBase64, mimeType: req.mimeType }];
+  }
+  throw new Error(
+    'Vision request requires at least one image: supply `imageBase64` + `mimeType`, or a non-empty `images` array',
+  );
 }
 
 /**
@@ -75,31 +121,28 @@ export async function callAnthropicVision(
     ...(creds.baseUrl && { baseURL: creds.baseUrl }),
   });
 
+  const images = resolveVisionImages(req);
+
+  // Image blocks first, then the single text block — the same ordering the
+  // single-image form has always produced, so a one-image request is
+  // byte-identical to what this function sent before multi-image support.
+  const content: Anthropic.ContentBlockParam[] = images.map((image) => ({
+    type: 'image' as const,
+    source: {
+      type: 'base64' as const,
+      media_type: image.mimeType as Anthropic.Base64ImageSource['media_type'],
+      data: image.base64,
+    },
+  }));
+  content.push({ type: 'text' as const, text: req.prompt });
+
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({
       model: req.model,
-      max_tokens: 1024,
+      max_tokens: req.maxTokens ?? ANTHROPIC_VISION_MAX_TOKENS,
       ...(req.system && { system: req.system }),
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: req.mimeType as Anthropic.Base64ImageSource['media_type'],
-                data: req.imageBase64,
-              },
-            },
-            {
-              type: 'text',
-              text: req.prompt,
-            },
-          ],
-        },
-      ],
+      messages: [{ role: 'user', content }],
     });
   } catch (err) {
     throw classifyAnthropicRateLimit(err) ?? err;
@@ -155,6 +198,8 @@ export async function callOpenAiVision(
   creds: AnthropicVisionCredentials,
   req: AnthropicVisionRequest,
 ): Promise<string> {
+  const images = resolveVisionImages(req);
+
   const client = new OpenAI({
     apiKey: creds.apiKey,
     ...(creds.baseUrl && { baseURL: creds.baseUrl }),
@@ -166,28 +211,32 @@ export async function callOpenAiVision(
     messages.push({ role: 'system', content: req.system });
   }
 
-  messages.push({
-    role: 'user',
-    content: [
-      {
-        type: 'text',
-        text: req.prompt,
+  // Text block first, then the image blocks — the same ordering the
+  // single-image form has always produced, so a one-image request is
+  // byte-identical to what this function sent before multi-image support.
+  const content: OpenAI.ChatCompletionContentPart[] = [
+    {
+      type: 'text',
+      text: req.prompt,
+    },
+  ];
+  for (const image of images) {
+    content.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${image.mimeType};base64,${image.base64}`,
       },
-      {
-        type: 'image_url',
-        image_url: {
-          url: `data:${req.mimeType};base64,${req.imageBase64}`,
-        },
-      },
-    ],
-  });
+    });
+  }
+
+  messages.push({ role: 'user', content });
 
   let response: OpenAI.ChatCompletion;
   try {
     response = await client.chat.completions.create({
       model: req.model,
       reasoning_effort: OPENAI_REASONING_EFFORT as any,
-      max_completion_tokens: ANALYZE_IMAGE_MAX_COMPLETION_TOKENS,
+      max_completion_tokens: req.maxTokens ?? ANALYZE_IMAGE_MAX_COMPLETION_TOKENS,
       messages,
     });
   } catch (err) {
