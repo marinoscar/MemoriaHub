@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.2 |
-| **Last Updated** | June 2026 |
+| **Version** | 1.3 |
+| **Last Updated** | August 2026 |
 | **Status** | Implemented |
 
 ---
@@ -18,13 +18,24 @@
 6. [API Endpoints](#6-api-endpoints)
 7. [Operations](#7-operations)
 
-**Related spec:** [Semantic Search](semantic-search.md) — pgvector embedding stored at the end of each tagging job.
+**Related specs:** [Semantic Search](semantic-search.md) — pgvector embedding stored at the end of each tagging job · [Video AI Auto-Tagging](video-auto-tagging.md) — the video counterpart.
+
+> **Scope of this document: PHOTOS.** Tagging is no longer photo-only as a
+> feature — epic #452 added `video_auto_tagging`, a separate job type that
+> samples frames, optionally transcribes the opening seconds of audio, and
+> makes one multi-image call. It **shares this document's entire persist half**
+> (the `tag_labels` vocabulary, `media_tag_status`, `media_items.description`,
+> the `MediaTagSource.ai` reconcile, and the `media_item_embedding` upsert), so
+> everything in §3 and §4's parsing/validation applies to both. What differs —
+> the resource ceiling, the prompt framing, transcription, streaming input, and
+> why it is a separate job type at all — lives in
+> [Video AI Auto-Tagging](video-auto-tagging.md).
 
 ---
 
 ## 1. Overview and User-Facing Behavior
 
-AI auto-tagging automatically assigns descriptive tags and generates a brief description for uploaded photos using a vision language model. A single vision call produces both outputs as one JSON object `{"tags", "description"}`. The model evaluates each photo against a **global vocabulary** of tag labels managed by the admin, then adds matching labels as regular circle-scoped tags and writes the description directly onto the `media_items` row.
+AI auto-tagging automatically assigns descriptive tags and generates a brief description for uploaded photos using a vision language model. (Videos are handled by the sibling `video_auto_tagging` job type — see [Video AI Auto-Tagging](video-auto-tagging.md).) A single vision call produces both outputs as one JSON object `{"tags", "description"}`. The model evaluates each photo against a **global vocabulary** of tag labels managed by the admin, then adds matching labels as regular circle-scoped tags and writes the description directly onto the `media_items` row.
 
 **Core capabilities:**
 
@@ -35,7 +46,7 @@ AI auto-tagging automatically assigns descriptive tags and generates a brief des
 - Use any configured AI provider (Anthropic, OpenAI) with admin-selected model.
 - Draw only from an admin-defined global vocabulary — the model cannot invent tag labels.
 - Allow circle collaborators to trigger a per-item re-run from the media drawer.
-- Allow admins to backfill existing photos across all circles via a global admin endpoint, with optional date-range scoping and a force flag to reprocess already-tagged items. Backfilling also produces embeddings for any item that runs through the pipeline.
+- Allow admins to backfill existing media across all circles via a global admin endpoint, with optional date-range scoping and a force flag to reprocess already-tagged items. Videos are **opt-in** via `mediaTypes: ['photo','video']` — an admin used to running photo backfills would otherwise dispatch an AI call for every video in the library on their first post-upgrade run. Backfilling also produces embeddings for any item that runs through the pipeline.
 - Generate a text embedding from description + tags + people names at the end of each successful run and store it in `media_item_embedding` for semantic search (best-effort; embedding failures never fail the tagging job). See [Semantic Search](semantic-search.md) for the full embedding and search architecture.
 - Track per-item status (`not_processed`, `pending`, `processing`, `processed`, `failed`) for monitoring and UI display.
 

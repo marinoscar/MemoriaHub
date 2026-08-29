@@ -25,9 +25,18 @@
 
 ## 1. Overview
 
-Semantic search lets users find photos by describing their visual content in natural language — "birthday cake with candles", "kids laughing in the garden", "sunset over the ocean" — rather than specifying exact metadata. It works by comparing a vector embedding of the user's query against pre-computed embeddings stored for each photo.
+Semantic search lets users find media by describing its content in natural language — "birthday cake with candles", "kids laughing in the garden", "sunset over the ocean" — rather than specifying exact metadata. It works by comparing a vector embedding of the user's query against pre-computed embeddings stored for each photo.
 
-Embeddings are generated at the end of every successful [auto-tagging](auto-tagging.md) job. The embedding text combines the photo's AI-generated `description`, `tags`, and any assigned people names into a single string that is fed to an embedding model (currently OpenAI only).
+Embeddings are generated at the end of every successful [auto-tagging](auto-tagging.md) job. The embedding text combines the item's AI-generated `description`, `tags`, and any assigned people names into a single string that is fed to an embedding model (currently OpenAI only).
+
+**Videos too, as of epic #452.** The `video_auto_tagging` job type shares this
+same persist half, so a tagged video produces a `media_item_embedding` row
+exactly as a photo does — before that epic, `semanticQuery` could never return
+a video at all. When transcription is enabled, the video's transcript is
+appended to the embedding text alongside description/tags/people, which is the
+*entire* "make speech searchable" change: no new search field, index, endpoint
+or UI, and spoken content starts matching immediately. See
+[Video AI Auto-Tagging](video-auto-tagging.md).
 
 Semantic search is **optional and additive**:
 
@@ -195,7 +204,7 @@ The agent's `search_media` tool also accepts `semanticQuery` as a top-level para
 
 `GET /api/search/fields` returns a descriptor for `semanticQuery` (appended after the registry fields) so the frontend filter builder and the agent tool schema are aware of it. It is surfaced as a `string`-type field with the description:
 
-> Natural-language description of photo content; ranks results by semantic similarity. Requires the embedding feature to be configured in AI Settings. Can be combined with structured filters for hybrid search.
+> Natural-language description of media content; ranks results by semantic similarity. Requires the embedding feature to be configured in AI Settings. Can be combined with structured filters for hybrid search.
 
 ---
 
@@ -221,7 +230,7 @@ In all fall-back cases, the search endpoint returns a valid (non-error) response
 
 ### Backfill via `POST /api/admin/tagging/backfill`
 
-The global admin backfill endpoint enqueues `auto_tagging` jobs for photos across all circles. Because embedding is the final step of every successful tagging job, backfilling also produces embeddings for all processed items — no separate embedding backfill endpoint exists.
+The global admin backfill endpoint enqueues `auto_tagging` jobs for photos across all circles (and `video_auto_tagging` for videos, when `mediaTypes` opts them in). Because embedding is the final step of every successful tagging job, backfilling also produces embeddings for all processed items — no separate embedding backfill endpoint exists.
 
 Items that have already been tagged but have no embedding (e.g. photos tagged before the embedding feature was enabled) can be re-embedded by running backfill with `"force": true`, which re-processes all items regardless of their current `processed` status.
 
