@@ -21,6 +21,7 @@ import { DoctorCheck, DoctorReport } from './doctor.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService, ResolvedSettings } from '../settings/system-settings/system-settings.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
+import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
 import { FaceSettingsService } from '../face/face-settings.service';
 import { GeoSettingsService } from '../geo/geo-settings.service';
 import { StorageSettingsService } from '../storage-settings/storage-settings.service';
@@ -211,6 +212,7 @@ describe('DoctorService', () => {
   let mockEnrichmentAdmin: jest.Mocked<Pick<EnrichmentAdminService, 'getStats'>>;
   let mockSocialMediaOcr: jest.Mocked<Pick<SocialMediaOcrService, 'getStatus'>>;
   let mockVisualEmbeddingService: jest.Mocked<Pick<VisualEmbeddingService, 'isAvailable'>>;
+  let mockAiProviderRegistry: { get: jest.Mock };
   const ORIGINAL_ENV = { ...process.env };
 
   beforeEach(async () => {
@@ -223,6 +225,13 @@ describe('DoctorService', () => {
     mockEnrichmentAdmin = { getStats: jest.fn() };
     mockSocialMediaOcr = { getStatus: jest.fn() };
     mockVisualEmbeddingService = { isAvailable: jest.fn().mockReturnValue(true) };
+    // OpenAI implements transcribeAudio; Anthropic deliberately does not (the
+    // ai.videoTagging check reports the latter as a visual-only warning).
+    mockAiProviderRegistry = {
+      get: jest.fn().mockImplementation((key: string) =>
+        key === 'anthropic' ? { key } : { key, transcribeAudio: jest.fn() },
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -230,6 +239,7 @@ describe('DoctorService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
         { provide: AiSettingsService, useValue: mockAiSettings },
+        { provide: AiProviderRegistry, useValue: mockAiProviderRegistry },
         { provide: FaceSettingsService, useValue: mockFaceSettings },
         { provide: GeoSettingsService, useValue: mockGeoSettings },
         { provide: StorageSettingsService, useValue: mockStorageSettings },
@@ -318,7 +328,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 30 documented checks across the 9 sections', async () => {
+    it('includes all 31 documented checks across the 9 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -341,6 +351,7 @@ describe('DoctorService', () => {
         'ai.socialMedia',
         'ai.duplicateDetection',
         'ai.pictureEnhancer',
+        'ai.videoTagging',
         'face.detection',
         'face.flagConsistency',
         'face.pgvector',
@@ -396,7 +407,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(30);
+      expect(report.summary.total).toBe(31);
     });
   });
 
@@ -436,7 +447,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(30);
+        expect(report.summary.total).toBe(31);
       } finally {
         jest.useRealTimers();
       }
@@ -510,6 +521,187 @@ describe('DoctorService', () => {
   // =========================================================================
   // 5. Flag inconsistency matrix
   // =========================================================================
+
+  // =========================================================================
+  // ai.videoTagging (epic #452, issue #457)
+  //
+  // The check's whole point is the asymmetry between the two cost levers: the
+  // VISUAL pass is required (missing ⇒ error, the job cannot run) while
+  // TRANSCRIPTION is an optional enrichment (missing ⇒ warning, the job runs
+  // visual-only). Reporting both as errors would send an admin chasing a
+  // transcription credential to fix a feature that already works.
+  // =========================================================================
+
+  describe('ai.videoTagging', () => {
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockNoWorkerNodes(mockPrisma);
+      (mockPrisma.aiProviderCredential.findUnique as jest.Mock).mockResolvedValue({
+        provider: 'openai',
+        enabled: true,
+      });
+    });
+
+    /** Healthy settings plus an `autoTagging.video` block. */
+    const withVideo = (video: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      makeHealthySettings({
+        autoTagging: {
+          video: {
+            enabled: true,
+            maxFrames: 6,
+            sampleIntervalSeconds: 5,
+            transcription: { enabled: false, leadSeconds: 30 },
+            ...video,
+          },
+        },
+        ...extra,
+      } as any);
+
+    it('is skipped when the master autoTagging flag is off', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeHealthySettings({
+          features: { autoTagging: false, faceRecognition: true, burstDetection: true },
+          autoTagging: { video: { enabled: true, maxFrames: 6, sampleIntervalSeconds: 5, transcription: { enabled: false, leadSeconds: 30 } } },
+        } as any),
+      );
+
+      const report = await service.runDiagnostics();
+      expect(findCheck(report, 'ai.videoTagging').status).toBe('skipped');
+    });
+
+    it('is skipped when video tagging itself is off — the default, so an upgrade reports nothing new', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(withVideo({ enabled: false }));
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.videoTagging');
+      expect(check.status).toBe('skipped');
+      expect(check.message).toMatch(/Video AI tagging is disabled/);
+    });
+
+    it('warns when AUTO_TAG_ENABLED=false overrides the setting — video tagging has no kill-switch of its own', async () => {
+      process.env = healthyEnv({ AUTO_TAG_ENABLED: 'false' });
+      mockSystemSettings.getSettings.mockResolvedValue(withVideo({}));
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.videoTagging');
+      expect(check.status).toBe('warning');
+      expect(check.message).toMatch(/AUTO_TAG_ENABLED=false/);
+    });
+
+    it('is status:error when enabled with no tagging provider/model selected', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        withVideo(
+          {},
+          {
+            ai: {
+              features: {
+                search: { provider: 'openai', model: 'gpt-4o' },
+                tagging: { provider: null, model: null },
+                embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+              },
+            },
+          },
+        ),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.videoTagging');
+      expect(check.status).toBe('error');
+      expect(check.actionItem).toBeTruthy();
+    });
+
+    it('is status:error when the resolved tagging provider has no enabled credential', async () => {
+      (mockPrisma.aiProviderCredential.findUnique as jest.Mock).mockResolvedValue({
+        provider: 'openai',
+        enabled: false,
+      });
+      mockSystemSettings.getSettings.mockResolvedValue(withVideo({}));
+
+      const report = await service.runDiagnostics();
+      expect(findCheck(report, 'ai.videoTagging').status).toBe('error');
+    });
+
+    it('is status:ok, visual-only, when transcription is off', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(withVideo({ maxFrames: 8 }));
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.videoTagging');
+      expect(check.status).toBe('ok');
+      expect(check.message).toMatch(/8 frames\/video/);
+      expect(check.message).toMatch(/visual-only/);
+    });
+
+    it('WARNS (never errors) when transcription is on but no transcription model is selected', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        withVideo({ transcription: { enabled: true, leadSeconds: 30 } }),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.videoTagging');
+      // Warning, not error: the job still runs and produces tags.
+      expect(check.status).toBe('warning');
+      expect(check.message).toMatch(/visual-only/);
+    });
+
+    it('warns when the selected transcription provider has no audio capability (e.g. Anthropic)', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        withVideo(
+          { transcription: { enabled: true, leadSeconds: 30 } },
+          {
+            ai: {
+              features: {
+                search: { provider: 'openai', model: 'gpt-4o' },
+                tagging: { provider: 'openai', model: 'gpt-4o' },
+                embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+                transcription: { provider: 'anthropic', model: 'claude-opus-4-8' },
+              },
+            },
+          },
+        ),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.videoTagging');
+      expect(check.status).toBe('warning');
+      expect(check.message).toMatch(/no audio capability/);
+    });
+
+    it('is status:ok and names both models when transcription is fully configured', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        withVideo(
+          { transcription: { enabled: true, leadSeconds: 45 } },
+          {
+            ai: {
+              features: {
+                search: { provider: 'openai', model: 'gpt-4o' },
+                tagging: { provider: 'openai', model: 'gpt-4o' },
+                embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+                transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+              },
+            },
+          },
+        ),
+      );
+
+      const report = await service.runDiagnostics();
+      const check = findCheck(report, 'ai.videoTagging');
+      expect(check.status).toBe('ok');
+      expect(check.message).toMatch(/gpt-4o-mini-transcribe/);
+      expect(check.message).toMatch(/first 45s/);
+    });
+  });
 
   describe('ai.flagConsistency', () => {
     beforeEach(() => {
@@ -1161,7 +1353,9 @@ describe('DoctorService', () => {
       const where = heavyCall![0].where;
       expect(where.status).toBe('online');
       expect(where.lastHeartbeatAt.gte).toBeInstanceOf(Date);
-      expect(where.eligibleTypes).toEqual({ hasSome: ['face_detection', 'auto_tagging'] });
+      expect(where.eligibleTypes).toEqual({
+        hasSome: ['face_detection', 'auto_tagging', 'video_auto_tagging'],
+      });
     });
 
     it("is warning in mode 'system' when enrichment features are on but no healthy node exists", async () => {

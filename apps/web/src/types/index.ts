@@ -201,6 +201,30 @@ export interface SystemSettings {
     reverseProvider?: 'offline' | 'nominatim' | 'google';
     forwardSearchEnabled?: boolean;
   };
+  /**
+   * Video AI tagging (epic #452). `features.autoTagging` is the master toggle;
+   * `autoTagging.video.enabled` is the sub-feature switch, off by default.
+   *
+   * `maxFrames` and `transcription.leadSeconds` are the two cost levers, and
+   * both are DURATION-INDEPENDENT: a video costs one AI call with `maxFrames`
+   * images no matter how long it is.
+   */
+  autoTagging?: {
+    video?: {
+      enabled?: boolean;
+      maxFrames?: number;
+      sampleIntervalSeconds?: number;
+      transcription?: {
+        enabled?: boolean;
+        leadSeconds?: number;
+      };
+    };
+  };
+  ai?: {
+    features?: {
+      transcription?: { provider: string; model: string } | null;
+    };
+  };
   face?: {
     video?: {
       enabled?: boolean;

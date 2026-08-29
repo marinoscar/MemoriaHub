@@ -517,6 +517,42 @@ export const systemSettingsSchema = z.object({
       }).nullable().default(null),
     }),
   }),
+  // Video AI auto-tagging (epic #452, issue #457). Mirrors `face.video.*`,
+  // but deliberately NOT coupled to it: face detection wants ~60 frames to
+  // catch everyone who appears, AI tagging wants ~6 because each frame is a
+  // BILLED image, so one shared knob would make one of the two wrong.
+  // No dedicated env kill-switch — video tagging rides on AUTO_TAG_ENABLED,
+  // exactly as video face detection rides on FACE_AUTO_DETECT.
+  autoTagging: z.object({
+    video: z.object({
+      // Default FALSE: upgrading an existing deployment must produce zero new
+      // spend until an admin opts in. `features.autoTagging` is still master.
+      enabled: z.boolean().default(false),
+      // The dominant cost lever, and duration-independent — computeSeekTimestamps
+      // spreads exactly this many frames across the WHOLE video, so a 3-hour
+      // recital and a 30-second clip cost the same number of billed images.
+      maxFrames: z.number().int().min(1).max(20).default(6),
+      sampleIntervalSeconds: z.number().int().min(1).max(60).default(5),
+      transcription: z.object({
+        enabled: z.boolean().default(false),
+        // First N seconds of audio only (ffmpeg `-t`) — likewise fixed
+        // regardless of runtime.
+        leadSeconds: z.number().int().min(5).max(600).default(30),
+      }).optional().default({ enabled: false, leadSeconds: 30 }),
+    }).optional().default({
+      enabled: false,
+      maxFrames: 6,
+      sampleIntervalSeconds: 5,
+      transcription: { enabled: false, leadSeconds: 30 },
+    }),
+  }).optional().default({
+    video: {
+      enabled: false,
+      maxFrames: 6,
+      sampleIntervalSeconds: 5,
+      transcription: { enabled: false, leadSeconds: 30 },
+    },
+  }),
   face: z.object({
     features: z.object({
       detection: z.object({
@@ -877,6 +913,17 @@ export const systemSettingsPatchSchema = z.object({
         provider: z.string(),
         model: z.string(),
       }).nullable().optional(),
+    }).optional(),
+  }).optional(),
+  autoTagging: z.object({
+    video: z.object({
+      enabled: z.boolean().optional(),
+      maxFrames: z.number().int().min(1).max(20).optional(),
+      sampleIntervalSeconds: z.number().int().min(1).max(60).optional(),
+      transcription: z.object({
+        enabled: z.boolean().optional(),
+        leadSeconds: z.number().int().min(5).max(600).optional(),
+      }).optional(),
     }).optional(),
   }).optional(),
   face: z.object({

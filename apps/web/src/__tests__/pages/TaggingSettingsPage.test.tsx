@@ -82,7 +82,10 @@ function nonAdminPermissions() {
   };
 }
 
-function makeSystemSettingsMock(autoTagging = false) {
+function makeSystemSettingsMock(
+  autoTagging = false,
+  extra: Record<string, unknown> = {},
+) {
   const updateSettings = vi.fn().mockResolvedValue(undefined);
   return {
     settings: {
@@ -91,6 +94,7 @@ function makeSystemSettingsMock(autoTagging = false) {
       updatedAt: new Date().toISOString(),
       updatedBy: null,
       version: 1,
+      ...extra,
     },
     isLoading: false,
     isSaving: false,
@@ -208,6 +212,127 @@ describe('TaggingSettingsPage', () => {
           }),
         );
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Video section (epic #452, issue #457)
+  //
+  // The section's job is to make the COST MODEL legible rather than present
+  // five bare numbers: a video costs one AI call carrying `maxFrames` images
+  // regardless of its length, and transcription bills `leadSeconds` per video.
+  // -------------------------------------------------------------------------
+  describe('video AI tagging section', () => {
+    /** Settings with an `autoTagging.video` block merged in. */
+    const withVideo = (
+      autoTagging: boolean,
+      video: Record<string, unknown> = {},
+      ai?: Record<string, unknown>,
+    ) =>
+      makeSystemSettingsMock(autoTagging, {
+        autoTagging: {
+          video: {
+            enabled: true,
+            maxFrames: 6,
+            sampleIntervalSeconds: 5,
+            transcription: { enabled: false, leadSeconds: 30 },
+            ...video,
+          },
+        },
+        ...(ai ? { ai } : {}),
+      });
+
+    it('renders the Video section with the duration-independent cost model spelled out', () => {
+      mockUseSystemSettings.mockReturnValue(withVideo(true) as any);
+
+      render(<TaggingSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByRole('heading', { name: 'Video' })).toBeInTheDocument();
+      expect(screen.getByText(/one AI call carrying 6 still frames/i)).toBeInTheDocument();
+      expect(screen.getByText(/three-hour recital and a thirty-second clip/i)).toBeInTheDocument();
+    });
+
+    it('defaults the video switch to off when no autoTagging namespace is stored', () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock(true) as any);
+
+      render(<TaggingSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const label = screen.getByText(/enable ai tagging for videos/i);
+      const switchEl = label
+        .closest('.MuiFormControlLabel-root')
+        ?.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      expect(switchEl?.checked).toBe(false);
+    });
+
+    it('disables the video switch until the master auto-tagging flag is on', () => {
+      mockUseSystemSettings.mockReturnValue(withVideo(false) as any);
+
+      render(<TaggingSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const label = screen.getByText(/enable ai tagging for videos/i);
+      const switchEl = label
+        .closest('.MuiFormControlLabel-root')
+        ?.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      expect(switchEl?.disabled).toBe(true);
+      expect(screen.getByText(/master switch for both photos and videos/i)).toBeInTheDocument();
+    });
+
+    it('PATCHes only the autoTagging.video keys it changes', async () => {
+      const mock = withVideo(true, { enabled: false });
+      mockUseSystemSettings.mockReturnValue(mock as any);
+
+      const user = userEvent.setup();
+      render(<TaggingSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const label = screen.getByText(/enable ai tagging for videos/i);
+      await user.click(
+        label.closest('.MuiFormControlLabel-root')?.querySelector('input[type="checkbox"]') as HTMLElement,
+      );
+
+      await waitFor(() => {
+        expect(mock.updateSettings).toHaveBeenCalledWith({
+          autoTagging: { video: { enabled: true } },
+        });
+      });
+    });
+
+    it('states the audio bill in seconds, not as a bare number', () => {
+      mockUseSystemSettings.mockReturnValue(
+        withVideo(true, { transcription: { enabled: true, leadSeconds: 45 } }) as any,
+      );
+
+      render(<TaggingSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/first 45 seconds/i)).toBeInTheDocument();
+      expect(screen.getByText(/never leaves your configured AI provider/i)).toBeInTheDocument();
+    });
+
+    it('warns and links to AI settings when transcription is on with no model configured', () => {
+      mockUseSystemSettings.mockReturnValue(
+        withVideo(true, { transcription: { enabled: true, leadSeconds: 30 } }) as any,
+      );
+
+      render(<TaggingSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.getByText(/no transcription model selected/i)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /admin settings/i })).toHaveAttribute(
+        'href',
+        '/admin/settings/ai',
+      );
+    });
+
+    it('does not warn once a transcription model is configured', () => {
+      mockUseSystemSettings.mockReturnValue(
+        withVideo(
+          true,
+          { transcription: { enabled: true, leadSeconds: 30 } },
+          { features: { transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' } } },
+        ) as any,
+      );
+
+      render(<TaggingSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      expect(screen.queryByText(/no transcription model selected/i)).not.toBeInTheDocument();
     });
   });
 

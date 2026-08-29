@@ -16,6 +16,7 @@ import {
   ResolvedSettings,
 } from '../settings/system-settings/system-settings.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
+import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
 import { FaceSettingsService } from '../face/face-settings.service';
 import { GeoSettingsService } from '../geo/geo-settings.service';
 import { StorageSettingsService } from '../storage-settings/storage-settings.service';
@@ -82,6 +83,7 @@ export class DoctorService {
     private readonly prisma: PrismaService,
     private readonly systemSettings: SystemSettingsService,
     private readonly aiSettings: AiSettingsService,
+    private readonly aiProviderRegistry: AiProviderRegistry,
     private readonly faceSettings: FaceSettingsService,
     private readonly geoSettings: GeoSettingsService,
     private readonly storageSettings: StorageSettingsService,
@@ -150,6 +152,11 @@ export class DoctorService {
         key: 'ai.pictureEnhancer',
         label: 'AI picture enhancer',
         fn: () => this.checkPictureEnhancer(settings),
+      },
+      {
+        key: 'ai.videoTagging',
+        label: 'Video AI tagging',
+        fn: () => this.checkVideoTagging(settings),
       },
       // Face
       { key: 'face.detection', label: 'Face detection provider', fn: () => this.checkFaceDetection(settings) },
@@ -240,6 +247,7 @@ export class DoctorService {
           'ai.socialMedia',
           'ai.duplicateDetection',
           'ai.pictureEnhancer',
+          'ai.videoTagging',
         ],
       },
       {
@@ -927,6 +935,121 @@ export class DoctorService {
     };
   }
 
+  /**
+   * Video AI tagging readiness (epic #452, issue #457).
+   *
+   * The status ladder distinguishes the two independent cost levers: the
+   * VISUAL pass is required (no tagging model ⇒ error, since the job cannot
+   * run at all), while TRANSCRIPTION is an optional enrichment (misconfigured
+   * ⇒ warning, because the job still runs visual-only rather than failing).
+   * Reporting both as errors would make an admin chase a transcription
+   * credential to fix a feature that is, in fact, already working.
+   */
+  private async checkVideoTagging(settings: ResolvedSettings): Promise<CheckOutcome> {
+    if (settings.features?.['autoTagging'] !== true) {
+      return { status: 'skipped', message: 'Auto-tagging is disabled.' };
+    }
+    if (settings.autoTagging?.video?.enabled !== true) {
+      return { status: 'skipped', message: 'Video AI tagging is disabled.' };
+    }
+    // Video tagging rides on AUTO_TAG_ENABLED — it has no kill-switch of its
+    // own, exactly as video face detection rides on FACE_AUTO_DETECT.
+    if (process.env['AUTO_TAG_ENABLED'] === 'false') {
+      return {
+        status: 'warning',
+        message: 'Video AI tagging is enabled in settings but AUTO_TAG_ENABLED=false overrides it.',
+        actionItem: 'Remove or set AUTO_TAG_ENABLED=true.',
+      };
+    }
+
+    // --- Visual pass: required. ---
+    const tagging = settings.ai?.features?.tagging;
+    if (!tagging?.provider || !tagging?.model) {
+      return {
+        status: 'error',
+        message: 'Video AI tagging is enabled but no tagging provider/model is selected.',
+        actionItem: 'Select a tagging provider and model in Admin Settings → AI.',
+      };
+    }
+
+    const taggingCred = await this.prisma.aiProviderCredential.findUnique({
+      where: { provider: tagging.provider },
+    });
+    if (!taggingCred || !taggingCred.enabled) {
+      return {
+        status: 'error',
+        message: `No enabled ${tagging.provider} credential configured for tagging.`,
+        actionItem: `Enable a ${tagging.provider} credential in Admin Settings → AI.`,
+      };
+    }
+
+    // --- Transcription: optional, degrades to visual-only. ---
+    const transcriptionOn = settings.autoTagging?.video?.transcription?.enabled === true;
+    if (transcriptionOn) {
+      const transcription = (settings.ai?.features as { transcription?: { provider?: string; model?: string } | null })
+        ?.transcription;
+      if (!transcription?.provider || !transcription?.model) {
+        return {
+          status: 'warning',
+          message:
+            'Transcription is enabled but no transcription provider/model is selected — videos will be tagged visual-only.',
+          actionItem: 'Select a transcription model in Admin Settings → AI, or turn transcription off.',
+        };
+      }
+
+      const transcriptionCred = await this.prisma.aiProviderCredential.findUnique({
+        where: { provider: transcription.provider },
+      });
+      if (!transcriptionCred || !transcriptionCred.enabled) {
+        return {
+          status: 'warning',
+          message: `No enabled ${transcription.provider} credential for transcription — videos will be tagged visual-only.`,
+          actionItem: `Enable a ${transcription.provider} credential in Admin Settings → AI.`,
+        };
+      }
+
+      // A provider with no audio capability (Anthropic) is a real
+      // misconfiguration, but a benign one at runtime: `transcribeAudio?` is
+      // simply absent and the pipeline proceeds visual-only.
+      const providerInstance = this.safeGetAiProvider(transcription.provider);
+      if (providerInstance && typeof providerInstance.transcribeAudio !== 'function') {
+        return {
+          status: 'warning',
+          message: `Provider "${transcription.provider}" has no audio capability — videos will be tagged visual-only.`,
+          actionItem: 'Select an OpenAI transcription model in Admin Settings → AI.',
+        };
+      }
+
+      const maxFrames = settings.autoTagging?.video?.maxFrames ?? 6;
+      const leadSeconds = settings.autoTagging?.video?.transcription?.leadSeconds ?? 30;
+      return {
+        status: 'ok',
+        message:
+          `Video AI tagging ready (${tagging.provider}/${tagging.model}, ${maxFrames} frames/video) ` +
+          `with transcription (${transcription.provider}/${transcription.model}, first ${leadSeconds}s).`,
+      };
+    }
+
+    const maxFrames = settings.autoTagging?.video?.maxFrames ?? 6;
+    return {
+      status: 'ok',
+      message: `Video AI tagging ready (${tagging.provider}/${tagging.model}, ${maxFrames} frames/video, visual-only).`,
+    };
+  }
+
+  /**
+   * Resolve an AI provider without throwing for an unknown key — the registry
+   * throws, and a Doctor check must report a misconfiguration rather than
+   * become one.
+   */
+  private safeGetAiProvider(providerKey: string): { transcribeAudio?: unknown } | null {
+    try {
+      return this.aiProviderRegistry.get(providerKey) as { transcribeAudio?: unknown };
+    } catch {
+      return null;
+    }
+  }
+
   // ===========================================================================
   // Face checks
   // ===========================================================================
@@ -1007,7 +1130,7 @@ export class DoctorService {
    * Heavy media-compute job types a healthy external worker node must serve
    * for a fleet to substitute for the in-process worker (mode 'system'/'off').
    */
-  private static readonly NODE_HEAVY_MEDIA_TYPES = ['face_detection', 'auto_tagging'];
+  private static readonly NODE_HEAVY_MEDIA_TYPES = ['face_detection', 'auto_tagging', 'video_auto_tagging'];
 
   /**
    * Cheap DB read: online nodes with a fresh heartbeat (same staleness window
@@ -1442,11 +1565,12 @@ export class DoctorService {
       onnxruntime: ['duplicate_detection', 'duplicate_detection_batch'],
       ocr: ['social_media_detection'],
       tesseract: ['social_media_detection'],
-      ffprobe: ['video_face_detection', 'social_media_detection'],
-      ffmpeg: ['video_face_detection', 'social_media_detection'],
+      ffprobe: ['video_face_detection', 'social_media_detection', 'video_auto_tagging'],
+      ffmpeg: ['video_face_detection', 'social_media_detection', 'video_auto_tagging'],
       sharp: [
         'face_detection',
         'auto_tagging',
+        'video_auto_tagging',
         'duplicate_detection',
         'duplicate_detection_batch',
         'thumbnail_regen',
