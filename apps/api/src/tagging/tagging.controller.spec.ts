@@ -58,11 +58,13 @@ function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
 function makeMediaItem(overrides: Partial<{
   id: string;
   circleId: string;
+  type: MediaType;
   deletedAt: Date | null;
 }> = {}) {
   return {
     id: 'media-1',
     circleId: 'circle-1',
+    type: MediaType.photo,
     deletedAt: null,
     ...overrides,
   };
@@ -126,7 +128,39 @@ describe('TaggingController', () => {
       expect(result.data.status).toBe(JobStatus.pending);
     });
 
-    it('enqueues with type auto_tagging, reason rerun, and priority 0', async () => {
+    // -----------------------------------------------------------------------
+    // Issue #458: this endpoint had NO type guard at all, so a video id
+    // enqueued an `auto_tagging` job the handler then failed.
+    // -----------------------------------------------------------------------
+    it('routes a VIDEO to video_auto_tagging', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ type: MediaType.video }),
+      );
+      (mockPrisma.mediaTagStatus.upsert as jest.Mock).mockResolvedValue({});
+
+      await controller.rerunTagging('media-1', makeUser());
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'video_auto_tagging', priority: 0 }),
+      );
+    });
+
+    it('marks the tag status pending for a video too, so the UI badge reflects the queued rerun', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ type: MediaType.video }),
+      );
+      (mockPrisma.mediaTagStatus.upsert as jest.Mock).mockResolvedValue({});
+
+      await controller.rerunTagging('media-1', makeUser());
+
+      expect(mockPrisma.mediaTagStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ status: MediaTagStatusType.pending }),
+        }),
+      );
+    });
+
+    it('enqueues with type auto_tagging (photo), reason rerun, and priority 0', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem(),
       );

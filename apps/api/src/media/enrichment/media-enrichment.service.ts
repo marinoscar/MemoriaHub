@@ -28,7 +28,10 @@ export interface EnrichmentMediaItem {
  * Routing rules:
  *   - Soft-deleted items (deletedAt non-null) are skipped regardless of type.
  *   - Photos → auto_tagging (priority 20), face_detection (priority 10), burst_detection (priority 10).
- *   - Videos → video_face_detection (priority 20) when faceRecognition + face.video.enabled.
+ *   - Videos → video_face_detection (priority 20) when faceRecognition + face.video.enabled,
+ *     and video_auto_tagging (priority 20) when autoTagging + autoTagging.video.enabled.
+ *     Both ride the post-social-media-detection fan-out, so a TikTok re-share is
+ *     never sent to the vision model.
  *   - Other types are silently skipped.
  *   - Each feature has an environment kill-switch AND a system-settings flag.
  *   - EnrichmentJobService.enqueue is idempotent (deduplicates pending/running).
@@ -278,48 +281,101 @@ export class MediaEnrichmentService {
       // Reuse the caller's already-resolved settings when provided (upload path)
       // to avoid a redundant read; the social handler calls without them.
       const settings = resolvedSettings ?? (await this.systemSettings.getSettings());
+      const priority =
+        reason === JobReason.rerun ? 0 : reason === JobReason.backfill ? 100 : 20;
+      const enqueued: string[] = [];
+
+      // --- Video face detection ---
       const faceOn = settings.features?.['faceRecognition'] === true;
       const videoFaceOn = settings.face?.video?.enabled !== false;
       const faceKilled = (process.env['FACE_AUTO_DETECT'] ?? 'true') === 'false';
 
-      if (!faceOn || faceKilled || !videoFaceOn) {
+      if (faceOn && !faceKilled && videoFaceOn) {
+        const job = await this.enrichmentJobService.enqueue({
+          type: 'video_face_detection',
+          mediaItemId: item.id,
+          circleId: item.circleId,
+          reason,
+          priority,
+        });
+
+        await this.prisma.mediaFaceStatus.upsert({
+          where: { mediaItemId: item.id },
+          create: {
+            mediaItemId: item.id,
+            status: MediaFaceStatusType.pending,
+            faceCount: 0,
+          },
+          update: {
+            status: MediaFaceStatusType.pending,
+          },
+        });
+
+        enqueued.push(`video_face_detection(job=${job.id})`);
+      } else {
         const why = !faceOn
           ? 'feature disabled'
           : faceKilled
             ? 'FACE_AUTO_DETECT=false'
             : 'face.video.enabled=false';
         this.logger.debug(
-          `MediaItem ${item.id} (video) post-detection enrichment skipped: ${why}`,
+          `MediaItem ${item.id} (video) video_face_detection skipped: ${why}`,
         );
-        return;
       }
 
-      const priority =
-        reason === JobReason.rerun ? 0 : reason === JobReason.backfill ? 100 : 20;
+      // --- Video AI tagging (epic #452, issue #458) ---
+      //
+      // Deliberately part of the post-detection fan-out rather than enqueued
+      // directly at upload: `social_media_detection` withholds video
+      // enrichment until a video is classified, so routing through here means
+      // a TikTok/Instagram re-share is NEVER sent to the vision model —
+      // cheaper and more correct. Gated on autoTagging + AUTO_TAG_ENABLED +
+      // autoTagging.video.enabled, all read from the one settings object the
+      // caller already resolved.
+      const taggingOn = settings.features?.['autoTagging'] === true;
+      const videoTaggingOn = (settings as { autoTagging?: { video?: { enabled?: boolean } } })
+        .autoTagging?.video?.enabled === true;
+      const autoTagKilled = process.env['AUTO_TAG_ENABLED'] === 'false';
 
-      const job = await this.enrichmentJobService.enqueue({
-        type: 'video_face_detection',
-        mediaItemId: item.id,
-        circleId: item.circleId,
-        reason,
-        priority,
-      });
-
-      await this.prisma.mediaFaceStatus.upsert({
-        where: { mediaItemId: item.id },
-        create: {
+      if (taggingOn && !autoTagKilled && videoTaggingOn) {
+        const job = await this.enrichmentJobService.enqueue({
+          type: 'video_auto_tagging',
           mediaItemId: item.id,
-          status: MediaFaceStatusType.pending,
-          faceCount: 0,
-        },
-        update: {
-          status: MediaFaceStatusType.pending,
-        },
-      });
+          circleId: item.circleId,
+          reason,
+          priority,
+        });
 
-      this.logger.log(
-        `MediaItem ${item.id} (video) post-detection enrichment: enqueued video_face_detection(job=${job.id}, reason=${reason}, priority=${priority})`,
-      );
+        await this.prisma.mediaTagStatus.upsert({
+          where: { mediaItemId: item.id },
+          create: {
+            mediaItemId: item.id,
+            circleId: item.circleId,
+            status: MediaTagStatusType.pending,
+            tagCount: 0,
+          },
+          update: {
+            status: MediaTagStatusType.pending,
+          },
+        });
+
+        enqueued.push(`video_auto_tagging(job=${job.id})`);
+      } else {
+        const why = !taggingOn
+          ? 'feature disabled'
+          : autoTagKilled
+            ? 'AUTO_TAG_ENABLED=false'
+            : 'autoTagging.video.enabled=false';
+        this.logger.debug(
+          `MediaItem ${item.id} (video) video_auto_tagging skipped: ${why}`,
+        );
+      }
+
+      if (enqueued.length > 0) {
+        this.logger.log(
+          `MediaItem ${item.id} (video) post-detection enrichment: enqueued ${enqueued.join(', ')} (reason=${reason}, priority=${priority})`,
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
@@ -341,12 +397,29 @@ export class MediaEnrichmentService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Re-enqueue auto-tagging for a single item and mark its tag status pending.
-   * Mirrors TaggingController.rerunTagging.
+   * Re-enqueue AI tagging for a single item and mark its tag status pending.
+   *
+   * Routes to `video_auto_tagging` for videos and `auto_tagging` otherwise —
+   * mirroring `enqueueFaceRerun` below, which has always branched this way.
+   * Before issue #458 this enqueued `auto_tagging` unconditionally, so any
+   * caller handed a video produced a job the handler then failed.
+   *
+   * `type` is optional so a caller that already knows it avoids a lookup; when
+   * absent it is resolved here, which keeps every call site correct by default
+   * rather than correct only if it remembered to pass one.
    */
-  async enqueueTagRerun(item: { id: string; circleId: string }): Promise<void> {
+  async enqueueTagRerun(item: { id: string; circleId: string; type?: MediaType }): Promise<void> {
+    const type =
+      item.type ??
+      (
+        await this.prisma.mediaItem.findUnique({
+          where: { id: item.id },
+          select: { type: true },
+        })
+      )?.type;
+
     await this.enrichmentJobService.enqueue({
-      type: 'auto_tagging',
+      type: type === MediaType.video ? 'video_auto_tagging' : 'auto_tagging',
       mediaItemId: item.id,
       circleId: item.circleId,
       reason: JobReason.rerun,

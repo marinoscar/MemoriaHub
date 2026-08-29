@@ -33,6 +33,9 @@ function TaggingSettingsContent() {
   const [backfillFrom, setBackfillFrom] = useState('');
   const [backfillTo, setBackfillTo] = useState('');
   const [backfillForce, setBackfillForce] = useState(false);
+  // Videos are opt-in: the default backfill must not surprise an admin with an
+  // AI call for every video in the library.
+  const [backfillIncludeVideos, setBackfillIncludeVideos] = useState(false);
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillResult, setBackfillResult] = useState<GlobalBackfillResult | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
@@ -77,6 +80,7 @@ function TaggingSettingsContent() {
       from: backfillFrom || undefined,
       to: backfillTo || undefined,
       force: backfillForce,
+      mediaTypes: backfillIncludeVideos ? ['photo', 'video'] : ['photo'],
     })
       .then((result) => setBackfillResult(result))
       .catch((err: unknown) => {
@@ -264,8 +268,8 @@ function TaggingSettingsContent() {
             Run Backfill on All Circles
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Queue AI tagging for unprocessed (or all, if forced) photos across every circle that has
-            auto-tagging enabled.
+            Queue AI tagging for unprocessed (or all, if forced) media across every circle that has
+            auto-tagging enabled. Photos only unless you opt videos in below.
           </Typography>
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
@@ -297,8 +301,25 @@ function TaggingSettingsContent() {
               />
             }
             label="Force re-tag all"
-            sx={{ mb: 2, display: 'block' }}
+            sx={{ display: 'block' }}
           />
+
+          <FormControlLabel
+            control={
+              <Switch
+                checked={backfillIncludeVideos}
+                onChange={(e) => setBackfillIncludeVideos(e.target.checked)}
+                disabled={!videoEnabled}
+              />
+            }
+            label="Include videos"
+            sx={{ display: 'block' }}
+          />
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {videoEnabled
+              ? `Off by default. Each video costs one AI call with ${maxFrames} frames, so a whole-library run can be a large, one-off bill.`
+              : 'Turn on video AI tagging above to back-fill videos.'}
+          </Typography>
 
           {backfillResult && (
             <Alert severity="success" sx={{ mb: 2 }}>

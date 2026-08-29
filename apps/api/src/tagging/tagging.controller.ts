@@ -13,7 +13,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { CircleRole, JobReason, MediaTagStatusType } from '@prisma/client';
+import { CircleRole, JobReason, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -57,8 +57,14 @@ export class TaggingController {
       'collaborator' as CircleRole,
     );
 
+    // Route by media type (epic #452, issue #458). This endpoint previously
+    // had NO type guard at all, so a video id enqueued an `auto_tagging` job
+    // the handler then failed.
+    const jobType =
+      mediaItem.type === MediaType.video ? 'video_auto_tagging' : 'auto_tagging';
+
     const job = await this.enrichmentJobService.enqueue({
-      type: 'auto_tagging',
+      type: jobType,
       mediaItemId,
       circleId: mediaItem.circleId,
       reason: JobReason.rerun,
@@ -79,7 +85,7 @@ export class TaggingController {
     });
 
     this.logger.log(
-      `Rerun auto-tagging job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${user.id}`,
+      `Rerun ${jobType} job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${user.id}`,
     );
 
     return { data: { jobId: job.id, status: job.status } };
@@ -128,10 +134,10 @@ export class TaggingController {
     mediaItemId: string,
     user: RequestUser,
     requiredRole: CircleRole = 'viewer' as CircleRole,
-  ): Promise<{ id: string; circleId: string }> {
+  ): Promise<{ id: string; circleId: string; type: MediaType }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
-      select: { id: true, circleId: true, deletedAt: true },
+      select: { id: true, circleId: true, type: true, deletedAt: true },
     });
 
     if (!mediaItem || mediaItem.deletedAt) {
@@ -145,6 +151,6 @@ export class TaggingController {
       requiredRole,
     );
 
-    return { id: mediaItem.id, circleId: mediaItem.circleId };
+    return { id: mediaItem.id, circleId: mediaItem.circleId, type: mediaItem.type };
   }
 }
