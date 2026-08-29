@@ -8,7 +8,8 @@
 // from any job immediately backs off all sibling jobs of the same kind.
 //
 // Provider key mapping (coarse, by job type):
-//   auto_tagging   → 'tagging'   (single AI tagging provider configured at a time)
+//   auto_tagging       → 'tagging'   (single AI tagging provider configured at a time)
+//   video_auto_tagging → 'tagging'   (same provider quota as the photo path)
 //   geocode        → 'geocode'   (single reverse-geocode provider at a time)
 //   face_detection → 'face'      (compreface — the only face provider)
 //   all others     → null        (not throttled: storage, insights, trash, etc.)
@@ -73,6 +74,9 @@ export class ProviderThrottleService {
   static resolveKey(jobType: string): string | null {
     switch (jobType) {
       case 'auto_tagging':
+      // Video tagging calls the SAME configured tagging provider, so it must
+      // share the photo path's cooldown gate rather than getting its own.
+      case 'video_auto_tagging':
         return 'tagging';
       case 'geocode':
         return 'geocode';

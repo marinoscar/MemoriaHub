@@ -8,6 +8,8 @@ import { SettingsModule } from '../settings/settings.module';
 import { MediaTouchModule } from '../media/media-touch.module';
 import { AutoTaggingHandler } from './auto-tagging.handler';
 import { AutoTaggingService } from './auto-tagging.service';
+import { VideoAutoTaggingHandler } from './video-auto-tagging.handler';
+import { VideoAutoTaggingService } from './video-auto-tagging.service';
 import { TaggingController } from './tagging.controller';
 import { TagLabelsController } from './tag-labels.controller';
 import { TagLabelsService } from './tag-labels.service';
@@ -17,7 +19,14 @@ import { AdminTaggingController } from './admin-tagging.controller';
 @Module({
   imports: [EnrichmentModule, AiModule, StorageProvidersModule, PrismaModule, CirclesModule, SettingsModule, MediaTouchModule],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
-  providers: [AutoTaggingHandler, AutoTaggingService, TagLabelsService, TaggingBackfillService],
-  exports: [AutoTaggingService],
+  providers: [
+    AutoTaggingHandler,
+    AutoTaggingService,
+    VideoAutoTaggingHandler,
+    VideoAutoTaggingService,
+    TagLabelsService,
+    TaggingBackfillService,
+  ],
+  exports: [AutoTaggingService, VideoAutoTaggingService],
 })
 export class TaggingModule {}

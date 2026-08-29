@@ -149,7 +149,13 @@ const VIDEO_JOB_TIMEOUT_MS = getEnvInt('ENRICHMENT_VIDEO_JOB_TIMEOUT_MS', 1_200_
 const LEASE_MS = getEnvInt('ENRICHMENT_LEASE_MS', 1_800_000); // 30 min
 
 /** Job types governed by the video timeout override. */
-const VIDEO_JOB_TYPES = new Set(['video_face_detection', 'social_media_detection']);
+const VIDEO_JOB_TYPES = new Set([
+  'video_face_detection',
+  'social_media_detection',
+  // Frame extraction + N prepared images + one multi-image AI call on a
+  // multi-GB download legitimately exceeds the 10-minute global default.
+  'video_auto_tagging',
+]);
 
 /** Resolve the effective execution timeout (ms) for a job type. */
 function timeoutMsForType(type: string): number {

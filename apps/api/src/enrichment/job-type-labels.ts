@@ -16,6 +16,7 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   face_detection: 'Face detection',
   video_face_detection: 'Video face detection',
   auto_tagging: 'Auto-tagging',
+  video_auto_tagging: 'Video auto-tagging',
   geocode: 'Geocoding',
   duplicate_detection: 'Duplicate detection',
   duplicate_detection_batch: 'Duplicate detection (batch)',
