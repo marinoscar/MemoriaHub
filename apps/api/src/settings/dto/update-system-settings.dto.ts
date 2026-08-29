@@ -79,6 +79,13 @@ export const patchSystemSettingsSchema = z.object({
             })
             .nullable()
             .optional(),
+          transcription: z
+            .object({
+              provider: z.string(),
+              model: z.string(),
+            })
+            .nullable()
+            .optional(),
         })
         .optional(),
     })

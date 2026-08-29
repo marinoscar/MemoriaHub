@@ -47,6 +47,15 @@ export const setMemoriesFeatureSchema = z.object({
 });
 export class SetMemoriesFeatureDto extends createZodDto(setMemoriesFeatureSchema) {}
 
+// Speech-to-text for video auto-tagging (epic #452, issue #454). Same
+// nullable pair shape as `enhance`/`memories` — a half-filled provider/model
+// pair is not a usable selection.
+export const setTranscriptionFeatureSchema = z.object({
+  provider: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+});
+export class SetTranscriptionFeatureDto extends createZodDto(setTranscriptionFeatureSchema) {}
+
 // Both fields optional — an empty body tests the configured ai.features.embedding.
 // .default({}) so a bodyless POST parses as {} — see issue #289 (app.module.ts).
 export const testEmbeddingSchema = z.object({

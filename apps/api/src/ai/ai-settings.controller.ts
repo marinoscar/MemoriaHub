@@ -27,6 +27,7 @@ import {
   SetEmbeddingFeatureDto,
   SetEnhanceFeatureDto,
   SetMemoriesFeatureDto,
+  SetTranscriptionFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
@@ -105,13 +106,15 @@ export class AiSettingsController {
     description:
       'When capability=embedding, returns embedding model IDs instead of chat model IDs. ' +
       'When capability=image, returns image-edit (enhancement) model IDs. ' +
+      'When capability=transcription, returns speech-to-text model IDs. ' +
       'Providers that do not support the requested capability return an empty array.',
   })
   @ApiQuery({ name: 'provider', required: true, description: 'Provider key' })
   @ApiQuery({
     name: 'capability',
     required: false,
-    description: 'Model capability filter: "chat" (default) | "embedding" | "image"',
+    description:
+      'Model capability filter: "chat" (default) | "embedding" | "image" | "transcription"',
   })
   @ApiResponse({ status: 200, description: 'List of model IDs' })
   async listModels(
@@ -123,6 +126,9 @@ export class AiSettingsController {
     }
     if (capability === 'image') {
       return this.aiSettingsService.listImageModels(provider);
+    }
+    if (capability === 'transcription') {
+      return this.aiSettingsService.listTranscriptionModels(provider);
     }
     return this.aiSettingsService.listModels(provider);
   }
@@ -201,5 +207,30 @@ export class AiSettingsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.aiSettingsService.setMemoriesFeature(dto, userId);
+  }
+
+  @Put('features/transcription')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @ApiOperation({
+    summary:
+      'Set active provider and model for video audio transcription (Admin)',
+    description:
+      'Speech-to-text provider/model used by video auto-tagging to transcribe the ' +
+      'opening seconds of a video (epic #452). List candidates with ' +
+      'GET /api/ai/models?capability=transcription — OpenAI-only in v1. Passing a ' +
+      'null provider or model clears the selection, in which case video tagging ' +
+      'runs visual-only. Returns 400 when the selected provider has no configured, ' +
+      'enabled credential.',
+  })
+  @ApiResponse({ status: 200, description: 'Transcription feature config updated' })
+  @ApiResponse({
+    status: 400,
+    description: 'Provider is not configured or is disabled',
+  })
+  async setTranscriptionFeature(
+    @Body() dto: SetTranscriptionFeatureDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.aiSettingsService.setTranscriptionFeature(dto, userId);
   }
 }

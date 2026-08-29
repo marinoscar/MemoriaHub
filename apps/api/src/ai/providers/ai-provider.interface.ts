@@ -110,6 +110,22 @@ export interface EnhanceImageResult {
   mimeType: string;
 }
 
+export interface TranscribeAudioRequest {
+  model: string;
+  /** Encoded audio bytes. Bounded by the caller — see `extractAudioLead`. */
+  audio: Buffer;
+  /** MIME type of `audio`, e.g. 'audio/mp4'. */
+  mimeType: string;
+  /** Optional ISO-639-1 hint; omit to let the model detect the language. */
+  language?: string;
+}
+
+export interface TranscribeAudioResult {
+  text: string;
+  /** Detected or declared language, when the provider reports one. */
+  language?: string;
+}
+
 export interface AiProvider {
   /** Unique key identifying this provider, e.g. 'openai' | 'anthropic' */
   readonly key: string;
@@ -131,4 +147,18 @@ export interface AiProvider {
    * capability implement it (OpenAI only in v1). Returns the enhanced bytes.
    */
   enhanceImage?(creds: AiProviderCredentials, req: EnhanceImageRequest): Promise<EnhanceImageResult>;
+  /**
+   * Speech-to-text. Optional — only providers with an audio capability
+   * implement it (OpenAI only in v1); Anthropic has none, so the method is
+   * simply ABSENT there rather than throwing, exactly like `embedText?` and
+   * `enhanceImage?`.
+   *
+   * Callers check `typeof provider.transcribeAudio === 'function'` and
+   * proceed without a transcript when it is missing — video auto-tagging
+   * degrades to visual-only rather than failing.
+   */
+  transcribeAudio?(
+    creds: AiProviderCredentials,
+    req: TranscribeAudioRequest,
+  ): Promise<TranscribeAudioResult>;
 }

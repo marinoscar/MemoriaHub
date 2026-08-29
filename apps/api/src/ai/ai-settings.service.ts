@@ -16,6 +16,7 @@ import {
   SetEmbeddingFeatureDto,
   SetEnhanceFeatureDto,
   SetMemoriesFeatureDto,
+  SetTranscriptionFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
 
@@ -175,6 +176,19 @@ export class AiSettingsService {
       return [];
     }
     return (provider as any).listEmbeddingModels() as string[];
+  }
+
+  /**
+   * List speech-to-text models for a provider (epic #452, issue #454).
+   * Returns an empty array for providers with no audio capability.
+   */
+  async listTranscriptionModels(providerKey: string): Promise<string[]> {
+    // Validate the provider key — registry.get throws for unknown providers.
+    const provider = this.registry.get(providerKey);
+    if (typeof (provider as any).listTranscriptionModels !== 'function') {
+      return [];
+    }
+    return (provider as any).listTranscriptionModels() as string[];
   }
 
   /**
@@ -363,6 +377,51 @@ export class AiSettingsService {
       userId,
     );
     return value;
+  }
+
+  /**
+   * Update the video-transcription feature config (epic #452, issue #454).
+   *
+   * Same nullable-object shape and up-front credential validation as
+   * `setMemoriesFeature` above, for the same reason: a bad selection here
+   * would otherwise only ever surface inside an unattended
+   * `video_auto_tagging` job, where the admin never sees the error.
+   */
+  async setTranscriptionFeature(dto: SetTranscriptionFeatureDto, userId: string) {
+    const value =
+      dto.provider && dto.model
+        ? { provider: dto.provider, model: dto.model }
+        : null;
+
+    if (value) {
+      await this.assertProviderUsable(value.provider);
+    }
+
+    await this.systemSettings.patchSettings(
+      {
+        ai: {
+          features: {
+            transcription: value,
+          },
+        },
+      } as any,
+      userId,
+    );
+    return value;
+  }
+
+  /**
+   * Resolve the active transcription provider + model from system settings.
+   * Returns null when unset — callers run visual-only rather than failing
+   * (epic #452, issue #454).
+   */
+  async resolveTranscriptionConfig(): Promise<{ provider: string; model: string } | null> {
+    const sysSettings = await this.systemSettings.getSettings();
+    const transcription = (sysSettings.ai?.features as any)?.transcription;
+    if (!transcription?.provider || !transcription?.model) {
+      return null;
+    }
+    return { provider: transcription.provider, model: transcription.model };
   }
 
   /**

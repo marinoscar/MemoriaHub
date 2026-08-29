@@ -516,8 +516,20 @@ export class AutoTaggingService {
     peopleNames: string[],
   ): Promise<void> {
     try {
+      // A video's transcript (epic #452, issue #454) joins the same embedding
+      // text as description/tags/people. That is the ENTIRE "make speech
+      // searchable" change — no new search field, index, or endpoint —
+      // `semanticQuery` starts matching spoken content for free. Photos never
+      // have a transcript row, so this read is a miss on the photo path.
+      //
+      // Isolated try/catch rather than relying on the outer one: a failed
+      // transcript read must degrade to "no transcript", not to "no
+      // embedding at all", which is what falling through to the outer catch
+      // would silently do.
+      const transcriptText = await this.readTranscriptText(mediaItemId);
+
       // Build text from all available signals
-      const text = [description, ...tagNames, ...peopleNames]
+      const text = [description, ...tagNames, ...peopleNames, transcriptText]
         .filter(Boolean)
         .join('. ');
       if (!text) {
@@ -579,6 +591,28 @@ export class AutoTaggingService {
         `AutoTagging embedAndStore: embedding failed for MediaItem ${mediaItemId} — ${err instanceof Error ? err.message : String(err)}`,
       );
       // Swallow the error — embedding failure must not fail the tagging job
+    }
+  }
+
+  /**
+   * Read a media item's transcript text, if one exists (epic #452, issue #454).
+   *
+   * Never throws: a transcript is an enrichment of the embedding text, not a
+   * precondition for it, so any failure resolves to `null` and the embedding
+   * proceeds from description/tags/people alone.
+   */
+  private async readTranscriptText(mediaItemId: string): Promise<string | null> {
+    try {
+      const row = await this.prisma.mediaTranscript.findUnique({
+        where: { mediaItemId },
+        select: { text: true },
+      });
+      return row?.text ?? null;
+    } catch (err) {
+      this.logger.warn(
+        `AutoTagging embedAndStore: transcript lookup failed for MediaItem ${mediaItemId} — ${err instanceof Error ? err.message : String(err)}; embedding without it`,
+      );
+      return null;
     }
   }
 

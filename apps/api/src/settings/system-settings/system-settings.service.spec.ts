@@ -129,7 +129,7 @@ describe('SystemSettingsService', () => {
       const expectedParsed = {
         ...newSettings,
         ai: {
-          features: { ...newSettings.ai.features, enhance: null, memories: null },
+          features: { ...newSettings.ai.features, enhance: null, memories: null, transcription: null },
         },
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
@@ -239,7 +239,7 @@ describe('SystemSettingsService', () => {
       const expectedValidated = {
         ...newSettings,
         ai: {
-          features: { ...newSettings.ai.features, enhance: null, memories: null },
+          features: { ...newSettings.ai.features, enhance: null, memories: null, transcription: null },
         },
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,

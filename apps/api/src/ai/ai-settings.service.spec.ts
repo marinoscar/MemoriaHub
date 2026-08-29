@@ -12,6 +12,7 @@ import { AiProviderRegistry } from './providers/ai-provider.registry';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { encryptSecret } from '../common/crypto/secret-cipher';
+import { patchSystemSettingsSchema } from '../settings/dto/update-system-settings.dto';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -419,6 +420,141 @@ describe('AiSettingsService', () => {
         expect.objectContaining({ ai: { features: { memories: null } } }),
         'user-1',
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // setTranscriptionFeature / resolveTranscriptionConfig (epic #452, issue #454)
+  // ---------------------------------------------------------------------------
+  describe('setTranscriptionFeature', () => {
+    it('persists the provider/model pair when the credential exists and is enabled', async () => {
+      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
+        enabled: true,
+      } as any);
+      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+
+      const result = await service.setTranscriptionFeature(
+        { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+        'user-1',
+      );
+
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ai: {
+            features: {
+              transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+            },
+          },
+        }),
+        'user-1',
+      );
+      expect(result).toEqual({ provider: 'openai', model: 'gpt-4o-mini-transcribe' });
+    });
+
+    it('rejects a provider with no configured credential (400) — a bad selection would otherwise only surface inside an unattended job', async () => {
+      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.setTranscriptionFeature(
+          { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockSystemSettings.patchSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects a provider whose credential is DISABLED (400)', async () => {
+      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
+        enabled: false,
+      } as any);
+
+      await expect(
+        service.setTranscriptionFeature(
+          { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockSystemSettings.patchSettings).not.toHaveBeenCalled();
+    });
+
+    it('clears the selection to null when either field is null — no credential check', async () => {
+      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+
+      const result = await service.setTranscriptionFeature(
+        { provider: 'openai', model: null },
+        'user-1',
+      );
+
+      expect(result).toBeNull();
+      expect(mockPrisma.aiProviderCredential.findUnique).not.toHaveBeenCalled();
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ ai: { features: { transcription: null } } }),
+        'user-1',
+      );
+    });
+  });
+
+  describe('resolveTranscriptionConfig', () => {
+    it('returns {provider, model} when configured', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: {
+          features: {
+            transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+          },
+        },
+      });
+
+      await expect(service.resolveTranscriptionConfig()).resolves.toEqual({
+        provider: 'openai',
+        model: 'gpt-4o-mini-transcribe',
+      });
+    });
+
+    it('returns null when unset, so video tagging runs visual-only rather than failing', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: { features: { transcription: null } },
+      });
+
+      await expect(service.resolveTranscriptionConfig()).resolves.toBeNull();
+    });
+
+    it('returns null for a half-filled pair — not a usable selection', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        ai: { features: { transcription: { provider: 'openai', model: null } } },
+      });
+
+      await expect(service.resolveTranscriptionConfig()).resolves.toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // The wire DTO is a hand-maintained THIRD copy of every settings namespace
+  // and strips unknown keys, so a namespace present only in the two zod
+  // schemas validates in unit tests while every real PATCH silently no-ops.
+  // See CLAUDE.md's "three hand-maintained copies" pitfall.
+  // ---------------------------------------------------------------------------
+  describe('ai.features.transcription is registered in the PATCH wire DTO', () => {
+    it('survives patchSystemSettingsSchema parsing rather than being stripped', () => {
+      const parsed = patchSystemSettingsSchema.parse({
+        ai: {
+          features: {
+            transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+          },
+        },
+      });
+
+      expect(parsed.ai?.features?.transcription).toEqual({
+        provider: 'openai',
+        model: 'gpt-4o-mini-transcribe',
+      });
+    });
+
+    it('accepts an explicit null (clearing the selection)', () => {
+      const parsed = patchSystemSettingsSchema.parse({
+        ai: { features: { transcription: null } },
+      });
+
+      expect(parsed.ai?.features?.transcription).toBeNull();
     });
   });
 

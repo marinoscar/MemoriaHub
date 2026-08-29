@@ -212,6 +212,15 @@ export interface SystemSettingsValue {
         provider: string;
         model: string;
       } | null;
+      /**
+       * Active speech-to-text provider+model for video auto-tagging (epic
+       * #452, issue #454); null when unset, in which case video tagging runs
+       * visual-only. OpenAI-only in v1 — Anthropic has no audio capability.
+       */
+      transcription?: {
+        provider: string;
+        model: string;
+      } | null;
     };
   };
   face?: {
@@ -684,6 +693,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       embedding: { provider: null, model: null },
       enhance: null,
       memories: null,
+      transcription: null,
     },
   },
   face: {

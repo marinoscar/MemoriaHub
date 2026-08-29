@@ -341,3 +341,98 @@ test('settles only once: a late "error" event fired as a side effect of kill() d
     restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// extractAudioLead (epic #452, issue #454)
+//
+// The cost bound for transcription: the FIRST `leadSeconds` of audio only, so
+// a 3-hour video and a 30-second clip cost the same. These tests reuse the
+// same scripted-spawn seam as the poster-frame ladder above.
+// ---------------------------------------------------------------------------
+
+test('extractAudioLead returns the encoded bytes and echoes the leadSeconds it was given', async () => {
+  const { restore, calls } = installFakeFfmpeg([{ kind: 'success', bytes: Buffer.from('fake-audio') }]);
+
+  try {
+    const { extractAudioLead } = await import('@memoriahub/enrichment-compute/video');
+
+    const result = await extractAudioLead(fakeVideoPath(), { leadSeconds: 30 });
+
+    assert.equal(result.buffer.toString(), 'fake-audio');
+    assert.equal(result.mimeType, 'audio/mp4');
+    assert.equal(result.leadSeconds, 30, 'leadSeconds is echoed so the caller can persist what was actually paid for');
+    assert.equal(calls.length, 1, 'exactly one ffmpeg invocation');
+  } finally {
+    restore();
+  }
+});
+
+test('extractAudioLead bounds the extraction with `-t <leadSeconds>` regardless of video duration', async () => {
+  const { restore, calls } = installFakeFfmpeg([{ kind: 'success' }]);
+
+  try {
+    const { extractAudioLead } = await import('@memoriahub/enrichment-compute/video');
+    await extractAudioLead(fakeVideoPath(), { leadSeconds: 30 });
+
+    const { args } = calls[0];
+    assert.equal(args[args.indexOf('-t') + 1], '30');
+    assert.ok(args.includes('-vn'), 'video stream must be dropped');
+    assert.deepEqual(
+      [args[args.indexOf('-ac') + 1], args[args.indexOf('-ar') + 1]],
+      ['1', '16000'],
+      'mono 16 kHz keeps the payload far under the provider request cap',
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('extractAudioLead unlinks its own temp output on success', async () => {
+  const { restore, calls } = installFakeFfmpeg([{ kind: 'success' }]);
+
+  try {
+    const { extractAudioLead } = await import('@memoriahub/enrichment-compute/video');
+    await extractAudioLead(fakeVideoPath(), { leadSeconds: 10 });
+
+    await assert.rejects(
+      () => fs.stat(calls[0].outputPath),
+      /ENOENT/,
+      'the module owns its outputs and must clean them up',
+    );
+    assert.match(calls[0].outputPath, /memoriaHub-audio-/, 'temp prefix must be reapable by TempFileJanitorTask');
+  } finally {
+    restore();
+  }
+});
+
+test('extractAudioLead throws when ffmpeg produces an empty file (e.g. a video with no audio track)', async () => {
+  const { restore, calls } = installFakeFfmpeg([{ kind: 'empty' }]);
+
+  try {
+    const { extractAudioLead } = await import('@memoriahub/enrichment-compute/video');
+
+    await assert.rejects(
+      () => extractAudioLead(fakeVideoPath(), { leadSeconds: 30 }),
+      /empty output file/,
+    );
+    await assert.rejects(() => fs.stat(calls[0].outputPath), /ENOENT/, 'temp file cleaned up on failure too');
+  } finally {
+    restore();
+  }
+});
+
+test('extractAudioLead SIGKILLs a hung ffmpeg and rejects with its own timeout message', async () => {
+  const { restore, calls } = installFakeFfmpeg([{ kind: 'hang' }]);
+
+  try {
+    const { extractAudioLead } = await import('@memoriahub/enrichment-compute/video');
+
+    await assert.rejects(
+      () => extractAudioLead(fakeVideoPath(), { leadSeconds: 30, ffmpegTimeoutMs: 30 }),
+      /audio extraction timed out after 30ms/,
+    );
+    assert.deepEqual(calls[0].killSignals, ['SIGKILL'], 'ffmpeg ignores SIGTERM mid-decode');
+  } finally {
+    restore();
+  }
+});

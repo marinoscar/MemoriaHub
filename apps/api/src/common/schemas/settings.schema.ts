@@ -507,6 +507,14 @@ export const systemSettingsSchema = z.object({
         provider: z.string(),
         model: z.string(),
       }).nullable().default(null),
+      // Speech-to-text for video auto-tagging (epic #452, issue #454).
+      // Same nullable-object shape as `enhance`/`memories`: a half-filled
+      // provider/model pair is not a valid selection. OpenAI-only in v1 —
+      // with this unset, video tagging runs visual-only rather than failing.
+      transcription: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).nullable().default(null),
     }),
   }),
   face: z.object({
@@ -862,6 +870,10 @@ export const systemSettingsPatchSchema = z.object({
         model: z.string(),
       }).nullable().optional(),
       memories: z.object({
+        provider: z.string(),
+        model: z.string(),
+      }).nullable().optional(),
+      transcription: z.object({
         provider: z.string(),
         model: z.string(),
       }).nullable().optional(),

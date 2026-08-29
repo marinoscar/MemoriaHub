@@ -980,6 +980,88 @@ describe('AutoTaggingService', () => {
       expect(mockPrisma.$executeRaw).toHaveBeenCalled();
     });
 
+    it('folds a video transcript into the embedded text alongside description/tags/people (#454)', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
+        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
+      mockRegistry.get
+        .mockReturnValueOnce(mockProvider)
+        .mockReturnValueOnce(mockAiProviderForEmbedding);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      (mockPrisma.mediaTranscript.findUnique as jest.Mock).mockResolvedValue({
+        text: 'happy birthday to you',
+      });
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([
+        { person: { name: 'Alice' } },
+      ]);
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      // This is the ENTIRE "make speech searchable" change — the transcript
+      // rides the existing embedding text, so semanticQuery matches spoken
+      // content with no new search field, index, or endpoint.
+      const embeddedText = mockAiProviderForEmbedding.embedText.mock.calls[0][2] as string;
+      expect(embeddedText).toContain('happy birthday to you');
+      expect(embeddedText).toContain('Sand.');
+      expect(embeddedText).toContain('Beach');
+      expect(embeddedText).toContain('Alice');
+    });
+
+    it('embeds without a transcript when the item has none (the photo path)', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
+        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
+      mockRegistry.get
+        .mockReturnValueOnce(mockProvider)
+        .mockReturnValueOnce(mockAiProviderForEmbedding);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      (mockPrisma.mediaTranscript.findUnique as jest.Mock).mockResolvedValue(null);
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
+      );
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockAiProviderForEmbedding.embedText.mock.calls[0][2]).toBe('Sand.. Beach');
+    });
+
+    it('still embeds when the transcript lookup itself fails — degrade, never skip', async () => {
+      mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+      });
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
+        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
+      mockRegistry.get
+        .mockReturnValueOnce(mockProvider)
+        .mockReturnValueOnce(mockAiProviderForEmbedding);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      (mockPrisma.mediaTranscript.findUnique as jest.Mock).mockRejectedValue(
+        new Error('transcripts table unreachable'),
+      );
+      mockProvider.analyzeImage.mockResolvedValue(
+        JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
+      );
+
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // A failed transcript read must cost the transcript, not the embedding.
+      expect(mockAiProviderForEmbedding.embedText).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+    });
+
     it('swallows embedText errors — tagging job still succeeds', async () => {
       mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
         provider: 'openai',
