@@ -106,9 +106,15 @@ export function AdminPageHeader({
       >
         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, minWidth: 0 }}>
           {icon ? (
-            // `0.15em` lines the glyph up with the first line's cap height. The
-            // icon must never shrink; the title is the only flexible child.
-            <Box sx={{ display: 'flex', flexShrink: 0, mt: '0.15em' }}>{icon}</Box>
+            /* Centres the 24px glyph on the title's FIRST line box, which is
+               `lineHeight (1.25) x fontSize`: (1.25 x 24 - 24) / 2 = 3px at
+               xs, (1.25 x 34.4 - 24) / 2 ~= 9px at sm. It cannot be one `em`
+               value — `em` here resolves against this Box's inherited 16px
+               body font, not the h1's — and it cannot be `alignItems: center`
+               on the row, which is the defect this whole component exists to
+               fix. Keep the two numbers in step with `fontSize` below.
+               `flexShrink: 0` because the title is the only flexible child. */
+            <Box sx={{ display: 'flex', flexShrink: 0, mt: { xs: '3px', sm: '9px' } }}>{icon}</Box>
           ) : null}
           <Typography
             variant="h4"
@@ -123,7 +129,14 @@ export function AdminPageHeader({
             {title}
           </Typography>
           {titleAdornment ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0, mt: '0.15em' }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                flexShrink: 0,
+                mt: { xs: '3px', sm: '9px' },
+              }}
+            >
               {titleAdornment}
             </Box>
           ) : null}
