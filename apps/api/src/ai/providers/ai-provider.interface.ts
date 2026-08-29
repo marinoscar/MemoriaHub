@@ -54,14 +54,36 @@ export type ChatStreamEvent =
   | { type: 'tool_call'; id: string; name: string; input: unknown }
   | { type: 'done'; stopReason?: string };
 
+export interface AnalyzeImageInputImage {
+  /** Raw base64-encoded image data — no `data:` URI prefix. */
+  base64: string;
+  /** MIME type, e.g. 'image/jpeg' */
+  mimeType: string;
+}
+
 export interface AnalyzeImageRequest {
   model: string;
   system?: string;
   prompt: string;
-  /** Raw base64-encoded image data — no `data:` URI prefix. */
-  imageBase64: string;
-  /** MIME type, e.g. 'image/jpeg' */
-  mimeType: string;
+  /**
+   * Single-image form. Ignored when `images` is present and non-empty.
+   * Optional only so the multi-image form can omit it — a request supplying
+   * neither form throws before any network call.
+   */
+  imageBase64?: string;
+  /** MIME type of `imageBase64`, e.g. 'image/jpeg' */
+  mimeType?: string;
+  /**
+   * Multi-image form — ORDERED; the model sees the images in array order.
+   * Lets video auto-tagging send N frames sampled across a video in ONE call
+   * (issue #453) rather than N calls. Takes precedence over `imageBase64`.
+   */
+  images?: AnalyzeImageInputImage[];
+  /**
+   * Per-request output token budget. Absent keeps each provider's existing
+   * default, so every pre-existing caller sends an unchanged request.
+   */
+  maxTokens?: number;
 }
 
 export interface EnhanceImageRequest {

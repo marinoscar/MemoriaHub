@@ -260,3 +260,114 @@ test('callOpenAiVision rethrows non-rate-limit errors unchanged (e.g. HTTP 400)'
     globalThis.fetch = originalFetch;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Multi-image support (issue #453)
+// ---------------------------------------------------------------------------
+
+test('callOpenAiVision emits the text block first, then one image_url block per `images` entry in array order', async () => {
+  const { callOpenAiVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const { captured, restore } = stubFetchOnce(makeOpenAiChatCompletionResponse('ok'));
+
+  try {
+    await callOpenAiVision(
+      { apiKey: 'sk-test-key' },
+      {
+        model: 'gpt-5-mini',
+        prompt: 'Summarize this video.',
+        images: [
+          { base64: 'ZnJhbWUtMA==', mimeType: 'image/jpeg' },
+          { base64: 'ZnJhbWUtMQ==', mimeType: 'image/png' },
+        ],
+      },
+    );
+
+    const [userMessage] = captured.body.messages;
+    assert.equal(userMessage.content.length, 3, 'one text block plus two image blocks');
+    assert.equal(userMessage.content[0].type, 'text');
+    assert.equal(userMessage.content[0].text, 'Summarize this video.');
+
+    assert.deepEqual(
+      userMessage.content.slice(1).map((b) => [b.type, b.image_url.url]),
+      [
+        ['image_url', 'data:image/jpeg;base64,ZnJhbWUtMA=='],
+        ['image_url', 'data:image/png;base64,ZnJhbWUtMQ=='],
+      ],
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('callOpenAiVision prefers a non-empty `images` array over the single-image fields', async () => {
+  const { callOpenAiVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const { captured, restore } = stubFetchOnce(makeOpenAiChatCompletionResponse('ok'));
+
+  try {
+    await callOpenAiVision(
+      { apiKey: 'sk-test-key' },
+      {
+        model: 'gpt-5-mini',
+        prompt: 'p',
+        imageBase64: 'c2luZ2xl',
+        mimeType: 'image/jpeg',
+        images: [{ base64: 'bXVsdGk=', mimeType: 'image/jpeg' }],
+      },
+    );
+
+    const [userMessage] = captured.body.messages;
+    assert.equal(userMessage.content.length, 2);
+    assert.equal(userMessage.content[1].image_url.url, 'data:image/jpeg;base64,bXVsdGk=');
+  } finally {
+    restore();
+  }
+});
+
+test('callOpenAiVision honors `maxTokens`, and defaults to 4096 when absent', async () => {
+  const { callOpenAiVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const overridden = stubFetchOnce(makeOpenAiChatCompletionResponse('ok'));
+  try {
+    await callOpenAiVision(
+      { apiKey: 'sk-test-key' },
+      { model: 'gpt-5-mini', prompt: 'p', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg', maxTokens: 8192 },
+    );
+    assert.equal(overridden.captured.body.max_completion_tokens, 8192);
+  } finally {
+    overridden.restore();
+  }
+
+  const defaulted = stubFetchOnce(makeOpenAiChatCompletionResponse('ok'));
+  try {
+    await callOpenAiVision(
+      { apiKey: 'sk-test-key' },
+      { model: 'gpt-5-mini', prompt: 'p', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg' },
+    );
+    assert.equal(defaulted.captured.body.max_completion_tokens, 4096);
+  } finally {
+    defaulted.restore();
+  }
+});
+
+test('callOpenAiVision throws before any network call when no image is supplied', async () => {
+  const { callOpenAiVision } = await import('@memoriahub/enrichment-compute/ai');
+
+  const originalFetch = globalThis.fetch;
+  let fetched = false;
+  globalThis.fetch = async () => {
+    fetched = true;
+    throw new Error('should never be called');
+  };
+
+  try {
+    await assert.rejects(
+      () => callOpenAiVision({ apiKey: 'sk-test-key' }, { model: 'm', prompt: 'p' }),
+      /at least one image/i,
+    );
+    assert.equal(fetched, false, 'no request should be sent for a request with no image');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
