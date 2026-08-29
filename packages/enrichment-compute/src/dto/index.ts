@@ -188,6 +188,45 @@ export const autoTaggingResultSchema = z.object({
 export type AutoTaggingResult = z.infer<typeof autoTaggingResultSchema>;
 
 // ---------------------------------------------------------------------------
+// video_auto_tagging (epic #452, issue #455)
+// ---------------------------------------------------------------------------
+
+/**
+ * The RAW, unparsed vision-model response text for a video, plus the frame /
+ * transcript provenance the server persists and logs.
+ *
+ * Parsing stays server-side for the same reason as `autoTaggingResultSchema`
+ * above: validating returned tags against the enabled TagLabel vocabulary
+ * needs a DB-loaded label set that a node does not have. The node returns
+ * text; the server decides what counts as a tag.
+ *
+ * `sampledTimestampsMs` is carried so a node-computed result records WHICH
+ * moments the description was written from — the same audit value the
+ * in-process path logs.
+ */
+export const videoAutoTaggingResultSchema = z.object({
+  rawText: z.string(),
+  frameCount: z.number().int().nonnegative(),
+  sampledTimestampsMs: z.array(z.number()),
+  /**
+   * Present only when transcription ran and produced speech. Absent or null
+   * means the video was tagged visual-only — which is the normal outcome when
+   * transcription is off, unconfigured, or the provider has no audio
+   * capability.
+   */
+  transcript: z
+    .object({
+      text: z.string(),
+      language: z.string().optional(),
+      /** Seconds of audio actually transcribed — see `media_transcripts`. */
+      leadSeconds: z.number().int().positive(),
+    })
+    .nullable()
+    .optional(),
+});
+export type VideoAutoTaggingResult = z.infer<typeof videoAutoTaggingResultSchema>;
+
+// ---------------------------------------------------------------------------
 // geocode
 // ---------------------------------------------------------------------------
 
