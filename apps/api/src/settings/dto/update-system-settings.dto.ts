@@ -90,6 +90,27 @@ export const patchSystemSettingsSchema = z.object({
         .optional(),
     })
     .optional(),
+  // Video AI auto-tagging (epic #452, issue #457). This is the WIRE DTO — the
+  // copy nestjs-zod validates the request body against, and which strips
+  // unknown keys. A namespace present only in settings.schema.ts validates
+  // perfectly in unit tests while every real PATCH silently no-ops.
+  autoTagging: z
+    .object({
+      video: z
+        .object({
+          enabled: z.boolean().optional(),
+          maxFrames: z.number().int().min(1).max(20).optional(),
+          sampleIntervalSeconds: z.number().int().min(1).max(60).optional(),
+          transcription: z
+            .object({
+              enabled: z.boolean().optional(),
+              leadSeconds: z.number().int().min(5).max(600).optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   face: z
     .object({
       features: z

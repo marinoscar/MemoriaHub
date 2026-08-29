@@ -26,6 +26,7 @@ export interface ResolvedSettings {
   ui: SystemSettingsValue['ui'];
   features: SystemSettingsValue['features'];
   ai: SystemSettingsValue['ai'];
+  autoTagging: SystemSettingsValue['autoTagging'];
   face: SystemSettingsValue['face'];
   storage: SystemSettingsValue['storage'];
   burst: SystemSettingsValue['burst'];
@@ -138,6 +139,7 @@ export class SystemSettingsService {
       ui: value.ui,
       features: value.features,
       ai: value.ai,
+      autoTagging: value.autoTagging,
       face: value.face,
       storage: value.storage,
       burst: value.burst,
@@ -239,6 +241,7 @@ export class SystemSettingsService {
       ui: value.ui,
       features: value.features,
       ai: value.ai,
+      autoTagging: value.autoTagging,
       face: value.face,
       storage: value.storage,
       burst: value.burst,
@@ -324,6 +327,35 @@ export class SystemSettingsService {
             (dto as any).ai?.features?.transcription !== undefined
               ? (dto as any).ai?.features?.transcription
               : ((current.ai?.features as any)?.transcription ?? null),
+        },
+      },
+      // Video AI auto-tagging (epic #452, issue #457). Defaults are the
+      // OFF-by-default cost bounds — an existing deployment upgrading with no
+      // stored autoTagging namespace must produce zero new spend.
+      autoTagging: {
+        video: {
+          enabled:
+            (dto as any).autoTagging?.video?.enabled ??
+            (current as any).autoTagging?.video?.enabled ??
+            false,
+          maxFrames:
+            (dto as any).autoTagging?.video?.maxFrames ??
+            (current as any).autoTagging?.video?.maxFrames ??
+            6,
+          sampleIntervalSeconds:
+            (dto as any).autoTagging?.video?.sampleIntervalSeconds ??
+            (current as any).autoTagging?.video?.sampleIntervalSeconds ??
+            5,
+          transcription: {
+            enabled:
+              (dto as any).autoTagging?.video?.transcription?.enabled ??
+              (current as any).autoTagging?.video?.transcription?.enabled ??
+              false,
+            leadSeconds:
+              (dto as any).autoTagging?.video?.transcription?.leadSeconds ??
+              (current as any).autoTagging?.video?.transcription?.leadSeconds ??
+              30,
+          },
         },
       },
       face: {
@@ -871,6 +903,7 @@ export class SystemSettingsService {
       ui: value.ui,
       features: value.features,
       ai: value.ai,
+      autoTagging: value.autoTagging,
       face: value.face,
       storage: value.storage,
       burst: value.burst,

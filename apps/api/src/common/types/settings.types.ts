@@ -223,6 +223,43 @@ export interface SystemSettingsValue {
       } | null;
     };
   };
+  /**
+   * Video AI auto-tagging (epic #452, issue #457) — mirrors `face.video.*`.
+   *
+   * Deliberately NOT coupled to `face.video.*` even though both sample frames:
+   * the right values are an order of magnitude apart. Face detection wants ~60
+   * frames to catch everyone who appears; AI tagging wants ~6, because every
+   * frame is a BILLED image. Sharing one knob would make one of the two wrong.
+   *
+   * There is no dedicated env kill-switch — video tagging rides on
+   * `AUTO_TAG_ENABLED`, exactly as video face detection rides on
+   * `FACE_AUTO_DETECT`.
+   */
+  autoTagging?: {
+    video: {
+      /**
+       * Sub-feature switch, default FALSE. `features.autoTagging` remains the
+       * master flag. Off by default so upgrading an existing deployment
+       * produces zero new spend until an admin opts in.
+       */
+      enabled: boolean;
+      /**
+       * The dominant cost lever: images sent in the single vision call.
+       * DURATION-INDEPENDENT — `computeSeekTimestamps` spreads exactly this
+       * many frames across the whole video, so a 3-hour recital and a
+       * 30-second clip cost the same.
+       */
+      maxFrames: number;
+      /** Desired gap between sampled frames; feeds `computeSeekTimestamps`. */
+      sampleIntervalSeconds: number;
+      transcription: {
+        /** Second cost lever, independently switchable from the visual pass. */
+        enabled: boolean;
+        /** First N seconds of audio only (ffmpeg `-t`). Also duration-independent. */
+        leadSeconds: number;
+      };
+    };
+  };
   face?: {
     features: {
       detection: {
@@ -694,6 +731,14 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       enhance: null,
       memories: null,
       transcription: null,
+    },
+  },
+  autoTagging: {
+    video: {
+      enabled: false,
+      maxFrames: 6,
+      sampleIntervalSeconds: 5,
+      transcription: { enabled: false, leadSeconds: 30 },
     },
   },
   face: {

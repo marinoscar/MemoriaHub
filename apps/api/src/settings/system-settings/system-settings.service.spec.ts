@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException } from '@nestjs/common';
 import { SystemSettingsService } from './system-settings.service';
+import { patchSystemSettingsSchema } from '../dto/update-system-settings.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   createMockPrismaService,
@@ -131,6 +132,7 @@ describe('SystemSettingsService', () => {
         ai: {
           features: { ...newSettings.ai.features, enhance: null, memories: null, transcription: null },
         },
+        autoTagging: DEFAULT_SYSTEM_SETTINGS.autoTagging,
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
@@ -241,6 +243,7 @@ describe('SystemSettingsService', () => {
         ai: {
           features: { ...newSettings.ai.features, enhance: null, memories: null, transcription: null },
         },
+        autoTagging: DEFAULT_SYSTEM_SETTINGS.autoTagging,
         face: DEFAULT_SYSTEM_SETTINGS.face,
         storage: DEFAULT_SYSTEM_SETTINGS.storage,
         burst: DEFAULT_SYSTEM_SETTINGS.burst,
@@ -802,6 +805,122 @@ describe('SystemSettingsService', () => {
     // jobs.stuckThresholdMinutes handling — mirrors the jobs.history
     // preservation/default/explicit-update coverage above.
     // -------------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // autoTagging.video.* (epic #452, issue #457)
+    //
+    // This namespace is a hand-maintained copy in FIVE places, one of which —
+    // patchSystemSettingsSchema, the wire DTO — strips unknown keys. A
+    // namespace present only in settings.schema.ts validates perfectly in unit
+    // tests while every real PATCH silently no-ops, so the first test below
+    // drives the value through the REAL wire DTO before handing it to the
+    // service, which is the only thing that actually proves the DTO copy was
+    // updated. See CLAUDE.md's "three hand-maintained copies" pitfall.
+    // -----------------------------------------------------------------------
+    describe('autoTagging.video handling', () => {
+      beforeEach(() => {
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+      });
+
+      it('survives the PATCH wire DTO and reaches the stored value', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          version: 2,
+        } as any);
+
+        // The wire DTO is what nestjs-zod validates the real request body
+        // against, and it strips anything it does not declare.
+        const throughWire = patchSystemSettingsSchema.parse({
+          autoTagging: {
+            video: {
+              enabled: true,
+              maxFrames: 10,
+              transcription: { enabled: true, leadSeconds: 60 },
+            },
+          },
+        });
+        expect((throughWire as any).autoTagging?.video?.maxFrames).toBe(10);
+
+        await service.patchSettings(throughWire as any, mockUserId);
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).autoTagging).toEqual({
+          video: {
+            enabled: true,
+            maxFrames: 10,
+            // Untouched keys keep their stored/default value.
+            sampleIntervalSeconds: 5,
+            transcription: { enabled: true, leadSeconds: 60 },
+          },
+        });
+      });
+
+      it('defaults to OFF with the documented cost bounds — an upgrade must add no new spend', async () => {
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          version: 2,
+        } as any);
+
+        // An existing deployment's stored value has no autoTagging namespace.
+        const { autoTagging: _omitted, ...withoutAutoTagging } = DEFAULT_SYSTEM_SETTINGS as any;
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: withoutAutoTagging,
+        } as any);
+
+        await service.patchSettings({ geo: { forwardSearchEnabled: true } } as any, mockUserId);
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).autoTagging).toEqual({
+          video: {
+            enabled: false,
+            maxFrames: 6,
+            sampleIntervalSeconds: 5,
+            transcription: { enabled: false, leadSeconds: 30 },
+          },
+        });
+      });
+
+      it('preserves non-default autoTagging.video values when patching an unrelated field', async () => {
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            autoTagging: {
+              video: {
+                enabled: true,
+                maxFrames: 12,
+                sampleIntervalSeconds: 15,
+                transcription: { enabled: true, leadSeconds: 120 },
+              },
+            },
+          } as any,
+        } as any);
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          version: 2,
+        } as any);
+
+        await service.patchSettings({ geo: { forwardSearchEnabled: true } } as any, mockUserId);
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).autoTagging.video).toEqual({
+          enabled: true,
+          maxFrames: 12,
+          sampleIntervalSeconds: 15,
+          transcription: { enabled: true, leadSeconds: 120 },
+        });
+      });
+
+      it('rejects an out-of-range maxFrames at the wire DTO — the frame budget is the cost lever', () => {
+        expect(() =>
+          patchSystemSettingsSchema.parse({ autoTagging: { video: { maxFrames: 21 } } }),
+        ).toThrow();
+        expect(() =>
+          patchSystemSettingsSchema.parse({ autoTagging: { video: { maxFrames: 0 } } }),
+        ).toThrow();
+      });
+    });
+
     describe('jobs.stuckThresholdMinutes handling', () => {
       // Save/restore ENRICHMENT_STUCK_MINUTES so the "applies the default (3)"
       // assertion below is deterministic regardless of the ambient test env.
