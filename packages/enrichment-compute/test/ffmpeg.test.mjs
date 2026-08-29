@@ -35,6 +35,7 @@ import { Readable } from 'node:stream';
 
 const {
   buildFrameExtractionArgs,
+  buildAudioLeadArgs,
   buildFfprobeArgs,
   parseFfprobeOutput,
   extractFfmpegError,
@@ -94,6 +95,33 @@ test('argv parity: frames(1).output(out) — the HEIC transcode shape, no seek a
     '1',
     OUT,
   ]);
+});
+
+test('argv parity: audio-lead extraction bounds the OUTPUT with `-t` after `-i`, mono 16 kHz, no video', () => {
+  assert.deepEqual(buildAudioLeadArgs({ input: IN, output: '/tmp/out.m4a', durationSecs: 30 }), [
+    '-i',
+    IN,
+    '-y',
+    '-vn',
+    '-t',
+    '30',
+    '-ac',
+    '1',
+    '-ar',
+    '16000',
+    '/tmp/out.m4a',
+  ]);
+});
+
+test('audio-lead `-t` stays AFTER `-i` — an output-duration bound, not an input seek', () => {
+  const args = buildAudioLeadArgs({ input: IN, output: '/tmp/out.m4a', durationSecs: 5 });
+  assert.ok(args.indexOf('-t') > args.indexOf('-i'), '-t must follow -i to bound the output duration');
+  assert.equal(args.includes('-ss'), false, 'audio-lead extraction never seeks');
+});
+
+test('audio-lead duration seconds are stringified, not rounded', () => {
+  const args = buildAudioLeadArgs({ input: IN, output: '/tmp/out.m4a', durationSecs: 12.5 });
+  assert.equal(args[args.indexOf('-t') + 1], '12.5');
 });
 
 test('argv parity: ffprobe uses the DEFAULT output format (never -print_format json)', () => {

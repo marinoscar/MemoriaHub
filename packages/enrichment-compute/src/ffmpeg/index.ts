@@ -141,6 +141,43 @@ export function buildFrameExtractionArgs(spec: FrameExtractionArgsSpec): string[
   return args;
 }
 
+export interface AudioLeadArgsSpec {
+  /** Source media path handed to `-i`. */
+  input: string;
+  /** Destination path (ffmpeg's positional output argument). */
+  output: string;
+  /** Seconds of audio to keep, from the start (`-t`). */
+  durationSecs: number;
+}
+
+/**
+ * Build the argv for a bounded, transcription-ready audio extraction.
+ *
+ * `-t <n>` after `-i` bounds the OUTPUT duration to the first n seconds, so
+ * the cost is fixed regardless of how long the source video is. `-vn` drops
+ * video; `-ac 1 -ar 16000` produce mono 16 kHz, which is what transcription
+ * models want anyway and keeps the payload far under any request size cap.
+ *
+ * Like {@link buildFrameExtractionArgs}, argument ORDER is the parity surface
+ * — server and worker node must invoke ffmpeg identically. See
+ * test/ffmpeg.test.mjs for the regression guard.
+ */
+export function buildAudioLeadArgs(spec: AudioLeadArgsSpec): string[] {
+  return [
+    '-i',
+    spec.input,
+    '-y',
+    '-vn',
+    '-t',
+    String(spec.durationSecs),
+    '-ac',
+    '1',
+    '-ar',
+    '16000',
+    spec.output,
+  ];
+}
+
 /** Build the argv fluent-ffmpeg's `ffprobe()` used: default (INI-ish) output. */
 export function buildFfprobeArgs(input: string): string[] {
   return ['-show_streams', '-show_format', input];

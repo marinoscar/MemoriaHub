@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { buildFrameExtractionArgs, runFfmpeg } from '../ffmpeg/index.js';
+import { buildAudioLeadArgs, buildFrameExtractionArgs, runFfmpeg } from '../ffmpeg/index.js';
 import { computeLog } from '../logging.js';
 
 export interface ExtractedFrame {
@@ -168,6 +168,82 @@ export async function extractFramesAt(
     for (const p of tmpFramePaths) {
       await fs.unlink(p).catch(() => {});
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// extractAudioLead — bounded audio extraction for transcription
+// ---------------------------------------------------------------------------
+
+export interface AudioLeadOpts {
+  /**
+   * Seconds of audio to extract, from the START of the video (ffmpeg `-t`).
+   *
+   * This is the entire cost bound for transcription: a 3-hour video and a
+   * 30-second clip both yield at most `leadSeconds` of billable audio.
+   * Transcribing the whole track was rejected outright — ~180 billable
+   * minutes for a 3-hour video, and well past the transcription API's ~25 MB
+   * request cap. See docs/specs/video-auto-tagging.md.
+   */
+  leadSeconds: number;
+  /**
+   * ffmpeg timeout in ms before SIGKILL. Defaults to `FFMPEG_TIMEOUT_MS`
+   * (read at call time — this package has no NestJS DI/config), falling back
+   * to 60000 when unset/unparsable.
+   */
+  ffmpegTimeoutMs?: number;
+}
+
+export interface ExtractedAudioLead {
+  /** Encoded audio bytes, ready to hand to a transcription API. */
+  buffer: Buffer;
+  /** MIME type of `buffer`. */
+  mimeType: string;
+  /** The `leadSeconds` actually requested — recorded for audit/re-run detection. */
+  leadSeconds: number;
+}
+
+/**
+ * Extract the first `leadSeconds` of audio from the video already on disk at
+ * `videoPath`, as mono 16 kHz AAC in an m4a container.
+ *
+ * Mono 16 kHz is what the transcription models downsample to anyway, and it
+ * keeps the payload tiny — ~30 s lands well under 1 MB, so the request is
+ * never near the provider's size cap regardless of the source video.
+ *
+ * `videoPath` must already be a seekable file on disk — like the frame
+ * extractors above, this function does NOT take ownership of it. It owns and
+ * unlinks its OWN temp output in a `finally`. The temp prefix is
+ * `memoriaHub-audio-*` so the API's TempFileJanitorTask reaps an orphan left
+ * behind by a SIGKILLed worker.
+ *
+ * Throws when ffmpeg fails or produces no audio (a video with no audio track
+ * exits non-zero, or writes an empty file). Callers treat transcription as
+ * best-effort and proceed visual-only.
+ */
+export async function extractAudioLead(
+  videoPath: string,
+  opts: AudioLeadOpts,
+): Promise<ExtractedAudioLead> {
+  const ffmpegTimeoutMs =
+    opts.ffmpegTimeoutMs ?? parseInt(process.env.FFMPEG_TIMEOUT_MS ?? '60000', 10);
+
+  const tmpOut = join(tmpdir(), `memoriaHub-audio-${randomUUID()}.m4a`);
+
+  try {
+    await runFfmpeg(buildAudioLeadArgs({ input: videoPath, output: tmpOut, durationSecs: opts.leadSeconds }), {
+      timeoutMs: ffmpegTimeoutMs,
+      timeoutMessage: `ffmpeg audio extraction timed out after ${ffmpegTimeoutMs}ms`,
+    });
+    await assertNonEmptyFile(tmpOut);
+
+    return {
+      buffer: await fs.readFile(tmpOut),
+      mimeType: 'audio/mp4',
+      leadSeconds: opts.leadSeconds,
+    };
+  } finally {
+    await fs.unlink(tmpOut).catch(() => {});
   }
 }
 

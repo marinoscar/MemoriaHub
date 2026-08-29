@@ -319,6 +319,11 @@ export class SystemSettingsService {
             (dto as any).ai?.features?.memories !== undefined
               ? (dto as any).ai?.features?.memories
               : ((current.ai?.features as any)?.memories ?? null),
+          // Nullable object, same contract as `enhance` above (epic #452).
+          transcription:
+            (dto as any).ai?.features?.transcription !== undefined
+              ? (dto as any).ai?.features?.transcription
+              : ((current.ai?.features as any)?.transcription ?? null),
         },
       },
       face: {

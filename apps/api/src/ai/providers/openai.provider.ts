@@ -9,6 +9,8 @@ import type {
   ChatStreamEvent,
   EnhanceImageRequest,
   EnhanceImageResult,
+  TranscribeAudioRequest,
+  TranscribeAudioResult,
 } from './ai-provider.interface';
 
 // =============================================================================
@@ -45,6 +47,16 @@ const OPENAI_EMBEDDING_MODELS = ['text-embedding-3-small', 'text-embedding-3-lar
 // the chat-model isEligibleOpenAiModel regex (which excludes the 'image'
 // keyword), so image models need their own curated source.
 const OPENAI_IMAGE_MODELS = ['gpt-image-1'] as const;
+
+// Curated speech-to-text models (issue #454). Like the image models above,
+// these are filtered OUT of `client.models.list()` by isEligibleOpenAiModel's
+// modality regex ('audio', 'whisper', 'transcribe'), so they need their own
+// curated source.
+const OPENAI_TRANSCRIPTION_MODELS = [
+  'gpt-4o-mini-transcribe',
+  'gpt-4o-transcribe',
+  'whisper-1',
+] as const;
 
 /**
  * Returns true for OpenAI chat/LLM model ids that have a GPT major.minor
@@ -234,6 +246,10 @@ export class OpenAiProvider implements AiProvider {
     return [...OPENAI_IMAGE_MODELS];
   }
 
+  listTranscriptionModels(): string[] {
+    return [...OPENAI_TRANSCRIPTION_MODELS];
+  }
+
   async testModel(
     creds: AiProviderCredentials,
     model: string,
@@ -370,7 +386,74 @@ export class OpenAiProvider implements AiProvider {
       );
     }
   }
+
+  /**
+   * Speech-to-text (issue #454). OpenAI-only — see `AiProvider.transcribeAudio?`
+   * for why Anthropic simply omits the method rather than throwing.
+   *
+   * The caller owns bounding the audio (see `extractAudioLead`'s `leadSeconds`),
+   * so this method never has to reason about duration or the ~25 MB request cap.
+   *
+   * Errors are rethrown through `rethrowWithProviderStatus` so a genuine 429
+   * carries its HTTP status and Retry-After into `classifyRateLimit` and routes
+   * through the queue's deferral path instead of burning a retry attempt.
+   */
+  async transcribeAudio(
+    creds: AiProviderCredentials,
+    req: TranscribeAudioRequest,
+  ): Promise<TranscribeAudioResult> {
+    try {
+      const client = new OpenAI({
+        apiKey: creds.apiKey,
+        ...(creds.baseUrl && { baseURL: creds.baseUrl }),
+      });
+
+      // Extension is derived from the MIME so OpenAI infers the container.
+      const ext = AUDIO_EXT_BY_MIME[req.mimeType] ?? 'm4a';
+      const file = await toFile(req.audio, `audio.${ext}`, { type: req.mimeType });
+
+      const resp = await client.audio.transcriptions.create({
+        model: req.model,
+        file,
+        ...(req.language && { language: req.language }),
+      } as any);
+
+      // `language` is present on the verbose response shapes but absent from
+      // the SDK's narrowest `Transcription` type, so read both fields off an
+      // index-signature view rather than asserting a shape the SDK disowns.
+      const body = resp as unknown as Record<string, unknown>;
+      const text = typeof body['text'] === 'string' ? body['text'] : '';
+      const language = typeof body['language'] === 'string' ? body['language'] : undefined;
+
+      return { text: text.trim(), ...(language && { language }) };
+    } catch (err: unknown) {
+      const e = err as { status?: number; code?: string; message?: string };
+      if (e?.status === 401) {
+        throw rethrowWithProviderStatus(err, 'Invalid API key');
+      }
+      if (e?.status === 404 || e?.code === 'model_not_found') {
+        throw rethrowWithProviderStatus(err, `Model not found: ${req.model}`);
+      }
+      throw rethrowWithProviderStatus(
+        err,
+        e?.message ?? 'Unknown error calling OpenAI audio transcription',
+      );
+    }
+  }
 }
+
+/** Container extension OpenAI infers the audio format from, keyed by MIME. */
+const AUDIO_EXT_BY_MIME: Record<string, string> = {
+  'audio/mp4': 'm4a',
+  'audio/m4a': 'm4a',
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+  'audio/flac': 'flac',
+};
 
 /**
  * Re-shape a provider SDK error into a plain `Error` with `message`, while
