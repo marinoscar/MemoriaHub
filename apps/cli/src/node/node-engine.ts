@@ -163,6 +163,19 @@ const INPUT_REQUIRED_TYPES = new Set<string>([
   'auto_tagging',
 ]);
 
+/**
+ * Job types whose compute reads the input URL DIRECTLY rather than a local
+ * file (epic #452, issue #456).
+ *
+ * ffmpeg speaks HTTP and range-seeks, so `video_auto_tagging` needs only the
+ * few megabytes around each seek point — pre-downloading a multi-gigabyte
+ * video here would defeat the entire optimization and leave it server-side
+ * only. For these types the engine passes `inputUrl` straight through and
+ * skips both the download and the local-path assertion; the compute function
+ * decides for itself whether to stream or fall back.
+ */
+const URL_INPUT_TYPES = new Set<string>(['video_auto_tagging']);
+
 type Resolved = Required<Pick<NodeEngineDeps, 'downloadFn' | 'detectFn' | 'tmpDir'>>;
 
 export class NodeEngine extends NodeTypedEmitter {
@@ -428,11 +441,17 @@ export class NodeEngine extends NodeTypedEmitter {
     }, leaseInterval);
     leaseTimer.unref?.();
 
+    // A URL-input type receives the presigned URL verbatim; everything else
+    // gets a local temp file as before.
+    const usesUrlInput = URL_INPUT_TYPES.has(type);
+
     try {
-      if (inputUrl) {
+      if (inputUrl && usesUrlInput) {
+        // Deliberately no download: the compute reads the URL directly.
+      } else if (inputUrl) {
         await this.resolved.downloadFn(inputUrl, tmpPath);
         downloaded = true;
-      } else if (INPUT_REQUIRED_TYPES.has(type)) {
+      } else if (INPUT_REQUIRED_TYPES.has(type) || usesUrlInput) {
         // Server returned no presigned URL for a job whose compute reads the
         // input file. Fail cleanly instead of calling compute with '' (which
         // would throw the opaque `ENOENT ... open ''`); the server requeues.
@@ -441,7 +460,8 @@ export class NodeEngine extends NodeTypedEmitter {
         );
       }
 
-      const result = await this.dispatcher.compute(type, downloaded ? tmpPath : '', params ?? {}, {
+      const computeInput = usesUrlInput ? (inputUrl as string) : downloaded ? tmpPath : '';
+      const result = await this.dispatcher.compute(type, computeInput, params ?? {}, {
         nodeId: this.nodeId,
         jobId,
       });

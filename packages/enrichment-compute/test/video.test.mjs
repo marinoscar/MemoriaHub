@@ -436,3 +436,176 @@ test('extractAudioLead SIGKILLs a hung ffmpeg and rejects with its own timeout m
     restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// probeRangeSeekSuitability (issue #456)
+//
+// Answers both preconditions for streaming a video to ffmpeg in one small
+// ranged read: does the provider honor Range, and (for MP4/MOV) is the `moov`
+// index at the FRONT of the file? Any answer other than 'suitable' routes the
+// caller to the proven download path, so this function must NEVER throw.
+// ---------------------------------------------------------------------------
+
+/** Build an ISO-BMFF top-level box: 4-byte size, 4-byte type, then payload. */
+function box(type, payloadLength = 0) {
+  const buf = Buffer.alloc(8 + payloadLength);
+  buf.writeUInt32BE(8 + payloadLength, 0);
+  buf.write(type, 4, 'latin1');
+  return buf;
+}
+
+function rangeResponse(body, { status = 206, contentRange = 'bytes 0-63/1000000' } = {}) {
+  const headers = new Headers({ 'content-type': 'video/mp4' });
+  if (contentRange) headers.set('content-range', contentRange);
+  return new Response(body, { status, headers });
+}
+
+test('probeRangeSeekSuitability returns "suitable" for a faststart MP4 (moov before mdat)', async () => {
+  const { probeRangeSeekSuitability } = await import('@memoriahub/enrichment-compute/video');
+
+  let capturedInit;
+  const result = await probeRangeSeekSuitability('https://storage.example/video.mp4', {
+    fetchImpl: async (_url, init) => {
+      capturedInit = init;
+      return rangeResponse(Buffer.concat([box('ftyp', 16), box('moov', 32), box('mdat', 64)]));
+    },
+  });
+
+  assert.equal(result.verdict, 'suitable');
+  assert.match(result.detail, /faststart/);
+  assert.ok(result.bytesRead > 0);
+  // The probe must ASK for a range — that is what proves the provider honors it.
+  assert.match(capturedInit.headers.Range, /^bytes=0-\d+$/);
+});
+
+test('probeRangeSeekSuitability returns "not-faststart" when mdat precedes moov', async () => {
+  const { probeRangeSeekSuitability } = await import('@memoriahub/enrichment-compute/video');
+
+  const result = await probeRangeSeekSuitability('https://storage.example/video.mp4', {
+    fetchImpl: async () => rangeResponse(Buffer.concat([box('ftyp', 16), box('mdat', 64)])),
+  });
+
+  // ffmpeg would have to fetch the tail before it could seek at all,
+  // collapsing the saving — download instead.
+  assert.equal(result.verdict, 'not-faststart');
+});
+
+test('probeRangeSeekSuitability returns "no-range-support" on a 200 (whole object sent)', async () => {
+  const { probeRangeSeekSuitability } = await import('@memoriahub/enrichment-compute/video');
+
+  const result = await probeRangeSeekSuitability('https://storage.example/video.mp4', {
+    fetchImpl: async () =>
+      rangeResponse(box('moov', 32), { status: 200, contentRange: null }),
+  });
+
+  // Seeks would re-download the file each time — strictly worse than one
+  // clean download.
+  assert.equal(result.verdict, 'no-range-support');
+});
+
+test('probeRangeSeekSuitability returns "unknown" for a non-ISO-BMFF container', async () => {
+  const { probeRangeSeekSuitability } = await import('@memoriahub/enrichment-compute/video');
+
+  const result = await probeRangeSeekSuitability('https://storage.example/video.webm', {
+    fetchImpl: async () => rangeResponse(Buffer.from('\x1aE\xdf\xa3 not an mp4 at all')),
+  });
+
+  assert.equal(result.verdict, 'unknown');
+});
+
+test('probeRangeSeekSuitability NEVER throws — a network failure resolves to "unknown"', async () => {
+  const { probeRangeSeekSuitability } = await import('@memoriahub/enrichment-compute/video');
+
+  const result = await probeRangeSeekSuitability('https://storage.example/video.mp4', {
+    fetchImpl: async () => {
+      throw new Error('ECONNRESET');
+    },
+  });
+
+  assert.equal(result.verdict, 'unknown');
+  assert.match(result.detail, /ECONNRESET/);
+});
+
+test('probeRangeSeekSuitability returns "unknown" for a non-OK HTTP status (e.g. an expired URL)', async () => {
+  const { probeRangeSeekSuitability } = await import('@memoriahub/enrichment-compute/video');
+
+  const result = await probeRangeSeekSuitability('https://storage.example/video.mp4', {
+    fetchImpl: async () => new Response('AccessDenied', { status: 403 }),
+  });
+
+  assert.equal(result.verdict, 'unknown');
+  assert.match(result.detail, /403/);
+});
+
+test('probeRangeSeekSuitability handles a 64-bit box size without mis-parsing', async () => {
+  const { probeRangeSeekSuitability } = await import('@memoriahub/enrichment-compute/video');
+
+  // ftyp declared with the `size == 1` escape, real size in the following 8 bytes.
+  const largeFtyp = Buffer.alloc(24);
+  largeFtyp.writeUInt32BE(1, 0);
+  largeFtyp.write('ftyp', 4, 'latin1');
+  largeFtyp.writeBigUInt64BE(24n, 8);
+
+  const result = await probeRangeSeekSuitability('https://storage.example/video.mp4', {
+    fetchImpl: async () => rangeResponse(Buffer.concat([largeFtyp, box('moov', 16)])),
+  });
+
+  assert.equal(result.verdict, 'suitable');
+});
+
+test('isHttpUrl distinguishes a URL source from a local path', async () => {
+  const { isHttpUrl } = await import('@memoriahub/enrichment-compute/video');
+
+  assert.equal(isHttpUrl('https://storage.example/v.mp4'), true);
+  assert.equal(isHttpUrl('http://storage.example/v.mp4'), true);
+  assert.equal(isHttpUrl('/tmp/memoriaHub-vtag-dl-abc.mp4'), false);
+  assert.equal(isHttpUrl('C:\\videos\\clip.mp4'), false);
+});
+
+// ---------------------------------------------------------------------------
+// extractFrames is now timeout-bounded (issue #456)
+// ---------------------------------------------------------------------------
+
+test('extractFrames SIGKILLs a hung ffmpeg and skips that frame instead of hanging the worker', async () => {
+  const { restore, calls } = installFakeFfmpeg([
+    { kind: 'hang' },
+    { kind: 'success', bytes: Buffer.from('frame-2') },
+  ]);
+
+  try {
+    const { extractFrames } = await import('@memoriahub/enrichment-compute/video');
+
+    const frames = await extractFrames(fakeVideoPath(), {
+      durationMs: 20_000,
+      sampleIntervalSeconds: 10,
+      maxFrames: 2,
+      ffmpegTimeoutMs: 30,
+    });
+
+    // Before this, the sampling path was unbounded — against a remote URL a
+    // stalled read would hang a worker slot until the 20-minute job timeout.
+    assert.deepEqual(calls[0].killSignals, ['SIGKILL']);
+    assert.equal(frames.length, 1, 'the timed-out frame is skipped, the rest still extracted');
+    assert.equal(frames[0].buffer.toString(), 'frame-2');
+  } finally {
+    restore();
+  }
+});
+
+test('extractFrames accepts a URL source and keeps `-ss` BEFORE `-i` (input seek)', async () => {
+  const { restore, calls } = installFakeFfmpeg([{ kind: 'success' }]);
+
+  try {
+    const { extractFrames } = await import('@memoriahub/enrichment-compute/video');
+
+    const url = 'https://storage.example/video.mp4?sig=abc';
+    await extractFrames(url, { durationMs: 10_000, sampleIntervalSeconds: 10, maxFrames: 1 });
+
+    assert.equal(calls[0].inputPath, url);
+    // Input seek is what makes a URL source fetch only the bytes around the
+    // seek point; moving -ss after -i would forfeit the whole optimization.
+    assert.ok(calls[0].args.indexOf('-ss') < calls[0].args.indexOf('-i'));
+  } finally {
+    restore();
+  }
+});

@@ -47,10 +47,7 @@ import {
 } from '@memoriahub/enrichment-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import {
-  streamToTempFile,
-  assertDiskSpaceForDownload,
-} from '../storage/processing/processors/stream-utils';
+import { downloadToTempFile } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
@@ -254,24 +251,27 @@ export class VideoFaceDetectionService {
 
       // --- 5. Download video (stream directly to a temp file — constant memory) ---
       const fileExt = extname(mediaItem.storageObject.name || '') || '.mp4';
-      const tmpVideoPath = join(tmpdir(), `memoriaHub-vface-dl-${randomUUID()}${fileExt}`);
 
-      const objectProvider = await this.resolver.getProviderFor(
-        mediaItem.storageObject.storageProvider,
-        mediaItem.storageObject.bucket,
-      );
-
-      // Pre-flight: fail fast (through the normal retry/backoff path) when the
-      // temp filesystem cannot hold the download plus headroom.
-      await assertDiskSpaceForDownload(mediaItem.storageObject.size, tmpdir());
+      // Shared helper (issue #456) — one implementation of the
+      // disk-guard -> download -> partial-file-cleanup sequence, instead of
+      // the byte-identical copy this and SocialMediaDetectionHandler each had.
+      // This path deliberately still DOWNLOADS: presigned-URL range seeking is
+      // being proven on the new, off-by-default video_auto_tagging type first.
+      const { path: tmpVideoPath, cleanup: cleanupVideo } = await downloadToTempFile({
+        getStream: () =>
+          this.resolver
+            .getProviderFor(
+              mediaItem.storageObject!.storageProvider,
+              mediaItem.storageObject!.bucket,
+            )
+            .then((p) => p.download(mediaItem.storageObject!.storageKey)),
+        sizeBytes: mediaItem.storageObject.size,
+        prefix: 'memoriaHub-vface-dl-',
+        extension: fileExt,
+      });
 
       let computed: ComputedVideoFaceCluster[];
       try {
-        // Download INSIDE the try so a failed/partial streamToTempFile still
-        // has its partial temp file unlinked by the finally below.
-        const videoStream = await objectProvider.download(mediaItem.storageObject.storageKey);
-        await streamToTempFile(videoStream, tmpVideoPath);
-
         // --- 6-9. Compute half: extract frames, detect, cluster, crop thumbnails ---
         computed = await this.computeVideoFaces(
           tmpVideoPath,
@@ -284,7 +284,7 @@ export class VideoFaceDetectionService {
         // The downloaded temp file is only needed for download + frame
         // extraction above; always clean it up regardless of success/failure —
         // including a partial file left behind by a failed streamToTempFile.
-        await fs.unlink(tmpVideoPath).catch(() => {});
+        await cleanupVideo();
       }
 
       // --- 10. Upload representative frame thumbnails (server holds storage creds) ---

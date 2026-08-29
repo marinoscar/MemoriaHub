@@ -1,6 +1,9 @@
 import { Readable } from 'stream';
 import { createWriteStream, promises as fs } from 'fs';
 import { pipeline } from 'stream/promises';
+import { randomUUID } from 'crypto';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 /** Headroom factor applied on top of the object size for the disk-space guard. */
 const DISK_GUARD_HEADROOM = 1.2;
@@ -49,4 +52,54 @@ export async function assertDiskSpaceForDownload(
       `insufficient disk space for video download: need ${toMb(neededBytes)} MB, have ${toMb(freeBytes)} MB`,
     );
   }
+}
+
+/**
+ * Download an object to a temp file, guarded by the disk-space pre-flight, and
+ * return the path plus a cleanup function.
+ *
+ * Extracted (issue #456) from the byte-identical block that
+ * `VideoFaceDetectionService`, `SocialMediaDetectionHandler` and
+ * `VideoAutoTaggingService` each had inline. It is also the FALLBACK for the
+ * streaming path, so the fallback has exactly one implementation rather than
+ * three copies that could drift.
+ *
+ * The caller MUST call the returned `cleanup()` in a `finally` — a failed or
+ * partial download still leaves a temp file, and it is the caller that knows
+ * when the file stops being needed.
+ */
+export async function downloadToTempFile(opts: {
+  /** Opens the source stream. Called INSIDE the guarded section. */
+  getStream: () => Promise<Readable>;
+  /** Object size in bytes, for the disk-space pre-flight. */
+  sizeBytes: bigint | number;
+  /** Temp filename prefix, e.g. 'memoriaHub-vtag-dl-'. */
+  prefix: string;
+  /** File extension including the dot, for ffmpeg container detection. */
+  extension?: string;
+  /** Directory for the temp file. Defaults to the OS temp dir. */
+  dir?: string;
+}): Promise<{ path: string; cleanup: () => Promise<void> }> {
+  const dir = opts.dir ?? tmpdir();
+  const filePath = join(dir, `${opts.prefix}${randomUUID()}${opts.extension ?? ''}`);
+  const cleanup = async (): Promise<void> => {
+    await fs.unlink(filePath).catch(() => {});
+  };
+
+  // Pre-flight BEFORE opening the stream: fail fast (through the caller's
+  // normal retry/backoff path) when the filesystem cannot hold the download
+  // plus headroom, rather than filling the disk with a partial file.
+  await assertDiskSpaceForDownload(opts.sizeBytes, dir);
+
+  try {
+    const stream = await opts.getStream();
+    await streamToTempFile(stream, filePath);
+  } catch (err) {
+    // A partial file from a failed streamToTempFile must not be left behind
+    // for the caller to remember about.
+    await cleanup();
+    throw err;
+  }
+
+  return { path: filePath, cleanup };
 }

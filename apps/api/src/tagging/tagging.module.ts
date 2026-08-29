@@ -6,6 +6,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { SettingsModule } from '../settings/settings.module';
 import { MediaTouchModule } from '../media/media-touch.module';
+import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { AutoTaggingHandler } from './auto-tagging.handler';
 import { AutoTaggingService } from './auto-tagging.service';
 import { VideoAutoTaggingHandler } from './video-auto-tagging.handler';
@@ -24,6 +25,7 @@ import { AdminTaggingController } from './admin-tagging.controller';
     AutoTaggingService,
     VideoAutoTaggingHandler,
     VideoAutoTaggingService,
+    VideoInputResolver,
     TagLabelsService,
     TaggingBackfillService,
   ],

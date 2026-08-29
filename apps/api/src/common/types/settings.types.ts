@@ -258,6 +258,13 @@ export interface SystemSettingsValue {
         /** First N seconds of audio only (ffmpeg `-t`). Also duration-independent. */
         leadSeconds: number;
       };
+      /**
+       * Whether ffmpeg may read a video straight from a presigned URL via HTTP
+       * range seeks instead of downloading it whole (issue #456). The download
+       * path remains the fallback for EVERY streaming failure, so turning this
+       * off is a revert switch rather than a correctness gate.
+       */
+      streamInput?: boolean;
     };
   };
   face?: {
@@ -739,6 +746,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
       maxFrames: 6,
       sampleIntervalSeconds: 5,
       transcription: { enabled: false, leadSeconds: 30 },
+      streamInput: true,
     },
   },
   face: {

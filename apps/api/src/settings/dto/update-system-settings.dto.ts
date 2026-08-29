@@ -107,6 +107,7 @@ export const patchSystemSettingsSchema = z.object({
               leadSeconds: z.number().int().min(5).max(600).optional(),
             })
             .optional(),
+          streamInput: z.boolean().optional(),
         })
         .optional(),
     })
