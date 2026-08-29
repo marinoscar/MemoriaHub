@@ -148,6 +148,7 @@ export const NODE_JOB_TYPES = [
   'social_media_detection',
   'thumbnail_regen',
   'auto_tagging',
+  'video_auto_tagging',
   'geocode',
   'workflow_execute_batch',
 ] as const;
@@ -173,6 +174,9 @@ export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
   social_media_detection: ['ffprobe'], // tesseract optional → Tier-1-only mode
   thumbnail_regen: ['sharp', 'ffmpeg'],
   auto_tagging: ['sharp'],
+  // Frame extraction (and optional audio extraction) means ffmpeg/ffprobe are
+  // hard requirements — a node without them must never claim this type.
+  video_auto_tagging: ['sharp', 'ffmpeg', 'ffprobe'],
   geocode: [],
   // Pure-JS declaration pass — no native libs, no model files, no ffmpeg.
   workflow_execute_batch: [],
@@ -439,6 +443,10 @@ export class ComputeDispatcher {
       ),
       thumbnail_regen: lazy(() => import('./compute/thumbnail.js'), 'thumbnail_regen'),
       auto_tagging: lazy(() => import('./compute/auto-tagging.js'), 'auto_tagging'),
+      video_auto_tagging: lazy(
+        () => import('./compute/video-auto-tagging.js'),
+        'video_auto_tagging',
+      ),
       geocode: lazy(() => import('./compute/geocode.js'), 'geocode'),
       workflow_execute_batch: lazy(
         () => import('./compute/workflow-execute-batch.js'),

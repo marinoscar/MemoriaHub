@@ -29,6 +29,45 @@ export interface AutoTaggingJobCredentials {
   mimeTypeHint: string;
 }
 
+/**
+ * Transient credentials for a node-computed `video_auto_tagging` job
+ * (epic #452, issue #460).
+ *
+ * Differs from `AutoTaggingJobCredentials` in two ways, both because a video
+ * prompt depends on values only the node knows:
+ *
+ *   - `prompt` is ABSENT. The user prompt embeds the sampled frame timestamps,
+ *     which the node produces. It hands over `labelNames` and `peopleNames`
+ *     instead (both need DB access a node does not have) and the node composes
+ *     the prompt with the same shared `buildVideoPrompt`.
+ *   - `transcription` carries a SECOND, independent provider credential. It is
+ *     absent when transcription is off, unconfigured, or unresolvable — in
+ *     which case the node tags visual-only, matching the in-process path's
+ *     degradation exactly.
+ *
+ * Both `apiKey` fields are plaintext, scoped to a single job, and MUST NEVER
+ * be persisted to disk/config/logs by the CLI.
+ */
+export interface VideoAutoTaggingJobCredentials {
+  type: 'video_auto_tagging';
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+  /** Fixed system prompt — shared verbatim with the in-process path. */
+  system: string;
+  /** Enabled TagLabel vocabulary; the node cannot read it itself. */
+  labelNames: string[];
+  /** Assigned people on this item, for the prompt's name clause. */
+  peopleNames: string[];
+  transcription?: {
+    provider: string;
+    model: string;
+    apiKey: string;
+    baseUrl?: string;
+  };
+}
+
 export interface GeocodeJobCredentials {
   type: 'geocode';
   /**
@@ -45,4 +84,7 @@ export interface GeocodeJobCredentials {
   lng: number;
 }
 
-export type JobCredentialsResult = AutoTaggingJobCredentials | GeocodeJobCredentials;
+export type JobCredentialsResult =
+  | AutoTaggingJobCredentials
+  | VideoAutoTaggingJobCredentials
+  | GeocodeJobCredentials;

@@ -39,8 +39,12 @@ import {
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
+import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { decryptSecret } from '../common/crypto/secret-cipher';
-import type { JobCredentialsResult } from './dto/job-credentials.dto';
+import type {
+  JobCredentialsResult,
+  VideoAutoTaggingJobCredentials,
+} from './dto/job-credentials.dto';
 
 // ---------------------------------------------------------------------------
 // Input shapes
@@ -115,6 +119,7 @@ export class NodesService {
     private readonly aiSettingsService: AiSettingsService,
     private readonly systemSettings: SystemSettingsService,
     private readonly autoTaggingService: AutoTaggingService,
+    private readonly videoAutoTaggingService: VideoAutoTaggingService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -407,6 +412,44 @@ export class NodesService {
       return { ...basePayload, actions };
     }
 
+    // video_auto_tagging (epic #452, issue #460) — same rationale as
+    // video_face_detection below: the job carries no payload, the in-process
+    // worker reads `autoTagging.video.*` fresh from system settings at process
+    // time, and a node has no DB access, so the effective values are merged in
+    // here. `durationMs` also has to come from the DB, since frame sampling is
+    // computed from it and the node only receives a URL.
+    if (job.type === 'video_auto_tagging') {
+      const settings = await this.systemSettings.getSettings();
+      const video = (settings as { autoTagging?: { video?: Record<string, unknown> } }).autoTagging
+        ?.video;
+      const transcription = video?.['transcription'] as
+        | { enabled?: boolean; leadSeconds?: number }
+        | undefined;
+
+      let durationMs: number | null = null;
+      if (job.mediaItemId) {
+        const item = await this.prisma.mediaItem.findUnique({
+          where: { id: job.mediaItemId },
+          select: { durationMs: true },
+        });
+        durationMs = item?.durationMs ?? null;
+      }
+
+      const basePayload =
+        job.payload && typeof job.payload === 'object' && !Array.isArray(job.payload)
+          ? (job.payload as Record<string, unknown>)
+          : {};
+
+      return {
+        ...basePayload,
+        durationMs,
+        maxFrames: (video?.['maxFrames'] as number | undefined) ?? 6,
+        sampleIntervalSeconds: (video?.['sampleIntervalSeconds'] as number | undefined) ?? 5,
+        transcriptionEnabled: transcription?.enabled === true,
+        leadSeconds: transcription?.leadSeconds ?? 30,
+      };
+    }
+
     if (job.type !== 'video_face_detection') {
       return job.payload ?? null;
     }
@@ -654,6 +697,9 @@ export class NodesService {
     if (job.type === 'auto_tagging') {
       return this.getAutoTaggingCredentials(job);
     }
+    if (job.type === 'video_auto_tagging') {
+      return this.getVideoAutoTaggingCredentials(job);
+    }
     if (job.type === 'geocode') {
       return this.getGeocodeCredentials(job);
     }
@@ -723,6 +769,108 @@ export class NodesService {
       system,
       prompt,
       mimeTypeHint: 'image/jpeg',
+    };
+  }
+
+  /**
+   * Transient credentials for a node-computed `video_auto_tagging` job
+   * (epic #452, issue #460).
+   *
+   * Mirrors `getAutoTaggingCredentials` above — same provider/model
+   * resolution, same `recordModel` so the persist half knows what produced the
+   * result, same never-persisted plaintext key — and adds two video-specific
+   * things:
+   *
+   *   1. The prompt is built via the SHARED `buildVideoPrompt`, so a node
+   *      sends the exact prompt the server would have. Frame timestamps are
+   *      NOT known here (the node samples them), so the prompt is composed on
+   *      the node from these pieces instead of being handed over whole. What
+   *      IS handed over is the vocabulary and people names, which need DB
+   *      access a node does not have.
+   *   2. Transcription credentials, when enabled and configured — a SECOND,
+   *      independent provider. Absent means the node tags visual-only, which
+   *      is the same degradation the in-process path performs.
+   */
+  private async getVideoAutoTaggingCredentials(job: EnrichmentJob): Promise<JobCredentialsResult> {
+    if (!job.mediaItemId) {
+      throw new BadRequestException(`video_auto_tagging job ${job.id} has no mediaItemId`);
+    }
+
+    const row = await this.prisma.systemSettings.findUnique({ where: { key: 'global' } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const settingsValue = (row?.value as any) ?? {};
+    const taggingConfig = settingsValue?.ai?.features?.tagging as
+      | { provider?: string; model?: string }
+      | undefined;
+    const provider = taggingConfig?.provider;
+    const model = taggingConfig?.model;
+    if (!provider || !model) {
+      throw new BadRequestException('AI tagging provider or model not configured in system settings');
+    }
+
+    await this.enrichmentJobService.recordModel(job.id, provider, model);
+
+    const creds = await this.aiSettingsService.resolveCredentials(provider);
+
+    const tagLabels = await this.prisma.tagLabel.findMany({
+      where: { enabled: true },
+      select: { name: true },
+      orderBy: { name: 'asc' },
+    });
+    const labelNames = tagLabels.map((t) => t.name);
+
+    const faces = await this.prisma.face.findMany({
+      where: {
+        mediaItemId: job.mediaItemId,
+        personId: { not: null },
+        person: { deletedAt: null, mergedIntoId: null },
+      },
+      select: { person: { select: { name: true } } },
+    });
+    const peopleNames = [
+      ...new Set(faces.map((f) => f.person?.name).filter((n): n is string => !!n)),
+    ];
+
+    // The system prompt is fixed; the user prompt depends on frame timestamps
+    // only the node knows, so hand over its inputs and let the node compose it
+    // with the same shared builder.
+    const { system } = this.videoAutoTaggingService.buildVideoPrompt(labelNames, peopleNames, [], null);
+
+    // --- Transcription: a separate, optional provider. ---
+    let transcription: VideoAutoTaggingJobCredentials['transcription'];
+    const transcriptionEnabled =
+      settingsValue?.autoTagging?.video?.transcription?.enabled === true;
+    if (transcriptionEnabled) {
+      const cfg = settingsValue?.ai?.features?.transcription as
+        | { provider?: string; model?: string }
+        | undefined;
+      if (cfg?.provider && cfg?.model) {
+        try {
+          const transcriptionCreds = await this.aiSettingsService.resolveCredentials(cfg.provider);
+          transcription = {
+            provider: cfg.provider,
+            model: cfg.model,
+            apiKey: transcriptionCreds.apiKey,
+            ...(transcriptionCreds.baseUrl ? { baseUrl: transcriptionCreds.baseUrl } : {}),
+          };
+        } catch {
+          // Best-effort, exactly like the in-process path: an unresolvable
+          // transcription credential degrades the video to visual-only rather
+          // than failing the job.
+        }
+      }
+    }
+
+    return {
+      type: 'video_auto_tagging',
+      provider,
+      model,
+      apiKey: creds.apiKey,
+      ...(creds.baseUrl ? { baseUrl: creds.baseUrl } : {}),
+      system,
+      labelNames,
+      peopleNames,
+      ...(transcription ? { transcription } : {}),
     };
   }
 

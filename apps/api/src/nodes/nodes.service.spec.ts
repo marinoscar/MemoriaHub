@@ -59,6 +59,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
+import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
@@ -150,6 +151,10 @@ describe('NodesService — result/failure ingestion', () => {
         { provide: AiSettingsService, useValue: { resolveCredentials: jest.fn() } },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
         { provide: AutoTaggingService, useValue: { buildPrompt: jest.fn() } },
+        {
+          provide: VideoAutoTaggingService,
+          useValue: { buildVideoPrompt: jest.fn().mockReturnValue({ system: 's', prompt: 'p' }) },
+        },
       ],
     }).compile();
 
@@ -551,6 +556,59 @@ describe('NodesService — result/failure ingestion', () => {
         mode: 'sweep',
         sampleIntervalSeconds: 7,
         maxFramesPerVideo: 42,
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // video_auto_tagging params (epic #452, issue #460)
+    //
+    // Same rationale as video_face_detection above — the job carries no
+    // payload, the in-process worker reads autoTagging.video.* fresh at
+    // process time, and a node has no DB access. durationMs likewise: frame
+    // sampling is computed from it and the node only receives a URL.
+    // -----------------------------------------------------------------------
+
+    it('merges fresh autoTagging.video.* settings AND durationMs for video_auto_tagging jobs', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({
+        autoTagging: {
+          video: {
+            maxFrames: 8,
+            sampleIntervalSeconds: 3,
+            transcription: { enabled: true, leadSeconds: 45 },
+          },
+        },
+      });
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({ durationMs: 90_000 });
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'video_auto_tagging', mediaItemId: 'media-1', payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['video_auto_tagging']);
+
+      expect(jobs[0].params).toEqual({
+        durationMs: 90_000,
+        maxFrames: 8,
+        sampleIntervalSeconds: 3,
+        transcriptionEnabled: true,
+        leadSeconds: 45,
+      });
+    });
+
+    it('falls back to the documented video-tagging defaults when the namespace is absent', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue({});
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({ durationMs: null });
+      mockClaimService.claim.mockResolvedValue([
+        claimedJob({ type: 'video_auto_tagging', mediaItemId: 'media-1', payload: null }),
+      ]);
+
+      const { jobs } = await service.claim(USER_ID, NODE_ID, 1, ['video_auto_tagging']);
+
+      expect(jobs[0].params).toEqual({
+        durationMs: null,
+        maxFrames: 6,
+        sampleIntervalSeconds: 5,
+        transcriptionEnabled: false,
+        leadSeconds: 30,
       });
     });
 

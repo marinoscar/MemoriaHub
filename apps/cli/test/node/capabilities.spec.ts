@@ -50,9 +50,18 @@ describe('NODE_JOB_TYPES', () => {
       'social_media_detection',
       'thumbnail_regen',
       'auto_tagging',
+      'video_auto_tagging',
       'geocode',
       'workflow_execute_batch',
     ]);
+  });
+
+  it('requires ffmpeg AND ffprobe for video_auto_tagging — a node without them must never claim it', () => {
+    // Frame extraction (and optional audio extraction) shell out to ffmpeg;
+    // requirements are per TYPE for exactly this reason, which is also why
+    // video tagging is a separate job type from auto_tagging (['sharp']).
+    expect(JOB_TYPE_REQUIREMENTS.video_auto_tagging).toEqual(['sharp', 'ffmpeg', 'ffprobe']);
+    expect(JOB_TYPE_REQUIREMENTS.auto_tagging).toEqual(['sharp']);
   });
 });
 

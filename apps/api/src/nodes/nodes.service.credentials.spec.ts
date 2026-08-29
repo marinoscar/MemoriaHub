@@ -50,6 +50,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
+import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { encryptSecret } from '../common/crypto/secret-cipher';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
@@ -93,6 +94,7 @@ describe('NodesService.getJobCredentials', () => {
   let mockAiSettingsService: { resolveCredentials: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockAutoTaggingService: { buildPrompt: jest.Mock };
+  let mockVideoAutoTaggingService: { buildVideoPrompt: jest.Mock };
   let originalKey: string | undefined;
   let originalGeoProviderEnv: string | undefined;
 
@@ -122,6 +124,11 @@ describe('NodesService.getJobCredentials', () => {
     mockAutoTaggingService = {
       buildPrompt: jest.fn().mockReturnValue({ system: 'SYSTEM_PROMPT', prompt: 'USER_PROMPT' }),
     };
+    mockVideoAutoTaggingService = {
+      buildVideoPrompt: jest
+        .fn()
+        .mockReturnValue({ system: 'VIDEO_SYSTEM_PROMPT', prompt: 'VIDEO_USER_PROMPT' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -136,6 +143,7 @@ describe('NodesService.getJobCredentials', () => {
         { provide: AiSettingsService, useValue: mockAiSettingsService },
         { provide: SystemSettingsService, useValue: mockSystemSettings },
         { provide: AutoTaggingService, useValue: mockAutoTaggingService },
+        { provide: VideoAutoTaggingService, useValue: mockVideoAutoTaggingService },
       ],
     }).compile();
 
@@ -310,6 +318,152 @@ describe('NodesService.getJobCredentials', () => {
   // =========================================================================
   // geocode
   // =========================================================================
+
+  // =========================================================================
+  // video_auto_tagging (epic #452, issue #460)
+  // =========================================================================
+
+  describe('video_auto_tagging', () => {
+    const videoSettings = (overrides: Record<string, unknown> = {}) => ({
+      key: 'global',
+      value: {
+        ai: {
+          features: {
+            tagging: { provider: 'anthropic', model: 'claude-3-5-sonnet' },
+            ...((overrides['aiFeatures'] as object) ?? {}),
+          },
+        },
+        autoTagging: {
+          video: {
+            enabled: true,
+            transcription: { enabled: overrides['transcriptionEnabled'] === true, leadSeconds: 30 },
+          },
+        },
+      },
+    });
+
+    beforeEach(() => {
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'video_auto_tagging', mediaItemId: 'media-1' }),
+      );
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(videoSettings());
+      (mockPrisma.tagLabel.findMany as jest.Mock).mockResolvedValue([
+        { name: 'Beach' },
+        { name: 'Birthday' },
+      ]);
+      (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([{ person: { name: 'Alice' } }]);
+    });
+
+    it('hands over the VOCABULARY and PEOPLE rather than a finished prompt', async () => {
+      const result = (await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)) as any;
+
+      // The user prompt embeds frame timestamps only the node knows, so the
+      // node composes it with the shared builder from these inputs — neither
+      // of which it could read itself.
+      expect(result.type).toBe('video_auto_tagging');
+      expect(result.labelNames).toEqual(['Beach', 'Birthday']);
+      expect(result.peopleNames).toEqual(['Alice']);
+      expect(result.prompt).toBeUndefined();
+      expect(result.system).toBe('VIDEO_SYSTEM_PROMPT');
+    });
+
+    it('returns the decrypted tagging key and resolved provider/model', async () => {
+      const result = (await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)) as any;
+
+      expect(result.provider).toBe('anthropic');
+      expect(result.model).toBe('claude-3-5-sonnet');
+      expect(result.apiKey).toBe('anthropic-test-key');
+    });
+
+    it('calls recordModel so the server-side persist half knows what produced the result', async () => {
+      await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID);
+
+      expect(mockEnrichmentJobService.recordModel).toHaveBeenCalledWith(
+        JOB_ID,
+        'anthropic',
+        'claude-3-5-sonnet',
+      );
+    });
+
+    it('omits transcription credentials entirely when transcription is off', async () => {
+      const result = (await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)) as any;
+
+      expect(result.transcription).toBeUndefined();
+    });
+
+    it('includes a SECOND, independent transcription credential when configured', async () => {
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(
+        videoSettings({
+          transcriptionEnabled: true,
+          aiFeatures: {
+            transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+          },
+        }),
+      );
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'anthropic-test-key' })
+        .mockResolvedValueOnce({ apiKey: 'openai-audio-key' });
+
+      const result = (await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)) as any;
+
+      expect(result.transcription).toEqual({
+        provider: 'openai',
+        model: 'gpt-4o-mini-transcribe',
+        apiKey: 'openai-audio-key',
+      });
+    });
+
+    it('degrades to visual-only when transcription is on but unconfigured', async () => {
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(
+        videoSettings({ transcriptionEnabled: true }),
+      );
+
+      const result = (await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)) as any;
+
+      // Not an error: the node tags visual-only, matching the in-process path.
+      expect(result.transcription).toBeUndefined();
+      expect(result.apiKey).toBe('anthropic-test-key');
+    });
+
+    it('degrades to visual-only when the transcription credential cannot be resolved', async () => {
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(
+        videoSettings({
+          transcriptionEnabled: true,
+          aiFeatures: {
+            transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
+          },
+        }),
+      );
+      mockAiSettingsService.resolveCredentials
+        .mockResolvedValueOnce({ apiKey: 'anthropic-test-key' })
+        .mockRejectedValueOnce(new Error('no openai credential'));
+
+      const result = (await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)) as any;
+
+      expect(result.transcription).toBeUndefined();
+    });
+
+    it('400s when no tagging provider/model is configured', async () => {
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
+        key: 'global',
+        value: { ai: { features: { tagging: { provider: null, model: null } } } },
+      });
+
+      await expect(service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('400s for a job with no mediaItemId', async () => {
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeHeldJob({ type: 'video_auto_tagging', mediaItemId: null }),
+      );
+
+      await expect(service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+  });
 
   describe('geocode', () => {
     const GPS_LAT = 9.9325427;

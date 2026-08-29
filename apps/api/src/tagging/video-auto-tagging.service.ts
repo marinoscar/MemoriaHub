@@ -51,6 +51,13 @@ import {
   extractAudioLead,
   extractFrames,
 } from '@memoriahub/enrichment-compute/video';
+// Prompt construction lives in the shared parity package so the server and a
+// distributed worker node send BYTE-IDENTICAL vision requests (issue #460).
+import {
+  VIDEO_AUTO_TAGGING_SYSTEM_PROMPT,
+  VIDEO_TAGGING_MAX_TOKENS,
+  buildVideoTaggingPrompt,
+} from '@memoriahub/enrichment-compute/ai';
 import { PrismaService } from '../prisma/prisma.service';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
@@ -64,33 +71,6 @@ import { prepareImageForProcessing } from '../storage/processing/image-orientati
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { AutoTaggingService } from './auto-tagging.service';
-
-/**
- * System prompt for the video pass. Same output CONTRACT as the photo prompt
- * — a `{"tags": [...], "description": "..."}` JSON envelope — which is what
- * lets the entire parse/persist half be reused verbatim. What differs is the
- * framing: the model must understand it is looking at ordered stills from ONE
- * video, not a set of unrelated photos.
- *
- * Module-level so `buildVideoPrompt` can hand a distributed worker node the
- * EXACT prompt the server would have sent (issue #460), with no second
- * prompt-string construction to drift.
- */
-const VIDEO_AUTO_TAGGING_SYSTEM_PROMPT =
-  'You are a video analysis assistant. You will be shown several still frames sampled in order from a SINGLE video, ' +
-  'and optionally a transcript of its opening seconds. Your job is to analyze the video as a whole and return a JSON object ' +
-  'with two keys: "tags" and "description". ' +
-  '"tags" must be a JSON array of strings — each string must exactly match one of the labels in the provided allowed list; return an empty array if none apply. ' +
-  '"description" must be a brief 1-3 sentence description of the video as a whole, not of any single frame. ' +
-  'Respond with ONLY a JSON object with those two keys — no explanation, no code fences, no extra text.';
-
-/**
- * Output budget for the video vision call. Higher than the photo path's
- * provider defaults because a whole-video description plus a tag list does not
- * reliably fit in Anthropic's 1024, and a truncated response fails the JSON
- * parse (issue #453 added the per-request override for exactly this).
- */
-const VIDEO_TAGGING_MAX_TOKENS = 2048;
 
 /** Long-edge cap per frame — same env var and default as the photo path. */
 const TAG_MAX_DIM = (): number => parseInt(process.env['TAG_MAX_IMAGE_DIM'] ?? '1568', 10);
@@ -687,62 +667,4 @@ export class VideoAutoTaggingService {
       },
     });
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Render a millisecond offset as `m:ss`, for the frame-timestamp list. */
-function formatTimestamp(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-/**
- * Build the video user prompt.
- *
- * EXTENDS the photo prompt's contract rather than replacing it: the same
- * `{"tags": [...], "description": "..."}` envelope, the same newline-joined
- * `Allowed labels:` vocabulary, and the same named-people clause. What it adds
- * is the ordered-frames framing, the timestamp of each frame, and — when
- * present — a delimited transcript block. Because the OUTPUT contract is
- * unchanged, the whole parse/persist half is reused verbatim.
- *
- * Exported for direct testing.
- */
-export function buildVideoTaggingPrompt(
-  labelNames: string[],
-  peopleNames: string[],
-  sampledTimestampsMs: number[],
-  transcript: string | null,
-): string {
-  const frameList = sampledTimestampsMs.map((ms, i) => `${i + 1}. ${formatTimestamp(ms)}`).join('\n');
-
-  let prompt = `Analyze this video and return a JSON object with two keys: "tags" and "description".
-
-You are shown ${sampledTimestampsMs.length} still frame(s) sampled in order from a single video, at these points in its runtime:
-${frameList}
-
-Treat them as one video, not as unrelated photos. Describe what the video as a whole is about.
-
-"tags": an array of applicable labels from the following allowed list. Only choose labels that clearly apply. Return an empty array if none apply.
-"description": a brief 1-3 sentence description of the video.
-
-Allowed labels:
-${labelNames.join('\n')}
-
-Example response: {"tags": ["label1", "label2"], "description": "A child blows out candles on a birthday cake while family members sing. The video was taken indoors at a decorated dining table."}`;
-
-  if (transcript) {
-    prompt += `\n\nTranscript of the video's opening seconds (may be incomplete or misheard — treat it as a hint, not as fact):\n"""\n${transcript}\n"""`;
-  }
-
-  if (peopleNames.length > 0) {
-    prompt += `\n\nThe following named people appear in this video: ${peopleNames.join(', ')}. Mention them by name in the description where appropriate.`;
-  }
-
-  return prompt;
 }
