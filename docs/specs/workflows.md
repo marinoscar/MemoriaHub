@@ -196,7 +196,15 @@ Refinements are re-applied at three call sites that all share the same contract:
 
 ## 6. Media Item Action Library
 
-`apps/api/src/workflows/registry/media-item-fields.ts` (`MEDIA_ITEM_ACTIONS`) is the Media Item Subject's **Then** catalog. Every action descriptor (`WorkflowActionDescriptor`, `apps/api/src/workflows/registry/field-descriptor.interface.ts`) carries a Zod `paramsSchema` (`apps/api/src/workflows/actions/action-params.schema.ts`), a typed `permission` (`WorkflowActionPermission`), a `triggerCompatibility` (`'manual_only'` or `'all'`), and advisory `reversible`/`highImpact` flags surfaced to the builder UI. `WorkflowActionExecutor` (`apps/api/src/workflows/actions/workflow-action.executor.ts`) is the single place every action is actually applied — one item, one action, one `ActionOutcome` (`{ status: 'applied'|'skipped'|'failed', reason?, detail?, terminal? }`).
+`apps/api/src/workflows/registry/media-item-fields.ts` (`MEDIA_ITEM_ACTIONS`) is the Media Item Subject's **Then** catalog. Every action descriptor (`WorkflowActionDescriptor`, `apps/api/src/workflows/registry/field-descriptor.interface.ts`) carries a Zod `paramsSchema` (`apps/api/src/workflows/actions/action-params.schema.ts`) — **validated by `WorkflowDefinitionValidator.validate()` as its fifth step** since epic #452, which also normalizes schema defaults so the executor reads real values rather than `undefined`; before that the schemas were declared on all 22 actions and never invoked, leaving params structurally unvalidated at create/run time and failing at runtime, per item, inside a batch job — a typed `permission` (`WorkflowActionPermission`), a `triggerCompatibility` (`'manual_only'` or `'all'`), and advisory `reversible`/`highImpact` flags surfaced to the builder UI. `WorkflowActionExecutor` (`apps/api/src/workflows/actions/workflow-action.executor.ts`) is the single place every action is actually applied — one item, one action, one `ActionOutcome` (`{ status: 'applied'|'skipped'|'failed', reason?, detail?, terminal? }`).
+
+> **Param shape, easy to get wrong:** an action is stored **flat** in the
+> definition — `{ type, ...params }`, each param a TOP-LEVEL sibling of `type`,
+> never nested under a `params` key. `actionSchema` is
+> `z.object({ type }).passthrough()` precisely to allow that, and
+> `WorkflowExecuteBatchHandler` rebuilds the executor's `params` bag with
+> `const { type, ...params } = a`. The validator therefore reads and writes
+> siblings.
 
 ### 6.1 Item-level actions
 
@@ -215,7 +223,8 @@ Refinements are re-applied at three call sites that all share the same contract:
 | `set_location` | `{ lat, lng }` | base | `MediaService.bulkUpdateMedia` (`set.location`) | routes through the shared `applyLocation()` helper — coords + `coordSource='manual'` + synchronous reverse-geocode |
 | `clear_location` | — | base | `MediaService.bulkUpdateMedia` (`set.location: null`) | routes through `GEO_CLEAR_COLUMNS` (also nulls `coordSource`) |
 | `move_to_circle` | `{ targetCircleId }` | base + both-circle collaborator | hand-rolled (§6.3) | the **one** action with a cross-circle cascade |
-| `rerun_enrichment` | `kinds[]` ⊆ `tagging,faces,metadata,thumbnail,duplicates` | base | `EnrichmentJobService.enqueue` at **priority 100** | `faces` routes on the item's media type (`face_detection` for photos, `video_face_detection` for videos) |
+| `rerun_enrichment` | `kinds[]` ⊆ `tagging,faces,metadata,thumbnail,duplicates` | base | `EnrichmentJobService.enqueue` at **priority 100** | BOTH `faces` and `tagging` route on the item's media type — `face_detection`/`video_face_detection` and `auto_tagging`/`video_auto_tagging` respectively (epic #452). A `tagging` kind also upserts `MediaTagStatus → pending` (best-effort), so the UI badge moves and `buildDependencyState` does not read a stale `processed` while tags are mid-rebuild |
+| `rerun_ai_tagging` | *(none)* | base | Same executor path as `rerun_enrichment` with `kinds: ['tagging']` | Epic #452. A **preset, not a second implementation** — one click for the common case, so video routing and the status upsert cannot drift between the two. `triggerCompatibility: 'all'`, reversible, not high-impact |
 
 "base" = `BASE_ACTION_PERMISSION` = circle `collaborator` role + system `media:write` permission.
 

@@ -79,6 +79,16 @@ The worker container is configured entirely through environment variables — th
 
 `loadConfig()` (`apps/cli/src/config.ts`) overlays these env vars over any `~/.memoriahub/config.json` on disk (env wins), and synthesizes a full config from env alone when no config file exists at all — this is what lets the container run with zero interactive setup.
 
+**`video_auto_tagging` needs ffmpeg, like the other video types.** Epic #452's
+video AI-tagging job requires `['sharp','ffmpeg','ffprobe']` — it extracts
+frames (and optionally an audio lead) before making a single multi-image vision
+call — so a node without the ffmpeg binaries never claims it, exactly as with
+`video_face_detection`. The container bundle already carries them; a native
+install gets them from `node install-deps` (§2). It is the one job type the
+engine does **not** pre-download the input for: ffmpeg range-seeks the
+presigned URL directly, so a multi-gigabyte video costs megabytes of transfer
+rather than a full download to disk.
+
 **`workflow_execute_batch` needs nothing from this document.** Unlike every other type in `MEMORIAHUB_ELIGIBLE_TYPES`'s default set, the Media Workflow Automation batch-execution job type (`workflow_execute_batch`, epic #138) has zero capability requirements — no native library, no model file, no `ffmpeg`/`ffprobe` — because it never touches media bytes or runs a model; it only declares intended per-item outcomes from a frozen action list, and the API re-does the actual work authoritatively server-side (see the [Workflow Automation spec §11](specs/workflows.md#11-node-execution-computepersist-split)). It is therefore eligible on the leanest possible worker install, including a bare native `node install-deps`-free checkout, and `node doctor` always reports it ready. See the [Distributed Nodes spec §8](specs/distributed-nodes.md#8-node-eligible-job-types) job-type table for where it sits relative to the model/native-dependency-bearing types this document is primarily about.
 
 ### The bundled CompreFace sidecar
