@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -13,7 +13,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Link,
 } from '@mui/material';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -21,6 +20,7 @@ import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalTaggingBackfill } from '../../services/adminBackfill';
 import type { GlobalBackfillResult } from '../../services/adminBackfill';
 import { TagsContent } from './TagsPage';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 function TaggingSettingsContent() {
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
@@ -79,29 +79,17 @@ function TaggingSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <LocalOfferIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            AI Tagging &amp; Descriptions
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Manage global auto-tagging settings, run backfills across all circles, and maintain the tag
-          vocabulary.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<LocalOfferIcon color="primary" />}
+          title={<>AI Tagging &amp; Descriptions</>}
+          description={
+            <>
+              Manage global auto-tagging settings, run backfills across all circles, and maintain the tag
+              vocabulary.
+            </>
+          }
+        />
 
         {/* Section 1: Global Settings */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>

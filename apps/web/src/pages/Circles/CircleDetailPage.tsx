@@ -62,6 +62,7 @@ import {
   isInviteClaimed,
 } from './circleMembersTable';
 import type { Circle, CircleInvite, CircleMember, CircleRole } from '../../types/circles';
+import { scrollableTabsProps } from '../../components/common/tabs';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -313,7 +314,7 @@ export default function CircleDetailPage() {
       </Box>
 
       <Paper variant="outlined">
-        <Tabs value={tab} onChange={(_, v: number) => setTab(v)} sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs {...scrollableTabsProps} value={tab} onChange={(_, v: number) => setTab(v)} sx={{ px: 2, borderBottom: 1, borderColor: 'divider' }}>
           <Tab label="Members" />
           <Tab label="Invites" />
         </Tabs>

@@ -4,6 +4,7 @@ import { Box, Alert, Tabs, Tab, Typography, Stack } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useCircle } from '../../hooks/useCircle';
 import { PendingEnhancementsTab } from './PendingEnhancementsTab';
+import { scrollableTabsProps } from '../../components/common/tabs';
 
 /**
  * Tab keys. These are the `?tab=` values on the wire, so they are part of the
@@ -68,8 +69,7 @@ export default function EnhancementsPage() {
       <Tabs
         value={tab}
         onChange={(_, v: EnhancementsTab) => setTab(v)}
-        variant="scrollable"
-        scrollButtons="auto"
+        {...scrollableTabsProps}
         sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
       >
         <Tab label="Pending review" value="pending" />

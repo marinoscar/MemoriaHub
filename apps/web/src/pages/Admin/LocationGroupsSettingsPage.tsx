@@ -3,9 +3,10 @@
  *
  * Structure deliberately mirrors `LocationInferenceSettingsPage`: an inner
  * `…Content()` component wrapped by a `usePermissions()` guard, a
- * `<Container maxWidth="lg">`, a "Back to Settings" link, an icon + `h4`
- * heading, then sequential `<Paper variant="outlined">` sections and a pair of
- * feedback `<Snackbar>`s.
+ * `<Container maxWidth="lg">`, a shared `<AdminPageHeader>` (issue #451: the
+ * back link and the icon + `h4` heading it used to declare inline), then
+ * sequential `<Paper variant="outlined">` sections and a pair of feedback
+ * `<Snackbar>`s.
  *
  * RBAC: `geo_settings:read` (Admin). Location groups are a global geo
  * configuration exactly like the active reverse-geocoding provider, so the
@@ -13,7 +14,7 @@
  * and so does this page.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Alert,
   Avatar,
@@ -26,7 +27,6 @@ import {
   Divider,
   FormControlLabel,
   IconButton,
-  Link,
   Paper,
   Slider,
   Snackbar,
@@ -67,6 +67,8 @@ import type {
 import MergeLocationsDialog from '../../components/locations/MergeLocationsDialog';
 import type { MergeLocationCandidate } from '../../components/locations/MergeLocationsDialog';
 import LocationGroupEditorDialog from './LocationGroupEditorDialog';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { scrollableTabsProps } from '../../components/common/tabs';
 
 const LEVEL_TABS: Array<{ level: LocationGroupLevel; label: string }> = [
   { level: 'country', label: 'Countries' },
@@ -437,29 +439,17 @@ function LocationGroupsSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4, minWidth: 0 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <PublicIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Location Groups
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Collapse the many spellings a geocoder returns for one place — "Heredia", "Heredia
-          Province", "Provincia de Heredia" — into a single canonical name used everywhere photos
-          are browsed.
-        </Typography>
+        <AdminPageHeader
+          icon={<PublicIcon color="primary" />}
+          title={<>Location Groups</>}
+          description={
+            <>
+              Collapse the many spellings a geocoder returns for one place — "Heredia", "Heredia
+              Province", "Provincia de Heredia" — into a single canonical name used everywhere photos
+              are browsed.
+            </>
+          }
+        />
 
         {/* ---------------------------------------------------------------- */}
         {/* Section 1: Global Settings                                        */}
@@ -549,9 +539,7 @@ function LocationGroupsSettingsContent() {
           <Tabs
             value={level}
             onChange={(_, next: LocationGroupLevel) => setLevel(next)}
-            variant="scrollable"
-            scrollButtons="auto"
-            allowScrollButtonsMobile
+            {...scrollableTabsProps}
           >
             {LEVEL_TABS.map((tab) => (
               <Tab key={tab.level} value={tab.level} label={tab.label} />

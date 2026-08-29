@@ -28,6 +28,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { getEnhancerAdminStatus } from '../../services/enhance';
 import type { EnhancerAdminStatus } from '../../services/enhance';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 type Quality = 'low' | 'medium' | 'high';
 type Strength = 'subtle' | 'balanced' | 'strong';
@@ -171,29 +172,17 @@ function EnhancerSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <AutoFixHighIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            AI Picture Enhancer
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Turn the enhancer on, confirm the OpenAI image model is configured, and set the
-          defaults users start from.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<AutoFixHighIcon color="primary" />}
+          title={<>AI Picture Enhancer</>}
+          description={
+            <>
+              Turn the enhancer on, confirm the OpenAI image model is configured, and set the
+              defaults users start from.
+            </>
+          }
+        />
 
         {/* Section A: Master toggle */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>

@@ -7,7 +7,6 @@ import {
   Card,
   CardContent,
   Alert,
-  Link,
   useTheme,
 } from '@mui/material';
 import HourglassEmpty from '@mui/icons-material/HourglassEmpty';
@@ -22,7 +21,7 @@ import PlayCircleOutlined from '@mui/icons-material/PlayCircleOutlined';
 import Inventory2Outlined from '@mui/icons-material/Inventory2Outlined';
 import CheckCircleOutlined from '@mui/icons-material/CheckCircleOutlined';
 import HistoryToggleOff from '@mui/icons-material/HistoryToggleOff';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobInsights } from '../../hooks/useJobInsights';
 import { KpiCard } from '../../components/insights/KpiCard';
@@ -38,6 +37,7 @@ import {
   buildPerTypeRows,
   type PerTypeRow,
 } from './jobInsightsTable';
+import { AdminBackLink } from '../../components/admin/AdminPageHeader';
 
 // ---------------------------------------------------------------------------
 // Color palette for proportion bar segments
@@ -93,17 +93,8 @@ function JobInsightsPageContent() {
 
   return (
     <Container maxWidth="xl">
-      <Box sx={{ py: 4 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminBackLink />
 
         {/* Header */}
         <Box

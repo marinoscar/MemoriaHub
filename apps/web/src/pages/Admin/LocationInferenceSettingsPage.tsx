@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -13,7 +13,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Link,
   Slider,
   Divider,
 } from '@mui/material';
@@ -22,6 +21,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalLocationInferenceBackfill } from '../../services/adminLocationInference';
 import type { LocationInferenceBackfillResult } from '../../services/adminLocationInference';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 function LocationInferenceSettingsContent() {
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
@@ -122,29 +122,17 @@ function LocationInferenceSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <MyLocationIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Location Inference
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Estimate missing GPS coordinates from nearby same-device photos, tune auto-apply
-          thresholds, and trigger backfills across all circles.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<MyLocationIcon color="primary" />}
+          title={<>Location Inference</>}
+          description={
+            <>
+              Estimate missing GPS coordinates from nearby same-device photos, tune auto-apply
+              thresholds, and trigger backfills across all circles.
+            </>
+          }
+        />
 
         {/* Section 1: Global Settings */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>

@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -47,7 +47,6 @@ import {
   DialogActions,
   RadioGroup,
   Radio,
-  Link,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -72,6 +71,7 @@ import {
   buildStorageProviderColumns,
   providerLabel,
 } from './storageProvidersTable';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 // ---------------------------------------------------------------------------
 // Per-provider form shape
@@ -571,28 +571,17 @@ function StorageProvidersContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <CloudIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Storage Providers
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Configure storage providers for new uploads, manage credentials, and migrate existing
-          files between providers.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<CloudIcon color="primary" />}
+          title={<>Storage Providers</>}
+          description={
+            <>
+              Configure storage providers for new uploads, manage credentials, and migrate existing
+              files between providers.
+            </>
+          }
+        />
 
         {/* ------------------------------------------------------------------ */}
         {/* Provider rows                                                       */}

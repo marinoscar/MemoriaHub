@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -13,7 +13,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Link,
   Divider,
   Dialog,
   DialogTitle,
@@ -39,6 +38,7 @@ import {
   type AdminWorkflowListItem,
   type AdminWorkflowRun,
 } from '../../services/adminWorkflows';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 // ---------------------------------------------------------------------------
 // Media Workflow Automation — admin settings & oversight (issue #143).
@@ -295,27 +295,17 @@ function WorkflowsSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <AccountTreeIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Workflow Automation
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Control the blast radius, throughput, and safety of automated media
-          workflows across every circle.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<AccountTreeIcon color="primary" />}
+          title={<>Workflow Automation</>}
+          description={
+            <>
+              Control the blast radius, throughput, and safety of automated media
+              workflows across every circle.
+            </>
+          }
+        />
 
         {/* KPI strip */}
         <Box sx={{ mb: 3 }}>

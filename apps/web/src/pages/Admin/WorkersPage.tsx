@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useMemo, useState, FormEvent } from 'react';
-import { Navigate, Link as RouterLink, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -41,7 +41,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Link,
   TextField,
   RadioGroup,
   Radio,
@@ -72,6 +71,7 @@ import {
   buildWorkerNodeColumns,
   isCredentialRevoked,
 } from './workersTable';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 // ---------------------------------------------------------------------------
 // Create node credential dialog
@@ -399,29 +399,17 @@ function WorkersPageContent() {
 
   return (
     <Container maxWidth="xl">
-      <Box sx={{ py: 4 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Page header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <HubIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Worker Nodes
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Distributed CLI worker nodes: fleet health, heartbeats, and per-node job stats.
-          Auto-refreshes every 5 seconds.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<HubIcon color="primary" />}
+          title={<>Worker Nodes</>}
+          description={
+            <>
+              Distributed CLI worker nodes: fleet health, heartbeats, and per-node job stats.
+              Auto-refreshes every 5 seconds.
+            </>
+          }
+        />
 
         {/* Action bar */}
         <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>

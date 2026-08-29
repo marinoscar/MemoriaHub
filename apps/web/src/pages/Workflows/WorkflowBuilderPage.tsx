@@ -57,6 +57,7 @@ import { api } from '../../services/api';
 const DEFAULT_MAX_ITEMS_PER_RUN = 10000;
 const DEFAULT_REQUIRE_PREVIEW = true;
 import type { CreateWorkflowDto, UpdateWorkflowDto } from '../../types/workflows';
+import { scrollableTabsProps } from '../../components/common/tabs';
 
 /** Subset of `workflows.*` system settings the builder reads (admin-only). */
 interface WorkflowSystemSettings {
@@ -312,6 +313,7 @@ export default function WorkflowBuilderPage() {
 
       {isEdit && (
         <Tabs
+          {...scrollableTabsProps}
           value={tab}
           onChange={(_, next: 'builder' | 'runs') => setTab(next)}
           sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}

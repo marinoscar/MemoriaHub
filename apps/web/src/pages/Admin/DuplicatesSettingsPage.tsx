@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -13,7 +13,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Link,
   Slider,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -21,6 +20,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalDuplicatesBackfill, getDuplicatesStatus } from '../../services/adminDuplicates';
 import type { DuplicateBackfillResult, DuplicatesModelStatus } from '../../services/adminDuplicates';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 function DuplicatesSettingsContent() {
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
@@ -124,29 +124,17 @@ function DuplicatesSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <ContentCopyIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Near-Duplicate Detection
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Control near-duplicate photo detection globally, tune matching sensitivity, and trigger
-          backfills across all circles.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<ContentCopyIcon color="primary" />}
+          title={<>Near-Duplicate Detection</>}
+          description={
+            <>
+              Control near-duplicate photo detection globally, tune matching sensitivity, and trigger
+              backfills across all circles.
+            </>
+          }
+        />
 
         {/* Model status */}
         {modelStatusError && (
