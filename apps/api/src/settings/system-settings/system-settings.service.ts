@@ -356,6 +356,10 @@ export class SystemSettingsService {
               (current as any).autoTagging?.video?.transcription?.leadSeconds ??
               30,
           },
+          streamInput:
+            (dto as any).autoTagging?.video?.streamInput ??
+            (current as any).autoTagging?.video?.streamInput ??
+            true,
         },
       },
       face: {

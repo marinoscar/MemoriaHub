@@ -3,7 +3,11 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { streamToTempFile, assertDiskSpaceForDownload } from './stream-utils';
+import {
+  streamToTempFile,
+  assertDiskSpaceForDownload,
+  downloadToTempFile,
+} from './stream-utils';
 
 describe('streamToTempFile', () => {
   let tmpPath: string;
@@ -134,5 +138,96 @@ describe('assertDiskSpaceForDownload', () => {
     await expect(assertDiskSpaceForDownload(1_000_000, '/d')).rejects.toThrow(
       /insufficient disk space/,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// downloadToTempFile (issue #456)
+//
+// Extracted from the byte-identical block VideoFaceDetectionService,
+// SocialMediaDetectionHandler and VideoAutoTaggingService each had inline. It
+// is also the FALLBACK for the streaming path, so the sequence
+// (disk guard -> download -> partial-file cleanup) must have one implementation
+// rather than three that could drift.
+// ---------------------------------------------------------------------------
+
+describe('downloadToTempFile', () => {
+  const written: string[] = [];
+
+  afterEach(async () => {
+    for (const p of written.splice(0)) {
+      await fs.unlink(p).catch(() => {});
+    }
+  });
+
+  it('writes the stream to a temp file named with the given prefix and extension', async () => {
+    const { path, cleanup } = await downloadToTempFile({
+      getStream: async () => Readable.from([Buffer.from('video-bytes')]),
+      sizeBytes: 11,
+      prefix: 'memoriaHub-vtag-dl-',
+      extension: '.mp4',
+    });
+    written.push(path);
+
+    expect(path).toContain('memoriaHub-vtag-dl-');
+    expect(path.endsWith('.mp4')).toBe(true);
+    await expect(fs.readFile(path, 'utf8')).resolves.toBe('video-bytes');
+
+    await cleanup();
+    await expect(fs.stat(path)).rejects.toThrow();
+  });
+
+  it('runs the disk-space guard BEFORE opening the stream — a full disk must not start a download', async () => {
+    const getStream = jest.fn();
+
+    await expect(
+      downloadToTempFile({
+        getStream,
+        // Absurd size: guaranteed to exceed free space plus 20% headroom.
+        sizeBytes: Number.MAX_SAFE_INTEGER,
+        prefix: 'memoriaHub-guard-',
+      }),
+    ).rejects.toThrow(/insufficient disk space/);
+
+    expect(getStream).not.toHaveBeenCalled();
+  });
+
+  it('cleans up the PARTIAL file when the download fails mid-stream', async () => {
+    let capturedPath: string | undefined;
+
+    const failing = new Readable({
+      read() {
+        this.push(Buffer.from('partial'));
+        this.destroy(new Error('connection reset'));
+      },
+    });
+
+    await expect(
+      downloadToTempFile({
+        getStream: async () => failing,
+        sizeBytes: 100,
+        prefix: 'memoriaHub-partial-',
+      }),
+    ).rejects.toThrow(/connection reset/);
+
+    // Nothing matching the prefix should survive — the helper owns cleanup on
+    // the failure path so the caller cannot forget.
+    const leftovers = (await fs.readdir(tmpdir())).filter((f) =>
+      f.startsWith('memoriaHub-partial-'),
+    );
+    expect(leftovers).toEqual([]);
+    expect(capturedPath).toBeUndefined();
+  });
+
+  it('is idempotent on cleanup — a second call is a no-op, not a throw', async () => {
+    const { path, cleanup } = await downloadToTempFile({
+      getStream: async () => Readable.from([Buffer.from('x')]),
+      sizeBytes: 1,
+      prefix: 'memoriaHub-idem-',
+    });
+    written.push(path);
+
+    await cleanup();
+    await expect(cleanup()).resolves.toBeUndefined();
   });
 });

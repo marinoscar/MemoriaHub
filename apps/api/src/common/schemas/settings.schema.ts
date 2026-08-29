@@ -539,11 +539,17 @@ export const systemSettingsSchema = z.object({
         // regardless of runtime.
         leadSeconds: z.number().int().min(5).max(600).default(30),
       }).optional().default({ enabled: false, leadSeconds: 30 }),
+      // Whether ffmpeg reads the video from a presigned URL via HTTP range
+      // seeks instead of downloading it whole (issue #456). The proven
+      // download path stays the fallback for EVERY streaming failure, so this
+      // is a revert switch rather than a correctness gate.
+      streamInput: z.boolean().default(true),
     }).optional().default({
       enabled: false,
       maxFrames: 6,
       sampleIntervalSeconds: 5,
       transcription: { enabled: false, leadSeconds: 30 },
+      streamInput: true,
     }),
   }).optional().default({
     video: {
@@ -551,6 +557,7 @@ export const systemSettingsSchema = z.object({
       maxFrames: 6,
       sampleIntervalSeconds: 5,
       transcription: { enabled: false, leadSeconds: 30 },
+      streamInput: true,
     },
   }),
   face: z.object({
@@ -924,6 +931,7 @@ export const systemSettingsPatchSchema = z.object({
         enabled: z.boolean().optional(),
         leadSeconds: z.number().int().min(5).max(600).optional(),
       }).optional(),
+      streamInput: z.boolean().optional(),
     }).optional(),
   }).optional(),
   face: z.object({

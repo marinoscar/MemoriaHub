@@ -35,7 +35,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { streamToTempFile, assertDiskSpaceForDownload } from '../storage/processing/processors/stream-utils';
+import { downloadToTempFile } from '../storage/processing/processors/stream-utils';
 import { probeVideoFile, extractContainerMetadata } from '../storage/processing/processors/ffprobe.util';
 import {
   SocialMediaDetectorService,
@@ -250,15 +250,16 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
           mediaItem.storageObject!.storageProvider,
           mediaItem.storageObject!.bucket,
         );
-        // Pre-flight: fail fast (through the normal retry/backoff path) when
-        // the temp filesystem cannot hold the download plus headroom.
-        await assertDiskSpaceForDownload(sizeBytes, tmpdir());
-        const stream = await provider.download(mediaItem.storageObject!.storageKey);
-        const tmpPath = join(tmpdir(), `memoriaHub-social-dl-${randomUUID()}${fileExt}`);
-        // Record the path BEFORE streaming so the outer finally can unlink a
-        // partial file when streamToTempFile itself fails mid-download.
+        // Shared helper (issue #456) — one implementation of the
+        // disk-guard -> download -> partial-file-cleanup sequence, instead of
+        // the byte-identical copy this and VideoFaceDetectionService each had.
+        const { path: tmpPath } = await downloadToTempFile({
+          getStream: () => provider.download(mediaItem.storageObject!.storageKey),
+          sizeBytes,
+          prefix: 'memoriaHub-social-dl-',
+          extension: fileExt,
+        });
         downloadedVideoPath = tmpPath;
-        await streamToTempFile(stream, tmpPath);
         return downloadedVideoPath;
       };
 

@@ -45,16 +45,14 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { EnrichmentJob, MediaTagStatusType, MediaType } from '@prisma/client';
-import { randomUUID } from 'crypto';
-import { tmpdir } from 'os';
-import { join, extname } from 'path';
-import { promises as fs } from 'fs';
+import { extname } from 'path';
 import type { VideoAutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
 import {
   extractAudioLead,
   extractFrames,
 } from '@memoriahub/enrichment-compute/video';
 import { PrismaService } from '../prisma/prisma.service';
+import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
 import type {
@@ -62,11 +60,6 @@ import type {
   AiProviderCredentials,
   AnalyzeImageInputImage,
 } from '../ai/providers/ai-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import {
-  streamToTempFile,
-  assertDiskSpaceForDownload,
-} from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
@@ -124,6 +117,13 @@ export interface VideoTaggingParams {
   sampleIntervalSeconds: number;
   transcriptionEnabled: boolean;
   leadSeconds: number;
+  /**
+   * Whether ffmpeg may read the video straight from a presigned URL via HTTP
+   * range seeks instead of downloading it whole (issue #456). Off falls back
+   * to the proven download path, which is also what every streaming failure
+   * does — so this is a revert switch, not a correctness gate.
+   */
+  streamInput: boolean;
 }
 
 @Injectable()
@@ -134,7 +134,7 @@ export class VideoAutoTaggingService {
     private readonly prisma: PrismaService,
     private readonly aiSettingsService: AiSettingsService,
     private readonly aiProviderRegistry: AiProviderRegistry,
-    private readonly resolver: StorageProviderResolver,
+    private readonly videoInput: VideoInputResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly autoTaggingService: AutoTaggingService,
   ) {}
@@ -181,6 +181,7 @@ export class VideoAutoTaggingService {
       sampleIntervalSeconds: videoSettings?.sampleIntervalSeconds ?? 5,
       transcriptionEnabled: videoSettings?.transcription?.enabled === true,
       leadSeconds: videoSettings?.transcription?.leadSeconds ?? 30,
+      streamInput: videoSettings?.streamInput !== false,
     };
 
     const mediaItem = await this.prisma.mediaItem.findUnique({
@@ -318,24 +319,24 @@ export class VideoAutoTaggingService {
       const labelNames = tagLabels.map((t) => t.name);
 
       const fileExt = extname(mediaItem.storageObject.name || '') || '.mp4';
-      const tmpVideoPath = join(tmpdir(), `memoriaHub-vtag-dl-${randomUUID()}${fileExt}`);
 
-      const objectProvider = await this.resolver.getProviderFor(
-        mediaItem.storageObject.storageProvider,
-        mediaItem.storageObject.bucket,
-      );
-
-      // Pre-flight: fail fast through the normal retry/backoff path when the
-      // temp filesystem cannot hold the download plus headroom.
-      await assertDiskSpaceForDownload(mediaItem.storageObject.size, tmpdir());
+      // Streams from a presigned URL when the provider honors Range and the
+      // container's index is at the front; otherwise downloads. Either way the
+      // returned handle is just something ffmpeg can read (issue #456).
+      const input = await this.videoInput.resolve({
+        storageKey: mediaItem.storageObject.storageKey,
+        storageProvider: mediaItem.storageObject.storageProvider,
+        bucket: mediaItem.storageObject.bucket,
+        sizeBytes: mediaItem.storageObject.size,
+        extension: fileExt,
+        tempPrefix: 'memoriaHub-vtag-dl-',
+        streamingEnabled: params.streamInput,
+        jobId: job.id,
+      });
 
       let computed: VideoAutoTaggingResult;
       try {
-        // Download INSIDE the try so a partial file is still unlinked below.
-        const videoStream = await objectProvider.download(mediaItem.storageObject.storageKey);
-        await streamToTempFile(videoStream, tmpVideoPath);
-
-        computed = await this.computeVideoAutoTagging(tmpVideoPath, {
+        computed = await this.computeVideoAutoTagging(input.source, {
           durationMs: mediaItem.durationMs,
           fileExtension: fileExt,
           params,
@@ -348,7 +349,7 @@ export class VideoAutoTaggingService {
           jobId: job.id,
         });
       } finally {
-        await fs.unlink(tmpVideoPath).catch(() => {});
+        await input.cleanup();
       }
 
       // The transcript is persisted BEFORE the shared persist runs, so

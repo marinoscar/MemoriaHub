@@ -850,6 +850,7 @@ describe('SystemSettingsService', () => {
             // Untouched keys keep their stored/default value.
             sampleIntervalSeconds: 5,
             transcription: { enabled: true, leadSeconds: 60 },
+            streamInput: true,
           },
         });
       });
@@ -876,6 +877,9 @@ describe('SystemSettingsService', () => {
             maxFrames: 6,
             sampleIntervalSeconds: 5,
             transcription: { enabled: false, leadSeconds: 30 },
+            // Streaming defaults ON: the download path remains the fallback
+            // for every failure, so this is a revert switch, not a risk.
+            streamInput: true,
           },
         });
       });
@@ -908,7 +912,16 @@ describe('SystemSettingsService', () => {
           maxFrames: 12,
           sampleIntervalSeconds: 15,
           transcription: { enabled: true, leadSeconds: 120 },
+          streamInput: true,
         });
+      });
+
+      it('carries streamInput through the wire DTO, so it can be flipped off without a deploy', () => {
+        const parsed = patchSystemSettingsSchema.parse({
+          autoTagging: { video: { streamInput: false } },
+        });
+
+        expect((parsed as any).autoTagging?.video?.streamInput).toBe(false);
       });
 
       it('rejects an out-of-range maxFrames at the wire DTO — the frame budget is the cost lever', () => {

@@ -31,14 +31,8 @@ jest.mock('@memoriahub/enrichment-compute/video', () => ({
   extractAudioLead: jest.fn(),
 }));
 
-// Downloading is orthogonal to what these tests assert.
-jest.mock('../storage/processing/processors/stream-utils', () => ({
-  streamToTempFile: jest.fn().mockResolvedValue(undefined),
-  assertDiskSpaceForDownload: jest.fn().mockResolvedValue(undefined),
-}));
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { Readable } from 'stream';
 import {
   EnrichmentJob,
   JobReason,
@@ -54,7 +48,7 @@ import { AutoTaggingService } from './auto-tagging.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError } from '../enrichment/rate-limit.error';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -151,7 +145,8 @@ describe('VideoAutoTaggingService', () => {
   };
   let mockRegistry: { get: jest.Mock };
   let mockProvider: { analyzeImage: jest.Mock; transcribeAudio?: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock };
+  let mockVideoInput: { resolve: jest.Mock };
+  let mockCleanup: jest.Mock;
   let mockEnrichmentJobService: { recordModel: jest.Mock };
   let mockAutoTaggingService: { persistAutoTagging: jest.Mock };
   const ORIGINAL_ENV = { ...process.env };
@@ -172,9 +167,14 @@ describe('VideoAutoTaggingService', () => {
       resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }),
       resolveTranscriptionConfig: jest.fn().mockResolvedValue(null),
     };
-    mockResolver = {
-      getProviderFor: jest.fn().mockResolvedValue({
-        download: jest.fn().mockResolvedValue(Readable.from([Buffer.from('video')])),
+    mockCleanup = jest.fn().mockResolvedValue(undefined);
+    mockVideoInput = {
+      resolve: jest.fn().mockResolvedValue({
+        source: '/tmp/video.mp4',
+        mode: 'download',
+        reason: 'test',
+        bytesMoved: 5_000_000,
+        cleanup: mockCleanup,
       }),
     };
     mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
@@ -203,7 +203,7 @@ describe('VideoAutoTaggingService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AiSettingsService, useValue: mockAiSettings },
         { provide: AiProviderRegistry, useValue: mockRegistry },
-        { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: VideoInputResolver, useValue: mockVideoInput },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AutoTaggingService, useValue: mockAutoTaggingService },
       ],
@@ -284,7 +284,7 @@ describe('VideoAutoTaggingService', () => {
 
       await service.processMediaItem(makeJob());
 
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockVideoInput.resolve).not.toHaveBeenCalled();
       expect(mockProvider.analyzeImage).not.toHaveBeenCalled();
     });
 
@@ -380,6 +380,63 @@ describe('VideoAutoTaggingService', () => {
       const req = mockProvider.analyzeImage.mock.calls[0][1];
       expect(req.images.length).toBeGreaterThan(0);
       expect(req.images.length).toBeLessThan(6);
+    });
+  });
+
+  // =========================================================================
+  // Input resolution (issue #456)
+  // =========================================================================
+
+  describe('video input', () => {
+    it('asks the resolver for the input and hands whatever it returns to ffmpeg', async () => {
+      mockVideoInput.resolve.mockResolvedValue({
+        source: 'https://storage.example/clip.mp4?sig=abc',
+        mode: 'stream',
+        reason: 'faststart',
+        bytesMoved: 65536,
+        cleanup: mockCleanup,
+      });
+
+      await service.processMediaItem(makeJob());
+
+      // The compute half is source-agnostic: a URL and a path are both just
+      // something ffmpeg can read.
+      expect(mockExtractFrames.mock.calls[0][0]).toBe('https://storage.example/clip.mp4?sig=abc');
+    });
+
+    it('forwards the admin streamInput setting, defaulting to enabled', async () => {
+      await service.processMediaItem(makeJob());
+      expect(mockVideoInput.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({ streamingEnabled: true }),
+      );
+
+      mockVideoInput.resolve.mockClear();
+      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(
+        makeSettings({
+          autoTagging: {
+            video: {
+              enabled: true,
+              maxFrames: 6,
+              sampleIntervalSeconds: 5,
+              transcription: { enabled: false, leadSeconds: 30 },
+              streamInput: false,
+            },
+          },
+        }),
+      );
+
+      await service.processMediaItem(makeJob());
+      expect(mockVideoInput.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({ streamingEnabled: false }),
+      );
+    });
+
+    it('always cleans up the input, including when the AI call throws', async () => {
+      mockProvider.analyzeImage.mockRejectedValue(new Error('provider exploded'));
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow();
+
+      expect(mockCleanup).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -237,3 +237,57 @@ describe('NodeEngine INPUT_REQUIRED_TYPES guard', () => {
     expect(doneEvents[0]?.submitted).toBe(true);
   });
 });
+
+/**
+ * URL_INPUT_TYPES (epic #452, issue #456).
+ *
+ * ffmpeg speaks HTTP and range-seeks, so `video_auto_tagging` needs only the
+ * few megabytes around each seek point. Pre-downloading a multi-gigabyte video
+ * in the engine would defeat the entire optimization and leave it server-side
+ * only — which is exactly the trap this opt-out exists to avoid.
+ */
+describe('NodeEngine URL_INPUT_TYPES opt-out', () => {
+  it('video_auto_tagging passes the presigned URL STRAIGHT to compute, downloading nothing', async () => {
+    const downloadCalls: DownloadCall[] = [];
+    const doneEvents: Array<{ jobId: string; type: string; submitted: boolean }> = [];
+    const url = 'https://storage.example.com/signed/video.mp4';
+    const { engine, stub } = buildEngine(
+      [claim('j1', 'video_auto_tagging', url)],
+      ['video_auto_tagging'],
+      downloadCalls,
+    );
+    engine.on(NODE_EV.JOB_DONE, (payload) => doneEvents.push(payload));
+
+    await runUntilIdle(engine);
+    await engine.stop('test');
+
+    // The whole point: no gigabytes pulled to disk.
+    expect(downloadCalls).toHaveLength(0);
+
+    expect(stub.computeCalls).toHaveLength(1);
+    expect(stub.computeCalls[0]?.type).toBe('video_auto_tagging');
+    expect(stub.computeCalls[0]?.inputPath).toBe(url);
+
+    expect(stub.failureCalls).toHaveLength(0);
+    expect(doneEvents[0]?.submitted).toBe(true);
+  });
+
+  it('video_auto_tagging with inputUrl:null still fails cleanly rather than computing on an empty string', async () => {
+    const downloadCalls: DownloadCall[] = [];
+    const { engine, stub } = buildEngine(
+      [claim('j1', 'video_auto_tagging', null)],
+      ['video_auto_tagging'],
+      downloadCalls,
+    );
+
+    await runUntilIdle(engine);
+    await engine.stop('test');
+
+    // A URL-input type still REQUIRES a URL — skipping the download must not
+    // also skip the "no input at all" guard.
+    expect(stub.computeCalls).toHaveLength(0);
+    expect(stub.failureCalls).toHaveLength(1);
+    expect(stub.failureCalls[0]?.body.error).toContain('input bytes unavailable');
+    expect(stub.failureCalls[0]?.body.error).toContain('video_auto_tagging');
+  });
+});

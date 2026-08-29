@@ -49,6 +49,44 @@ export interface FrameExtractionOpts {
    * Falls back to '.mp4' when absent.
    */
   fileExtension?: string;
+  /**
+   * Per-frame ffmpeg timeout in ms before SIGKILL.
+   *
+   * Historically UNBOUNDED here (only `extractPosterFrame` was bounded), which
+   * was survivable against a local file. Against a remote URL it is not: a
+   * stalled network read would hang a worker slot until the 20-minute job
+   * timeout fired. Absent, this falls back to `FFMPEG_TIMEOUT_MS` (default
+   * 60000) — so the previously-unbounded local path also gains a ceiling.
+   */
+  ffmpegTimeoutMs?: number;
+}
+
+/**
+ * A video source ffmpeg can read: either a local file path or an HTTP(S) URL.
+ *
+ * ffmpeg speaks HTTP and issues Range requests, so `-ss` fast input seek
+ * against a URL fetches only the ranges around each seek point — megabytes
+ * rather than the whole multi-gigabyte file. The functions here do not care
+ * which form they are given; `isHttpUrl` below is only used to pick a longer
+ * default timeout for the network case.
+ */
+export type VideoSource = string;
+
+/** True for an http(s) URL, as opposed to a local filesystem path. */
+export function isHttpUrl(source: string): boolean {
+  return /^https?:\/\//i.test(source);
+}
+
+/**
+ * Default ffmpeg timeout for a single frame/audio extraction, in ms.
+ *
+ * A network source gets a longer budget than a local file: the first seek has
+ * to fetch the container header before it can read anything.
+ */
+function defaultFfmpegTimeoutMs(source: string): number {
+  const configured = parseInt(process.env.FFMPEG_TIMEOUT_MS ?? '60000', 10);
+  const base = Number.isFinite(configured) && configured > 0 ? configured : 60000;
+  return isHttpUrl(source) ? base * 2 : base;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,10 +109,11 @@ export interface FrameExtractionOpts {
  * Always cleans up its own (per-frame output) temp files in a finally block.
  */
 export async function extractFrames(
-  videoPath: string,
+  videoPath: VideoSource,
   opts: FrameExtractionOpts,
 ): Promise<ExtractedFrame[]> {
   const { durationMs, sampleIntervalSeconds, maxFrames } = opts;
+  const ffmpegTimeoutMs = opts.ffmpegTimeoutMs ?? defaultFfmpegTimeoutMs(videoPath);
 
   const seekTimestamps = computeSeekTimestamps(durationMs ?? 0, sampleIntervalSeconds, maxFrames);
 
@@ -88,7 +127,7 @@ export async function extractFrames(
       tmpFramePaths.push(tmpOut);
 
       try {
-        await extractFrame(videoPath, tmpOut, seekSecs);
+        await extractFrame(videoPath, tmpOut, seekSecs, ffmpegTimeoutMs);
         const buffer = await fs.readFile(tmpOut);
         results.push({ timestampMs: Math.round(seekSecs * 1000), buffer });
       } catch (err) {
@@ -128,10 +167,12 @@ export async function extractFrames(
  * per-frame output temp files it creates internally, in a finally block.
  */
 export async function extractFramesAt(
-  videoPath: string,
+  videoPath: VideoSource,
   timestampsMs: number[],
   _fileExtension?: string,
+  ffmpegTimeoutMs?: number,
 ): Promise<ExtractedFrame[]> {
+  const timeoutMs = ffmpegTimeoutMs ?? defaultFfmpegTimeoutMs(videoPath);
   const cleaned = Array.from(new Set(timestampsMs.map((t) => Math.max(0, Math.round(t))))).sort(
     (a, b) => a - b,
   );
@@ -151,7 +192,7 @@ export async function extractFramesAt(
       tmpFramePaths.push(tmpOut);
 
       try {
-        await extractFrame(videoPath, tmpOut, seekSecs);
+        await extractFrame(videoPath, tmpOut, seekSecs, timeoutMs);
         const buffer = await fs.readFile(tmpOut);
         results.push({ timestampMs: ms, buffer });
       } catch (err) {
@@ -222,11 +263,10 @@ export interface ExtractedAudioLead {
  * best-effort and proceed visual-only.
  */
 export async function extractAudioLead(
-  videoPath: string,
+  videoPath: VideoSource,
   opts: AudioLeadOpts,
 ): Promise<ExtractedAudioLead> {
-  const ffmpegTimeoutMs =
-    opts.ffmpegTimeoutMs ?? parseInt(process.env.FFMPEG_TIMEOUT_MS ?? '60000', 10);
+  const ffmpegTimeoutMs = opts.ffmpegTimeoutMs ?? defaultFfmpegTimeoutMs(videoPath);
 
   const tmpOut = join(tmpdir(), `memoriaHub-audio-${randomUUID()}.m4a`);
 
@@ -432,13 +472,170 @@ export function computeSeekTimestamps(
  *
  * Argv: `['-ss', <seekSecs>, '-i', tmpIn, '-y', '-vframes', '1', tmpOut]` —
  * identical to what fluent-ffmpeg's `.seekInput(s).frames(1).output(out)`
- * chain produced. Deliberately UNBOUNDED by a timeout, matching the previous
- * behaviour of this sampling path (only `extractPosterFrame` was ever
- * timeout-bounded); each caller already treats a per-frame failure as
- * skippable.
+ * chain produced. `tmpIn` may be a local path OR an http(s) URL; ffmpeg does
+ * not care, and `-ss` before `-i` stays an INPUT seek either way, which is
+ * exactly what makes a URL source fetch only the bytes around the seek point.
+ *
+ * Bounded by `timeoutMs` (issue #456). This path used to be unbounded —
+ * survivable against a local file, but against a remote URL a stalled network
+ * read would hang a worker slot until the 20-minute job timeout. Each caller
+ * already treats a per-frame failure as skippable, so a timed-out frame costs
+ * that frame, not the video.
  */
-function extractFrame(tmpIn: string, tmpOut: string, seekSecs: number): Promise<void> {
-  return runFfmpeg(
-    buildFrameExtractionArgs({ input: tmpIn, output: tmpOut, seekSecs }),
-  );
+function extractFrame(
+  tmpIn: VideoSource,
+  tmpOut: string,
+  seekSecs: number,
+  timeoutMs: number,
+): Promise<void> {
+  return runFfmpeg(buildFrameExtractionArgs({ input: tmpIn, output: tmpOut, seekSecs }), {
+    timeoutMs,
+    timeoutMessage: `ffmpeg frame extraction timed out after ${timeoutMs}ms`,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Range-seek suitability probe (issue #456)
+// ---------------------------------------------------------------------------
+
+export type RangeSeekVerdict =
+  /** Range honored AND the container's index is at the front — stream it. */
+  | 'suitable'
+  /**
+   * Range honored but the index is at the END of the file (a non-faststart
+   * MP4/MOV), so ffmpeg must fetch the tail before it can seek at all —
+   * collapsing the saving and doing it slowly. Download instead.
+   */
+  | 'not-faststart'
+  /** The provider ignored the Range header, so there is no saving to be had. */
+  | 'no-range-support'
+  /** Could not tell (network error, unrecognized container). Download instead. */
+  | 'unknown';
+
+export interface RangeSeekProbeResult {
+  verdict: RangeSeekVerdict;
+  /** Human-readable reason, for the decision log. */
+  detail: string;
+  /** Bytes actually read by the probe itself. */
+  bytesRead: number;
+}
+
+/** How much of the file head to read when looking for the `moov` atom. */
+const FASTSTART_PROBE_BYTES = 64 * 1024;
+
+/**
+ * Decide whether a video URL is worth streaming to ffmpeg instead of
+ * downloading whole.
+ *
+ * This answers BOTH preconditions in a single small ranged request:
+ *
+ *   1. Does the provider honor `Range`? A 206 with a `Content-Range` header
+ *      says yes. A 200 means the whole object was sent and ffmpeg's seeks
+ *      would re-download the file repeatedly — strictly worse than one clean
+ *      download.
+ *   2. For MP4/MOV, is the `moov` atom at the FRONT ("faststart")? The atom
+ *      layout is definitive and readable from the first few KB, which is why
+ *      this reads the bytes rather than trying to infer it from ffprobe
+ *      metadata — ffprobe's `-show_format` output does not report atom order
+ *      at all, so there is nothing in the persisted `_processing['video-probe']`
+ *      blob that could answer this.
+ *
+ * NEVER THROWS: any failure resolves to `'unknown'`, and every non-`suitable`
+ * verdict means "use the proven download path". The worst case of this whole
+ * feature is therefore exactly today's behavior plus one 64 KB read.
+ */
+export async function probeRangeSeekSuitability(
+  url: string,
+  opts: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<RangeSeekProbeResult> {
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const doFetch = opts.fetchImpl ?? fetch;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await doFetch(url, {
+      headers: { Range: `bytes=0-${FASTSTART_PROBE_BYTES - 1}` },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return { verdict: 'unknown', detail: `probe returned HTTP ${response.status}`, bytesRead: 0 };
+    }
+    if (response.status !== 206 || !response.headers.get('content-range')) {
+      // A 200 means the provider sent the WHOLE object — no ranged reads, so
+      // streaming would re-fetch the file per seek.
+      return {
+        verdict: 'no-range-support',
+        detail: `provider answered HTTP ${response.status} without Content-Range`,
+        bytesRead: 0,
+      };
+    }
+
+    const head = Buffer.from(await response.arrayBuffer());
+    const layout = findMp4IndexPosition(head);
+
+    if (layout === 'front') {
+      return { verdict: 'suitable', detail: 'moov atom at the front (faststart)', bytesRead: head.length };
+    }
+    if (layout === 'back') {
+      return {
+        verdict: 'not-faststart',
+        detail: 'mdat precedes moov — the index is at the end of the file',
+        bytesRead: head.length,
+      };
+    }
+    return {
+      verdict: 'unknown',
+      detail: 'container layout not recognized in the probed head',
+      bytesRead: head.length,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { verdict: 'unknown', detail: `probe failed: ${msg}`, bytesRead: 0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Walk the top-level ISO-BMFF (MP4/MOV) box list in `head` and report whether
+ * the `moov` index box comes before or after the `mdat` media payload.
+ *
+ * Returns `'unknown'` for a non-ISO-BMFF container (WebM, AVI, …) or when the
+ * probed window ends before either box is seen — both of which route to the
+ * download path rather than guessing.
+ */
+function findMp4IndexPosition(head: Buffer): 'front' | 'back' | 'unknown' {
+  let offset = 0;
+
+  // A box is: 4-byte big-endian size, 4-byte type. Size 1 means the real
+  // 64-bit size follows the type; size 0 means "to end of file".
+  while (offset + 8 <= head.length) {
+    const size32 = head.readUInt32BE(offset);
+    const type = head.toString('latin1', offset + 4, offset + 8);
+
+    if (type === 'moov') return 'front';
+    if (type === 'mdat') return 'back';
+
+    let boxSize: number;
+    if (size32 === 1) {
+      if (offset + 16 > head.length) return 'unknown';
+      // Read the 64-bit size as a Number — real box sizes are far below 2^53.
+      boxSize = Number(head.readBigUInt64BE(offset + 8));
+    } else if (size32 === 0) {
+      // Extends to EOF, so nothing further can appear before it.
+      return 'unknown';
+    } else {
+      boxSize = size32;
+    }
+
+    // A malformed or absurd size means this is not an ISO-BMFF file (or is
+    // corrupt); either way, do not guess.
+    if (boxSize < 8 || !Number.isSafeInteger(boxSize)) return 'unknown';
+    offset += boxSize;
+  }
+
+  return 'unknown';
 }
