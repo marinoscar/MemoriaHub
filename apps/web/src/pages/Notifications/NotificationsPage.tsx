@@ -89,6 +89,7 @@ import type {
   NotificationItem,
   NotificationStatusFilter,
 } from '../../types/notifications';
+import { scrollableTabsProps } from '../../components/common/tabs';
 
 // ---------------------------------------------------------------------------
 // Tabs
@@ -473,7 +474,7 @@ export default function NotificationsPage() {
 
       {/* Status tabs */}
       <Paper variant="outlined" sx={{ mb: 2 }}>
-        <Tabs value={tab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
+        <Tabs {...scrollableTabsProps} value={tab} onChange={handleTabChange}>
           <Tab label="Unread" value="unread" />
           <Tab label="All" value="all" />
           <Tab label="Dismissed" value="dismissed" />
