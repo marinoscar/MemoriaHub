@@ -9,6 +9,7 @@ import {
   WorkflowOperator,
 } from '../registry/field-descriptor.interface';
 import {
+  getActionDescriptor,
   getField,
   getSubjectRegistry,
   isRegisteredAction,
@@ -20,9 +21,10 @@ import {
  * Validates a workflow definition document against the per-Subject registry.
  *
  * Layered on top of the structural Zod schema: it rejects a `subject` not in the
- * registry, any `field`/`op`/action `type` not registered for that Subject, and
- * operator/value-type mismatches — so an unknown or cross-Subject combination
- * can never be persisted.
+ * registry, any `field`/`op`/action `type` not registered for that Subject,
+ * operator/value-type mismatches, and action `params` that fail the action's
+ * own declared schema — so an unknown or cross-Subject combination, or a
+ * malformed action parameter, can never be persisted.
  *
  * Stateless and pure (no I/O) — trivially unit-testable.
  */
@@ -61,7 +63,7 @@ export class WorkflowDefinitionValidator {
       }
     }
 
-    // 4. Actions: each type must be registered for the Subject (params: Phase 2).
+    // 4. Actions: each type must be registered for the Subject.
     for (const action of def.actions) {
       if (!isRegisteredAction(def.subject, action.type)) {
         const registry = getSubjectRegistry(def.subject);
@@ -71,6 +73,51 @@ export class WorkflowDefinitionValidator {
         );
       }
     }
+
+    // 5. Action PARAMS: validate each action's params against its declared
+    //    schema (epic #452, issue #459).
+    //
+    //    `WorkflowActionDescriptor.paramsSchema` was declared on all 22 actions
+    //    and never invoked anywhere. The definition schema's `actionSchema` is
+    //    `z.object({ type }).passthrough()`, so params were structurally
+    //    UNVALIDATED at create and run time and the executor blind-cast
+    //    `action.params['kinds']`. A malformed or missing `kinds` array reached
+    //    the executor and failed at runtime, per item, inside a batch job —
+    //    instead of being rejected with a clean 400 when the workflow was saved.
+    //
+    //    Wiring it here hardens all 22 existing actions retroactively, and
+    //    NORMALIZES params in the process (schemas carry `.default()`s, e.g.
+    //    remove_tags' `sources`), so the executor reads defaulted values rather
+    //    than undefined.
+    //
+    //    SHAPE NOTE, and it is easy to get wrong: an action is stored FLAT —
+    //    `{ type, ...params }`, each param a TOP-LEVEL SIBLING of `type`, never
+    //    nested under a `params` key. `actionSchema` is
+    //    `z.object({ type }).passthrough()` precisely to allow that, and
+    //    WorkflowExecuteBatchHandler rebuilds the executor's params bag with
+    //    `const { type, ...params } = a`. So the values to validate are the
+    //    siblings, and the normalized values are written back as siblings too.
+    def.actions = def.actions.map((action) => {
+      const descriptor = getActionDescriptor(def.subject, action.type);
+      // A registered action with no schema cannot happen today (step 4 already
+      // proved it is registered, and every descriptor declares one), but
+      // treating it as "nothing to check" is the safe reading rather than
+      // throwing on a registry the user cannot fix.
+      if (!descriptor?.paramsSchema) return action;
+
+      const { type, ...params } = action as Record<string, unknown>;
+      const result = descriptor.paramsSchema.safeParse(params);
+      if (!result.success) {
+        const issues = result.error.issues
+          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+          .join('; ');
+        throw new BadRequestException(
+          `Invalid params for action "${action.type}": ${issues}`,
+        );
+      }
+
+      return { type, ...(result.data as Record<string, unknown>) } as typeof action;
+    });
 
     return def;
   }

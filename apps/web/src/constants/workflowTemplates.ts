@@ -75,6 +75,33 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     },
   },
   {
+    // Epic #452's headline use case, made discoverable: "for videos captured
+    // between date A and date B, re-run AI tagging".
+    id: 'retag-videos-in-range',
+    name: 'Re-tag videos from a date range',
+    title: 'Re-tag videos from a date range',
+    description:
+      'Give a batch of videos AI tags and a written description, so they turn up in search.',
+    plainLanguage:
+      'If a video was captured within a date range, re-run AI tagging on it.',
+    icon: Movie,
+    suggestedTrigger: 'manual',
+    definition: {
+      version: 1,
+      subject: 'media_item',
+      match: 'all',
+      conditions: [
+        { field: 'mediaType', op: 'equals', value: 'video' },
+        {
+          field: 'capturedAt',
+          op: 'between',
+          value: ['2026-01-01T00:00:00.000Z', '2026-12-31T23:59:59.999Z'],
+        },
+      ],
+      actions: [{ type: 'rerun_ai_tagging' }],
+    },
+  },
+  {
     id: 'trip-album',
     name: 'Album from a trip',
     title: 'Album from a trip',

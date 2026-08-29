@@ -53,6 +53,9 @@ export const ACTION_PARAM_KIND: Record<string, ActionParamKind> = {
   clear_location: 'none',
   move_to_circle: 'circle',
   rerun_enrichment: 'rerunKinds',
+  // The one-click form of "Re-run enrichment -> tick Tagging" (epic #452).
+  // Takes no params — the kinds list is fixed server-side.
+  rerun_ai_tagging: 'none',
   resolve_burst_group: 'resolveAction',
   dismiss_burst_group: 'none',
   resolve_duplicate_group: 'resolveAction',

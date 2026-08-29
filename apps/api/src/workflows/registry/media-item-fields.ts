@@ -825,6 +825,19 @@ export const MEDIA_ITEM_ACTIONS: WorkflowActionDescriptor[] = [
     reversible: true,
     highImpact: false,
   },
+  {
+    // Shortcut for the epic #452 headline case ("for videos captured between
+    // A and B, re-run AI tagging"). Purely discoverability — it dispatches
+    // through the same rerun_enrichment executor path with kinds:['tagging'],
+    // so it is a preset rather than a second implementation. Takes no params.
+    type: 'rerun_ai_tagging',
+    label: 'Re-run AI tagging',
+    paramsSchema: emptyParamsSchema,
+    permission: BASE_ACTION_PERMISSION,
+    triggerCompatibility: 'all',
+    reversible: true,
+    highImpact: false,
+  },
 
   // ----------------------------- Review-queue -----------------------------
   {

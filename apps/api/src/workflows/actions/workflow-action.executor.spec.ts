@@ -14,7 +14,7 @@
  */
 
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { MediaTagSource, MediaType } from '@prisma/client';
+import { JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { WorkflowActionExecutor } from './workflow-action.executor';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -692,7 +692,8 @@ describe('WorkflowActionExecutor', () => {
   // ---------------------------------------------------------------------------
 
   describe('rerun_enrichment', () => {
-    it('enqueues auto_tagging for kind "tagging" at priority 100', async () => {
+    it('enqueues auto_tagging for kind "tagging" on a PHOTO at priority 100', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.photo } as any);
       const outcome = await executor.execute(
         action('rerun_enrichment', { kinds: ['tagging'] }),
         { id: ITEM_ID },
@@ -701,6 +702,83 @@ describe('WorkflowActionExecutor', () => {
       expect(outcome).toEqual({ status: 'applied' });
       expect(enrichmentJobs.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'auto_tagging', mediaItemId: ITEM_ID, circleId: CIRCLE_ID, priority: 100 }),
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // Epic #452's headline use case: "for videos captured between A and B,
+    // re-run AI tagging". It was already expressible — mediaType and capturedAt
+    // are registered condition fields and rerun_enrichment is a shipped action
+    // — but enrichmentJobTypeForKind returned 'auto_tagging' unconditionally
+    // for `tagging`, so every matched video produced a failed job.
+    // -------------------------------------------------------------------------
+
+    it('routes "tagging" to video_auto_tagging for a VIDEO', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.video } as any);
+
+      await executor.execute(action('rerun_enrichment', { kinds: ['tagging'] }), { id: ITEM_ID }, ctx);
+
+      expect(enrichmentJobs.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'video_auto_tagging' }),
+      );
+      expect(
+        (enrichmentJobs.enqueue as jest.Mock).mock.calls.map((c) => c[0].type),
+      ).not.toContain('auto_tagging');
+    });
+
+    it('skips (not_found) when kinds includes "tagging" but the item no longer exists', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue(null);
+
+      const outcome = await executor.execute(
+        action('rerun_enrichment', { kinds: ['tagging'] }),
+        { id: ITEM_ID },
+        ctx,
+      );
+
+      expect(outcome).toEqual({ status: 'skipped', reason: 'not_found' });
+    });
+
+    it('marks MediaTagStatus pending, so the badge reflects the queued rerun and the dependency snapshot is not stale', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.video } as any);
+
+      await executor.execute(action('rerun_enrichment', { kinds: ['tagging'] }), { id: ITEM_ID }, ctx);
+
+      expect(prisma.mediaTagStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { mediaItemId: ITEM_ID },
+          update: { status: MediaTagStatusType.pending },
+        }),
+      );
+    });
+
+    it('does NOT touch MediaTagStatus for a non-tagging kind', async () => {
+      await executor.execute(action('rerun_enrichment', { kinds: ['metadata'] }), { id: ITEM_ID }, ctx);
+
+      expect(prisma.mediaTagStatus.upsert).not.toHaveBeenCalled();
+    });
+
+    it('still applies when the tag-status write fails — a cosmetic miss must not fail the run item', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.photo } as any);
+      prisma.mediaTagStatus.upsert.mockRejectedValue(new Error('db down') as any);
+
+      const outcome = await executor.execute(
+        action('rerun_enrichment', { kinds: ['tagging'] }),
+        { id: ITEM_ID },
+        ctx,
+      );
+
+      expect(outcome).toEqual({ status: 'applied' });
+      expect(enrichmentJobs.enqueue).toHaveBeenCalled();
+    });
+
+    it('uses reason "rerun", the loop-protection contract that stops an on_media_enriched workflow re-triggering itself', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.photo } as any);
+
+      await executor.execute(action('rerun_enrichment', { kinds: ['tagging'] }), { id: ITEM_ID }, ctx);
+
+      // workflow-trigger.listener.ts only reacts to JobReason.upload.
+      expect(enrichmentJobs.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: JobReason.rerun }),
       );
     });
 
@@ -731,6 +809,7 @@ describe('WorkflowActionExecutor', () => {
     });
 
     it('enqueues one job per kind for multiple kinds', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.photo } as any);
       await executor.execute(
         action('rerun_enrichment', { kinds: ['tagging', 'metadata', 'thumbnail', 'duplicates'] }),
         { id: ITEM_ID },
@@ -740,6 +819,53 @@ describe('WorkflowActionExecutor', () => {
       const types = (enrichmentJobs.enqueue as jest.Mock).mock.calls.map((c) => c[0].type);
       expect(types.sort()).toEqual(
         ['auto_tagging', 'duplicate_detection', 'metadata_extraction', 'thumbnail_regen'].sort(),
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // rerun_ai_tagging — the epic #452 shortcut. A PRESET over the same executor
+  // path, so video routing and the tag-status upsert cannot drift between it
+  // and "Re-run enrichment -> tick Tagging".
+  // ---------------------------------------------------------------------------
+
+  describe('rerun_ai_tagging', () => {
+    it('enqueues video_auto_tagging for a video, with no params supplied', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.video } as any);
+
+      const outcome = await executor.execute(action('rerun_ai_tagging', {}), { id: ITEM_ID }, ctx);
+
+      expect(outcome).toEqual({ status: 'applied' });
+      expect(enrichmentJobs.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'video_auto_tagging', priority: 100, reason: JobReason.rerun }),
+      );
+    });
+
+    it('enqueues auto_tagging for a photo', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.photo } as any);
+
+      await executor.execute(action('rerun_ai_tagging', {}), { id: ITEM_ID }, ctx);
+
+      expect(enrichmentJobs.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'auto_tagging' }),
+      );
+    });
+
+    it('enqueues exactly ONE job — it is tagging only, not a full re-enrichment', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.photo } as any);
+
+      await executor.execute(action('rerun_ai_tagging', {}), { id: ITEM_ID }, ctx);
+
+      expect(enrichmentJobs.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    it('marks MediaTagStatus pending, exactly like the long form', async () => {
+      prisma.mediaItem.findUnique.mockResolvedValue({ type: MediaType.photo } as any);
+
+      await executor.execute(action('rerun_ai_tagging', {}), { id: ITEM_ID }, ctx);
+
+      expect(prisma.mediaTagStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ update: { status: MediaTagStatusType.pending } }),
       );
     });
   });
