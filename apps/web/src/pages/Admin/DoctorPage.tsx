@@ -1,4 +1,4 @@
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -9,7 +9,6 @@ import {
   Button,
   CircularProgress,
   Alert,
-  Link,
 } from '@mui/material';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -20,6 +19,7 @@ import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlined';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useDoctor } from '../../hooks/useDoctor';
 import type { DoctorCheck, DoctorCheckStatus, DoctorSection } from '../../services/doctor';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -119,47 +119,28 @@ function DoctorPageContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
         {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Page header */}
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: { xs: 'flex-start', sm: 'center' },
-            justifyContent: 'space-between',
-            flexDirection: { xs: 'column', sm: 'row' },
-            gap: 1,
-            mb: 1,
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <MonitorHeartIcon color="primary" />
-            <Typography variant="h4" component="h1">
-              Doctor &mdash; Diagnostics
-            </Typography>
-          </Box>
-          <Button
-            variant="contained"
-            onClick={() => void run()}
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
-          >
-            Run diagnostics
-          </Button>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Run configuration health checks across auth, storage, AI providers, and background jobs.
-        </Typography>
+        <AdminPageHeader
+          icon={<MonitorHeartIcon color="primary" />}
+          title={<>Doctor &mdash; Diagnostics</>}
+          actions={
+            <Button
+              variant="contained"
+              onClick={() => void run()}
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={16} /> : <RefreshIcon />}
+            >
+              Run diagnostics
+            </Button>
+          }
+          description={
+            <>
+              Run configuration health checks across auth, storage, AI providers, and background
+              jobs.
+            </>
+          }
+        />
 
         {/* Inline error (report already loaded, a re-run failed) */}
         {error && report && (

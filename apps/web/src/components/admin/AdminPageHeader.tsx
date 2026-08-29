@@ -41,11 +41,38 @@ import { Box, Link, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import { ADMIN_HUB_PATH } from '../../config/adminSections';
 
+/**
+ * The "← Back to Settings" link on its own, for the handful of admin pages
+ * whose header is bespoke enough that `AdminPageHeader` would change their
+ * visual design (an `h5` title with a subtitle beside it, say). They still
+ * need the one thing that is not a design choice: the link is redundant below
+ * `sm`, where the AppBar's drill-down arrow already goes to the same place.
+ */
+export function AdminBackLink({ to = ADMIN_HUB_PATH }: { to?: string }) {
+  return (
+    <Link
+      component={RouterLink}
+      to={to}
+      underline="hover"
+      variant="body2"
+      // Hidden, not unmounted — see the note (1) in the file header.
+      sx={{ display: { xs: 'none', sm: 'inline-block' }, mb: 2 }}
+    >
+      &larr; Back to Settings
+    </Link>
+  );
+}
+
 export interface AdminPageHeaderProps {
   /** Rendered as the page's single `<h1>`. */
   title: ReactNode;
   /** Optional leading glyph, e.g. `<ArchiveIcon color="primary" />`. */
   icon?: ReactNode;
+  /**
+   * Rendered immediately after the title and OUTSIDE the `<h1>` — a status
+   * chip belongs beside a heading, not inside its accessible name.
+   */
+  titleAdornment?: ReactNode;
   /** The `text.secondary` paragraph under the title. */
   description?: ReactNode;
   /** Where the back link points. Defaults to the admin hub. */
@@ -57,22 +84,14 @@ export interface AdminPageHeaderProps {
 export function AdminPageHeader({
   title,
   icon,
+  titleAdornment,
   description,
   backTo = ADMIN_HUB_PATH,
   actions,
 }: AdminPageHeaderProps) {
   return (
     <>
-      <Link
-        component={RouterLink}
-        to={backTo}
-        underline="hover"
-        variant="body2"
-        // Hidden, not unmounted — see the note (1) in the file header.
-        sx={{ display: { xs: 'none', sm: 'inline-block' }, mb: 2 }}
-      >
-        &larr; Back to Settings
-      </Link>
+      <AdminBackLink to={backTo} />
 
       <Box
         sx={{
@@ -103,6 +122,11 @@ export function AdminPageHeader({
           >
             {title}
           </Typography>
+          {titleAdornment ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0, mt: '0.15em' }}>
+              {titleAdornment}
+            </Box>
+          ) : null}
         </Box>
 
         {actions ? (

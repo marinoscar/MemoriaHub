@@ -11,7 +11,6 @@ import {
   Chip,
   Divider,
   useTheme,
-  Link,
 } from '@mui/material';
 import StorageIcon from '@mui/icons-material/Storage';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -22,7 +21,7 @@ import FaceIcon from '@mui/icons-material/Face';
 import TagIcon from '@mui/icons-material/LocalOffer';
 import QueuedIcon from '@mui/icons-material/HourglassEmpty';
 import ComputingIcon from '@mui/icons-material/QueryStats';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useInsights } from '../../hooks/useInsights';
 import { KpiCard } from '../../components/insights/KpiCard';
@@ -31,6 +30,7 @@ import { CompositionDonut } from '../../components/insights/CompositionDonut';
 import { ProportionBar } from '../../components/insights/ProportionBar';
 import { FreshnessPill } from '../../components/insights/FreshnessPill';
 import { formatBytes, formatCompactNumber, percent, bytesToNumber } from '../../utils/formatBytes';
+import { AdminBackLink } from '../../components/admin/AdminPageHeader';
 
 // Suppress unused import warning — VideoIcon is available for future use
 void VideoIcon;
@@ -178,17 +178,9 @@ function StorageInsightsPageContent() {
 
   return (
     <Container maxWidth="xl">
-      <Box sx={{ py: 4 }}>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
         {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
+        <AdminBackLink />
 
         {/* Header */}
         <Box

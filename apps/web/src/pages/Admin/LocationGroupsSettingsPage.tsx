@@ -3,9 +3,10 @@
  *
  * Structure deliberately mirrors `LocationInferenceSettingsPage`: an inner
  * `…Content()` component wrapped by a `usePermissions()` guard, a
- * `<Container maxWidth="lg">`, a "Back to Settings" link, an icon + `h4`
- * heading, then sequential `<Paper variant="outlined">` sections and a pair of
- * feedback `<Snackbar>`s.
+ * `<Container maxWidth="lg">`, a shared `<AdminPageHeader>` (issue #451: the
+ * back link and the icon + `h4` heading it used to declare inline), then
+ * sequential `<Paper variant="outlined">` sections and a pair of feedback
+ * `<Snackbar>`s.
  *
  * RBAC: `geo_settings:read` (Admin). Location groups are a global geo
  * configuration exactly like the active reverse-geocoding provider, so the

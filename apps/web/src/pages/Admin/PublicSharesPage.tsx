@@ -28,7 +28,7 @@
  */
 
 import { useState, useCallback, useMemo } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -48,7 +48,6 @@ import {
   TextField,
   Tabs,
   Tab,
-  Link,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import RevokeIcon from '@mui/icons-material/Block';
@@ -75,6 +74,7 @@ import {
   type ShareStatusFilter,
 } from './sharesTable';
 import { scrollableTabsProps } from '../../components/common/tabs';
+import { AdminBackLink } from '../../components/admin/AdminPageHeader';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -460,15 +460,7 @@ function PublicSharesPageContent() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 } }}>
-      <Link
-        component={RouterLink}
-        to="/admin/settings"
-        underline="hover"
-        variant="body2"
-        sx={{ display: 'inline-block', mb: 2 }}
-      >
-        &larr; Back to Settings
-      </Link>
+      <AdminBackLink />
 
       {/* Header */}
       <Stack direction="row" spacing={2} sx={{ mb: 3, alignItems: 'center' }}>

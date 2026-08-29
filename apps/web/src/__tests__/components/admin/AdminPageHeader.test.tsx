@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { screen } from '@testing-library/react';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import { render } from '../../utils/test-utils';
 import { AdminPageHeader } from '../../../components/admin/AdminPageHeader';
@@ -136,5 +139,49 @@ describe('AdminPageHeader', () => {
 
     const slot = screen.getByTestId('run-btn').parentElement as HTMLElement;
     expect(getComputedStyle(slot).flexWrap).toBe('wrap');
+  });
+});
+
+/**
+ * Issue #451 — a source-scanning guard, for the same reason the tab-bar sweep
+ * in `common/scrollableTabs.test.ts` is one: the redundancy is invisible above
+ * `sm`, so no rendered assertion catches it, and the next admin page added by
+ * copy-paste from an older one would silently reintroduce it.
+ */
+describe('the "Back to Settings" link is never hand-rolled', () => {
+  const PAGES_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'pages');
+
+  function tsxFiles(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) tsxFiles(full, out);
+      else if (entry.endsWith('.tsx')) out.push(full);
+    }
+    return out;
+  }
+
+  it('routes every admin page through AdminPageHeader or AdminBackLink', () => {
+    const offenders = tsxFiles(PAGES_ROOT).filter((file) => {
+      const source = readFileSync(file, 'utf-8');
+      if (!source.includes('Back to Settings')) return false;
+      // The literal may only appear inside the two shared components' call
+      // sites — anywhere else it is a page re-declaring the link by hand, and
+      // therefore one that will still show it on a phone.
+      return !source.includes('<AdminPageHeader') && !source.includes('<AdminBackLink');
+    });
+
+    expect(offenders.map((f) => relative(PAGES_ROOT, f))).toEqual([]);
+  });
+
+  it('finds the admin pages at all, so the sweep cannot pass vacuously', () => {
+    // Counts ADOPTERS, not occurrences of the literal: after the migration the
+    // string itself lives only in the shared components, so a scan for it
+    // across `pages/` would trivially find nothing and prove nothing.
+    const adopters = tsxFiles(PAGES_ROOT).filter((file) => {
+      const source = readFileSync(file, 'utf-8');
+      return source.includes('<AdminPageHeader') || source.includes('<AdminBackLink');
+    });
+
+    expect(adopters.length).toBeGreaterThanOrEqual(20);
   });
 });
