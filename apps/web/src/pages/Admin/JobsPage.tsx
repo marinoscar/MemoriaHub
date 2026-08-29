@@ -346,7 +346,6 @@ function JobsPageContent() {
   return (
     <Container maxWidth="xl">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<WorkHistoryIcon color="primary" />}
           title={<>Job Queue</>}
@@ -371,10 +370,10 @@ function JobsPageContent() {
               View insights &amp; ETA
             </Button>
           }
+          description={
+            <>Monitor and manage enrichment job queue. Auto-refreshes every 5 seconds.</>
+          }
         />
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Monitor and manage enrichment job queue. Auto-refreshes every 5 seconds.
-        </Typography>
 
         {/* Stats error */}
         {statsError && (

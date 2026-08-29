@@ -245,7 +245,6 @@ function GeoSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<LocationOnIcon color="primary" />}
           title={<>Geo Settings</>}

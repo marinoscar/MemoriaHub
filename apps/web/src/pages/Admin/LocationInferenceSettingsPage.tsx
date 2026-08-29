@@ -123,7 +123,6 @@ function LocationInferenceSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<MyLocationIcon color="primary" />}
           title={<>Location Inference</>}

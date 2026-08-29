@@ -572,7 +572,6 @@ function StorageProvidersContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<CloudIcon color="primary" />}
           title={<>Storage Providers</>}

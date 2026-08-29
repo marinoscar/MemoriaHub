@@ -80,7 +80,6 @@ function TaggingSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<LocalOfferIcon color="primary" />}
           title={<>AI Tagging &amp; Descriptions</>}

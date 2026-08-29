@@ -120,7 +120,6 @@ function DoctorPageContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<MonitorHeartIcon color="primary" />}
           title={<>Doctor &mdash; Diagnostics</>}

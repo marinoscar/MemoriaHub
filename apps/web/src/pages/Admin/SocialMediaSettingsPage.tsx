@@ -156,7 +156,6 @@ function SocialMediaSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<MovieIcon color="primary" />}
           title={<>Social Media Detection</>}

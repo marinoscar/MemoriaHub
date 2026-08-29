@@ -173,7 +173,6 @@ function EnhancerSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<AutoFixHighIcon color="primary" />}
           title={<>AI Picture Enhancer</>}

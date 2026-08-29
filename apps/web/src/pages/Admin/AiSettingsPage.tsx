@@ -317,7 +317,6 @@ function AiSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           title={<>AI Settings</>}
           description={

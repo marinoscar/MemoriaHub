@@ -400,7 +400,6 @@ function WorkersPageContent() {
   return (
     <Container maxWidth="xl">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<HubIcon color="primary" />}
           title={<>Worker Nodes</>}

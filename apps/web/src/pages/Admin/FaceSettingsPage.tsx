@@ -269,7 +269,6 @@ function FaceSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<FaceIcon color="primary" />}
           title={<>Face Settings</>}

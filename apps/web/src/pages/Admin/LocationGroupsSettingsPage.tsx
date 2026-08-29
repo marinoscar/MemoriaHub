@@ -439,7 +439,6 @@ function LocationGroupsSettingsContent() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 4, minWidth: 0 }}>
-        {/* Back link */}
         <AdminPageHeader
           icon={<PublicIcon color="primary" />}
           title={<>Location Groups</>}
