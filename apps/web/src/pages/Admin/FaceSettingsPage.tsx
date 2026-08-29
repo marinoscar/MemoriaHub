@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -18,7 +18,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Link,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -27,6 +26,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useFaceSettings } from '../../hooks/useFaceSettings';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGlobalFaceBackfill, runGlobalFaceAutoArchiveBackfill } from '../../services/adminBackfill';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 function FaceSettingsContent() {
   const {
@@ -268,27 +268,17 @@ function FaceSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
         {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <FaceIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Face Settings
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Configure face detection provider credentials and detection settings
-        </Typography>
+        <AdminPageHeader
+          icon={<FaceIcon color="primary" />}
+          title={<>Face Settings</>}
+          description={
+            <>
+              Configure face detection provider credentials and detection settings
+            </>
+          }
+        />
 
         {/* Global face recognition section */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>

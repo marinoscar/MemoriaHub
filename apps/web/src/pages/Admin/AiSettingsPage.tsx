@@ -26,6 +26,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import WarningIcon from '@mui/icons-material/Warning';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAiSettings } from '../../hooks/useAiSettings';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 function AiSettingsContent() {
   const {
@@ -315,24 +316,16 @@ function AiSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
         {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Typography variant="h4" component="h1" gutterBottom>
-          AI Settings
-        </Typography>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Configure AI provider credentials and feature settings
-        </Typography>
+        <AdminPageHeader
+          title={<>AI Settings</>}
+          description={
+            <>
+              Configure AI provider credentials and feature settings
+            </>
+          }
+        />
 
         {/* Provider sections — show configured providers AND known-but-unconfigured providers */}
         {[...(settings?.providers ?? []), ...(settings?.knownProviders ?? [])].map((providerConfig) => (

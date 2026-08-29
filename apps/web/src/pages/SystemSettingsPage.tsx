@@ -7,10 +7,9 @@ import {
   Tabs,
   Tab,
   Paper,
-  Link,
 } from '@mui/material';
 import { useState } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { usePermissions } from '../hooks/usePermissions';
 import { useSystemSettings } from '../hooks/useSystemSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -18,6 +17,8 @@ import { UISettings } from '../components/admin/UISettings';
 import { StorageSettings } from '../components/admin/StorageSettings';
 import { MaintenanceSettings } from '../components/admin/MaintenanceSettings';
 import { resetJobHistory } from '../services/jobInsights';
+import { AdminPageHeader } from '../components/admin/AdminPageHeader';
+import { scrollableTabsProps } from '../components/common/tabs';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -69,24 +70,16 @@ export default function SystemSettingsPage() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Typography variant="h4" component="h1" gutterBottom>
-          System Settings
-        </Typography>
-        <Typography color="text.secondary" sx={{ mb: 2 }}>
-          Configure application-wide settings
-          {!canWrite && ' (read-only)'}
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          title={<>System Settings</>}
+          description={
+            <>
+              Configure application-wide settings
+              {!canWrite && ' (read-only)'}
+            </>
+          }
+        />
 
         {/* Last Updated Info */}
         {settings?.updatedBy && (
@@ -105,6 +98,7 @@ export default function SystemSettingsPage() {
         {settings && (
           <Paper sx={{ mt: 2 }}>
             <Tabs
+              {...scrollableTabsProps}
               value={tabIndex}
               onChange={(_, newValue) => setTabIndex(newValue)}
               sx={{ borderBottom: 1, borderColor: 'divider' }}
@@ -114,7 +108,7 @@ export default function SystemSettingsPage() {
               <Tab label="Maintenance" />
             </Tabs>
 
-            <Box sx={{ p: 3 }}>
+            <Box sx={{ p: { xs: 2, sm: 3 } }}>
               <TabPanel value={tabIndex} index={0}>
                 <UISettings
                   settings={settings.ui}

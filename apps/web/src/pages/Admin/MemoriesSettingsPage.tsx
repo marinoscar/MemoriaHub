@@ -30,6 +30,7 @@ import { getEmailSettings } from '../../services/email';
 import { listCircles } from '../../services/circles';
 import { runMemoriesBackfill } from '../../services/adminMemories';
 import type { MemoriesBackfillResult } from '../../services/adminMemories';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 type DigestFrequency = 'off' | 'daily' | 'weekly' | 'monthly';
 
@@ -335,26 +336,16 @@ function MemoriesSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <AutoAwesomeMotionIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Memories
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Automatic memory curation, story feed, and email digests.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<AutoAwesomeMotionIcon color="primary" />}
+          title={<>Memories</>}
+          description={
+            <>
+              Automatic memory curation, story feed, and email digests.
+            </>
+          }
+        />
 
         {/* ---- Section 1: global toggle ------------------------------------ */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>

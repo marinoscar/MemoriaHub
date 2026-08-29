@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -13,7 +13,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Link,
   Slider,
 } from '@mui/material';
 import MovieIcon from '@mui/icons-material/Movie';
@@ -22,6 +21,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { backfillSocialMedia, getSocialMediaStatus } from '../../services/adminSocialMedia';
 import type { SocialMediaBackfillResult, SocialMediaOcrStatus } from '../../services/adminSocialMedia';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 function SocialMediaSettingsContent() {
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
@@ -155,31 +155,20 @@ function SocialMediaSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
         {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <MovieIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Social Media Detection
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Detects videos saved from TikTok, Instagram, and Facebook and tags them{' '}
-          <strong>&ldquo;Social Media&rdquo;</strong> plus the source platform. Detected social media
-          videos are skipped by all other enrichment (tagging, face detection, bursts, duplicates,
-          location inference) to save compute.
-        </Typography>
+        <AdminPageHeader
+          icon={<MovieIcon color="primary" />}
+          title={<>Social Media Detection</>}
+          description={
+            <>
+              Detects videos saved from TikTok, Instagram, and Facebook and tags them{' '}
+              <strong>&ldquo;Social Media&rdquo;</strong> plus the source platform. Detected social media
+              videos are skipped by all other enrichment (tagging, face detection, bursts, duplicates,
+              location inference) to save compute.
+            </>
+          }
+        />
 
         {/* OCR model status */}
         {ocrStatusError && (

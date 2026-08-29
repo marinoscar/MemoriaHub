@@ -36,6 +36,7 @@ import type {
   TestEmailResult,
   UpdateEmailSettingsBody,
 } from '../../services/email';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 // Common AWS SES regions.
 const SES_REGIONS: { value: string; label: string }[] = [
@@ -230,27 +231,17 @@ function EmailSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
         {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <EmailIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Email Settings
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Configure the outbound email provider (AWS SES or SMTP) and test delivery.
-        </Typography>
+        <AdminPageHeader
+          icon={<EmailIcon color="primary" />}
+          title={<>Email Settings</>}
+          description={
+            <>
+              Configure the outbound email provider (AWS SES or SMTP) and test delivery.
+            </>
+          }
+        />
 
         {/* Status chips */}
         <Stack direction="row" spacing={1} sx={{ mb: 3, flexWrap: 'wrap', gap: 1 }}>

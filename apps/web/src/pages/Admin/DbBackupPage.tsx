@@ -35,7 +35,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Alert,
   AlertTitle,
@@ -77,6 +77,7 @@ import type {
 } from '../../services/dbBackup';
 import { DataTable } from '../../components/datatable';
 import type { DataTableRowAction } from '../../components/datatable';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 import {
   DB_BACKUP_RUNS_TABLE_ID,
   buildDbBackupRunColumns,
@@ -532,28 +533,18 @@ function DbBackupPageContent() {
 
   return (
     <Container maxWidth="xl">
-      <Box sx={{ py: 4 }}>
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <BackupIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Database Backup
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Scheduled <code>pg_dump</code> of the PostgreSQL database to object
-          storage. This backs up the <strong>database only</strong> — media files
-          are covered separately by Backup and by node Local Media Backup.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<BackupIcon color="primary" />}
+          title={<>Database Backup</>}
+          description={
+            <>
+              Scheduled <code>pg_dump</code> of the PostgreSQL database to object
+              storage. This backs up the <strong>database only</strong> — media files
+              are covered separately by Backup and by node Local Media Backup.
+            </>
+          }
+        />
 
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
@@ -570,8 +561,24 @@ function DbBackupPageContent() {
         {/* Run controls + live progress                                        */}
         {/* ------------------------------------------------------------------ */}
         <Paper variant="outlined" sx={{ p: 2.5, mb: 3 }} id="db-backup-active-run">
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <Typography variant="h6" component="h2" sx={{ flexGrow: 1 }}>
+          {/* Four items on one line do not fit a 360px viewport. Without a wrap
+              guard every child stays at the default `flex-shrink: 1` and the
+              contained button is compressed until "Back up now" breaks across
+              three lines and clips "Refresh" beside it (issue #451, the same
+              root cause #438 fixed elsewhere). The heading is the only
+              shrinkable child; the controls wrap to their own line instead. */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 1,
+              rowGap: 1,
+              mb: 2,
+              '& .MuiButton-root': { flexShrink: 0, whiteSpace: 'nowrap' },
+            }}
+          >
+            <Typography variant="h6" component="h2" sx={{ flexGrow: 1, minWidth: 0 }}>
               Runs
             </Typography>
             {config && (
@@ -1092,9 +1099,20 @@ function DbBackupPageContent() {
               />
             )}
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* The neighbouring text is a full locale timestamp, which is wide
+                enough on a phone to squeeze the button's label. Wrap instead. */}
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 2,
+                rowGap: 1,
+              }}
+            >
               <Button
                 variant="contained"
+                sx={{ flexShrink: 0 }}
                 disabled={saving || !canWrite}
                 onClick={() => void handleSave()}
               >

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import {
   Container,
   Box,
@@ -18,7 +18,6 @@ import {
   CircularProgress,
   Alert,
   Snackbar,
-  Link,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -28,6 +27,7 @@ import { useGeoSettings } from '../../hooks/useGeoSettings';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { runGeoBackfill } from '../../services/geo';
 import type { GeoReverseProvider } from '../../services/geo';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 const PROVIDER_LABELS: Record<string, string> = {
   offline: 'Offline (GeoNames)',
@@ -244,27 +244,17 @@ function GeoSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
         {/* Back link */}
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <LocationOnIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Geo Settings
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Configure reverse geocoding provider and credentials
-        </Typography>
+        <AdminPageHeader
+          icon={<LocationOnIcon color="primary" />}
+          title={<>Geo Settings</>}
+          description={
+            <>
+              Configure reverse geocoding provider and credentials
+            </>
+          }
+        />
 
         {/* Active reverse provider */}
         <Paper variant="outlined" sx={{ p: 3, mb: 2 }}>

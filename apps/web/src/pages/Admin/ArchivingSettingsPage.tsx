@@ -10,12 +10,12 @@ import {
   Stack,
   Alert,
   Snackbar,
-  Link,
 } from '@mui/material';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 const DEFAULT_RETENTION_DAYS = 30;
 const MIN_RETENTION_DAYS = 1;
@@ -67,30 +67,20 @@ function ArchivingSettingsContent() {
 
   return (
     <Container maxWidth="lg">
-      <Box sx={{ py: 4 }}>
-        <Link
-          component={RouterLink}
-          to="/admin/settings"
-          underline="hover"
-          variant="body2"
-          sx={{ display: 'inline-block', mb: 2 }}
-        >
-          &larr; Back to Settings
-        </Link>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <ArchiveIcon color="primary" />
-          <Typography variant="h4" component="h1">
-            Archiving &amp; Deletion
-          </Typography>
-        </Box>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Archive hides items from browse surfaces (Home, Albums, People, Explore, Map) without
-          deleting them; search still finds archived items by default. Trash is a recoverable
-          deletion state — items are purged permanently after the retention period below.
-          Archiving and moving items to Trash are performed manually or in bulk from the media
-          views, not from this page.
-        </Typography>
+      <Box sx={{ py: { xs: 2, sm: 4 } }}>
+        <AdminPageHeader
+          icon={<ArchiveIcon color="primary" />}
+          title={<>Archiving &amp; Deletion</>}
+          description={
+            <>
+              Archive hides items from browse surfaces (Home, Albums, People, Explore, Map) without
+              deleting them; search still finds archived items by default. Trash is a recoverable
+              deletion state — items are purged permanently after the retention period below.
+              Archiving and moving items to Trash are performed manually or in bulk from the media
+              views, not from this page.
+            </>
+          }
+        />
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>

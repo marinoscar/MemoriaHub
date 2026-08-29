@@ -64,6 +64,7 @@ import {
 import { listMedia, getMedia } from '../../services/media';
 import type { MediaItem } from '../../types/media';
 import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
+import { scrollableTabsProps } from '../../components/common/tabs';
 
 // ---------------------------------------------------------------------------
 // Delete Biometrics Dialog
@@ -1715,6 +1716,7 @@ export default function PeoplePage() {
           hidden, since a lone "People" tab conveys nothing. */}
       {showHiddenTab && (
         <Tabs
+          {...scrollableTabsProps}
           value={activeTab}
           onChange={(_, v: number) => {
             setActiveTab(v);

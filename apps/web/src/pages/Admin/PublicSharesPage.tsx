@@ -74,6 +74,7 @@ import {
   withStatusFilter,
   type ShareStatusFilter,
 } from './sharesTable';
+import { scrollableTabsProps } from '../../components/common/tabs';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -494,9 +495,7 @@ function PublicSharesPageContent() {
         <Tabs
           value={statusFilter}
           onChange={handleStatusChange}
-          variant="scrollable"
-          scrollButtons="auto"
-          allowScrollButtonsMobile
+          {...scrollableTabsProps}
         >
           <Tab label="All" value="all" />
           <Tab label="Active" value="active" />
