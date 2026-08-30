@@ -1,6 +1,7 @@
 import { api } from './api';
 import { createTrashEmptyRun } from './trashEmptyRuns';
 import type { CreateTrashEmptyRunResponse } from '../types/trashEmptyRuns';
+import type { EnhanceParams } from './enhance';
 import type {
   MediaItem,
   MediaListResponse,
@@ -399,6 +400,45 @@ export interface BulkRerunDto {
 
 export async function bulkRerunTags(dto: BulkRerunDto): Promise<{ queued: number }> {
   return api.post<{ queued: number }>('/media/bulk/tags/rerun', dto);
+}
+
+/**
+ * Per-reason breakdown of the ids the server declined to queue. The three
+ * counts plus `queued` always sum to `requested` — an ineligible item never
+ * fails the whole batch (unlike the single-item endpoint, which 400s).
+ */
+export interface BulkEnhanceSkipped {
+  /** Not a photo (or its storage object is not an image). */
+  notPhoto: number;
+  /** Over the `pictureEnhancement.maxInputMegapixels` guard. */
+  tooLarge: number;
+  /**
+   * Already has a live (pending/processing/ready) enhancement. A `ready` result
+   * is a completed, already-billed render awaiting a decision and is never
+   * superseded by a batch.
+   */
+  alreadyLive: number;
+}
+
+export interface BulkEnhanceResult {
+  batchId: string;
+  requested: number;
+  queued: number;
+  skipped: BulkEnhanceSkipped;
+}
+
+/**
+ * Queue one AI enhancement per eligible photo in a selection (202).
+ * One `params` object applies to the whole batch. 400 when the feature is
+ * disabled, no model is configured, or the selection exceeds
+ * `pictureEnhancement.maxBatchSize` — render the server's message.
+ */
+export async function bulkEnhance(dto: {
+  circleId: string;
+  ids: string[];
+  params?: EnhanceParams;
+}): Promise<BulkEnhanceResult> {
+  return api.post<BulkEnhanceResult>('/media/bulk/enhance', dto);
 }
 
 export async function bulkRerunFaces(dto: BulkRerunDto): Promise<{ queued: number }> {

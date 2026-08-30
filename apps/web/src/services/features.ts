@@ -22,6 +22,13 @@ export interface PictureEnhancementPolicy {
   blockReplaceOnDownscale: boolean;
   /** Configured enhancement model NAME (never a credential); null when unset. */
   model: string | null;
+  /**
+   * Max photos one bulk-enhance request may queue (epic #420). Surfaced here
+   * rather than only on the Admin-only system-settings read so a non-admin
+   * collaborator's client can cap and label its selection up front instead of
+   * discovering the limit as a 400.
+   */
+  maxBatchSize: number;
 }
 
 export interface FeatureFlags {
