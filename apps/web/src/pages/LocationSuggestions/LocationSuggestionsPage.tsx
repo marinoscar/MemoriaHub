@@ -45,6 +45,7 @@ import type {
   LocationSuggestionSummary,
 } from '../../services/locationSuggestions';
 import type { SortOrder } from '../../types/media';
+import { formatCivilDateTime } from '../../utils/civilDate';
 
 // ---------------------------------------------------------------------------
 // Sort model. The API defaults to `createdAt` / `desc`, so those two values are
@@ -128,7 +129,7 @@ interface SuggestionRowProps {
 
 function SuggestionRow({ suggestion, acting, onAccept, onReject, onAdjust }: SuggestionRowProps) {
   const capturedDate = suggestion.capturedAt
-    ? new Date(suggestion.capturedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    ? formatCivilDateTime(suggestion.capturedAt, { dateStyle: 'medium', timeStyle: 'short' })
     : null;
 
   return (
