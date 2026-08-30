@@ -16,9 +16,10 @@ import {
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import type { MediaItem } from '../../types/media';
-import { bulkEnhance } from '../../services/media';
+import type { AddAlbumItemsByFilterDto, MediaItem } from '../../types/media';
+import { bulkEnhance, bulkEnhanceByFilter } from '../../services/media';
 import type { BulkEnhanceResult } from '../../services/media';
+import { ApiError } from '../../services/api';
 import type { EnhanceQuality, EnhanceStrength } from '../../services/enhance';
 import {
   DEFAULT_ADJUSTMENTS,
@@ -33,6 +34,34 @@ import type { AdjustmentsState, EnhanceFormState, PresetKey } from './enhancePre
 // Props
 // ---------------------------------------------------------------------------
 
+/**
+ * Filter mode (issue #424) — "enhance everything matching this filter".
+ *
+ * The distinguishing property is that the user did NOT enumerate the photos:
+ * the match set is resolved server-side and includes items they have never
+ * scrolled to. Every copy difference below exists to say that out loud.
+ */
+export interface BatchEnhanceFilterMode {
+  /**
+   * The filter to send verbatim — the same shape the gallery already hands
+   * `addAlbumItemsByFilter`. `circleId` and `params` are supplied by the dialog.
+   */
+  filters: AddAlbumItemsByFilterDto;
+  /**
+   * Exact matching-photo count when the caller can know it: offset-mode
+   * `meta.totalItems`, or an album's own already-loaded item list.
+   *
+   * `null` in the gallery's default KEYSET mode, where `GET /api/media` runs no
+   * `COUNT(*)` — there the count is only ever learned from the server, either
+   * from the 202's `requested` or from an over-cap refusal's `details`.
+   */
+  matchCount?: number | null;
+  /** Qualifier after the count: "matching your current filter" / "in this album". */
+  scopeLabel?: string;
+  /** Verb phrase in the refusal: "match your filter" / "are in this album". */
+  matchPhrase?: string;
+}
+
 interface BatchEnhanceDialogProps {
   open: boolean;
   onClose: () => void;
@@ -41,8 +70,16 @@ interface BatchEnhanceDialogProps {
    * The WHOLE selection, videos included. The dialog derives the photo subset
    * itself so it can tell the user exactly what will be skipped rather than
    * silently shrinking their selection.
+   *
+   * Empty (or omitted) in filter mode, which has no selection at all.
    */
-  items: MediaItem[];
+  items?: MediaItem[];
+  /**
+   * Present → the dialog submits a FILTER instead of a list of ids, and swaps
+   * in the filter-mode copy. Absent → the original by-selection behaviour,
+   * byte for byte.
+   */
+  filterMode?: BatchEnhanceFilterMode;
   /** `pictureEnhancement.maxBatchSize` from GET /api/features. */
   maxBatchSize?: number;
   /** Optional model label (from ai.features.enhance), shown for transparency. */
@@ -82,6 +119,34 @@ function summarize(result: BulkEnhanceResult): string {
   return skipped > 0 ? `${base} · ${skipped} skipped` : base;
 }
 
+/** What the server reported when it REFUSED an over-cap by-filter batch. */
+interface CapRefusal {
+  matchedCount: number;
+  maxBatchSize?: number;
+}
+
+/**
+ * Read the by-filter over-cap refusal out of a failed request.
+ *
+ * The endpoint never truncates to the cap — over the limit it 400s and puts the
+ * real numbers under `details` (they MUST live there: the API's
+ * `HttpExceptionFilter` rebuilds every error body from a fixed key allowlist).
+ * In keyset mode this refusal is the ONLY way the client ever learns how many
+ * photos the filter actually matches, so it is rendered as the count it is
+ * rather than as a generic failure.
+ */
+function readCapRefusal(err: unknown): CapRefusal | null {
+  if (!(err instanceof ApiError)) return null;
+  const details = err.details;
+  if (!details || typeof details !== 'object') return null;
+  const { matchedCount, maxBatchSize } = details as Record<string, unknown>;
+  if (typeof matchedCount !== 'number') return null;
+  return {
+    matchedCount,
+    maxBatchSize: typeof maxBatchSize === 'number' ? maxBatchSize : undefined,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -100,6 +165,7 @@ export function BatchEnhanceDialog({
   onClose,
   circleId,
   items,
+  filterMode,
   maxBatchSize,
   modelLabel,
   onSuccess,
@@ -123,6 +189,12 @@ export function BatchEnhanceDialog({
    * photos were left out.
    */
   const [result, setResult] = useState<BulkEnhanceResult | null>(null);
+  /**
+   * The server's over-cap refusal, in filter mode. Held separately from
+   * `error` so it renders as the specific "N match, the limit is M" refusal
+   * (with a real number the client could not have known) rather than a banner.
+   */
+  const [capRefusal, setCapRefusal] = useState<CapRefusal | null>(null);
 
   // A fresh open is a fresh submission — never inherit the previous run's
   // outcome or error banner.
@@ -131,19 +203,42 @@ export function BatchEnhanceDialog({
       setSubmitting(false);
       setError(null);
       setResult(null);
+      setCapRefusal(null);
     }
   }, [open]);
 
   // ---- Selection breakdown -------------------------------------------------
-  const photoIds = useMemo(
-    () => items.filter((it) => it.type === 'photo').map((it) => it.id),
-    [items],
-  );
-  const photoCount = photoIds.length;
-  const videoCount = items.length - photoCount;
+  const selection = useMemo(() => items ?? [], [items]);
+  const isFilterMode = filterMode != null;
 
-  const overCap = maxBatchSize != null && photoCount > maxBatchSize;
-  const excess = overCap ? photoCount - (maxBatchSize as number) : 0;
+  const photoIds = useMemo(
+    () => selection.filter((it) => it.type === 'photo').map((it) => it.id),
+    [selection],
+  );
+  const selectedPhotoCount = photoIds.length;
+  const videoCount = selection.length - selectedPhotoCount;
+
+  // In filter mode the count is whatever we actually know: the caller's exact
+  // count when it has one, otherwise the number the server named when it
+  // refused. Null means "not knowable yet" — never a guess.
+  const filterCount = capRefusal?.matchedCount ?? filterMode?.matchCount ?? null;
+
+  const effectiveCap = capRefusal?.maxBatchSize ?? maxBatchSize;
+  const countForCap = isFilterMode ? filterCount : selectedPhotoCount;
+  const overCap =
+    effectiveCap != null && countForCap != null && countForCap > effectiveCap;
+  const excess = overCap ? (countForCap as number) - (effectiveCap as number) : 0;
+
+  // A filter that matches nothing is a 400 server-side; pre-empt it when the
+  // caller already knows the count, so the user is told rather than shown a
+  // failure after paying the round-trip.
+  const emptyFilter = isFilterMode && filterMode?.matchCount === 0;
+  const scopeLabel = filterMode?.scopeLabel ?? 'matching your current filter';
+  const matchPhrase = filterMode?.matchPhrase ?? 'match your filter';
+
+  const submitDisabled = isFilterMode
+    ? overCap || emptyFilter
+    : overCap || selectedPhotoCount === 0;
 
   const formState = useMemo<EnhanceFormState>(
     () => ({ presetKey, adjustments, strength, preserveFaces, instructions, quality }),
@@ -170,15 +265,19 @@ export function BatchEnhanceDialog({
   };
 
   const handleSubmit = async () => {
-    if (submitting || overCap || photoCount === 0) return;
+    if (submitting || submitDisabled) return;
     setSubmitting(true);
     setError(null);
+    setCapRefusal(null);
     try {
-      const res = await bulkEnhance({
-        circleId,
-        ids: photoIds,
-        params: buildEnhanceParams(formState),
-      });
+      const params = buildEnhanceParams(formState);
+      const res = isFilterMode
+        ? await bulkEnhanceByFilter({
+            ...(filterMode as BatchEnhanceFilterMode).filters,
+            circleId,
+            params,
+          })
+        : await bulkEnhance({ circleId, ids: photoIds, params });
       if (skippedTotal(res) > 0) {
         // Hold the dialog open so the breakdown is read before it disappears.
         setResult(res);
@@ -186,9 +285,18 @@ export function BatchEnhanceDialog({
         finish(res);
       }
     } catch (err) {
-      // A 400 here is the server explaining itself (cap exceeded, feature
-      // disabled, no model configured) — show its message verbatim.
-      setError(err instanceof Error ? err.message : 'Failed to queue AI enhancements');
+      // The by-filter endpoint REFUSES rather than truncating when the match set
+      // is over the cap, and names both numbers under `details`. Render that as
+      // the refusal it is — in keyset mode it is also the only place the real
+      // match count ever becomes known.
+      const refusal = isFilterMode ? readCapRefusal(err) : null;
+      if (refusal) {
+        setCapRefusal(refusal);
+      } else {
+        // Otherwise a 400 is the server explaining itself (feature disabled, no
+        // model configured, nothing matched) — show its message verbatim.
+        setError(err instanceof Error ? err.message : 'Failed to queue AI enhancements');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -207,6 +315,26 @@ export function BatchEnhanceDialog({
 
   const showResult = result !== null;
 
+  // "Enhance all 23 photos matching your current filter?" — and, when the count
+  // is not knowable up front (keyset mode), an honest count-less variant rather
+  // than an invented number.
+  const filterTitle =
+    filterCount != null
+      ? `Enhance all ${photoCountLabel(filterCount)} ${scopeLabel}?`
+      : `Enhance every photo ${scopeLabel}?`;
+
+  const dialogTitle = showResult
+    ? 'AI enhancements queued'
+    : isFilterMode
+      ? filterTitle
+      : `Enhance ${photoCountLabel(selectedPhotoCount)} with AI`;
+
+  const submitLabel = isFilterMode
+    ? filterCount != null
+      ? `Enhance ${photoCountLabel(filterCount)}`
+      : 'Enhance all matching'
+    : `Enhance ${photoCountLabel(selectedPhotoCount)}`;
+
   return (
     <Dialog
       open={open}
@@ -218,9 +346,7 @@ export function BatchEnhanceDialog({
       <DialogTitle id="batch-enhance-title" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <AutoFixHighIcon color="primary" fontSize="small" />
         <Box component="span" sx={{ minWidth: 0 }}>
-          {showResult
-            ? 'AI enhancements queued'
-            : `Enhance ${photoCountLabel(photoCount)} with AI`}
+          {dialogTitle}
         </Box>
       </DialogTitle>
 
@@ -275,20 +401,35 @@ export function BatchEnhanceDialog({
           <Stack spacing={2}>
             {error && <Alert severity="error">{error}</Alert>}
 
-            {videoCount > 0 && (
+            {!isFilterMode && videoCount > 0 && (
               <Typography variant="body2" color="text.secondary">
                 {videoCount} {plural(videoCount, 'video', 'videos')} in your selection
                 will be skipped — AI Enhance works on photos only.
               </Typography>
             )}
 
-            {overCap && (
-              <Alert severity="warning">
-                You selected {photoCountLabel(photoCount)}; the limit is{' '}
-                {maxBatchSize} per batch. Deselect {excess}, or ask an admin to raise
-                the limit.
+            {emptyFilter && (
+              <Alert severity="info">
+                No photos {matchPhrase}. Videos, archived photos and photos in the
+                Trash are never enhanced.
               </Alert>
             )}
+
+            {overCap &&
+              (isFilterMode ? (
+                // The server refuses rather than enhancing the first N — say so,
+                // with the numbers it reported, and give the two ways forward.
+                <Alert severity="warning">
+                  {countForCap} photos {matchPhrase}; the limit is {effectiveCap} per
+                  batch. Narrow the filter, or ask an admin to raise the limit.
+                </Alert>
+              ) : (
+                <Alert severity="warning">
+                  You selected {photoCountLabel(selectedPhotoCount)}; the limit is{' '}
+                  {effectiveCap} per batch. Deselect {excess}, or ask an admin to
+                  raise the limit.
+                </Alert>
+              ))}
 
             <Box>
               <Typography variant="subtitle2" sx={{ mb: 1 }} id="batch-enhance-preset-label">
@@ -345,10 +486,28 @@ export function BatchEnhanceDialog({
 
             {/* Cost confirmation — names the exact count, never "these photos". */}
             <Alert severity="warning" icon={<AutoFixHighIcon fontSize="inherit" />}>
-              This will start {photoCount} AI{' '}
-              {plural(photoCount, 'enhancement', 'enhancements')}. Each one uses AI
-              credits and cannot be undone once started. You&apos;ll review and
-              approve each result before anything changes.
+              {isFilterMode ? (
+                <>
+                  {filterCount != null
+                    ? `This starts ${filterCount} AI ${plural(filterCount, 'enhancement', 'enhancements')}.`
+                    : 'This starts one AI enhancement per matching photo.'}{' '}
+                  Each uses AI credits and cannot be undone once started.{' '}
+                  {/* The whole reason this mode needs its own copy: the user never
+                      enumerated these photos, so the set is larger than what they
+                      are looking at. */}
+                  <Box component="strong">
+                    Photos you cannot currently see on screen are included.
+                  </Box>{' '}
+                  You&apos;ll review and approve each result before anything changes.
+                </>
+              ) : (
+                <>
+                  This will start {selectedPhotoCount} AI{' '}
+                  {plural(selectedPhotoCount, 'enhancement', 'enhancements')}. Each one
+                  uses AI credits and cannot be undone once started. You&apos;ll review
+                  and approve each result before anything changes.
+                </>
+              )}
             </Alert>
           </Stack>
         )}
@@ -369,13 +528,13 @@ export function BatchEnhanceDialog({
               onClick={() => void handleSubmit()}
               // Disabled while in flight so a double-tap cannot queue (and bill)
               // the same selection twice.
-              disabled={submitting || overCap || photoCount === 0}
+              disabled={submitting || submitDisabled}
               startIcon={
                 submitting ? <CircularProgress size={16} color="inherit" /> : <AutoFixHighIcon />
               }
               sx={{ minHeight: 44 }}
             >
-              {submitting ? 'Queueing…' : `Enhance ${photoCountLabel(photoCount)}`}
+              {submitting ? 'Queueing…' : submitLabel}
             </Button>
           </>
         )}
