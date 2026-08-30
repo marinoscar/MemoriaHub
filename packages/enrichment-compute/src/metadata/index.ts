@@ -50,6 +50,171 @@ export function parseExifOffsetToMinutes(offset: string): number | null {
 }
 
 /**
+ * Re-encode a wall clock as a CIVIL timestamp: the components exactly as
+ * written, stamped `Z`.
+ *
+ * This is the single definition of how a capture time becomes the value stored
+ * in `media_items.captured_at` (see `docs/specs/date-model.md`). Photos went
+ * through this shape from the start; video ingest did not, and stored a real
+ * instant in the same column instead, so a video and a photo taken a minute
+ * apart could land on different days (issue #443). One helper, so the two
+ * paths cannot drift — and so both executors (the API and a worker node)
+ * produce byte-identical values.
+ */
+export function wallClockToCivilTimestamp(parts: {
+  year: number;
+  month: number; // 1-12, NOT the JS 0-11 index
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  ms?: number;
+}): string {
+  return new Date(
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+      parts.ms ?? 0,
+    ),
+  ).toISOString();
+}
+
+/**
+ * Container tags that may carry a capture time, most reliable first.
+ *
+ * `com.apple.quicktime.creationdate` is the one that actually solves the
+ * problem: Apple writes the local wall clock *plus* its true offset
+ * (`2026-06-20T20:16:07-0600`). `date` is the equivalent written by several
+ * other vendors. `creation_time` is listed last because MP4/MOV spec it as
+ * UTC, so it usually carries no local information at all.
+ */
+const VIDEO_CREATION_TAGS = [
+  'com.apple.quicktime.creationdate',
+  'date',
+  'creation_time',
+] as const;
+
+/**
+ * An ISO-ish datetime with an EXPLICIT numeric UTC offset — the only form that
+ * lets us recover the wall clock at capture. `Z` is deliberately not matched:
+ * it means "this is UTC", which is an instant with the local time discarded.
+ */
+const OFFSET_DATETIME_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?\s*([+-])(\d{2}):?(\d{2})$/;
+
+export interface VideoCaptureTimestamp {
+  /** Civil timestamp for `media_items.captured_at`. */
+  capturedAt: string;
+  /** True UTC offset in minutes, when the container stated one. */
+  capturedAtOffset?: number;
+  /**
+   * How it was derived:
+   *  - `wall_clock` — a tag carried the local time and its offset (correct).
+   *  - `instant`    — only a UTC instant was available, so `capturedAt` is NOT
+   *                   civil and the item may bucket on the neighbouring day.
+   *                   Unknowable, not guessable: inventing a zone (the
+   *                   server's, the owner's) would be worse than a
+   *                   known-imperfect value. Hosts log this so the residual
+   *                   gap stays measurable.
+   */
+  source: 'wall_clock' | 'instant';
+  /** Which container tag supplied the value. */
+  tag: string;
+}
+
+/**
+ * Derive a capture timestamp from a video container's tags (issue #443).
+ *
+ * `tags` is the merged, lower-cased tag map from ffprobe (format tags first,
+ * then the video stream's). Returns `undefined` when no tag parses.
+ */
+export function parseVideoCaptureTimestamp(
+  tags: Record<string, unknown>,
+): VideoCaptureTimestamp | undefined {
+  // Tier 1 — a tag carrying local time AND its offset.
+  for (const tag of VIDEO_CREATION_TAGS) {
+    const raw = tags[tag];
+    if (typeof raw !== 'string' || raw.trim().length === 0) continue;
+
+    const m = OFFSET_DATETIME_RE.exec(raw.trim());
+    if (!m) continue;
+
+    const [, y, mo, d, h, mi, sec, frac, sign, offH, offM] = m;
+    const ms = frac ? Math.round(parseFloat(`0.${frac}`) * 1000) : 0;
+    const offsetMinutes =
+      (sign === '-' ? -1 : 1) * (parseInt(offH, 10) * 60 + parseInt(offM, 10));
+
+    return {
+      capturedAt: wallClockToCivilTimestamp({
+        year: Number(y),
+        month: Number(mo),
+        day: Number(d),
+        hour: Number(h),
+        minute: Number(mi),
+        second: Number(sec),
+        ms,
+      }),
+      capturedAtOffset: offsetMinutes,
+      source: 'wall_clock',
+      tag,
+    };
+  }
+
+  // Tier 2 — a bare instant plus an offset stated by some OTHER tag. Rare, but
+  // free: applying a known offset to a known instant recovers the wall clock.
+  const offsetFromTags = findOffsetMinutes(tags);
+
+  // Tier 3 — an instant with no offset anywhere. Kept as-is.
+  for (const tag of VIDEO_CREATION_TAGS) {
+    const raw = tags[tag];
+    if (typeof raw !== 'string' || raw.trim().length === 0) continue;
+
+    const parsed = new Date(raw.trim());
+    if (isNaN(parsed.getTime())) continue;
+
+    if (offsetFromTags !== null) {
+      const shifted = new Date(parsed.getTime() + offsetFromTags * 60_000);
+      return {
+        capturedAt: wallClockToCivilTimestamp({
+          year: shifted.getUTCFullYear(),
+          month: shifted.getUTCMonth() + 1,
+          day: shifted.getUTCDate(),
+          hour: shifted.getUTCHours(),
+          minute: shifted.getUTCMinutes(),
+          second: shifted.getUTCSeconds(),
+          ms: shifted.getUTCMilliseconds(),
+        }),
+        capturedAtOffset: offsetFromTags,
+        source: 'wall_clock',
+        tag,
+      };
+    }
+
+    return { capturedAt: parsed.toISOString(), source: 'instant', tag };
+  }
+
+  return undefined;
+}
+
+/** Tags that sometimes state a UTC offset on their own. */
+const OFFSET_ONLY_TAGS = ['com.apple.quicktime.creationdate', 'date', 'time_offset'] as const;
+
+function findOffsetMinutes(tags: Record<string, unknown>): number | null {
+  for (const tag of OFFSET_ONLY_TAGS) {
+    const raw = tags[tag];
+    if (typeof raw !== 'string') continue;
+    const m = /([+-])(\d{2}):?(\d{2})$/.exec(raw.trim());
+    if (!m) continue;
+    return (m[1] === '-' ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10));
+  }
+  return null;
+}
+
+/**
  * Extract EXIF metadata from an image buffer.
  *
  * Extracted fields (missing fields are omitted — never written as null):
@@ -108,11 +273,15 @@ export async function extractExif(buffer: Buffer): Promise<Record<string, unknow
     // the same value as before; on a non-UTC host it now produces the correct
     // wall-clock UTC instead of an offset-shifted instant.
     // The real capture-time offset is preserved separately in capturedAtOffset.
-    const ts = new Date(Date.UTC(
-      dto.getFullYear(), dto.getMonth(), dto.getDate(),
-      dto.getHours(), dto.getMinutes(), dto.getSeconds(), ms,
-    ));
-    metadata['capturedAt'] = ts.toISOString();
+    metadata['capturedAt'] = wallClockToCivilTimestamp({
+      year: dto.getFullYear(),
+      month: dto.getMonth() + 1,
+      day: dto.getDate(),
+      hour: dto.getHours(),
+      minute: dto.getMinutes(),
+      second: dto.getSeconds(),
+      ms,
+    });
   }
 
   // UTC offset (stored as "+HH:MM" / "-HH:MM" or numeric minutes)

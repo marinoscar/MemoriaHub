@@ -41,6 +41,7 @@ import {
  *   _processing['video-probe'].height           → height (videos)
  *   _processing['video-probe'].durationMs       → durationMs
  *   _processing['video-probe'].capturedAt       → capturedAt (videos, only when exif absent)
+ *   _processing['video-probe'].capturedAtOffset → capturedAtOffset (with the above)
  *   _processing['geocode'].country              → geoCountry
  *   _processing['geocode'].countryCode          → geoCountryCode
  *   _processing['geocode'].admin1               → geoAdmin1
@@ -217,6 +218,12 @@ export class MediaMetadataSyncService {
       // already set in update.capturedAt and we do NOT override it here)
       if (update.capturedAt === undefined && typeof videoProbeMeta['capturedAt'] === 'string') {
         update.capturedAt = new Date(videoProbeMeta['capturedAt']);
+        // The true offset, when the container stated one (issue #443). Written
+        // only alongside the capturedAt it belongs to, so an offset can never
+        // describe a timestamp that came from somewhere else.
+        if (typeof videoProbeMeta['capturedAtOffset'] === 'number') {
+          update.capturedAtOffset = videoProbeMeta['capturedAtOffset'];
+        }
       }
     }
 

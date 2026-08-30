@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { streamToTempFile } from './stream-utils';
 import { probeVideoFileWithTimeout, extractContainerMetadata } from './ffprobe.util';
+import { parseVideoCaptureTimestamp } from '@memoriahub/enrichment-compute/metadata';
 
 /**
  * VideoProbeProcessor — extracts duration, dimensions, codec, and container
@@ -72,19 +73,37 @@ export class VideoProbeProcessor implements ObjectProcessor {
       const container = extractContainerMetadata(probeData);
       const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;
 
-      // --- creation_time → capturedAt ---
-      // Prefer format-level tag; fall back to the video stream's tag.
+      // --- capture time → capturedAt (+ capturedAtOffset) ---
+      //
+      // `captured_at` is a CIVIL timestamp for photos — the wall clock at
+      // capture, re-encoded as UTC (see docs/specs/date-model.md). Videos used
+      // to store a real INSTANT in the same column, because container
+      // `creation_time` is spec'd as UTC, so a video shot at 20:16 in a UTC-6
+      // zone landed on the NEXT calendar day and separated from photos taken
+      // minutes beside it (#443).
+      //
+      // parseVideoCaptureTimestamp applies the same wall-clock re-encode the
+      // photo path uses whenever a tag states a local time with its offset
+      // (Apple writes `com.apple.quicktime.creationdate`), and falls back to
+      // the old instant behaviour only when the container carries no local
+      // information at all — the true zone is then unknowable, and guessing
+      // one would be worse than a known-imperfect value.
       const videoStream = probeData.streams?.find(s => s.codec_type === 'video');
-      const rawCreationTime: unknown =
-        probeData.format?.tags?.['creation_time'] ??
-        videoStream?.tags?.['creation_time'];
+      const captureTags: Record<string, unknown> = {
+        ...lowerCaseKeys(videoStream?.tags),
+        ...lowerCaseKeys(probeData.format?.tags),
+      };
 
-      let capturedAt: string | undefined;
-      if (typeof rawCreationTime === 'string' && rawCreationTime.length > 0) {
-        const d = new Date(rawCreationTime);
-        if (!isNaN(d.getTime())) {
-          capturedAt = d.toISOString();
-        }
+      const capture = parseVideoCaptureTimestamp(captureTags);
+      const capturedAt = capture?.capturedAt;
+
+      if (capture?.source === 'instant') {
+        // Logged so the size of the residual gap is measurable rather than
+        // assumed: these are the videos a re-run can never correct.
+        this.logger.debug(
+          `video-probe for object ${object.id}: no local-time tag; ` +
+            `capturedAt kept as a UTC instant from '${capture.tag}'`,
+        );
       }
 
       const metadata: Record<string, unknown> = {};
@@ -93,6 +112,9 @@ export class VideoProbeProcessor implements ObjectProcessor {
       if (typeof height === 'number') metadata['height'] = height;
       if (typeof codec === 'string') metadata['codec'] = codec;
       if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
+      if (capture?.capturedAtOffset !== undefined) {
+        metadata['capturedAtOffset'] = capture.capturedAtOffset;
+      }
       if (formatName !== undefined) metadata['formatName'] = formatName;
       metadata['formatTags'] = formatTags;
       metadata['streamTags'] = streamTags;
@@ -114,4 +136,19 @@ export class VideoProbeProcessor implements ObjectProcessor {
       });
     }
   }
+}
+
+/**
+ * Lower-case a tag map's keys so lookups are container-case-independent
+ * (ffprobe reports `creation_time` but some muxers write `Creation_Time`).
+ * Built from the RAW probe data rather than the size-capped `formatTags`, so a
+ * large tag set can never cap away the capture time itself.
+ */
+function lowerCaseKeys(tags: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!tags) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(tags)) {
+    out[key.toLowerCase()] = value;
+  }
+  return out;
 }
