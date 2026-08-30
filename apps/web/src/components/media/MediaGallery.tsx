@@ -64,6 +64,7 @@ import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
 import StarIcon from '@mui/icons-material/Star';
+import CloseIcon from '@mui/icons-material/Close';
 import BurstModeIcon from '@mui/icons-material/BurstMode';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useTheme } from '@mui/material/styles';
@@ -508,6 +509,7 @@ export function MediaGallery({
   onBulkSuccess,
 }: MediaGalleryProps) {
   const theme = useTheme();
+  const navigate = useNavigate();
 
   // Determine mode: FEED activates when EITHER queryParams OR a custom fetcher
   // is supplied. CONTROLLED mode is used only when neither is present.
@@ -708,6 +710,13 @@ export function MediaGallery({
   const [snackbar, setSnackbar] = useState<{
     message: string;
     severity: 'success' | 'error';
+    /**
+     * When set, the toast offers a link to that bulk-enhance batch's progress
+     * page (issue #423). This is the MAIN way back to a batch just submitted —
+     * the hub's "Recent batches" list is the recovery path for a toast that was
+     * dismissed or a page that was reloaded.
+     */
+    batchId?: string;
   } | null>(null);
 
   // -------------------------------------------------------------------------
@@ -1274,9 +1283,9 @@ export function MediaGallery({
         // Nothing has changed yet — the batch only queues work whose results
         // are each reviewed later — so this drops the selection and reports the
         // server's counts rather than refreshing any item.
-        onSuccess={(msg) => {
+        onSuccess={(msg, batchId) => {
           handleClearSelection();
-          setSnackbar({ message: msg, severity: 'success' });
+          setSnackbar({ message: msg, severity: 'success', batchId });
         }}
       />
 
@@ -1325,10 +1334,13 @@ export function MediaGallery({
         />
       )}
 
-      {/* Snackbar for bulk operation feedback */}
+      {/* Snackbar for bulk operation feedback.
+          A toast carrying a batch id gets an action and a longer dwell — it is
+          the only pointer to work that runs for minutes after the dialog
+          closes, so four seconds is not enough to read AND act on it. */}
       <Snackbar
         open={snackbar !== null}
-        autoHideDuration={4000}
+        autoHideDuration={snackbar?.batchId ? 10000 : 4000}
         onClose={() => setSnackbar(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
@@ -1336,6 +1348,33 @@ export function MediaGallery({
           onClose={() => setSnackbar(null)}
           severity={snackbar?.severity ?? 'success'}
           sx={{ width: '100%' }}
+          action={
+            // MUI drops `onClose`'s close button as soon as `action` is set, so
+            // the dismiss affordance is re-added here rather than lost.
+            snackbar?.batchId ? (
+              <>
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    const id = snackbar.batchId;
+                    setSnackbar(null);
+                    if (id) navigate(`/enhancement-batches/${id}`);
+                  }}
+                >
+                  View progress
+                </Button>
+                <IconButton
+                  size="small"
+                  color="inherit"
+                  aria-label="Close"
+                  onClick={() => setSnackbar(null)}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </>
+            ) : undefined
+          }
         >
           {snackbar?.message}
         </Alert>

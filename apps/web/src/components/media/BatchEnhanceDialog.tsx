@@ -47,8 +47,14 @@ interface BatchEnhanceDialogProps {
   maxBatchSize?: number;
   /** Optional model label (from ai.features.enhance), shown for transparency. */
   modelLabel?: string | null;
-  /** One-line summary built from the SERVER's counts, for the parent snackbar. */
-  onSuccess: (message: string) => void;
+  /**
+   * One-line summary built from the SERVER's counts, for the parent snackbar.
+   *
+   * The batch id rides along (issue #423) so the toast can offer a way to the
+   * batch's progress page — otherwise the only record of a just-submitted batch
+   * is a sentence that disappears in four seconds.
+   */
+  onSuccess: (message: string, batchId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +165,7 @@ export function BatchEnhanceDialog({
 
   /** Emit the toast and hand control back to the parent (which clears the selection). */
   const finish = (res: BulkEnhanceResult) => {
-    onSuccess(summarize(res));
+    onSuccess(summarize(res), res.batchId);
     onClose();
   };
 
