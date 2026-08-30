@@ -1,0 +1,18 @@
+-- AlterEnum
+--
+-- Bulk Enhance batching (epic #420, issue #421, Phase 1).
+--
+-- `ALTER TYPE ... ADD VALUE` cannot run in the same transaction as statements
+-- that REFERENCE the new value, so this gets its own migration containing
+-- nothing else — the same precedent as
+-- 20260705000000_add_media_tag_source_system and
+-- 20260810000000_add_memories_ready_notification_type.
+--
+-- `cancelled` means the row was superseded or withdrawn before a render ever
+-- ran — "never rendered at all". It is deliberately DISTINCT from
+-- `discarded`, which means a human looked at a completed `ready` result and
+-- said no.
+--
+-- IF NOT EXISTS makes the statement idempotent, so a re-applied migration on
+-- a database that already carries the value is a no-op rather than an error.
+ALTER TYPE "MediaEnhancementStatus" ADD VALUE IF NOT EXISTS 'cancelled';

@@ -37,66 +37,68 @@ model User {
   linkedPersonId          String?          @map("linked_person_id") @db.Uuid
 
   // Relations
-  identities                  UserIdentity[]
-  userRoles                   UserRole[]
-  userSettings                UserSettings?
-  auditEvents                 AuditEvent[]                @relation("ActorEvents")
-  settingsUpdates             SystemSettings[]            @relation("SettingsUpdater")
-  refreshTokens               RefreshToken[]              @relation("UserRefreshTokens")
-  allowlistEntriesAdded       AllowedEmail[]              @relation("AllowlistAddedBy")
-  allowlistEntry              AllowedEmail?               @relation("AllowlistClaimedBy")
-  deviceCodes                 DeviceCode[]                @relation("UserDeviceCodes")
-  storageObjects              StorageObject[]             @relation("UserStorageObjects")
-  personalAccessTokens        PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
-  mediaItems                  MediaItem[]                 @relation("MediaAddedBy")
-  albums                      Album[]                     @relation("AlbumAddedBy")
-  tags                        Tag[]                       @relation("TagAddedBy")
+  identities                     UserIdentity[]
+  userRoles                      UserRole[]
+  userSettings                   UserSettings?
+  auditEvents                    AuditEvent[]                @relation("ActorEvents")
+  settingsUpdates                SystemSettings[]            @relation("SettingsUpdater")
+  refreshTokens                  RefreshToken[]              @relation("UserRefreshTokens")
+  allowlistEntriesAdded          AllowedEmail[]              @relation("AllowlistAddedBy")
+  allowlistEntry                 AllowedEmail?               @relation("AllowlistClaimedBy")
+  deviceCodes                    DeviceCode[]                @relation("UserDeviceCodes")
+  storageObjects                 StorageObject[]             @relation("UserStorageObjects")
+  personalAccessTokens           PersonalAccessToken[]       @relation("UserPersonalAccessTokens")
+  mediaItems                     MediaItem[]                 @relation("MediaAddedBy")
+  albums                         Album[]                     @relation("AlbumAddedBy")
+  tags                           Tag[]                       @relation("TagAddedBy")
   // Circle relations
-  ownedCircles                Circle[]                    @relation("CircleOwner")
-  circleMemberships           CircleMember[]
-  circleInvitesAdded          CircleInvite[]              @relation("CircleInviteAddedBy")
-  circleInvitesClaimed        CircleInvite[]              @relation("CircleInviteClaimedBy")
+  ownedCircles                   Circle[]                    @relation("CircleOwner")
+  circleMemberships              CircleMember[]
+  circleInvitesAdded             CircleInvite[]              @relation("CircleInviteAddedBy")
+  circleInvitesClaimed           CircleInvite[]              @relation("CircleInviteClaimedBy")
   // AI Search relations
-  aiCredentialsUpdated        AiProviderCredential[]      @relation("AiCredentialUpdater")
+  aiCredentialsUpdated           AiProviderCredential[]      @relation("AiCredentialUpdater")
   // Face Recognition relations
-  faceCredentialsUpdated      FaceProviderCredential[]    @relation("FaceCredentialUpdater")
+  faceCredentialsUpdated         FaceProviderCredential[]    @relation("FaceCredentialUpdater")
   // Storage Provider relations
-  storageCredentialsUpdated   StorageProviderCredential[] @relation("StorageCredentialUpdater")
-  peopleAdded                 Person[]                    @relation("PersonAddedBy")
-  resolvedBursts              BurstGroup[]                @relation("BurstGroupResolvedBy")
+  storageCredentialsUpdated      StorageProviderCredential[] @relation("StorageCredentialUpdater")
+  peopleAdded                    Person[]                    @relation("PersonAddedBy")
+  resolvedBursts                 BurstGroup[]                @relation("BurstGroupResolvedBy")
   // Duplicate Detection relations
-  resolvedDuplicates          DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
+  resolvedDuplicates             DuplicateGroup[]            @relation("DuplicateGroupResolvedBy")
   // Geo Provider relations
-  geoCredentialsUpdated       GeoProviderCredential[]     @relation("GeoCredentialUpdater")
+  geoCredentialsUpdated          GeoProviderCredential[]     @relation("GeoCredentialUpdater")
   // Media Sharing relations
-  mediaShares                 MediaShare[]                @relation("MediaShareCreatedBy")
+  mediaShares                    MediaShare[]                @relation("MediaShareCreatedBy")
   // Location Inference relations
-  resolvedLocationSuggestions LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
+  resolvedLocationSuggestions    LocationSuggestion[]        @relation("LocationSuggestionResolvedBy")
   // Distributed Worker Node relations
-  workerNodes                 WorkerNode[]
-  nodeCredentials             NodeCredential[]            @relation("UserNodeCredentials")
+  workerNodes                    WorkerNode[]
+  nodeCredentials                NodeCredential[]            @relation("UserNodeCredentials")
   // AI Picture Enhancer relations
-  mediaEnhancementsCreated    MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
+  mediaEnhancementsCreated       MediaEnhancement[]          @relation("MediaEnhancementCreatedBy")
+  // AI Picture Enhancer — bulk batches (epic #420, issue #421)
+  mediaEnhancementBatchesCreated MediaEnhancementBatch[]     @relation("MediaEnhancementBatchCreatedBy")
   // Workflow Automation relations
-  workflowsCreated            Workflow[]                  @relation("WorkflowCreatedBy")
-  workflowRunsStarted         WorkflowRun[]               @relation("WorkflowRunStartedBy")
-  workflowRunsApproved        WorkflowRun[]               @relation("WorkflowRunApprovedBy")
+  workflowsCreated               Workflow[]                  @relation("WorkflowCreatedBy")
+  workflowRunsStarted            WorkflowRun[]               @relation("WorkflowRunStartedBy")
+  workflowRunsApproved           WorkflowRun[]               @relation("WorkflowRunApprovedBy")
   // Empty Trash at Scale relations
-  trashEmptyRunsStarted       TrashEmptyRun[]             @relation("TrashEmptyRunStartedBy")
+  trashEmptyRunsStarted          TrashEmptyRun[]             @relation("TrashEmptyRunStartedBy")
   // Review Runs relations (bursts / duplicates / location suggestions —
   // supersedes the former LocationSuggestionRun-only relation, issue #190)
-  reviewRunsStarted           ReviewRun[]                 @relation("ReviewRunStartedBy")
+  reviewRunsStarted              ReviewRun[]                 @relation("ReviewRunStartedBy")
   // Notification Center relations (epic #240, issue #244; schema-only)
-  notifications               Notification[]              @relation("UserNotifications")
+  notifications                  Notification[]              @relation("UserNotifications")
   // Memories relations (epic #300, issue #301)
-  memoryUserStates            MemoryUserState[]
+  memoryUserStates               MemoryUserState[]
   // PostgreSQL Database Backup & Restore relations (epic #339, issue #340)
-  databaseBackupsCreated      DatabaseBackupRun[]         @relation("DatabaseBackupCreatedBy")
-  databaseBackupsRestored     DatabaseBackupRun[]         @relation("DatabaseBackupRestoredBy")
+  databaseBackupsCreated         DatabaseBackupRun[]         @relation("DatabaseBackupCreatedBy")
+  databaseBackupsRestored        DatabaseBackupRun[]         @relation("DatabaseBackupRestoredBy")
   // Profile picture management relations (issue #354)
-  linkedPerson                Person?                     @relation("UserLinkedPerson", fields: [linkedPersonId], references: [id], onDelete: SetNull)
+  linkedPerson                   Person?                     @relation("UserLinkedPerson", fields: [linkedPersonId], references: [id], onDelete: SetNull)
   // Location Grouping relations (issue #373)
-  locationGroups              LocationGroup[]
+  locationGroups                 LocationGroup[]
 
   @@index([linkedPersonId])
   @@map("users")
@@ -400,46 +402,48 @@ model Circle {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  owner                 User                  @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  members               CircleMember[]
-  invites               CircleInvite[]
-  mediaItems            MediaItem[]
-  albums                Album[]
-  tags                  Tag[]
+  owner                   User                    @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members                 CircleMember[]
+  invites                 CircleInvite[]
+  mediaItems              MediaItem[]
+  albums                  Album[]
+  tags                    Tag[]
   // Face Recognition relations
-  people                Person[]
-  faces                 Face[]
-  enrichmentJobs        EnrichmentJob[]
+  people                  Person[]
+  faces                   Face[]
+  enrichmentJobs          EnrichmentJob[]
   // Auto-Tagging relations
   mediaTagStatuses      MediaTagStatus[]
   // Video Auto-Tagging relations (epic #452, issue #454)
   mediaTranscripts      MediaTranscript[]
   // Metadata Re-run relations
-  mediaMetadataStatuses MediaMetadataStatus[]
+  mediaMetadataStatuses   MediaMetadataStatus[]
   // Geocode Status relations
-  mediaGeocodeStatuses  MediaGeocodeStatus[]
+  mediaGeocodeStatuses    MediaGeocodeStatus[]
   // Burst Detection relations
-  bursts                BurstGroup[]
+  bursts                  BurstGroup[]
   // Duplicate Detection relations
-  duplicateGroups       DuplicateGroup[]
+  duplicateGroups         DuplicateGroup[]
   // Media Sharing relations
-  mediaShares           MediaShare[]
+  mediaShares             MediaShare[]
   // Location Inference relations
-  locationSuggestions   LocationSuggestion[]
+  locationSuggestions     LocationSuggestion[]
   // AI Picture Enhancer relations
-  mediaEnhancements     MediaEnhancement[]
+  mediaEnhancements       MediaEnhancement[]
+  // AI Picture Enhancer — bulk batches (epic #420, issue #421)
+  mediaEnhancementBatches MediaEnhancementBatch[]
   // Workflow Automation relations
-  workflows             Workflow[]
-  workflowRuns          WorkflowRun[]
+  workflows               Workflow[]
+  workflowRuns            WorkflowRun[]
   // Empty Trash at Scale relations
-  trashEmptyRuns        TrashEmptyRun[]
+  trashEmptyRuns          TrashEmptyRun[]
   // Review Runs relations (bursts / duplicates / location suggestions —
   // supersedes the former LocationSuggestionRun-only relation, issue #190)
-  reviewRuns            ReviewRun[]
+  reviewRuns              ReviewRun[]
   // Notification Center relations (epic #240, issue #244; schema-only)
-  notifications         Notification[]        @relation("CircleNotifications")
+  notifications           Notification[]          @relation("CircleNotifications")
   // Memories relations (epic #300, issue #301)
-  memories              Memory[]
+  memories                Memory[]
 
   @@index([ownerId])
   @@map("circles")
@@ -1749,6 +1753,14 @@ enum MediaEnhancementStatus {
   applied
   discarded
   expired
+  // Bulk-enhance batching (epic #420, issue #421): the row was superseded or
+  // withdrawn before a render ever ran — "never rendered at all". Deliberately
+  // distinct from `discarded`, which means a human reviewed a completed
+  // `ready` result and chose not to keep it. Placed LAST, matching the
+  // append-only `ALTER TYPE ... ADD VALUE` in the migration (no BEFORE/AFTER
+  // clause) — same precedent as MediaTagSource.system and
+  // NotificationType.memories_ready.
+  cancelled
 }
 
 enum MediaEnhancementDecision {
@@ -1792,19 +1804,59 @@ model MediaEnhancement {
   lastError         String? @map("last_error")
   createdById       String? @map("created_by_id") @db.Uuid
 
+  // Bulk-enhance batching (epic #420, issue #421): the batch this enhancement
+  // was created under, or null for a single-item (non-batched) request.
+  // onDelete: SetNull is deliberate — deleting a batch record must never
+  // delete enhancements it produced, which may already be `applied`; mirrors
+  // resultMediaItemId above.
+  batchId String? @map("batch_id") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  mediaItem       MediaItem  @relation("MediaEnhancementSource", fields: [mediaItemId], references: [id], onDelete: Cascade)
-  circle          Circle     @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  resultMediaItem MediaItem? @relation("MediaEnhancementResult", fields: [resultMediaItemId], references: [id], onDelete: SetNull)
-  createdBy       User?      @relation("MediaEnhancementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  mediaItem       MediaItem              @relation("MediaEnhancementSource", fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle          Circle                 @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  resultMediaItem MediaItem?             @relation("MediaEnhancementResult", fields: [resultMediaItemId], references: [id], onDelete: SetNull)
+  createdBy       User?                  @relation("MediaEnhancementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  batch           MediaEnhancementBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([mediaItemId, status])
   @@index([circleId, status])
   @@index([status, updatedAt])
+  @@index([batchId])
   @@map("media_enhancements")
+}
+
+// One row per bulk "AI Enhance" request against multiple MediaItems in a
+// circle (epic #420, issue #421 — Phase 1 data model only; the batching
+// service/controller land in a later phase). requestedCount is how many
+// items the caller asked to enhance; queuedCount is how many
+// MediaEnhancement rows were actually created (requestedCount minus any
+// items skipped up front — e.g. non-photo items, items already mid-flight —
+// recorded in `skipped`). `source` distinguishes how the batch was formed
+// (e.g. "selection" for a gallery multi-select) for future entry points.
+model MediaEnhancementBatch {
+  id             String    @id @default(uuid()) @db.Uuid
+  circleId       String    @map("circle_id") @db.Uuid
+  requestedCount Int       @map("requested_count")
+  queuedCount    Int       @default(0) @map("queued_count")
+  skipped        Json?     @db.JsonB
+  params         Json?     @db.JsonB
+  source         String    @default("selection")
+  cancelledAt    DateTime? @map("cancelled_at") @db.Timestamptz
+  lastError      String?   @map("last_error")
+  createdById    String?   @map("created_by_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  circle       Circle             @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  createdBy    User?              @relation("MediaEnhancementBatchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  enhancements MediaEnhancement[]
+
+  @@index([circleId, createdAt])
+  @@map("media_enhancement_batches")
 }
 
 // =============================================================================

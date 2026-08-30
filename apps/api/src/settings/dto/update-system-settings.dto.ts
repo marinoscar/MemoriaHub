@@ -238,6 +238,7 @@ export const patchSystemSettingsSchema = z.object({
       blockReplaceOnDownscale: z.boolean().optional(),
       maxInputMegapixels: z.number().min(1).max(100).optional(),
       retentionHours: z.number().int().min(1).max(720).optional(),
+      maxBatchSize: z.number().int().min(1).max(200).optional(),
     })
     .optional(),
   // Memories (epic #300, issue #302). NOTE: this is the THIRD hand-maintained

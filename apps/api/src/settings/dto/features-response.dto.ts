@@ -21,6 +21,13 @@ export const featuresResponseSchema = z.object({
     blockReplaceOnDownscale: z.boolean(),
     /** Configured enhancement model NAME (never a credential); null when unset. */
     model: z.string().nullable(),
+    /**
+     * Max items one bulk-enhance request may queue (epic #420, issue #421).
+     * Surfaced here — rather than only on the Admin-only system settings read —
+     * so a non-admin collaborator's client can cap/label its selection before
+     * submitting instead of discovering the limit as a 400.
+     */
+    maxBatchSize: z.number(),
   }),
 });
 

@@ -32,6 +32,11 @@ export const listEnhancementsQuerySchema = z.object({
       ...(Object.keys(ENHANCEMENT_STATUS_ALIASES) as [string, ...string[]]),
     ])
     .optional(),
+  /**
+   * Narrow the hub listing to one bulk-enhance batch (epic #420, issue #421).
+   * Composes with `status` — e.g. a batch's `awaiting_decision` rows.
+   */
+  batchId: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(24),
   sortBy: z.enum(['createdAt', 'updatedAt']).default('createdAt'),
