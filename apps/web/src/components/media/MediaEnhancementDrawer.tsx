@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ComponentType } from 'react';
 import {
   Drawer,
   Box,
@@ -7,20 +6,10 @@ import {
   IconButton,
   Stack,
   Button,
-  ButtonBase,
-  Chip,
   CircularProgress,
   LinearProgress,
   Alert,
   Divider,
-  Collapse,
-  FormControlLabel,
-  Switch,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  TextField,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -29,31 +18,32 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import HealingIcon from '@mui/icons-material/Healing';
-import NightlightIcon from '@mui/icons-material/Nightlight';
-import PaletteIcon from '@mui/icons-material/Palette';
-import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
-import TuneIcon from '@mui/icons-material/Tune';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
-import type { SvgIconProps } from '@mui/material';
 import type { MediaItem } from '../../types/media';
 import { useMediaEnhance } from '../../hooks/useMediaEnhance';
 import type { EnhanceUiStatus } from '../../hooks/useMediaEnhance';
 import { BeforeAfterSlider } from './BeforeAfterSlider';
 import { ReplaceDownscaleNotice, describeResolutionLoss } from './ReplaceDownscaleNotice';
 import type {
-  EnhanceParams,
-  EnhancePreset,
   EnhanceQuality,
   EnhanceStrength,
   EnhanceImageInfo,
   ApplyDecision,
 } from '../../services/enhance';
+// Presets, the customize panel and the params mapping are SHARED with
+// BatchEnhanceDialog (issue #422) so the two surfaces cannot drift.
+import {
+  DEFAULT_ADJUSTMENTS,
+  PRESET_BY_KEY,
+  PresetPicker,
+  EnhanceCustomizePanel,
+  buildEnhanceParams,
+} from './enhancePresets';
+import type { AdjustmentsState, EnhanceFormState, PresetKey } from './enhancePresets';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -92,147 +82,6 @@ interface MediaEnhancementDrawerProps {
    * current call sites do); reopening restores the review via `resumeLatest`.
    */
   onFinishedInBackground?: (status: 'ready' | 'failed') => void;
-}
-
-// ---------------------------------------------------------------------------
-// Adjustments
-// ---------------------------------------------------------------------------
-
-interface AdjustmentsState {
-  color: boolean;
-  tone: boolean;
-  sharpness: boolean;
-  denoise: boolean;
-  dehaze: boolean;
-  straighten: boolean;
-}
-
-const ADJUSTMENT_FIELDS: { key: keyof AdjustmentsState; label: string }[] = [
-  { key: 'color', label: 'Correct color & white balance' },
-  { key: 'tone', label: 'Balance exposure & tone' },
-  { key: 'sharpness', label: 'Increase clarity & sharpness' },
-  { key: 'denoise', label: 'Reduce noise' },
-  { key: 'dehaze', label: 'Remove haze' },
-  { key: 'straighten', label: 'Straighten horizon' },
-];
-
-/** Mirrors the server-side defaults in `enhance-prompt.builder.ts`. */
-const DEFAULT_ADJUSTMENTS: AdjustmentsState = {
-  color: true,
-  tone: true,
-  sharpness: true,
-  denoise: true,
-  dehaze: false,
-  straighten: false,
-};
-
-// ---------------------------------------------------------------------------
-// Presets
-// ---------------------------------------------------------------------------
-
-/**
- * `auto` and `custom` are UI-only choices — neither sends a `preset` to the
- * API. The four real values map 1:1 onto the server's preset enum.
- */
-type PresetKey = 'auto' | EnhancePreset | 'custom';
-
-interface PresetDef {
-  key: PresetKey;
-  label: string;
-  description: string;
-  Icon: ComponentType<SvgIconProps>;
-  /** Shown as a warning chip for presets whose output is an AI invention. */
-  interpretive?: boolean;
-  /** Prefill applied when the preset is picked; every field stays editable. */
-  prefill: {
-    adjustments: AdjustmentsState;
-    strength: EnhanceStrength;
-    preserveFaces: boolean;
-  };
-}
-
-const PRESETS: PresetDef[] = [
-  {
-    key: 'auto',
-    label: 'Auto',
-    description: 'Balanced all-round improvement',
-    Icon: AutoAwesomeIcon,
-    prefill: {
-      adjustments: DEFAULT_ADJUSTMENTS,
-      strength: 'balanced',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'restore_old_photo',
-    label: 'Restore old photo',
-    description: 'Repair scratches, fading and creases in scans of old prints',
-    Icon: HealingIcon,
-    // Issue #436: this preset is aimed at damaged FACES essentially every time
-    // it is used, and "strongly ... increase clarity and sharpness" was being
-    // applied to the face just as much as to the creases — inviting the model
-    // to re-detail (i.e. invent) features it has too few pixels to preserve.
-    // dehaze/tone/denoise stay on: those act on the paper, not the face.
-    // Both knobs remain raisable by hand under Customize.
-    prefill: {
-      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, sharpness: false, denoise: true, dehaze: true },
-      strength: 'balanced',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'low_light',
-    label: 'Low-light rescue',
-    description: 'Brighten dim indoor and night photos without washing them out',
-    Icon: NightlightIcon,
-    prefill: {
-      adjustments: { ...DEFAULT_ADJUSTMENTS, tone: true, denoise: true },
-      strength: 'strong',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'colorize_bw',
-    label: 'Colorize B&W',
-    description: 'Add natural color to a black-and-white photo',
-    Icon: PaletteIcon,
-    interpretive: true,
-    prefill: {
-      adjustments: DEFAULT_ADJUSTMENTS,
-      strength: 'balanced',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'portrait_polish',
-    label: 'Portrait polish',
-    description: 'Even out skin tone and lighting on faces, gently',
-    Icon: FaceRetouchingNaturalIcon,
-    prefill: {
-      adjustments: { ...DEFAULT_ADJUSTMENTS, sharpness: true, denoise: true },
-      strength: 'subtle',
-      preserveFaces: true,
-    },
-  },
-  {
-    key: 'custom',
-    label: 'Custom',
-    description: 'Choose the corrections yourself',
-    Icon: TuneIcon,
-    prefill: {
-      adjustments: DEFAULT_ADJUSTMENTS,
-      strength: 'balanced',
-      preserveFaces: true,
-    },
-  },
-];
-
-const PRESET_BY_KEY = new Map(PRESETS.map((p) => [p.key, p]));
-
-function adjustmentsEqual(a: AdjustmentsState, b: AdjustmentsState): boolean {
-  return (ADJUSTMENT_FIELDS as { key: keyof AdjustmentsState }[]).every(
-    ({ key }) => a[key] === b[key],
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -280,69 +129,6 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-// ---------------------------------------------------------------------------
-// Preset card
-// ---------------------------------------------------------------------------
-
-function PresetCard({
-  def,
-  selected,
-  onSelect,
-}: {
-  def: PresetDef;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const { Icon } = def;
-  return (
-    <ButtonBase
-      onClick={onSelect}
-      aria-pressed={selected}
-      aria-label={`${def.label} — ${def.description}`}
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-start',
-        textAlign: 'left',
-        gap: 0.5,
-        p: 1.25,
-        minHeight: 96,
-        width: '100%',
-        borderRadius: 1.5,
-        border: '2px solid',
-        borderColor: selected ? 'primary.main' : 'divider',
-        bgcolor: selected ? 'action.selected' : 'transparent',
-        transition: 'border-color 120ms, background-color 120ms',
-        '&:hover': { borderColor: selected ? 'primary.main' : 'text.disabled' },
-        '&:focus-visible': {
-          outline: '3px solid',
-          outlineColor: 'primary.main',
-          outlineOffset: 2,
-        },
-      }}
-    >
-      <Stack direction="row" spacing={0.75} sx={{ width: '100%', alignItems: 'center' }}>
-        <Icon fontSize="small" color={selected ? 'primary' : 'action'} />
-        <Typography variant="body2" sx={{ flex: 1, minWidth: 0, fontWeight: 600 }}>
-          {def.label}
-        </Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.3 }}>
-        {def.description}
-      </Typography>
-      {def.interpretive && (
-        <Chip
-          size="small"
-          color="warning"
-          variant="outlined"
-          label="Interpretive"
-          sx={{ height: 20, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }}
-        />
-      )}
-    </ButtonBase>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -423,62 +209,15 @@ export function MediaEnhancementDrawer({
     if (key === 'custom') setCustomize(true);
   }, []);
 
-  const activePreset = PRESET_BY_KEY.get(presetKey) ?? PRESETS[0];
-
-  /**
-   * True when the user has actually deviated from the selected preset's
-   * prefill (or typed free-text guidance) — NOT merely because the Customize
-   * panel is expanded. This drives `intent`, which changes the prompt's opening
-   * sentence server-side and is the only thing that makes `instructions` count.
-   */
-  const isCustomized = useMemo(
-    () =>
-      !adjustmentsEqual(adjustments, activePreset.prefill.adjustments) ||
-      strength !== activePreset.prefill.strength ||
-      preserveFaces !== activePreset.prefill.preserveFaces ||
-      instructions.trim().length > 0,
-    [adjustments, strength, preserveFaces, instructions, activePreset],
+  /** Everything `buildEnhanceParams` / `isFormCustomized` read, in one object. */
+  const formState = useMemo<EnhanceFormState>(
+    () => ({ presetKey, adjustments, strength, preserveFaces, instructions, quality }),
+    [presetKey, adjustments, strength, preserveFaces, instructions, quality],
   );
-
-  /**
-   * Param mapping (deliberate, see issue #98 commit set E):
-   *  - `preset` is sent for the four real presets only; `auto`/`custom` are UI
-   *    affordances and send none.
-   *  - `intent: 'custom'` is sent ONLY when the user genuinely customized. It
-   *    swaps the prompt's base sentence and is the gate for `instructions`.
-   *  - A preset's prefilled adjustments/strength/preserveFaces are still sent
-   *    even when untouched, because they differ from the SERVER's defaults
-   *    (e.g. portrait_polish = subtle). They are honored regardless of intent.
-   *  - Full-auto with nothing touched sends `{}` so every server default wins.
-   */
-  const buildParams = (): EnhanceParams => {
-    const params: EnhanceParams = {};
-
-    if (presetKey !== 'auto' && presetKey !== 'custom') {
-      params.preset = presetKey;
-    }
-
-    if (isCustomized) {
-      params.intent = 'custom';
-      params.adjustments = { ...adjustments };
-      params.strength = strength;
-      params.preserveFaces = preserveFaces;
-      const trimmed = instructions.trim();
-      if (trimmed) params.instructions = trimmed;
-    } else if (presetKey !== 'auto') {
-      params.adjustments = { ...adjustments };
-      params.strength = strength;
-      params.preserveFaces = preserveFaces;
-    }
-
-    if (quality) params.quality = quality;
-
-    return params;
-  };
 
   const handleStart = () => {
     setCommitError(null);
-    void start(buildParams());
+    void start(buildEnhanceParams(formState));
   };
 
   const confirmDecision = async () => {
@@ -628,24 +367,11 @@ export function MediaEnhancementDrawer({
                 <Typography variant="subtitle2" sx={{ mb: 1 }} id="enhance-preset-label">
                   What are we fixing?
                 </Typography>
-                <Box
-                  role="group"
-                  aria-labelledby="enhance-preset-label"
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
-                    gap: 1,
-                  }}
-                >
-                  {PRESETS.map((def) => (
-                    <PresetCard
-                      key={def.key}
-                      def={def}
-                      selected={presetKey === def.key}
-                      onSelect={() => selectPreset(def.key)}
-                    />
-                  ))}
-                </Box>
+                <PresetPicker
+                  presetKey={presetKey}
+                  onSelect={selectPreset}
+                  labelId="enhance-preset-label"
+                />
               </Box>
 
               {presetKey === 'colorize_bw' && (
@@ -671,75 +397,19 @@ export function MediaEnhancementDrawer({
                 Customize
               </Button>
 
-              <Collapse in={customize} unmountOnExit>
-                <Stack spacing={1.5}>
-                  {ADJUSTMENT_FIELDS.map(({ key, label }) => (
-                    <FormControlLabel
-                      key={key}
-                      control={
-                        <Switch
-                          size="small"
-                          checked={adjustments[key]}
-                          onChange={(e) =>
-                            setAdjustments((prev) => ({ ...prev, [key]: e.target.checked }))
-                          }
-                        />
-                      }
-                      label={label}
-                    />
-                  ))}
-
-                  <FormControl size="small" fullWidth>
-                    <InputLabel>Strength</InputLabel>
-                    <Select
-                      label="Strength"
-                      value={strength}
-                      onChange={(e) => setStrength(e.target.value as EnhanceStrength)}
-                    >
-                      <MenuItem value="subtle">Subtle</MenuItem>
-                      <MenuItem value="balanced">Balanced</MenuItem>
-                      <MenuItem value="strong">Strong</MenuItem>
-                    </Select>
-                  </FormControl>
-
-                  <FormControl size="small" fullWidth>
-                    <InputLabel>Output quality</InputLabel>
-                    <Select
-                      label="Output quality"
-                      value={quality}
-                      onChange={(e) => setQuality(e.target.value as EnhanceQuality | '')}
-                    >
-                      <MenuItem value="">Default (set by administrator)</MenuItem>
-                      <MenuItem value="low">Low — fastest, cheapest</MenuItem>
-                      <MenuItem value="medium">Medium</MenuItem>
-                      <MenuItem value="high">High — slowest, best detail</MenuItem>
-                    </Select>
-                  </FormControl>
-
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        size="small"
-                        checked={preserveFaces}
-                        onChange={(e) => setPreserveFaces(e.target.checked)}
-                      />
-                    }
-                    label="Preserve faces & identities"
-                  />
-
-                  <TextField
-                    label="Additional instructions"
-                    size="small"
-                    fullWidth
-                    multiline
-                    minRows={2}
-                    value={instructions}
-                    onChange={(e) => setInstructions(e.target.value.slice(0, 500))}
-                    placeholder="Optional guidance (max 500 chars)"
-                    helperText={`${instructions.length}/500`}
-                  />
-                </Stack>
-              </Collapse>
+              <EnhanceCustomizePanel
+                open={customize}
+                adjustments={adjustments}
+                onAdjustmentsChange={setAdjustments}
+                strength={strength}
+                onStrengthChange={setStrength}
+                quality={quality}
+                onQualityChange={setQuality}
+                preserveFaces={preserveFaces}
+                onPreserveFacesChange={setPreserveFaces}
+                instructions={instructions}
+                onInstructionsChange={setInstructions}
+              />
 
               <Button
                 variant="contained"
