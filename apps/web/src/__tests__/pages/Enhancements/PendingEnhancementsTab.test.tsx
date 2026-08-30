@@ -38,6 +38,12 @@ vi.mock('../../../hooks/useFeatureFlags', () => ({
 vi.mock('../../../services/enhance', () => ({
   applyEnhancement: vi.fn().mockResolvedValue({}),
   discardEnhancement: vi.fn().mockResolvedValue(undefined),
+  // The tab renders the "Recent batches" card (issue #423), which fetches on
+  // mount. Stubbed empty so it renders nothing and stays out of the way here.
+  listEnhancementBatches: vi.fn().mockResolvedValue({
+    items: [],
+    meta: { page: 1, pageSize: 3, totalItems: 0, totalPages: 0 },
+  }),
 }));
 
 vi.mock('../../../services/media', () => ({

@@ -62,7 +62,11 @@ describe('EnhancementsPage', () => {
 
   it('passes the active circle id down to the pending tab', () => {
     render(<EnhancementsPage />);
-    expect(pendingTabSpy).toHaveBeenCalledWith({ circleId: 'circle-1' });
+    // objectContaining, because the tab also receives the optional batch-filter
+    // props (issue #423) which this assertion is not about.
+    expect(pendingTabSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ circleId: 'circle-1' }),
+    );
   });
 
   it('opens the tab named by ?tab= on mount', () => {
