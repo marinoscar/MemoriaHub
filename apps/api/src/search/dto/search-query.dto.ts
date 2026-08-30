@@ -24,6 +24,34 @@ export const nearFilterValueSchema = z.object({
 
 export type NearFilterValue = z.infer<typeof nearFilterValueSchema>;
 
+/**
+ * `{ from?, to? }` shape for the two date-range filters (issue #446).
+ *
+ * Both bounds accept a full ISO 8601 timestamp OR a bare `YYYY-MM-DD`; the
+ * calendar-date form is what the AI search agent emits and what a `<input
+ * type="date">` produces, and its end-of-day semantics are applied downstream
+ * in `media-where.builder`. Without this refinement `filters` was a bare
+ * `z.record(z.string(), z.unknown())`, so a malformed `{from,to}` reached
+ * `new Date()` unvalidated.
+ */
+export const dateRangeFilterValueSchema = z
+  .object({
+    from: z.string().min(1).optional(),
+    to: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine(
+    (v) => v.from !== undefined || v.to !== undefined,
+    'Provide at least one of { from, to }',
+  )
+  .refine(
+    (v) =>
+      [v.from, v.to].every((b) => b === undefined || !isNaN(new Date(b).getTime())),
+    'Bounds must be an ISO 8601 date or datetime',
+  );
+
+export type DateRangeFilterValue = z.infer<typeof dateRangeFilterValueSchema>;
+
 export const searchQuerySchema = z.object({
   circleId: z.string().uuid(),
   semanticQuery: z.string().min(1).max(512).optional(),
@@ -39,6 +67,18 @@ export const searchQuerySchema = z.object({
             path: ['people'],
             message: `Invalid people filter: ${result.error.issues.map((i) => i.message).join('; ')}`,
           });
+        }
+      }
+      for (const key of ['capturedAt', 'uploadedAt'] as const) {
+        if (key in filters && filters[key] !== undefined && filters[key] !== null) {
+          const result = dateRangeFilterValueSchema.safeParse(filters[key]);
+          if (!result.success) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [key],
+              message: `Invalid ${key} filter: ${result.error.issues.map((i) => i.message).join('; ')}`,
+            });
+          }
         }
       }
       if ('near' in filters && filters['near'] !== undefined && filters['near'] !== null) {

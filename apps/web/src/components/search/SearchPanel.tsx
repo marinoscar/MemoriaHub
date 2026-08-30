@@ -34,6 +34,8 @@ import type { SearchRequest } from '../../services/search';
 import { getExploreTags, getLocationFacets } from '../../services/media';
 import type { LocationCountry } from '../../services/media';
 import type { ExploreItem } from '../../services/media';
+import { civilDayRange, instantDayRange } from '../../utils/dateRangeBounds';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,6 +78,12 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 export function SearchPanel({ open, onClose, circleId, onSubmit }: SearchPanelProps) {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+
+  // The user's stored IANA zone (#444), used ONLY to resolve upload-date
+  // bounds — an instant field. Null means "no preference expressed", which
+  // `instantDayRange` reads as "use the browser zone".
+  const { user } = useAuth();
+  const userTimeZone = user?.timezone ?? undefined;
 
   // -------------------------------------------------------------------------
   // Data loading
@@ -222,20 +230,21 @@ export function SearchPanel({ open, onClose, circleId, onSubmit }: SearchPanelPr
       filters['near'] = { lat: pinLocation.lat, lng: pinLocation.lng, radiusKm };
     }
 
-    // Date
+    // Date taken — a CIVIL timestamp. The bounds are anchored in UTC on
+    // purpose: `captured_at` stores the capture wall clock re-encoded as UTC,
+    // so "June 16" here means June 16 on the photographer's calendar. This
+    // block and the upload-date block below look alike and are NOT the same
+    // rule — see docs/specs/date-model.md before unifying them (#446).
     if (dateFrom || dateTo) {
-      const capturedAt: { from?: string; to?: string } = {};
-      if (dateFrom) capturedAt.from = new Date(dateFrom + 'T00:00:00.000Z').toISOString();
-      if (dateTo) capturedAt.to = new Date(dateTo + 'T23:59:59.999Z').toISOString();
-      filters['capturedAt'] = capturedAt;
+      filters['capturedAt'] = civilDayRange(dateFrom, dateTo);
     }
 
-    // Upload date
+    // Upload date — a genuine INSTANT, displayed to the user in their own
+    // clock everywhere else in the UI, so its bounds resolve in the user's
+    // zone (stored preference first, browser zone otherwise). Anchoring these
+    // to UTC shifted the whole window by the user's offset (#446).
     if (uploadFrom || uploadTo) {
-      const uploadedAt: { from?: string; to?: string } = {};
-      if (uploadFrom) uploadedAt.from = new Date(uploadFrom + 'T00:00:00.000Z').toISOString();
-      if (uploadTo) uploadedAt.to = new Date(uploadTo + 'T23:59:59.999Z').toISOString();
-      filters['uploadedAt'] = uploadedAt;
+      filters['uploadedAt'] = instantDayRange(uploadFrom, uploadTo, userTimeZone);
     }
 
     // Media type
