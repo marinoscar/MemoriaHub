@@ -49,6 +49,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -136,6 +137,7 @@ describe('EnhancementBatchesController', () => {
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: {} },
         { provide: StorageProcessingRecoveryService, useValue: {} },
+        { provide: ThumbnailPruneService, useValue: {} },
         { provide: MediaMetadataSyncService, useValue: {} },
         { provide: MediaEnrichmentService, useValue: {} },
         { provide: MediaThumbnailService, useValue: {} },
