@@ -82,6 +82,7 @@ import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import { BatchEnhanceDialog } from './BatchEnhanceDialog';
 import type { BulkEffect, BulkSuccessOptions } from './BulkActionToolbar';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { TrashBulkToolbar } from './TrashBulkToolbar';
@@ -725,12 +726,25 @@ export function MediaGallery({
   const { pictureEnhancement } = useFeatureFlags();
   const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
+  const [batchEnhanceOpen, setBatchEnhanceOpen] = useState(false);
 
   const singleSelectedItem = useMemo<MediaItem | null>(() => {
     if (selected.size !== 1) return null;
     const [onlyId] = Array.from(selected);
     return mergedItems.find((it) => it.id === onlyId) ?? null;
   }, [selected, mergedItems]);
+
+  /**
+   * The full selection resolved to items (issue #422). Kept alongside
+   * `singleSelectedItem` rather than replacing it — the lightbox and the
+   * single-photo enhancement drawer still need the one-item form. Because this
+   * gallery is the only place BulkActionToolbar is rendered, Home, the media
+   * library, albums and search all inherit batch actions with no per-page wiring.
+   */
+  const selectedItems = useMemo(
+    () => mergedItems.filter((it) => selected.has(it.id)),
+    [selected, mergedItems],
+  );
 
   // -------------------------------------------------------------------------
   // Bulk success handler
@@ -1027,8 +1041,11 @@ export function MediaGallery({
           onSuccess={handleBulkSuccess}
           onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
           singleSelectedItem={singleSelectedItem}
+          selectedItems={selectedItems}
           enhanceEnabled={enhanceEnabled}
+          maxBatchSize={pictureEnhancement?.maxBatchSize}
           onOpenEnhance={() => setEnhanceOpen(true)}
+          onOpenBatchEnhance={() => setBatchEnhanceOpen(true)}
         />
       )}
 
@@ -1243,6 +1260,23 @@ export function MediaGallery({
         onError={(msg) => {
           setAddToAlbumOpen(false);
           setSnackbar({ message: msg, severity: 'error' });
+        }}
+      />
+
+      {/* AI enhancement batch dialog (multi-photo selection) */}
+      <BatchEnhanceDialog
+        open={batchEnhanceOpen}
+        onClose={() => setBatchEnhanceOpen(false)}
+        circleId={circleId}
+        items={selectedItems}
+        maxBatchSize={pictureEnhancement?.maxBatchSize}
+        modelLabel={pictureEnhancement?.model ?? undefined}
+        // Nothing has changed yet — the batch only queues work whose results
+        // are each reviewed later — so this drops the selection and reports the
+        // server's counts rather than refreshing any item.
+        onSuccess={(msg) => {
+          handleClearSelection();
+          setSnackbar({ message: msg, severity: 'success' });
         }}
       />
 

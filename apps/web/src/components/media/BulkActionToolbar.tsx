@@ -107,10 +107,21 @@ interface BulkActionToolbarProps {
    * to decide whether the photo-only "AI Enhance" action can appear.
    */
   singleSelectedItem?: MediaItem | null;
+  /**
+   * Every selected item, videos included (issue #422). Present alongside — not
+   * instead of — `singleSelectedItem`: the exactly-one-photo case still opens
+   * the single-item drawer, and a caller that supplies only the single item
+   * keeps that behaviour unchanged.
+   */
+  selectedItems?: MediaItem[];
   /** Feature flag: features.pictureEnhancement. Gates the AI Enhance trigger. */
   enhanceEnabled?: boolean;
+  /** `pictureEnhancement.maxBatchSize`, passed through to the batch dialog. */
+  maxBatchSize?: number;
   /** Open the AI enhancement drawer for the single selected photo. */
   onOpenEnhance?: () => void;
+  /** Open the batch submit dialog for a multi-photo selection. */
+  onOpenBatchEnhance?: () => void;
 }
 
 export function BulkActionToolbar({
@@ -129,8 +140,11 @@ export function BulkActionToolbar({
   onRemoveFromAlbum,
   mode = 'home',
   singleSelectedItem,
+  selectedItems,
   enhanceEnabled,
+  maxBatchSize,
   onOpenEnhance,
+  onOpenBatchEnhance,
 }: BulkActionToolbarProps) {
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -141,11 +155,35 @@ export function BulkActionToolbar({
   const ids = Array.from(selected);
   const count = ids.length;
 
-  const canEnhance =
+  // --- AI Enhance gate (single: issue #98, batch: issue #422) ---------------
+  //
+  // Videos never count: AI Enhance is photo-only, so a videos-only selection
+  // shows no button at all rather than a trigger that would skip everything.
+  const enhancePhotoCount = selectedItems?.filter((i) => i.type === 'photo').length ?? 0;
+
+  // Exactly one photo and nothing else → the existing single-item drawer,
+  // unchanged. Everything else with at least one photo in it → the batch
+  // dialog, including a one-photo-plus-videos selection (which has no
+  // `singleSelectedItem` for the drawer to render).
+  const canEnhanceSingle =
     Boolean(enhanceEnabled) &&
     Boolean(onOpenEnhance) &&
     count === 1 &&
     singleSelectedItem?.type === 'photo';
+  const isBatchEnhance = !canEnhanceSingle && enhancePhotoCount > 0;
+  const canEnhance =
+    !isViewer &&
+    (canEnhanceSingle || (Boolean(enhanceEnabled) && Boolean(onOpenBatchEnhance) && isBatchEnhance));
+
+  const enhanceLabel = isBatchEnhance
+    ? `AI Enhance ${enhancePhotoCount} photo${enhancePhotoCount !== 1 ? 's' : ''}`
+    : 'AI Enhance';
+  // Surfaced before the dialog opens so an over-cap selection is trimmed in the
+  // grid — where the checkboxes are — rather than discovered on submit.
+  const enhanceTooltip =
+    isBatchEnhance && maxBatchSize != null && enhancePhotoCount > maxBatchSize
+      ? `${enhanceLabel} (limit ${maxBatchSize} per batch)`
+      : enhanceLabel;
 
   if (count === 0) return null;
 
@@ -296,10 +334,10 @@ export function BulkActionToolbar({
         {!isViewer && (
           <>
             {canEnhance && (
-              <Tooltip title="AI Enhance">
+              <Tooltip title={enhanceTooltip}>
                 <IconButton
-                  aria-label="AI Enhance"
-                  onClick={onOpenEnhance}
+                  aria-label={enhanceLabel}
+                  onClick={isBatchEnhance ? onOpenBatchEnhance : onOpenEnhance}
                   disabled={loading}
                   color="primary"
                 >
