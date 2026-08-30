@@ -366,15 +366,6 @@ export default function EnhancementBatchPage() {
           </Button>
         )}
 
-        {/* Says exactly what the cancel button does, where the label cannot. */}
-        {!terminal && canCancel && (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Cancelling stops the photos still queued. Any photo already being
-            enhanced finishes — its AI call has already been paid for, so
-            stopping it would waste the credit and throw the result away.
-          </Typography>
-        )}
-
         {batch.failedCount > 0 && (
           <Card variant="outlined" sx={{ mt: 1, mb: 2 }}>
             <CardContent>
@@ -407,6 +398,16 @@ export default function EnhancementBatchPage() {
               />
             </CardContent>
           </Card>
+        )}
+
+        {/* Last in the slot, so it sits directly above the cancel button it
+            explains. The label can only say "remaining"; this says why. */}
+        {!terminal && canCancel && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Cancelling stops the photos still queued. Any photo already being
+            enhanced finishes — its AI call has already been paid for, so
+            stopping it would waste the credit and throw the result away.
+          </Typography>
         )}
       </RunProgressPanel>
 
