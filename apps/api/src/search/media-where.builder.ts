@@ -246,6 +246,37 @@ export function wherePeople(ids: string[], mode: 'all' | 'any' = 'all'): Prisma.
   return { AND: validIds.map((id) => ({ faces: { some: { personId: id } } })) };
 }
 
+/**
+ * AND-compose extra fragments onto an already-built `where` (issue #431).
+ *
+ * `buildMediaWhere` collects every filter into a shared `AND` array precisely
+ * so that two fragments each emitting a top-level key (`OR`, `AND`) cannot
+ * clobber one another. `wherePeople(ids, 'all')` also returns a top-level
+ * `AND`, so composing the two with an object spread —
+ * `{ ...buildMediaWhere(...), ...wherePeople(...) }` — overwrote the builder's
+ * whole `AND` array and silently dropped every other filter, WIDENING the
+ * match set. That is a wrong-results bug on a read path (the gallery) and a
+ * wrong-writes bug on `POST /albums/:id/items/by-filter`, which adds the
+ * widened set to the album.
+ *
+ * Pushing each fragment into the array instead is safe for any fragment shape,
+ * including one that carries its own nested `AND`.
+ */
+export function andWhere(
+  base: Prisma.MediaItemWhereInput,
+  ...fragments: Array<Prisma.MediaItemWhereInput | undefined>
+): Prisma.MediaItemWhereInput {
+  const extras = fragments.filter(
+    (f): f is Prisma.MediaItemWhereInput => !!f && Object.keys(f).length > 0,
+  );
+  if (extras.length === 0) return base;
+
+  const existing =
+    base.AND === undefined ? [] : Array.isArray(base.AND) ? base.AND : [base.AND];
+
+  return { ...base, AND: [...existing, ...extras] };
+}
+
 export function buildMediaWhere(
   circleId: string,
   filters: MediaFilters,

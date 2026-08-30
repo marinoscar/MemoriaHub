@@ -5,6 +5,7 @@
  */
 import { BadRequestException } from '@nestjs/common';
 import {
+  andWhere,
   buildMediaWhere,
   MediaFilters,
   whereDateRange,
@@ -956,6 +957,76 @@ describe('wherePeople', () => {
     expect(result).toEqual({
       faces: { some: { personId: { in: [ID_A] } } },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// andWhere — people composition (issue #431)
+//
+// The regression this guards: `{ ...buildMediaWhere(...), ...wherePeople(ids,
+// 'all') }` overwrote the builder's AND array with the people one, so every
+// other filter vanished and the match set WIDENED. It reached both the gallery
+// and album add-by-filter, which writes the widened set into the album.
+// ---------------------------------------------------------------------------
+describe('andWhere — composing people with other filters', () => {
+  const ID_A = '11111111-1111-1111-1111-111111111111';
+  const ID_B = '22222222-2222-2222-2222-222222222222';
+
+  it("keeps every other filter when peopleMatch is 'all'", () => {
+    const base = buildMediaWhere(CIRCLE_ID, {
+      tag: 'beach',
+      country: 'Costa Rica',
+      cameraMake: 'Apple',
+    });
+    const baseCount = ((base as any).AND as unknown[]).length;
+    expect(baseCount).toBeGreaterThan(0);
+
+    const where = andWhere(base, wherePeople([ID_A, ID_B], 'all')) as any;
+
+    // Nothing was replaced: the builder's fragments survive alongside people.
+    expect(where.AND).toHaveLength(baseCount + 1);
+    expect(where.circleId).toBe(CIRCLE_ID);
+    expect(where.deletedAt).toBeNull();
+    expect(where.AND).toContainEqual({
+      AND: [
+        { faces: { some: { personId: ID_A } } },
+        { faces: { some: { personId: ID_B } } },
+      ],
+    });
+    expect(JSON.stringify(where)).toContain('beach');
+    expect(JSON.stringify(where)).toContain('Costa Rica');
+    expect(JSON.stringify(where)).toContain('Apple');
+  });
+
+  it("keeps every other filter when peopleMatch is 'any'", () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const where = andWhere(base, wherePeople([ID_A], 'any')) as any;
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toContainEqual({ faces: { some: { personId: { in: [ID_A] } } } });
+  });
+
+  it('composes onto a base that has no AND array yet', () => {
+    const base = buildMediaWhere(CIRCLE_ID, {});
+    expect((base as any).AND).toBeUndefined();
+    const where = andWhere(base, wherePeople([ID_A], 'all')) as any;
+    expect(where.AND).toHaveLength(1);
+    expect(where.circleId).toBe(CIRCLE_ID);
+  });
+
+  it('returns the base untouched when there is no people filter', () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    expect(andWhere(base, undefined)).toBe(base);
+    expect(andWhere(base, {})).toBe(base);
+  });
+
+  it('appends rather than replaces when several fragments are supplied', () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const where = andWhere(
+      base,
+      wherePeople([ID_A], 'all'),
+      wherePeople([ID_B], 'all'),
+    ) as any;
+    expect(where.AND).toHaveLength(3);
   });
 });
 
