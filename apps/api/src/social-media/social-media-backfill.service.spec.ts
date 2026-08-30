@@ -208,9 +208,12 @@ describe('SocialMediaBackfillService', () => {
 
       const [callArgs] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       const where = callArgs[0].where;
+      // The shared whereDateRange builder widens a midnight upper bound to
+      // exclusive next-midnight, so a `to` of 2024-12-31 covers that whole day
+      // rather than only its first instant (#446).
       expect(where.capturedAt).toEqual({
         gte: new Date('2024-01-01'),
-        lte: new Date('2024-12-31'),
+        lt: new Date('2025-01-01T00:00:00.000Z'),
       });
       expect(where).not.toHaveProperty('OR');
     });
