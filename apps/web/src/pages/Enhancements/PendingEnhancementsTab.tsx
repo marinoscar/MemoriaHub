@@ -43,6 +43,7 @@ import {
   ReplaceDownscaleNotice,
   describeResolutionLoss,
 } from '../../components/media/ReplaceDownscaleNotice';
+import { RecentBatchesCard } from './RecentBatchesCard';
 
 const PAGE_SIZE = 24;
 
@@ -610,6 +611,11 @@ export function PendingEnhancementsTab({
 
   return (
     <Box>
+      {/* Hidden while a batch filter is active — the chip below already says
+          which batch you are looking at, and offering a list of batches to
+          jump to from inside one is noise. */}
+      {!batchId && <RecentBatchesCard circleId={circleId} />}
+
       {/* ---------- Batch filter ----------
           Someone arriving from a batch's progress page sees a NARROWED inbox,
           which without this reads as "where did my other enhancements go?".
