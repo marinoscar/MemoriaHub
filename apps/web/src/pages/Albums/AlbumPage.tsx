@@ -26,6 +26,7 @@ import {
   TextField,
   Menu,
   MenuItem,
+  Snackbar,
   Stack,
   Tooltip,
 } from '@mui/material';
@@ -36,10 +37,14 @@ import MapIcon from '@mui/icons-material/Map';
 import SlideshowIcon from '@mui/icons-material/Slideshow';
 import PeopleIcon from '@mui/icons-material/People';
 import ImageIcon from '@mui/icons-material/Image';
+import CloseIcon from '@mui/icons-material/Close';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
+import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../services/media';
 import type { MediaItem } from '../../types/media';
+import { BatchEnhanceDialog } from '../../components/media/BatchEnhanceDialog';
 import { MediaGallery } from '../../components/media/MediaGallery';
 import { MediaLightbox } from '../../components/media/MediaLightbox';
 import { ShareDialog } from '../../components/share/ShareDialog';
@@ -84,6 +89,16 @@ export default function AlbumPage() {
   const [mapOpen, setMapOpen] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+
+  // AI Enhance for the whole album (issue #424) — the batch dialog in filter
+  // mode, where the "filter" is album membership. Gated on the client-visible
+  // pictureEnhancement policy (GET /api/features), never on the Admin-only
+  // system-settings read, so a non-admin collaborator sees it too.
+  const { pictureEnhancement } = useFeatureFlags();
+  const [albumEnhanceOpen, setAlbumEnhanceOpen] = useState(false);
+  const [enhanceToast, setEnhanceToast] = useState<
+    { message: string; batchId: string } | null
+  >(null);
 
   // Slideshow lightbox — null = closed. Self-contained; does not fight the
   // MediaGallery's own lightbox.
@@ -192,6 +207,13 @@ export default function AlbumPage() {
   }
 
   const isEmpty = albumItems.length === 0;
+
+  // The album's own item list is already loaded, so — unlike the gallery's
+  // keyset feed — the exact photo count IS knowable here and the dialog can
+  // name it up front instead of learning it from a refusal.
+  const albumPhotoCount = albumItems.filter((it) => it.type === 'photo').length;
+  const canEnhanceAlbum =
+    canManage && Boolean(pictureEnhancement?.enabled) && albumPhotoCount > 0;
 
   // No minHeight/pb on this Box — the Layout shell owns viewport height and
   // the BottomNav clearance (issue #237); duplicating either stacks dead
@@ -314,6 +336,17 @@ export default function AlbumPage() {
                     <ImageIcon fontSize="small" sx={{ mr: 1 }} />
                     Select album cover
                   </MenuItem>
+                  {canEnhanceAlbum && (
+                    <MenuItem
+                      onClick={() => {
+                        setMenuAnchor(null);
+                        setAlbumEnhanceOpen(true);
+                      }}
+                    >
+                      <AutoFixHighIcon fontSize="small" sx={{ mr: 1 }} />
+                      Enhance all photos in this album
+                    </MenuItem>
+                  )}
                   <MenuItem
                     onClick={() => {
                       setMenuAnchor(null);
@@ -409,6 +442,63 @@ export default function AlbumPage() {
         onClose={() => setShareDialogOpen(false)}
         target={{ type: 'album', id: albumId }}
       />
+
+      {/* AI Enhance the whole album — the shared batch dialog in filter mode
+          (issue #424). Album membership IS the filter, so `albumId` is the
+          entire filter body. */}
+      <BatchEnhanceDialog
+        open={albumEnhanceOpen}
+        onClose={() => setAlbumEnhanceOpen(false)}
+        circleId={activeCircle.id}
+        filterMode={{
+          filters: { circleId: activeCircle.id, albumId },
+          matchCount: albumPhotoCount,
+          scopeLabel: 'in this album',
+          matchPhrase: 'are in this album',
+        }}
+        maxBatchSize={pictureEnhancement?.maxBatchSize}
+        modelLabel={pictureEnhancement?.model ?? undefined}
+        onSuccess={(message, batchId) => setEnhanceToast({ message, batchId })}
+      />
+
+      {/* Batch toast — carries the only pointer to work that runs for minutes
+          after the dialog closes, so it dwells longer and offers the link. */}
+      <Snackbar
+        open={enhanceToast !== null}
+        autoHideDuration={10000}
+        onClose={() => setEnhanceToast(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          severity="success"
+          sx={{ width: '100%' }}
+          action={
+            <>
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  const id = enhanceToast?.batchId;
+                  setEnhanceToast(null);
+                  if (id) navigate(`/enhancement-batches/${id}`);
+                }}
+              >
+                View progress
+              </Button>
+              <IconButton
+                size="small"
+                color="inherit"
+                aria-label="Close"
+                onClick={() => setEnhanceToast(null)}
+              >
+                <CloseIcon fontSize="small" />
+              </IconButton>
+            </>
+          }
+        >
+          {enhanceToast?.message}
+        </Alert>
+      </Snackbar>
 
       {/* Rename dialog */}
       <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} maxWidth="xs" fullWidth>

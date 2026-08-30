@@ -94,7 +94,11 @@ import { BulkTagsDialog } from './BulkTagsDialog';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { TimelineScrubber } from './TimelineScrubber';
 import { getMedia, removeAlbumItem } from '../../services/media';
-import type { MediaItem, MediaQueryParams } from '../../types/media';
+import type {
+  AddAlbumItemsByFilterDto,
+  MediaItem,
+  MediaQueryParams,
+} from '../../types/media';
 import type { CircleRole } from '../../types/circles';
 
 // ---------------------------------------------------------------------------
@@ -736,6 +740,8 @@ export function MediaGallery({
   const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
   const [batchEnhanceOpen, setBatchEnhanceOpen] = useState(false);
+  /** "Enhance all matching" — the same dialog, in filter mode (issue #424). */
+  const [filterEnhanceOpen, setFilterEnhanceOpen] = useState(false);
 
   const singleSelectedItem = useMemo<MediaItem | null>(() => {
     if (selected.size !== 1) return null;
@@ -880,6 +886,51 @@ export function MediaGallery({
     }
     return rest;
   }, [queryParams, albumId, circleId]);
+
+  // -------------------------------------------------------------------------
+  // Enhance-by-filter (issue #424) — the filter the server resolves the match
+  // set from. Deliberately NOT albumDialogFilters: that one strips `albumId` so
+  // items can be added to a DIFFERENT album, whereas here dropping it would
+  // widen "this album" to "the whole circle" and enhance photos nobody asked
+  // about. Pagination/sort/cursor are stripped — they change which page you
+  // see, never which photos match.
+  // -------------------------------------------------------------------------
+
+  const enhanceFilters = useMemo<AddAlbumItemsByFilterDto>(() => {
+    if (!queryParams) return { circleId };
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    const {
+      page: _p,
+      pageSize: _ps,
+      sortBy: _sb,
+      sortOrder: _so,
+      cursor: _c,
+      ...rest
+    } = queryParams;
+    /* eslint-enable @typescript-eslint/no-unused-vars */
+    return { ...rest, circleId };
+  }, [queryParams, circleId]);
+
+  /**
+   * "A filter is active" = something narrows the circle beyond how it is sorted.
+   *
+   * On an album page `albumId` is excluded from that test: being inside an album
+   * is the surface you are on, not a filter you applied — and AlbumPage has its
+   * own explicit "Enhance all photos in this album" entry point. It still rides
+   * along in `enhanceFilters` above, so the match set stays album-scoped.
+   */
+  const filterActive = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { circleId: _cid, albumId: aid, ...rest } = enhanceFilters;
+    const narrowed = Object.values(rest).some(
+      (v) =>
+        v !== undefined &&
+        v !== null &&
+        v !== '' &&
+        !(Array.isArray(v) && v.length === 0),
+    );
+    return narrowed || (Boolean(aid) && !albumId);
+  }, [enhanceFilters, albumId]);
 
   // -------------------------------------------------------------------------
   // Grid measurement — ONE ResizeObserver for the whole gallery (never one per
@@ -1055,6 +1106,8 @@ export function MediaGallery({
           maxBatchSize={pictureEnhancement?.maxBatchSize}
           onOpenEnhance={() => setEnhanceOpen(true)}
           onOpenBatchEnhance={() => setBatchEnhanceOpen(true)}
+          filterActive={filterActive}
+          onOpenFilterEnhance={() => setFilterEnhanceOpen(true)}
         />
       )}
 
@@ -1283,6 +1336,23 @@ export function MediaGallery({
         // Nothing has changed yet — the batch only queues work whose results
         // are each reviewed later — so this drops the selection and reports the
         // server's counts rather than refreshing any item.
+        onSuccess={(msg, batchId) => {
+          handleClearSelection();
+          setSnackbar({ message: msg, severity: 'success', batchId });
+        }}
+      />
+
+      {/* AI enhancement — same dialog, FILTER mode (issue #424). The match set
+          is resolved server-side, so it covers photos not yet scrolled to; the
+          gallery has no COUNT(*) in keyset mode, so no count is passed and the
+          real number only ever comes back from the server. */}
+      <BatchEnhanceDialog
+        open={filterEnhanceOpen}
+        onClose={() => setFilterEnhanceOpen(false)}
+        circleId={circleId}
+        filterMode={{ filters: enhanceFilters }}
+        maxBatchSize={pictureEnhancement?.maxBatchSize}
+        modelLabel={pictureEnhancement?.model ?? undefined}
         onSuccess={(msg, batchId) => {
           handleClearSelection();
           setSnackbar({ message: msg, severity: 'success', batchId });

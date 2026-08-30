@@ -122,6 +122,17 @@ interface BulkActionToolbarProps {
   onOpenEnhance?: () => void;
   /** Open the batch submit dialog for a multi-photo selection. */
   onOpenBatchEnhance?: () => void;
+  /**
+   * True when something narrows the current view beyond the circle (issue #424).
+   * Gates the "Enhance all matching" overflow item — with no filter it would
+   * mean "enhance the entire library", which is not an action worth one click.
+   */
+  filterActive?: boolean;
+  /**
+   * Open the batch submit dialog in FILTER mode: the server resolves the match
+   * set, so it includes photos the user has not scrolled to.
+   */
+  onOpenFilterEnhance?: () => void;
 }
 
 export function BulkActionToolbar({
@@ -145,6 +156,8 @@ export function BulkActionToolbar({
   maxBatchSize,
   onOpenEnhance,
   onOpenBatchEnhance,
+  filterActive,
+  onOpenFilterEnhance,
 }: BulkActionToolbarProps) {
   const [moreAnchor, setMoreAnchor] = useState<null | HTMLElement>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -174,6 +187,15 @@ export function BulkActionToolbar({
   const canEnhance =
     !isViewer &&
     (canEnhanceSingle || (Boolean(enhanceEnabled) && Boolean(onOpenBatchEnhance) && isBatchEnhance));
+
+  // "Enhance all matching" is deliberately overflow-only and filter-gated: it
+  // acts on photos the user never selected (or saw), so it belongs behind the
+  // menu, not beside the one-tap icons.
+  const canEnhanceByFilter =
+    !isViewer &&
+    Boolean(enhanceEnabled) &&
+    Boolean(filterActive) &&
+    Boolean(onOpenFilterEnhance);
 
   const enhanceLabel = isBatchEnhance
     ? `AI Enhance ${enhancePhotoCount} photo${enhancePhotoCount !== 1 ? 's' : ''}`
@@ -404,6 +426,22 @@ export function BulkActionToolbar({
           <ListItemIcon><AutoAwesomeIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Re-run AI tagging</ListItemText>
         </MenuItem>
+        {canEnhanceByFilter && [
+          <Divider key="enhance-filter-divider" />,
+          <MenuItem
+            key="enhance-filter"
+            onClick={() => {
+              setMoreAnchor(null);
+              onOpenFilterEnhance?.();
+            }}
+          >
+            <ListItemIcon><AutoFixHighIcon fontSize="small" /></ListItemIcon>
+            <ListItemText
+              primary="Enhance all matching"
+              secondary="Every photo your filter matches, not just the selection"
+            />
+          </MenuItem>,
+        ]}
         <Divider />
         <MenuItem onClick={() => { setMoreAnchor(null); void handleFavorite(false); }}>
           <ListItemIcon><StarBorderIcon fontSize="small" /></ListItemIcon>
