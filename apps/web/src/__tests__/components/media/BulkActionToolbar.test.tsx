@@ -572,4 +572,298 @@ describe('BulkActionToolbar', () => {
       expect(onOpenEnhance).toHaveBeenCalledTimes(1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // AI Enhance BATCH gate (issue #422) — the routing matrix between the
+  // single-item drawer and the multi-photo batch dialog.
+  //
+  // canEnhanceSingle  = enhanceEnabled && onOpenEnhance && count===1 &&
+  //                     singleSelectedItem?.type === 'photo'
+  // isBatchEnhance    = !canEnhanceSingle && enhancePhotoCount > 0
+  //   where enhancePhotoCount = selectedItems.filter(photo).length
+  // -------------------------------------------------------------------------
+  describe('AI Enhance batch gate (issue #422)', () => {
+    const photo = (id: string) => makeMediaItem({ id, type: 'photo' });
+    const video = (id: string) => makeMediaItem({ id, type: 'video' });
+
+    it('1 photo selected: routes to the single-item drawer (onOpenEnhance), never the batch dialog', async () => {
+      const onOpenEnhance = vi.fn();
+      const onOpenBatchEnhance = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1'])}
+          singleSelectedItem={photo('p1')}
+          selectedItems={[photo('p1')]}
+          enhanceEnabled
+          onOpenEnhance={onOpenEnhance}
+          onOpenBatchEnhance={onOpenBatchEnhance}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /ai enhance/i }));
+      expect(onOpenEnhance).toHaveBeenCalledTimes(1);
+      expect(onOpenBatchEnhance).not.toHaveBeenCalled();
+    });
+
+    it('2+ photos selected: routes to the batch dialog (onOpenBatchEnhance), never the single drawer', async () => {
+      const onOpenEnhance = vi.fn();
+      const onOpenBatchEnhance = vi.fn();
+      const user = userEvent.setup();
+      const items = [photo('p1'), photo('p2'), photo('p3')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2', 'p3'])}
+          singleSelectedItem={undefined}
+          selectedItems={items}
+          enhanceEnabled
+          onOpenEnhance={onOpenEnhance}
+          onOpenBatchEnhance={onOpenBatchEnhance}
+        />,
+      );
+
+      const button = screen.getByRole('button', { name: /ai enhance 3 photos/i });
+      expect(button).toBeInTheDocument();
+      await user.click(button);
+      expect(onOpenBatchEnhance).toHaveBeenCalledTimes(1);
+      expect(onOpenEnhance).not.toHaveBeenCalled();
+    });
+
+    it('1 photo + N videos: routes to the BATCH dialog, not the single drawer — there is no singleSelectedItem for the drawer to render', async () => {
+      const onOpenEnhance = vi.fn();
+      const onOpenBatchEnhance = vi.fn();
+      const user = userEvent.setup();
+      const items = [photo('p1'), video('v1'), video('v2')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'v1', 'v2'])}
+          // A mixed selection has no single item for the drawer to open on —
+          // this is exactly why the shipped gate diverges from a naive
+          // "count === 1 photo" reading of the issue's formula.
+          singleSelectedItem={null}
+          selectedItems={items}
+          enhanceEnabled
+          onOpenEnhance={onOpenEnhance}
+          onOpenBatchEnhance={onOpenBatchEnhance}
+        />,
+      );
+
+      const button = screen.getByRole('button', { name: /ai enhance 1 photo\b/i });
+      expect(button).toBeInTheDocument();
+      await user.click(button);
+      expect(onOpenBatchEnhance).toHaveBeenCalledTimes(1);
+      expect(onOpenEnhance).not.toHaveBeenCalled();
+    });
+
+    it('videos-only selection: no AI Enhance button at all (nothing eligible to enhance)', () => {
+      const items = [video('v1'), video('v2')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['v1', 'v2'])}
+          singleSelectedItem={null}
+          selectedItems={items}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('mixed selection: the label and cap check count PHOTOS only, ignoring videos in the total', () => {
+      const items = [photo('p1'), photo('p2'), video('v1'), video('v2'), video('v3')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2', 'v1', 'v2', 'v3'])}
+          singleSelectedItem={null}
+          selectedItems={items}
+          enhanceEnabled
+          maxBatchSize={10}
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      // "5 selected" (the whole selection) but "AI Enhance 2 photos" (photos only).
+      expect(screen.getByText('5 selected')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /ai enhance 2 photos/i })).toBeInTheDocument();
+    });
+
+    it('viewer role: the batch AI Enhance button is hidden even with a multi-photo selection', () => {
+      const items = [photo('p1'), photo('p2')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2'])}
+          activeCircleRole="viewer"
+          singleSelectedItem={undefined}
+          selectedItems={items}
+          enhanceEnabled
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('feature flag off: the batch AI Enhance button is hidden even with a multi-photo selection', () => {
+      const items = [photo('p1'), photo('p2')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2'])}
+          singleSelectedItem={undefined}
+          selectedItems={items}
+          enhanceEnabled={false}
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('feature flags still loading (enhanceEnabled undefined): does NOT flash the button in', () => {
+      // MediaGallery derives `enhanceEnabled = Boolean(pictureEnhancement?.enabled)`
+      // from useFeatureFlags, which is null while the request is in flight — so
+      // the prop this component actually receives during that window is
+      // `undefined`, not `false`. Both must render nothing.
+      const items = [photo('p1'), photo('p2')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2'])}
+          singleSelectedItem={undefined}
+          selectedItems={items}
+          enhanceEnabled={undefined}
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /ai enhance/i })).not.toBeInTheDocument();
+    });
+
+    it('caps the tooltip with the batch limit when the photo count exceeds maxBatchSize', async () => {
+      const user = userEvent.setup();
+      const items = [photo('p1'), photo('p2'), photo('p3')];
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          selected={new Set(['p1', 'p2', 'p3'])}
+          singleSelectedItem={undefined}
+          selectedItems={items}
+          enhanceEnabled
+          maxBatchSize={2}
+          onOpenEnhance={vi.fn()}
+          onOpenBatchEnhance={vi.fn()}
+        />,
+      );
+
+      await user.hover(screen.getByRole('button', { name: /ai enhance 3 photos/i }));
+      expect(await screen.findByText(/limit 2 per batch/i)).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // "Enhance all matching" — filter-gated overflow item (issue #424)
+  //
+  // canEnhanceByFilter = !isViewer && enhanceEnabled && filterActive &&
+  //                      onOpenFilterEnhance
+  // -------------------------------------------------------------------------
+  describe('Enhance all matching (issue #424)', () => {
+    async function openMenu(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole('button', { name: /more actions/i }));
+    }
+
+    it('is offered in the overflow menu when a filter is active, enhance is enabled, and the caller is not a viewer', async () => {
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          enhanceEnabled
+          filterActive
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      await openMenu(user);
+      expect(screen.getByText(/enhance all matching/i)).toBeInTheDocument();
+    });
+
+    it('is absent with no active filter, even when enhance is enabled', async () => {
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          enhanceEnabled
+          filterActive={false}
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      await openMenu(user);
+      expect(screen.queryByText(/enhance all matching/i)).not.toBeInTheDocument();
+    });
+
+    it('is absent for a viewer, even with an active filter', async () => {
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          activeCircleRole="viewer"
+          enhanceEnabled
+          filterActive
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      // Viewers get no "More actions" button at all, so the menu item cannot
+      // be reached either way — but assert the root cause directly too.
+      expect(screen.queryByRole('button', { name: /more actions/i })).not.toBeInTheDocument();
+    });
+
+    it('is absent when the feature flag is off, even with an active filter', async () => {
+      const user = userEvent.setup();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          enhanceEnabled={false}
+          filterActive
+          onOpenFilterEnhance={vi.fn()}
+        />,
+      );
+
+      await openMenu(user);
+      expect(screen.queryByText(/enhance all matching/i)).not.toBeInTheDocument();
+    });
+
+    it('calls onOpenFilterEnhance when clicked, and closes the menu', async () => {
+      const user = userEvent.setup();
+      const onOpenFilterEnhance = vi.fn();
+      render(
+        <BulkActionToolbar
+          {...defaultProps}
+          enhanceEnabled
+          filterActive
+          onOpenFilterEnhance={onOpenFilterEnhance}
+        />,
+      );
+
+      await openMenu(user);
+      await user.click(screen.getByText(/enhance all matching/i));
+
+      expect(onOpenFilterEnhance).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(screen.queryByText(/enhance all matching/i)).not.toBeInTheDocument();
+      });
+    });
+  });
 });
