@@ -45,6 +45,7 @@ import type {
   DuplicateSortBy,
 } from '../../services/duplicates';
 import type { SortOrder } from '../../types/media';
+import { formatCivilDateTime } from '../../utils/civilDate';
 
 const KIND_LABELS: Record<DuplicateGroupKind, string> = {
   exact_variant: 'Exact copy',
@@ -140,7 +141,7 @@ function DuplicateGroupCard({ group, selected, onToggle }: DuplicateGroupCardPro
   const navigate = useNavigate();
 
   const capturedDate = group.capturedAt
-    ? new Date(group.capturedAt).toLocaleString(undefined, {
+    ? formatCivilDateTime(group.capturedAt, {
         dateStyle: 'medium',
         timeStyle: 'short',
       })

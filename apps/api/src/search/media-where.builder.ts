@@ -37,12 +37,42 @@ export function whereFavorite(value: boolean): Prisma.MediaItemWhereInput {
   return { favorite: value };
 }
 
+/**
+ * Upper-bound normalisation for a date range (issue #446, epic #440).
+ *
+ * A caller that supplies a bare `YYYY-MM-DD` — the AI search agent, a workflow
+ * `between` condition, any API consumer — means "through the end of that day",
+ * but it arrives as that day's midnight and an inclusive `lte` then matches
+ * only an item timestamped exactly `00:00:00.000`, silently dropping the whole
+ * final day. Clients that already send an explicit end-of-day bound are
+ * unaffected.
+ *
+ * The fix is applied here, at the single place both range builders funnel
+ * through, so it also protects callers that cannot be fixed client-side.
+ *
+ * Returns the bound expressed as EXCLUSIVE (`lt`) when it lands exactly on
+ * midnight, otherwise as INCLUSIVE (`lte`). "Exactly midnight" is a deliberate
+ * heuristic: a genuine capture at precisely `00:00:00.000` is vanishingly
+ * rare, and the heuristic can only ever INCLUDE such an item, never exclude
+ * one.
+ */
+function upperBound(to: Date): { lt: Date } | { lte: Date } {
+  const isMidnightUtc =
+    to.getUTCHours() === 0 &&
+    to.getUTCMinutes() === 0 &&
+    to.getUTCSeconds() === 0 &&
+    to.getUTCMilliseconds() === 0;
+
+  if (!isMidnightUtc) return { lte: to };
+  return { lt: new Date(to.getTime() + 24 * 60 * 60 * 1000) };
+}
+
 export function whereDateRange(from?: Date, to?: Date): Prisma.MediaItemWhereInput {
   if (!from && !to) return {};
   return {
     capturedAt: {
       ...(from && { gte: from }),
-      ...(to && { lte: to }),
+      ...(to && upperBound(to)),
     },
   };
 }
@@ -52,7 +82,7 @@ export function whereCreatedAtRange(from?: Date, to?: Date): Prisma.MediaItemWhe
   return {
     createdAt: {
       ...(from && { gte: from }),
-      ...(to && { lte: to }),
+      ...(to && upperBound(to)),
     },
   };
 }
@@ -214,6 +244,37 @@ export function wherePeople(ids: string[], mode: 'all' | 'any' = 'all'): Prisma.
   }
   // 'all' mode: AND-compose one faces.some clause per person id
   return { AND: validIds.map((id) => ({ faces: { some: { personId: id } } })) };
+}
+
+/**
+ * AND-compose extra fragments onto an already-built `where` (issue #431).
+ *
+ * `buildMediaWhere` collects every filter into a shared `AND` array precisely
+ * so that two fragments each emitting a top-level key (`OR`, `AND`) cannot
+ * clobber one another. `wherePeople(ids, 'all')` also returns a top-level
+ * `AND`, so composing the two with an object spread —
+ * `{ ...buildMediaWhere(...), ...wherePeople(...) }` — overwrote the builder's
+ * whole `AND` array and silently dropped every other filter, WIDENING the
+ * match set. That is a wrong-results bug on a read path (the gallery) and a
+ * wrong-writes bug on `POST /albums/:id/items/by-filter`, which adds the
+ * widened set to the album.
+ *
+ * Pushing each fragment into the array instead is safe for any fragment shape,
+ * including one that carries its own nested `AND`.
+ */
+export function andWhere(
+  base: Prisma.MediaItemWhereInput,
+  ...fragments: Array<Prisma.MediaItemWhereInput | undefined>
+): Prisma.MediaItemWhereInput {
+  const extras = fragments.filter(
+    (f): f is Prisma.MediaItemWhereInput => !!f && Object.keys(f).length > 0,
+  );
+  if (extras.length === 0) return base;
+
+  const existing =
+    base.AND === undefined ? [] : Array.isArray(base.AND) ? base.AND : [base.AND];
+
+  return { ...base, AND: [...existing, ...extras] };
 }
 
 export function buildMediaWhere(

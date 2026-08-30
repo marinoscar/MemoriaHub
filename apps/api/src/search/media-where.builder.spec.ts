@@ -5,8 +5,10 @@
  */
 import { BadRequestException } from '@nestjs/common';
 import {
+  andWhere,
   buildMediaWhere,
   MediaFilters,
+  whereDateRange,
   whereTag,
   whereCountry,
   whereLocality,
@@ -124,16 +126,18 @@ describe('buildMediaWhere', () => {
   });
 
   describe('date range filter', () => {
-    it('produces capturedAt.gte and lte when both bounds are provided', () => {
+    it('produces capturedAt.gte and an end-day-inclusive upper bound', () => {
       const from = new Date('2023-01-01');
       const to = new Date('2023-12-31');
       const where = buildMediaWhere(CIRCLE_ID, {
         capturedAtFrom: from,
         capturedAtTo: to,
       });
-      // AND-composition: capturedAt lives inside where.AND[0]
+      // AND-composition: capturedAt lives inside where.AND[0].
+      // A midnight upper bound becomes exclusive next-midnight so the end day
+      // is covered rather than dropped (#446).
       expect(inAnd(where, 'capturedAt')).toMatchObject({
-        capturedAt: { gte: from, lte: to },
+        capturedAt: { gte: from, lt: new Date('2024-01-01T00:00:00.000Z') },
       });
     });
 
@@ -145,11 +149,11 @@ describe('buildMediaWhere', () => {
       expect(clause.capturedAt.lte).toBeUndefined();
     });
 
-    it('produces only lte when only to is provided', () => {
+    it('produces only an upper bound when only to is provided', () => {
       const to = new Date('2023-06-01');
       const where = buildMediaWhere(CIRCLE_ID, { capturedAtTo: to });
       const clause = inAnd(where, 'capturedAt');
-      expect(clause.capturedAt).toMatchObject({ lte: to });
+      expect(clause.capturedAt).toMatchObject({ lt: new Date('2023-06-02T00:00:00.000Z') });
       expect(clause.capturedAt.gte).toBeUndefined();
     });
   });
@@ -957,17 +961,103 @@ describe('wherePeople', () => {
 });
 
 // ---------------------------------------------------------------------------
+// andWhere — people composition (issue #431)
+//
+// The regression this guards: `{ ...buildMediaWhere(...), ...wherePeople(ids,
+// 'all') }` overwrote the builder's AND array with the people one, so every
+// other filter vanished and the match set WIDENED. It reached both the gallery
+// and album add-by-filter, which writes the widened set into the album.
+// ---------------------------------------------------------------------------
+describe('andWhere — composing people with other filters', () => {
+  const ID_A = '11111111-1111-1111-1111-111111111111';
+  const ID_B = '22222222-2222-2222-2222-222222222222';
+
+  it("keeps every other filter when peopleMatch is 'all'", () => {
+    const base = buildMediaWhere(CIRCLE_ID, {
+      tag: 'beach',
+      country: 'Costa Rica',
+      cameraMake: 'Apple',
+    });
+    const baseCount = ((base as any).AND as unknown[]).length;
+    expect(baseCount).toBeGreaterThan(0);
+
+    const where = andWhere(base, wherePeople([ID_A, ID_B], 'all')) as any;
+
+    // Nothing was replaced: the builder's fragments survive alongside people.
+    expect(where.AND).toHaveLength(baseCount + 1);
+    expect(where.circleId).toBe(CIRCLE_ID);
+    expect(where.deletedAt).toBeNull();
+    expect(where.AND).toContainEqual({
+      AND: [
+        { faces: { some: { personId: ID_A } } },
+        { faces: { some: { personId: ID_B } } },
+      ],
+    });
+    expect(JSON.stringify(where)).toContain('beach');
+    expect(JSON.stringify(where)).toContain('Costa Rica');
+    expect(JSON.stringify(where)).toContain('Apple');
+  });
+
+  it("keeps every other filter when peopleMatch is 'any'", () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const where = andWhere(base, wherePeople([ID_A], 'any')) as any;
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toContainEqual({ faces: { some: { personId: { in: [ID_A] } } } });
+  });
+
+  it('composes onto a base that has no AND array yet', () => {
+    const base = buildMediaWhere(CIRCLE_ID, {});
+    expect((base as any).AND).toBeUndefined();
+    const where = andWhere(base, wherePeople([ID_A], 'all')) as any;
+    expect(where.AND).toHaveLength(1);
+    expect(where.circleId).toBe(CIRCLE_ID);
+  });
+
+  it('returns the base untouched when there is no people filter', () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    expect(andWhere(base, undefined)).toBe(base);
+    expect(andWhere(base, {})).toBe(base);
+  });
+
+  it('appends rather than replaces when several fragments are supplied', () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const where = andWhere(
+      base,
+      wherePeople([ID_A], 'all'),
+      wherePeople([ID_B], 'all'),
+    ) as any;
+    expect(where.AND).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // whereCreatedAtRange — standalone helper (upload date range on createdAt)
 // ---------------------------------------------------------------------------
 import { whereCreatedAtRange } from './media-where.builder';
 
 describe('whereCreatedAtRange', () => {
-  it('returns { createdAt: { gte, lte } } when both bounds are provided', () => {
+  it('treats a midnight upper bound as exclusive next-midnight', () => {
+    // Issue #446: a bare `YYYY-MM-DD` from the AI agent or a workflow arrives
+    // as that day's midnight, and an inclusive `lte` against it matched only an
+    // item timestamped exactly 00:00:00.000 — silently dropping the end day.
     const from = new Date('2023-01-01');
     const to = new Date('2023-12-31');
     expect(whereCreatedAtRange(from, to)).toEqual({
-      createdAt: { gte: from, lte: to },
+      createdAt: { gte: from, lt: new Date('2024-01-01T00:00:00.000Z') },
     });
+  });
+
+  it('keeps an explicit non-midnight upper bound inclusive', () => {
+    const to = new Date('2023-12-31T12:00:00.000Z');
+    const result = whereCreatedAtRange(undefined, to) as any;
+    expect(result.createdAt).toEqual({ lte: to });
+  });
+
+  it('keeps an explicit end-of-day upper bound inclusive', () => {
+    // What the web client sends. It must not be widened by another day.
+    const to = new Date('2023-12-31T23:59:59.999Z');
+    const result = whereCreatedAtRange(undefined, to) as any;
+    expect(result.createdAt).toEqual({ lte: to });
   });
 
   it('returns only gte when only from is provided', () => {
@@ -975,17 +1065,34 @@ describe('whereCreatedAtRange', () => {
     const result = whereCreatedAtRange(from) as any;
     expect(result.createdAt).toMatchObject({ gte: from });
     expect(result.createdAt.lte).toBeUndefined();
-  });
-
-  it('returns only lte when only to is provided', () => {
-    const to = new Date('2023-06-01');
-    const result = whereCreatedAtRange(undefined, to) as any;
-    expect(result.createdAt).toMatchObject({ lte: to });
-    expect(result.createdAt.gte).toBeUndefined();
+    expect(result.createdAt.lt).toBeUndefined();
   });
 
   it('returns {} when no bounds are provided', () => {
     expect(whereCreatedAtRange()).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereDateRange — the same end-day rule on capturedAt (issue #446)
+// ---------------------------------------------------------------------------
+describe('whereDateRange — end-day normalisation', () => {
+  it('covers the whole end day for a bare calendar bound', () => {
+    const where = whereDateRange(
+      new Date('2026-06-01'),
+      new Date('2026-06-30'),
+    ) as any;
+    expect(where.capturedAt.gte).toEqual(new Date('2026-06-01T00:00:00.000Z'));
+    expect(where.capturedAt.lt).toEqual(new Date('2026-07-01T00:00:00.000Z'));
+
+    // The photo the old `lte` bound excluded.
+    const june30 = new Date('2026-06-30T23:59:59.000Z');
+    expect(june30.getTime()).toBeLessThan(where.capturedAt.lt.getTime());
+  });
+
+  it('leaves a precise instant bound exactly as given', () => {
+    const to = new Date('2026-06-30T12:00:00.000Z');
+    expect((whereDateRange(undefined, to) as any).capturedAt).toEqual({ lte: to });
   });
 });
 
@@ -1009,14 +1116,23 @@ describe('SEARCHABLE_FIELDS — uploadedAt field', () => {
     expect(field.type).toBe('date-range');
   });
 
-  it('buildWhere with from/to produces createdAt gte/lte', () => {
+  it('buildWhere with from/to produces createdAt bounds covering the end day', () => {
     const field = getField();
     const result = field.buildWhere({
       from: '2023-01-01T00:00:00.000Z',
       to: '2023-12-31T00:00:00.000Z',
     }) as any;
     expect(result.createdAt.gte).toEqual(new Date('2023-01-01T00:00:00.000Z'));
-    expect(result.createdAt.lte).toEqual(new Date('2023-12-31T00:00:00.000Z'));
+    expect(result.createdAt.lt).toEqual(new Date('2024-01-01T00:00:00.000Z'));
+  });
+
+  it('buildWhere rejects a malformed bound with a 400 instead of Invalid Date', () => {
+    // The workflow path already threw here; the search path silently produced
+    // `Invalid Date` and failed deep inside Prisma (#446).
+    const field = getField();
+    expect(() => field.buildWhere({ from: 'not-a-date' })).toThrow(BadRequestException);
+    expect(() => field.buildWhere({ from: 42 })).toThrow(BadRequestException);
+    expect(() => field.buildWhere('2023-01-01')).toThrow(BadRequestException);
   });
 
   it('buildWhere with no bounds returns {}', () => {
@@ -1032,7 +1148,7 @@ describe('buildWhereFromFields — uploadedAt filter', () => {
     });
     const clause = inAnd(where, 'createdAt');
     expect(clause.createdAt.gte).toEqual(new Date('2023-01-01T00:00:00.000Z'));
-    expect(clause.createdAt.lte).toEqual(new Date('2023-12-31T00:00:00.000Z'));
+    expect(clause.createdAt.lt).toEqual(new Date('2024-01-01T00:00:00.000Z'));
   });
 });
 
@@ -1198,5 +1314,55 @@ describe('searchQuerySchema — people filter validation', () => {
       makeBaseQuery({ filters: { people: { ids: [VALID_UUID], mode: 'wrong' } } }),
     );
     expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DTO validation — date-range filters (issue #446)
+//
+// `filters` is typed `z.record(z.string(), z.unknown())`, so before this the
+// two date-range filters had NO shape validation at all and a malformed
+// `{from,to}` reached `new Date()` untyped.
+// ---------------------------------------------------------------------------
+describe('searchQuerySchema — date-range filter validation', () => {
+  function query(filters: Record<string, unknown>) {
+    return searchQuerySchema.safeParse({
+      circleId: '550e8400-e29b-41d4-a716-446655440099',
+      filters,
+    });
+  }
+
+  it.each(['capturedAt', 'uploadedAt'])('accepts a bare calendar day for %s', (key) => {
+    expect(query({ [key]: { from: '2026-06-01', to: '2026-06-30' } }).success).toBe(true);
+  });
+
+  it.each(['capturedAt', 'uploadedAt'])('accepts a full ISO instant for %s', (key) => {
+    expect(
+      query({ [key]: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-30T23:59:59.999Z' } })
+        .success,
+    ).toBe(true);
+  });
+
+  it.each(['capturedAt', 'uploadedAt'])('accepts a one-sided range for %s', (key) => {
+    expect(query({ [key]: { from: '2026-06-01' } }).success).toBe(true);
+    expect(query({ [key]: { to: '2026-06-30' } }).success).toBe(true);
+  });
+
+  it('rejects an unparseable bound', () => {
+    expect(query({ capturedAt: { from: 'yesterday' } }).success).toBe(false);
+  });
+
+  it('rejects a non-object filter value', () => {
+    expect(query({ capturedAt: '2026-06-01' }).success).toBe(false);
+    expect(query({ uploadedAt: ['2026-06-01'] }).success).toBe(false);
+  });
+
+  it('rejects an empty range and unknown keys', () => {
+    expect(query({ capturedAt: {} }).success).toBe(false);
+    expect(query({ capturedAt: { from: '2026-06-01', between: true } }).success).toBe(false);
+  });
+
+  it('leaves an absent date filter alone', () => {
+    expect(query({}).success).toBe(true);
   });
 });

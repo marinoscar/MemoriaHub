@@ -39,6 +39,7 @@ import { startRunErrorMessage } from '../../services/reviewRuns';
 import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
 import type { BurstGroupSummary, BurstSortBy, GroupResolveAction } from '../../services/bursts';
 import type { SortOrder } from '../../types/media';
+import { formatCivilDateTime } from '../../utils/civilDate';
 
 // ---------------------------------------------------------------------------
 // Sort model. The API defaults to `capturedAt` / `asc`, so those two values are
@@ -113,7 +114,7 @@ function BurstGroupCard({ group, selected, onToggle }: BurstGroupCardProps) {
   const navigate = useNavigate();
 
   const capturedDate = group.capturedAt
-    ? new Date(group.capturedAt).toLocaleString(undefined, {
+    ? formatCivilDateTime(group.capturedAt, {
         dateStyle: 'medium',
         timeStyle: 'short',
       })

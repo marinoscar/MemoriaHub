@@ -74,6 +74,11 @@ import {
   useItemLocationCandidate,
 } from '../../hooks/useLocationSuggestions';
 import { revertLocationSuggestion } from '../../services/locationSuggestions';
+import {
+  civilInputToIso,
+  formatCivilDateTime,
+  isoToCivilInput,
+} from '../../utils/civilDate';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -322,7 +327,7 @@ export function MediaDetailDrawer({
 
   const handleStartEdit = useCallback(() => {
     if (!item) return;
-    setEditCapturedAt(item.capturedAt ? item.capturedAt.slice(0, 16) : '');
+    setEditCapturedAt(isoToCivilInput(item.capturedAt));
     setEditDescription(item.description ?? '');
     setSaveError(null);
     setEditing(true);
@@ -339,7 +344,10 @@ export function MediaDetailDrawer({
     setSaveError(null);
     try {
       const dto: PatchMediaDto = {
-        capturedAt: editCapturedAt ? new Date(editCapturedAt).toISOString() : null,
+        // capturedAt is a civil timestamp: the datetime-local value is the
+        // photographer's wall clock and must be re-encoded as UTC, never
+        // parsed in the viewer's zone (epic #440).
+        capturedAt: civilInputToIso(editCapturedAt),
         description: editDescription || null,
       };
       const updated = await patchMediaApi(item.id, dto);
@@ -829,7 +837,12 @@ export function MediaDetailDrawer({
         )}
 
         <MetaRow label="Type" value={item.type} />
-        <MetaRow label="Captured" value={formatDateTime(item.capturedAt)} />
+        {/* Captured is a CIVIL timestamp (photographer's clock, rendered in
+            UTC); Imported below is a real instant and stays viewer-local. */}
+        <MetaRow
+          label="Captured"
+          value={item.capturedAt ? formatCivilDateTime(item.capturedAt) : '—'}
+        />
         <MetaRow label="Imported" value={formatDateTime(item.importedAt)} />
         <MetaRow label="Source" value={item.source} />
         <MetaRow

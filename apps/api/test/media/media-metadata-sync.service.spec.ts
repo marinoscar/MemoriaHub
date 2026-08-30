@@ -574,6 +574,52 @@ describe('MediaMetadataSyncService', () => {
       expect(data.capturedAt).toEqual(new Date(VIDEO_CAPTURED_AT));
     });
 
+    it('should set capturedAtOffset alongside a video capturedAt (#443)', async () => {
+      prisma.storageObject.findUnique.mockResolvedValue({
+        id: STORAGE_OBJ_ID,
+        metadata: {
+          _processing: {
+            'video-probe': {
+              capturedAt: '2026-06-20T20:16:07.000Z',
+              capturedAtOffset: -360,
+            },
+          },
+        },
+      });
+      prisma.mediaItem.findUnique.mockResolvedValue(mockMediaItem);
+      prisma.mediaItem.update.mockResolvedValue({});
+
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.capturedAt).toEqual(new Date('2026-06-20T20:16:07.000Z'));
+      expect(data.capturedAtOffset).toBe(-360);
+    });
+
+    it('should not carry a video capturedAtOffset when exif supplied the timestamp', async () => {
+      // An offset must never describe a timestamp that came from elsewhere.
+      prisma.storageObject.findUnique.mockResolvedValue({
+        id: STORAGE_OBJ_ID,
+        metadata: {
+          _processing: {
+            exif: { capturedAt: '2025-01-15T09:00:00.000Z' },
+            'video-probe': {
+              capturedAt: '2026-06-20T20:16:07.000Z',
+              capturedAtOffset: -360,
+            },
+          },
+        },
+      });
+      prisma.mediaItem.findUnique.mockResolvedValue(mockMediaItem);
+      prisma.mediaItem.update.mockResolvedValue({});
+
+      await service.handleObjectProcessed(new ObjectProcessedEvent(STORAGE_OBJ_ID));
+
+      const data = prisma.mediaItem.update.mock.calls[0][0].data;
+      expect(data.capturedAt).toEqual(new Date('2025-01-15T09:00:00.000Z'));
+      expect(data.capturedAtOffset).toBeUndefined();
+    });
+
     it('should prefer exif.capturedAt over video-probe.capturedAt when both are present', async () => {
       const EXIF_CAPTURED_AT = '2025-01-15T09:00:00.000Z';
       prisma.storageObject.findUnique.mockResolvedValue({

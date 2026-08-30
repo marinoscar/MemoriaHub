@@ -419,8 +419,14 @@ describe('MediaLibraryPage', () => {
 
       await waitFor(() => {
         const params = getGalleryQueryParams();
-        expect(params.capturedAtFrom).toBe(new Date('2024-01-01').toISOString());
-        expect(params.capturedAtTo).toBe(new Date('2024-01-31').toISOString());
+        // capturedAt is a CIVIL timestamp, so both bounds are anchored in UTC,
+        // and the upper bound covers the WHOLE end day. This assertion used to
+        // read `new Date('2024-01-31').toISOString()` — that day's midnight —
+        // which is precisely the defect in #446: an inclusive `lte` against it
+        // matched only a photo captured at exactly 00:00:00.000 and dropped
+        // January 31 entirely.
+        expect(params.capturedAtFrom).toBe('2024-01-01T00:00:00.000Z');
+        expect(params.capturedAtTo).toBe('2024-01-31T23:59:59.999Z');
       });
     });
   });

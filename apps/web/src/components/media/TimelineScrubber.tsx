@@ -73,6 +73,9 @@ function buildBuckets(
 
     const year = Number(match[1]);
     const monthIndex = Number(match[2]) - 1;
+    // Local constructor + local formatting: both sides use the same zone, so
+    // no offset is applied and the month label always matches the civil
+    // `YYYY-MM` key it was parsed from (epic #440).
     const label = new Date(year, monthIndex, 1).toLocaleDateString(undefined, {
       month: 'short',
       year: 'numeric',
