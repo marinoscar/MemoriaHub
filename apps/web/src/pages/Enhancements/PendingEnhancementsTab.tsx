@@ -706,12 +706,16 @@ export function PendingEnhancementsTab({
               batch filter to see everything.
             </Typography>
           ) : (
-          <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 480, mx: 'auto' }}>
-            AI Enhance improves a photo&apos;s exposure, color, clarity and noise.
-            Start one from a photo&apos;s viewer or the gallery selection bar — the
-            result waits here for you to compare and decide, and nothing is
-            changed until you do.
-          </Typography>
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ maxWidth: 480, mx: 'auto' }}
+            >
+              AI Enhance improves a photo&apos;s exposure, color, clarity and
+              noise. Start one from a photo&apos;s viewer or the gallery
+              selection bar — the result waits here for you to compare and
+              decide, and nothing is changed until you do.
+            </Typography>
           )}
         </Box>
       ) : (
