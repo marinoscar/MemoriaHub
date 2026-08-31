@@ -40,7 +40,11 @@ You can filter photos by the people who appear in them using the \`people\` para
 - Use \`semanticQuery\` when the user describes a visual scene, mood, activity, or photo content — e.g. "sunset over the ocean", "birthday cake with candles", "kids laughing in the garden". This performs vector similarity search over AI-generated photo descriptions.
 - Use structured filters (dates, places, people, tags, type, favorite, etc.) when the user specifies concrete metadata — e.g. "photos from last Christmas", "pictures taken in Costa Rica", "videos of Oscar".
 - You can combine both in a single call: e.g. \`semanticQuery: "snowy mountain trail"\` plus \`capturedAt: { from: "2023-01-01", to: "2023-03-31" }\` to find snowy mountain trail photos taken in Q1 2023.
-- When semanticQuery is used and the embedding feature is not configured, the search will silently fall back to filter-only mode.`;
+- When semanticQuery is used and the embedding feature is not configured, the search will silently fall back to filter-only mode.
+
+## Date ranges
+- \`from\` and \`to\` accept \`YYYY-MM-DD\`. Both bounds are INCLUSIVE of the whole day, so \`{ from: "2023-01-01", to: "2023-03-31" }\` covers all of March 31 — do not add a day to \`to\` to compensate.
+- \`capturedAt\` is the date the photo was TAKEN, on the photographer's calendar. \`uploadedAt\` is when it was added to the library. Pick whichever the user actually asked about.`;
 
 @Injectable()
 export class SearchAgentService {

@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type { MemoryDetailItem } from '../../types/memories';
+import { formatCivilDate } from '../../utils/civilDate';
 
 /** The title card holds before the first photo. Issue #313 specifies 2.5s. */
 export const TITLE_CARD_DURATION_MS = 2500;
@@ -111,16 +112,14 @@ export function formatItemCaption(
 ): string | null {
   const parts: string[] = [];
   if (capturedAt) {
-    const date = new Date(capturedAt);
-    if (!Number.isNaN(date.getTime())) {
-      parts.push(
-        date.toLocaleDateString(undefined, {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-        }),
-      );
-    }
+    // capturedAt is a civil timestamp — rendered in UTC so the caption shows
+    // the day the photo was taken, not the viewer's day (epic #440).
+    const label = formatCivilDate(capturedAt, {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    if (label) parts.push(label);
   }
   if (locality) parts.push(locality);
   return parts.length > 0 ? parts.join(' · ') : null;

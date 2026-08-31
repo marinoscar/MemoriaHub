@@ -33,7 +33,7 @@ import { MediaLocationsExtentQueryDto } from './dto/media-locations-extent-query
 import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
+import { andWhere, buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { fold } from '../location-groups/normalize-location-name';
@@ -400,8 +400,12 @@ export class MediaService {
           : [];
     const effectiveMode = peopleMatch ?? 'any';
 
-    const where = {
-      ...buildMediaWhere(circleId, {
+    // AND-compose the people fragment rather than spreading it: wherePeople in
+    // 'all' mode returns a top-level `AND`, which an object spread would use to
+    // REPLACE the builder's own `AND` array, silently dropping every other
+    // filter and widening the result set (#431).
+    const where = andWhere(
+      buildMediaWhere(circleId, {
         type,
         capturedAtFrom,
         capturedAtTo,
@@ -422,8 +426,8 @@ export class MediaService {
         noFaces,
         excludeArchived: true,
       }),
-      ...(effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {}),
-    };
+      effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : undefined,
+    );
 
     const dir = sortOrder;
     const orderBy = [
@@ -1423,8 +1427,10 @@ export class MediaService {
       peopleMatch,
     } = dto;
 
-    const where = {
-      ...buildMediaWhere(album.circleId, {
+    // Same composition rule as listMedia above — and it matters more here,
+    // because this path WRITES: a widened match set is added to the album (#431).
+    const where = andWhere(
+      buildMediaWhere(album.circleId, {
         type,
         capturedAtFrom,
         capturedAtTo,
@@ -1445,7 +1451,7 @@ export class MediaService {
         noFaces,
         excludeArchived: true,
       }),
-      ...(() => {
+      (() => {
         const effectivePersonIds =
           personIds && personIds.length > 0
             ? personIds
@@ -1453,9 +1459,11 @@ export class MediaService {
               ? [personId]
               : [];
         const effectiveMode = peopleMatch ?? 'any';
-        return effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : {};
+        return effectivePersonIds.length > 0
+          ? wherePeople(effectivePersonIds, effectiveMode)
+          : undefined;
       })(),
-    };
+    );
 
     const matches = await this.prisma.mediaItem.findMany({
       where,

@@ -13,6 +13,7 @@ import {
 import EditCalendarIcon from '@mui/icons-material/EditCalendar';
 import { bulkUpdateMedia } from '../../services/media';
 import { ApiError } from '../../services/api';
+import { civilInputToIso } from '../../utils/civilDate';
 
 interface BulkDateDialogProps {
   open: boolean;
@@ -49,7 +50,10 @@ export function BulkDateDialog({
       const result = await bulkUpdateMedia({
         circleId,
         ids,
-        set: { capturedAt: new Date(value).toISOString() },
+        // capturedAt is a civil timestamp — the datetime-local value is a
+        // wall clock and is re-encoded as UTC, not parsed in the viewer's
+        // zone, which would shift every item by the browser offset (#440).
+        set: { capturedAt: civilInputToIso(value) },
       });
       onSuccess(`Updated ${result.updated} item${result.updated !== 1 ? 's' : ''}`);
     } catch (err) {

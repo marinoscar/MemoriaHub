@@ -301,6 +301,96 @@ describe('VideoProbeProcessor', () => {
       expect(result.metadata?.capturedAt).toBe(EXPECTED_ISO);
     });
 
+    it('should re-encode an Apple local-time tag as a civil timestamp', async () => {
+      // The #443 defect: container creation_time is a real UTC instant, so a
+      // video shot at 20:16 in a UTC-6 zone was stored as 02:16 the NEXT day
+      // and separated from photos taken minutes beside it. Apple writes the
+      // local wall clock plus its true offset, which is exactly what is needed.
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: {
+            creation_time: '2026-06-21T02:16:07.000000Z',
+            'com.apple.quicktime.creationdate': '2026-06-20T20:16:07-0600',
+          },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe('2026-06-20T20:16:07.000Z');
+      expect(result.metadata?.capturedAtOffset).toBe(-360);
+    });
+
+    it('should find the local-time tag on the video stream too', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [
+          {
+            codec_type: 'video',
+            codec_name: 'h264',
+            width: 1920,
+            height: 1080,
+            index: 0,
+            tags: { 'com.apple.quicktime.creationdate': '2026-06-20T20:16:07+05:30' },
+          } as any,
+        ],
+        format: {
+          duration: 5.0,
+          filename: '/tmp/fake',
+          nb_streams: 1,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '51200',
+          bit_rate: '0',
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe('2026-06-20T20:16:07.000Z');
+      expect(result.metadata?.capturedAtOffset).toBe(330);
+    });
+
+    it('should match a capture tag case-insensitively', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { 'Com.Apple.QuickTime.CreationDate': '2026-06-20T20:16:07-0600' },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.capturedAt).toBe('2026-06-20T20:16:07.000Z');
+    });
+
+    it('should omit capturedAtOffset when only a UTC instant is available', async () => {
+      // Unrecoverable by design: no local information exists in the container.
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { creation_time: '2026-06-21T02:16:07.000000Z' },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.capturedAt).toBe('2026-06-21T02:16:07.000Z');
+      expect(result.metadata).not.toHaveProperty('capturedAtOffset');
+    });
+
     it('should omit capturedAt when no creation_time tag exists anywhere', async () => {
       // Default synthetic data has no creation_time tag
       setupFfprobeSuccess(makeSyntheticProbeData());

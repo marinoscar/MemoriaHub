@@ -51,6 +51,46 @@ export interface SearchableField {
   buildWhere(value: unknown): Prisma.MediaItemWhereInput;
 }
 
+/**
+ * Parse a `{ from?, to? }` date-range filter value.
+ *
+ * Validates rather than coercing silently: a bare `new Date(garbage)` yields
+ * `Invalid Date`, which Prisma then rejects deep inside query execution with a
+ * message that names neither the field nor the offending value. The workflow
+ * condition path already threw a `BadRequestException` here (`asDate` in
+ * `workflows/registry/media-item-fields.ts`); the search path did not, so the
+ * same malformed input produced a 400 through one door and a 500 through the
+ * other (issue #446).
+ *
+ * The end-of-day semantics of a bare `YYYY-MM-DD` upper bound are applied
+ * downstream in `media-where.builder`, so every caller — this registry, the AI
+ * agent, workflows — gets them from one place.
+ */
+function asDateRange(
+  value: unknown,
+  field: string,
+): { from?: Date; to?: Date } {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new BadRequestException(`${field} must be an object { from?, to? }`);
+  }
+
+  const raw = value as { from?: unknown; to?: unknown };
+  const parse = (v: unknown, edge: 'from' | 'to'): Date | undefined => {
+    if (v === undefined || v === null || v === '') return undefined;
+    if (typeof v !== 'string') {
+      throw new BadRequestException(`${field}.${edge} must be an ISO 8601 date string`);
+    }
+    const d = new Date(v);
+    if (isNaN(d.getTime())) {
+      throw new BadRequestException(`${field}.${edge} is not a valid ISO 8601 date`);
+    }
+    return d;
+  };
+
+  return { from: parse(raw.from, 'from'), to: parse(raw.to, 'to') };
+}
+
 export const SEARCHABLE_FIELDS: SearchableField[] = [
   {
     key: 'type',
@@ -74,11 +114,8 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     description:
       'Filter by capture date. Pass an object { from?: ISO8601, to?: ISO8601 } to match items captured in that window.',
     buildWhere: (v) => {
-      const range = v as { from?: string; to?: string } | undefined;
-      return whereDateRange(
-        range?.from ? new Date(range.from) : undefined,
-        range?.to ? new Date(range.to) : undefined,
-      );
+      const range = asDateRange(v, 'capturedAt');
+      return whereDateRange(range.from, range.to);
     },
   },
   {
@@ -88,11 +125,8 @@ export const SEARCHABLE_FIELDS: SearchableField[] = [
     description:
       'Filter by upload date (when the item was added to the library, i.e. createdAt — distinct from capture/EXIF date). Pass an object { from?: ISO8601, to?: ISO8601 } to match items uploaded in that window.',
     buildWhere: (v) => {
-      const range = v as { from?: string; to?: string } | undefined;
-      return whereCreatedAtRange(
-        range?.from ? new Date(range.from) : undefined,
-        range?.to ? new Date(range.to) : undefined,
-      );
+      const range = asDateRange(v, 'uploadedAt');
+      return whereCreatedAtRange(range.from, range.to);
     },
   },
   {

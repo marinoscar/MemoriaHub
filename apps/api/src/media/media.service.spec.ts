@@ -697,8 +697,12 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      // AND-composition: capturedAt lives inside where.AND[n]
-      expect(inAnd(call[0].where, 'capturedAt').capturedAt).toMatchObject({ gte: from, lte: to });
+      // AND-composition: capturedAt lives inside where.AND[n]. A midnight upper
+      // bound becomes exclusive next-midnight so the end day is covered (#446).
+      expect(inAnd(call[0].where, 'capturedAt').capturedAt).toMatchObject({
+        gte: from,
+        lt: new Date('2025-01-01T00:00:00.000Z'),
+      });
     });
 
     it('filters by albumId via AlbumItem join', async () => {
@@ -4415,8 +4419,10 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
-        faces: { some: { personId: { in: ['person-uuid-123'] } } },
+      // The people fragment is AND-composed, not spread over the top level, so
+      // it can no longer replace the other filters' AND array (#431).
+      expect(inAnd(call[0].where, 'faces').faces).toMatchObject({
+        some: { personId: { in: ['person-uuid-123'] } },
       });
     });
 
@@ -4449,8 +4455,8 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
-        faces: { some: { personId: { in: [PERSON_A, PERSON_B] } } },
+      expect(inAnd(call[0].where, 'faces').faces).toMatchObject({
+        some: { personId: { in: [PERSON_A, PERSON_B] } },
       });
     });
 
@@ -4462,7 +4468,9 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
+      // 'all' mode emits its own nested AND, now carried as one entry of the
+      // outer AND array instead of replacing it wholesale (#431).
+      expect((call[0].where.AND as any[])).toContainEqual({
         AND: [
           { faces: { some: { personId: PERSON_A } } },
           { faces: { some: { personId: PERSON_B } } },
@@ -4479,8 +4487,8 @@ describe('MediaService', () => {
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       // Default 'any' → OR via personId.in
-      expect(call[0].where).toMatchObject({
-        faces: { some: { personId: { in: [PERSON_A, PERSON_B] } } },
+      expect(inAnd(call[0].where, 'faces').faces).toMatchObject({
+        some: { personId: { in: [PERSON_A, PERSON_B] } },
       });
     });
 
@@ -4498,8 +4506,8 @@ describe('MediaService', () => {
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
       // personIds wins: both persons in the IN clause
-      expect(call[0].where).toMatchObject({
-        faces: { some: { personId: { in: [PERSON_A, PERSON_B] } } },
+      expect(inAnd(call[0].where, 'faces').faces).toMatchObject({
+        some: { personId: { in: [PERSON_A, PERSON_B] } },
       });
     });
 
@@ -4511,9 +4519,41 @@ describe('MediaService', () => {
       );
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
-      expect(call[0].where).toMatchObject({
-        faces: { some: { personId: { in: [PERSON_A] } } },
+      expect(inAnd(call[0].where, 'faces').faces).toMatchObject({
+        some: { personId: { in: [PERSON_A] } },
       });
+    });
+
+    it('keeps every other filter alongside peopleMatch "all" (regression, #431)', async () => {
+      // The bug: composing with an object spread let wherePeople's top-level
+      // AND replace buildMediaWhere's, dropping tag/country/camera/date and
+      // WIDENING the result set.
+      await service.listMedia(
+        {
+          ...defaultMediaQuery,
+          personIds: [PERSON_A, PERSON_B],
+          peopleMatch: 'all',
+          tag: 'beach',
+          cameraMake: 'Apple',
+        } as any,
+        'user-1',
+        ownPerms,
+      );
+
+      const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+      const serialized = JSON.stringify(call[0].where);
+      expect(serialized).toContain('beach');
+      expect(serialized).toContain('Apple');
+      expect((call[0].where.AND as any[])).toContainEqual({
+        AND: [
+          { faces: { some: { personId: PERSON_A } } },
+          { faces: { some: { personId: PERSON_B } } },
+        ],
+      });
+      // The circle scope and browse defaults survive too.
+      expect(call[0].where.circleId).toBeDefined();
+      expect(call[0].where.deletedAt).toBeNull();
+      expect(inAnd(call[0].where, 'archivedAt').archivedAt).toBeNull();
     });
 
     it('omits faces filter when both personId and personIds are absent', async () => {

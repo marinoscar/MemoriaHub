@@ -35,6 +35,7 @@ import {
 import type { ComparisonRowDef } from '../../components/review/MemberComparison';
 import { formatBytes } from '../../utils/formatBytes';
 import type { DuplicateGroupKind, DuplicateGroupMember, DuplicateResolveAction } from '../../services/duplicates';
+import { formatCivilDateTime } from '../../utils/civilDate';
 
 const KIND_LABELS: Record<DuplicateGroupKind, string> = {
   exact_variant: 'Exact copy',
@@ -200,7 +201,7 @@ const COMPARISON_ROW_DEFS: ComparisonRowDef<DuplicateGroupMember>[] = [
     label: 'Captured at',
     value: (m) =>
       m.capturedAt
-        ? new Date(m.capturedAt).toLocaleString(undefined, {
+        ? formatCivilDateTime(m.capturedAt, {
             dateStyle: 'medium',
             timeStyle: 'short',
           })
@@ -378,7 +379,7 @@ export default function DuplicateGroupPage() {
   const removeCount = group.members.length - keepCount;
 
   const capturedDate = group.capturedAt
-    ? new Date(group.capturedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    ? formatCivilDateTime(group.capturedAt, { dateStyle: 'medium', timeStyle: 'short' })
     : null;
 
   const leftMember = leftId ? membersById.get(leftId) ?? null : null;

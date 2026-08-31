@@ -26,6 +26,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useCircle } from '../../hooks/useCircle';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import type { BurstGroupMember, GroupResolveAction } from '../../services/bursts';
+import { formatCivilDateTime } from '../../utils/civilDate';
 
 interface MemberCardProps {
   member: BurstGroupMember;
@@ -35,7 +36,7 @@ interface MemberCardProps {
 
 function MemberCard({ member, selected, onToggle }: MemberCardProps) {
   const capturedTime = member.capturedAt
-    ? new Date(member.capturedAt).toLocaleTimeString(undefined, { timeStyle: 'medium' })
+    ? formatCivilDateTime(member.capturedAt, { timeStyle: 'medium' })
     : null;
 
   const resolution =
@@ -248,7 +249,7 @@ export default function BurstGroupPage() {
   const deleteCount = group.members.length - keepCount;
 
   const capturedDate = group.capturedAt
-    ? new Date(group.capturedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    ? formatCivilDateTime(group.capturedAt, { dateStyle: 'medium', timeStyle: 'short' })
     : null;
 
   return (

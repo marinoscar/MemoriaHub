@@ -1,5 +1,6 @@
 import { memoryTypeMeta } from './memoryTypeMeta';
 import type { MemoryCard } from '../../types/memories';
+import { formatCivilDate } from '../../utils/civilDate';
 
 /**
  * Human period for a memory ("March 2023", "Mar – Apr 2023", "2019 – 2025").
@@ -16,24 +17,34 @@ export function formatMemoryPeriod(
   const end = new Date(periodEnd);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
 
+  // periodStart/periodEnd are CIVIL timestamps — they cover the capture range,
+  // so they are read in UTC (epic #440). The server generated this row's own
+  // title with `timeZone: 'UTC'` (memory-title-templates.ts), so rendering the
+  // period browser-locally made a memory's title and its period label disagree
+  // for any viewer whose offset crossed a month boundary.
   const sameMonth =
-    start.getFullYear() === end.getFullYear() &&
-    start.getMonth() === end.getMonth();
+    start.getUTCFullYear() === end.getUTCFullYear() &&
+    start.getUTCMonth() === end.getUTCMonth();
   if (sameMonth) {
-    return start.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    return formatCivilDate(periodStart, { month: 'long', year: 'numeric' });
   }
 
-  const sameYear = start.getFullYear() === end.getFullYear();
+  const sameYear = start.getUTCFullYear() === end.getUTCFullYear();
   if (sameYear) {
-    const from = start.toLocaleDateString(undefined, { month: 'short' });
-    const to = end.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    const from = formatCivilDate(periodStart, { month: 'short' });
+    const to = formatCivilDate(periodEnd, { month: 'short', year: 'numeric' });
     return `${from} – ${to}`;
   }
 
-  return `${start.getFullYear()} – ${end.getFullYear()}`;
+  return `${start.getUTCFullYear()} – ${end.getUTCFullYear()}`;
 }
 
-/** Month header for the hub's scroll groups, keyed on `generatedAt`. */
+/**
+ * Month header for the hub's scroll groups, keyed on `generatedAt`.
+ *
+ * `generatedAt` is a real INSTANT (when the curator ran), so it stays on the
+ * viewer-local path — unlike the period above. See `docs/specs/date-model.md`.
+ */
 export function formatMemoryMonth(generatedAt: string): string {
   const date = new Date(generatedAt);
   if (Number.isNaN(date.getTime())) return 'Earlier';

@@ -83,15 +83,18 @@ describe('WorkflowConditionCompiler', () => {
   });
 
   describe('capturedAt', () => {
-    it('between compiles to capturedAt gte/lte via whereDateRange', () => {
+    it('between compiles via whereDateRange and covers the whole end day', () => {
       const from = '2024-01-01T00:00:00.000Z';
       const to = '2024-12-31T00:00:00.000Z';
       const def = baseDef({
         conditions: [{ field: 'capturedAt', op: 'between', value: { from, to } }],
       });
       const { where } = compiler.compile(CIRCLE_ID, def);
+      // The builder converts a midnight upper bound to exclusive
+      // next-midnight, so a workflow `between` no longer truncates its final
+      // day — the condition editor sends a bare YYYY-MM-DD (#446).
       expect((where as any).AND[0]).toEqual({
-        capturedAt: { gte: new Date(from), lte: new Date(to) },
+        capturedAt: { gte: new Date(from), lt: new Date('2025-01-01T00:00:00.000Z') },
       });
     });
 

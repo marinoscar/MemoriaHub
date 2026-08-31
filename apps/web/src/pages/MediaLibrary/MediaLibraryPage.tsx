@@ -44,6 +44,7 @@ import type { ExportFilters } from '../../services/media';
 import { MediaGallery } from '../../components/media/MediaGallery';
 import type { MediaItem, MediaQueryParams, TagItem, MediaType } from '../../types/media';
 import { PersonMultiSelect } from '../../components/search/PersonMultiSelect';
+import { civilDayRange } from '../../utils/dateRangeBounds';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -194,8 +195,13 @@ export default function MediaLibraryPage() {
     if (filterType) params.type = filterType;
     if (filterFavorite) params.favorite = true;
     if (filterAlbum) params.albumId = filterAlbum;
-    if (filterDateFrom) params.capturedAtFrom = new Date(filterDateFrom).toISOString();
-    if (filterDateTo) params.capturedAtTo = new Date(filterDateTo).toISOString();
+    // capturedAt is a CIVIL timestamp: a bare `YYYY-MM-DD` bound is anchored in
+    // UTC and the upper bound covers the whole day. `new Date(dateTo)` alone
+    // yielded that day's UTC midnight, so an inclusive `lte` matched only a
+    // photo captured at exactly 00:00:00.000 and dropped the end day (#446).
+    const captured = civilDayRange(filterDateFrom, filterDateTo);
+    if (captured.from) params.capturedAtFrom = captured.from;
+    if (captured.to) params.capturedAtTo = captured.to;
     if (selectedTags.length === 1) params.tag = selectedTags[0];
     if (filterCountry) params.country = filterCountry;
     if (filterRegion) params.region = filterRegion;

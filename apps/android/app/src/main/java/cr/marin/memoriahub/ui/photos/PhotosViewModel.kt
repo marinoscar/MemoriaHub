@@ -53,6 +53,20 @@ class PhotosViewModel @Inject constructor(
     private fun SyncFileEntity.captureMillis(): Long = dateTakenMs ?: dateAddedSec * 1000L
 
     private fun List<SyncFileEntity>.toSections(): List<PhotoSection> {
+        // The device zone is CORRECT here and must not be changed to UTC.
+        //
+        // This screen groups the phone's own MediaStore rows, not server DTOs.
+        // `dateTakenMs` is MediaStore DATE_TAKEN — a real epoch-millis INSTANT,
+        // not the civil timestamp the API stores in `capturedAt` (see
+        // docs/specs/date-model.md, epic #440). Rendering that instant in the
+        // device zone recovers the wall clock at capture, which is the same
+        // value ingest will later store as a civil timestamp, so this grouping
+        // already agrees with the server's. Pinning it to UTC would introduce
+        // exactly the offset the epic exists to remove.
+        //
+        // Residual gap: MediaStore exposes no capture offset, so a photo taken
+        // abroad regroups if the device zone changes. The device zone is the
+        // best proxy available and is right in the common case.
         val zone = ZoneId.systemDefault()
         return asSequence()
             .map { entity ->
