@@ -38,6 +38,12 @@ vi.mock('../../../hooks/useFeatureFlags', () => ({
 vi.mock('../../../services/enhance', () => ({
   applyEnhancement: vi.fn().mockResolvedValue({}),
   discardEnhancement: vi.fn().mockResolvedValue(undefined),
+  // The tab renders the "Recent batches" card (issue #423), which fetches on
+  // mount. Stubbed empty so it renders nothing and stays out of the way here.
+  listEnhancementBatches: vi.fn().mockResolvedValue({
+    items: [],
+    meta: { page: 1, pageSize: 3, totalItems: 0, totalPages: 0 },
+  }),
 }));
 
 vi.mock('../../../services/media', () => ({
@@ -589,6 +595,140 @@ describe('PendingEnhancementsTab', () => {
 
       expect(screen.queryByRole('checkbox')).toBeNull();
       expect(screen.queryByRole('button', { name: /Select all/i })).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Batch filter (epic #420, issue #423) — arriving from a batch's progress
+  // page narrows the inbox to that one batch's results.
+  // ---------------------------------------------------------------------------
+  describe('batch filter (issue #423)', () => {
+    it('with no batchId (the normal case), behaves exactly as today: no chip, unfiltered request, RecentBatchesCard shown', () => {
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 1, totalPages: 1 },
+      });
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      expect(screen.queryByText(/from one batch/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Show all' })).not.toBeInTheDocument();
+      expect(mockUseEnhancements).toHaveBeenCalledWith(
+        expect.not.objectContaining({ batchId: expect.anything() }),
+      );
+    });
+
+    it('narrows the request to the batch and renders a chip naming the result count', () => {
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 7, totalPages: 1 },
+      });
+      render(<PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />);
+
+      expect(mockUseEnhancements).toHaveBeenCalledWith(
+        expect.objectContaining({ circleId: 'circle-1', batchId: 'batch-1' }),
+      );
+      expect(screen.getByText('Showing 7 results from one batch')).toBeInTheDocument();
+    });
+
+    it('uses singular copy for exactly one result', () => {
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 1, totalPages: 1 },
+      });
+      render(<PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />);
+
+      expect(screen.getByText('Showing 1 result from one batch')).toBeInTheDocument();
+    });
+
+    it('hides the RecentBatchesCard while a batch filter is active (it would only add noise)', () => {
+      mockList([makeItem()]);
+      const { unmount } = render(
+        <PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />,
+      );
+      // "Recent batches" is RecentBatchesCard's own heading; absent under a filter.
+      expect(screen.queryByText(/recent batches/i)).not.toBeInTheDocument();
+      unmount();
+
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+      // (RecentBatchesCard renders nothing itself when its own list is empty —
+      // the meaningful assertion is that the chip driving `!batchId` is gone.)
+      expect(screen.queryByText(/from one batch/i)).not.toBeInTheDocument();
+    });
+
+    it('calls onClearBatchFilter from both the chip delete affordance and the "Show all" button', async () => {
+      const user = userEvent.setup();
+      const onClearBatchFilter = vi.fn();
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 3, totalPages: 1 },
+      });
+      render(
+        <PendingEnhancementsTab
+          circleId="circle-1"
+          batchId="batch-1"
+          onClearBatchFilter={onClearBatchFilter}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Show all' }));
+      expect(onClearBatchFilter).toHaveBeenCalledTimes(1);
+
+      // MUI Chip's onDelete renders a delete icon inside the chip itself.
+      const chip = screen.getByText('Showing 3 results from one batch').closest(
+        '.MuiChip-root',
+      ) as HTMLElement;
+      await user.click(within(chip).getByTestId('CancelIcon'));
+      expect(onClearBatchFilter).toHaveBeenCalledTimes(2);
+    });
+
+    it('clearing the filter (batchId becomes undefined) restores the unfiltered request', () => {
+      mockList([makeItem()], {
+        meta: { page: 1, pageSize: 24, totalItems: 3, totalPages: 1 },
+      });
+      const { rerender } = render(
+        <PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />,
+      );
+      expect(mockUseEnhancements).toHaveBeenLastCalledWith(
+        expect.objectContaining({ batchId: 'batch-1' }),
+      );
+
+      rerender(<PendingEnhancementsTab circleId="circle-1" />);
+
+      expect(mockUseEnhancements).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({ batchId: expect.anything() }),
+      );
+      expect(screen.queryByText(/from one batch/i)).not.toBeInTheDocument();
+    });
+
+    it('shows batch-specific empty-state copy under a batch filter, distinct from the general empty state', () => {
+      mockList([]);
+      const { unmount } = render(
+        <PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />,
+      );
+      expect(
+        screen.getByText(/this batch has no results here yet/i),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/exposure, color, clarity and noise/)).not.toBeInTheDocument();
+      unmount();
+
+      mockList([]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+      expect(screen.getByText(/exposure, color, clarity and noise/)).toBeInTheDocument();
+      expect(screen.queryByText(/this batch has no results here yet/i)).not.toBeInTheDocument();
+    });
+
+    it('resets to page 1 when the batchId changes', async () => {
+      mockList([makeItem()], {
+        meta: { page: 2, pageSize: 24, totalItems: 50, totalPages: 3 },
+      });
+      const { rerender } = render(
+        <PendingEnhancementsTab circleId="circle-1" batchId="batch-1" />,
+      );
+      mockUseEnhancements.mockClear();
+
+      rerender(<PendingEnhancementsTab circleId="circle-1" batchId="batch-2" />);
+
+      await waitFor(() => {
+        expect(mockUseEnhancements).toHaveBeenLastCalledWith(
+          expect.objectContaining({ batchId: 'batch-2', page: 1 }),
+        );
+      });
     });
   });
 });

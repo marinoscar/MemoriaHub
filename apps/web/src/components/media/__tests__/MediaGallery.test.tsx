@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../__tests__/utils/test-utils';
 import {
@@ -44,10 +44,33 @@ vi.mock('../MediaDetailDrawer', () => ({
   MediaDetailDrawer: vi.fn(() => null),
 }));
 
-// Stub the bulk action toolbar (asserted via data-testid).
+// Stub the bulk action toolbar (asserted via data-testid). Extended (issue
+// #422) to also surface the `selectedItems`/`singleSelectedItem` props the
+// gallery derives, so the derivation itself is directly observable without
+// depending on BulkActionToolbar's own render logic.
 vi.mock('../BulkActionToolbar', () => ({
-  BulkActionToolbar: vi.fn(({ selected }: { selected: Set<string> }) =>
-    selected.size > 0 ? <div data-testid="bulk-toolbar">Bulk toolbar</div> : null,
+  BulkActionToolbar: vi.fn(
+    ({
+      selected,
+      selectedItems,
+      singleSelectedItem,
+    }: {
+      selected: Set<string>;
+      selectedItems?: MediaItem[];
+      singleSelectedItem?: MediaItem | null;
+    }) =>
+      selected.size > 0 ? (
+        <div data-testid="bulk-toolbar">
+          Bulk toolbar
+          <span data-testid="bulk-toolbar-ids">
+            {(selectedItems ?? []).map((i) => i.id).join(',')}
+          </span>
+          <span data-testid="bulk-toolbar-photo-count">
+            {(selectedItems ?? []).filter((i) => i.type === 'photo').length}
+          </span>
+          <span data-testid="bulk-toolbar-single-id">{singleSelectedItem?.id ?? ''}</span>
+        </div>
+      ) : null,
   ),
 }));
 
@@ -95,9 +118,19 @@ vi.mock('../../../contexts/MediaPreviewContext', () => ({
 
 import { listMedia } from '../../../services/media';
 import { useMediaPreview } from '../../../contexts/MediaPreviewContext';
+import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 
 const mockListMedia = vi.mocked(listMedia);
 const mockUseMediaPreview = vi.mocked(useMediaPreview);
+const mockUseIntersectionObserver = vi.mocked(useIntersectionObserver);
+
+/** The `onIntersect` callback (2nd arg) from the most recent sentinel wiring. */
+function latestFeedLoadMore(): () => void {
+  const calls = mockUseIntersectionObserver.mock.calls;
+  const last = calls[calls.length - 1];
+  if (!last) throw new Error('useIntersectionObserver was never called');
+  return last[1] as () => void;
+}
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -456,6 +489,131 @@ describe('MediaGallery', () => {
       await waitFor(() => {
         // Bulk toolbar disappears when nothing is selected
         expect(screen.queryByTestId('bulk-toolbar')).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // selectedItems / singleSelectedItem derivation (issue #422)
+  //
+  // BulkActionToolbar's batch-vs-drawer routing (see BulkActionToolbar.test.tsx)
+  // depends entirely on what MediaGallery resolves `selected` (an id Set) to —
+  // these tests cover that resolution itself, independent of the toolbar.
+  // -------------------------------------------------------------------------
+  describe('selectedItems derivation', () => {
+    it('resolves the full multi-item selection (photos AND videos) via per-group "Select all"', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeItem('mix-photo', {
+          type: 'photo',
+          capturedAt: '2024-06-15T08:00:00.000Z',
+          originalFilename: 'mix-photo.jpg',
+        }),
+        makeItem('mix-video', {
+          type: 'video',
+          capturedAt: '2024-06-15T09:00:00.000Z',
+          originalFilename: 'mix-video.mp4',
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /select all/i }));
+
+      await waitFor(() => {
+        const ids = screen.getByTestId('bulk-toolbar-ids').textContent;
+        expect(ids?.split(',').sort()).toEqual(['mix-photo', 'mix-video']);
+      });
+      // Only the photo counts toward the batch-enhance eligible set.
+      expect(screen.getByTestId('bulk-toolbar-photo-count')).toHaveTextContent('1');
+    });
+
+    it('sets singleSelectedItem only while exactly one item is selected, and clears it once a second joins', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeItem('single-a', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'single-a.jpg' }),
+        makeItem('single-b', { capturedAt: '2024-06-15T09:00:00.000Z', originalFilename: 'single-b.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      // Select exactly one via its own checkbox.
+      const singleATile = screen.getByAltText('single-a.jpg').closest('li') as HTMLElement;
+      await user.click(within(singleATile).getByRole('button', { name: /select item/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar-single-id')).toHaveTextContent('single-a');
+      });
+
+      // Select the group's remaining item too — now singleSelectedItem must
+      // clear, since the drawer's one-item form no longer applies.
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar-single-id')).toHaveTextContent('');
+      });
+      expect(screen.getByTestId('bulk-toolbar-ids').textContent?.split(',').sort()).toEqual([
+        'single-a',
+        'single-b',
+      ]);
+    });
+
+    it('a selection spanning a paginated append includes items loaded on a LATER page', async () => {
+      const user = userEvent.setup();
+      mockListMedia.mockResolvedValueOnce({
+        items: [makeItem('page1-item', { originalFilename: 'page1-item.jpg' })],
+        meta: { pageSize: 50, nextCursor: 'cursor-2', hasMore: true },
+      });
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          queryParams={{ circleId: 'circle-1' }}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByAltText('page1-item.jpg')).toBeInTheDocument();
+      });
+
+      // Select the first page's item before the second page ever loads.
+      await user.click(screen.getByRole('button', { name: /select item/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar-ids')).toHaveTextContent('page1-item');
+      });
+
+      // Simulate the sentinel entering the viewport — useIntersectionObserver
+      // itself is mocked, so the append is driven by invoking the captured
+      // `onIntersect` callback directly rather than a real IntersectionObserver.
+      mockListMedia.mockResolvedValueOnce({
+        items: [makeItem('page2-item', { originalFilename: 'page2-item.jpg' })],
+        meta: { pageSize: 50, nextCursor: null, hasMore: false },
+      });
+      await act(async () => {
+        latestFeedLoadMore()();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByAltText('page2-item.jpg')).toBeInTheDocument();
+      });
+
+      // Select the newly-appended second-page item too.
+      const secondPageCheckbox = screen.getByAltText('page2-item.jpg').closest('li');
+      await user.click(
+        within(secondPageCheckbox as HTMLElement).getByRole('button', { name: /select item/i }),
+      );
+
+      // The selection now spans both the original page and the appended one —
+      // `mergedItems` (base + feed pages, minus locally-removed ids) is what
+      // `selectedItems` is derived from, so both ids must be present.
+      await waitFor(() => {
+        const ids = screen.getByTestId('bulk-toolbar-ids').textContent;
+        expect(ids?.split(',').sort()).toEqual(['page1-item', 'page2-item']);
       });
     });
   });

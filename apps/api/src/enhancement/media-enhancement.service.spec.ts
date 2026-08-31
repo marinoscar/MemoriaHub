@@ -28,7 +28,12 @@
  *   - discardEnhancement: RBAC (collaborator), deletes staging, row -> discarded
  */
 
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CircleRole, MediaEnhancementStatus, MediaEnhancementDecision, MediaType, MediaTagSource } from '@prisma/client';
 import { MediaEnhancementService } from './media-enhancement.service';
@@ -45,7 +50,37 @@ import { SystemSettingsService } from '../settings/system-settings/system-settin
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
+import { BulkEnhance } from './dto/bulk-enhance.dto';
+import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
 import { ListEnhancementsQuery } from './dto/list-enhancements-query.dto';
+import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+
+/**
+ * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
+ * return the body the client would actually receive.
+ *
+ * Load-bearing for issue #424's over-the-cap 400: the filter rebuilds every
+ * response from a fixed allowlist (message, code, details, error,
+ * error_description, startedAt), so a payload field asserted only via
+ * `getResponse()` can still be silently dropped on the wire. Copied from the
+ * harness in `db-backup/db-backup-admin.service.spec.ts`, which in turn mirrors
+ * `common/filters/http-exception.filter.spec.ts`.
+ */
+function sendThroughFilter(exception: unknown): any {
+  const response = {
+    code: jest.fn().mockReturnThis(),
+    send: jest.fn().mockReturnThis(),
+  };
+  const host = {
+    switchToHttp: () => ({
+      getResponse: () => response,
+      getRequest: () => ({ url: '/api/media/bulk/enhance/by-filter', method: 'POST' }),
+    }),
+  } as unknown as ArgumentsHost;
+
+  new HttpExceptionFilter().catch(exception, host);
+  return response.send.mock.calls[0][0];
+}
 
 const USER: RequestUser = {
   id: 'user-1',
@@ -411,11 +446,784 @@ describe('MediaEnhancementService', () => {
         circleId: CIRCLE_ID,
         reason: 'rerun',
         priority: 0,
+        // Required: dedup would otherwise return the superseded row's job.
+        skipDedup: true,
         providerKey: 'openai',
         modelVersion: 'gpt-image-1',
         payload: { enhancementId: ENH_ID },
       });
       expect(result).toEqual({ data: { enhancementId: ENH_ID, jobId: 'job-1', status: 'pending' } });
+    });
+
+    it('regression: startEnhance enqueues with skipDedup:true (a plain requeue would silently hand back the superseded job)', async () => {
+      await service.startEnhance(MEDIA_ID, {}, USER);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ skipDedup: true }),
+      );
+    });
+  });
+
+  // ===========================================================================
+  // startBatch (POST /api/media/bulk/enhance — issue #421)
+  // ===========================================================================
+
+  describe('startBatch', () => {
+    const CIRCLE_ID_2 = 'circle-2';
+
+    /** Bulk-enhance-flavored media item fixture: only the fields createBatchFrom selects. */
+    function makeBatchItem(overrides: Record<string, any> = {}) {
+      return {
+        id: 'media-x',
+        circleId: CIRCLE_ID,
+        type: MediaType.photo,
+        width: 1200,
+        height: 900,
+        storageObject: { id: 'obj-x', mimeType: 'image/jpeg' },
+        ...overrides,
+      };
+    }
+
+    function makeBulkDto(overrides: Partial<BulkEnhance> = {}): BulkEnhance {
+      return {
+        circleId: CIRCLE_ID,
+        ids: ['media-a', 'media-b'],
+        params: {},
+        ...overrides,
+      } as BulkEnhance;
+    }
+
+    /**
+     * Wires mediaItem.findMany for BOTH call shapes startBatch's flow uses on the
+     * same mock function: assertAllInCircle's existence check (`select: { id: true }`
+     * only) and createBatchFrom's full item fetch (everything else). Routing on the
+     * select shape — rather than on call order — keeps every test independent of how
+     * many times each is invoked.
+     */
+    function wireMediaItems(items: Array<Record<string, any>>) {
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockImplementation(async (args: any) => {
+        const ids: string[] = args.where.id.in;
+        const selectKeys = args.select ? Object.keys(args.select) : [];
+        const isExistenceCheck = selectKeys.length === 1 && selectKeys[0] === 'id';
+        const matched = items.filter((i) => ids.includes(i.id));
+        return isExistenceCheck ? matched.map((i) => ({ id: i.id })) : matched;
+      });
+    }
+
+    let createdEnhancementIds: string[];
+
+    beforeEach(() => {
+      createdEnhancementIds = [];
+      (mockPrisma.mediaEnhancementBatch.create as jest.Mock).mockImplementation(
+        async (args: any) => ({ id: 'batch-1', queuedCount: 0, ...args.data }),
+      );
+      (mockPrisma.mediaEnhancementBatch.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([]); // no live rows by default
+      (mockPrisma.mediaEnhancement.create as jest.Mock).mockImplementation(async (args: any) => {
+        const id = `enh-${args.data.mediaItemId}`;
+        createdEnhancementIds.push(id);
+        return { id, ...args.data };
+      });
+      wireMediaItems([makeBatchItem({ id: 'media-a' }), makeBatchItem({ id: 'media-b' })]);
+    });
+
+    // -------------------------------------------------------------------------
+    // Feature gate / config guards (mirror startEnhance's)
+    // -------------------------------------------------------------------------
+
+    it('throws 400 when features.pictureEnhancement is off', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(makeSettings({ features: { pictureEnhancement: false } }));
+
+      await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(BadRequestException);
+      await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow('Picture enhancement is disabled');
+      expect(mockMembership.assertCircleAccess).not.toHaveBeenCalled();
+    });
+
+    it('throws 400 when PICTURE_ENHANCEMENT_ENABLED=false, even with the feature flag on', async () => {
+      process.env['PICTURE_ENHANCEMENT_ENABLED'] = 'false';
+
+      await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws 400 when no enhancement model is configured', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ ai: { features: { enhance: null } } }),
+      );
+
+      await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(
+        'No enhancement model configured',
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // Batch-size cap
+    // -------------------------------------------------------------------------
+
+    it('throws 400 naming BOTH the requested count and the configured cap when the (deduped) selection exceeds maxBatchSize', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ pictureEnhancement: { ...makeSettings().pictureEnhancement, maxBatchSize: 3 } }),
+      );
+      const dto = makeBulkDto({ ids: ['m1', 'm2', 'm3', 'm4', 'm5'] });
+
+      await expect(service.startBatch(dto, USER)).rejects.toThrow(BadRequestException);
+      await expect(service.startBatch(dto, USER)).rejects.toThrow(
+        'Cannot enhance 5 items in one batch; the limit is 3',
+      );
+      expect(mockMembership.assertCircleAccess).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a cap of 25 when pictureEnhancement.maxBatchSize is unset', async () => {
+      const dto = makeBulkDto({ ids: Array.from({ length: 26 }, (_, i) => `m${i}`) });
+
+      await expect(service.startBatch(dto, USER)).rejects.toThrow('the limit is 25');
+    });
+
+    // -------------------------------------------------------------------------
+    // RBAC / existence
+    // -------------------------------------------------------------------------
+
+    it('asserts circle access at the collaborator level before touching media items', async () => {
+      await service.startBatch(makeBulkDto(), USER);
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER.id,
+        CIRCLE_ID,
+        USER.permissions,
+        CircleRole.collaborator,
+      );
+    });
+
+    it('propagates a ForbiddenException from RBAC (non-collaborator)', async () => {
+      mockMembership.assertCircleAccess.mockRejectedValue(new ForbiddenException('nope'));
+
+      await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.mediaEnhancementBatch.create).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException naming ids that are missing or belong to another circle', async () => {
+      // Only media-a exists in the circle; media-b does not resolve.
+      wireMediaItems([makeBatchItem({ id: 'media-a' })]);
+
+      await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(NotFoundException);
+      await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(/media-b/);
+      expect(mockPrisma.mediaEnhancementBatch.create).not.toHaveBeenCalled();
+    });
+
+    // -------------------------------------------------------------------------
+    // Partition logic — each skip reason independently, and every id lands in
+    // EXACTLY ONE bucket.
+    // -------------------------------------------------------------------------
+
+    describe('partitioning', () => {
+      it('counts a non-photo MediaType as notPhoto', async () => {
+        wireMediaItems([makeBatchItem({ id: 'media-a', type: MediaType.video })]);
+
+        const result = await service.startBatch(makeBulkDto({ ids: ['media-a'] }), USER);
+
+        expect(result.data.skipped).toEqual({ notPhoto: 1, tooLarge: 0, alreadyLive: 0 });
+        expect(result.data.queued).toBe(0);
+      });
+
+      it('counts an image/* mimeType mismatch as notPhoto (photo type, non-image storage object)', async () => {
+        wireMediaItems([
+          makeBatchItem({ id: 'media-a', storageObject: { id: 'obj-x', mimeType: 'application/pdf' } }),
+        ]);
+
+        const result = await service.startBatch(makeBulkDto({ ids: ['media-a'] }), USER);
+
+        expect(result.data.skipped).toEqual({ notPhoto: 1, tooLarge: 0, alreadyLive: 0 });
+      });
+
+      it('counts an oversized item as tooLarge (maxInputMegapixels exceeded)', async () => {
+        // 12000x9000 = 108 MP > default 50 MP cap.
+        wireMediaItems([makeBatchItem({ id: 'media-a', width: 12000, height: 9000 })]);
+
+        const result = await service.startBatch(makeBulkDto({ ids: ['media-a'] }), USER);
+
+        expect(result.data.skipped).toEqual({ notPhoto: 0, tooLarge: 1, alreadyLive: 0 });
+      });
+
+      it.each([
+        ['pending', MediaEnhancementStatus.pending],
+        ['processing', MediaEnhancementStatus.processing],
+        ['ready', MediaEnhancementStatus.ready],
+      ])('counts an item with an existing %s enhancement as alreadyLive', async (_label, status) => {
+        wireMediaItems([makeBatchItem({ id: 'media-a' })]);
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([
+          { mediaItemId: 'media-a' },
+        ]);
+        void status; // the live-row query only returns mediaItemId — status is asserted via the it.each label
+
+        const result = await service.startBatch(makeBulkDto({ ids: ['media-a'] }), USER);
+
+        expect(result.data.skipped).toEqual({ notPhoto: 0, tooLarge: 0, alreadyLive: 1 });
+        expect(result.data.queued).toBe(0);
+      });
+
+      it('places every id in exactly one bucket, and the counts sum to `requested`', async () => {
+        const items = [
+          makeBatchItem({ id: 'notphoto-1', type: MediaType.video }),
+          makeBatchItem({ id: 'notphoto-2', storageObject: { id: 'o', mimeType: 'application/pdf' } }),
+          makeBatchItem({ id: 'toolarge-1', width: 12000, height: 9000 }),
+          makeBatchItem({ id: 'live-1' }),
+          makeBatchItem({ id: 'live-2' }),
+          makeBatchItem({ id: 'live-3' }),
+          makeBatchItem({ id: 'eligible-1' }),
+        ];
+        wireMediaItems(items);
+        (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([
+          { mediaItemId: 'live-1' },
+          { mediaItemId: 'live-2' },
+          { mediaItemId: 'live-3' },
+        ]);
+        const dto = makeBulkDto({ ids: items.map((i) => i.id) });
+
+        const result = await service.startBatch(dto, USER);
+
+        expect(result.data.skipped).toEqual({ notPhoto: 2, tooLarge: 1, alreadyLive: 3 });
+        expect(result.data.queued).toBe(1);
+        expect(result.data.requested).toBe(7);
+        const sumSkipped = Object.values(result.data.skipped).reduce((a: number, b: any) => a + b, 0);
+        expect(sumSkipped + result.data.queued).toBe(result.data.requested);
+      });
+
+      it('counts an id that vanishes between the RBAC existence check and the item fetch (a concurrent hard delete) as notPhoto', async () => {
+        // assertAllInCircle sees both ids; the createBatchFrom item fetch only
+        // resolves media-a — media-b raced away in between.
+        (mockPrisma.mediaItem.findMany as jest.Mock).mockImplementation(async (args: any) => {
+          const ids: string[] = args.where.id.in;
+          const selectKeys = args.select ? Object.keys(args.select) : [];
+          const isExistenceCheck = selectKeys.length === 1 && selectKeys[0] === 'id';
+          if (isExistenceCheck) return ids.map((id) => ({ id }));
+          return [makeBatchItem({ id: 'media-a' })]; // media-b vanished
+        });
+
+        const result = await service.startBatch(makeBulkDto({ ids: ['media-a', 'media-b'] }), USER);
+
+        expect(result.data.skipped.notPhoto).toBe(1);
+        expect(result.data.queued).toBe(1);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // THE ANTI-SUPERSEDE TEST — the criterion most likely to regress silently.
+    //
+    // A bulk enhance must NEVER call supersedeLive()/deleteStaging() on an
+    // item's existing `ready` enhancement: that row is a completed,
+    // already-billed gpt-image-1 result awaiting a human keep/replace/discard
+    // decision. Losing it silently (and the money that produced it) because
+    // the item happened to be re-selected in a later batch is exactly the
+    // defect DIVERGENCE 1 in media-enhancement.service.ts exists to prevent.
+    // -------------------------------------------------------------------------
+
+    it('NEVER supersedes a live `ready` enhancement: no discard, no staging-key mutation, no provider delete', async () => {
+      const liveReadyRow = makeEnhancementRow({
+        id: 'enh-live',
+        mediaItemId: 'media-a',
+        status: MediaEnhancementStatus.ready,
+        stagingStorageKey: 'enhancements/enh-live/result.jpg',
+        stagingThumbnailKey: 'enhancements/enh-live/thumb.jpg',
+      });
+      wireMediaItems([makeBatchItem({ id: 'media-a' })]);
+      (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([
+        { mediaItemId: 'media-a' },
+      ]);
+      // Sanity: the row is real and would be discarded by supersedeLive() if it ran.
+      void liveReadyRow;
+
+      const result = await service.startBatch(makeBulkDto({ ids: ['media-a'] }), USER);
+
+      expect(result.data.skipped.alreadyLive).toBe(1);
+      expect(result.data.queued).toBe(0);
+      // The staged bytes were never touched.
+      expect(mockActiveProvider.delete).not.toHaveBeenCalled();
+      expect(mockObjectProvider.delete).not.toHaveBeenCalled();
+      // No enhancement row anywhere was updated (discarded or otherwise) —
+      // startBatch only ever CREATEs new rows for eligible items.
+      expect(mockPrisma.mediaEnhancement.update).not.toHaveBeenCalled();
+      // No new (superseding) enhancement row was created for this item either.
+      expect(mockPrisma.mediaEnhancement.create).not.toHaveBeenCalled();
+    });
+
+    // -------------------------------------------------------------------------
+    // Enqueue shape
+    // -------------------------------------------------------------------------
+
+    describe('enqueue options', () => {
+      it('every enqueued job carries priority:50, skipDedup:true, reason:rerun, type:picture_enhancement, and payload.enhancementId for the row just created', async () => {
+        await service.startBatch(makeBulkDto({ ids: ['media-a', 'media-b'] }), USER);
+
+        expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledTimes(2);
+        for (const call of (mockEnrichmentJobService.enqueue as jest.Mock).mock.calls) {
+          const [opts] = call;
+          expect(opts).toMatchObject({
+            type: 'picture_enhancement',
+            reason: 'rerun',
+            priority: 50,
+            skipDedup: true,
+            providerKey: 'openai',
+            modelVersion: 'gpt-image-1',
+          });
+          expect(opts.payload).toEqual({ enhancementId: `enh-${opts.mediaItemId}` });
+        }
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Dedup of duplicate ids
+    // -------------------------------------------------------------------------
+
+    it('dedupes duplicate ids in the request before the cap check, producing one enhancement per unique id', async () => {
+      const dto = makeBulkDto({ ids: ['media-a', 'media-a', 'media-b'] });
+
+      const result = await service.startBatch(dto, USER);
+
+      expect(result.data.requested).toBe(2);
+      expect(result.data.queued).toBe(2);
+      expect(mockPrisma.mediaEnhancement.create).toHaveBeenCalledTimes(2);
+      // assertAllInCircle's existence check also only ever sees the 2 unique ids.
+      const existenceCall = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls.find(
+        (c: any[]) => c[0].select && Object.keys(c[0].select).length === 1 && c[0].select.id === true,
+      );
+      expect(existenceCall![0].where.id.in).toEqual(['media-a', 'media-b']);
+    });
+
+    // -------------------------------------------------------------------------
+    // Zero-eligible edge case
+    // -------------------------------------------------------------------------
+
+    it('creates the batch row and returns queued:0 when nothing is eligible', async () => {
+      wireMediaItems([makeBatchItem({ id: 'media-a', type: MediaType.video })]);
+
+      const result = await service.startBatch(makeBulkDto({ ids: ['media-a'] }), USER);
+
+      expect(mockPrisma.mediaEnhancementBatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          circleId: CIRCLE_ID,
+          requestedCount: 1,
+          queuedCount: 0,
+          source: 'selection',
+          createdById: USER.id,
+        }),
+      });
+      expect(result).toEqual({
+        data: {
+          batchId: 'batch-1',
+          requested: 1,
+          queued: 0,
+          skipped: { notPhoto: 1, tooLarge: 0, alreadyLive: 0 },
+        },
+      });
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('uses CIRCLE_ID_2 to prove the batch row is scoped to dto.circleId, not a hard-coded default', async () => {
+      mockMembership.assertCircleAccess.mockResolvedValue({
+        role: CircleRole.collaborator,
+        isSuperAdmin: false,
+      });
+      wireMediaItems([makeBatchItem({ id: 'media-a', circleId: CIRCLE_ID_2 })]);
+
+      await service.startBatch(makeBulkDto({ circleId: CIRCLE_ID_2, ids: ['media-a'] }), USER);
+
+      expect(mockPrisma.mediaEnhancementBatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ circleId: CIRCLE_ID_2 }),
+      });
+    });
+  });
+
+  // ===========================================================================
+  // startBatchByFilter (POST /api/media/bulk/enhance/by-filter — issue #424)
+  //
+  // The matched set is resolved server-side, so the WHERE clause is the whole
+  // safety story: every photo it matches costs a real, billed gpt-image-1 call.
+  // These tests assert the clause itself (trash / archive / video exclusion,
+  // people composition), the refuse-never-truncate cap, and that everything
+  // downstream is DELEGATED to the same createBatchFrom internals startBatch
+  // uses rather than reimplemented.
+  // ===========================================================================
+
+  describe('startBatchByFilter', () => {
+    /** Same shape createBatchFrom selects (see makeBatchItem in startBatch). */
+    function makeFilterItem(overrides: Record<string, any> = {}) {
+      return {
+        id: 'media-x',
+        circleId: CIRCLE_ID,
+        type: MediaType.photo,
+        width: 1200,
+        height: 900,
+        storageObject: { id: 'obj-x', mimeType: 'image/jpeg' },
+        ...overrides,
+      };
+    }
+
+    function makeFilterDto(overrides: Record<string, any> = {}): BulkEnhanceByFilter {
+      return {
+        circleId: CIRCLE_ID,
+        params: {},
+        peopleMatch: 'any',
+        ...overrides,
+      } as BulkEnhanceByFilter;
+    }
+
+    /**
+     * Wires the count + both findMany shapes off ONE in-memory item list:
+     *
+     *  - `count`    -> startBatchByFilter's cap/zero-match check
+     *  - findMany with `select: { id: true }` -> the id resolution
+     *  - findMany with the full select        -> createBatchFrom's item fetch
+     *
+     * The where clause is captured (not interpreted) so the tests can assert it
+     * directly; that is the point of this suite.
+     */
+    let capturedWhere: any;
+    function wireFilterMatches(items: Array<Record<string, any>>) {
+      capturedWhere = undefined;
+      (mockPrisma.mediaItem.count as jest.Mock).mockImplementation(async (args: any) => {
+        capturedWhere = args.where;
+        return items.length;
+      });
+      (mockPrisma.mediaItem.findMany as jest.Mock).mockImplementation(async (args: any) => {
+        const selectKeys = args.select ? Object.keys(args.select) : [];
+        const idsOnly = selectKeys.length === 1 && selectKeys[0] === 'id';
+        if (idsOnly && !args.where?.id) {
+          // The by-filter id resolution (filter where, not an id list).
+          capturedWhere = args.where;
+          return items.map((i) => ({ id: i.id }));
+        }
+        const ids: string[] = args.where?.id?.in ?? items.map((i) => i.id);
+        return items.filter((i) => ids.includes(i.id));
+      });
+    }
+
+    beforeEach(() => {
+      (mockPrisma.mediaEnhancementBatch.create as jest.Mock).mockImplementation(
+        async (args: any) => ({ id: 'batch-f1', queuedCount: 0, ...args.data }),
+      );
+      (mockPrisma.mediaEnhancementBatch.update as jest.Mock).mockResolvedValue({});
+      (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mediaEnhancement.create as jest.Mock).mockImplementation(async (args: any) => ({
+        id: `enh-${args.data.mediaItemId}`,
+        ...args.data,
+      }));
+      wireFilterMatches([makeFilterItem({ id: 'media-a' }), makeFilterItem({ id: 'media-b' })]);
+    });
+
+    // -------------------------------------------------------------------------
+    // THE TRASH TEST — highest-consequence regression in this feature.
+    //
+    // buildMediaWhere's `excludeArchived` flag governs ONLY archivedAt, and its
+    // deletedAt handling is an incidental detail of that builder rather than a
+    // contract this endpoint may lean on. A by-filter enhance that reaches into
+    // the Trash does not render a wrong pixel — it spends real money on photos
+    // the user already threw away.
+    // -------------------------------------------------------------------------
+
+    it('EXCLUDES trashed items: the matched-set where asserts deletedAt: null explicitly', async () => {
+      await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(capturedWhere).toMatchObject({ deletedAt: null });
+      // And on the count query specifically — the number shown to the user and
+      // checked against the cap must come from the same restricted set.
+      const countWhere = (mockPrisma.mediaItem.count as jest.Mock).mock.calls[0][0].where;
+      expect(countWhere.deletedAt).toBeNull();
+    });
+
+    it('EXCLUDES archived items: the matched-set where asserts archivedAt: null explicitly', async () => {
+      await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(capturedWhere).toMatchObject({ archivedAt: null });
+      const countWhere = (mockPrisma.mediaItem.count as jest.Mock).mock.calls[0][0].where;
+      expect(countWhere.archivedAt).toBeNull();
+    });
+
+    it('EXCLUDES videos in SQL (type: photo on the where), not as a post-filter', async () => {
+      await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(capturedWhere).toMatchObject({ type: MediaType.photo });
+      // The cap is checked against the same photo-only count, so it cannot lie.
+      const countWhere = (mockPrisma.mediaItem.count as jest.Mock).mock.calls[0][0].where;
+      expect(countWhere.type).toBe(MediaType.photo);
+    });
+
+    // -------------------------------------------------------------------------
+    // Filter composition
+    // -------------------------------------------------------------------------
+
+    it('AND-composes the buildMediaWhere fragment rather than spreading it, so a people clause cannot clobber it', async () => {
+      await service.startBatchByFilter(
+        makeFilterDto({ tag: 'birthday', personIds: ['p1', 'p2'], peopleMatch: 'all' }),
+        USER,
+      );
+
+      // Both fragments survive as SEPARATE AND elements. A spread-merge would
+      // have let wherePeople's own top-level AND overwrite the tag filter.
+      const and = capturedWhere.AND as any[];
+      expect(and).toHaveLength(2);
+      const flat = JSON.stringify(and);
+      expect(flat).toContain('birthday');
+      expect(flat).toContain('p1');
+      expect(flat).toContain('p2');
+    });
+
+    it("composes peopleMatch:'all' as one faces.some clause per person (every person in the same photo)", async () => {
+      await service.startBatchByFilter(
+        makeFilterDto({ personIds: ['p1', 'p2'], peopleMatch: 'all' }),
+        USER,
+      );
+
+      const people = (capturedWhere.AND as any[]).find((f) => f.AND);
+      expect(people.AND).toEqual([
+        { faces: { some: { personId: 'p1' } } },
+        { faces: { some: { personId: 'p2' } } },
+      ]);
+    });
+
+    it("composes peopleMatch:'any' as a single personId IN clause", async () => {
+      await service.startBatchByFilter(
+        makeFilterDto({ personIds: ['p1', 'p2'], peopleMatch: 'any' }),
+        USER,
+      );
+
+      const people = (capturedWhere.AND as any[]).find((f) => f.faces);
+      expect(people).toEqual({ faces: { some: { personId: { in: ['p1', 'p2'] } } } });
+    });
+
+    it('falls back to the singular personId when personIds is absent', async () => {
+      await service.startBatchByFilter(makeFilterDto({ personId: 'p9' }), USER);
+
+      const flat = JSON.stringify(capturedWhere.AND);
+      expect(flat).toContain('p9');
+    });
+
+    it('adds no people fragment at all when neither personId nor personIds is supplied', async () => {
+      await service.startBatchByFilter(makeFilterDto({ tag: 'beach' }), USER);
+
+      expect((capturedWhere.AND as any[]).some((f) => JSON.stringify(f).includes('personId'))).toBe(
+        false,
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // Gates (identical to the by-selection endpoint's)
+    // -------------------------------------------------------------------------
+
+    it('throws 400 when features.pictureEnhancement is off, before any query runs', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ features: { pictureEnhancement: false } }),
+      );
+
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        'Picture enhancement is disabled',
+      );
+      expect(mockMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaItem.count).not.toHaveBeenCalled();
+    });
+
+    it('throws 400 when PICTURE_ENHANCEMENT_ENABLED=false, even with the feature flag on', async () => {
+      process.env['PICTURE_ENHANCEMENT_ENABLED'] = 'false';
+
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws 400 when no enhancement model is configured', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ ai: { features: { enhance: null } } }),
+      );
+
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        'No enhancement model configured',
+      );
+    });
+
+    it('asserts collaborator access BEFORE running any query on the caller behalf', async () => {
+      mockMembership.assertCircleAccess.mockRejectedValue(new ForbiddenException('nope'));
+
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockPrisma.mediaItem.count).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaEnhancementBatch.create).not.toHaveBeenCalled();
+    });
+
+    it('asserts circle access at the collaborator level', async () => {
+      await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+        USER.id,
+        CIRCLE_ID,
+        USER.permissions,
+        CircleRole.collaborator,
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // Zero-match and cap — refuse, never truncate
+    // -------------------------------------------------------------------------
+
+    it('throws 400 when the filter matches nothing, without creating a batch row', async () => {
+      wireFilterMatches([]);
+
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        'No photos match this filter',
+      );
+      expect(mockPrisma.mediaEnhancementBatch.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('REFUSES a filter matching more than maxBatchSize, naming both numbers — never truncating to the first N', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ pictureEnhancement: { ...makeSettings().pictureEnhancement, maxBatchSize: 3 } }),
+      );
+      wireFilterMatches(
+        Array.from({ length: 7 }, (_, i) => makeFilterItem({ id: `media-${i}` })),
+      );
+
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        '7 photos match this filter; the limit is 3 per batch.',
+      );
+      // The whole point of refusing: nothing was queued, nothing was billed.
+      expect(mockPrisma.mediaEnhancementBatch.create).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaEnhancement.create).not.toHaveBeenCalled();
+      expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a cap of 25 when pictureEnhancement.maxBatchSize is unset', async () => {
+      wireFilterMatches(
+        Array.from({ length: 26 }, (_, i) => makeFilterItem({ id: `media-${i}` })),
+      );
+
+      await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
+        '26 photos match this filter; the limit is 25 per batch.',
+      );
+    });
+
+    it('accepts a match count exactly AT the cap (the boundary is inclusive)', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ pictureEnhancement: { ...makeSettings().pictureEnhancement, maxBatchSize: 2 } }),
+      );
+
+      const result = await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(result.data.queued).toBe(2);
+    });
+
+    // -------------------------------------------------------------------------
+    // THE ERROR-ENVELOPE TEST — asserted THROUGH the real HttpExceptionFilter.
+    //
+    // A getResponse() assertion proves nothing about the wire: the filter
+    // rebuilds every body from a fixed key allowlist (message, code, details,
+    // error, error_description, startedAt), so a top-level `matchedCount` would
+    // pass a naive unit test and still be silently dropped for the client that
+    // needs it to render "412 photos match; the limit is 25".
+    // -------------------------------------------------------------------------
+
+    it('carries matchedCount and maxBatchSize under `details` THROUGH the real HttpExceptionFilter', async () => {
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ pictureEnhancement: { ...makeSettings().pictureEnhancement, maxBatchSize: 3 } }),
+      );
+      wireFilterMatches(
+        Array.from({ length: 7 }, (_, i) => makeFilterItem({ id: `media-${i}` })),
+      );
+
+      let thrown: unknown;
+      try {
+        await service.startBatchByFilter(makeFilterDto(), USER);
+      } catch (err) {
+        thrown = err;
+      }
+
+      const body = sendThroughFilter(thrown);
+      expect(body).toMatchObject({
+        statusCode: 400,
+        message: '7 photos match this filter; the limit is 3 per batch.',
+        details: { matchedCount: 7, maxBatchSize: 3 },
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Delegation — the by-filter path owns "which items" and nothing else.
+    // -------------------------------------------------------------------------
+
+    it('delegates to the shared createBatchFrom internals: same response shape, same skip partition, source `filter`', async () => {
+      wireFilterMatches([
+        makeFilterItem({ id: 'ok-1' }),
+        makeFilterItem({ id: 'toolarge-1', width: 12000, height: 9000 }),
+      ]);
+
+      const result = await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(result).toEqual({
+        data: {
+          batchId: 'batch-f1',
+          requested: 2,
+          queued: 1,
+          skipped: { notPhoto: 0, tooLarge: 1, alreadyLive: 0 },
+        },
+      });
+      expect(mockPrisma.mediaEnhancementBatch.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          circleId: CIRCLE_ID,
+          requestedCount: 2,
+          source: 'filter',
+          createdById: USER.id,
+        }),
+      });
+    });
+
+    it('still applies the alreadyLive skip — a filter cannot know which photos already have an unreviewed result', async () => {
+      wireFilterMatches([makeFilterItem({ id: 'media-a' })]);
+      (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([
+        { mediaItemId: 'media-a' },
+      ]);
+
+      const result = await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(result.data.skipped.alreadyLive).toBe(1);
+      expect(result.data.queued).toBe(0);
+      // The staged bytes of the live row were never touched (see the anti-
+      // supersede test on startBatch — the same rule applies here).
+      expect(mockActiveProvider.delete).not.toHaveBeenCalled();
+      expect(mockPrisma.mediaEnhancement.update).not.toHaveBeenCalled();
+    });
+
+    it('enqueues at priority 50 with skipDedup, exactly like the by-selection batch', async () => {
+      await service.startBatchByFilter(makeFilterDto(), USER);
+
+      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledTimes(2);
+      for (const [opts] of (mockEnrichmentJobService.enqueue as jest.Mock).mock.calls) {
+        expect(opts).toMatchObject({
+          type: 'picture_enhancement',
+          reason: 'rerun',
+          priority: 50,
+          skipDedup: true,
+        });
+      }
+    });
+
+    it('snapshots the resolved filter on the batch row for provenance, without polluting the per-item enhance params', async () => {
+      await service.startBatchByFilter(
+        makeFilterDto({ tag: 'beach', params: { strength: 'strong' } }),
+        USER,
+      );
+
+      const batchParams = (mockPrisma.mediaEnhancementBatch.create as jest.Mock).mock
+        .calls[0][0].data.params;
+      expect(batchParams).toMatchObject({
+        strength: 'strong',
+        _filter: expect.objectContaining({ circleId: CIRCLE_ID, tag: 'beach' }),
+      });
+      expect(batchParams._filter).not.toHaveProperty('params');
+
+      // The per-enhancement params (which compile the prompt) stay clean.
+      const enhParams = (mockPrisma.mediaEnhancement.create as jest.Mock).mock.calls[0][0].data
+        .params;
+      expect(enhParams).toEqual({ strength: 'strong' });
     });
   });
 

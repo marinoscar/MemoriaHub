@@ -64,6 +64,7 @@ import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
 import StarIcon from '@mui/icons-material/Star';
+import CloseIcon from '@mui/icons-material/Close';
 import BurstModeIcon from '@mui/icons-material/BurstMode';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useTheme } from '@mui/material/styles';
@@ -82,6 +83,7 @@ import { MediaSelectionCheckbox } from './MediaSelectionCheckbox';
 import { MediaLightbox } from './MediaLightbox';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import { BatchEnhanceDialog } from './BatchEnhanceDialog';
 import type { BulkEffect, BulkSuccessOptions } from './BulkActionToolbar';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { TrashBulkToolbar } from './TrashBulkToolbar';
@@ -92,7 +94,11 @@ import { BulkTagsDialog } from './BulkTagsDialog';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { TimelineScrubber } from './TimelineScrubber';
 import { getMedia, removeAlbumItem } from '../../services/media';
-import type { MediaItem, MediaQueryParams } from '../../types/media';
+import type {
+  AddAlbumItemsByFilterDto,
+  MediaItem,
+  MediaQueryParams,
+} from '../../types/media';
 import type { CircleRole } from '../../types/circles';
 
 // ---------------------------------------------------------------------------
@@ -507,6 +513,7 @@ export function MediaGallery({
   onBulkSuccess,
 }: MediaGalleryProps) {
   const theme = useTheme();
+  const navigate = useNavigate();
 
   // Determine mode: FEED activates when EITHER queryParams OR a custom fetcher
   // is supplied. CONTROLLED mode is used only when neither is present.
@@ -707,6 +714,13 @@ export function MediaGallery({
   const [snackbar, setSnackbar] = useState<{
     message: string;
     severity: 'success' | 'error';
+    /**
+     * When set, the toast offers a link to that bulk-enhance batch's progress
+     * page (issue #423). This is the MAIN way back to a batch just submitted —
+     * the hub's "Recent batches" list is the recovery path for a toast that was
+     * dismissed or a page that was reloaded.
+     */
+    batchId?: string;
   } | null>(null);
 
   // -------------------------------------------------------------------------
@@ -725,12 +739,27 @@ export function MediaGallery({
   const { pictureEnhancement } = useFeatureFlags();
   const enhanceEnabled = Boolean(pictureEnhancement?.enabled);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
+  const [batchEnhanceOpen, setBatchEnhanceOpen] = useState(false);
+  /** "Enhance all matching" — the same dialog, in filter mode (issue #424). */
+  const [filterEnhanceOpen, setFilterEnhanceOpen] = useState(false);
 
   const singleSelectedItem = useMemo<MediaItem | null>(() => {
     if (selected.size !== 1) return null;
     const [onlyId] = Array.from(selected);
     return mergedItems.find((it) => it.id === onlyId) ?? null;
   }, [selected, mergedItems]);
+
+  /**
+   * The full selection resolved to items (issue #422). Kept alongside
+   * `singleSelectedItem` rather than replacing it — the lightbox and the
+   * single-photo enhancement drawer still need the one-item form. Because this
+   * gallery is the only place BulkActionToolbar is rendered, Home, the media
+   * library, albums and search all inherit batch actions with no per-page wiring.
+   */
+  const selectedItems = useMemo(
+    () => mergedItems.filter((it) => selected.has(it.id)),
+    [selected, mergedItems],
+  );
 
   // -------------------------------------------------------------------------
   // Bulk success handler
@@ -857,6 +886,51 @@ export function MediaGallery({
     }
     return rest;
   }, [queryParams, albumId, circleId]);
+
+  // -------------------------------------------------------------------------
+  // Enhance-by-filter (issue #424) — the filter the server resolves the match
+  // set from. Deliberately NOT albumDialogFilters: that one strips `albumId` so
+  // items can be added to a DIFFERENT album, whereas here dropping it would
+  // widen "this album" to "the whole circle" and enhance photos nobody asked
+  // about. Pagination/sort/cursor are stripped — they change which page you
+  // see, never which photos match.
+  // -------------------------------------------------------------------------
+
+  const enhanceFilters = useMemo<AddAlbumItemsByFilterDto>(() => {
+    if (!queryParams) return { circleId };
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    const {
+      page: _p,
+      pageSize: _ps,
+      sortBy: _sb,
+      sortOrder: _so,
+      cursor: _c,
+      ...rest
+    } = queryParams;
+    /* eslint-enable @typescript-eslint/no-unused-vars */
+    return { ...rest, circleId };
+  }, [queryParams, circleId]);
+
+  /**
+   * "A filter is active" = something narrows the circle beyond how it is sorted.
+   *
+   * On an album page `albumId` is excluded from that test: being inside an album
+   * is the surface you are on, not a filter you applied — and AlbumPage has its
+   * own explicit "Enhance all photos in this album" entry point. It still rides
+   * along in `enhanceFilters` above, so the match set stays album-scoped.
+   */
+  const filterActive = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { circleId: _cid, albumId: aid, ...rest } = enhanceFilters;
+    const narrowed = Object.values(rest).some(
+      (v) =>
+        v !== undefined &&
+        v !== null &&
+        v !== '' &&
+        !(Array.isArray(v) && v.length === 0),
+    );
+    return narrowed || (Boolean(aid) && !albumId);
+  }, [enhanceFilters, albumId]);
 
   // -------------------------------------------------------------------------
   // Grid measurement — ONE ResizeObserver for the whole gallery (never one per
@@ -1027,8 +1101,13 @@ export function MediaGallery({
           onSuccess={handleBulkSuccess}
           onError={(msg) => setSnackbar({ message: msg, severity: 'error' })}
           singleSelectedItem={singleSelectedItem}
+          selectedItems={selectedItems}
           enhanceEnabled={enhanceEnabled}
+          maxBatchSize={pictureEnhancement?.maxBatchSize}
           onOpenEnhance={() => setEnhanceOpen(true)}
+          onOpenBatchEnhance={() => setBatchEnhanceOpen(true)}
+          filterActive={filterActive}
+          onOpenFilterEnhance={() => setFilterEnhanceOpen(true)}
         />
       )}
 
@@ -1246,6 +1325,40 @@ export function MediaGallery({
         }}
       />
 
+      {/* AI enhancement batch dialog (multi-photo selection) */}
+      <BatchEnhanceDialog
+        open={batchEnhanceOpen}
+        onClose={() => setBatchEnhanceOpen(false)}
+        circleId={circleId}
+        items={selectedItems}
+        maxBatchSize={pictureEnhancement?.maxBatchSize}
+        modelLabel={pictureEnhancement?.model ?? undefined}
+        // Nothing has changed yet — the batch only queues work whose results
+        // are each reviewed later — so this drops the selection and reports the
+        // server's counts rather than refreshing any item.
+        onSuccess={(msg, batchId) => {
+          handleClearSelection();
+          setSnackbar({ message: msg, severity: 'success', batchId });
+        }}
+      />
+
+      {/* AI enhancement — same dialog, FILTER mode (issue #424). The match set
+          is resolved server-side, so it covers photos not yet scrolled to; the
+          gallery has no COUNT(*) in keyset mode, so no count is passed and the
+          real number only ever comes back from the server. */}
+      <BatchEnhanceDialog
+        open={filterEnhanceOpen}
+        onClose={() => setFilterEnhanceOpen(false)}
+        circleId={circleId}
+        filterMode={{ filters: enhanceFilters }}
+        maxBatchSize={pictureEnhancement?.maxBatchSize}
+        modelLabel={pictureEnhancement?.model ?? undefined}
+        onSuccess={(msg, batchId) => {
+          handleClearSelection();
+          setSnackbar({ message: msg, severity: 'success', batchId });
+        }}
+      />
+
       {/* AI enhancement drawer (single photo) */}
       {singleSelectedItem && singleSelectedItem.type === 'photo' && (
         <MediaEnhancementDrawer
@@ -1291,10 +1404,13 @@ export function MediaGallery({
         />
       )}
 
-      {/* Snackbar for bulk operation feedback */}
+      {/* Snackbar for bulk operation feedback.
+          A toast carrying a batch id gets an action and a longer dwell — it is
+          the only pointer to work that runs for minutes after the dialog
+          closes, so four seconds is not enough to read AND act on it. */}
       <Snackbar
         open={snackbar !== null}
-        autoHideDuration={4000}
+        autoHideDuration={snackbar?.batchId ? 10000 : 4000}
         onClose={() => setSnackbar(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
@@ -1302,6 +1418,33 @@ export function MediaGallery({
           onClose={() => setSnackbar(null)}
           severity={snackbar?.severity ?? 'success'}
           sx={{ width: '100%' }}
+          action={
+            // MUI drops `onClose`'s close button as soon as `action` is set, so
+            // the dismiss affordance is re-added here rather than lost.
+            snackbar?.batchId ? (
+              <>
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    const id = snackbar.batchId;
+                    setSnackbar(null);
+                    if (id) navigate(`/enhancement-batches/${id}`);
+                  }}
+                >
+                  View progress
+                </Button>
+                <IconButton
+                  size="small"
+                  color="inherit"
+                  aria-label="Close"
+                  onClick={() => setSnackbar(null)}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </>
+            ) : undefined
+          }
         >
           {snackbar?.message}
         </Alert>

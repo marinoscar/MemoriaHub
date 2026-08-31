@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Box, Alert, Tabs, Tab, Typography, Stack } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
@@ -46,6 +46,24 @@ export default function EnhancementsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, setSearchParams]);
 
+  /**
+   * Optional bulk-enhance batch filter (epic #420, issue #423), set when a user
+   * follows "Review N results" from a batch's progress page. It lives in the
+   * URL rather than in state so the narrowed view survives a reload and can be
+   * shared — and so clearing the chip is just dropping the param.
+   */
+  const batchId = searchParams.get('batchId') ?? undefined;
+  const clearBatchFilter = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.delete('batchId');
+        return params;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
   if (!activeCircle) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -79,7 +97,13 @@ export default function EnhancementsPage() {
 
       {/* Only the active tab's data is fetched — each tab owns its own hook
           call, so mounting one never triggers the others' requests. */}
-      {tab === 'pending' && <PendingEnhancementsTab circleId={activeCircle.id} />}
+      {tab === 'pending' && (
+        <PendingEnhancementsTab
+          circleId={activeCircle.id}
+          batchId={batchId}
+          onClearBatchFilter={clearBatchFilter}
+        />
+      )}
 
       {tab === 'enhanced' && (
         <Alert severity="info">

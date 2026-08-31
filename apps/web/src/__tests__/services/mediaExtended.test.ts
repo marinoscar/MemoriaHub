@@ -31,6 +31,8 @@ import {
   bulkUpdateMedia,
   bulkTags,
   bulkDelete,
+  bulkEnhance,
+  bulkEnhanceByFilter,
   reverseGeocode,
   searchPlaces,
   getDashboard,
@@ -567,6 +569,140 @@ describe('bulkDelete', () => {
 
     const result = await bulkDelete({ circleId: 'circle-1', ids: ['item-1', 'item-2', 'item-3'] });
     expect(result.deleted).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bulkEnhance (epic #420, issue #422)
+// ---------------------------------------------------------------------------
+
+describe('bulkEnhance', () => {
+  it('POSTs to /media/bulk/enhance with the ids and params, and returns the batch result', async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post('*/api/media/bulk/enhance', async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          batchId: 'batch-1',
+          requested: 3,
+          queued: 2,
+          skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 1 },
+        });
+      }),
+    );
+
+    const result = await bulkEnhance({
+      circleId: 'circle-1',
+      ids: ['item-1', 'item-2', 'item-3'],
+      params: { preset: 'restore_old_photo' },
+    });
+
+    expect(capturedBody).toEqual({
+      circleId: 'circle-1',
+      ids: ['item-1', 'item-2', 'item-3'],
+      params: { preset: 'restore_old_photo' },
+    });
+    expect(result).toEqual({
+      batchId: 'batch-1',
+      requested: 3,
+      queued: 2,
+      skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 1 },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bulkEnhanceByFilter (issue #424) — and its private serializeMediaFilter
+// boolean-coercion contract.
+// ---------------------------------------------------------------------------
+
+describe('bulkEnhanceByFilter', () => {
+  it('POSTs to /media/bulk/enhance/by-filter and returns the batch result', async () => {
+    server.use(
+      http.post('*/api/media/bulk/enhance/by-filter', async () => {
+        return HttpResponse.json({
+          batchId: 'batch-2',
+          requested: 40,
+          queued: 40,
+          skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 0 },
+        });
+      }),
+    );
+
+    const result = await bulkEnhanceByFilter({ circleId: 'circle-1', tag: 'vacation' });
+    expect(result.batchId).toBe('batch-2');
+    expect(result.queued).toBe(40);
+  });
+
+  /**
+   * The API's shared `mediaFilterFields` shape declares the five boolean
+   * filter keys as `z.string()` (it is shared with the GET /api/media query
+   * string, where every value necessarily arrives as text) — a real JSON
+   * `true` in a POST body fails that validation and 400s. This is a live bug
+   * today on the sibling `addAlbumItemsByFilter` (issue #473);
+   * `serializeMediaFilter` is the fix applied on THIS path only, and this test
+   * is what keeps it from regressing back to sending real booleans.
+   */
+  it("coerces the five boolean filter keys to 'true'/'false' strings before sending", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post('*/api/media/bulk/enhance/by-filter', async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          batchId: 'batch-3',
+          requested: 5,
+          queued: 5,
+          skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 0 },
+        });
+      }),
+    );
+
+    await bulkEnhanceByFilter({
+      circleId: 'circle-1',
+      favorite: true,
+      missingGeo: false,
+      missingCapturedAt: true,
+      missingCamera: false,
+      noFaces: true,
+    } as Parameters<typeof bulkEnhanceByFilter>[0]);
+
+    expect(capturedBody).toMatchObject({
+      circleId: 'circle-1',
+      favorite: 'true',
+      missingGeo: 'false',
+      missingCapturedAt: 'true',
+      missingCamera: 'false',
+      noFaces: 'true',
+    });
+    // Never the raw booleans a naive passthrough would have sent.
+    expect(capturedBody).not.toMatchObject({ favorite: true });
+  });
+
+  it('leaves non-boolean filter fields (and circleId/params) untouched', async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post('*/api/media/bulk/enhance/by-filter', async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          batchId: 'batch-4',
+          requested: 1,
+          queued: 1,
+          skipped: { notPhoto: 0, tooLarge: 0, alreadyLive: 0 },
+        });
+      }),
+    );
+
+    await bulkEnhanceByFilter({
+      circleId: 'circle-1',
+      tag: 'vacation',
+      params: { strength: 'strong' },
+    } as Parameters<typeof bulkEnhanceByFilter>[0]);
+
+    expect(capturedBody).toMatchObject({
+      circleId: 'circle-1',
+      tag: 'vacation',
+      params: { strength: 'strong' },
+    });
   });
 });
 

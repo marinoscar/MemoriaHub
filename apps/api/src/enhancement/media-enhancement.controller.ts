@@ -26,6 +26,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParamsDto } from './dto/enhance-params.dto';
+import { BulkEnhanceDto } from './dto/bulk-enhance.dto';
+import { BulkEnhanceByFilterDto } from './dto/bulk-enhance-by-filter.dto';
 import { ApplyEnhancementDto } from './dto/apply-enhancement.dto';
 import {
   ENHANCEMENT_STATUS_ALIASES,
@@ -46,6 +48,10 @@ export class MediaEnhancementController {
   // 'media' prefix as MediaController, whose @Get(':id') would otherwise
   // shadow /media/enhancements — same convention (and same reason) as the
   // static-route block in media.controller.ts.
+  //
+  // This applies to EVERY literal-prefixed route here, not just GET routes:
+  // POST 'bulk/enhance' must also live in this block, or 'bulk' is captured as
+  // the :id param of a later-registered parameterised route.
   // ===========================================================================
 
   /**
@@ -79,6 +85,14 @@ export class MediaEnhancementController {
       '`in_progress` (pending, processing), `awaiting_decision` (ready), ' +
       '`terminal` (applied, discarded, expired).',
   })
+  @ApiQuery({
+    name: 'batchId',
+    required: false,
+    type: String,
+    format: 'uuid',
+    description:
+      'Narrow to one bulk-enhance batch (see GET /api/enhancement-batches). Composes with `status`.',
+  })
   @ApiQuery({ name: 'page', required: false, type: Number, description: 'Default 1' })
   @ApiQuery({ name: 'pageSize', required: false, type: Number, description: 'Default 24, max 50' })
   @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'updatedAt'], description: 'Default createdAt' })
@@ -91,6 +105,83 @@ export class MediaEnhancementController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.service.listEnhancements(query, user);
+  }
+
+  /**
+   * POST /api/media/bulk/enhance — queue an enhancement per eligible item in a
+   * selection. Declared in the static-routes block so `bulk` is never captured
+   * as an :id param.
+   */
+  @Post('bulk/enhance')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Queue AI enhancements for a selection of photos (bulk)',
+    description:
+      'Creates a batch and queues one enhancement per ELIGIBLE item. Unlike the single-item ' +
+      'endpoint, an ineligible item never fails the request: non-photos, oversized images, ' +
+      'and items that already have a live (pending/processing/ready) enhancement are skipped ' +
+      'and reported per-reason in `skipped`. In particular an existing `ready` result is NEVER ' +
+      'superseded — it is a completed, already-billed render awaiting a human decision. ' +
+      'The batch row is created even when nothing is eligible (`queued: 0`), so the caller ' +
+      'always gets a pollable batch id explaining the outcome. Distinct ids are counted ' +
+      'against the `pictureEnhancement.maxBatchSize` limit (also surfaced on GET /api/features).',
+  })
+  @ApiResponse({
+    status: 202,
+    description:
+      'Batch created: { batchId, requested, queued, skipped: { notPhoto, tooLarge, alreadyLive } }',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Feature disabled / no model configured / selection exceeds maxBatchSize',
+  })
+  @ApiResponse({ status: 403, description: 'Caller is not a collaborator of the circle' })
+  @ApiResponse({ status: 404, description: 'One or more ids are not live items of the circle' })
+  async startBatch(@Body() dto: BulkEnhanceDto, @CurrentUser() user: RequestUser) {
+    return this.service.startBatch(dto, user);
+  }
+
+  /**
+   * POST /api/media/bulk/enhance/by-filter — queue an enhancement per photo
+   * matching a filter. Declared in the static-routes block for the same reason
+   * as `bulk/enhance` above: `bulk` must never be captured as an :id param.
+   */
+  @Post('bulk/enhance/by-filter')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Queue AI enhancements for every photo matching a filter (bulk)',
+    description:
+      'Resolves the filter server-side and runs the SAME batch machinery as ' +
+      'POST /api/media/bulk/enhance — identical response shape, identical skip ' +
+      'partition, identical priority/dedup behaviour. Accepts the same filter fields ' +
+      'as GET /api/media (note the boolean-ish fields are query-string oriented and ' +
+      'arrive as the strings "true"/"false", matching the album by-filter endpoint). ' +
+      'The matched set EXCLUDES trashed, archived, and non-photo items, all in SQL, ' +
+      'so the count checked against the cap is the count that actually runs. ' +
+      'A filter matching more than `pictureEnhancement.maxBatchSize` photos is ' +
+      'REFUSED with 400 — never silently truncated to the first N — and the ' +
+      'response carries `details.matchedCount` and `details.maxBatchSize` so the ' +
+      'caller can narrow the filter. A filter matching zero photos is likewise a 400.',
+  })
+  @ApiResponse({
+    status: 202,
+    description:
+      'Batch created: { batchId, requested, queued, skipped: { notPhoto, tooLarge, alreadyLive } }',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Feature disabled / no model configured / no photos match / match count exceeds ' +
+      'maxBatchSize (with details.matchedCount and details.maxBatchSize)',
+  })
+  @ApiResponse({ status: 403, description: 'Caller is not a collaborator of the circle' })
+  async startBatchByFilter(
+    @Body() dto: BulkEnhanceByFilterDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.service.startBatchByFilter(dto, user);
   }
 
   // ===========================================================================

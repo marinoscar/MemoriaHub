@@ -707,6 +707,11 @@ export const systemSettingsSchema = z.object({
     // 168h (7 days). The enhancements hub is an inbox users work through over
     // time; a 3-day window destroyed staged previews before they were reviewed.
     retentionHours: z.number().int().min(1).max(720).default(168),
+    // Bulk enhance (epic #420, issue #421): the AUTHORITATIVE cap on how many
+    // items one POST /api/media/bulk/enhance may queue. Each queued item is a
+    // separately-billed gpt-image-1 call, so the cap is the admin's spend
+    // guardrail — the DTO's own max(200) is only a schema backstop.
+    maxBatchSize: z.number().int().min(1).max(200).default(25),
   }).optional().default({
     defaultQuality: 'high',
     defaultStrength: 'balanced',
@@ -715,6 +720,7 @@ export const systemSettingsSchema = z.object({
     blockReplaceOnDownscale: false,
     maxInputMegapixels: 50,
     retentionHours: 168,
+    maxBatchSize: 25,
   }),
   // Node backup change feed (issue #310, epic #308). Read by
   // NodeBackupQueryService via the cached getSettings() call.
@@ -1033,6 +1039,7 @@ export const systemSettingsPatchSchema = z.object({
     blockReplaceOnDownscale: z.boolean().optional(),
     maxInputMegapixels: z.number().min(1).max(100).optional(),
     retentionHours: z.number().int().min(1).max(720).optional(),
+    maxBatchSize: z.number().int().min(1).max(200).optional(),
   }).optional(),
   backup: z.object({
     maxPageSize: z.number().int().min(50).max(500).optional(),

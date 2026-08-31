@@ -43,6 +43,7 @@ import {
   ReplaceDownscaleNotice,
   describeResolutionLoss,
 } from '../../components/media/ReplaceDownscaleNotice';
+import { RecentBatchesCard } from './RecentBatchesCard';
 
 const PAGE_SIZE = 24;
 
@@ -452,6 +453,14 @@ export function EnhancementCard({
 
 interface PendingEnhancementsTabProps {
   circleId: string;
+  /**
+   * Narrow the inbox to one bulk-enhance batch (epic #420, issue #423). Set
+   * from the page's `?batchId=` param when a user arrives from a batch's
+   * progress page. Absent — the normal case — leaves behaviour untouched.
+   */
+  batchId?: string;
+  /** Drop the batch filter (and its URL param). Required when `batchId` is set. */
+  onClearBatchFilter?: () => void;
 }
 
 /**
@@ -460,7 +469,11 @@ interface PendingEnhancementsTabProps {
  *
  * Multi-select and bulk actions are deliberately absent — they land in PR2.
  */
-export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps) {
+export function PendingEnhancementsTab({
+  circleId,
+  batchId,
+  onClearBatchFilter,
+}: PendingEnhancementsTabProps) {
   const { pictureEnhancement } = useFeatureFlags();
   const [status, setStatus] = useState<'all' | EnhancementStatusFilter>('all');
   const [sortOrder, setSortOrder] = useState<EnhancementSortOrder>('desc');
@@ -476,17 +489,18 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
 
   useEffect(() => {
     setPage(1);
-  }, [circleId, status, sortOrder]);
+  }, [circleId, status, sortOrder, batchId]);
 
   const params = useMemo(
     () => ({
       circleId,
       ...(status !== 'all' ? { status } : {}),
+      ...(batchId ? { batchId } : {}),
       page,
       pageSize: PAGE_SIZE,
       sortOrder,
     }),
-    [circleId, status, page, sortOrder],
+    [circleId, status, batchId, page, sortOrder],
   );
 
   const { items, meta, isLoading, error, polling, refresh } = useEnhancements(params);
@@ -597,6 +611,37 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
 
   return (
     <Box>
+      {/* Hidden while a batch filter is active — the chip below already says
+          which batch you are looking at, and offering a list of batches to
+          jump to from inside one is noise. */}
+      {!batchId && <RecentBatchesCard circleId={circleId} />}
+
+      {/* ---------- Batch filter ----------
+          Someone arriving from a batch's progress page sees a NARROWED inbox,
+          which without this reads as "where did my other enhancements go?".
+          The chip names why, and "Show all" is the way back out. */}
+      {batchId && (
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ mb: 2, alignItems: 'center', flexWrap: 'wrap' }}
+        >
+          <Chip
+            color="primary"
+            variant="outlined"
+            icon={<AutoFixHighIcon />}
+            label={`Showing ${meta?.totalItems ?? items.length} result${
+              (meta?.totalItems ?? items.length) === 1 ? '' : 's'
+            } from one batch`}
+            onDelete={onClearBatchFilter}
+          />
+          <Button size="small" onClick={onClearBatchFilter}>
+            Show all
+          </Button>
+        </Stack>
+      )}
+
       {/* ---------- Filters ---------- */}
       <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <FormControl size="small" sx={{ minWidth: 180 }}>
@@ -650,12 +695,28 @@ export function PendingEnhancementsTab({ circleId }: PendingEnhancementsTabProps
           <Typography variant="h6" gutterBottom>
             Nothing waiting for you
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 480, mx: 'auto' }}>
-            AI Enhance improves a photo&apos;s exposure, color, clarity and noise.
-            Start one from a photo&apos;s viewer or the gallery selection bar — the
-            result waits here for you to compare and decide, and nothing is
-            changed until you do.
-          </Typography>
+          {batchId ? (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ maxWidth: 480, mx: 'auto' }}
+            >
+              This batch has no results here yet. Its photos may still be
+              enhancing, or you may have already dealt with them — clear the
+              batch filter to see everything.
+            </Typography>
+          ) : (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ maxWidth: 480, mx: 'auto' }}
+            >
+              AI Enhance improves a photo&apos;s exposure, color, clarity and
+              noise. Start one from a photo&apos;s viewer or the gallery
+              selection bar — the result waits here for you to compare and
+              decide, and nothing is changed until you do.
+            </Typography>
+          )}
         </Box>
       ) : (
         <Stack spacing={2}>

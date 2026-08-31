@@ -1,6 +1,7 @@
 import { api } from './api';
 import { createTrashEmptyRun } from './trashEmptyRuns';
 import type { CreateTrashEmptyRunResponse } from '../types/trashEmptyRuns';
+import type { EnhanceParams } from './enhance';
 import type {
   MediaItem,
   MediaListResponse,
@@ -399,6 +400,110 @@ export interface BulkRerunDto {
 
 export async function bulkRerunTags(dto: BulkRerunDto): Promise<{ queued: number }> {
   return api.post<{ queued: number }>('/media/bulk/tags/rerun', dto);
+}
+
+/**
+ * Per-reason breakdown of the ids the server declined to queue. The three
+ * counts plus `queued` always sum to `requested` — an ineligible item never
+ * fails the whole batch (unlike the single-item endpoint, which 400s).
+ */
+export interface BulkEnhanceSkipped {
+  /** Not a photo (or its storage object is not an image). */
+  notPhoto: number;
+  /** Over the `pictureEnhancement.maxInputMegapixels` guard. */
+  tooLarge: number;
+  /**
+   * Already has a live (pending/processing/ready) enhancement. A `ready` result
+   * is a completed, already-billed render awaiting a decision and is never
+   * superseded by a batch.
+   */
+  alreadyLive: number;
+}
+
+export interface BulkEnhanceResult {
+  batchId: string;
+  requested: number;
+  queued: number;
+  skipped: BulkEnhanceSkipped;
+}
+
+/**
+ * Queue one AI enhancement per eligible photo in a selection (202).
+ * One `params` object applies to the whole batch. 400 when the feature is
+ * disabled, no model is configured, or the selection exceeds
+ * `pictureEnhancement.maxBatchSize` — render the server's message.
+ */
+export async function bulkEnhance(dto: {
+  circleId: string;
+  ids: string[];
+  params?: EnhanceParams;
+}): Promise<BulkEnhanceResult> {
+  return api.post<BulkEnhanceResult>('/media/bulk/enhance', dto);
+}
+
+/**
+ * The filter half of a by-filter enhance request: the SAME shape the gallery
+ * already hands `addAlbumItemsByFilter`, with `circleId` required (the endpoint
+ * resolves the match set itself, so it cannot infer the circle).
+ */
+export type BulkEnhanceByFilterDto = AddAlbumItemsByFilterDto & {
+  circleId: string;
+  params?: EnhanceParams;
+};
+
+/**
+ * Fields the API's shared `mediaFilterFields` shape declares as
+ * `z.string().transform(...)` — query-string oriented, even in a POST body.
+ * See `serializeMediaFilter` below.
+ */
+const MEDIA_FILTER_BOOLEAN_KEYS = [
+  'favorite',
+  'missingGeo',
+  'missingCapturedAt',
+  'missingCamera',
+  'noFaces',
+] as const;
+
+/**
+ * Coerce the filter's boolean fields to the `'true'` / `'false'` STRINGS the
+ * API's `mediaFilterFields` shape parses.
+ *
+ * Those fields are `z.string().transform(...)` because the shape is shared with
+ * `GET /api/media`, where every value arrives as a query string — a real JSON
+ * `true` fails `z.string()` and the whole request 400s on validation. The web
+ * `MediaQueryParams` type models them as real booleans (correctly, for the GET
+ * path, where `URLSearchParams` stringifies them on the way out), so a POST body
+ * built from the same object has to do that stringification itself.
+ *
+ * Applied only here, on the new call — the existing `addAlbumItemsByFilter`
+ * path is left exactly as it is.
+ */
+function serializeMediaFilter(dto: BulkEnhanceByFilterDto): Record<string, unknown> {
+  const body: Record<string, unknown> = { ...dto };
+  for (const key of MEDIA_FILTER_BOOLEAN_KEYS) {
+    const value = body[key];
+    if (typeof value === 'boolean') body[key] = value ? 'true' : 'false';
+  }
+  return body;
+}
+
+/**
+ * Queue one AI enhancement per eligible photo MATCHING A FILTER (202) — the
+ * server resolves the match set, so photos the user has not scrolled to (and
+ * cannot see) are included. Issue #424.
+ *
+ * The endpoint never truncates to the cap: over `pictureEnhancement.maxBatchSize`
+ * it REFUSES with a 400 whose `details` carries `{ matchedCount, maxBatchSize }`,
+ * and a filter matching nothing is a 400 as well. `ApiError` already preserves
+ * `details`, so a caller can render the real numbers rather than a bare message.
+ */
+export async function bulkEnhanceByFilter(
+  dto: BulkEnhanceByFilterDto,
+): Promise<BulkEnhanceResult> {
+  return api.post<BulkEnhanceResult>(
+    '/media/bulk/enhance/by-filter',
+    serializeMediaFilter(dto),
+  );
 }
 
 export async function bulkRerunFaces(dto: BulkRerunDto): Promise<{ queued: number }> {
