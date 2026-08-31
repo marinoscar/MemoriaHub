@@ -33,7 +33,7 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
-import { buildMediaWhere, wherePeople } from '../search/media-where.builder';
+import { andWhere, buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { ListEnhancementBatchesQuery } from './dto/list-enhancement-batches-query.dto';
 import {
   ListEnhancementsQuery,
@@ -354,13 +354,14 @@ export class MediaEnhancementService {
    *      that actually runs — counting videos and then skipping them downstream
    *      would make the cap check lie.
    *
-   *   3. The two fragments are AND-NESTED, never spread-merged. `buildMediaWhere`
-   *      emits a top-level `AND` whenever any filter is set, and `wherePeople`
-   *      emits one in 'all' mode; `{...a, ...b}` would let the people clause
-   *      silently CLOBBER the entire rest of the filter, quietly widening the
-   *      match set. (The `addAlbumItemsByFilter` precedent spreads them — safe
-   *      there only by luck, and not a pattern worth copying into a path that
-   *      spends money.)
+   *   3. The fragments are AND-NESTED via the shared `andWhere` helper, never
+   *      spread-merged. `buildMediaWhere` emits a top-level `AND` whenever any
+   *      filter is set, and `wherePeople` emits one in 'all' mode; `{...a, ...b}`
+   *      would let the people clause silently CLOBBER the entire rest of the
+   *      filter, quietly widening the match set — the issue #431 defect that
+   *      `andWhere` exists to make unrepresentable. `listMedia` and
+   *      `addAlbumItemsByFilter` compose through the same helper (#472), so
+   *      there is now exactly one spelling of this rule.
    *
    * A `type: 'video'` filter is not overridden into `photo`; it AND-composes to
    * an empty match set and gets the honest zero-match 400 below.
@@ -425,16 +426,22 @@ export class MediaEnhancementService {
         ? wherePeople(effectivePersonIds, dto.peopleMatch ?? 'any')
         : {};
 
-    const where: Prisma.MediaItemWhereInput = {
-      circleId: dto.circleId,
-      // RULE 1 — never spend money on trashed or archived photos.
-      deletedAt: null,
-      archivedAt: null,
-      // RULE 2 — photo-only in the SQL so the shown count is the run count.
-      type: MediaType.photo,
-      // RULE 3 — nest, never spread.
-      AND: [filterWhere, peopleWhere].filter((f) => Object.keys(f).length > 0),
-    };
+    // RULE 3 — compose through the SHARED `andWhere` helper, never a spread.
+    // It pushes each fragment into the `AND` array, which is what stops a
+    // people clause (its own top-level `AND` in 'all' mode) from clobbering
+    // the rest of the filter — the issue #431 defect.
+    const where = andWhere(
+      {
+        circleId: dto.circleId,
+        // RULE 1 — never spend money on trashed or archived photos.
+        deletedAt: null,
+        archivedAt: null,
+        // RULE 2 — photo-only in the SQL so the shown count is the run count.
+        type: MediaType.photo,
+      },
+      filterWhere,
+      peopleWhere,
+    );
 
     const matchedCount = await this.prisma.mediaItem.count({ where });
 
