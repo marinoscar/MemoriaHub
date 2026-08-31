@@ -359,8 +359,9 @@ export class MediaEnhancementService {
    *      filter is set, and `wherePeople` emits one in 'all' mode; `{...a, ...b}`
    *      would let the people clause silently CLOBBER the entire rest of the
    *      filter, quietly widening the match set — the issue #431 defect that
-   *      `andWhere` exists to make unrepresentable. (The `addAlbumItemsByFilter`
-   *      precedent still spreads them; that is tracked separately in #473.)
+   *      `andWhere` exists to make unrepresentable. `listMedia` and
+   *      `addAlbumItemsByFilter` compose through the same helper (#472), so
+   *      there is now exactly one spelling of this rule.
    *
    * A `type: 'video'` filter is not overridden into `photo`; it AND-composes to
    * an empty match set and gets the honest zero-match 400 below.
