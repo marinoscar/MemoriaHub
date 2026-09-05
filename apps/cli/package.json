@@ -37,8 +37,8 @@
   },
   "optionalDependencies": {
     "exiftool-vendored": "35.21.0",
-    "onnxruntime-node": "1.27.0",
-    "sharp": "0.35.3",
+    "onnxruntime-node": "1.29.0",
+    "sharp": "0.35.4",
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {
@@ -46,7 +46,7 @@
     "@types/cli-progress": "^3.11.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.3",
-    "@types/react": "19",
+    "@types/react": "^19.2.18",
     "ink-testing-library": "^4.0.0",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.11",
