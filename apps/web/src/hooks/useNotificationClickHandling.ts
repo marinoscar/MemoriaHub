@@ -12,10 +12,11 @@
  *      circleId }` to it.
  *   2. A click on a toast raised by the PAGE fallback (`new Notification`),
  *      routed here through `setNotificationOpenHandler`.
- *   3. A COLD OPEN: no tab was open, so the worker opened `${link}?n=<id>`.
- *      The id is marked read and the `n` param stripped (replace, not push).
- *      The circle is not carried on that URL, so a cold open lands on the link
- *      in whatever circle is active — the same as following a bookmark.
+ *   3. A COLD OPEN: no tab was open, so the worker opened
+ *      `${link}?n=<id>&c=<circleId>` (`c` only when the row has a circle).
+ *      The id is marked read, the active circle switched to `c`, and both
+ *      params stripped (replace, not push). The window is already AT the link,
+ *      so there is nothing left to navigate to — only the circle to fix.
  *
  * CIRCLE BEFORE NAVIGATE. Review-queue links (`/bursts`, `/duplicates`, …) are
  * circle-agnostic routes that render the ACTIVE circle, so the circle must be
@@ -38,6 +39,9 @@ export const NOTIFICATION_CLICK_MESSAGE = 'notification-click';
 
 /** Query param a cold-opened window carries the clicked notification id in. */
 export const NOTIFICATION_ID_PARAM = 'n';
+
+/** Query param a cold-opened window carries the notification's circle id in. */
+export const NOTIFICATION_CIRCLE_PARAM = 'c';
 
 export interface NotificationTarget {
   circleId: string | null;
@@ -110,13 +114,18 @@ export function useNotificationClickHandling(): void {
     };
   }, [openTarget]);
 
-  // 3. Cold open via `?n=<id>`.
+  // 3. Cold open via `?n=<id>&c=<circleId>`. The window is already on the
+  // link, so `openTarget` is called with no link: it only switches circle
+  // (with the same stale-circle guard as every other entry point).
   const clickedId = searchParams.get(NOTIFICATION_ID_PARAM);
+  const clickedCircleId = searchParams.get(NOTIFICATION_CIRCLE_PARAM);
   useEffect(() => {
-    if (!clickedId) return;
-    void markNotificationReadById(clickedId);
+    if (clickedId === null && clickedCircleId === null) return;
+    if (clickedId) void markNotificationReadById(clickedId);
+    if (clickedCircleId) openTarget({ circleId: clickedCircleId, link: null });
     const next = new URLSearchParams(searchParams);
     next.delete(NOTIFICATION_ID_PARAM);
+    next.delete(NOTIFICATION_CIRCLE_PARAM);
     setSearchParams(next, { replace: true });
-  }, [clickedId, searchParams, setSearchParams]);
+  }, [clickedId, clickedCircleId, searchParams, setSearchParams, openTarget]);
 }
