@@ -44,6 +44,15 @@ export interface NotificationPreferencesValue {
   types?: Record<string, boolean>;
   /** Re-enable `on_media_enriched` workflow-run rows. Absent = FALSE. */
   workflowMicroRuns?: boolean;
+  /**
+   * Web Push channel preferences (epic #481, issue #484). Absent = enabled,
+   * for the sub-namespace, `enabled`, and every per-type key alike. Independent
+   * of the inbox switches above: disabling push never dismisses inbox rows.
+   */
+  push?: {
+    enabled?: boolean;
+    types?: Record<string, boolean>;
+  };
 }
 
 /** One inclusive `YYYY-MM-DD` date window a user never wants resurfaced. */
@@ -395,6 +404,12 @@ export interface SystemSettingsValue {
     retentionDays: number;
     /** Forensic escape hatch: when false the nightly cron never enqueues. */
     purgeEnabled: boolean;
+    /** Kill switch for in-page browser toasts (epic #481, #484). */
+    browserEnabled?: boolean;
+    /** Kill switch for every Web Push delivery (epic #481, #484). */
+    pushEnabled?: boolean;
+    /** Types whose push channel (and, unless mandatory, inbox row) is suppressed. */
+    disabledTypes?: string[];
   };
   pictureEnhancement?: {
     defaultQuality: 'low' | 'medium' | 'high';
@@ -825,6 +840,9 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettingsValue = {
   notifications: {
     retentionDays: 30,
     purgeEnabled: true,
+    browserEnabled: true,
+    pushEnabled: true,
+    disabledTypes: [],
   },
   pictureEnhancement: {
     defaultQuality: 'high',

@@ -934,6 +934,65 @@ describe('SystemSettingsService', () => {
       });
     });
 
+    describe('notifications channel kill switches (epic #481, #484)', () => {
+      beforeEach(() => {
+        mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+        mockPrisma.systemSettings.update.mockResolvedValue({
+          ...mockSystemSettings,
+          version: 2,
+        } as any);
+      });
+
+      it('survives the PATCH wire DTO and merges field-wise, keeping retention', async () => {
+        const throughWire = patchSystemSettingsSchema.parse({
+          notifications: { pushEnabled: false, disabledTypes: ['upload_completed'] },
+        });
+        expect((throughWire as any).notifications).toEqual({
+          pushEnabled: false,
+          disabledTypes: ['upload_completed'],
+        });
+
+        await service.patchSettings(throughWire as any, mockUserId);
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).notifications).toEqual({
+          retentionDays: 30,
+          purgeEnabled: true,
+          browserEnabled: true,
+          pushEnabled: false,
+          disabledTypes: ['upload_completed'],
+        });
+      });
+
+      it('defaults every switch ON for a stored value that predates them', async () => {
+        mockPrisma.systemSettings.findUnique.mockResolvedValue({
+          ...mockSystemSettings,
+          value: {
+            ...(DEFAULT_SYSTEM_SETTINGS as any),
+            notifications: { retentionDays: 10, purgeEnabled: false },
+          },
+        } as any);
+
+        await service.patchSettings({ ui: { allowUserThemeOverride: true } } as any, mockUserId);
+
+        const updateCall = mockPrisma.systemSettings.update.mock.calls[0][0];
+        expect((updateCall.data.value as any).notifications).toEqual({
+          retentionDays: 10,
+          purgeEnabled: false,
+          browserEnabled: true,
+          pushEnabled: true,
+          disabledTypes: [],
+        });
+      });
+
+      it('rejects an unknown notification type in disabledTypes at the wire', () => {
+        expect(
+          patchSystemSettingsSchema.safeParse({ notifications: { disabledTypes: ['nope'] } })
+            .success,
+        ).toBe(false);
+      });
+    });
+
     describe('jobs.stuckThresholdMinutes handling', () => {
       // Save/restore ENRICHMENT_STUCK_MINUTES so the "applies the default (3)"
       // assertion below is deterministic regardless of the ambient test env.
