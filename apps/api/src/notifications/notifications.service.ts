@@ -57,6 +57,7 @@ import { Notification, NotificationType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationItemDto } from './dto/notification-response.dto';
+import { isMandatoryType } from './notification-channels';
 import { NotificationDispatchService } from './notification-dispatch.service';
 import { NotificationPolicyService } from './notification-policy.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
@@ -87,6 +88,12 @@ const UNREAD_COUNT_CACHE_TTL_MS = 2000;
  * Worst case that costs a few extra COUNT queries — never unbounded memory.
  */
 const UNREAD_COUNT_CACHE_MAX_ENTRIES = 5000;
+
+/**
+ * Rows per statement for dismissTypesGlobally() (issue #489). Bounds each
+ * UPDATE's lock set and WAL burst; the loop runs until a short batch.
+ */
+export const GLOBAL_DISMISS_BATCH_SIZE = 5000;
 
 // -----------------------------------------------------------------------------
 // Producer input shapes (consumed by #246 / #247)
@@ -879,6 +886,64 @@ export class NotificationsService {
         AND dismissed_at IS NULL
         AND type::text = ANY(${types.map((t) => String(t))}::text[])
     `);
+  }
+
+  /**
+   * App-wide counterpart of dismissTypesForUser() (issue #489): dismiss every
+   * LIVE row of the given types, for every user.
+   *
+   * WHY: when an admin adds a type to `notifications.disabledTypes`, the inbox
+   * gate stops NEW rows, but rows already live would stay forever — for the
+   * review_queue_* STATE types especially, since the reconcile that would
+   * otherwise drain them to zero no longer refreshes a suppressed type. The
+   * admin's intent is "stop showing this", the same reasoning as #251's
+   * per-user dismiss-on-disable.
+   *
+   * MANDATORY types are filtered out here, not only by the caller: the policy
+   * never suppresses their inbox row, so dismissing them would silently hide
+   * something the kill switch is documented not to touch.
+   *
+   * Batched (GLOBAL_DISMISS_BATCH_SIZE rows per statement via an id subquery)
+   * so no single UPDATE sweeps an unbounded set. Implies read, exactly like
+   * dismissTypesForUser, so a dismissed row never lingers in an unread count.
+   * `updated_at` is set explicitly (no DB trigger; the retention purge keys off
+   * it). Runs on `tx` when given, so the caller can keep it atomic with the
+   * settings write. The caller must call invalidateAllUnreadCounts() AFTER its
+   * transaction commits.
+   */
+  async dismissTypesGlobally(
+    types: readonly NotificationType[],
+    tx: Prisma.TransactionClient = this.prisma,
+  ): Promise<number> {
+    const eligible = [...new Set(types)].filter((t) => !isMandatoryType(t)).map(String);
+    if (eligible.length === 0) return 0;
+
+    let total = 0;
+    for (;;) {
+      const affected = await tx.$executeRaw(Prisma.sql`
+        UPDATE notifications
+        SET dismissed_at = now(),
+            read_at = COALESCE(read_at, now()),
+            updated_at = now()
+        WHERE id IN (
+          SELECT id FROM notifications
+          WHERE dismissed_at IS NULL
+            AND type::text = ANY(${eligible}::text[])
+          LIMIT ${GLOBAL_DISMISS_BATCH_SIZE}
+        )
+      `);
+      total += affected;
+      if (affected < GLOBAL_DISMISS_BATCH_SIZE) break;
+    }
+    return total;
+  }
+
+  /**
+   * Drop EVERY cached badge count — after an app-wide dismissal, any user's
+   * count may have changed. Cheap: the cache is a bounded in-process Map.
+   */
+  invalidateAllUnreadCounts(): void {
+    this.unreadCountCache.clear();
   }
 
   /**
