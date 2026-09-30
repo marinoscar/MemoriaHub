@@ -7,5 +7,7 @@
     "allowSyntheticDefaultImports": true,
     "strict": true
   },
-  "include": ["vite.config.ts"]
+  // `pwa/` is config-side code (issue #482): `vite.config.ts` imports it and
+  // the React tree never does.
+  "include": ["vite.config.ts", "pwa/**/*.ts"]
 }
