@@ -46,8 +46,48 @@ vi.mock('../../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
+vi.mock('../../../hooks/useNotificationConfig', () => ({
+  useNotificationConfig: vi.fn(),
+}));
+
+vi.mock('../../../hooks/useNotificationCapability', () => ({
+  useNotificationCapability: vi.fn(),
+}));
+
+vi.mock('../../../services/pushSubscription', () => ({
+  requestPermissionAndSyncPush: vi.fn(),
+}));
+
 import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
 import { usePermissions } from '../../../hooks/usePermissions';
+import { useNotificationConfig } from '../../../hooks/useNotificationConfig';
+import { useNotificationCapability } from '../../../hooks/useNotificationCapability';
+import { requestPermissionAndSyncPush } from '../../../services/pushSubscription';
+import { deviceNotificationState } from '../NotificationSettings';
+import type { NotificationClientConfig } from '../../../types/notifications';
+import type { NotificationCapability } from '../../../hooks/useNotificationCapability';
+
+const mockUseNotificationConfig = vi.mocked(useNotificationConfig);
+const mockUseNotificationCapability = vi.mocked(useNotificationCapability);
+const mockRequestPermissionAndSync = vi.mocked(requestPermissionAndSyncPush);
+const refreshCapability = vi.fn();
+
+function mockPushConfig(config: NotificationClientConfig | null) {
+  mockUseNotificationConfig.mockReturnValue({
+    config,
+    isLoading: config === null,
+    error: null,
+    refresh: vi.fn().mockResolvedValue(undefined),
+  });
+}
+
+function mockDevice(capability: NotificationCapability) {
+  mockUseNotificationCapability.mockReturnValue({
+    capability,
+    permission: capability === 'granted' ? 'granted' : capability === 'denied' ? 'denied' : 'default',
+    refresh: refreshCapability,
+  });
+}
 
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUsePermissions = vi.mocked(usePermissions);
@@ -97,6 +137,9 @@ function renderComponent(
 }
 
 beforeEach(() => {
+  mockPushConfig({ pushEnabled: false, vapidPublicKey: null, browserEnabled: true, pushTypes: [] });
+  mockDevice('default');
+  mockRequestPermissionAndSync.mockResolvedValue('granted');
   mockUseFeatureFlags.mockReturnValue(mockFlags());
   mockUsePermissions.mockReturnValue({
     permissions: new Set(),
@@ -518,5 +561,182 @@ describe('NotificationSettings — feature-flag loading/error states', () => {
     expect(
       screen.getByRole('switch', { name: /uploads finished notifications/i }),
     ).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Browser & push (issue #486)
+// ---------------------------------------------------------------------------
+
+const PUSH_CONFIG: NotificationClientConfig = {
+  pushEnabled: true,
+  vapidPublicKey: 'BKey',
+  browserEnabled: true,
+  pushTypes: ['upload_completed', 'share_expiring'],
+};
+
+describe('NotificationSettings — this device', () => {
+  it('offers the permission prompt in the default state and re-reads afterwards', async () => {
+    mockPushConfig(PUSH_CONFIG);
+    renderComponent(baseSettings());
+    fireEvent.click(screen.getByRole('button', { name: /allow notifications/i }));
+    await waitFor(() => expect(mockRequestPermissionAndSync).toHaveBeenCalledWith(PUSH_CONFIG));
+    await waitFor(() => expect(refreshCapability).toHaveBeenCalled());
+  });
+
+  it('explains a denied permission with per-browser remedies and no prompt button', () => {
+    mockDevice('denied');
+    renderComponent(baseSettings());
+    expect(screen.getByText(/notifications are blocked on this device/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /allow notifications/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the Add to Home Screen walkthrough on an iOS tab', () => {
+    mockDevice('ios-needs-install');
+    renderComponent(baseSettings());
+    expect(screen.getByText(/add this app to your home screen/i)).toBeInTheDocument();
+  });
+
+  it('says so when an administrator turned browser notifications off', () => {
+    mockDevice('admin-disabled');
+    renderComponent(baseSettings());
+    expect(
+      screen.getByText(/browser notifications are turned off for this application/i),
+    ).toBeInTheDocument();
+  });
+
+  it.each<NotificationCapability>([
+    'admin-disabled',
+    'insecure-context',
+    'unsupported',
+    'sw-unavailable',
+    'denied',
+    'default',
+    'granted',
+  ])('deviceNotificationState(%s) has copy', (capability) => {
+    expect(deviceNotificationState(capability)?.title).toBeTruthy();
+  });
+
+  it('deviceNotificationState(ios-needs-install) defers to the walkthrough panel', () => {
+    expect(deviceNotificationState('ios-needs-install')).toBeNull();
+  });
+});
+
+describe('NotificationSettings — push preferences', () => {
+  it('disables the push master and offers no per-type push when the server has push off', () => {
+    renderComponent(baseSettings());
+    const master = screen.getByRole('switch', { name: /^push notifications$/i });
+    expect(master).toBeDisabled();
+    expect(master).not.toBeChecked();
+    expect(screen.getByText(/not available on this server/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('switch', { name: /uploads finished push notifications/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders nothing for push until the config has loaded', () => {
+    mockPushConfig(null);
+    renderComponent(baseSettings());
+    expect(screen.queryByRole('switch', { name: /^push notifications$/i })).not.toBeInTheDocument();
+  });
+
+  it('offers a per-type push switch only for pushTypes, ON when absent', () => {
+    mockPushConfig(PUSH_CONFIG);
+    renderComponent(baseSettings());
+    expect(screen.getByRole('switch', { name: /^push notifications$/i })).toBeChecked();
+    expect(
+      screen.getByRole('switch', { name: /uploads finished push notifications/i }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('switch', { name: /expiring shares push notifications/i }),
+    ).toBeChecked();
+    expect(
+      screen.queryByRole('switch', { name: /burst photos push notifications/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('turning a type\'s push off PATCHes exactly that key as false', async () => {
+    mockPushConfig(PUSH_CONFIG);
+    const { updateSettings } = renderComponent(baseSettings());
+    fireEvent.click(screen.getByRole('switch', { name: /uploads finished push notifications/i }));
+    await waitFor(() =>
+      expect(updateSettings).toHaveBeenCalledWith({
+        notifications: { push: { types: { upload_completed: false } } },
+      }),
+    );
+  });
+
+  it('turning a type\'s push back on DELETEs the override (null)', async () => {
+    mockPushConfig(PUSH_CONFIG);
+    const { updateSettings } = renderComponent(
+      baseSettings({ notifications: { push: { types: { upload_completed: false } } } }),
+    );
+    const sw = screen.getByRole('switch', { name: /uploads finished push notifications/i });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    await waitFor(() =>
+      expect(updateSettings).toHaveBeenCalledWith({
+        notifications: { push: { types: { upload_completed: null } } },
+      }),
+    );
+  });
+
+  it('the push master writes false to turn off and null to turn back on', async () => {
+    mockPushConfig(PUSH_CONFIG);
+    const off = renderComponent(baseSettings());
+    fireEvent.click(screen.getByRole('switch', { name: /^push notifications$/i }));
+    await waitFor(() =>
+      expect(off.updateSettings).toHaveBeenCalledWith({
+        notifications: { push: { enabled: false } },
+      }),
+    );
+  });
+
+  it('re-enabling the push master sends null', async () => {
+    mockPushConfig(PUSH_CONFIG);
+    const { updateSettings } = renderComponent(
+      baseSettings({ notifications: { push: { enabled: false } } }),
+    );
+    fireEvent.click(screen.getByRole('switch', { name: /^push notifications$/i }));
+    await waitFor(() =>
+      expect(updateSettings).toHaveBeenCalledWith({
+        notifications: { push: { enabled: null } },
+      }),
+    );
+  });
+
+  it('per-type push is disabled while the push master, the inbox type or the inbox master is off', () => {
+    mockPushConfig(PUSH_CONFIG);
+    renderComponent(
+      baseSettings({
+        notifications: { push: { enabled: false }, types: { share_expiring: false } },
+      }),
+    );
+    expect(
+      screen.getByRole('switch', { name: /uploads finished push notifications/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('switch', { name: /expiring shares push notifications/i }),
+    ).toBeDisabled();
+  });
+
+  it('inbox type off disables that type\'s push switch even with push on', () => {
+    mockPushConfig(PUSH_CONFIG);
+    renderComponent(baseSettings({ notifications: { types: { share_expiring: false } } }));
+    expect(
+      screen.getByRole('switch', { name: /expiring shares push notifications/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('switch', { name: /uploads finished push notifications/i }),
+    ).toBeEnabled();
+  });
+
+  it('the inbox master off disables every push control', () => {
+    mockPushConfig(PUSH_CONFIG);
+    renderComponent(baseSettings({ notifications: { enabled: false } }));
+    expect(screen.getByRole('switch', { name: /^push notifications$/i })).toBeDisabled();
+    expect(
+      screen.getByRole('switch', { name: /uploads finished push notifications/i }),
+    ).toBeDisabled();
   });
 });
