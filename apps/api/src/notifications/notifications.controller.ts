@@ -10,7 +10,9 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Sse,
 } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import {
   ApiOperation,
   ApiParam,
@@ -31,6 +33,7 @@ import {
 import { NotificationScopeDto } from './dto/notification-scope.dto';
 import { pushCapableTypes } from './notification-channels';
 import { NotificationPolicyService, isPushAllowed } from './notification-policy.service';
+import { NotificationStreamService, SseMessage } from './notification-stream.service';
 import { NotificationsService } from './notifications.service';
 import {
   PushSubscribeDto,
@@ -79,6 +82,8 @@ export class NotificationsController {
     private readonly pushConfig: PushConfigService,
     private readonly pushSubscriptions: PushSubscriptionService,
     private readonly policy: NotificationPolicyService,
+    // `streams`, plural: the handler below is named `stream`.
+    private readonly streams: NotificationStreamService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -112,6 +117,40 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
   ): Promise<NotificationListDto> {
     return this.notificationsService.list(userId, query);
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/notifications/stream  (SSE; before :id to avoid route conflicts)
+  // ---------------------------------------------------------------------------
+
+  @Sse('stream')
+  @Auth()
+  @ApiOperation({
+    summary: 'Live notification stream (Server-Sent Events)',
+    description:
+      'Long-lived `text/event-stream` of the CALLER\'s notifications only — the user is taken ' +
+      'from the access token, never from a parameter. Authenticate with `Authorization: Bearer` ' +
+      '(use a fetch-based SSE client; there is no query-string token).\n\n' +
+      'Events:\n' +
+      '- `notification` — `{ type: "notification", notification, unreadCount?, toast, pushed, reason }`; ' +
+      '`notification` has the same shape as a `GET /api/notifications` item, `reason` is ' +
+      '`created` | `reunread` | `incremented`.\n' +
+      '- `sync` — `{ type: "sync" }`: the caller\'s rows changed in another tab; refetch.\n' +
+      '- `ping` — `{ type: "ping" }`: keep-alive, sent on open and every 25 s; ignore it.\n\n' +
+      'Nothing is replayed after a reconnect — ' +
+      'clients must refetch the list and unread count whenever the stream (re)opens.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Event stream',
+    content: {
+      'text/event-stream': {
+        schema: { type: 'string', example: 'event: ping\nid: 1\ndata: {"type":"ping"}\n\n' },
+      },
+    },
+  })
+  stream(@CurrentUser('id') userId: string): Observable<SseMessage> {
+    return this.streams.subscribe(userId);
   }
 
   // ---------------------------------------------------------------------------
@@ -222,7 +261,9 @@ export class NotificationsController {
     @Body() dto: NotificationScopeDto,
     @CurrentUser('id') userId: string,
   ): Promise<BulkResultDto> {
-    return this.notificationsService.markAllRead(userId, dto?.circleId);
+    const result = await this.notificationsService.markAllRead(userId, dto?.circleId);
+    this.streams.publishSync(userId);
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -243,7 +284,9 @@ export class NotificationsController {
     @Body() dto: NotificationScopeDto,
     @CurrentUser('id') userId: string,
   ): Promise<BulkResultDto> {
-    return this.notificationsService.dismissAll(userId, dto?.circleId);
+    const result = await this.notificationsService.dismissAll(userId, dto?.circleId);
+    this.streams.publishSync(userId);
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -267,6 +310,7 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
   ): Promise<void> {
     await this.notificationsService.markRead(userId, id);
+    this.streams.publishSync(userId);
   }
 
   // ---------------------------------------------------------------------------
@@ -287,6 +331,7 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
   ): Promise<void> {
     await this.notificationsService.dismiss(userId, id);
+    this.streams.publishSync(userId);
   }
 
   // ---------------------------------------------------------------------------
@@ -305,5 +350,6 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
   ): Promise<void> {
     await this.notificationsService.remove(userId, id);
+    this.streams.publishSync(userId);
   }
 }

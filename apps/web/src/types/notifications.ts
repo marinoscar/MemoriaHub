@@ -124,3 +124,69 @@ export interface NotificationPreferencesPatch {
   types?: Partial<Record<NotificationType, boolean | null>>;
   workflowMicroRuns?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Live notification stream (issue #485, epic #481)
+//
+// Mirrors the payload of one `event: notification` frame on
+// `GET /api/notifications/stream`
+// (apps/api/src/notifications/notification-stream.service.ts).
+// ---------------------------------------------------------------------------
+
+/**
+ * One parsed `notification` frame.
+ *
+ * `notification` is the stored row's own shape, so it can be dropped straight
+ * into the panel list. `toast` and `pushed` are instructions about THIS live
+ * delivery, not properties of the row, which is why they sit beside it rather
+ * than on it.
+ */
+export type NotificationStreamEvent =
+  | {
+      type: 'notification';
+      notification: NotificationItem;
+      /**
+       * May the page raise an OS notification for this arrival? Server-computed
+       * from the admin policy and the user's preferences. `false` never means
+       * "suppressed" — the row exists and the bell still updates.
+       */
+      toast: boolean;
+      /**
+       * Is the same notification also going to this user over Web Push? When it
+       * is AND this browser holds an active push subscription, the service
+       * worker already shows it, so the page must not raise a second toast.
+       */
+      pushed: boolean;
+      /**
+       * The user's unread badge count AFTER this write, when the server could
+       * read it. Authoritative: when present the client uses it instead of a
+       * reconciling count request.
+       */
+      unreadCount?: number;
+      /**
+       * Why the frame was published: `created` (a new row), `reunread` (a read
+       * row became unread again — a review queue grew past what the user saw)
+       * or `incremented` (a counted row grew while still unread).
+       */
+      reason: 'created' | 'reunread' | 'incremented' | (string & {}) | null;
+    }
+  | {
+      /** "Something changed that a single row cannot describe — re-read." */
+      type: 'sync';
+    };
+
+/**
+ * `GET /api/notifications/config` — what this deployment lets a client do with
+ * browser notifications (epic #481). Authentication only; exposes the VAPID
+ * PUBLIC key and nothing secret.
+ */
+export interface NotificationClientConfig {
+  /** Web Push is configured AND the admin kill switch is on. */
+  pushEnabled: boolean;
+  /** The `applicationServerKey` for `pushManager.subscribe`; null when push is off. */
+  vapidPublicKey: string | null;
+  /** May the page raise browser toasts at all? (admin kill switch) */
+  browserEnabled: boolean;
+  /** Types the admin policy lets travel by push — the per-type push toggles offered. */
+  pushTypes: NotificationType[];
+}

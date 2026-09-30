@@ -33,6 +33,7 @@ import { randomUUID } from 'crypto';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { DEFAULT_NOTIFICATION_POLICY, NotificationPolicyService } from './notification-policy.service';
+import { NotificationStreamService } from './notification-stream.service';
 import { PushConfigService } from './push/push-config.service';
 import { PushSubscriptionService } from './push/push-subscription.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -84,6 +85,7 @@ describe('NotificationsController — route dispatch + auth + validation (supert
   let mockPushConfig: { getActivePublicKey: jest.Mock };
   let mockPushSubs: { subscribe: jest.Mock; unsubscribe: jest.Mock };
   let mockPolicy: { getPolicy: jest.Mock };
+  let mockStreams: { subscribe: jest.Mock; publishSync: jest.Mock };
 
   async function buildApp(): Promise<NestFastifyApplication> {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -93,6 +95,7 @@ describe('NotificationsController — route dispatch + auth + validation (supert
         { provide: PushConfigService, useValue: mockPushConfig },
         { provide: PushSubscriptionService, useValue: mockPushSubs },
         { provide: NotificationPolicyService, useValue: mockPolicy },
+        { provide: NotificationStreamService, useValue: mockStreams },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
       ],
     })
@@ -110,6 +113,7 @@ describe('NotificationsController — route dispatch + auth + validation (supert
 
   beforeEach(async () => {
     mockService = makeMockService();
+    mockStreams = { subscribe: jest.fn(), publishSync: jest.fn().mockReturnValue(0) };
     mockPushConfig = { getActivePublicKey: jest.fn().mockResolvedValue(null) };
     mockPolicy = { getPolicy: jest.fn().mockResolvedValue(DEFAULT_NOTIFICATION_POLICY) };
     mockPushSubs = {
@@ -344,6 +348,8 @@ describe('NotificationsController — route dispatch + auth + validation (supert
       await request(app.getHttpServer()).post(`/notifications/${NOTIF_ID}/read`).expect(204);
 
       expect(mockService.markRead).toHaveBeenCalledWith(USER_ID, NOTIF_ID);
+      // Other open tabs of the SAME user are told to refetch (#485).
+      expect(mockStreams.publishSync).toHaveBeenCalledWith(USER_ID);
     });
 
     it('400s when the id path param is not a UUID', async () => {

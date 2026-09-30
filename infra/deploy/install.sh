@@ -424,6 +424,23 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+    # Live notification stream (SSE, #485): no buffering, long read timeout.
+    location /api/notifications/stream {
+        proxy_pass http://127.0.0.1:${HOST_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding off;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 1h;
+        proxy_read_timeout 1h;
+    }
+
     # API routes
     location /api {
         proxy_pass http://127.0.0.1:${HOST_PORT};
