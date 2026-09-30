@@ -502,6 +502,16 @@ async function maybeRaiseToast(notification: NotificationItem, pushed: boolean):
 }
 
 /**
+ * Mark one notification read from OUTSIDE a subscribing component — the
+ * shell's service-worker click handler and the `?n=<id>` cold-open path (issue
+ * #486). Same optimistic write as `useNotifications().markRead`, without
+ * subscribing the caller to every store change.
+ */
+export function markNotificationReadById(id: string): Promise<void> {
+  return markReadAction(id);
+}
+
+/**
  * Register what a click on a page-raised toast should do (navigate, switching
  * circle first). Returns an unregister function. Only the most recent
  * registration is kept — the shell mounts exactly one.
