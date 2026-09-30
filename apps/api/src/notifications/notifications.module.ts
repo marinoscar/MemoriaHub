@@ -8,6 +8,7 @@ import { UploadNotificationService } from './producers/upload-notification.servi
 import { WorkflowRunNotificationService } from './producers/workflow-run-notification.service';
 import { PushConfigController } from './push/push-config.controller';
 import { PushConfigService } from './push/push-config.service';
+import { PushNotificationChannel } from './push/push-notification.channel';
 import { PushSubscriptionService } from './push/push-subscription.service';
 import { PushTestService } from './push/push-test.service';
 
@@ -58,6 +59,7 @@ import { PushTestService } from './push/push-test.service';
   providers: [
     NotificationPreferencesService,
     NotificationPolicyService,
+    PushNotificationChannel,
     PushConfigService,
     PushSubscriptionService,
     PushTestService,
