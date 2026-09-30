@@ -93,6 +93,10 @@ const PERMISSIONS = [
   { name: 'email_settings:read', description: 'View email provider configuration and test connectivity' },
   { name: 'email_settings:write', description: 'Configure email provider credentials, set active provider, and send test emails' },
 
+  // Web Push (VAPID) configuration (Admin only, epic #481)
+  { name: 'push:read', description: 'Admin: view Web Push (VAPID) configuration' },
+  { name: 'push:write', description: 'Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys' },
+
   // PostgreSQL Database Backup & Restore (Admin only, epic #339)
   { name: 'db_backup:read', description: 'Admin: read database backup run history and status' },
   { name: 'db_backup:write', description: 'Admin: configure and trigger database backups' },
@@ -147,6 +151,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Email Provider Settings: admin-only
     'email_settings:read',
     'email_settings:write',
+    // Web Push (VAPID) configuration: admin-only
+    'push:read',
+    'push:write',
     // PostgreSQL Database Backup & Restore: admin-only
     'db_backup:read',
     'db_backup:write',

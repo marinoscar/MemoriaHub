@@ -25,13 +25,15 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { APP_PIPE } from '@nestjs/core';
-import { ExecutionContext, NotFoundException } from '@nestjs/common';
+import { ConflictException, ExecutionContext, NotFoundException } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
 
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
+import { PushConfigService } from './push/push-config.service';
+import { PushSubscriptionService } from './push/push-subscription.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
 
@@ -78,12 +80,16 @@ function makeMockService() {
 describe('NotificationsController — route dispatch + auth + validation (supertest)', () => {
   let app: NestFastifyApplication;
   let mockService: ReturnType<typeof makeMockService>;
+  let mockPushConfig: { getActivePublicKey: jest.Mock };
+  let mockPushSubs: { subscribe: jest.Mock; unsubscribe: jest.Mock };
 
   async function buildApp(): Promise<NestFastifyApplication> {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [NotificationsController],
       providers: [
         { provide: NotificationsService, useValue: mockService },
+        { provide: PushConfigService, useValue: mockPushConfig },
+        { provide: PushSubscriptionService, useValue: mockPushSubs },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
       ],
     })
@@ -101,6 +107,15 @@ describe('NotificationsController — route dispatch + auth + validation (supert
 
   beforeEach(async () => {
     mockService = makeMockService();
+    mockPushConfig = { getActivePublicKey: jest.fn().mockResolvedValue(null) };
+    mockPushSubs = {
+      subscribe: jest.fn().mockResolvedValue({
+        id: 'sub-1',
+        endpoint: 'https://push.example.com/abc',
+        createdAt: new Date(0).toISOString(),
+      }),
+      unsubscribe: jest.fn().mockResolvedValue(undefined),
+    };
     app = await buildApp();
   });
 
@@ -385,6 +400,99 @@ describe('NotificationsController — route dispatch + auth + validation (supert
       mockService.remove.mockRejectedValueOnce(new NotFoundException('Notification not found'));
 
       await request(app.getHttpServer()).delete(`/notifications/${NOTIF_ID}`).expect(404);
+    });
+  });
+
+  // ===========================================================================
+  // Web Push (epic #481, issue #483)
+  // ===========================================================================
+
+  describe('GET /notifications/config', () => {
+    it('reports push disabled with no key when no VAPID pair is active', async () => {
+      const res = await request(app.getHttpServer()).get('/notifications/config').expect(200);
+      expect(res.body).toEqual({ pushEnabled: false, vapidPublicKey: null, browserEnabled: true });
+    });
+
+    it('exposes the active public key and pushEnabled=true', async () => {
+      mockPushConfig.getActivePublicKey.mockResolvedValueOnce('BPUBKEY');
+      const res = await request(app.getHttpServer()).get('/notifications/config').expect(200);
+      expect(res.body).toMatchObject({ pushEnabled: true, vapidPublicKey: 'BPUBKEY' });
+    });
+
+    it('is NOT swallowed by an :id-shaped route', async () => {
+      await request(app.getHttpServer()).get('/notifications/config').expect(200);
+      expect(mockService.markRead).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /notifications/push/subscriptions', () => {
+    const body = {
+      endpoint: 'https://push.example.com/abc',
+      keys: { p256dh: 'pkey', auth: 'akey' },
+      expirationTime: null,
+    };
+
+    it('201s and delegates with the caller id and user-agent', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/notifications/push/subscriptions')
+        .set('User-Agent', 'jest-agent')
+        .send(body)
+        .expect(201);
+      expect(res.body.id).toBe('sub-1');
+      expect(mockPushSubs.subscribe).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({ endpoint: body.endpoint, keys: body.keys }),
+        'jest-agent',
+      );
+    });
+
+    it('400s on a non-https endpoint', async () => {
+      await request(app.getHttpServer())
+        .post('/notifications/push/subscriptions')
+        .send({ ...body, endpoint: 'http://push.example.com/abc' })
+        .expect(400);
+      expect(mockPushSubs.subscribe).not.toHaveBeenCalled();
+    });
+
+    it('400s when keys are missing', async () => {
+      await request(app.getHttpServer())
+        .post('/notifications/push/subscriptions')
+        .send({ endpoint: body.endpoint })
+        .expect(400);
+    });
+
+    it('maps the service 409 (push not enabled) through', async () => {
+      mockPushSubs.subscribe.mockRejectedValueOnce(new ConflictException('off'));
+      await request(app.getHttpServer())
+        .post('/notifications/push/subscriptions')
+        .send(body)
+        .expect(409);
+    });
+  });
+
+  describe('DELETE /notifications/push/subscriptions', () => {
+    it('204s and scopes the delete to the caller', async () => {
+      await request(app.getHttpServer())
+        .delete('/notifications/push/subscriptions')
+        .send({ endpoint: 'https://push.example.com/abc' })
+        .expect(204);
+      expect(mockPushSubs.unsubscribe).toHaveBeenCalledWith(USER_ID, 'https://push.example.com/abc');
+      expect(mockService.remove).not.toHaveBeenCalled();
+    });
+
+    it('404s when the service reports not found', async () => {
+      mockPushSubs.unsubscribe.mockRejectedValueOnce(new NotFoundException('nope'));
+      await request(app.getHttpServer())
+        .delete('/notifications/push/subscriptions')
+        .send({ endpoint: 'https://push.example.com/abc' })
+        .expect(404);
+    });
+
+    it('400s without an endpoint', async () => {
+      await request(app.getHttpServer())
+        .delete('/notifications/push/subscriptions')
+        .send({})
+        .expect(400);
     });
   });
 });

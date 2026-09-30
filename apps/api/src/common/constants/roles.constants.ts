@@ -80,6 +80,12 @@ export const PERMISSIONS = {
   EMAIL_SETTINGS_READ: 'email_settings:read',
   EMAIL_SETTINGS_WRITE: 'email_settings:write',
 
+  // Web Push (VAPID) configuration (Admin only, epic #481). Separate from
+  // system_settings:* because generating/rotating key material has a real
+  // blast radius: every existing push subscriber goes dark on rotation.
+  PUSH_READ: 'push:read',
+  PUSH_WRITE: 'push:write',
+
   // Sharing (Admin + Contributor; manage_any = Admin only)
   SHARES_MANAGE: 'shares:manage',
   SHARES_MANAGE_ANY: 'shares:manage_any',

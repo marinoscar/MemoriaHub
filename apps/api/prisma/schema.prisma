@@ -90,6 +90,8 @@ model User {
   reviewRunsStarted              ReviewRun[]                 @relation("ReviewRunStartedBy")
   // Notification Center relations (epic #240, issue #244; schema-only)
   notifications                  Notification[]              @relation("UserNotifications")
+  // Web Push subscriptions (epic #481, issue #483)
+  pushSubscriptions              PushSubscription[]          @relation("UserPushSubscriptions")
   // Memories relations (epic #300, issue #301)
   memoryUserStates               MemoryUserState[]
   // PostgreSQL Database Backup & Restore relations (epic #339, issue #340)
@@ -2321,6 +2323,39 @@ model Notification {
   // a raw-SQL-only partial unique index, is added in migration
   // 20260805000000_add_notifications and is NOT representable here.
   @@map("notifications")
+}
+
+// =============================================================================
+// Web Push subscriptions (epic #481, issue #483)
+// =============================================================================
+//
+// One row per browser PushSubscription (the object `pushManager.subscribe`
+// returns). `endpoint` is UNIQUE ON ITS OWN, not per user: the same browser
+// re-subscribing under a different signed-in user MOVES the row to the new
+// owner rather than forking a duplicate that would keep pushing the old
+// owner's notifications to a machine they no longer use.
+//
+// `p256dh`/`auth` are the browser's public encryption key and auth secret —
+// needed to encrypt a payload for this endpoint, never returned by any route.
+// `failureCount` counts consecutive non-404/410 send failures; the sender
+// prunes the row at 5. A 404/410 from the push service prunes immediately.
+model PushSubscription {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  endpoint       String    @unique
+  p256dh         String
+  auth           String
+  expirationTime DateTime? @map("expiration_time") @db.Timestamptz
+  userAgent      String?   @map("user_agent")
+  failureCount   Int       @default(0) @map("failure_count")
+  lastSuccessAt  DateTime? @map("last_success_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // =============================================================================

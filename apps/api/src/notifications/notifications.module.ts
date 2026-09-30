@@ -5,6 +5,10 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { UploadNotificationService } from './producers/upload-notification.service';
 import { WorkflowRunNotificationService } from './producers/workflow-run-notification.service';
+import { PushConfigController } from './push/push-config.controller';
+import { PushConfigService } from './push/push-config.service';
+import { PushSubscriptionService } from './push/push-subscription.service';
+import { PushTestService } from './push/push-test.service';
 
 /**
  * Notification Center (epic #240, issues #245 + #247).
@@ -40,17 +44,28 @@ import { WorkflowRunNotificationService } from './producers/workflow-run-notific
  * NotificationsService for the dismiss-on-disable write), so importing it back
  * here would be the very cycle the no-imports rule above exists to prevent.
  * Net edge: SettingsModule -> NotificationsModule, one direction only.
+ *
+ * Web Push (epic #481, #483) adds PushConfigService, PushSubscriptionService,
+ * PushTestService and the admin PushConfigController. They too depend on
+ * nothing but PrismaService (the VAPID config lives in its own `webPush`
+ * system_settings row, read with Prisma directly — NOT through
+ * SettingsModule's SystemSettingsService, for the same cycle reason), so the
+ * no-imports rule still holds.
  */
 @Module({
-  controllers: [NotificationsController],
+  controllers: [NotificationsController, PushConfigController],
   providers: [
     NotificationPreferencesService,
+    PushConfigService,
+    PushSubscriptionService,
+    PushTestService,
     NotificationsService,
     UploadNotificationService,
     WorkflowRunNotificationService,
   ],
   exports: [
     NotificationPreferencesService,
+    PushSubscriptionService,
     NotificationsService,
     UploadNotificationService,
     WorkflowRunNotificationService,
