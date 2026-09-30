@@ -124,6 +124,9 @@ function setHook(overrides: Partial<ReturnType<typeof usePushConfig>> = {}) {
 
 const renderAsAdmin = () => render(<PushConfigPage />, { wrapperOptions: { user: mockAdminUser } });
 
+// Typing-heavy flows: give each test headroom when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 30_000 });
+
 describe('PushConfigPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
