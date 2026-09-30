@@ -638,3 +638,39 @@ describe('NotificationPreferencesService', () => {
     });
   });
 });
+
+describe('push sub-namespace resolution (epic #481, issue #484)', () => {
+  it('absent push namespace resolves to push enabled for every type', () => {
+    const r = resolveNotificationPreferences(undefined);
+    expect(r.push.enabled).toBe(true);
+    expect(Object.values(r.push.types).every(Boolean)).toBe(true);
+  });
+
+  it('push.enabled=false disables push for every type without touching the inbox', () => {
+    const r = resolveNotificationPreferences({ push: { enabled: false } });
+    expect(Object.values(r.push.types).some(Boolean)).toBe(false);
+    expect(Object.values(r.types).every(Boolean)).toBe(true);
+    expect(disabledNotificationTypes({ push: { enabled: false } })).toEqual([]);
+  });
+
+  it('a per-type push switch affects only that type', () => {
+    const r = resolveNotificationPreferences({ push: { types: { upload_completed: false } } });
+    expect(r.push.types.upload_completed).toBe(false);
+    expect(r.push.types.enrichment_failed).toBe(true);
+    expect(r.types.upload_completed).toBe(true);
+  });
+
+  it('isPushEnabled reads the push sub-namespace through the cache', async () => {
+    const prisma = {
+      userSettings: {
+        findUnique: jest.fn().mockResolvedValue({
+          value: { notifications: { push: { types: { share_expiring: false } } } },
+        }),
+      },
+    };
+    const svc = new NotificationPreferencesService(prisma as any);
+    await expect(svc.isPushEnabled('u', 'share_expiring' as any)).resolves.toBe(false);
+    await expect(svc.isPushEnabled('u', 'upload_completed' as any)).resolves.toBe(true);
+    expect(prisma.userSettings.findUnique).toHaveBeenCalledTimes(1);
+  });
+});

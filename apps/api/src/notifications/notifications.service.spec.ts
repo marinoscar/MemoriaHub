@@ -18,10 +18,12 @@
 import { NotFoundException } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { Prisma } from '@prisma/client';
+import { NotificationType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { NotificationDispatchService } from './notification-dispatch.service';
+import { NotificationPolicyService } from './notification-policy.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationsService } from './notifications.service';
 
@@ -87,8 +89,14 @@ describe('NotificationsService', () => {
     invalidate: jest.Mock;
   };
 
+  /** #484 admin kill switch (default: inbox allowed) and post-commit fan-out. */
+  let mockPolicy: { isInboxAllowed: jest.Mock };
+  let mockDispatcher: { dispatch: jest.Mock };
+
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    mockPolicy = { isInboxAllowed: jest.fn().mockResolvedValue(true) };
+    mockDispatcher = { dispatch: jest.fn() };
     mockPreferences = {
       isEnabled: jest.fn().mockResolvedValue(true),
       prime: jest.fn().mockResolvedValue(undefined),
@@ -100,6 +108,8 @@ describe('NotificationsService', () => {
         NotificationsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationPreferencesService, useValue: mockPreferences },
+        { provide: NotificationPolicyService, useValue: mockPolicy },
+        { provide: NotificationDispatchService, useValue: mockDispatcher },
       ],
     }).compile();
 
@@ -1222,6 +1232,122 @@ describe('NotificationsService', () => {
         expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
         expect(mockPrisma.$transaction).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  // =========================================================================
+  // Channel layer hooks (epic #481, issue #484)
+  // =========================================================================
+
+  describe('channel dispatch hooks + admin inbox gate (#484)', () => {
+    const counted = {
+      userId: USER_ID,
+      circleId: CIRCLE_ID,
+      type: 'upload_completed' as NotificationType,
+      buildTitle: (n: number) => `${n} uploaded`,
+    };
+
+    beforeEach(() => wireTransactionPassthrough(mockPrisma));
+
+    it('emit() dispatches the created row after the write', async () => {
+      const created = makeRow({ type: 'share_expiring' });
+      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      await service.emit({ userId: USER_ID, type: 'share_expiring' as NotificationType, title: 't' });
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created');
+    });
+
+    it('emit() writes nothing and dispatches nothing when the admin disabled the type', async () => {
+      mockPolicy.isInboxAllowed.mockResolvedValue(false);
+      await service.emit({ userId: USER_ID, type: 'share_expiring' as NotificationType, title: 't' });
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('emit() does not dispatch when the write fails', async () => {
+      (mockPrisma.notification.create as jest.Mock).mockRejectedValue(new Error('db'));
+      await service.emit({ userId: USER_ID, type: 'share_expiring' as NotificationType, title: 't' });
+      expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('upsertState() dispatches only a NEWLY created live row, never a silent refresh', async () => {
+      const input = {
+        userId: USER_ID,
+        circleId: CIRCLE_ID,
+        type: 'review_queue_bursts' as NotificationType,
+        title: '2 bursts',
+      };
+      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      await service.upsertState(input);
+      expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
+
+      const created = makeRow();
+      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      await service.upsertState(input);
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created');
+    });
+
+    it('upsertState() race loser (P2002 → fold into winner) does not dispatch', async () => {
+      (mockPrisma.notification.updateMany as jest.Mock)
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 1 });
+      (mockPrisma.notification.create as jest.Mock).mockRejectedValue(makeP2002Error());
+      await service.upsertState({
+        userId: USER_ID,
+        circleId: CIRCLE_ID,
+        type: 'review_queue_bursts' as NotificationType,
+        title: 'x',
+      });
+      expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('upsertCountedEvent() dispatches a created row after the transaction resolves', async () => {
+      const created = makeRow({ type: 'upload_completed' });
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      await service.upsertCountedEvent(counted);
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created');
+      // After commit: the dispatch happens after $transaction has resolved.
+      const txOrder = (mockPrisma.$transaction as jest.Mock).mock.invocationCallOrder[0];
+      expect(mockDispatcher.dispatch.mock.invocationCallOrder[0]).toBeGreaterThan(txOrder);
+    });
+
+    it('upsertCountedEvent() dispatches an increment only when it re-unreads', async () => {
+      const existing = makeRow({ id: 'row-existing', type: 'upload_completed' });
+      (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'row-existing', count: 3 }]);
+      (mockPrisma.notification.findUnique as jest.Mock).mockResolvedValue(existing);
+
+      await service.upsertCountedEvent(counted);
+      expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
+
+      await service.upsertCountedEvent({ ...counted, reunreadOnIncrement: true });
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(existing, 'incremented');
+    });
+
+    it('upsertCountedEvent() takes no lock when the admin disabled the type', async () => {
+      mockPolicy.isInboxAllowed.mockResolvedValue(false);
+      await service.upsertCountedEvent(counted);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('markStatesUnreadByIds() dispatches the re-unread rows', async () => {
+      const r = makeRow({ readAt: null });
+      (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([r]);
+      await expect(
+        service.markStatesUnreadByIds([{ id: NOTIF_ID, userId: USER_ID }]),
+      ).resolves.toBe(1);
+      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [NOTIF_ID] }, readAt: null, dismissedAt: null },
+      });
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(r, 'reunread');
+    });
+
+    it('markStatesUnreadByIds() dispatches nothing when nothing changed', async () => {
+      (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(0);
+      await service.markStatesUnreadByIds([{ id: NOTIF_ID, userId: USER_ID }]);
+      expect(mockPrisma.notification.findMany).not.toHaveBeenCalled();
+      expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
     });
   });
 });

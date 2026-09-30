@@ -125,10 +125,41 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
     const dismissedDeleted = await this.purgeInBatches(dismissedWhere);
     const readDeleted = await this.purgeInBatches(readWhere);
 
+    // Third pass (epic #481, issue #484): channel delivery audit rows. Unlike
+    // notifications these are pure machine records with no read state, so age
+    // alone (created_at, served by its own index) decides. Independent of the
+    // passes above — the FK is SET NULL, so order does not matter.
+    const deliveriesDeleted = await this.purgeDeliveriesInBatches(cutoff);
+
     this.logger.log(
       `notification_purge: deleted ${dismissedDeleted + readDeleted} notification(s) past cutoff ` +
-        `(${dismissedDeleted} dismissed, ${readDeleted} read); unread rows retained by design`,
+        `(${dismissedDeleted} dismissed, ${readDeleted} read); unread rows retained by design; ` +
+        `deleted ${deliveriesDeleted} delivery record(s)`,
     );
+  }
+
+  /** Batched delete of `notification_deliveries` older than the cutoff. */
+  private async purgeDeliveriesInBatches(cutoff: Date): Promise<number> {
+    let totalDeleted = 0;
+
+    for (;;) {
+      const batch = await this.prisma.notificationDelivery.findMany({
+        where: { createdAt: { lt: cutoff } },
+        select: { id: true },
+        take: BATCH_SIZE,
+      });
+
+      if (batch.length === 0) break;
+
+      const result = await this.prisma.notificationDelivery.deleteMany({
+        where: { id: { in: batch.map((row) => row.id) } },
+      });
+      totalDeleted += result.count;
+
+      if (batch.length < BATCH_SIZE) break;
+    }
+
+    return totalDeleted;
   }
 
   /**

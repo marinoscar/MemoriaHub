@@ -32,6 +32,7 @@ import { randomUUID } from 'crypto';
 
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
+import { DEFAULT_NOTIFICATION_POLICY, NotificationPolicyService } from './notification-policy.service';
 import { PushConfigService } from './push/push-config.service';
 import { PushSubscriptionService } from './push/push-subscription.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -82,6 +83,7 @@ describe('NotificationsController — route dispatch + auth + validation (supert
   let mockService: ReturnType<typeof makeMockService>;
   let mockPushConfig: { getActivePublicKey: jest.Mock };
   let mockPushSubs: { subscribe: jest.Mock; unsubscribe: jest.Mock };
+  let mockPolicy: { getPolicy: jest.Mock };
 
   async function buildApp(): Promise<NestFastifyApplication> {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -90,6 +92,7 @@ describe('NotificationsController — route dispatch + auth + validation (supert
         { provide: NotificationsService, useValue: mockService },
         { provide: PushConfigService, useValue: mockPushConfig },
         { provide: PushSubscriptionService, useValue: mockPushSubs },
+        { provide: NotificationPolicyService, useValue: mockPolicy },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
       ],
     })
@@ -108,6 +111,7 @@ describe('NotificationsController — route dispatch + auth + validation (supert
   beforeEach(async () => {
     mockService = makeMockService();
     mockPushConfig = { getActivePublicKey: jest.fn().mockResolvedValue(null) };
+    mockPolicy = { getPolicy: jest.fn().mockResolvedValue(DEFAULT_NOTIFICATION_POLICY) };
     mockPushSubs = {
       subscribe: jest.fn().mockResolvedValue({
         id: 'sub-1',
@@ -410,13 +414,36 @@ describe('NotificationsController — route dispatch + auth + validation (supert
   describe('GET /notifications/config', () => {
     it('reports push disabled with no key when no VAPID pair is active', async () => {
       const res = await request(app.getHttpServer()).get('/notifications/config').expect(200);
-      expect(res.body).toEqual({ pushEnabled: false, vapidPublicKey: null, browserEnabled: true });
+      expect(res.body).toEqual({
+        pushEnabled: false,
+        vapidPublicKey: null,
+        browserEnabled: true,
+        pushTypes: [],
+      });
     });
 
     it('exposes the active public key and pushEnabled=true', async () => {
       mockPushConfig.getActivePublicKey.mockResolvedValueOnce('BPUBKEY');
       const res = await request(app.getHttpServer()).get('/notifications/config').expect(200);
       expect(res.body).toMatchObject({ pushEnabled: true, vapidPublicKey: 'BPUBKEY' });
+      expect(res.body.pushTypes).toContain('upload_completed');
+    });
+
+    it('honours the admin kill switches', async () => {
+      mockPushConfig.getActivePublicKey.mockResolvedValue('BPUBKEY');
+      mockPolicy.getPolicy.mockResolvedValueOnce({
+        ...DEFAULT_NOTIFICATION_POLICY,
+        browserEnabled: false,
+        disabledTypes: ['upload_completed'],
+      });
+      const res = await request(app.getHttpServer()).get('/notifications/config').expect(200);
+      expect(res.body.browserEnabled).toBe(false);
+      expect(res.body.pushTypes).not.toContain('upload_completed');
+      expect(res.body.pushTypes).toContain('share_expiring');
+
+      mockPolicy.getPolicy.mockResolvedValueOnce({ ...DEFAULT_NOTIFICATION_POLICY, pushEnabled: false });
+      const off = await request(app.getHttpServer()).get('/notifications/config').expect(200);
+      expect(off.body).toMatchObject({ pushEnabled: false, vapidPublicKey: null, pushTypes: [] });
     });
 
     it('is NOT swallowed by an :id-shaped route', async () => {

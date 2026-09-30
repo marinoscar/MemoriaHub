@@ -1243,6 +1243,54 @@ describe('UserSettingsService', () => {
   // Per-user navigation preferences (issue #392, epic #388)
   // ===========================================================================
 
+  describe('patchSettings (PATCH) — notifications.push (epic #481, #484)', () => {
+    const seedAndPatch = async (stored: Record<string, unknown> | undefined, patch: any) => {
+      mockPrisma.userSettings.findUnique.mockResolvedValue({
+        ...mockUserSettings,
+        value: { ...DEFAULT_USER_SETTINGS, ...(stored ? { notifications: stored } : {}) } as any,
+      } as any);
+      mockPrisma.userSettings.update.mockImplementation((async (args: any) => ({
+        ...mockUserSettings,
+        value: args.data.value,
+        version: 2,
+      })) as any);
+      mockPrisma.user.update.mockResolvedValue({} as any);
+      wireTransactionPassthrough(mockPrisma);
+      await service.patchSettings(mockUserId, { notifications: patch });
+      return (mockPrisma.userSettings.update.mock.calls[0][0] as any).data.value.notifications;
+    };
+
+    it('merges push per type, leaving inbox keys and other push types untouched', async () => {
+      const result = await seedAndPatch(
+        { types: { share_expiring: false }, push: { types: { enrichment_failed: false } } },
+        { push: { types: { upload_completed: false } } },
+      );
+      expect(result).toEqual({
+        types: { share_expiring: false },
+        push: { types: { enrichment_failed: false, upload_completed: false } },
+      });
+    });
+
+    it('null deletes a push type or the switch; push: null clears the sub-namespace', async () => {
+      expect(
+        await seedAndPatch(
+          { push: { enabled: false, types: { upload_completed: false } } },
+          { push: { enabled: null, types: { upload_completed: null } } },
+        ),
+      ).toBeUndefined();
+      jest.clearAllMocks();
+      expect(
+        await seedAndPatch({ enabled: true, push: { enabled: false } }, { push: null }),
+      ).toEqual({ enabled: true });
+    });
+
+    it('disabling push for a type does NOT dismiss inbox rows', async () => {
+      await seedAndPatch(undefined, { push: { enabled: false } });
+      expect(mockNotifications.dismissTypesForUser).not.toHaveBeenCalled();
+      expect(mockNotifications.invalidatePreferences).toHaveBeenCalledWith(mockUserId);
+    });
+  });
+
   describe('patchSettings (PATCH) — navigation', () => {
     const persistedValue = (): UserSettingsValue =>
       (mockPrisma.userSettings.update.mock.calls[0][0] as any).data

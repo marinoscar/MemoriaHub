@@ -596,6 +596,20 @@ export class SystemSettingsService {
           (dto as any).notifications?.purgeEnabled ??
           (current as any).notifications?.purgeEnabled ??
           true,
+        // Channel kill switches (epic #481, issue #484)
+        browserEnabled:
+          (dto as any).notifications?.browserEnabled ??
+          (current as any).notifications?.browserEnabled ??
+          true,
+        pushEnabled:
+          (dto as any).notifications?.pushEnabled ??
+          (current as any).notifications?.pushEnabled ??
+          true,
+        // An array is replaced wholesale, never merged (JSON Merge Patch).
+        disabledTypes:
+          (dto as any).notifications?.disabledTypes ??
+          (current as any).notifications?.disabledTypes ??
+          [],
       },
       pictureEnhancement: {
         defaultQuality:

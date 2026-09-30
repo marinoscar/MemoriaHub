@@ -1,3 +1,4 @@
+import { NotificationType } from '@prisma/client';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
@@ -158,6 +159,17 @@ export const patchSystemSettingsSchema = z.object({
     .object({
       retentionDays: z.number().int().min(1).max(365).optional(),
       purgeEnabled: z.boolean().optional(),
+      // Channel kill switches (epic #481, issue #484)
+      browserEnabled: z.boolean().optional(),
+      pushEnabled: z.boolean().optional(),
+      disabledTypes: z
+        .array(
+          z.enum(
+            Object.values(NotificationType) as [NotificationType, ...NotificationType[]],
+          ),
+        )
+        .max(50)
+        .optional(),
     })
     .optional(),
   storage: z

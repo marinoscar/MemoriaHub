@@ -388,6 +388,49 @@ export class UserSettingsService {
 
     if (Object.keys(types).length > 0) merged.types = types;
 
+    const push = this.mergePushPreferences(current?.push, patch.push);
+    if (push !== undefined) merged.push = push;
+
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  /**
+   * Merge the `notifications.push` sub-namespace (epic #481, issue #484).
+   * Same rules as the parent, one level deeper:
+   *   - `push` absent                → stored sub-namespace untouched;
+   *   - `push: null`                 → sub-namespace DELETED (all push defaults);
+   *   - `push.enabled: null`         → key deleted (back to default: enabled);
+   *   - `push.types: { [t]: null }`  → that type deleted; others untouched.
+   * An empty result collapses to `undefined`.
+   */
+  private mergePushPreferences(
+    current: NotificationPreferencesValue['push'],
+    patch: NotificationPreferencesPatch['push'],
+  ): NotificationPreferencesValue['push'] {
+    if (patch === undefined) return current;
+    if (patch === null) return undefined;
+
+    const types: Record<string, boolean> = { ...(current?.types ?? {}) };
+    if (patch.types !== undefined) {
+      for (const [type, value] of Object.entries(patch.types)) {
+        if (value === null || value === undefined) {
+          delete types[type];
+        } else {
+          types[type] = value;
+        }
+      }
+    }
+
+    const merged: NonNullable<NotificationPreferencesValue['push']> = {};
+    const enabled =
+      patch.enabled === null
+        ? undefined
+        : patch.enabled !== undefined
+          ? patch.enabled
+          : current?.enabled;
+    if (enabled !== undefined) merged.enabled = enabled;
+    if (Object.keys(types).length > 0) merged.types = types;
+
     return Object.keys(merged).length > 0 ? merged : undefined;
   }
 

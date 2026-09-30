@@ -18,6 +18,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { NotificationType } from '@prisma/client';
 
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -28,6 +29,8 @@ import {
   UnreadCountDto,
 } from './dto/notification-response.dto';
 import { NotificationScopeDto } from './dto/notification-scope.dto';
+import { pushCapableTypes } from './notification-channels';
+import { NotificationPolicyService, isPushAllowed } from './notification-policy.service';
 import { NotificationsService } from './notifications.service';
 import {
   PushSubscribeDto,
@@ -43,8 +46,13 @@ export interface NotificationClientConfig {
   pushEnabled: boolean;
   /** The applicationServerKey for pushManager.subscribe, null when push is off. */
   vapidPublicKey: string | null;
-  /** May the client raise in-page browser toasts at all? */
+  /** May the client raise in-page browser toasts at all? (admin kill switch) */
   browserEnabled: boolean;
+  /**
+   * Types the admin policy lets travel by push — what a per-type push
+   * preference toggle should be offered for. Empty when push is off.
+   */
+  pushTypes: NotificationType[];
 }
 
 /**
@@ -70,6 +78,7 @@ export class NotificationsController {
     private readonly notificationsService: NotificationsService,
     private readonly pushConfig: PushConfigService,
     private readonly pushSubscriptions: PushSubscriptionService,
+    private readonly policy: NotificationPolicyService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -119,11 +128,18 @@ export class NotificationsController {
   })
   @ApiResponse({ status: 200, description: 'Notification capabilities' })
   async config(): Promise<NotificationClientConfig> {
-    const vapidPublicKey = await this.pushConfig.getActivePublicKey();
+    const [publicKey, policy] = await Promise.all([
+      this.pushConfig.getActivePublicKey(),
+      this.policy.getPolicy(),
+    ]);
+    // The admin kill switch hides push entirely, so a client never spends the
+    // one-shot browser permission prompt on a channel that cannot deliver.
+    const pushEnabled = publicKey !== null && policy.pushEnabled;
     return {
-      pushEnabled: vapidPublicKey !== null,
-      vapidPublicKey,
-      browserEnabled: true,
+      pushEnabled,
+      vapidPublicKey: pushEnabled ? publicKey : null,
+      browserEnabled: policy.browserEnabled,
+      pushTypes: pushEnabled ? pushCapableTypes().filter((t) => isPushAllowed(t, policy)) : [],
     };
   }
 

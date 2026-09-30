@@ -78,6 +78,18 @@ export interface ResolvedNotificationPreferences {
   types: Record<NotificationType, boolean>;
   /** Whether `on_media_enriched` workflow micro-runs may notify. */
   workflowMicroRuns: boolean;
+  /**
+   * Web Push channel preferences (epic #481, issue #484), defaults applied.
+   * `types[t]` is `push.enabled && push.types[t] !== false` — deliberately NOT
+   * ANDed with the inbox switches: the dispatcher only ever pushes a row that
+   * the inbox gate already let through, so the inbox gate applies by
+   * construction, and keeping this independent means disabling push can never
+   * be mistaken for disabling (and dismissing) the inbox type.
+   */
+  push: {
+    enabled: boolean;
+    types: Record<NotificationType, boolean>;
+  };
 }
 
 /** Every enum member, resolved once. */
@@ -103,11 +115,20 @@ export function resolveNotificationPreferences(
     types[type] = enabled && stored[type] !== false;
   }
 
+  // Push sub-namespace: absent means enabled, exactly like the inbox switches.
+  const pushEnabled = value?.push?.enabled !== false;
+  const pushStored = value?.push?.types ?? {};
+  const pushTypes = {} as Record<NotificationType, boolean>;
+  for (const type of ALL_TYPES) {
+    pushTypes[type] = pushEnabled && pushStored[type] !== false;
+  }
+
   return {
     enabled,
     types,
     // The one inverted default — see the header.
     workflowMicroRuns: value?.workflowMicroRuns === true,
+    push: { enabled: pushEnabled, types: pushTypes },
   };
 }
 
@@ -181,6 +202,15 @@ export class NotificationPreferencesService {
     // (impossible today, since resolve() enumerates the live enum, but the
     // absent-means-enabled rule should hold structurally, not by luck).
     return prefs.types[type] !== false;
+  }
+
+  /**
+   * Does this user want Web Push for this type? (epic #481, issue #484). Only
+   * the push sub-namespace — the caller has already passed the inbox gate.
+   */
+  async isPushEnabled(userId: string, type: NotificationType): Promise<boolean> {
+    const prefs = await this.resolve(userId);
+    return prefs.push.types[type] !== false;
   }
 
   /** Opt-in check for `on_media_enriched` workflow micro-runs (#247 / #251). */

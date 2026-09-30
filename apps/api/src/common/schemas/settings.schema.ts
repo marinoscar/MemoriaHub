@@ -136,6 +136,13 @@ export type DataTablesPatch = z.infer<typeof dataTablesPatchSchema>;
 // when absent — lives in resolveNotificationPreferences() (the notifications
 // module), NOT here, precisely so this schema keeps one uniform rule.
 //
+// PUSH SUB-NAMESPACE (epic #481, issue #484). `push` holds the WEB PUSH channel
+// preferences and follows the same absent-means-enabled rule: `push.enabled`
+// and every `push.types` key are optional with no default. It is deliberately
+// independent of the inbox switches above — turning push off for a type never
+// suppresses (or dismisses) that type's inbox rows — while the inbox switches
+// still gate push (a type with no inbox row has nothing to push).
+//
 // WHY z.partialRecord AND NOT z.record. In zod v4, `z.record(z.enum([...]), v)`
 // is EXHAUSTIVE: it requires every enum key to be present, so `{ upload_completed:
 // false }` would fail validation. `z.partialRecord` is the partial form and
@@ -152,6 +159,13 @@ export const notificationPreferencesSchema = z
     enabled: z.boolean().optional(),
     types: z.partialRecord(notificationTypeKeySchema, z.boolean()).optional(),
     workflowMicroRuns: z.boolean().optional(),
+    push: z
+      .object({
+        enabled: z.boolean().optional(),
+        types: z.partialRecord(notificationTypeKeySchema, z.boolean()).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -167,6 +181,18 @@ export const notificationPreferencesPatchSchema = z
       .partialRecord(notificationTypeKeySchema, z.boolean().nullable())
       .optional(),
     workflowMicroRuns: z.boolean().optional(),
+    // `null` on `push` clears the whole push sub-namespace back to defaults;
+    // `null` on `push.enabled` / a `push.types` key deletes that key.
+    push: z
+      .object({
+        enabled: z.boolean().nullable().optional(),
+        types: z
+          .partialRecord(notificationTypeKeySchema, z.boolean().nullable())
+          .optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -693,10 +719,25 @@ export const systemSettingsSchema = z.object({
   // jobs.history above: retentionDays ages out only rows the user has already
   // RESOLVED (dismissed_at / read_at). An UNREAD notification is never deleted
   // by age — see NotificationPurgeHandler.
+  //
+  // Channel kill switches (epic #481, issue #484), read by
+  // NotificationPolicyService: `pushEnabled: false` stops every Web Push;
+  // `browserEnabled: false` withholds in-page browser toasts; `disabledTypes`
+  // suppresses both the push channel and the inbox row for a non-mandatory
+  // type (a mandatory type keeps its inbox row).
   notifications: z.object({
     retentionDays: z.number().int().min(1).max(365).default(30),
     purgeEnabled: z.boolean().default(true),
-  }).optional().default({ retentionDays: 30, purgeEnabled: true }),
+    browserEnabled: z.boolean().default(true),
+    pushEnabled: z.boolean().default(true),
+    disabledTypes: z.array(notificationTypeKeySchema).max(50).default([]),
+  }).optional().default({
+    retentionDays: 30,
+    purgeEnabled: true,
+    browserEnabled: true,
+    pushEnabled: true,
+    disabledTypes: [],
+  }),
   pictureEnhancement: z.object({
     defaultQuality: z.enum(['low', 'medium', 'high']).default('high'),
     defaultStrength: z.enum(['subtle', 'balanced', 'strong']).default('balanced'),
@@ -1030,6 +1071,9 @@ export const systemSettingsPatchSchema = z.object({
   notifications: z.object({
     retentionDays: z.number().int().min(1).max(365).optional(),
     purgeEnabled: z.boolean().optional(),
+    browserEnabled: z.boolean().optional(),
+    pushEnabled: z.boolean().optional(),
+    disabledTypes: z.array(notificationTypeKeySchema).max(50).optional(),
   }).optional(),
   pictureEnhancement: z.object({
     defaultQuality: z.enum(['low', 'medium', 'high']).optional(),

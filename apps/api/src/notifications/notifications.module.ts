@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 
+import { NotificationDispatchService } from './notification-dispatch.service';
+import { NotificationPolicyService } from './notification-policy.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -7,6 +9,7 @@ import { UploadNotificationService } from './producers/upload-notification.servi
 import { WorkflowRunNotificationService } from './producers/workflow-run-notification.service';
 import { PushConfigController } from './push/push-config.controller';
 import { PushConfigService } from './push/push-config.service';
+import { PushNotificationChannel } from './push/push-notification.channel';
 import { PushSubscriptionService } from './push/push-subscription.service';
 import { PushTestService } from './push/push-test.service';
 
@@ -51,11 +54,20 @@ import { PushTestService } from './push/push-test.service';
  * system_settings row, read with Prisma directly — NOT through
  * SettingsModule's SystemSettingsService, for the same cycle reason), so the
  * no-imports rule still holds.
+ *
+ * #484 adds the channel layer: NotificationPolicyService (admin kill switches,
+ * read from the `global` row with Prisma), NotificationDispatchService (post-
+ * commit fan-out to Web Push + the `notification.dispatched` event; uses the
+ * globally registered EventEmitter2, which needs no import) and
+ * PushNotificationChannel. Still no imports.
  */
 @Module({
   controllers: [NotificationsController, PushConfigController],
   providers: [
     NotificationPreferencesService,
+    NotificationPolicyService,
+    NotificationDispatchService,
+    PushNotificationChannel,
     PushConfigService,
     PushSubscriptionService,
     PushTestService,
@@ -65,6 +77,8 @@ import { PushTestService } from './push/push-test.service';
   ],
   exports: [
     NotificationPreferencesService,
+    NotificationPolicyService,
+    NotificationDispatchService,
     PushSubscriptionService,
     NotificationsService,
     UploadNotificationService,

@@ -90,6 +90,8 @@ describe('NotificationPurgeHandler', () => {
     mockPrisma = createMockPrismaService();
     mockPrisma.notification.findMany.mockResolvedValue([]);
     mockPrisma.notification.deleteMany.mockResolvedValue({ count: 0 });
+    mockPrisma.notificationDelivery.findMany.mockResolvedValue([]);
+    mockPrisma.notificationDelivery.deleteMany.mockResolvedValue({ count: 0 });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -631,6 +633,45 @@ describe('NotificationPurgeHandler', () => {
       mockSettings.getSettingValue.mockRejectedValue(new Error('Settings DB error'));
 
       await expect(handler.process(makeJob())).rejects.toThrow('Settings DB error');
+    });
+  });
+
+  // =========================================================================
+  // notification_deliveries pass (epic #481, issue #484)
+  // =========================================================================
+
+  describe('process — notification_deliveries pass', () => {
+    beforeEach(() => {
+      mockSettings.getSettingValue.mockResolvedValueOnce(true).mockResolvedValueOnce(7);
+    });
+
+    it('deletes delivery rows by createdAt < cutoff (age only), in batches of 5000', async () => {
+      const before = Date.now();
+      mockPrisma.notificationDelivery.findMany
+        .mockResolvedValueOnce(Array.from({ length: 5000 }, (_, i) => ({ id: `d${i}` })) as any)
+        .mockResolvedValueOnce([{ id: 'last' }] as any);
+      mockPrisma.notificationDelivery.deleteMany
+        .mockResolvedValueOnce({ count: 5000 })
+        .mockResolvedValueOnce({ count: 1 });
+
+      await handler.process(makeJob());
+
+      expect(mockPrisma.notificationDelivery.findMany).toHaveBeenCalledTimes(2);
+      const arg = mockPrisma.notificationDelivery.findMany.mock.calls[0][0] as any;
+      expect(arg.take).toBe(5000);
+      expect(arg.select).toEqual({ id: true });
+      const cutoff: Date = arg.where.createdAt.lt;
+      expect(Math.abs(before - 7 * 86_400_000 - cutoff.getTime())).toBeLessThan(5000);
+      expect(mockPrisma.notificationDelivery.deleteMany).toHaveBeenLastCalledWith({
+        where: { id: { in: ['last'] } },
+      });
+    });
+
+    it('is skipped entirely when purging is disabled', async () => {
+      mockSettings.getSettingValue.mockReset();
+      mockSettings.getSettingValue.mockResolvedValue(false);
+      await handler.process(makeJob());
+      expect(mockPrisma.notificationDelivery.findMany).not.toHaveBeenCalled();
     });
   });
 });
