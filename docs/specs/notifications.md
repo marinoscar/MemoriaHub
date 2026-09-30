@@ -4,9 +4,10 @@
 |-------|-------|
 | **Epic** | #240 |
 | **Children** | #244 (schema) · #245 (service + API) · #246 (review-queue reconcile) · #247 (event producers) · #248 (retention purge) · #249 (bell) · #250 (inbox page) · #251 (preferences) |
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Last Updated** | August 2026 |
 | **Status** | Implemented |
+| **Extended by** | Epic #481: channels, Web Push, the live SSE stream and admin broadcasts. See [section 16](#16-channels-web-push-and-the-live-stream-epic-481), [Browser Notifications, Web Push and the Live Stream](browser-notifications.md) and [Admin Notification Broadcasts](notification-broadcasts.md) |
 
 ---
 
@@ -27,6 +28,7 @@
 13. [Known Gaps and Limitations](#13-known-gaps-and-limitations)
 14. [Implementation Notes Where the Build Diverged From the Issues](#14-implementation-notes-where-the-build-diverged-from-the-issues)
 15. [Future Work](#15-future-work)
+16. [Channels, Web Push and the Live Stream (Epic #481)](#16-channels-web-push-and-the-live-stream-epic-481)
 
 ---
 
@@ -51,6 +53,8 @@ Goals:
 - **A single write path.** Every producer — present or future — calls into `NotificationsService`, never `prisma.notification.create()` directly, so the dedup and preference-gating rules cannot drift between call sites.
 - **Self-healing.** The review-queue rows are periodically re-stated from the real counts rather than incrementally patched from events, so a missed write, a crash mid-run, or a row a user resolved by hand all converge on the next hourly tick.
 - **Preferences are enforced once, centrally**, not re-implemented per producer.
+
+> **Epic #481 (channels, Web Push, live stream, broadcasts)** builds on this model without changing it: the inbox row described here is the `inbox` channel, and a committed row can additionally travel by Web Push and reach open tabs over an SSE stream. See [section 16](#16-channels-web-push-and-the-live-stream-epic-481).
 
 ## 2. The Problem This Replaced
 
@@ -288,6 +292,8 @@ So it is **read/dismissed state** — an action the user took — that makes a r
 
 The two passes run as separate range scans (one per index, `(dismissed_at, updated_at)` and `(read_at)` respectively) rather than one `OR`-combined predicate, so each stays a clean single-column scan. The `dismissedAt: null` clause on pass (b) also resolves the one case where the two rules could otherwise disagree: dismissal always implies read and backfills `read_at` when it was null, so `dismissed_at >= read_at` is always true for a dismissed row — and a row read long ago but dismissed only yesterday should be retained counting from its *dismissal* (the user's most recent interaction with it), not deleted on the strength of the older read. Excluding dismissed rows from pass (b) is therefore always the conservative reading of the two rules, never the looser one.
 
+**Delivery audit rows** (epic #481): the same nightly job has a third pass that deletes `notification_deliveries` rows older than `notifications.retentionDays` **by `created_at` alone**. These are machine records with no read/dismiss state, so age (not state) is the right key, in contrast to the two passes above. See [browser-notifications.md section 6](browser-notifications.md#6-delivery-audit-and-purge).
+
 `notifications.purgeEnabled` (default `true`) and `notifications.retentionDays` (default 30) are plain system settings, checked both by the nightly task (to decide whether to enqueue at all) and by the handler itself (in case a manual retry from `/admin/settings/jobs` re-runs an already-queued row after the setting changed) — the same double-check `JobHistoryPurgeHandler` performs for `jobs.history.purgeEnabled`.
 
 ## 8. Preferences (#251)
@@ -334,6 +340,10 @@ The preference cache is invalidated **after** the write returns (never inside th
 
 Any read failure inside `NotificationPreferencesService.resolve()` — the database being unreachable, a malformed hand-edited JSONB blob — resolves to "everything enabled," with a logged warning, never to "everything suppressed." The stated reasoning: a preferences lookup must never be the reason a notification silently disappears. The failure mode of a gate like this has to be over-notifying, never under-notifying — an extra notification is an annoyance a user can dismiss; a missing one is information genuinely lost.
 
+### 8.6 The `push` sub-namespace (epic #481)
+
+`user_settings.notifications.push` (`{ enabled?, types? }`) holds the per-user **Web Push** preferences. It follows the same absent-means-enabled rule and the same null-deletes-a-key PATCH semantics, but is deliberately **independent of the inbox switches**: turning push off for a type never suppresses or dismisses that type's inbox rows, while the inbox gate still governs push (a type with no inbox row has nothing to push). The gate is `NotificationPreferencesService.isPushEnabled(userId, type)`, called by the dispatcher (not by the three write primitives). The mandatory `admin_broadcast_critical` type's **inbox** row ignores the inbox preferences, but its push honours the push preferences. Full detail: [browser-notifications.md section 8](browser-notifications.md#8-per-user-push-preferences).
+
 ## 9. Frontend
 
 ### 9.1 One refcounted module-level store, not a context provider
@@ -345,6 +355,8 @@ A React Context provider would also solve the "one shared state" problem, but at
 The store is **reference-counted** (`enabledSubscribers`): the polling timer starts when the first subscriber that opts in (`enabled: true`, the default) mounts, and stops when the last one unmounts. This is what keeps the login screen, and any test that never renders the bell, from issuing a single background request. Polling additionally pauses outright — the interval is torn down, not merely skipped — while `document.visibilityState === 'hidden'`, and resumes with an immediate refetch on `visibilitychange`/`focus`.
 
 The panel's item list is fetched on demand (`refreshList()`, called when the bell popover opens), never polled — a closed bell therefore costs exactly one small integer request per minute, not an item-list request too.
+
+**Since epic #481 the bell is no longer poll-only.** The same refcounted store also opens **one** `GET /api/notifications/stream` (SSE) connection per tab. While it is open the 60 s badge poll is replaced by a 5-minute safety net, each `notification` frame updates the badge and panel in place, a `sync` frame (published when the caller reads, dismisses or deletes rows in another tab) triggers a refetch, and every connect or reconnect refetches the count because nothing is replayed. When the stream drops the store falls back to the 60 s poll. Details: [browser-notifications.md section 11](browser-notifications.md#11-the-live-stream-sse).
 
 ### 9.2 Circle-switch-before-navigate
 
@@ -368,6 +380,8 @@ The bare `@Auth()` decorator is **not optional** — this codebase has no global
 
 **Every single-row route resolves a cross-user id to `404`, never `403`.** `markRead`, `dismiss`, and `remove` all scope their `WHERE` clause by both `id` **and** the JWT's `userId` in one query — a notification id that exists but belongs to a different user is therefore indistinguishable, from the response alone, from an id that does not exist at all. This is a deliberate enumeration-resistance choice, matching the public-share `404` policy documented elsewhere in this codebase: a `403` would confirm to a client that the id is *valid but not theirs*, leaking the existence of another user's row; a `404` reveals nothing.
 
+**Epic #481 additions.** The new user-facing routes (`GET /api/notifications/stream`, `GET /api/notifications/config`, `POST`/`DELETE /api/notifications/push/subscriptions`) keep the bare `@Auth()` for the same reason. The new **admin** surfaces do carry permissions: `push:read`/`push:write` for `/api/admin/push-config/*` and `broadcasts:read`/`broadcasts:write` for `/api/admin/broadcasts/*` (all Admin-role only, seeded in `prisma/seed.ts`). The admin notification policy (`notifications.browserEnabled`, `pushEnabled`, `disabledTypes`) reuses `system_settings:read`/`write`.
+
 ## 11. Module Graph and the No-Imports Rule
 
 `NotificationsModule` (`apps/api/src/notifications/notifications.module.ts`) **imports nothing** — not `PrismaModule` (which is `@Global` and therefore needs no import), and, more importantly, none of the modules that own producers. This is a hard architectural rule, not an incidental fact about the current codebase, and it is the reason the notifications feature is split across two NestJS modules rather than one:
@@ -389,9 +403,11 @@ NotificationsReconcileModule ──▶ EnrichmentModule
 
 A future contributor adding a sixth producer should read this section before reaching for an import: if the new producer needs a service from a module that is not already safely one-directional with `NotificationsModule`, the new code almost certainly belongs in `NotificationsReconcileModule` (or a further sibling module), not inside `NotificationsModule` itself.
 
+**Epic #481 additions keep the rule.** `NotificationsModule` still imports nothing: `NotificationPolicyService` and `PushConfigService` read `system_settings` through `PrismaService` directly (not `SystemSettingsService`, since `SettingsModule` imports `NotificationsModule`). The broadcast feature lives in a separate leaf module, `BroadcastsModule`, which imports `NotificationsModule`, `EnrichmentModule` and `EmailModule` and which nothing imports, so its edge also points into notifications.
+
 ## 12. API Endpoints
 
-All routes are `authenticated, any role` (§10); none require a permission scope.
+All routes in this table are `authenticated, any role` (§10); none require a permission scope. The admin routes added by epic #481 (`/api/admin/push-config/*`, `/api/admin/broadcasts/*`) are listed in [browser-notifications.md section 17](browser-notifications.md#17-rbac-and-api-surface) and [notification-broadcasts.md section 11](notification-broadcasts.md#11-api).
 
 | Method | Path | Description |
 |---|---|---|
@@ -402,6 +418,10 @@ All routes are `authenticated, any role` (§10); none require a permission scope
 | `POST` | `/api/notifications/:id/read` | Idempotent. Snapshots `data.countAtRead` when `data.count` exists (§6). |
 | `POST` | `/api/notifications/:id/dismiss` | Idempotent; implies read. |
 | `DELETE` | `/api/notifications/:id` | Hard-delete one row. |
+| `GET` | `/api/notifications/stream` | Live SSE stream of the caller's notifications (epic #481). |
+| `GET` | `/api/notifications/config` | Client capabilities: `{ pushEnabled, vapidPublicKey, browserEnabled, pushTypes }` (epic #481). |
+| `POST` | `/api/notifications/push/subscriptions` | Register this browser's Web Push subscription (upsert by endpoint); `409` when push is off (epic #481). |
+| `DELETE` | `/api/notifications/push/subscriptions` | Body `{ endpoint }`; remove one of the caller's subscriptions (epic #481). |
 
 Every `:id` route is `404`, not `403`, on a cross-user id (§10). `read-all`/`dismiss-all` are declared **before** the `:id` routes in the controller to avoid Nest treating `read-all`/`dismiss-all` as a `:id` value.
 
@@ -431,8 +451,26 @@ The issues that scoped this epic described the shape of the feature; the shipped
 |---|---|
 | Integration coverage for the advisory-lock race and the JSONB containment queries against a real Postgres | Currently unit-tested only against a mocked Prisma client (§13); would need a live-database test harness the way, e.g., the pgvector-backed face-matching tests do |
 | Resolve or surface a demoted/removed member's stale review-queue row proactively | Currently relies entirely on manual dismissal or the retention purge (§13); a targeted resolve on membership change (rather than waiting for the next reconcile or the purge) would close the gap without changing the reconcile's per-tick cost |
-| Real-time delivery (WebSocket/SSE push) instead of 60-second polling | The current design deliberately does not attempt this — see the module-level store's own rationale (§9.1) for why polling with visibility-aware pause/resume was chosen for v1 |
+| ~~Real-time delivery (WebSocket/SSE push) instead of 60-second polling~~ | **Done in epic #481** (SSE stream plus Web Push, §16). The stream is per API process and has no replay, so the poll remains as a safety net (see [browser-notifications.md section 19](browser-notifications.md#19-known-limitations)) |
 | A dedicated admin settings panel for `notifications.retentionDays`/`notifications.purgeEnabled` | Currently editable only via the generic system-settings JSON write path, the same gap `reviewRuns.runHistoryRetentionDays` has (see [review-runs.md §10](review-runs.md#10-retention-and-stale-run-sweep)) |
+
+## 16. Channels, Web Push and the Live Stream (Epic #481)
+
+Epic #481 added a **channel layer** on top of the model above. Nothing inside the three write primitives changed; three things were added around them.
+
+**Channels.** `notification-channels.ts` declares, for every `NotificationType`, which channels it may use (`inbox`, `push`) and whether it is `mandatory`. The `notifications` row is the inbox channel. Once a write has committed, `NotificationsService` hands the row to `NotificationDispatchService.dispatch()` (fire-and-forget, never throws, never inside a transaction), which applies the admin policy and the user's push preferences, throttles to one push per notification id per 5 minutes, sends a Web Push to the user's registered browsers, records a `notification_deliveries` audit row, and emits `notification.dispatched`. A silent STATE-count refresh is not dispatched; a new row, a re-marked-unread STATE row and an incremented counted row (with re-unread) are.
+
+**Two new notification types.** `admin_broadcast` and `admin_broadcast_critical` (migration `20260815010000`), both per-occurrence EVENT types written with `emit()`. They are produced only by [admin broadcasts](notification-broadcasts.md). The critical type is the **only mandatory type**: its inbox row bypasses the user's per-type preference and the admin `disabledTypes` switch (its push still needs VAPID, a subscription and the push preferences).
+
+**Admin policy.** `notifications.browserEnabled`, `notifications.pushEnabled` and `notifications.disabledTypes` in the `global` system settings row, read by `NotificationPolicyService` (cached 5 s, fails open). `disabledTypes` joins the per-user preference in the inbox gate, so a suppressed type writes no row; `pushEnabled: false` stops every Web Push including mandatory types; `browserEnabled: false` withholds the in-page toast only. Edited at `/admin/settings/notifications`.
+
+**Web Push.** Browsers subscribe against a VAPID key pair that an administrator generates, rotates and removes at `/admin/settings/push`. The pair lives in the `webPush` `system_settings` row (private key AES-256-GCM encrypted with `SECRETS_ENCRYPTION_KEY`) with **no environment variables**. Subscriptions are rows in `push_subscriptions`, pruned on HTTP 404/410 or after 5 consecutive failures. The service worker (`apps/web/src/sw.ts`, built with `vite-plugin-pwa` `injectManifest`) shows every push and never touches the API or caches anything under `/api`. Operator procedure: [VAPID keys runbook](../runbooks/vapid-keys.md).
+
+**Live stream.** `GET /api/notifications/stream` (SSE) publishes `notification`, `sync` and `ping` frames to exactly the authenticated user's open tabs. It is per API process, has no replay, and is exempt from the response-envelope interceptor.
+
+**Retention.** The nightly `notification_purge` job also deletes `notification_deliveries` by age (§7).
+
+The complete design (platform facts, dispatch ordering, pruning rules, the client capability model, toast dedup, click handling, diagnostics, API and rejected alternatives) is in [Browser Notifications, Web Push and the Live Stream](browser-notifications.md); broadcasts are in [Admin Notification Broadcasts](notification-broadcasts.md).
 
 ---
 
@@ -441,3 +479,4 @@ The issues that scoped this epic described the shape of the feature; the shipped
 | Version | Date | Author | Changes |
 |---|---|---|---|
 | 1.0 | August 2026 | AI Assistant | Initial specification, documenting the shipped epic #240 implementation across all eight child issues (#244–#251): the STATE/EVENT data model and its partial unique index, the three producer write primitives, all five producers and their differently-shaped volume guards, the `countAtRead` re-unread contract, the age-vs-state retention asymmetry with `job_history_purge`, the absent-means-enabled preferences model and dismiss-on-disable, the shared frontend polling store and circle-switch-before-navigate pattern, RBAC, the module-graph acyclicity constraint, and known test-coverage gaps |
+| 1.1 | August 2026 | AI Assistant | Added §16 and cross-links for epic #481 (issues #482-#488): the channel layer and dispatcher, the `admin_broadcast`/`admin_broadcast_critical` types, the admin notification policy, the `notifications.push` preference namespace (§8.6), the live SSE stream (the bell is no longer poll-only, §9.1), delivery-audit purge (§7), new endpoints (§12) and RBAC/module-graph notes |
