@@ -38,6 +38,18 @@
 // The gate is fail-open by construction: a preferences read that fails resolves
 // to all-enabled, so a broken lookup over-notifies rather than silently
 // swallowing everything.
+//
+// CHANNELS (epic #481, issue #484). The row these primitives write is the
+// INBOX channel. Two things were added around them, nothing inside them:
+//   - the admin `disabledTypes` kill switch joins the #251 gate
+//     (NotificationPolicyService.isInboxAllowed — mandatory types exempt);
+//   - after a write that is NEW to the user — a created row, a STATE row
+//     re-marked unread, or a counted row incremented with re-unread — the
+//     committed row is handed to NotificationDispatchService.dispatch(), which
+//     fans it out to Web Push (and the `notification.dispatched` event).
+//     dispatch() is fire-and-forget and is ALWAYS called after the write (and
+//     any $transaction) has committed, never inside one. A silent STATE count
+//     refresh is NOT dispatched — it would push the same queue every hour.
 // =============================================================================
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -45,6 +57,8 @@ import { Notification, NotificationType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationItemDto } from './dto/notification-response.dto';
+import { NotificationDispatchService } from './notification-dispatch.service';
+import { NotificationPolicyService } from './notification-policy.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
 
 // -----------------------------------------------------------------------------
@@ -184,6 +198,8 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly preferences: NotificationPreferencesService,
+    private readonly policy: NotificationPolicyService,
+    private readonly dispatcher: NotificationDispatchService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -441,10 +457,10 @@ export class NotificationsService {
    */
   async emit(input: EmitNotificationInput): Promise<void> {
     try {
-      // #251 gate — a suppressed type writes NO row (see the header).
-      if (!(await this.preferences.isEnabled(input.userId, input.type))) return;
+      // #251 gate + admin kill switch — a suppressed type writes NO row.
+      if (!(await this.isInboxDeliverable(input.userId, input.type))) return;
 
-      await this.prisma.notification.create({
+      const row = await this.prisma.notification.create({
         data: {
           userId: input.userId,
           circleId: input.circleId ?? null,
@@ -456,6 +472,8 @@ export class NotificationsService {
         },
       });
       this.invalidateUnreadCount(input.userId);
+      // Committed (single statement, no transaction) — fan out.
+      this.dispatcher.dispatch(row, 'created');
     } catch (err) {
       this.logger.warn(
         `emit(${input.type}) for user ${input.userId} failed: ${this.errorMessage(err)}`,
@@ -484,7 +502,7 @@ export class NotificationsService {
       // #251 gate. A suppressed STATE type writes no row AND refreshes none:
       // the user's existing live rows of this type were dismissed when they
       // disabled it, and this reconcile must not resurrect them.
-      if (!(await this.preferences.isEnabled(input.userId, input.type))) return;
+      if (!(await this.isInboxDeliverable(input.userId, input.type))) return;
 
       const payload = {
         title: input.title,
@@ -504,9 +522,10 @@ export class NotificationsService {
         data: payload,
       });
 
+      let created: Notification | null = null;
       if (updated.count === 0) {
         try {
-          await this.prisma.notification.create({
+          created = await this.prisma.notification.create({
             data: {
               userId: input.userId,
               circleId: input.circleId,
@@ -532,6 +551,10 @@ export class NotificationsService {
       }
 
       this.invalidateUnreadCount(input.userId);
+      // Only a NEWLY CREATED live row is news; an in-place refresh (or the
+      // race loser folding into the winner's row) is silent. A read row whose
+      // queue grew is dispatched by markStatesUnreadByIds() instead.
+      if (created) this.dispatcher.dispatch(created, 'created');
     } catch (err) {
       this.logger.warn(
         `upsertState(${input.type}) for user ${input.userId} circle ${input.circleId} failed: ` +
@@ -577,9 +600,13 @@ export class NotificationsService {
     try {
       // #251 gate — checked BEFORE the transaction opens, so a suppressed type
       // never takes the advisory lock it would otherwise contend for.
-      if (!(await this.preferences.isEnabled(input.userId, input.type))) return;
+      if (!(await this.isInboxDeliverable(input.userId, input.type))) return;
 
-      await this.prisma.$transaction(async (tx) => {
+      // What to fan out once the transaction has COMMITTED (never inside it).
+      const outcome = await this.prisma.$transaction(async (tx): Promise<
+        | { kind: 'created'; row: Notification }
+        | { kind: 'incremented'; id: string; reunread: boolean }
+      > => {
         // Aggregation key — must contain everything the lookup predicate below
         // filters on, so two different keys can never share a lock by accident
         // (only by hash collision, which is harmless).
@@ -648,8 +675,13 @@ export class NotificationsService {
                 ${reunread}
             WHERE id = ${existing.id}::uuid
           `);
+          return {
+            kind: 'incremented',
+            id: existing.id,
+            reunread: input.reunreadOnIncrement === true,
+          };
         } else {
-          await tx.notification.create({
+          const row = await tx.notification.create({
             data: {
               userId: input.userId,
               circleId,
@@ -660,10 +692,22 @@ export class NotificationsService {
               data: payload as Prisma.InputJsonValue,
             },
           });
+          return { kind: 'created', row };
         }
       });
 
       this.invalidateUnreadCount(input.userId);
+
+      // Post-commit fan-out. A new row is always news. An increment is news
+      // only when the caller opted into re-unread (the row re-badges); the
+      // dispatcher throttles per row id, so a 4 000-file import that
+      // increments one row 4 000 times pushes a handful of times, not 4 000.
+      if (outcome?.kind === 'created') {
+        this.dispatcher.dispatch(outcome.row, 'created');
+      } else if (outcome?.kind === 'incremented' && outcome.reunread) {
+        const row = await this.prisma.notification.findUnique({ where: { id: outcome.id } });
+        if (row) this.dispatcher.dispatch(row, 'incremented');
+      }
     } catch (err) {
       this.logger.warn(
         `upsertCountedEvent(${input.type}) for user ${input.userId} failed: ` +
@@ -770,6 +814,10 @@ export class NotificationsService {
       `);
 
       for (const row of rows) this.invalidateUnreadCount(row.userId);
+
+      // A STATE row re-marked unread is news again (its queue grew past what
+      // the user last saw) — fan it out, post-commit.
+      if (updated > 0) await this.dispatchReunread(rows.map((r) => r.id));
       return updated;
     } catch (err) {
       this.logger.warn(`markStatesUnreadByIds failed: ${this.errorMessage(err)}`);
@@ -849,6 +897,28 @@ export class NotificationsService {
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
+
+  /**
+   * The inbox gate every write path applies: the user's #251 preference AND
+   * the admin `disabledTypes` kill switch (mandatory types exempt). Both
+   * lookups are cached and fail open.
+   */
+  private async isInboxDeliverable(userId: string, type: NotificationType): Promise<boolean> {
+    if (!(await this.policy.isInboxAllowed(type))) return false;
+    return this.preferences.isEnabled(userId, type);
+  }
+
+  /** Load the rows just re-marked unread and dispatch each. Never throws. */
+  private async dispatchReunread(ids: readonly string[]): Promise<void> {
+    try {
+      const rows = await this.prisma.notification.findMany({
+        where: { id: { in: [...ids] }, readAt: null, dismissedAt: null },
+      });
+      for (const row of rows ?? []) this.dispatcher.dispatch(row, 'reunread');
+    } catch (err) {
+      this.logger.warn(`dispatch of re-unread rows failed: ${this.errorMessage(err)}`);
+    }
+  }
 
   /**
    * Translate the `status` query param into a Prisma where fragment.
