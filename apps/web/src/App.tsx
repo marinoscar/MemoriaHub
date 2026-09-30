@@ -32,6 +32,8 @@ const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const EmailSettingsPage = lazy(() => import('./pages/Admin/EmailSettingsPage'));
+const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
+const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
 const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
@@ -147,6 +149,8 @@ function AppRoutes() {
                 <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
                 <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
                 <Route path="/admin/settings/email" element={<EmailSettingsPage />} />
+                <Route path="/admin/settings/push" element={<PushConfigPage />} />
+                <Route path="/admin/settings/notifications" element={<NotificationPolicyPage />} />
                 <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
                 <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
                 <Route path="/admin/settings/jobs" element={<JobsPage />} />

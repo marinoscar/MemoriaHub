@@ -42,6 +42,8 @@ import EmailIcon from '@mui/icons-material/Email';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
+import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
+import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 
 export interface AdminCardDef {
   title: string;
@@ -88,6 +90,22 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         description: 'Configure the outbound email provider (AWS SES or SMTP) and test delivery.',
         Icon: EmailIcon,
         path: '/admin/settings/email',
+        permission: 'system_settings:read',
+      },
+      {
+        title: 'Web Push',
+        description:
+          'Generate the VAPID key pair, switch web push on or off, and test delivery to your devices.',
+        Icon: VpnKeyOutlinedIcon,
+        path: '/admin/settings/push',
+        permission: 'push:read',
+      },
+      {
+        title: 'Notifications',
+        description:
+          'Turn browser notifications and web push on or off for everyone, and silence individual notification types.',
+        Icon: NotificationsOutlinedIcon,
+        path: '/admin/settings/notifications',
         permission: 'system_settings:read',
       },
     ],
