@@ -28,14 +28,18 @@ vi.mock('../../services/broadcasts', async (importOriginal) => {
   };
 });
 
-vi.mock('../../services/pushDiagnostics', () => ({
-  getNotificationClientConfig: vi.fn().mockResolvedValue({
-    pushEnabled: true,
-    vapidPublicKey: 'k',
-    browserEnabled: true,
-    pushTypes: [],
-  }),
-}));
+vi.mock('../../services/notifications', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/notifications')>();
+  return {
+    ...actual,
+    getNotificationConfig: vi.fn().mockResolvedValue({
+      pushEnabled: true,
+      vapidPublicKey: 'k',
+      browserEnabled: true,
+      pushTypes: [],
+    }),
+  };
+});
 
 vi.mock('../../components/datatable', () => ({
   DataTable: ({ rows, rowActions, rowId, emptyState }: any) => (

@@ -583,6 +583,14 @@ describe('sw.ts event handlers (push, notificationclick, pushsubscriptionchange,
       expect(clientsOpenWindow).toHaveBeenCalledWith('/duplicates?n=n-3');
     });
 
+    it('carries the circle as &c=<circleId> on a cold open, URL-encoded', async () => {
+      const { settled } = fireClick({ id: 'n-4', link: '/bursts', circleId: 'c 2' });
+      await settled;
+      expect(clientsOpenWindow).toHaveBeenCalledWith(
+        `/bursts?n=n-4&c=${encodeURIComponent('c 2')}`,
+      );
+    });
+
     it('appends &n=<id> when the link already has a query string, URL-encoding the id', async () => {
       const { settled } = fireClick({ id: 'id with spaces', link: '/admin/settings/jobs?status=failed' });
       await settled;

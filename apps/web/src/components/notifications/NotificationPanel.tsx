@@ -19,7 +19,9 @@
  * settings) and then `navigate` in the same event handler: `setActiveCircle`
  * updates its React state synchronously before its first `await`, so both
  * updates land in one render batch and the destination mounts already scoped to
- * the new circle — no need to await the settings PATCH round-trip.
+ * the new circle — no need to await the settings PATCH round-trip. The logic
+ * is `useOpenNotificationTarget` (`hooks/useNotificationClickHandling.ts`),
+ * shared with the inbox page and OS-toast clicks.
  */
 
 import {
@@ -37,7 +39,7 @@ import {
 } from '@mui/material';
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import { useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOpenNotificationTarget } from '../../hooks/useNotificationClickHandling';
 import { useNotifications } from '../../hooks/useNotifications';
 import { NotificationRow } from './NotificationRow';
 import type { NotificationItem } from '../../types/notifications';
@@ -54,7 +56,7 @@ export function NotificationPanel({ open, anchorEl, onClose }: NotificationPanel
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
-  const { circles, activeCircleId, setActiveCircle } = useCircle();
+  const openTarget = useOpenNotificationTarget();
 
   const { items, hasLoadedList, error, unreadCount, markRead, dismiss, markAllRead } =
     useNotifications();
@@ -66,23 +68,10 @@ export function NotificationPanel({ open, anchorEl, onClose }: NotificationPanel
     // inside the store if it fails.
     if (!notification.readAt) void markRead(notification.id);
 
-    // Switch circle BEFORE navigating (see file header).
-    //
-    // The membership check guards the stale-row case: a notification can
-    // outlive the user's access to its circle, and `setActiveCircle` would
-    // happily persist an id that resolves to no circle at all, leaving the
-    // whole app in a sticky "no active circle" state. `circles.length === 0`
-    // is treated as "not loaded yet" rather than "member of nothing" — every
-    // user always has a personal circle, so an empty list only ever means the
-    // CircleContext init is still in flight.
-    const circleKnown =
-      circles.length === 0 || circles.some((c) => c.id === notification.circleId);
-
-    if (notification.circleId && notification.circleId !== activeCircleId && circleKnown) {
-      void setActiveCircle(notification.circleId);
-    }
-
-    if (notification.link) navigate(notification.link);
+    // Switch circle BEFORE navigating (see file header), with the shared
+    // stale-circle guard: a circle the user no longer belongs to is never
+    // switched to.
+    openTarget({ circleId: notification.circleId, link: notification.link });
   };
 
   const handleSeeAll = () => {

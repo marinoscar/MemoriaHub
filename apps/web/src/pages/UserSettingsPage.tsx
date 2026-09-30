@@ -5,7 +5,8 @@ import {
   Alert,
   Snackbar,
 } from '@mui/material';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ThemeSettings } from '../components/settings/ThemeSettings';
 import { TimezoneSettings } from '../components/settings/TimezoneSettings';
 import { ProfileSettings } from '../components/settings/ProfileSettings';
@@ -29,6 +30,26 @@ export default function UserSettingsPage() {
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Deep links (`/settings#notifications`, from NotificationPermissionBanner).
+  // A client-side navigation does not scroll to a hash, and the sections only
+  // mount once settings have loaded, so scroll here once the target exists.
+  // Tracked per hash so a later re-render (e.g. after a save) never yanks the
+  // page back.
+  const { hash } = useLocation();
+  const scrolledHashRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hash || !settings || scrolledHashRef.current === hash) return;
+    let target: HTMLElement | null = null;
+    try {
+      target = document.getElementById(decodeURIComponent(hash.slice(1)));
+    } catch {
+      target = null;
+    }
+    if (!target || typeof target.scrollIntoView !== 'function') return;
+    scrolledHashRef.current = hash;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [hash, settings]);
 
   const handleThemeChange = async (theme: 'light' | 'dark' | 'system') => {
     try {

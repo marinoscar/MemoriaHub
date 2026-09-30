@@ -146,6 +146,37 @@ describe('useNotificationClickHandling', () => {
     expect(search).toBe('?keep=1');
   });
 
+  it('switches to the cold-opened ?c=<circle> and strips both params', () => {
+    let search = '';
+    renderHook(
+      () => {
+        useNotificationClickHandling();
+        search = useLocation().search;
+      },
+      { wrapper: wrapper('/duplicates?n=abc&c=circle-2&keep=1') },
+    );
+    expect(markReadMock).toHaveBeenCalledWith('abc');
+    expect(setActiveCircle).toHaveBeenCalledWith('circle-2');
+    expect(setActiveCircle).toHaveBeenCalledTimes(1);
+    // Already on the link: the cold open must not navigate again.
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(search).toBe('?keep=1');
+  });
+
+  it('does not switch to a cold-opened circle the user is no longer in', () => {
+    let search = '';
+    renderHook(
+      () => {
+        useNotificationClickHandling();
+        search = useLocation().search;
+      },
+      { wrapper: wrapper('/bursts?n=abc&c=gone') },
+    );
+    expect(markReadMock).toHaveBeenCalledWith('abc');
+    expect(setActiveCircle).not.toHaveBeenCalled();
+    expect(search).toBe('');
+  });
+
   it('does nothing without ?n=', () => {
     renderHook(() => useNotificationClickHandling(), { wrapper: wrapper('/bursts') });
     expect(markReadMock).not.toHaveBeenCalled();

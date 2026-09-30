@@ -143,8 +143,9 @@ const str = (value: unknown): string | undefined =>
  * A push is shown EVEN WHEN A FOCUSED TAB EXISTS. Suppressing it for a focused
  * client (and posting the payload to the page instead) is exactly the "silent
  * push" Chrome penalises, and it leaves a focused user with no visible alert
- * unless the page raises its own. The in-app bell already updates on its own
- * poll; the OS notification is the alert.
+ * unless the page raises its own. The in-app bell keeps itself current
+ * independently (its SSE stream, with a poll fallback); the OS notification is
+ * the alert.
  */
 async function handlePush(event: PushEvent): Promise<void> {
   let payload: PushNotificationPayload;
@@ -254,8 +255,9 @@ self.addEventListener('push', (event) => {
 //     link, circleId }`; the page marks it read, switches circle and navigates
 //     on its own token;
 //   * no page is open — `clients.openWindow()` a fresh one at the link with
-//     the id riding along as `?n=<id>`, for the booting app to mark read and
-//     strip.
+//     the id riding along as `?n=<id>` (and the circle as `&c=<circleId>`
+//     when the row has one), for the booting app to mark read, switch circle
+//     and strip.
 //
 // `link` is RE-VALIDATED here even though the API writes only root-relative
 // links: this handler feeds it into a real navigation, and anything that is
@@ -303,9 +305,15 @@ self.addEventListener('notificationclick', (event) => {
         return;
       }
 
-      // COLD OPEN: no page to post to, so the id rides along in the URL.
+      // COLD OPEN: no page to post to, so the id (and circle) ride along in
+      // the URL. The circle matters: review-queue links render the ACTIVE
+      // circle, so without it a cold open lands in whichever circle was last
+      // active rather than the one the notification is about.
       const separator = link.includes('?') ? '&' : '?';
-      await self.clients.openWindow(`${link}${separator}n=${encodeURIComponent(id)}`);
+      const circleParam = circleId ? `&c=${encodeURIComponent(circleId)}` : '';
+      await self.clients.openWindow(
+        `${link}${separator}n=${encodeURIComponent(id)}${circleParam}`,
+      );
     })(),
   );
 });

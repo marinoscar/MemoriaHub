@@ -59,17 +59,17 @@ import {
   STEP_ORDER,
   buildDiagnosticsReport,
   collectBrowserSnapshot,
-  getNotificationClientConfig,
-  requestNotificationPermission,
   runPushTest,
   showLocalTestNotification,
   type BrowserSnapshot,
   type DiagnosticStep,
   type DiagnosticStepStatus,
   type LocalNotificationResult,
-  type NotificationClientConfig,
   type PushTestRun,
 } from '../../services/pushDiagnostics';
+import { getNotificationConfig } from '../../services/notifications';
+import { requestBrowserNotificationPermission } from '../../services/browserNotifications';
+import type { NotificationClientConfig } from '../../types/notifications';
 import { ApiError } from '../../services/api';
 import { useIsMounted } from '../../hooks/useIsMounted';
 import { notificationTypeLabel } from './notificationTypeCatalog';
@@ -237,7 +237,7 @@ export function PushTestPanel({ config, canWrite }: PushTestPanelProps) {
   // below against the admin view — a mismatch is one of the silent failures.
   const refreshClientConfig = useCallback(async () => {
     try {
-      const next = await getNotificationClientConfig();
+      const next = await getNotificationConfig();
       if (isMounted()) {
         setClientConfig(next);
         setClientConfigError(null);
@@ -303,7 +303,7 @@ export function PushTestPanel({ config, canWrite }: PushTestPanelProps) {
   const handleAllow = async () => {
     setIsRequesting(true);
     try {
-      await requestNotificationPermission();
+      await requestBrowserNotificationPermission();
     } finally {
       if (isMounted()) setIsRequesting(false);
       void refreshSnapshot();

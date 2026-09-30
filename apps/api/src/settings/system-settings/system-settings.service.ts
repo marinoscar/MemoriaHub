@@ -3,8 +3,13 @@ import {
   Logger,
   NotFoundException,
   ConflictException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationType, Prisma } from '@prisma/client';
+import { NotificationPolicyService } from '../../notifications/notification-policy.service';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { isMandatoryType } from '../../notifications/notification-channels';
 import { UpdateSystemSettingsDto } from '../dto/update-system-settings.dto';
 import { PatchSystemSettingsDto } from '../dto/update-system-settings.dto';
 import {
@@ -80,7 +85,80 @@ export class SystemSettingsService {
     cachedAt: number;
   } | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  /**
+   * NotificationPolicyService (issue #489) is injected so an admin kill-switch
+   * change (`notifications.{browserEnabled,pushEnabled,disabledTypes}`) takes
+   * effect on the very next notification in THIS process instead of up to one
+   * NOTIFICATION_POLICY_CACHE_TTL_MS later. It is a plain file import: the
+   * module edge is SettingsModule -> NotificationsModule (which imports
+   * nothing), so no cycle. @Optional() keeps the many specs that construct
+   * this service with only PrismaService working.
+   */
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notificationPolicy?: NotificationPolicyService,
+    @Optional() private readonly notifications?: NotificationsService,
+  ) {}
+
+  /**
+   * Types this write NEWLY adds to `notifications.disabledTypes`, minus
+   * mandatory types (whose inbox rows the kill switch never suppresses).
+   */
+  private newlyDisabledNotificationTypes(
+    before: readonly unknown[] | undefined,
+    after: readonly unknown[] | undefined,
+  ): NotificationType[] {
+    const prev = new Set((before ?? []).map(String));
+    return [...new Set((after ?? []).map(String))]
+      .filter((t) => !prev.has(t))
+      .map((t) => t as NotificationType)
+      .filter((t) => !isMandatoryType(t));
+  }
+
+  /**
+   * Run a settings write, keeping the #489 admin dismiss-on-disable ATOMIC
+   * with it.
+   *
+   * DECIDED BEHAVIOR (#489): when an admin adds a type to
+   * `notifications.disabledTypes`, every LIVE row of that type is dismissed
+   * app-wide (mandatory types excepted). Without it the review_queue_* STATE
+   * rows would stay forever — the reconcile no longer refreshes a suppressed
+   * type, so it never drains them. This mirrors UserSettingsService's #251
+   * per-user dismiss-on-disable, including running in the SAME transaction as
+   * the settings write so a failed save never leaves rows dismissed while the
+   * type is still on.
+   *
+   * Unlike the per-user path this diffs before/after and acts only on NEWLY
+   * disabled types: an app-wide sweep on every settings save (theme,
+   * retention, ...) would scan the table for nothing, and an already-disabled
+   * type has no live rows to find (the inbox gate stops new ones). Re-enabling
+   * a type does NOT resurrect dismissed rows — the reconcile recreates STATE
+   * rows on its next tick if the queue is still non-empty.
+   *
+   * No transaction is opened when nothing is newly disabled, so the common
+   * save stays the single statement it was. Unread-count caches are dropped
+   * AFTER the transaction commits.
+   */
+  private async writeWithNotificationDismiss<T>(
+    newlyDisabled: readonly NotificationType[],
+    write: (client: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    if (newlyDisabled.length === 0 || !this.notifications) {
+      return write(this.prisma);
+    }
+    const notifications = this.notifications;
+    const result = await this.prisma.$transaction(async (tx) => {
+      const written = await write(tx);
+      const dismissed = await notifications.dismissTypesGlobally(newlyDisabled, tx);
+      this.logger.log(
+        `Dismissed ${dismissed} live notification(s) of newly disabled type(s): ` +
+          newlyDisabled.join(', '),
+      );
+      return written;
+    });
+    notifications.invalidateAllUnreadCounts();
+    return result;
+  }
 
   /**
    * Invalidate the in-memory settings cache.
@@ -94,6 +172,10 @@ export class SystemSettingsService {
    */
   invalidateSettingsCache(): void {
     this.settingsCache = null;
+    // The notification policy is a second, independent cache over the SAME
+    // `global` row (read with Prisma directly — see NotificationPolicyService),
+    // so every settings write must drop it too.
+    this.notificationPolicy?.invalidate();
   }
 
   /**
@@ -211,24 +293,38 @@ export class SystemSettingsService {
     // Validate against schema
     const validated = systemSettingsSchema.parse(dto);
 
-    const settings = await this.prisma.systemSettings.upsert({
-      where: { key: SETTINGS_KEY },
-      update: {
-        value: validated as any,
-        updatedByUserId: userId,
-        version: { increment: 1 },
-      },
-      create: {
-        key: SETTINGS_KEY,
-        value: validated as any,
-        updatedByUserId: userId,
-      },
-      include: {
-        updatedByUser: {
-          select: { id: true, email: true },
+    // #489: diff against the stored list only when the new one could matter.
+    const nextDisabled = (validated as any).notifications?.disabledTypes as
+      | unknown[]
+      | undefined;
+    const newlyDisabled =
+      nextDisabled && nextDisabled.length > 0
+        ? this.newlyDisabledNotificationTypes(
+            ((await this.getSettings()) as any).notifications?.disabledTypes,
+            nextDisabled,
+          )
+        : [];
+
+    const settings = await this.writeWithNotificationDismiss(newlyDisabled, (client) =>
+      client.systemSettings.upsert({
+        where: { key: SETTINGS_KEY },
+        update: {
+          value: validated as any,
+          updatedByUserId: userId,
+          version: { increment: 1 },
         },
-      },
-    });
+        create: {
+          key: SETTINGS_KEY,
+          value: validated as any,
+          updatedByUserId: userId,
+        },
+        include: {
+          updatedByUser: {
+            select: { id: true, email: true },
+          },
+        },
+      }),
+    );
 
     // Invalidate cache so the next read fetches the new value immediately.
     this.invalidateSettingsCache();
@@ -899,19 +995,26 @@ export class SystemSettingsService {
     // Validate merged result
     const validated = systemSettingsSchema.parse(merged);
 
-    const settings = await this.prisma.systemSettings.update({
-      where: { key: SETTINGS_KEY },
-      data: {
-        value: validated as any,
-        updatedByUserId: userId,
-        version: { increment: 1 },
-      },
-      include: {
-        updatedByUser: {
-          select: { id: true, email: true },
+    const newlyDisabled = this.newlyDisabledNotificationTypes(
+      (current as any).notifications?.disabledTypes,
+      (validated as any).notifications?.disabledTypes,
+    );
+
+    const settings = await this.writeWithNotificationDismiss(newlyDisabled, (client) =>
+      client.systemSettings.update({
+        where: { key: SETTINGS_KEY },
+        data: {
+          value: validated as any,
+          updatedByUserId: userId,
+          version: { increment: 1 },
         },
-      },
-    });
+        include: {
+          updatedByUser: {
+            select: { id: true, email: true },
+          },
+        },
+      }),
+    );
 
     // Invalidate cache so the next read fetches the new value immediately.
     this.invalidateSettingsCache();

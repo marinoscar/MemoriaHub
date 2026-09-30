@@ -2144,6 +2144,10 @@ cd apps/web && npm test
 | [Face Detection and Recognition](specs/face-recognition.md) | End-to-end face detection, provider abstraction, matching, people labeling |
 | [Enrichment Queue](specs/enrichment-queue.md) | Generic background enrichment queue; how to add new AI capabilities |
 | [Memories](specs/memories.md) | Auto-curated memory collections (On This Day, Trips, People, Themes, Seasonal, Year in Review): data model, curation engine, AI titling, notifications/email digest, web story player, API/RBAC/settings |
+| [Notification Center](specs/notifications.md) | In-app bell and inbox: STATE/EVENT data model, write primitives, producers, retention, preferences; section 16 summarizes the epic #481 channel layer |
+| [Browser Notifications, Web Push and the Live Stream](specs/browser-notifications.md) | PWA shell and service worker, channel layer and dispatch, Web Push (runtime VAPID storage), admin policy, SSE stream, client capability model, diagnostics |
+| [Admin Notification Broadcasts](specs/notification-broadcasts.md) | One-to-all announcements over inbox, push and email: lifecycle, `broadcast_start`/`broadcast_chunk` fan-out jobs, resume/cancel, API/RBAC |
+| [VAPID keys runbook](runbooks/vapid-keys.md) | Generate, enable, rotate and remove Web Push keys from the admin UI; troubleshooting keyed to the diagnostics panel |
 
 ### 15.3 Specification Index
 

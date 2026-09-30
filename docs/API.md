@@ -4983,3 +4983,35 @@ Three `@Public()` routes back the HTML email digest — see [docs/specs/memories
 - `GET /public/memories/digest-image/:token` — stream a digest email's cover thumbnail bytes (never the original)
 - `GET /public/memories/digest-unsubscribe/:token` — render a confirmation page (mutates nothing)
 - `POST /public/memories/digest-unsubscribe/:token` — perform the opt-out (`user_settings.memories.emailDigestOptOut = true`); idempotent
+
+---
+
+## Notifications, Web Push and Broadcasts
+
+The Notification Center list/read/dismiss routes (`/notifications`, `/notifications/unread-count`, `/notifications/read-all`, `/notifications/dismiss-all`, `/notifications/:id/read|dismiss`, `DELETE /notifications/:id`) are documented in [docs/specs/notifications.md §12](specs/notifications.md#12-api-endpoints). The routes added by epic #481 are below; the generated reference at `/api/docs` is authoritative for request and response schemas. Full design: [Browser Notifications, Web Push and the Live Stream](specs/browser-notifications.md) and [Admin Notification Broadcasts](specs/notification-broadcasts.md).
+
+### Notification channels (authenticated, any role)
+
+- `GET /notifications/stream` — `text/event-stream` of the caller's notifications only (`Authorization: Bearer`, no query-string token; use a fetch-based client). Events: `notification` (`{ type, notification, unreadCount?, toast, pushed, reason }`), `sync` (refetch), `ping` (keep-alive every 25 s). Nothing is replayed after a reconnect. Not wrapped in the `{ data, meta }` envelope.
+- `GET /notifications/config` — `{ pushEnabled, vapidPublicKey, browserEnabled, pushTypes }`. The public VAPID key only.
+- `POST /notifications/push/subscriptions` — body is the browser's `PushSubscription.toJSON()` (`endpoint` must be `https://`); upserted by endpoint, moving the row to the caller if another user held it. `201`; `409` when Web Push is not enabled.
+- `DELETE /notifications/push/subscriptions` — body `{ "endpoint": "..." }`; `204`; `404` when the endpoint is not the caller's.
+
+### Admin: Web Push configuration (Admin + `push:read` / `push:write`)
+
+- `GET /admin/push-config` (`push:read`) — `{ enabled, publicKey, subject, effectiveSubject, configured, active, privateKeyStatus: { configured, last4, updatedAt }, settingsError, updatedAt, updatedById }`. The private key is never returned.
+- `PUT /admin/push-config` (`push:write`) — `{ enabled?, subject? }`; `409` when enabling with no key pair.
+- `POST /admin/push-config/generate` (`push:write`) — first key pair, enables push; `409` if one exists.
+- `POST /admin/push-config/rotate` (`push:write`) — body `{ "confirmation": "ROTATE", "subject"? }`; `409` if nothing is configured.
+- `DELETE /admin/push-config` (`push:write`) — body `{ "confirmation": "REMOVE" }`.
+- `POST /admin/push-config/test` (`push:write`) — sends a real push to the caller's own devices and returns diagnostics and hints; always `200`. See the [VAPID keys runbook](runbooks/vapid-keys.md).
+
+### Admin: Notification broadcasts (Admin + `broadcasts:read` / `broadcasts:write`)
+
+- `GET /admin/broadcasts/audience` (`read`) — `{ activeUsers }`.
+- `POST /admin/broadcasts/test` (`write`) — deliver the composition to the caller only.
+- `GET /admin/broadcasts?page=&pageSize=&status=` (`read`) — newest first.
+- `POST /admin/broadcasts` (`write`) — `{ title, body, link?, ctaLabel?, channels[], scheduledFor?, critical? }`; `201`. `push` and `critical` both require `inbox`; `link` must be root-relative.
+- `GET /admin/broadcasts/:id` (`read`), `POST /admin/broadcasts/:id/cancel`, `POST /admin/broadcasts/:id/resume`, `DELETE /admin/broadcasts/:id` (`write`; `409` for an invalid state, delete refused while `sending`).
+
+The admin notification policy (`notifications.browserEnabled`, `notifications.pushEnabled`, `notifications.disabledTypes`) is read and written through `GET`/`PATCH /system-settings`.

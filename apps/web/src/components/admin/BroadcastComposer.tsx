@@ -72,8 +72,8 @@ import type {
   BroadcastTestResult,
   CreateBroadcastRequest,
 } from '../../services/broadcasts';
-import { getNotificationClientConfig } from '../../services/pushDiagnostics';
-import type { NotificationClientConfig } from '../../services/pushDiagnostics';
+import { getNotificationConfig } from '../../services/notifications';
+import type { NotificationClientConfig } from '../../types/notifications';
 
 /** Default selection for a fresh composition: the durable inbox row. */
 const DEFAULT_CHANNELS: BroadcastChannel[] = ['inbox'];
@@ -157,7 +157,7 @@ export function BroadcastComposer({
     setConfirming(false);
     setTestNotice(null);
     let canceled = false;
-    getNotificationClientConfig()
+    getNotificationConfig()
       .then((config) => {
         if (!canceled) setClientConfig(config);
       })
