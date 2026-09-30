@@ -136,6 +136,13 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
       'Configure email provider credentials, set active provider, and send test emails',
   },
 
+  // Web Push (VAPID) configuration (Admin only, epic #481)
+  { name: PERMISSIONS.PUSH_READ, description: 'Admin: view Web Push (VAPID) configuration' },
+  {
+    name: PERMISSIONS.PUSH_WRITE,
+    description: 'Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys',
+  },
+
   // PostgreSQL Database Backup & Restore (Admin only, epic #339)
   { name: PERMISSIONS.DB_BACKUP_READ, description: 'Admin: read database backup run history and status' },
   { name: PERMISSIONS.DB_BACKUP_WRITE, description: 'Admin: configure and trigger database backups' },
@@ -197,6 +204,9 @@ export const ROLE_PERMISSION_MATRIX: Record<RoleName, readonly PermissionName[]>
     // Email Provider Settings: admin-only
     PERMISSIONS.EMAIL_SETTINGS_READ,
     PERMISSIONS.EMAIL_SETTINGS_WRITE,
+    // Web Push (VAPID) configuration: admin-only
+    PERMISSIONS.PUSH_READ,
+    PERMISSIONS.PUSH_WRITE,
     // PostgreSQL Database Backup & Restore: admin-only
     PERMISSIONS.DB_BACKUP_READ,
     PERMISSIONS.DB_BACKUP_WRITE,
