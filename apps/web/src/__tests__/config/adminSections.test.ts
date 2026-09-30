@@ -64,6 +64,35 @@ describe('adminSections', () => {
     });
   });
 
+  describe('notification cards (epic #481, issue #487)', () => {
+    it('declares Web Push and Notifications in General, after Email, with the exact API permissions', () => {
+      const general = ADMIN_SECTIONS.find((section) => section.label === 'General')!;
+      const titles = general.cards.map((card) => card.title);
+      const email = titles.indexOf('Email');
+
+      expect(titles.slice(email + 1, email + 3)).toEqual(['Web Push', 'Notifications']);
+      const push = general.cards.find((card) => card.title === 'Web Push')!;
+      const policy = general.cards.find((card) => card.title === 'Notifications')!;
+      expect(push).toMatchObject({ path: '/admin/settings/push', permission: 'push:read' });
+      expect(policy).toMatchObject({
+        path: '/admin/settings/notifications',
+        permission: 'system_settings:read',
+      });
+    });
+
+    it('shows Web Push to a push:read holder without system_settings:read', () => {
+      const titles = visibleAdminSections(allowOnly('push:read')).flatMap((s) =>
+        s.cards.map((c) => c.title),
+      );
+      expect(titles).toEqual(['Web Push']);
+    });
+
+    it('resolves both routes to their page titles', () => {
+      expect(adminPageTitle('/admin/settings/push')).toBe('Web Push');
+      expect(adminPageTitle('/admin/settings/notifications')).toBe('Notifications');
+    });
+  });
+
   describe('visibleAdminSections', () => {
     it('drops individual cards the permission gate rejects', () => {
       const sections = visibleAdminSections(allowOnly('jobs:read'));
