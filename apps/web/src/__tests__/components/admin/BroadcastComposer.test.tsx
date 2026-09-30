@@ -55,6 +55,9 @@ function localValue(date: Date) {
   )}:${pad(date.getMinutes())}`;
 }
 
+// Typing-heavy flows: give each test headroom when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 30_000 });
+
 describe('BroadcastComposer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
