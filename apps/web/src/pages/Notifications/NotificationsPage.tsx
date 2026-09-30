@@ -36,7 +36,9 @@
  * guard is also carried over verbatim — a notification can outlive the user's
  * access to its circle, and persisting an id that resolves to no circle leaves
  * the whole app stuck with no active circle. `circles.length === 0` means "not
- * loaded yet", never "member of nothing".
+ * loaded yet", never "member of nothing". The logic lives in
+ * `useOpenNotificationTarget` (`hooks/useNotificationClickHandling.ts`), shared
+ * with the bell panel and OS-toast clicks.
  *
  * ## Bulk confirmation
  *
@@ -48,7 +50,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -77,6 +79,7 @@ import {
   type DataTableRowAction,
 } from '../../components/datatable';
 import { useCircle } from '../../hooks/useCircle';
+import { useOpenNotificationTarget } from '../../hooks/useNotificationClickHandling';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useNotificationList } from '../../hooks/useNotificationList';
 import { dismissAllNotifications, listNotifications } from '../../services/notifications';
@@ -134,8 +137,9 @@ const EMPTY_STATE_TEXT: Record<NotificationsTab, string> = {
 // ---------------------------------------------------------------------------
 
 export default function NotificationsPage() {
-  const navigate = useNavigate();
-  const { circles, activeCircleId, setActiveCircle } = useCircle();
+  const { circles } = useCircle();
+  // Circle-switch-then-navigate, shared with the bell and OS-toast clicks.
+  const openTarget = useOpenNotificationTarget();
   const {
     unreadCount,
     markRead,
@@ -231,20 +235,9 @@ export default function NotificationsPage() {
         void markRead(notification.id).then(() => reload());
       }
 
-      const circleKnown =
-        circles.length === 0 || circles.some((c) => c.id === notification.circleId);
-
-      if (
-        notification.circleId &&
-        notification.circleId !== activeCircleId &&
-        circleKnown
-      ) {
-        void setActiveCircle(notification.circleId);
-      }
-
-      if (notification.link) navigate(notification.link);
+      openTarget({ circleId: notification.circleId, link: notification.link });
     },
-    [markRead, reload, circles, activeCircleId, setActiveCircle, navigate],
+    [markRead, reload, openTarget],
   );
 
   const handleMarkRead = useCallback(
