@@ -215,9 +215,9 @@ Indexes: `(user_id, type)`, `(status, created_at)`, `(created_at)`. Migration `2
 
 Pure predicates (`isInboxAllowed`, `isPushAllowed`, `isToastAllowed`, `policyChannels`) are exported alongside the service. `readNotificationPolicy` normalizes a stored blob and never throws (`!== false` for the booleans; unknown type names are filtered out).
 
-- **Cached 5 s** (`NOTIFICATION_POLICY_CACHE_TTL_MS`), because the gate runs per recipient in hot producer loops. There is an `invalidate()` but the settings write path does not call it, so a change takes up to 5 s per API process to be seen.
+- **Cached 5 s** (`NOTIFICATION_POLICY_CACHE_TTL_MS`), because the gate runs per recipient in hot producer loops. `SystemSettingsService.invalidateSettingsCache()` also invalidates this cache, so an admin policy change applies immediately on the writing process (other API processes still wait out the TTL).
 - **Fails open**: an unreadable policy resolves to "everything on". A transient database fault must never silently mute notifications.
-- `disabledTypes` gates **new** writes. It does not dismiss rows that already exist (only a user's own preference change does that; see [notifications.md section 8.4](notifications.md#84-dismiss-on-disable-is-transactional-with-the-settings-write)).
+- `disabledTypes` gates **new** writes, and adding a type also **dismisses its live rows app-wide** (mandatory types excepted) through `NotificationsService.dismissTypesGlobally`, in the same transaction as the settings write (batched, 5 000 rows per statement; the unread-count caches are dropped after commit). Only newly disabled types are swept, so an ordinary save opens no transaction. Re-enabling a type does not restore dismissed rows; `review_queue_*` rows are recreated by the next reconcile, event rows are not. See also [notifications.md section 8.4](notifications.md#84-dismiss-on-disable-is-transactional-with-the-settings-write).
 
 ### 7.1 Four hand-maintained copies
 
@@ -377,8 +377,8 @@ A `notification` frame may raise an OS toast (`showAppNotification`) only when *
 
 `notificationclick` (`sw.ts`) is the only place a click on a worker-shown notification can be handled, and it may arrive with no page open. It closes the notification first (so the OS cannot deliver a second click while async work is in flight), then:
 
-- **A window is open** (`matchAll({ type:'window', includeUncontrolled:true })`; uncontrolled so a tab open before the worker installed is not mistaken for a cold open): prefer one already on the link's path, focus it, and post `{ type: 'notification-click', id, link, circleId }`. `useNotificationClickHandling` marks the row read and switches circle, on the page's own token.
-- **No window**: `clients.openWindow(link + '?n=<id>')`. The booting app reads `?n=`, marks the row read and strips the parameter.
+- **A window is open** (`matchAll({ type:'window', includeUncontrolled:true })`; uncontrolled so a tab open before the worker installed is not mistaken for a cold open): prefer one already on the link's path, focus it, and post `{ type: 'notification-click', id, link, circleId }`. `useNotificationClickHandling` marks the row read and switches circle, on the page's own token. The bell, the inbox page and this handler share one `useOpenNotificationTarget` hook (mark read, circle switch, navigate); it only navigates to root-relative links.
+- **No window**: `clients.openWindow(link + '?n=<id>&c=<circleId>')` (`c` only when the row has a circle). The booting app marks the row read, switches to that circle (membership-guarded) and strips both parameters.
 
 `link` is re-validated with `isInternalLink` (a single-leading-slash path) before it feeds a navigation; anything else becomes `/`. The circle switch is guarded by a membership check, mirroring the bell (see [notifications.md section 9.2](notifications.md#92-circle-switch-before-navigate)). A page-raised toast's `onclick` (page path only, since an SW toast returns no handle) marks read and calls the same open handler.
 
@@ -438,9 +438,8 @@ The test payload carries `test: true`. `sw.ts` always shows it (obeying the crit
 ## 19. Known Limitations
 
 - **SSE and the push throttle are per API process.** With several replicas a tab on replica A sees nothing published on replica B (the client's 5-minute safety poll and refetch-on-reconnect cover it), and the 5-minute push throttle is per replica.
-- **The policy cache is not invalidated by a settings write** (5 s TTL), and `disabledTypes` does not dismiss existing rows.
+- **The policy cache is per API process**: a settings write invalidates it on the writing process only; other replicas see the change within the 5 s TTL.
 - **No delivery statistics UI.** `notification_deliveries` is queryable but only the diagnostics panel surfaces delivery outcomes, for the admin's own devices.
-- **The user preferences page has no switch for the two broadcast types** (`admin_broadcast`, `admin_broadcast_critical`). The API accepts a `notifications.types` / `notifications.push.types` key for them, so an ordinary broadcast is mutable by API, but there is no control for it on `/settings` today.
 - **`push` requires a service-worker-capable, HTTPS origin and, on iOS, an installed app** (section 12); nothing in this repo can work around that.
 - **Rotation is disruptive** by design: devices that never reopen the app go silent until pruned.
 

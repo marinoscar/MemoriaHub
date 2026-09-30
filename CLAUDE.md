@@ -1438,10 +1438,10 @@ The refresh cadence for the precomputed storage metrics snapshot is controlled v
 
 **Notification Channels and Web Push (epic #481):**
 
-The `notifications.*` system-settings namespace also carries the channel kill switches, read by `NotificationPolicyService` (through `PrismaService` directly; cached 5 s, no invalidation on write; **fails open** to everything-on) and edited at `/admin/settings/notifications`:
+The `notifications.*` system-settings namespace also carries the channel kill switches, read by `NotificationPolicyService` (through `PrismaService` directly; cached 5 s, invalidated on settings write; **fails open** to everything-on) and edited at `/admin/settings/notifications`:
 - `notifications.browserEnabled` — boolean, default true; `false` withholds the in-page browser toast (the SSE frame's `toast` flag). Inbox rows are unaffected
 - `notifications.pushEnabled` — boolean, default true; `false` stops every Web Push, mandatory types included, and makes `GET /api/notifications/config` report `pushEnabled: false`
-- `notifications.disabledTypes` — `NotificationType[]` (max 50), default `[]`, replaced wholesale on write; suppresses the push channel for a listed type and its inbox row too unless the type is mandatory (`admin_broadcast_critical`). Gates NEW writes only; it does not dismiss existing rows
+- `notifications.disabledTypes` — `NotificationType[]` (max 50), default `[]`, replaced wholesale on write; suppresses the push channel for a listed type and its inbox row too unless the type is mandatory (`admin_broadcast_critical`). Gates NEW writes, and newly disabling a non-mandatory type dismisses its live rows app-wide in the same transaction (`NotificationsService.dismissTypesGlobally`); re-enabling does not restore them (the reconcile recreates `review_queue_*` rows)
 
 These three keys must be added in **every** hand-maintained copy (the schema, its patch twin, the wire DTO and the hand-written merge in `SystemSettingsService.patchSettings`; see the pitfall below), or a `PATCH /api/system-settings` silently no-ops.
 

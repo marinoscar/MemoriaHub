@@ -218,7 +218,7 @@ The broadcast object exposes `id, title, body, link, ctaLabel, critical, channel
 
 - **No email rate-limit deferral.** The email channel has no per-provider throttle: a chunk sends to its group with concurrency 5 and only counts failures. A provider that rate-limits mid-fan-out produces failed emails that are logged, not retried or deferred (the job still succeeds), and there is no resend. (A failed inbox/push delivery is separate: those never fail the job either.)
 - **No per-channel delivery breakdown.** `processedCount` counts recipients walked, not messages delivered per channel. The broadcast row does not record how many inbox rows were written (a user's preference can suppress an ordinary broadcast's row), how many pushes were accepted, or how many emails succeeded. Push attempts are auditable in `notification_deliveries` per notification, not per broadcast.
-- **The user preferences page has no switch for the broadcast types**, so an ordinary broadcast can be muted only through the API today; a critical one cannot be muted at all (by design).
+- A critical broadcast cannot be muted in the inbox (by design). `/settings` has an **Announcements** section: `admin_broadcast` has inbox and push toggles; `admin_broadcast_critical` shows the inbox as always-on and read-only, while its push toggle is usable.
 - **The audience is every active user**: no segmentation, no per-circle targeting.
 - **Per-process SSE and push throttle** apply to the inbox/push legs exactly as in [browser-notifications.md](browser-notifications.md#19-known-limitations).
 - **A cancel does not recall** anything already delivered.
