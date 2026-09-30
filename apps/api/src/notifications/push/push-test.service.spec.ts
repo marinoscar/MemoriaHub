@@ -2,6 +2,8 @@
 import * as webpush from 'web-push';
 import { WebPushError } from 'web-push';
 
+import { DEFAULT_NOTIFICATION_POLICY } from '../notification-policy.service';
+import { resolveNotificationPreferences } from '../notification-preferences.service';
 import {
   isValidVapidPublicKey,
   isValidVapidSubject,
@@ -31,7 +33,7 @@ function sub(id: string, endpoint: string) {
   };
 }
 
-function build(opts: { active?: boolean; subs?: any[]; row?: unknown } = {}) {
+function build(opts: { active?: boolean; subs?: any[]; row?: unknown; policy?: any; prefs?: any } = {}) {
   const active =
     opts.active === false
       ? null
@@ -50,7 +52,16 @@ function build(opts: { active?: boolean; subs?: any[]; row?: unknown } = {}) {
     auditEvent: { create: jest.fn().mockResolvedValue({}) },
   };
   const pushConfig = { resolveActiveVapidConfig: jest.fn().mockResolvedValue(active) };
-  return { service: new PushTestService(prisma as any, pushConfig as any), prisma };
+  const policy = {
+    getPolicy: jest.fn().mockResolvedValue(opts.policy ?? DEFAULT_NOTIFICATION_POLICY),
+  };
+  const preferences = {
+    resolve: jest.fn().mockResolvedValue(resolveNotificationPreferences(opts.prefs)),
+  };
+  return {
+    service: new PushTestService(prisma as any, pushConfig as any, policy as any, preferences as any),
+    prisma,
+  };
 }
 
 describe('PushTestService', () => {
@@ -127,6 +138,19 @@ describe('PushTestService', () => {
     expect(prisma.auditEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: 'push_config:test' }) }),
     );
+  });
+
+  it('reports per-type routing from admin policy and the caller\'s push preferences', async () => {
+    const { service } = build({
+      policy: { ...DEFAULT_NOTIFICATION_POLICY, disabledTypes: ['share_expiring'] },
+      prefs: { push: { types: { upload_completed: false } } },
+    });
+    const res = await service.runTest('u1', {});
+    const byType = Object.fromEntries(res.types.map((t) => [t.type, t]));
+    expect(byType.share_expiring).toMatchObject({ policyAllows: false, preferenceAllows: true });
+    expect(byType.upload_completed).toMatchObject({ policyAllows: true, preferenceAllows: false });
+    expect(byType.memories_ready).toMatchObject({ policyAllows: true, preferenceAllows: true });
+    expect(res.hints.join(' ')).toMatch(/share_expiring/);
   });
 
   describe('pure helpers', () => {

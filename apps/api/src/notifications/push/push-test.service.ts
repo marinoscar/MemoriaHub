@@ -6,6 +6,9 @@ import * as webpush from 'web-push';
 import { WebPushError } from 'web-push';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { isMandatoryType, pushCapableTypes } from '../notification-channels';
+import { NotificationPolicyService, isPushAllowed } from '../notification-policy.service';
+import { NotificationPreferencesService } from '../notification-preferences.service';
 import { describeThrown } from './describe-thrown';
 import { DEFAULT_VAPID_SUBJECT, PUSH_CONFIG_KEY, storedPushConfigSchema } from './push-config.schema';
 import { type ActiveVapidConfig, PushConfigService } from './push-config.service';
@@ -39,6 +42,9 @@ import type {
 // handful of devices, in parallel, each capped by a 10 s socket timeout, and
 // the admin needs the answer inline. Nothing is detached.
 //
+// 4. ROUTING  — per notification type, do the admin policy and the caller's
+//                 preferences keep push open (#484)?
+//
 // NOT A NOTIFICATION: it writes no `notifications` or `notification_deliveries`
 // row. It keeps the channel's ENDPOINT bookkeeping (success clears
 // failureCount; 404/410 prunes) but deliberately does NOT increment
@@ -62,6 +68,8 @@ export class PushTestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pushConfig: PushConfigService,
+    private readonly policy: NotificationPolicyService,
+    private readonly preferences: NotificationPreferencesService,
   ) {}
 
   /**
@@ -154,12 +162,23 @@ export class PushTestService {
   }
 
   /**
-   * Per-type routing diagnostics. Overridden in behaviour once the channel
-   * layer (admin policy + per-user push preferences) exists; until then there
-   * is no routing to report.
+   * ROUTING: for each push-capable type, do the admin policy and the caller's
+   * own preferences keep the push channel open? Uses the exact predicates the
+   * dispatcher uses (isPushAllowed + the inbox and push preference gates), so
+   * this cannot disagree with what a real notification does. A perfect send
+   * path is useless if every type is muted.
    */
-  protected async diagnoseTypes(_userId: string): Promise<PushTestTypeDiagnostics[]> {
-    return [];
+  private async diagnoseTypes(userId: string): Promise<PushTestTypeDiagnostics[]> {
+    const [policy, prefs] = await Promise.all([
+      this.policy.getPolicy(),
+      this.preferences.resolve(userId),
+    ]);
+    return pushCapableTypes().map((type) => ({
+      type,
+      mandatory: isMandatoryType(type),
+      policyAllows: isPushAllowed(type, policy),
+      preferenceAllows: prefs.types[type] !== false && prefs.push.types[type] !== false,
+    }));
   }
 
   // ---------------------------------------------------------------------------

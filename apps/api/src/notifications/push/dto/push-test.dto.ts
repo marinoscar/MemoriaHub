@@ -86,7 +86,7 @@ export interface PushTestResponse {
   testId: string;
   config: PushTestConfigDiagnostics;
   browser: PushTestBrowserDiagnostics;
-  /** Routing per notification type; empty until the channel layer lands (#484). */
+  /** Push routing per notification type (admin policy + caller's preferences). */
   types: PushTestTypeDiagnostics[];
   subscriptions: PushTestSubscriptionResult[];
   hints: string[];
