@@ -277,6 +277,13 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'The in-app notification center: paginated inbox, unread badge count, and read / dismiss / ' +
           'delete. Every route is scoped to the calling user.',
       },
+      {
+        name: 'Notification Broadcasts',
+        description:
+          'Admin announcements to every active user over in-app, Web Push and email: compose, ' +
+          'test-send to yourself, schedule, cancel, resume and delete. Delivered by a chunked, ' +
+          'resumable background fan-out.',
+      },
     ],
   },
   {

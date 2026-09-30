@@ -40,6 +40,7 @@ import { NodesModule } from './nodes/nodes.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
+import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
 import { MemoriesModule } from './memories/memories.module';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { DbBackupModule } from './db-backup/db-backup.module';
@@ -128,6 +129,7 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     WorkflowsModule,
     NotificationsModule,
     NotificationsReconcileModule,
+    BroadcastsModule,
     MemoriesModule,
     MaintenanceModule,
     DbBackupModule,
