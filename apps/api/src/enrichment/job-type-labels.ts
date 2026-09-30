@@ -42,6 +42,9 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   trash_empty_execute_batch: 'Empty trash execute batch',
   job_history_purge: 'Job history purge',
   notification_purge: 'Notification purge',
+  // Admin notification broadcasts (issue #488) — server-only fan-out
+  broadcast_start: 'Broadcast start',
+  broadcast_chunk: 'Broadcast delivery',
   // Review-queue runs — bursts / duplicates / location suggestions (issue #190)
   review_run_evaluate: 'Review run evaluate',
   review_run_execute_batch: 'Review run execute batch',

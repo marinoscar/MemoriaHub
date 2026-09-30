@@ -51,6 +51,8 @@ import { WorkflowEvaluateHandler } from '../workflows/runs/workflow-evaluate.han
 import { WorkflowExecuteBatchHandler } from '../workflows/runs/workflow-execute-batch.handler';
 import { WorkflowHistoryPurgeHandler } from '../workflows/runs/workflow-history-purge.handler';
 import { MemoryGenerationHandler } from '../memories/memory-generation.handler';
+import { BroadcastStartHandler } from '../notifications/broadcasts/handlers/broadcast-start.handler';
+import { BroadcastChunkHandler } from '../notifications/broadcasts/handlers/broadcast-chunk.handler';
 
 /** Every registered enrichment handler class (keep in sync with the modules). */
 const ALL_HANDLER_CLASSES = [
@@ -86,6 +88,8 @@ const ALL_HANDLER_CLASSES = [
   WorkflowExecuteBatchHandler,
   WorkflowHistoryPurgeHandler,
   MemoryGenerationHandler,
+  BroadcastStartHandler,
+  BroadcastChunkHandler,
 ];
 
 /**
@@ -93,6 +97,8 @@ const ALL_HANDLER_CLASSES = [
  * persistNodeResult. Mirrors CLAUDE.md and docs/specs/distributed-nodes.md.
  */
 const DOCUMENTED_SERVER_ONLY_TYPES = [
+  'broadcast_chunk',
+  'broadcast_start',
   'burst_detection',
   'duplicate_confidence_backfill',
   'duplicate_detection_batch',
