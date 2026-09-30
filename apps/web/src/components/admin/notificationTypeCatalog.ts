@@ -46,15 +46,6 @@ const DESCRIPTIONS: Record<string, string> = {
     'An important announcement. Its inbox row is always delivered; only its push can be switched off.',
 };
 
-/**
- * Labels for types the bell's `notificationMeta` may not know yet. The bell's
- * own label always wins when it has one.
- */
-const FALLBACK_LABELS: Record<string, string> = {
-  admin_broadcast: 'Announcement',
-  admin_broadcast_critical: 'Important announcement',
-};
-
 /** Every notification type, in the order the API declares them. */
 export const NOTIFICATION_TYPE_KEYS: readonly string[] = Object.keys(DESCRIPTIONS);
 
@@ -64,11 +55,9 @@ const MANDATORY_TYPES = new Set<string>(['admin_broadcast_critical']);
 /** A human label for a type; an unrecognised type falls back to its raw key. */
 export function notificationTypeLabel(type: string): string {
   const meta = notificationMeta(type);
-  // `notificationMeta` returns a generic fallback for unknown types — a
-  // specific label, or else the raw key, tells an admin more than the word
-  // "Notification" does.
-  if (meta.label !== 'Notification') return meta.label;
-  return FALLBACK_LABELS[type] ?? type;
+  // `notificationMeta` returns a generic fallback for unknown types — the raw
+  // key tells an admin more than the word "Notification" does.
+  return meta.label !== 'Notification' ? meta.label : type;
 }
 
 export function notificationTypeInfo(type: string): NotificationTypeInfo {

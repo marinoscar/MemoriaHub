@@ -22,7 +22,12 @@ export type NotificationType =
   | 'enrichment_failed'
   | 'workflow_run_completed'
   | 'share_expiring'
-  | 'memories_ready';
+  | 'memories_ready'
+  // Admin broadcasts (issue #488). Inbox rows with `circleId: null` and
+  // `data: { broadcastId, ctaLabel, critical }`. The critical variant is
+  // MANDATORY: its inbox row ignores every preference (only push can be muted).
+  | 'admin_broadcast'
+  | 'admin_broadcast_critical';
 
 /** One notification row. */
 export interface NotificationItem {

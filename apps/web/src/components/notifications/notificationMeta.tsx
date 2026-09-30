@@ -17,6 +17,8 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
+import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
+import PriorityHighIcon from '@mui/icons-material/PriorityHigh';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import PublicIcon from '@mui/icons-material/Public';
 
@@ -78,6 +80,18 @@ const META: Record<string, NotificationMeta> = {
     icon: <AutoAwesomeIcon fontSize="small" />,
     tone: 'success',
     label: 'Memories ready',
+  },
+  // Admin broadcasts (epic #481, issue #488). The critical variant is tinted
+  // `error` so it stands apart from routine announcements in the bell.
+  admin_broadcast: {
+    icon: <CampaignOutlinedIcon fontSize="small" />,
+    tone: 'info',
+    label: 'Announcement',
+  },
+  admin_broadcast_critical: {
+    icon: <PriorityHighIcon fontSize="small" />,
+    tone: 'error',
+    label: 'Important announcement',
   },
 };
 
