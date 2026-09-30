@@ -10,7 +10,8 @@
  * closed list itself and a one-line description of when the type fires.
  *
  * The list mirrors the API's `NotificationType` enum (and the
- * `NOTIFICATION_CHANNEL_DESCRIPTORS` record, which is exhaustive over it). A
+ * `NOTIFICATION_CHANNEL_DESCRIPTORS` record, which is exhaustive over it),
+ * including which types are mandatory. A
  * type missing here is still tolerated end to end: the policy page renders any
  * stored `disabledTypes` entry it does not recognise, so the list can never
  * hide a suppression it cannot lift.
@@ -24,7 +25,7 @@ export interface NotificationTypeInfo {
   description: string;
   /**
    * The inbox row survives the admin kill switch. Mirrors the API descriptor;
-   * no current type is mandatory.
+   * only the critical broadcast type is.
    */
   mandatory: boolean;
 }
@@ -39,20 +40,35 @@ const DESCRIPTIONS: Record<string, string> = {
   workflow_run_completed: 'A workflow run finished.',
   share_expiring: 'A public share link is about to expire.',
   memories_ready: 'New memories were curated for a circle.',
+  // Admin broadcasts (epic #481, issue #488).
+  admin_broadcast: 'An announcement an administrator sent to every active user.',
+  admin_broadcast_critical:
+    'An important announcement. Its inbox row is always delivered; only its push can be switched off.',
+};
+
+/**
+ * Labels for types the bell's `notificationMeta` may not know yet. The bell's
+ * own label always wins when it has one.
+ */
+const FALLBACK_LABELS: Record<string, string> = {
+  admin_broadcast: 'Announcement',
+  admin_broadcast_critical: 'Important announcement',
 };
 
 /** Every notification type, in the order the API declares them. */
 export const NOTIFICATION_TYPE_KEYS: readonly string[] = Object.keys(DESCRIPTIONS);
 
 /** Types whose INBOX row survives `disabledTypes`. Kept in sync with the API descriptors. */
-const MANDATORY_TYPES = new Set<string>();
+const MANDATORY_TYPES = new Set<string>(['admin_broadcast_critical']);
 
 /** A human label for a type; an unrecognised type falls back to its raw key. */
 export function notificationTypeLabel(type: string): string {
   const meta = notificationMeta(type);
-  // `notificationMeta` returns a generic fallback for unknown types — a raw key
-  // tells an admin more than the word "Notification" does.
-  return type in DESCRIPTIONS || meta.label !== 'Notification' ? meta.label : type;
+  // `notificationMeta` returns a generic fallback for unknown types — a
+  // specific label, or else the raw key, tells an admin more than the word
+  // "Notification" does.
+  if (meta.label !== 'Notification') return meta.label;
+  return FALLBACK_LABELS[type] ?? type;
 }
 
 export function notificationTypeInfo(type: string): NotificationTypeInfo {
