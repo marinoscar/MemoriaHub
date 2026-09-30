@@ -3,8 +3,10 @@ import {
   Logger,
   NotFoundException,
   ConflictException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationPolicyService } from '../../notifications/notification-policy.service';
 import { UpdateSystemSettingsDto } from '../dto/update-system-settings.dto';
 import { PatchSystemSettingsDto } from '../dto/update-system-settings.dto';
 import {
@@ -80,7 +82,19 @@ export class SystemSettingsService {
     cachedAt: number;
   } | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  /**
+   * NotificationPolicyService (issue #489) is injected so an admin kill-switch
+   * change (`notifications.{browserEnabled,pushEnabled,disabledTypes}`) takes
+   * effect on the very next notification in THIS process instead of up to one
+   * NOTIFICATION_POLICY_CACHE_TTL_MS later. It is a plain file import: the
+   * module edge is SettingsModule -> NotificationsModule (which imports
+   * nothing), so no cycle. @Optional() keeps the many specs that construct
+   * this service with only PrismaService working.
+   */
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notificationPolicy?: NotificationPolicyService,
+  ) {}
 
   /**
    * Invalidate the in-memory settings cache.
@@ -94,6 +108,10 @@ export class SystemSettingsService {
    */
   invalidateSettingsCache(): void {
     this.settingsCache = null;
+    // The notification policy is a second, independent cache over the SAME
+    // `global` row (read with Prisma directly — see NotificationPolicyService),
+    // so every settings write must drop it too.
+    this.notificationPolicy?.invalidate();
   }
 
   /**
