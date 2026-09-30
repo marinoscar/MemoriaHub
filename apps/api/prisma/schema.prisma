@@ -92,6 +92,7 @@ model User {
   notifications                  Notification[]              @relation("UserNotifications")
   // Web Push subscriptions (epic #481, issue #483)
   pushSubscriptions              PushSubscription[]          @relation("UserPushSubscriptions")
+  notificationDeliveries         NotificationDelivery[]      @relation("UserNotificationDeliveries")
   // Memories relations (epic #300, issue #301)
   memoryUserStates               MemoryUserState[]
   // PostgreSQL Database Backup & Restore relations (epic #339, issue #340)
@@ -2308,6 +2309,8 @@ model Notification {
   // Relations
   user   User    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
   circle Circle? @relation("CircleNotifications", fields: [circleId], references: [id], onDelete: Cascade)
+  // Channel delivery audit (epic #481, issue #484)
+  deliveries NotificationDelivery[] @relation("NotificationDeliveries")
 
   // unread-count query and unread filter
   @@index([userId, readAt])
@@ -2356,6 +2359,47 @@ model PushSubscription {
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// =============================================================================
+// Notification channel deliveries (epic #481, issue #484)
+// =============================================================================
+//
+// One row per (notification, non-inbox channel) delivery attempt — today only
+// `push`. An AUDIT/diagnostic record, not a queue: it answers "why did this
+// user never get pushed?" and is purged by the nightly notification_purge job
+// after `notifications.retentionDays` (by `created_at`).
+//
+// Both FKs are SetNull, not Cascade: the delivery history outlives the inbox
+// row (dismissed and purged) and the user (deleted) it was about. `type` is
+// denormalized for the same reason — it must still be readable once the
+// notification is gone. `channel` is a plain string ('inbox' | 'push') so a
+// future channel needs no enum migration.
+enum NotificationDeliveryStatus {
+  queued
+  sent
+  failed
+}
+
+model NotificationDelivery {
+  id                String                     @id @default(uuid()) @db.Uuid
+  notificationId    String?                    @map("notification_id") @db.Uuid
+  userId            String?                    @map("user_id") @db.Uuid
+  type              NotificationType
+  channel           String
+  status            NotificationDeliveryStatus
+  providerMessageId String?                    @map("provider_message_id")
+  error             String?
+  createdAt         DateTime                   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime                   @updatedAt @map("updated_at") @db.Timestamptz
+
+  notification Notification? @relation("NotificationDeliveries", fields: [notificationId], references: [id], onDelete: SetNull)
+  user         User?         @relation("UserNotificationDeliveries", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, type])
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("notification_deliveries")
 }
 
 // =============================================================================
