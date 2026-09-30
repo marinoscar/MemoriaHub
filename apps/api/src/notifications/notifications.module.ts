@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { NotificationPolicyService } from './notification-policy.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -56,6 +57,7 @@ import { PushTestService } from './push/push-test.service';
   controllers: [NotificationsController, PushConfigController],
   providers: [
     NotificationPreferencesService,
+    NotificationPolicyService,
     PushConfigService,
     PushSubscriptionService,
     PushTestService,
@@ -65,6 +67,7 @@ import { PushTestService } from './push/push-test.service';
   ],
   exports: [
     NotificationPreferencesService,
+    NotificationPolicyService,
     PushSubscriptionService,
     NotificationsService,
     UploadNotificationService,
