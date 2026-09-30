@@ -397,6 +397,19 @@ export const handlers = [
   // Notifications (epic #240 / issue #249) — the AppBar bell polls these on
   // every render of the app shell, so they need a default handler or every
   // AppBar/Layout test logs an unhandled-request warning.
+  // Live stream (issue #485). Defaults to UNAVAILABLE so the store stays on its
+  // 60s poll in every test that does not opt into the stream explicitly; the
+  // SSE client just backs off and retries until the subscriber unmounts.
+  http.get(`${API_BASE}/notifications/stream`, () => {
+    return new HttpResponse(null, { status: 503 });
+  }),
+
+  http.get(`${API_BASE}/notifications/config`, () => {
+    return HttpResponse.json({
+      data: { pushEnabled: false, vapidPublicKey: null, browserEnabled: true, pushTypes: [] },
+    });
+  }),
+
   http.get(`${API_BASE}/notifications/unread-count`, () => {
     return HttpResponse.json({ data: { count: 0 } });
   }),
