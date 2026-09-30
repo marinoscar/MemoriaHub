@@ -30,4 +30,14 @@ export interface EnrichmentHandler {
    * through the normal failure/retry path.
    */
   persistNodeResult?(job: EnrichmentJob, result: unknown): Promise<void>;
+
+  /**
+   * OPTIONAL admin-delete veto (issue #488). Consulted by
+   * `DELETE /api/admin/jobs/:id` before a job row of this type is deleted:
+   * return a human-readable reason to refuse (surfaced as a 400), or `null`
+   * to allow. For job chains whose row IS the only thing advancing some
+   * other record (a broadcast's start/chunk), deleting it would strand that
+   * record — the owner, not the generic admin service, knows when.
+   */
+  canDelete?(job: EnrichmentJob): Promise<string | null>;
 }

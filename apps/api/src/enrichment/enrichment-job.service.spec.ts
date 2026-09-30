@@ -154,6 +154,19 @@ describe('EnrichmentJobService', () => {
   // -------------------------------------------------------------------------
 
   describe('optional fields', () => {
+    it('writes scheduledFor when given and omits it otherwise (issue #488)', async () => {
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.enrichmentJob.create as jest.Mock).mockResolvedValue(makeJob());
+      const at = new Date('2030-01-01T09:00:00Z');
+
+      await service.enqueue(baseInput({ scheduledFor: at }));
+      await service.enqueue(baseInput());
+
+      const calls = (mockPrisma.enrichmentJob.create as jest.Mock).mock.calls;
+      expect(calls[0][0].data.scheduledFor).toBe(at);
+      expect(calls[1][0].data).not.toHaveProperty('scheduledFor');
+    });
+
     it('includes providerKey and modelVersion in create when provided', async () => {
       // Arrange
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);

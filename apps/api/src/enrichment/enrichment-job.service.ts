@@ -25,6 +25,13 @@ export interface EnqueueInput {
    * global jobs in a single batch (e.g. `storage_migration`).
    */
   skipDedup?: boolean;
+  /**
+   * Earliest time the job may be claimed (the claim query skips
+   * `scheduled_for > now()`). Omit for "eligible immediately". Used to
+   * schedule work for later durably — e.g. a scheduled broadcast's start
+   * job (issue #488) survives every restart until it is due.
+   */
+  scheduledFor?: Date;
 }
 
 @Injectable()
@@ -34,7 +41,7 @@ export class EnrichmentJobService {
   constructor(private readonly prisma: PrismaService) {}
 
   async enqueue(input: EnqueueInput): Promise<EnrichmentJob> {
-    const { type, mediaItemId = null, circleId = null, reason, priority = 0, providerKey, modelVersion, payload, skipDedup = false } = input;
+    const { type, mediaItemId = null, circleId = null, reason, priority = 0, providerKey, modelVersion, payload, skipDedup = false, scheduledFor } = input;
 
     // Idempotency: return existing pending/running job of same type for same media item.
     // For global jobs (mediaItemId IS NULL), Prisma treats `mediaItemId: null` as IS NULL,
@@ -70,6 +77,7 @@ export class EnrichmentJobService {
         modelVersion,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         payload: (payload ?? undefined) as any,
+        ...(scheduledFor ? { scheduledFor } : {}),
       },
     });
 

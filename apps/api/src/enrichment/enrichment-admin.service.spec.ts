@@ -14,6 +14,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { JobStatus } from '@prisma/client';
 import { EnrichmentAdminService } from './enrichment-admin.service';
+import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
@@ -923,6 +924,41 @@ describe('EnrichmentAdminService', () => {
       const result = await service.deleteJob('job-uuid-1');
 
       expect(result).toEqual({ deleted: true });
+    });
+
+    it('refuses a pending job whose handler vetoes the delete (issue #488)', async () => {
+      const registry = new EnrichmentHandlerRegistry();
+      registry.register({
+        type: 'guarded_type',
+        process: jest.fn(),
+        canDelete: jest.fn().mockResolvedValue('Cancel the broadcast instead'),
+      });
+      const guarded = new EnrichmentAdminService(
+        mockPrisma as unknown as PrismaService,
+        mockSettingsService as unknown as SystemSettingsService,
+        registry,
+      );
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
+        makeJobRow({ status: JobStatus.pending, type: 'guarded_type' }),
+      );
+
+      await expect(guarded.deleteJob('job-uuid-1')).rejects.toThrow('Cancel the broadcast instead');
+      expect(mockPrisma.enrichmentJob.delete).not.toHaveBeenCalled();
+    });
+
+    it('allows the delete when the handler veto returns null', async () => {
+      const registry = new EnrichmentHandlerRegistry();
+      registry.register({ type: 'guarded_type', process: jest.fn(), canDelete: jest.fn().mockResolvedValue(null) });
+      const guarded = new EnrichmentAdminService(
+        mockPrisma as unknown as PrismaService,
+        mockSettingsService as unknown as SystemSettingsService,
+        registry,
+      );
+      const job = makeJobRow({ status: JobStatus.pending, type: 'guarded_type' });
+      (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(job);
+      (mockPrisma.enrichmentJob.delete as jest.Mock).mockResolvedValue(job);
+
+      await expect(guarded.deleteJob('job-uuid-1')).resolves.toEqual({ deleted: true });
     });
 
     it('deletes a succeeded job successfully', async () => {
