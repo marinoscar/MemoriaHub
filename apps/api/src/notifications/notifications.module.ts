@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { NotificationDispatchService } from './notification-dispatch.service';
 import { NotificationPolicyService } from './notification-policy.service';
+import { NotificationStreamService } from './notification-stream.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -60,6 +61,10 @@ import { PushTestService } from './push/push-test.service';
  * commit fan-out to Web Push + the `notification.dispatched` event; uses the
  * globally registered EventEmitter2, which needs no import) and
  * PushNotificationChannel. Still no imports.
+ *
+ * #485 adds NotificationStreamService (the SSE registry behind
+ * GET /api/notifications/stream), which listens for `notification.dispatched`
+ * with @OnEvent — again no import.
  */
 @Module({
   controllers: [NotificationsController, PushConfigController],
@@ -67,6 +72,7 @@ import { PushTestService } from './push/push-test.service';
     NotificationPreferencesService,
     NotificationPolicyService,
     NotificationDispatchService,
+    NotificationStreamService,
     PushNotificationChannel,
     PushConfigService,
     PushSubscriptionService,
