@@ -9,6 +9,9 @@ import { MediaPreviewProvider } from '../../contexts/MediaPreviewContext';
 import { SearchProvider } from '../../contexts/SearchContext';
 import { MaintenanceBanner } from './MaintenanceBanner';
 import { TimezonePrompt } from '../settings/TimezonePrompt';
+import { NotificationPermissionBanner } from '../notifications/NotificationPermissionBanner';
+import { usePushSubscriptionSync } from '../../hooks/usePushSubscriptionSync';
+import { useNotificationClickHandling } from '../../hooks/useNotificationClickHandling';
 
 interface LayoutProps {
   /**
@@ -65,6 +68,15 @@ export function Layout({ fullBleed = false }: LayoutProps) {
   // want less context". A user on a 1400px screen who prefers a narrow rail
   // still has room for — and still benefits from — the second column.
   const showContextPane = useMediaQuery(theme.breakpoints.up('lg'));
+
+  // Browser notifications (issue #486, epic #481). Mounted ONCE, here, because
+  // this shell only renders for an authenticated user: auto-prompts for
+  // permission when push is on, keeps this device's push subscription
+  // registered, and routes clicks on OS notifications (service worker toasts,
+  // page toasts, cold opens via `?n=<id>`) to mark-read + circle switch +
+  // navigate.
+  const pushSync = usePushSubscriptionSync();
+  useNotificationClickHandling();
 
   return (
     <MediaRefreshProvider>
@@ -129,6 +141,16 @@ export function Layout({ fullBleed = false }: LayoutProps) {
                     }
               }
             >
+              {/* Not in the full-bleed (map) layout, whose `<main>` is a flex
+                  row owned edge-to-edge by the page. */}
+              {!fullBleed && (
+                <NotificationPermissionBanner
+                  config={pushSync.config}
+                  capability={pushSync.capability}
+                  onRequestPermission={() => void pushSync.requestPermission()}
+                  isRequestingPermission={pushSync.isRequestingPermission}
+                />
+              )}
               <Outlet />
             </Box>
           </Box>

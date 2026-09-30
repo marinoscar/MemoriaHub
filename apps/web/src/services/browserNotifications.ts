@@ -12,11 +12,32 @@
  * be unaffected: permission is denied by many users, the API does not exist in
  * a non-secure context or under jsdom, and some hardened browsers define
  * `Notification` and throw on touching it. So every function here DEGRADES
- * SILENTLY and none of them throws. The durable surface is the bell and
+ * SILENTLY and none of them throws.
+ *
+ * `requestBrowserNotificationPermission` (issue #486) is the ONLY place this
+ * app asks for permission; observing it is
+ * `hooks/useBrowserNotificationPermission.ts`'s job. The durable surface is the bell and
  * `/notifications`, which work with permission denied and the stream down.
  */
 
 import type { NotificationItem } from '../types/notifications';
+
+/**
+ * Dispatched on `window` after every permission request settles, so every
+ * mounted `useBrowserNotificationPermission` re-reads at once — the app-wide
+ * banner and the settings page stay in agreement whichever of them (or the
+ * auto-prompt) asked. Browsers without a Permissions API `change` event for
+ * notifications would otherwise wait for the next `visibilitychange`.
+ */
+export const NOTIFICATION_PERMISSION_CHANGED_EVENT = 'app:notification-permission-changed';
+
+function announcePermissionChanged(): void {
+  try {
+    window.dispatchEvent(new Event(NOTIFICATION_PERMISSION_CHANGED_EVENT));
+  } catch {
+    // Nothing listening can be helped by a throw here.
+  }
+}
 
 /** Same icons the service worker's `push` handler uses (`sw.ts`). */
 const TOAST_ICON = '/icons/icon-192.png';
@@ -34,6 +55,61 @@ function isSupported(): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Ask the browser for permission.
+ *
+ * =============================================================================
+ * WHO CALLS THIS (issue #486)
+ * =============================================================================
+ *
+ * Always through `requestPermissionAndSyncPush` (`services/pushSubscription.ts`),
+ * from three places:
+ *
+ *   * THE AUTO-PROMPT — `hooks/usePushSubscriptionSync.ts`, once per page load,
+ *     only when the deployment has push enabled and the device is `default`:
+ *     push is worthless without permission, so the shell asks up front.
+ *   * The app-wide `NotificationPermissionBanner`'s "Enable notifications"
+ *     button.
+ *   * The "Allow notifications" button in the Notifications card on
+ *     `/settings`.
+ *
+ * The buttons still matter after the auto-prompt: Firefox ignores a request
+ * with no user gesture, Safari may throw, and Chrome can demote it to a quiet
+ * UI. A denial remains effectively permanent — only the user can undo it in
+ * site settings — so nothing may call this in a loop or on every render.
+ *
+ * @returns the resulting permission, or `null` when the browser has no usable
+ *          `Notification` API. The caller should refresh its permission state
+ *          from `useBrowserNotificationPermission().refresh()` regardless of
+ *          what comes back — that hook is the single source of truth for what
+ *          the UI renders, and this return value is only what one call happened
+ *          to see.
+ */
+export async function requestBrowserNotificationPermission(): Promise<
+  NotificationPermission | null
+> {
+  if (!isSupported()) return null;
+
+  try {
+    // `Notification.requestPermission()` has two signatures across browsers —
+    // a promise (modern, everywhere current) and a legacy callback (old Safari).
+    // `await` handles the promise form and, on the callback form, simply
+    // resolves the `undefined` it returns; the UI is refreshed from
+    // `Notification.permission` afterwards either way, so the legacy path
+    // degrades to "the banner updates on the next visibility change" rather
+    // than to a broken button.
+    const result = await window.Notification.requestPermission();
+    return result ?? window.Notification.permission;
+  } catch {
+    // A throw here is a browser that refuses the request outright. Not an error
+    // worth surfacing: the permission state is unchanged, and the banner that
+    // prompted the click already explains what is going on.
+    return null;
+  } finally {
+    announcePermissionChanged();
   }
 }
 

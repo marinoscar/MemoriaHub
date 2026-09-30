@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { showAppNotification } from '../../services/browserNotifications';
+import {
+  NOTIFICATION_PERMISSION_CHANGED_EVENT,
+  requestBrowserNotificationPermission,
+  showAppNotification,
+} from '../../services/browserNotifications';
 import type { NotificationItem } from '../../types/notifications';
 
 /**
@@ -161,6 +165,47 @@ describe('browserNotifications', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  describe('requestBrowserNotificationPermission', () => {
+    it('returns null without throwing when Notification is unsupported', async () => {
+      setNotification('absent');
+
+      await expect(requestBrowserNotificationPermission()).resolves.toBeNull();
+    });
+
+    it('calls window.Notification.requestPermission() and returns its resolved value', async () => {
+      const { requestPermission } = setNotification('default', {
+        requestPermissionImpl: () => Promise.resolve('granted'),
+      });
+
+      const result = await requestBrowserNotificationPermission();
+
+      expect(requestPermission).toHaveBeenCalledTimes(1);
+      expect(result).toBe('granted');
+    });
+
+    it('catches a synchronous throw from requestPermission and returns null', async () => {
+      setNotification('default', {
+        requestPermissionImpl: () => {
+          throw new Error('blocked');
+        },
+      });
+
+      await expect(requestBrowserNotificationPermission()).resolves.toBeNull();
+    });
+
+    it('announces the settled request so every permission observer re-reads', async () => {
+      setNotification('default', { requestPermissionImpl: () => Promise.resolve('denied') });
+      const listener = vi.fn();
+      window.addEventListener(NOTIFICATION_PERMISSION_CHANGED_EVENT, listener);
+
+      await requestBrowserNotificationPermission();
+
+      window.removeEventListener(NOTIFICATION_PERMISSION_CHANGED_EVENT, listener);
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+  });
+
 
   describe('showAppNotification', () => {
     describe('permission gating', () => {

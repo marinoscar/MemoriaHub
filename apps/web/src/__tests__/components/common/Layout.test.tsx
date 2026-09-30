@@ -269,6 +269,24 @@ describe('Layout', () => {
   // smoke test that the shell still composes with the app's other providers.
   // =========================================================================
 
+  describe('notification permission banner (issue #486)', () => {
+    it('renders the app-wide banner above the page when this device has not been asked', async () => {
+      render(<Layout />);
+      expect(
+        await screen.findByText(/notifications are not enabled on this device/i),
+      ).toBeInTheDocument();
+    });
+
+    it('is not rendered in the full-bleed layout', async () => {
+      render(<Layout fullBleed />);
+      // Let the config request settle before asserting absence.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(
+        screen.queryByText(/notifications are not enabled on this device/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   describe('Integration with theme and auth context', () => {
     it('renders with light theme', () => {
       render(<Layout />, { wrapperOptions: { theme: 'light' } });

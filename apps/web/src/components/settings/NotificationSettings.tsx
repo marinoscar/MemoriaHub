@@ -27,6 +27,19 @@
 // continuously during an import). There is no null-delete for it — it is a
 // plain boolean either way — so it is written explicitly.
 //
+// PUSH (issue #486, epic #481) follows the SAME absent-means-enabled rule
+// under `notifications.push`: `push.enabled` and each `push.types[type]` are
+// written as `false` to turn off and `null` (DELETE) to turn back on. The push
+// switches are per ACCOUNT — they apply on every device — so this device's
+// browser permission never disables them; it only decides whether pushes can
+// be DELIVERED here, which the "On this device" block above them explains
+// (with the permission button, or the iOS Add-to-Home-Screen walkthrough). A
+// per-type push switch is offered only for types the admin policy lets travel
+// by push (`GET /api/notifications/config` → `pushTypes`), and every push
+// switch is disabled when the deployment has push off (`pushEnabled: false`),
+// when the inbox master is off, or when that type's inbox switch is off (a
+// type with no inbox row has nothing to push).
+//
 // `enabled` likewise has no null form in the PATCH schema, so turning the
 // master switch back on writes `enabled: true`. That materializes ONE key, and
 // only for a user who deliberately turned notifications off and on again — it
@@ -44,7 +57,9 @@
 import { useState } from 'react';
 import {
   Alert,
+  AlertTitle,
   Box,
+  Button,
   Card,
   CardContent,
   CircularProgress,
@@ -56,6 +71,13 @@ import {
 
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useNotificationConfig } from '../../hooks/useNotificationConfig';
+import {
+  useNotificationCapability,
+  type NotificationCapability,
+} from '../../hooks/useNotificationCapability';
+import { requestPermissionAndSyncPush } from '../../services/pushSubscription';
+import { AddToHomeScreenPanel } from './AddToHomeScreenPanel';
 import type { UserSettings, UserSettingsUpdate } from '../../types';
 import type {
   NotificationPreferencesPatch,
@@ -165,6 +187,94 @@ const ACTIVITY_TYPES: NotificationTypeDescriptor[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// This device (issue #486)
+// ---------------------------------------------------------------------------
+
+export interface DeviceNotificationState {
+  severity: 'info' | 'warning' | 'success';
+  title: string;
+  body: string;
+}
+
+/**
+ * What to tell the user about THIS device's ability to show browser and push
+ * notifications, per capability. Every arm names a DIFFERENT remedy (see
+ * `useNotificationCapability`). `ios-needs-install` returns null because the
+ * `AddToHomeScreenPanel` walkthrough is rendered in its place; `default`
+ * carries a permission button alongside.
+ */
+export function deviceNotificationState(
+  capability: NotificationCapability,
+): DeviceNotificationState | null {
+  switch (capability) {
+    case 'granted':
+      return {
+        severity: 'success',
+        title: 'Notifications are allowed on this device',
+        body: 'Alerts can reach you here even when MemoriaHub is in the background.',
+      };
+    case 'admin-disabled':
+      return {
+        severity: 'info',
+        title: 'Browser notifications are turned off for this application',
+        body:
+          'An administrator has disabled browser notifications for everyone, so ' +
+          'nothing you change here will make them appear. The notification bell is ' +
+          'unaffected.',
+      };
+    case 'insecure-context':
+      return {
+        severity: 'warning',
+        title: 'Notifications need a secure connection',
+        body:
+          'This page is not being served over HTTPS, so your browser will not allow ' +
+          'notifications here. Open the site over HTTPS to turn them on. (localhost ' +
+          'counts as secure — a plain http:// address on any other host does not.)',
+      };
+    case 'unsupported':
+      return {
+        severity: 'info',
+        title: 'This browser cannot show notifications',
+        body:
+          'This browser does not provide the notifications API. Your notifications ' +
+          'still arrive in the bell.',
+      };
+    case 'ios-needs-install':
+      return null;
+    case 'sw-unavailable':
+      return {
+        severity: 'warning',
+        title: 'Notifications are on, but may not always arrive',
+        body:
+          'You have allowed notifications, but the background service worker did not ' +
+          'register, so some may not appear — on Android it is the only way they can ' +
+          'be shown. Reloading the page usually fixes it; everything still arrives in ' +
+          'the bell either way.',
+      };
+    case 'denied':
+      return {
+        severity: 'warning',
+        title: 'Notifications are blocked on this device',
+        body:
+          'Your browser is blocking notifications from this site and the app cannot ' +
+          'ask again. Only you can undo this:\n' +
+          '• Chrome or Edge: click the icon at the left of the address bar → Notifications → Allow\n' +
+          '• Firefox: click the padlock in the address bar → clear the blocked notifications permission\n' +
+          '• Safari: Settings → Websites → Notifications → allow this site',
+      };
+    case 'default':
+    default:
+      return {
+        severity: 'info',
+        title: 'Notifications need your permission on this device',
+        body:
+          'Your browser has not been asked yet, so alerts cannot appear here until you ' +
+          'allow them. Your choices below are saved either way.',
+      };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -194,6 +304,24 @@ export function NotificationSettings({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Device + deployment capability (issue #486). `config` is null until it
+  // loads — never read as "disabled" (see `useNotificationConfig`).
+  const { config } = useNotificationConfig();
+  const { capability, refresh: refreshCapability } = useNotificationCapability({
+    adminDisabled: config?.browserEnabled === false,
+  });
+  const [isRequestingPermission, setIsRequestingPermission] = useState(false);
+
+  const handleRequestPermission = async () => {
+    setIsRequestingPermission(true);
+    try {
+      await requestPermissionAndSyncPush(config);
+    } finally {
+      setIsRequestingPermission(false);
+      refreshCapability();
+    }
+  };
+
   // --- derived state (never a defaulted local object) -----------------------
 
   const prefs = settings.notifications;
@@ -203,6 +331,13 @@ export function NotificationSettings({
     prefs?.types?.[type] !== false;
   // The one inverted default: absent means OFF.
   const microRunsEnabled = prefs?.workflowMicroRuns === true;
+  // Push: same absent-means-enabled rule, one level down.
+  const pushMasterEnabled = prefs?.push?.enabled !== false;
+  const pushTypeEnabled = (type: NotificationType): boolean =>
+    prefs?.push?.types?.[type] !== false;
+  const pushAvailable = config?.pushEnabled === true;
+  const pushOffered = (type: NotificationType): boolean =>
+    pushAvailable && (config?.pushTypes ?? []).includes(type);
 
   const isFlagOn = (flag: FeatureFlagKey): boolean => {
     if (flag === 'pictureEnhancement') return pictureEnhancement?.enabled === true;
@@ -261,26 +396,69 @@ export function NotificationSettings({
   const handleMicroRunsToggle = (next: boolean) =>
     void save({ workflowMicroRuns: next }, 'Notification preferences updated');
 
+  // Re-enabling push DELETES the override (null), same as the inbox switches.
+  const handlePushMasterToggle = (next: boolean) =>
+    void save(
+      { push: { enabled: next ? null : false } },
+      next ? 'Push notifications turned on' : 'Push notifications turned off',
+    );
+
+  const handlePushTypeToggle = (type: NotificationType, next: boolean) =>
+    void save({ push: { types: { [type]: next ? null : false } } }, 'Push preferences updated');
+
   const controlsDisabled = disabled || isSaving;
 
   // --- rendering ------------------------------------------------------------
 
   const renderTypeSwitch = (descriptor: NotificationTypeDescriptor) => (
     <Box key={descriptor.type} sx={{ mb: 2 }}>
-      <FormControlLabel
-        control={
-          <Switch
-            checked={typeEnabled(descriptor.type)}
-            onChange={(e) => handleTypeToggle(descriptor.type, e.target.checked)}
-            disabled={controlsDisabled || !masterEnabled}
-            slotProps={{
-              input: { 'aria-label': `${descriptor.label} notifications` },
-            }}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          columnGap: 2,
+        }}
+      >
+        <FormControlLabel
+          control={
+            <Switch
+              checked={typeEnabled(descriptor.type)}
+              onChange={(e) => handleTypeToggle(descriptor.type, e.target.checked)}
+              disabled={controlsDisabled || !masterEnabled}
+              slotProps={{
+                input: { 'aria-label': `${descriptor.label} notifications` },
+              }}
+            />
+          }
+          label={descriptor.label}
+          sx={{ minHeight: 44, ml: 0 }}
+        />
+        {pushOffered(descriptor.type) && (
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={pushTypeEnabled(descriptor.type)}
+                onChange={(e) => handlePushTypeToggle(descriptor.type, e.target.checked)}
+                disabled={
+                  controlsDisabled ||
+                  !masterEnabled ||
+                  !typeEnabled(descriptor.type) ||
+                  !pushMasterEnabled
+                }
+                slotProps={{
+                  input: { 'aria-label': `${descriptor.label} push notifications` },
+                }}
+              />
+            }
+            label="Push"
+            labelPlacement="start"
+            sx={{ minHeight: 44, ml: 0, mr: 0 }}
           />
-        }
-        label={descriptor.label}
-        sx={{ display: 'block', minHeight: 44, ml: 0 }}
-      />
+        )}
+      </Box>
       <Typography
         variant="body2"
         color="text.secondary"
@@ -356,6 +534,75 @@ export function NotificationSettings({
           Master switch. When off, nothing below can notify you, and your existing
           notifications are dismissed.
         </Typography>
+
+        {/* This device + push (issue #486) */}
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+          On this device
+        </Typography>
+        {capability === 'ios-needs-install' ? (
+          <AddToHomeScreenPanel />
+        ) : (
+          (() => {
+            const device = deviceNotificationState(capability);
+            if (!device) return null;
+            return (
+              <Alert
+                severity={device.severity}
+                sx={{ whiteSpace: 'pre-line' }}
+                action={
+                  capability === 'default' ? (
+                    <Button
+                      color="inherit"
+                      size="small"
+                      onClick={() => void handleRequestPermission()}
+                      disabled={isRequestingPermission}
+                      startIcon={
+                        isRequestingPermission ? (
+                          <CircularProgress size={14} color="inherit" />
+                        ) : undefined
+                      }
+                    >
+                      {isRequestingPermission ? 'Waiting…' : 'Allow notifications'}
+                    </Button>
+                  ) : undefined
+                }
+              >
+                <AlertTitle>{device.title}</AlertTitle>
+                {device.body}
+              </Alert>
+            );
+          })()
+        )}
+
+        {config && (
+          <Box sx={{ mt: 2 }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={pushAvailable && pushMasterEnabled}
+                  onChange={(e) => handlePushMasterToggle(e.target.checked)}
+                  disabled={controlsDisabled || !masterEnabled || !pushAvailable}
+                  slotProps={{ input: { 'aria-label': 'Push notifications' } }}
+                />
+              }
+              label="Push notifications"
+              sx={{ display: 'block', minHeight: 44, ml: 0 }}
+            />
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ ml: { xs: 0, sm: 6 } }}
+            >
+              {pushAvailable
+                ? 'Deliver notifications to your devices even when MemoriaHub is closed. ' +
+                  'Applies to every device you have allowed; use the Push switch on each ' +
+                  'type below to pick which ones.'
+                : 'Push notifications are not available on this server — an administrator ' +
+                  'has not turned them on.'}
+            </Typography>
+          </Box>
+        )}
 
         {flagsError && (
           <Alert severity="warning" sx={{ mt: 2 }}>

@@ -410,6 +410,19 @@ export const handlers = [
     });
   }),
 
+  // Web Push subscriptions (issue #486).
+  http.post(`${API_BASE}/notifications/push/subscriptions`, async ({ request }) => {
+    const body = (await request.json()) as { endpoint: string };
+    return HttpResponse.json(
+      { data: { id: 'push-sub-1', endpoint: body.endpoint, createdAt: new Date().toISOString() } },
+      { status: 201 },
+    );
+  }),
+
+  http.delete(`${API_BASE}/notifications/push/subscriptions`, () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.get(`${API_BASE}/notifications/unread-count`, () => {
     return HttpResponse.json({ data: { count: 0 } });
   }),
