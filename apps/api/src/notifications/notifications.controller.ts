@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -28,6 +29,23 @@ import {
 } from './dto/notification-response.dto';
 import { NotificationScopeDto } from './dto/notification-scope.dto';
 import { NotificationsService } from './notifications.service';
+import {
+  PushSubscribeDto,
+  PushSubscriptionResponse,
+  PushUnsubscribeDto,
+} from './push/dto/push-subscription.dto';
+import { PushConfigService } from './push/push-config.service';
+import { PushSubscriptionService } from './push/push-subscription.service';
+
+/** GET /api/notifications/config — what a client needs to offer push. */
+export interface NotificationClientConfig {
+  /** An active VAPID key pair exists: the client may subscribe. */
+  pushEnabled: boolean;
+  /** The applicationServerKey for pushManager.subscribe, null when push is off. */
+  vapidPublicKey: string | null;
+  /** May the client raise in-page browser toasts at all? */
+  browserEnabled: boolean;
+}
 
 /**
  * Notification Center API (epic #240, issue #245).
@@ -48,7 +66,11 @@ import { NotificationsService } from './notifications.service';
 @ApiTags('Notifications')
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly pushConfig: PushConfigService,
+    private readonly pushSubscriptions: PushSubscriptionService,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // GET /api/notifications
@@ -81,6 +103,72 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
   ): Promise<NotificationListDto> {
     return this.notificationsService.list(userId, query);
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/notifications/config  (before :id to avoid route conflicts)
+  // ---------------------------------------------------------------------------
+
+  @Get('config')
+  @Auth()
+  @ApiOperation({
+    summary: 'Client notification capabilities (Web Push availability and key)',
+    description:
+      'Authentication only, no permission: the users push reaches are exactly the users ' +
+      'who cannot read system settings. Exposes the VAPID PUBLIC key only.',
+  })
+  @ApiResponse({ status: 200, description: 'Notification capabilities' })
+  async config(): Promise<NotificationClientConfig> {
+    const vapidPublicKey = await this.pushConfig.getActivePublicKey();
+    return {
+      pushEnabled: vapidPublicKey !== null,
+      vapidPublicKey,
+      browserEnabled: true,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // POST /api/notifications/push/subscriptions
+  // ---------------------------------------------------------------------------
+
+  @Post('push/subscriptions')
+  @Auth()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: "Register this browser's Web Push subscription",
+    description:
+      "Body is the browser's `PushSubscription.toJSON()`. Upserted by endpoint: a " +
+      'subscription re-registered under another signed-in user moves to that user. ' +
+      '409 when Web Push is not enabled on this deployment.',
+  })
+  @ApiResponse({ status: 201, description: 'Subscription stored' })
+  @ApiResponse({ status: 409, description: 'Web Push is not enabled' })
+  async subscribePush(
+    @Body() dto: PushSubscribeDto,
+    @CurrentUser('id') userId: string,
+    @Headers('user-agent') userAgent?: string,
+  ): Promise<PushSubscriptionResponse> {
+    return this.pushSubscriptions.subscribe(userId, dto, userAgent);
+  }
+
+  // ---------------------------------------------------------------------------
+  // DELETE /api/notifications/push/subscriptions
+  // ---------------------------------------------------------------------------
+
+  @Delete('push/subscriptions')
+  @Auth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: "Remove one of the caller's Web Push subscriptions",
+    description: 'Body `{ endpoint }`. Scoped to the caller: another user\'s endpoint is a 404.',
+  })
+  @ApiResponse({ status: 204, description: 'Subscription removed' })
+  @ApiResponse({ status: 404, description: 'Subscription not found' })
+  async unsubscribePush(
+    @Body() dto: PushUnsubscribeDto,
+    @CurrentUser('id') userId: string,
+  ): Promise<void> {
+    await this.pushSubscriptions.unsubscribe(userId, dto.endpoint);
   }
 
   // ---------------------------------------------------------------------------
