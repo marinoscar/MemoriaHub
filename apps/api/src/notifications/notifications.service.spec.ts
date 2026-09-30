@@ -1256,6 +1256,18 @@ describe('NotificationsService', () => {
       expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created');
     });
 
+    it('emit() forwards skipPush to the dispatcher (issue #488)', async () => {
+      const created = makeRow({ type: 'admin_broadcast' });
+      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      await service.emit({
+        userId: USER_ID,
+        type: 'admin_broadcast' as NotificationType,
+        title: 't',
+        skipPush: true,
+      });
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created', { skipPush: true });
+    });
+
     it('emit() writes nothing and dispatches nothing when the admin disabled the type', async () => {
       mockPolicy.isInboxAllowed.mockResolvedValue(false);
       await service.emit({ userId: USER_ID, type: 'share_expiring' as NotificationType, title: 't' });
