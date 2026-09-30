@@ -44,6 +44,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
 import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
+import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 
 export interface AdminCardDef {
   title: string;
@@ -271,6 +272,14 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         Icon: MonitorHeartIcon,
         path: '/admin/settings/doctor',
         permission: 'system_settings:read',
+      },
+      {
+        title: 'Broadcasts',
+        description:
+          'Send an announcement to every active user now or on a schedule, and watch it go out.',
+        Icon: CampaignOutlinedIcon,
+        path: '/admin/settings/broadcasts',
+        permission: 'broadcasts:read',
       },
     ],
   },

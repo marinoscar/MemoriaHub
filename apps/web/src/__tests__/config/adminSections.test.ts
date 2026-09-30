@@ -87,6 +87,17 @@ describe('adminSections', () => {
       expect(titles).toEqual(['Web Push']);
     });
 
+    it('appends Broadcasts to Operations, gated on broadcasts:read (issue #488)', () => {
+      const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
+      const last = operations.cards[operations.cards.length - 1];
+      expect(last).toMatchObject({
+        title: 'Broadcasts',
+        path: '/admin/settings/broadcasts',
+        permission: 'broadcasts:read',
+      });
+      expect(adminPageTitle('/admin/settings/broadcasts')).toBe('Broadcasts');
+    });
+
     it('resolves both routes to their page titles', () => {
       expect(adminPageTitle('/admin/settings/push')).toBe('Web Push');
       expect(adminPageTitle('/admin/settings/notifications')).toBe('Notifications');
