@@ -1,14 +1,39 @@
 /**
- * Web Push subscription state, page side (epic #481; ported from
- * EnterpriseAppBase).
+ * Web Push subscription lifecycle, page side — issue #486, epic #481 (ported
+ * from EnterpriseAppBase).
  *
- * Issue #485 needs one question answered before the page raises its own toast
- * for a streamed notification: "will the service worker ALSO show this, because
- * it arrives over Web Push?" — `hasActivePushSubscription` below. Issue #486
- * adds the subscription lifecycle itself (subscribe, sync, remove).
+ * The server stores subscriptions (`POST`/`DELETE
+ * /api/notifications/push/subscriptions`) and the service worker shows pushes
+ * (`sw.ts`); this module is the page half that calls `pushManager.subscribe()`
+ * and reports the result. It also answers, for the live stream (#485), "will
+ * the service worker ALSO show this pushed notification?"
+ * (`hasActivePushSubscription`).
  *
- * NOTHING HERE THROWS. Push is decoration over the notification centre.
+ * THE SYNC RUNS ON EVERY BOOT, and that is the mechanism, not a retry. The
+ * POST is an idempotent upsert by endpoint, so re-sending an unchanged
+ * subscription costs one request and repairs every way the server's copy can
+ * drift: a row deleted after a 410, a subscription the worker's
+ * `pushsubscriptionchange` handler replaced but could not report (it has no
+ * token — see `sw.ts`), a browser shared between two accounts.
+ *
+ * Like `browserNotifications.ts`, NOTHING HERE THROWS. Push is decoration over
+ * the notification centre; every failure is logged with `console.warn` and
+ * swallowed.
  */
+
+import { subscribePushNotifications, unsubscribePushNotifications } from './notifications';
+import { requestBrowserNotificationPermission } from './browserNotifications';
+import type { NotificationClientConfig, PushSubscriptionPayload } from '../types/notifications';
+
+/**
+ * How long to wait for `navigator.serviceWorker.ready`. That promise never
+ * settles when no worker ever registers (see `showAppNotification`'s header),
+ * so it is always raced against this.
+ */
+const SERVICE_WORKER_READY_TIMEOUT_MS = 10_000;
+
+/** How long logout will wait for the best-effort unsubscribe. */
+const LOGOUT_UNSUBSCRIBE_TIMEOUT_MS = 3_000;
 
 /**
  * VAPID public keys travel as URL-safe base64 without padding;
@@ -23,6 +48,15 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuf
     output[i] = raw.charCodeAt(i);
   }
   return output;
+}
+
+/** Resolve with `value`, or with `fallback` once `ms` elapses — whichever is first. */
+function withTimeout<T, F>(promise: Promise<T>, ms: number, fallback: F): Promise<T | F> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<F>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function hasPushSupport(): boolean {
@@ -53,6 +87,133 @@ function subscriptionUsesKey(subscription: PushSubscription, key: Uint8Array): b
   return bytes.every((byte, index) => byte === key[index]);
 }
 
+/**
+ * The in-flight sync, so the boot effect and a permission-grant handler racing
+ * each other share one subscribe + POST.
+ */
+let inFlightSync: Promise<void> | null = null;
+
+async function runSync(vapidPublicKey: string): Promise<void> {
+  // Whatever this sync does (subscribe, re-subscribe after a key rotation, or
+  // fail half way), the cached "is there an active subscription?" answer may
+  // no longer hold.
+  invalidateActivePushSubscriptionCache();
+  if (!hasPushSupport()) return;
+  if (window.Notification?.permission !== 'granted') return;
+
+  const registration = await withTimeout(
+    navigator.serviceWorker.ready,
+    SERVICE_WORKER_READY_TIMEOUT_MS,
+    null,
+  );
+  if (!registration?.pushManager) {
+    console.warn('Push subscription sync skipped: no service worker registration is ready.');
+    return;
+  }
+
+  const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+  let subscription = await registration.pushManager.getSubscription();
+
+  // VAPID rotated since this browser subscribed. The browser refuses to
+  // subscribe with a different key while the old subscription exists, so it
+  // must go first.
+  if (subscription && !subscriptionUsesKey(subscription, applicationServerKey)) {
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey,
+    });
+  }
+
+  await subscribePushNotifications(subscription.toJSON() as PushSubscriptionPayload);
+}
+
+/**
+ * Make sure this browser holds a push subscription for the current VAPID key
+ * and that the server has it. Safe to call on every boot; a no-op unless
+ * permission is already `granted`. Never requests permission, never throws.
+ */
+export function syncPushSubscription(vapidPublicKey: string): Promise<void> {
+  if (inFlightSync) return inFlightSync;
+
+  inFlightSync = runSync(vapidPublicKey)
+    .catch((error) => {
+      console.warn('Push subscription sync failed.', error);
+    })
+    .finally(() => {
+      inFlightSync = null;
+      invalidateActivePushSubscriptionCache();
+    });
+
+  return inFlightSync;
+}
+
+/**
+ * Ask for notification permission, then — if granted and the deployment offers
+ * push — subscribe and sync. The one action the auto-prompt, the app-wide
+ * banner's button and the settings page's button all share.
+ *
+ * The sync is started, not awaited, so a caller's spinner tracks the browser
+ * prompt rather than a service worker that may take seconds to become ready.
+ */
+export async function requestPermissionAndSyncPush(
+  config: NotificationClientConfig | null,
+): Promise<NotificationPermission | null> {
+  const result = await requestBrowserNotificationPermission();
+  if (result === 'granted' && config?.pushEnabled && config.vapidPublicKey) {
+    void syncPushSubscription(config.vapidPublicKey);
+  }
+  return result;
+}
+
+/**
+ * Remove this browser's subscription before logout, so the signed-out account
+ * stops receiving pushes on this device. Best-effort and bounded: it never
+ * throws and never holds logout up for longer than
+ * `LOGOUT_UNSUBSCRIBE_TIMEOUT_MS`.
+ *
+ * Two steps, in this order:
+ *   1. `DELETE /api/notifications/push/subscriptions` — needs the still-valid
+ *      access token, which is why logout calls this BEFORE `POST /auth/logout`.
+ *      A failure (404: never registered; network) is swallowed.
+ *   2. `subscription.unsubscribe()` locally, so the push service stops
+ *      accepting messages for this endpoint even if step 1 failed. The next
+ *      sign-in's boot sync subscribes afresh for whoever that is.
+ *
+ * Uses `getRegistration()`, not `.ready`, so a page with no worker returns at
+ * once instead of waiting out a timeout.
+ */
+export async function removePushSubscription(): Promise<void> {
+  invalidateActivePushSubscriptionCache();
+  if (!hasPushSupport()) return;
+
+  const work = (async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (!subscription) return;
+    try {
+      await unsubscribePushNotifications(subscription.endpoint);
+    } catch (error) {
+      console.warn('Removing the push subscription from the server failed.', error);
+    }
+    await subscription.unsubscribe();
+  })();
+  // If the timeout wins, a later rejection must not surface as unhandled.
+  work.catch(() => {});
+
+  try {
+    await withTimeout(work, LOGOUT_UNSUBSCRIBE_TIMEOUT_MS, undefined);
+  } catch (error) {
+    console.warn('Removing the push subscription on logout failed.', error);
+  } finally {
+    invalidateActivePushSubscriptionCache();
+  }
+}
+
 // =============================================================================
 // "Will the service worker's push show this?" — issue #485
 // =============================================================================
@@ -61,6 +222,7 @@ function subscriptionUsesKey(subscription: PushSubscription, key: Uint8Array): b
  * How long a `hasActivePushSubscription` answer is reused. Long enough that a
  * burst of stream frames (a broadcast storm, a reconnect) costs one lookup,
  * short enough that a permission revoked in browser settings is noticed soon.
+ * `syncPushSubscription` and `removePushSubscription` drop it immediately.
  */
 export const ACTIVE_PUSH_SUBSCRIPTION_CACHE_MS = 30_000;
 
@@ -101,7 +263,7 @@ async function lookupActivePushSubscription(vapidPublicKey: string | null): Prom
  * True only when push is supported, notification permission is `granted`, a
  * service worker is registered, it has a subscription, and that subscription
  * was made with this key (a browser that hides the subscription's key counts
- * as a match — see `subscriptionUsesKey`). NEVER THROWS: any failure is `false`,
+ * as a match, as in the sync above). NEVER THROWS: any failure is `false`,
  * which callers treat as "the page must show its own toast". Cached for
  * `ACTIVE_PUSH_SUBSCRIPTION_CACHE_MS` per key.
  */
@@ -123,7 +285,26 @@ export function hasActivePushSubscription(vapidPublicKey: string | null): Promis
   return result;
 }
 
+// =============================================================================
+// Auto-prompt, once per page session
+// =============================================================================
+
+let autoPromptClaimed = false;
+
+/**
+ * Claim the single automatic permission prompt this page load may make.
+ * Returns `true` exactly once per full page load, so StrictMode's double
+ * effects, re-renders and remounts of the shell cannot prompt twice.
+ */
+export function claimAutoPermissionPrompt(): boolean {
+  if (autoPromptClaimed) return false;
+  autoPromptClaimed = true;
+  return true;
+}
+
 /** Test-only: forget module state between tests. */
 export function resetPushSubscriptionStateForTests(): void {
+  autoPromptClaimed = false;
+  inFlightSync = null;
   activeSubscriptionCache = null;
 }

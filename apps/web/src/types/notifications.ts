@@ -108,6 +108,21 @@ export interface NotificationPreferences {
   types?: Partial<Record<NotificationType, boolean>>;
   /** Opt-in for `on_media_enriched` workflow micro-runs. Absent === false. */
   workflowMicroRuns?: boolean;
+  /**
+   * Web Push channel preferences (issue #486). Same absent-means-enabled rule:
+   * an absent `push`, `push.enabled` or `push.types` key is ON. Independent of
+   * the inbox switches above, which still gate push (a type with no inbox row
+   * has nothing to push).
+   */
+  push?: NotificationPushPreferences;
+}
+
+/** The `notifications.push` sub-namespace. */
+export interface NotificationPushPreferences {
+  /** Push master switch for this account. Absent === true. */
+  enabled?: boolean;
+  /** Per-type push overrides. A type absent from this map is ENABLED. */
+  types?: Partial<Record<NotificationType, boolean>>;
 }
 
 /**
@@ -123,6 +138,14 @@ export interface NotificationPreferencesPatch {
   enabled?: boolean;
   types?: Partial<Record<NotificationType, boolean | null>>;
   workflowMicroRuns?: boolean;
+  /**
+   * `null` clears the whole push sub-namespace back to defaults; `null` on
+   * `push.enabled` or a `push.types` key deletes that key (back to enabled).
+   */
+  push?: {
+    enabled?: boolean | null;
+    types?: Partial<Record<NotificationType, boolean | null>>;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,4 +212,25 @@ export interface NotificationClientConfig {
   browserEnabled: boolean;
   /** Types the admin policy lets travel by push — the per-type push toggles offered. */
   pushTypes: NotificationType[];
+}
+
+// ---------------------------------------------------------------------------
+// Web Push subscriptions (issue #486, epic #481)
+// ---------------------------------------------------------------------------
+
+/**
+ * Body of `POST /api/notifications/push/subscriptions` — the browser's
+ * `PushSubscription.toJSON()`, passed through unchanged. No user id: the owner
+ * is always the authenticated caller.
+ */
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  expirationTime?: number | null;
+}
+
+export interface PushSubscriptionResponse {
+  id: string;
+  endpoint: string;
+  createdAt: string;
 }

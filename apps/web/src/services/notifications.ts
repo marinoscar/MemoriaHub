@@ -10,6 +10,8 @@ import type {
   NotificationClientConfig,
   NotificationListParams,
   NotificationListResponse,
+  PushSubscriptionPayload,
+  PushSubscriptionResponse,
 } from '../types/notifications';
 
 /** List the current user's notifications, newest first. */
@@ -79,4 +81,26 @@ export async function dismissAllNotifications(
  */
 export async function getNotificationConfig(): Promise<NotificationClientConfig> {
   return api.get<NotificationClientConfig>('/notifications/config');
+}
+
+/**
+ * Register (or refresh) this browser's Web Push subscription for the caller
+ * (issue #486). Upserted by `endpoint` server-side, so calling it on every boot
+ * is the self-heal, not a duplicate. 409 when push is disabled.
+ */
+export async function subscribePushNotifications(
+  subscription: PushSubscriptionPayload,
+): Promise<PushSubscriptionResponse> {
+  return api.post<PushSubscriptionResponse>('/notifications/push/subscriptions', subscription);
+}
+
+/**
+ * Remove this browser's Web Push subscription for the caller (issue #486). A
+ * `DELETE` with a JSON body: the endpoint URL is the only handle on the row.
+ * 404 when the caller has no such subscription.
+ */
+export async function unsubscribePushNotifications(endpoint: string): Promise<void> {
+  await api.delete<void>('/notifications/push/subscriptions', {
+    body: JSON.stringify({ endpoint }),
+  });
 }
