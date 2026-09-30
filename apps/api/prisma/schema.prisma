@@ -93,6 +93,9 @@ model User {
   // Web Push subscriptions (epic #481, issue #483)
   pushSubscriptions              PushSubscription[]          @relation("UserPushSubscriptions")
   notificationDeliveries         NotificationDelivery[]      @relation("UserNotificationDeliveries")
+  // Admin notification broadcasts (epic #481, issue #488)
+  notificationBroadcastsCreated  NotificationBroadcast[]     @relation("NotificationBroadcastCreatedBy")
+  notificationBroadcastsCanceled NotificationBroadcast[]     @relation("NotificationBroadcastCanceledBy")
   // Memories relations (epic #300, issue #301)
   memoryUserStates               MemoryUserState[]
   // PostgreSQL Database Backup & Restore relations (epic #339, issue #340)
@@ -2252,6 +2255,8 @@ enum NotificationType {
   workflow_run_completed
   share_expiring
   memories_ready
+  admin_broadcast // epic #481, issue #488 — an admin announcement
+  admin_broadcast_critical // same, marked critical: mandatory inbox row (bypasses user prefs and admin disabledTypes)
 }
 
 // Schema-only foundation for the in-app notification center (issue #244,
@@ -2400,6 +2405,62 @@ model NotificationDelivery {
   @@index([status, createdAt])
   @@index([createdAt])
   @@map("notification_deliveries")
+}
+
+// =============================================================================
+// Admin notification broadcasts (epic #481, issue #488)
+// =============================================================================
+//
+// One row per announcement an administrator composes. The row is the record
+// and the fan-out's durable state: `broadcast_start` claims it
+// (scheduled -> sending, stamping `audienceCutoff`), `broadcast_chunk` jobs walk
+// the audience 200 users at a time in id order, committing `cursorUserId` and
+// `processedCount` with a compare-and-swap after every page, and the last chunk
+// flips it to `sent`. A permanently failed job flips it to `failed`; resume
+// continues from the cursor. See docs/specs/notifications.md.
+//
+// `draft` is reserved (no route produces it). `channels` is a subset of
+// ['inbox','push','email']; a critical broadcast always includes 'inbox'.
+// `recipientCount` is the audience size at the cutoff (a snapshot: users
+// deactivated mid-fan-out are skipped, so `processedCount` may finish below it).
+enum NotificationBroadcastStatus {
+  draft
+  scheduled
+  sending
+  sent
+  canceled
+  failed
+}
+
+model NotificationBroadcast {
+  id             String                      @id @default(uuid()) @db.Uuid
+  title          String
+  body           String
+  link           String?
+  ctaLabel       String?                     @map("cta_label")
+  critical       Boolean                     @default(false)
+  channels       String[]
+  status         NotificationBroadcastStatus @default(scheduled)
+  scheduledFor   DateTime?                   @map("scheduled_for") @db.Timestamptz
+  audienceCutoff DateTime?                   @map("audience_cutoff") @db.Timestamptz
+  recipientCount Int?                        @map("recipient_count")
+  cursorUserId   String?                     @map("cursor_user_id") @db.Uuid
+  processedCount Int                         @default(0) @map("processed_count")
+  startedAt      DateTime?                   @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?                   @map("finished_at") @db.Timestamptz
+  lastError      String?                     @map("last_error")
+  createdById    String?                     @map("created_by_id") @db.Uuid
+  canceledById   String?                     @map("canceled_by_id") @db.Uuid
+  canceledAt     DateTime?                   @map("canceled_at") @db.Timestamptz
+  createdAt      DateTime                    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime                    @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdBy  User? @relation("NotificationBroadcastCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  canceledBy User? @relation("NotificationBroadcastCanceledBy", fields: [canceledById], references: [id], onDelete: SetNull)
+
+  @@index([status, scheduledFor])
+  @@index([createdAt(sort: Desc)])
+  @@map("notification_broadcasts")
 }
 
 // =============================================================================
