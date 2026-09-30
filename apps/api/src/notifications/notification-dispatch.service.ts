@@ -56,6 +56,15 @@ export interface NotificationDispatchedEvent {
   toast: boolean;
 }
 
+/**
+ * Per-dispatch narrowing. It can only REMOVE a channel, never add one past
+ * policy or preferences — e.g. an admin broadcast sent without the push
+ * channel (issue #488).
+ */
+export interface NotificationDispatchOptions {
+  skipPush?: boolean;
+}
+
 export const PUSH_THROTTLE_MS = 5 * 60 * 1000;
 const PUSH_THROTTLE_MAX_ENTRIES = 10_000;
 const DRAIN_TIMEOUT_MS = 5_000;
@@ -81,10 +90,14 @@ export class NotificationDispatchService implements OnModuleDestroy {
    * Fan a committed notification row out to its non-inbox channels.
    * Fire-and-forget: returns immediately, never throws, never rejects.
    */
-  dispatch(row: Notification, reason: NotificationDispatchReason = 'created'): void {
+  dispatch(
+    row: Notification,
+    reason: NotificationDispatchReason = 'created',
+    options: NotificationDispatchOptions = {},
+  ): void {
     let promise: Promise<void>;
     try {
-      promise = this.run(row, reason).catch((err) => {
+      promise = this.run(row, reason, options).catch((err) => {
         this.logger.warn(`dispatch(${row.type} ${row.id}) failed: ${describeThrown(err)}`);
       });
     } catch (err) {
@@ -127,12 +140,20 @@ export class NotificationDispatchService implements OnModuleDestroy {
   // Internals
   // ---------------------------------------------------------------------------
 
-  private async run(row: Notification, reason: NotificationDispatchReason): Promise<void> {
+  private async run(
+    row: Notification,
+    reason: NotificationDispatchReason,
+    options: NotificationDispatchOptions,
+  ): Promise<void> {
     const policy = await this.policy.getPolicy();
     const toast = isToastAllowed(row.type, policy);
     let pushed = false;
 
-    if (isPushAllowed(row.type, policy) && (await this.preferences.isPushEnabled(row.userId, row.type))) {
+    if (
+      !options.skipPush &&
+      isPushAllowed(row.type, policy) &&
+      (await this.preferences.isPushEnabled(row.userId, row.type))
+    ) {
       pushed = await this.push(row);
     }
 

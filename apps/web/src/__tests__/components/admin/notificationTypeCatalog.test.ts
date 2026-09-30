@@ -8,25 +8,24 @@ import {
   notificationTypeInfo,
   notificationTypeLabel,
 } from '../../../components/admin/notificationTypeCatalog';
-import type { NotificationType } from '../../../types/notifications';
-
-// Compile-time: every client-side NotificationType is catalogued. If a value is
-// added to the union without a catalog entry this list stops type-checking.
-const EVERY_TYPE: Record<NotificationType, true> = {
-  review_queue_bursts: true,
-  review_queue_duplicates: true,
-  review_queue_location_suggestions: true,
-  review_queue_enhancements: true,
-  upload_completed: true,
-  enrichment_failed: true,
-  workflow_run_completed: true,
-  share_expiring: true,
-  memories_ready: true,
-};
+// Every API `NotificationType` value (apps/api/prisma/schema.prisma).
+const EVERY_TYPE = [
+  'review_queue_bursts',
+  'review_queue_duplicates',
+  'review_queue_location_suggestions',
+  'review_queue_enhancements',
+  'upload_completed',
+  'enrichment_failed',
+  'workflow_run_completed',
+  'share_expiring',
+  'memories_ready',
+  'admin_broadcast',
+  'admin_broadcast_critical',
+];
 
 describe('notificationTypeCatalog', () => {
   it('lists every notification type once, with a label and description', () => {
-    for (const type of Object.keys(EVERY_TYPE)) {
+    for (const type of EVERY_TYPE) {
       expect(NOTIFICATION_TYPE_KEYS).toContain(type);
     }
     expect(new Set(NOTIFICATION_TYPE_KEYS).size).toBe(NOTIFICATION_TYPE_KEYS.length);
@@ -38,6 +37,13 @@ describe('notificationTypeCatalog', () => {
 
   it('reuses the bell labels', () => {
     expect(notificationTypeLabel('upload_completed')).toBe('Upload complete');
+  });
+
+  it('marks only the critical broadcast type mandatory, mirroring the API', () => {
+    expect(NOTIFICATION_TYPE_CATALOG.filter((info) => info.mandatory).map((info) => info.type)).toEqual([
+      'admin_broadcast_critical',
+    ]);
+    expect(notificationTypeLabel('admin_broadcast')).not.toBe('admin_broadcast');
   });
 
   it('falls back to the raw key for an unknown type', () => {

@@ -124,6 +124,15 @@ describe('NotificationDispatchService', () => {
     expect(t.events.emit.mock.calls[0][1].pushed).toBe(false);
   });
 
+  it('skipPush narrows the dispatch to inbox + SSE only (issue #488)', async () => {
+    const t = build();
+    t.svc.dispatch(row(), 'created', { skipPush: true });
+    await t.svc.drain();
+    expect(t.channel.deliver).not.toHaveBeenCalled();
+    expect(t.preferences.isPushEnabled).not.toHaveBeenCalled();
+    expect(t.events.emit.mock.calls[0][1].pushed).toBe(false);
+  });
+
   it('reports toast=false when the browser kill switch is off', async () => {
     const t = build({ policy: { ...DEFAULT_NOTIFICATION_POLICY, browserEnabled: false } });
     t.svc.dispatch(row());

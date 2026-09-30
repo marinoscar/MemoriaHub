@@ -101,6 +101,12 @@ export interface EmitNotificationInput {
   body?: string | null;
   link?: string | null;
   data?: Prisma.InputJsonValue | null;
+  /**
+   * Narrow the non-inbox channels for this one row (issue #488). Only ever
+   * removes a channel — `skipPush: true` writes the inbox row without a Web
+   * Push. Policy and preferences still apply on top.
+   */
+  skipPush?: boolean;
 }
 
 /**
@@ -473,7 +479,8 @@ export class NotificationsService {
       });
       this.invalidateUnreadCount(input.userId);
       // Committed (single statement, no transaction) — fan out.
-      this.dispatcher.dispatch(row, 'created');
+      if (input.skipPush) this.dispatcher.dispatch(row, 'created', { skipPush: true });
+      else this.dispatcher.dispatch(row, 'created');
     } catch (err) {
       this.logger.warn(
         `emit(${input.type}) for user ${input.userId} failed: ${this.errorMessage(err)}`,

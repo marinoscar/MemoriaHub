@@ -24,11 +24,12 @@ import * as channels from './notification-channels';
 const ALL = Object.values(NotificationType) as NotificationType[];
 
 describe('notification channel descriptors', () => {
-  it('declares every NotificationType, each with inbox + push and not mandatory', () => {
+  it('declares every NotificationType, each with inbox + push; only the critical broadcast is mandatory', () => {
     expect(Object.keys(NOTIFICATION_CHANNEL_DESCRIPTORS).sort()).toEqual([...ALL].sort());
     for (const t of ALL) {
-      expect(channelDescriptor(t)).toEqual({ channels: ['inbox', 'push'], mandatory: false });
-      expect(isMandatoryType(t)).toBe(false);
+      const mandatory = t === 'admin_broadcast_critical';
+      expect(channelDescriptor(t)).toEqual({ channels: ['inbox', 'push'], mandatory });
+      expect(isMandatoryType(t)).toBe(mandatory);
     }
     expect(pushCapableTypes().sort()).toEqual([...ALL].sort());
   });

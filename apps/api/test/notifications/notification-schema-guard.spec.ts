@@ -45,6 +45,13 @@ const EVENT_TYPES = [
 
 const ALL_ENUM_VALUES = [...REVIEW_QUEUE_TYPES, ...EVENT_TYPES];
 
+/**
+ * EVENT types added by LATER migrations (never STATE): they must stay out of
+ * the live-row dedup predicate too. Not part of ALL_ENUM_VALUES, which checks
+ * the ORIGINAL migration's CREATE TYPE only.
+ */
+const LATER_EVENT_TYPES = ['memories_ready', 'admin_broadcast', 'admin_broadcast_critical'] as const;
+
 function readMigrationSql(): string {
   return fs.readFileSync(MIGRATION_SQL_PATH, 'utf8');
 }
@@ -146,7 +153,7 @@ describe('Notification Center — migration schema-drift guard (issue #244)', ()
       // of "widen the predicate to cover event types" regression this guard
       // exists to catch, however it were phrased in SQL.
       const whereClause = index.whereClauseRaw as string;
-      for (const eventType of EVENT_TYPES) {
+      for (const eventType of [...EVENT_TYPES, ...LATER_EVENT_TYPES]) {
         expect(whereClause).not.toContain(`'${eventType}'`);
       }
     });

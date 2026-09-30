@@ -90,6 +90,14 @@ describe('NotificationPolicyPage', () => {
     expect(screen.getByText(/Inbox always delivered/, { selector: 'p' })).toBeInTheDocument();
   });
 
+  it('labels a mandatory type with the inbox-always chip', () => {
+    setSettings({});
+
+    renderPage();
+
+    expect(screen.getByText('Inbox always delivered', { selector: 'span' })).toBeInTheDocument();
+  });
+
   it('defaults to everything on when an older API returns no policy keys', () => {
     setSettings(undefined);
 

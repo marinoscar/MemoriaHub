@@ -117,6 +117,12 @@ interface NotificationTypeDescriptor {
   flag?: FeatureFlagKey;
   /** Delivered to Admins only (#247), so non-admins never see the switch. */
   adminOnly?: boolean;
+  /**
+   * The inbox row ignores every preference (issue #488 — the API's
+   * `NOTIFICATION_CHANNEL_DESCRIPTORS` `mandatory` flag). Its inbox switch is
+   * rendered always-on and read-only; only its push can be turned off.
+   */
+  mandatory?: boolean;
 }
 
 /** State notifications: "N things are waiting for you in a review queue." */
@@ -183,6 +189,23 @@ const ACTIVITY_TYPES: NotificationTypeDescriptor[] = [
     description:
       'Newly curated memories — On This Day, trips, people and themes — are ready to relive.',
     flag: 'memories',
+  },
+];
+
+/** Announcements an administrator sends to everyone (issue #488). */
+const ANNOUNCEMENT_TYPES: NotificationTypeDescriptor[] = [
+  {
+    type: 'admin_broadcast',
+    label: 'Announcements',
+    description: 'Messages an administrator sends to everyone using MemoriaHub.',
+  },
+  {
+    type: 'admin_broadcast_critical',
+    label: 'Important announcements',
+    description:
+      'Announcements an administrator marked as important. These always appear in ' +
+      'your bell and cannot be turned off here — only their push delivery can.',
+    mandatory: true,
   },
 ];
 
@@ -329,6 +352,10 @@ export function NotificationSettings({
   const masterEnabled = prefs?.enabled !== false;
   const typeEnabled = (type: NotificationType): boolean =>
     prefs?.types?.[type] !== false;
+  // What actually governs delivery: a mandatory type's inbox row ignores both
+  // the master switch and its own (never-offered) per-type switch.
+  const inboxOn = (descriptor: NotificationTypeDescriptor): boolean =>
+    descriptor.mandatory === true || (masterEnabled && typeEnabled(descriptor.type));
   // The one inverted default: absent means OFF.
   const microRunsEnabled = prefs?.workflowMicroRuns === true;
   // Push: same absent-means-enabled rule, one level down.
@@ -358,6 +385,7 @@ export function NotificationSettings({
 
   const visibleReviewQueues = REVIEW_QUEUE_TYPES.filter(isVisible);
   const visibleActivity = ACTIVITY_TYPES.filter(isVisible);
+  const visibleAnnouncements = ANNOUNCEMENT_TYPES.filter(isVisible);
   const workflowRunsVisible = visibleActivity.some(
     (d) => d.type === 'workflow_run_completed',
   );
@@ -424,15 +452,15 @@ export function NotificationSettings({
         <FormControlLabel
           control={
             <Switch
-              checked={typeEnabled(descriptor.type)}
+              checked={descriptor.mandatory ? true : typeEnabled(descriptor.type)}
               onChange={(e) => handleTypeToggle(descriptor.type, e.target.checked)}
-              disabled={controlsDisabled || !masterEnabled}
+              disabled={descriptor.mandatory || controlsDisabled || !masterEnabled}
               slotProps={{
                 input: { 'aria-label': `${descriptor.label} notifications` },
               }}
             />
           }
-          label={descriptor.label}
+          label={descriptor.mandatory ? `${descriptor.label} (always on)` : descriptor.label}
           sx={{ minHeight: 44, ml: 0 }}
         />
         {pushOffered(descriptor.type) && (
@@ -442,12 +470,7 @@ export function NotificationSettings({
                 size="small"
                 checked={pushTypeEnabled(descriptor.type)}
                 onChange={(e) => handlePushTypeToggle(descriptor.type, e.target.checked)}
-                disabled={
-                  controlsDisabled ||
-                  !masterEnabled ||
-                  !typeEnabled(descriptor.type) ||
-                  !pushMasterEnabled
-                }
+                disabled={controlsDisabled || !inboxOn(descriptor) || !pushMasterEnabled}
                 slotProps={{
                   input: { 'aria-label': `${descriptor.label} push notifications` },
                 }}
@@ -641,7 +664,19 @@ export function NotificationSettings({
               </>
             )}
 
-            {visibleReviewQueues.length === 0 && visibleActivity.length === 0 && (
+            {visibleAnnouncements.length > 0 && (
+              <>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+                  Announcements
+                </Typography>
+                {visibleAnnouncements.map(renderTypeSwitch)}
+              </>
+            )}
+
+            {visibleReviewQueues.length === 0 &&
+              visibleActivity.length === 0 &&
+              visibleAnnouncements.length === 0 && (
               <>
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="body2" color="text.secondary">

@@ -34,6 +34,7 @@ const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const EmailSettingsPage = lazy(() => import('./pages/Admin/EmailSettingsPage'));
 const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
 const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
+const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
 const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
@@ -158,6 +159,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/nodes" element={<WorkersPage />} />
                 <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
                 <Route path="/admin/settings/doctor" element={<DoctorPage />} />
+                <Route path="/admin/settings/broadcasts" element={<BroadcastsPage />} />
                 <Route path="/admin/settings/workflows" element={<WorkflowsSettingsPage />} />
                 {/* v0 server-side backup retired (#367) — superseded by the node-based
                     Local Media Backup reachable from the Worker Nodes page. */}

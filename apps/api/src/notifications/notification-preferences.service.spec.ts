@@ -30,8 +30,11 @@ import {
   disabledNotificationTypes,
   resolveNotificationPreferences,
 } from './notification-preferences.service';
+import { isMandatoryType } from './notification-channels';
 
 const ALL_TYPES = Object.values(NotificationType) as NotificationType[];
+/** Types a user may mute — every type except the mandatory critical broadcast (#488). */
+const MUTABLE_TYPES = ALL_TYPES.filter((t) => !isMandatoryType(t));
 
 const USER_A = 'user-aaa';
 const USER_B = 'user-bbb';
@@ -136,7 +139,7 @@ describe('resolveNotificationPreferences()', () => {
       const resolved = resolveNotificationPreferences({ enabled: false });
 
       expect(resolved.enabled).toBe(false);
-      for (const type of ALL_TYPES) {
+      for (const type of MUTABLE_TYPES) {
         expect(resolved.types[type]).toBe(false);
       }
     });
@@ -173,7 +176,7 @@ describe('resolveNotificationPreferences()', () => {
     });
 
     // types are all suppressed by the master switch...
-    for (const type of ALL_TYPES) {
+    for (const type of MUTABLE_TYPES) {
       expect(resolved.types[type]).toBe(false);
     }
     // ...but the raw workflowMicroRuns field still reflects what was stored.
@@ -208,6 +211,15 @@ describe('defaultNotificationPreferences()', () => {
 // =============================================================================
 
 describe('disabledNotificationTypes()', () => {
+  it('never lists a mandatory type, so a settings save never dismisses a critical broadcast (#488)', () => {
+    const disabled = disabledNotificationTypes({
+      enabled: false,
+      types: { admin_broadcast_critical: false },
+    });
+    expect(disabled).not.toContain('admin_broadcast_critical');
+    expect(disabled).toContain('admin_broadcast');
+  });
+
   it('returns an empty array for an absent namespace (nothing to dismiss)', () => {
     expect(disabledNotificationTypes(undefined)).toEqual([]);
   });
@@ -227,8 +239,8 @@ describe('disabledNotificationTypes()', () => {
   it('returns EVERY type when the master switch is off', () => {
     const disabled = disabledNotificationTypes({ enabled: false });
 
-    expect(new Set(disabled)).toEqual(new Set(ALL_TYPES));
-    expect(disabled).toHaveLength(ALL_TYPES.length);
+    expect(new Set(disabled)).toEqual(new Set(MUTABLE_TYPES));
+    expect(disabled).toHaveLength(MUTABLE_TYPES.length);
   });
 
   it('returns every type disabled by the master switch PLUS none extra when a type is also explicitly true (still off overall)', () => {
@@ -239,7 +251,7 @@ describe('disabledNotificationTypes()', () => {
 
     // enabled=false suppresses everything regardless of a per-type override —
     // resolve() ANDs `enabled && stored[type] !== false`.
-    expect(new Set(disabled)).toEqual(new Set(ALL_TYPES));
+    expect(new Set(disabled)).toEqual(new Set(MUTABLE_TYPES));
   });
 });
 
@@ -469,9 +481,20 @@ describe('NotificationPreferencesService', () => {
         value: { notifications: { enabled: false } },
       });
 
-      for (const type of ALL_TYPES) {
+      for (const type of MUTABLE_TYPES) {
         await expect(service.isEnabled(USER_A, type)).resolves.toBe(false);
       }
+    });
+
+    it('a MANDATORY type (admin_broadcast_critical, #488) stays enabled whatever the user stored', async () => {
+      (mockPrisma.userSettings.findUnique as jest.Mock).mockResolvedValue({
+        value: {
+          notifications: { enabled: false, types: { admin_broadcast_critical: false } },
+        },
+      });
+
+      await expect(service.isEnabled(USER_A, 'admin_broadcast_critical')).resolves.toBe(true);
+      await expect(service.isEnabled(USER_A, 'admin_broadcast')).resolves.toBe(false);
     });
   });
 

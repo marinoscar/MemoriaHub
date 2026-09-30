@@ -6,6 +6,7 @@ import {
 import { circleInvitationEmail } from './circle-invitation.email';
 import { membershipConfirmationEmail } from './membership-confirmation.email';
 import { memoryDigestEmail } from './memory-digest.email';
+import { broadcastEmail } from './broadcast.email';
 
 /**
  * Typed registry mapping each template name to its builder function.
@@ -18,4 +19,5 @@ export const TEMPLATES: {
   'circle-invitation': circleInvitationEmail,
   'membership-confirmation': membershipConfirmationEmail,
   'memory-digest': memoryDigestEmail,
+  broadcast: broadcastEmail,
 };

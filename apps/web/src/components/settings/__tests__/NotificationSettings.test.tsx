@@ -740,3 +740,59 @@ describe('NotificationSettings — push preferences', () => {
     ).toBeDisabled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Admin broadcasts (issue #488)
+// ---------------------------------------------------------------------------
+
+describe('NotificationSettings — announcements', () => {
+  it('offers a normal, user-mutable switch for routine announcements', async () => {
+    const { updateSettings } = renderComponent(baseSettings());
+    const toggle = screen.getByRole('switch', { name: /^announcements notifications$/i });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(updateSettings).toHaveBeenCalledWith({
+        notifications: { types: { admin_broadcast: false } },
+      }),
+    );
+  });
+
+  it('renders important announcements always-on and read-only', () => {
+    renderComponent(
+      baseSettings({ notifications: { types: { admin_broadcast_critical: false } } }),
+    );
+    const toggle = screen.getByRole('switch', {
+      name: /important announcements notifications/i,
+    });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/important announcements \(always on\)/i)).toBeInTheDocument();
+  });
+
+  it('stays on even when the inbox master switch is off', () => {
+    renderComponent(baseSettings({ notifications: { enabled: false } }));
+    expect(
+      screen.getByRole('switch', { name: /important announcements notifications/i }),
+    ).toBeChecked();
+  });
+
+  it('keeps the critical push switch usable while the inbox master is off', async () => {
+    mockPushConfig({ ...PUSH_CONFIG, pushTypes: ['admin_broadcast', 'admin_broadcast_critical'] });
+    const { updateSettings } = renderComponent(baseSettings({ notifications: { enabled: false } }));
+    expect(
+      screen.getByRole('switch', { name: /^announcements push notifications$/i }),
+    ).toBeDisabled();
+    const criticalPush = screen.getByRole('switch', {
+      name: /important announcements push notifications/i,
+    });
+    expect(criticalPush).toBeEnabled();
+    fireEvent.click(criticalPush);
+    await waitFor(() =>
+      expect(updateSettings).toHaveBeenCalledWith({
+        notifications: { push: { types: { admin_broadcast_critical: false } } },
+      }),
+    );
+  });
+});

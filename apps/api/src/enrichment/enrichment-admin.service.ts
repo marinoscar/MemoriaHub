@@ -6,13 +6,14 @@
 // Provides stats, paginated listing, retry/reset operations, and deletion.
 // =============================================================================
 
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger, Optional } from '@nestjs/common';
 import { Prisma, JobStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
 import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
 import { jobTypeLabel } from './job-type-labels';
+import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 
 /** Default rolling window (days) for the duration-history aggregate. */
 export const INSIGHTS_WINDOW_DAYS = 7;
@@ -185,6 +186,8 @@ export class EnrichmentAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settingsService: SystemSettingsService,
+    // Optional so specs that only exercise stats/list need not provide it.
+    @Optional() private readonly registry?: EnrichmentHandlerRegistry,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -867,6 +870,17 @@ export class EnrichmentAdminService {
       throw new BadRequestException(
         `EnrichmentJob ${id} is currently running and cannot be deleted`,
       );
+    }
+
+    // A handler may veto deleting a job whose row is the only thing advancing
+    // some other record (issue #488: a scheduled/sending broadcast's start or
+    // chunk job). Only consulted for non-terminal rows — history is always
+    // deletable.
+    if (job.status === JobStatus.pending) {
+      const refusal = await this.registry?.get(job.type)?.canDelete?.(job);
+      if (refusal) {
+        throw new BadRequestException(refusal);
+      }
     }
 
     await this.prisma.enrichmentJob.delete({ where: { id } });

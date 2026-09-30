@@ -15,9 +15,11 @@ import { NotificationType } from '@prisma/client';
 //           inbox row is written (NotificationDispatchService).
 //
 // `mandatory` exempts a type's INBOX row from the admin `disabledTypes` kill
-// switch (the row IS the guarantee the user is told). It never exempts push or
-// the in-page toast. None of the current types are mandatory; the field exists
-// so a future critical broadcast type can opt in without a structural change.
+// switch AND from the user's own per-type preference (the row IS the guarantee
+// the user is told). It never exempts push or the in-page toast. The only
+// mandatory type is `admin_broadcast_critical` (issue #488): an announcement an
+// administrator marked critical reaches every inbox no matter what anybody has
+// muted; its push still needs VAPID keys, a subscription and the push prefs.
 //
 // Declared as an exhaustive Record so adding a NotificationType value is a
 // compile error here until someone decides its channels.
@@ -50,6 +52,10 @@ export const NOTIFICATION_CHANNEL_DESCRIPTORS: Readonly<
   workflow_run_completed: INBOX_AND_PUSH,
   share_expiring: INBOX_AND_PUSH,
   memories_ready: INBOX_AND_PUSH,
+  // Admin broadcasts (issue #488). The broadcast's own `channels` can narrow
+  // these further per send (e.g. an email-only broadcast writes no row).
+  admin_broadcast: INBOX_AND_PUSH,
+  admin_broadcast_critical: { channels: ['inbox', 'push'], mandatory: true },
 };
 
 /** The descriptor for a type. An unknown value degrades to inbox-only. */
