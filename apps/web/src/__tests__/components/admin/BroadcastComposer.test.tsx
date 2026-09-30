@@ -9,18 +9,19 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 
-vi.mock('../../../services/pushDiagnostics', () => ({
-  getNotificationClientConfig: vi.fn(),
-}));
+vi.mock('../../../services/notifications', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../services/notifications')>();
+  return { ...actual, getNotificationConfig: vi.fn() };
+});
 
-import { getNotificationClientConfig } from '../../../services/pushDiagnostics';
+import { getNotificationConfig } from '../../../services/notifications';
 import {
   BroadcastComposer,
   earliestSchedule,
   validateLink,
 } from '../../../components/admin/BroadcastComposer';
 
-const mockConfig = vi.mocked(getNotificationClientConfig);
+const mockConfig = vi.mocked(getNotificationConfig);
 
 const onSubmit = vi.fn();
 const onSendTest = vi.fn();

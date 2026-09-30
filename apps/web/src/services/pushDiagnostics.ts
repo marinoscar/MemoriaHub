@@ -22,124 +22,31 @@
  * arrive before the HTTP response does.
  */
 
-import { api, ApiError } from './api';
+import { ApiError } from './api';
 import { sendPushTest, type PushTestResult } from './pushConfig';
+import { subscribePushNotifications } from './notifications';
+import { urlBase64ToUint8Array } from './pushSubscription';
+import { requestBrowserNotificationPermission } from './browserNotifications';
+import {
+  readHasNotificationApi,
+  readHasServiceWorkerApi,
+  readIsIos,
+  readIsSecureContext,
+  readIsStandalone,
+} from '../hooks/useNotificationCapability';
+import type { PushSubscriptionPayload } from '../types/notifications';
 
 // =============================================================================
-// Local browser helpers
+// Shared browser helpers
 // =============================================================================
 //
-// Deliberately self-contained. The app-wide push plumbing (the boot-time
-// subscription sync, the capability hook, the permission banner) lives in
-// other modules; this diagnostic must be able to walk the chain on its own, so
-// that when that plumbing is itself the broken link the test still runs and
-// still says so.
-
-/** `PushSubscription.toJSON()` — the body of `POST /api/notifications/push/subscriptions`. */
-export interface PushSubscriptionPayload {
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-  expirationTime?: number | null;
-}
-
-/** `GET /api/notifications/config` — what every signed-in client is told. */
-export interface NotificationClientConfig {
-  pushEnabled: boolean;
-  vapidPublicKey: string | null;
-  browserEnabled: boolean;
-  pushTypes: string[];
-}
-
-/** Store this browser's subscription for the caller (idempotent upsert by endpoint). */
-export function registerPushSubscription(payload: PushSubscriptionPayload): Promise<unknown> {
-  return api.post('/notifications/push/subscriptions', payload);
-}
-
-/** The client-facing notification capabilities, for the admin-vs-client consistency check. */
-export function getNotificationClientConfig(): Promise<NotificationClientConfig> {
-  return api.get<NotificationClientConfig>('/notifications/config');
-}
-
-export function readIsSecureContext(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.isSecureContext !== false;
-  } catch {
-    return true;
-  }
-}
-
-export function readHasNotificationApi(): boolean {
-  if (typeof window === 'undefined' || !('Notification' in window)) return false;
-  try {
-    // The access is the test: some hardened browsers expose it and then throw.
-    void window.Notification.permission;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function readHasServiceWorkerApi(): boolean {
-  try {
-    return typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
-  } catch {
-    return false;
-  }
-}
-
-/** iPhone / iPod / iPad — including an iPad that reports itself as a Mac. */
-export function readIsIos(): boolean {
-  try {
-    if (typeof navigator === 'undefined') return false;
-    const platform = typeof navigator.platform === 'string' ? navigator.platform : '';
-    const userAgent = typeof navigator.userAgent === 'string' ? navigator.userAgent : '';
-    if (/iPad|iPhone|iPod/.test(platform) || /iPad|iPhone|iPod/.test(userAgent)) return true;
-    const isMacLike = /Mac/.test(platform) || /Macintosh/.test(userAgent);
-    const touchPoints = typeof navigator.maxTouchPoints === 'number' ? navigator.maxTouchPoints : 0;
-    return isMacLike && touchPoints > 1;
-  } catch {
-    return false;
-  }
-}
-
-/** An installed web app rather than a browser tab. */
-export function readIsStandalone(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
-  } catch {
-    // Not evidence either way.
-  }
-  try {
-    return (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  } catch {
-    return false;
-  }
-}
-
-/** Ask for notification permission. Never throws; `null` when unsupported or refused outright. */
-export async function requestNotificationPermission(): Promise<NotificationPermission | null> {
-  if (!readHasNotificationApi()) return null;
-  try {
-    const result = await window.Notification.requestPermission();
-    return result ?? window.Notification.permission;
-  } catch {
-    return null;
-  }
-}
-
-/** base64url (VAPID public key) → bytes for `applicationServerKey`. */
-export function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = window.atob(base64);
-  const output = new Uint8Array(new ArrayBuffer(raw.length));
-  for (let i = 0; i < raw.length; i += 1) {
-    output[i] = raw.charCodeAt(i);
-  }
-  return output;
-}
+// The low-level primitives — the capability readers, the permission request,
+// the VAPID key decoder and the subscription POST — are the app's shared ones
+// (issue #489), none of which depends on the boot-time sync or the capability
+// hook's React state. What stays HERE is everything diagnostic-specific: the
+// step-by-step walk, the snapshot, and the subscribe/key-mismatch handling
+// that reports each failure instead of swallowing it the way
+// `syncPushSubscription` must.
 
 // =============================================================================
 // Types
@@ -712,7 +619,7 @@ export async function runPushTest(
       let asked = false;
       if (permission === 'default') {
         asked = true;
-        const result = await requestNotificationPermission();
+        const result = await requestBrowserNotificationPermission();
         permission = result ?? readPermission();
       }
       if (permission === 'denied') {
@@ -861,7 +768,7 @@ export async function runPushTest(
     {
       const step = begin('register');
       try {
-        await registerPushSubscription(subscription.toJSON() as PushSubscriptionPayload);
+        await subscribePushNotifications(subscription.toJSON() as PushSubscriptionPayload);
         finish(step, 'ok', 'The server stored this browser’s subscription.');
       } catch (error) {
         let detail = `Registering the subscription failed — ${describeError(error)}.`;

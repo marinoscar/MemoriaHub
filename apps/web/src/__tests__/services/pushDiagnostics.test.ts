@@ -23,9 +23,6 @@ vi.mock('../../services/pushConfig', () => ({
 import { api, ApiError } from '../../services/api';
 import { sendPushTest, type PushTestResult } from '../../services/pushConfig';
 import {
-  getNotificationClientConfig,
-  registerPushSubscription,
-  urlBase64ToUint8Array,
   DENIED_RECOVERY,
   PUSH_TEST_ACK_MESSAGE,
   buildDiagnosticsReport,
@@ -36,6 +33,7 @@ import {
   showLocalTestNotification,
   type DiagnosticStep,
 } from '../../services/pushDiagnostics';
+import { urlBase64ToUint8Array } from '../../services/pushSubscription';
 
 const mockRegister = vi.mocked(api.post);
 const mockSendTest = vi.mocked(sendPushTest);
@@ -443,20 +441,6 @@ describe('pushDiagnostics', () => {
       expect(result).toEqual({ ok: true, via: 'page' });
       expect(ctor).toHaveBeenCalledTimes(1);
       expect(env.registration.showNotification).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('local API helpers', () => {
-    it('registers a subscription against the notifications endpoint', async () => {
-      const payload = { endpoint: ENDPOINT, keys: { p256dh: P256DH, auth: AUTH } };
-      await registerPushSubscription(payload);
-      expect(mockRegister).toHaveBeenCalledWith('/notifications/push/subscriptions', payload);
-    });
-
-    it('reads the client notification config', async () => {
-      vi.mocked(api.get).mockResolvedValue({ pushEnabled: true } as any);
-      await expect(getNotificationClientConfig()).resolves.toEqual({ pushEnabled: true });
-      expect(api.get).toHaveBeenCalledWith('/notifications/config');
     });
   });
 

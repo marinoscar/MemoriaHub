@@ -76,6 +76,10 @@ function isSupported(): boolean {
  *   * The "Allow notifications" button in the Notifications card on
  *     `/settings`.
  *
+ * The one exception is the admin push diagnostics (`services/pushDiagnostics.ts`,
+ * `components/admin/PushTestPanel.tsx`), which call this directly: they walk
+ * the push chain step by step and do their own subscription handling.
+ *
  * The buttons still matter after the auto-prompt: Firefox ignores a request
  * with no user gesture, Safari may throw, and Chrome can demote it to a quiet
  * UI. A denial remains effectively permanent — only the user can undo it in

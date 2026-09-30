@@ -19,25 +19,33 @@ vi.mock('../../../services/pushDiagnostics', async (importOriginal) => {
     collectBrowserSnapshot: vi.fn(),
     runPushTest: vi.fn(),
     showLocalTestNotification: vi.fn(),
-    getNotificationClientConfig: vi.fn(),
-    requestNotificationPermission: vi.fn().mockResolvedValue('granted'),
   };
+});
+
+vi.mock('../../../services/notifications', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../services/notifications')>();
+  return { ...actual, getNotificationConfig: vi.fn() };
+});
+
+vi.mock('../../../services/browserNotifications', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../services/browserNotifications')>();
+  return { ...actual, requestBrowserNotificationPermission: vi.fn().mockResolvedValue('granted') };
 });
 
 import {
   collectBrowserSnapshot,
-  getNotificationClientConfig,
-  requestNotificationPermission,
   runPushTest,
   showLocalTestNotification,
 } from '../../../services/pushDiagnostics';
+import { getNotificationConfig } from '../../../services/notifications';
+import { requestBrowserNotificationPermission } from '../../../services/browserNotifications';
 import { PushTestPanel } from '../../../components/admin/PushTestPanel';
 
 const mockSnapshot = vi.mocked(collectBrowserSnapshot);
 const mockRun = vi.mocked(runPushTest);
 const mockLocal = vi.mocked(showLocalTestNotification);
-const mockRequest = vi.mocked(requestNotificationPermission);
-const mockClientConfig = vi.mocked(getNotificationClientConfig);
+const mockRequest = vi.mocked(requestBrowserNotificationPermission);
+const mockClientConfig = vi.mocked(getNotificationConfig);
 
 const PUBLIC_KEY = 'BEl62iUYgUivxIkv69yViEuiBIa1HI0DLQCHUp2ZfmZC';
 
