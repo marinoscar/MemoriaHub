@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api, ApiError } from '../services/api';
+import { removePushSubscription } from '../services/pushSubscription';
 import { User, AuthProvider as AuthProviderType } from '../types';
 import {
   useTimezoneAutoDetect,
@@ -144,6 +145,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [location.state]);
 
   const logout = useCallback(async () => {
+    // Stop this device receiving the signed-out account's Web Pushes (issue
+    // #486). Needs the still-valid token, so it runs BEFORE the logout call;
+    // never throws and gives up after 3s, so it cannot hold logout hostage.
+    await removePushSubscription();
     try {
       await api.post('/auth/logout');
     } catch (error) {

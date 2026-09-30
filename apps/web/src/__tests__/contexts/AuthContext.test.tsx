@@ -6,6 +6,11 @@ import { server } from '../mocks/server';
 import { AuthProvider, useAuth } from '../../contexts/AuthContext';
 import { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
+import { removePushSubscription } from '../../services/pushSubscription';
+
+vi.mock('../../services/pushSubscription', () => ({
+  removePushSubscription: vi.fn().mockResolvedValue(undefined),
+}));
 
 // Wrapper for hooks that need AuthProvider
 function createAuthWrapper() {
@@ -120,6 +125,32 @@ describe('AuthContext', () => {
 
       expect(result.current.isAuthenticated).toBe(false);
       expect(result.current.user).toBeNull();
+    });
+
+    it('removes this device\'s push subscription BEFORE the logout call (issue #486)', async () => {
+      const order: string[] = [];
+      vi.mocked(removePushSubscription).mockImplementation(async () => {
+        order.push('push');
+      });
+      server.use(
+        http.post('*/api/auth/refresh', () =>
+          HttpResponse.json({ accessToken: 'test-token', expiresIn: 900 }),
+        ),
+        http.post('*/api/auth/logout', () => {
+          order.push('logout');
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper: createAuthWrapper() });
+      await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+
+      await act(async () => {
+        await result.current.logout();
+      });
+
+      expect(order).toEqual(['push', 'logout']);
+      expect(result.current.isAuthenticated).toBe(false);
     });
   });
 
