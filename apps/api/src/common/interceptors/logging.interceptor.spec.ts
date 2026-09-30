@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { SSE_METADATA } from '@nestjs/common/constants';
 import { ExecutionContext, CallHandler, Logger } from '@nestjs/common';
 import { LoggingInterceptor } from './logging.interceptor';
 import { of, throwError } from 'rxjs';
@@ -307,6 +308,37 @@ describe('LoggingInterceptor', () => {
           done();
         },
       });
+    });
+  });
+
+  describe('SSE handlers via SSE_METADATA (#485)', () => {
+    function ctxWith(handler: () => void): ExecutionContext {
+      const req: Partial<FastifyRequest> = { method: 'GET', url: '/api/notifications/stream' };
+      return {
+        switchToHttp: () => ({ getRequest: () => req as FastifyRequest, getResponse: () => ({}) }),
+        getClass: () => jest.fn(),
+        getHandler: () => handler,
+      } as any;
+    }
+
+    it('logs exactly once, at open, however many frames the stream emits', (done) => {
+      function sseHandler() {}
+      Reflect.defineMetadata(SSE_METADATA, true, sseHandler);
+      const results: unknown[] = [];
+      interceptor
+        .intercept(ctxWith(sseHandler), {
+          handle: () => of({ comment: 'connected' }, { comment: 'heartbeat' }, { comment: 'heartbeat' }),
+        } as CallHandler)
+        .subscribe({
+          next: (v) => results.push(v),
+          complete: () => {
+            expect(results).toHaveLength(3);
+            expect(mockLogger).toHaveBeenCalledTimes(1);
+            expect(mockLogger.mock.calls[0][0]).toContain('SSE stream opened');
+            expect(mockLogger.mock.calls[0][0]).not.toMatch(/\d+ms/);
+            done();
+          },
+        });
     });
   });
 });

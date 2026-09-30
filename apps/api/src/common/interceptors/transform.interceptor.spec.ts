@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { SSE_METADATA } from '@nestjs/common/constants';
 import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { TransformInterceptor, ApiResponse } from './transform.interceptor';
 import { of } from 'rxjs';
@@ -433,6 +434,40 @@ describe('TransformInterceptor', () => {
           if (subscription1Complete) done();
         },
       });
+    });
+  });
+
+  describe('SSE bypass via SSE_METADATA (#485)', () => {
+    function ctxWith(handler: () => void): ExecutionContext {
+      return {
+        switchToHttp: () => ({ getRequest: () => ({}), getResponse: () => ({}) }),
+        getClass: () => jest.fn(),
+        getHandler: () => handler,
+      } as any;
+    }
+
+    it('passes a comment-only heartbeat through unwrapped', (done) => {
+      function sseHandler() {}
+      Reflect.defineMetadata(SSE_METADATA, true, sseHandler);
+      const heartbeat = { comment: 'heartbeat' };
+      interceptor
+        .intercept(ctxWith(sseHandler), { handle: () => of(heartbeat) } as CallHandler)
+        .subscribe((result: any) => {
+          expect(result).toBe(heartbeat);
+          expect(result).not.toHaveProperty('meta');
+          done();
+        });
+    });
+
+    it('still envelopes the same shape on a non-SSE handler', (done) => {
+      function plainHandler() {}
+      interceptor
+        .intercept(ctxWith(plainHandler), { handle: () => of({ comment: 'heartbeat' }) } as CallHandler)
+        .subscribe((result: any) => {
+          expect(result).toHaveProperty('meta');
+          expect(result.data).toEqual({ comment: 'heartbeat' });
+          done();
+        });
     });
   });
 });
