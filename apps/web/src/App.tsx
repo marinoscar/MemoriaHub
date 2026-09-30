@@ -8,6 +8,8 @@ import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { MaintenanceGate } from './components/common/MaintenanceGate';
+import { UpdatePrompt } from './components/pwa/UpdatePrompt';
+import { InstallPrompt } from './components/pwa/InstallPrompt';
 
 // Pages (lazy loaded)
 import { Suspense, lazy } from 'react';
@@ -92,6 +94,13 @@ function AppRoutes() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      {/* PWA (issue #482): outside <Routes>, <ErrorBoundary> and the
+          maintenance gate, so the service worker registers — and a waiting
+          update can be offered — on every route, including /login, public
+          share pages and the maintenance takeover (which is exactly when a
+          fixed build is about to land). Both render null by default. */}
+      <UpdatePrompt />
+      <InstallPrompt />
       <ErrorBoundary>
         {/* Maintenance mode (issue #348): sits outside <Routes> so the takeover
             is global — every route, authenticated or not — instead of each

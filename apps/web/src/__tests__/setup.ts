@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
-import { afterEach, beforeAll, afterAll, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { server } from './mocks/server';
 
 // Set base URL for fetch
@@ -41,6 +41,73 @@ Object.defineProperty(window, 'matchMedia', {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
   })),
+});
+
+// ---------------------------------------------------------------------------
+// Notification / navigator.serviceWorker mocks (issue #482, epic #481)
+//
+// jsdom implements neither API. These give every test a NEUTRAL BASELINE —
+// the least eventful thing each API can report — so PWA/push code that probes
+// for them does not crash on `undefined`, and reinstall them FRESH before
+// every test so one test's mutation never leaks into the next. A test that
+// needs a specific state (permission 'denied', a rejecting getRegistration())
+// just reassigns them: both are `configurable: true, writable: true`.
+//   - `Notification.permission` is 'default'; `requestPermission()` resolves
+//     'default' without prompting.
+//   - `navigator.serviceWorker.getRegistration()` resolves `undefined` (no
+//     worker yet); `.ready` resolves a registration whose
+//     `showNotification`/`getNotifications`/`pushManager` are harmless spies.
+// ---------------------------------------------------------------------------
+
+function createDefaultNotificationMock() {
+  const ctor = vi.fn(function (
+    this: { onclick: (() => void) | null; close: () => void },
+    _title: string,
+    _options?: unknown,
+  ) {
+    this.onclick = null;
+    this.close = vi.fn();
+  });
+  Object.assign(ctor, {
+    permission: 'default' as NotificationPermission,
+    requestPermission: vi.fn().mockResolvedValue('default' as NotificationPermission),
+  });
+  return ctor;
+}
+
+function createDefaultServiceWorkerRegistrationMock() {
+  return {
+    showNotification: vi.fn().mockResolvedValue(undefined),
+    getNotifications: vi.fn().mockResolvedValue([]),
+    pushManager: {
+      getSubscription: vi.fn().mockResolvedValue(null),
+      subscribe: vi.fn().mockRejectedValue(new Error('push not supported in tests')),
+    },
+  };
+}
+
+function installNotificationMocks(): void {
+  Object.defineProperty(window, 'Notification', {
+    configurable: true,
+    writable: true,
+    value: createDefaultNotificationMock(),
+  });
+  Object.defineProperty(window.navigator, 'serviceWorker', {
+    configurable: true,
+    writable: true,
+    value: {
+      controller: null,
+      getRegistration: vi.fn().mockResolvedValue(undefined),
+      ready: Promise.resolve(createDefaultServiceWorkerRegistrationMock()),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    },
+  });
+}
+
+installNotificationMocks();
+beforeEach(() => {
+  installNotificationMocks();
 });
 
 // Mock window.scrollTo

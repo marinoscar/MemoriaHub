@@ -1,0 +1,30 @@
+{
+  // ===========================================================================
+  // The service worker's own compilation  (issue #482, epic #481)
+  // ===========================================================================
+  //
+  // `src/sw.ts` runs in a ServiceWorkerGlobalScope: no `window`, no
+  // `document`, and a `self` carrying `skipWaiting()`, `clients` and
+  // `registration`. DOM declares a `self` of its own, so compiling the worker
+  // with the app's config would type-check it against the WRONG global. The
+  // two configs therefore partition `src/`: `tsconfig.json` excludes
+  // `src/sw.ts`, and this file checks nothing else (plus what it imports).
+  //
+  // CHECKING only — the worker is BUILT by vite-plugin-pwa, which ignores this.
+  // ===========================================================================
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // `DOM` is deliberately absent, not forgotten.
+    "lib": ["ES2020", "WebWorker"],
+    "types": ["vite/client", "vite-plugin-pwa/client"]
+  },
+  // `files`, NOT `include`: `extends` inherits the base `exclude`, which lists
+  // `src/sw.ts`, and `exclude` filters `include` — so `include: ["src/sw.ts"]`
+  // would resolve to ZERO files and pass vacuously. `files` is not subject to
+  // `exclude`. (Verify: `npx tsc -p tsconfig.worker.json --noEmit --listFiles`
+  // must list `src/sw.ts`.) `include: []` stops the base's `["src"]` being
+  // inherited into this DOM-less compilation.
+  "files": ["src/sw.ts"],
+  "include": [],
+  "references": []
+}

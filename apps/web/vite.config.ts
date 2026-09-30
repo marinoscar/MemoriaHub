@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 import { createRequire } from 'node:module';
+import { buildServiceWorkerOptions } from './pwa/service-worker';
 
 const require = createRequire(import.meta.url);
 
@@ -37,7 +39,11 @@ const transitionGroupEsm = require
   .replace(/package\.json$/, 'esm/TransitionGroupContext.js');
 
 export default defineConfig({
-  plugins: [react()],
+  // The service worker and the web app manifest (issue #482). Options live in
+  // `pwa/service-worker.ts` — see there for why `injectManifest`, `prompt` and
+  // `injectRegister: null`. `VitePWA` also emits `manifest.webmanifest` and
+  // serves it in dev, replacing the old static `public/site.webmanifest`.
+  plugins: [react(), VitePWA(buildServiceWorkerOptions())],
   resolve: {
     alias: [
       {
