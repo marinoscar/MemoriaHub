@@ -322,4 +322,33 @@ describe('UserSettingsPage', () => {
       });
     });
   });
+  describe('Hash deep links', () => {
+    it('scrolls the #notifications section into view', async () => {
+      const scrollIntoView = vi.fn();
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        render(<UserSettingsPage />, { wrapperOptions: { route: '/settings#notifications' } });
+        await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+        const section = document.getElementById('notifications');
+        expect(section).not.toBeNull();
+        expect(scrollIntoView.mock.contexts[0]).toBe(section);
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it('does not scroll without a hash', async () => {
+      const scrollIntoView = vi.fn();
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        render(<UserSettingsPage />, { wrapperOptions: { route: '/settings' } });
+        await screen.findByRole('heading', { name: /settings/i });
+        expect(scrollIntoView).not.toHaveBeenCalled();
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+  });
 });
