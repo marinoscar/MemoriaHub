@@ -31,7 +31,8 @@ export interface EmailSendResult {
 export type EmailTemplateName =
   | 'circle-invitation'
   | 'membership-confirmation'
-  | 'memory-digest';
+  | 'memory-digest'
+  | 'broadcast';
 
 /** The rendered pieces a template builder produces. */
 export interface RenderedEmail {
@@ -96,9 +97,23 @@ export interface MemoryDigestEmailData {
   unsubscribeUrl: string;
 }
 
+/** An admin notification broadcast (epic #481, issue #488). */
+export interface BroadcastEmailData {
+  title: string;
+  /** Plain text typed by an admin; escaped by the template, never interpreted. */
+  body: string;
+  /** Button label; defaults to "Open MemoriaHub" when a ctaUrl is present. */
+  ctaLabel?: string;
+  /** ABSOLUTE URL (APP_URL + the broadcast's root-relative link). */
+  ctaUrl?: string;
+  /** Adds a one-line "sent to everyone" notice. */
+  critical?: boolean;
+}
+
 /** Maps each template name to its typed data payload. */
 export interface EmailTemplateDataMap {
   'circle-invitation': CircleInvitationEmailData;
   'membership-confirmation': MembershipConfirmationEmailData;
   'memory-digest': MemoryDigestEmailData;
+  broadcast: BroadcastEmailData;
 }
