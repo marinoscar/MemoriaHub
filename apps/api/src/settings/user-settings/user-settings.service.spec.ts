@@ -20,6 +20,10 @@ import {
 } from '../../common/types/settings.types';
 
 const ALL_NOTIFICATION_TYPES = Object.values(NotificationType) as NotificationType[];
+/** Everything a user can mute — the mandatory critical broadcast (#488) is never dismissed. */
+const MUTABLE_NOTIFICATION_TYPES = ALL_NOTIFICATION_TYPES.filter(
+  (t) => t !== 'admin_broadcast_critical',
+);
 
 /** Fixture person ids for the #307 `memories` preference namespace. */
 const PERSON_A = '11111111-1111-4111-8111-111111111111';
@@ -1090,7 +1094,7 @@ describe('UserSettingsService', () => {
       );
     });
 
-    it('the master switch (enabled: false) dismisses EVERY notification type', async () => {
+    it('the master switch (enabled: false) dismisses EVERY mutable notification type', async () => {
       seed();
 
       await service.patchSettings(mockUserId, {
@@ -1098,7 +1102,7 @@ describe('UserSettingsService', () => {
       });
 
       const [, disabledArg] = mockNotifications.dismissTypesForUser.mock.calls[0];
-      expect(new Set(disabledArg)).toEqual(new Set(ALL_NOTIFICATION_TYPES));
+      expect(new Set(disabledArg)).toEqual(new Set(MUTABLE_NOTIFICATION_TYPES));
     });
 
     it('dismissTypesForUser is called with the transaction client (tx), not the bare PrismaService', async () => {
@@ -1174,7 +1178,7 @@ describe('UserSettingsService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
       const [userIdArg, disabledArg] = mockNotifications.dismissTypesForUser.mock.calls[0];
       expect(userIdArg).toBe(mockUserId);
-      expect(new Set(disabledArg)).toEqual(new Set(ALL_NOTIFICATION_TYPES));
+      expect(new Set(disabledArg)).toEqual(new Set(MUTABLE_NOTIFICATION_TYPES));
     });
 
     // -------------------------------------------------------------------------

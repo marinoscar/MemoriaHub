@@ -55,6 +55,7 @@ import { NotificationType } from '@prisma/client';
 
 import { NotificationPreferencesValue } from '../common/types/settings.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { isMandatoryType } from './notification-channels';
 
 /** TTL for the per-user preferences cache. Mirrors SETTINGS_CACHE_TTL_MS. */
 export const NOTIFICATION_PREFERENCES_CACHE_TTL_MS = 5000;
@@ -110,9 +111,13 @@ export function resolveNotificationPreferences(
   const enabled = value?.enabled !== false;
   const stored = value?.types ?? {};
 
+  // A MANDATORY type (admin_broadcast_critical, #488) is always enabled for
+  // the inbox: neither the master switch nor a per-type `false` can mute it,
+  // and — because disabledNotificationTypes() derives from this — a settings
+  // save never dismisses its rows either. Push preferences below still apply.
   const types = {} as Record<NotificationType, boolean>;
   for (const type of ALL_TYPES) {
-    types[type] = enabled && stored[type] !== false;
+    types[type] = isMandatoryType(type) || (enabled && stored[type] !== false);
   }
 
   // Push sub-namespace: absent means enabled, exactly like the inbox switches.
