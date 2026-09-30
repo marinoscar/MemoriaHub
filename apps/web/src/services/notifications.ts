@@ -7,6 +7,7 @@
 import { api } from './api';
 import type {
   NotificationBulkResult,
+  NotificationClientConfig,
   NotificationListParams,
   NotificationListResponse,
 } from '../types/notifications';
@@ -69,4 +70,13 @@ export async function dismissAllNotifications(
   circleId?: string,
 ): Promise<NotificationBulkResult> {
   return api.post<NotificationBulkResult>('/notifications/dismiss-all', { circleId });
+}
+
+/**
+ * This deployment's client-facing notification capabilities (epic #481):
+ * whether Web Push is on (and its VAPID public key), whether browser toasts are
+ * allowed, and which types may travel by push.
+ */
+export async function getNotificationConfig(): Promise<NotificationClientConfig> {
+  return api.get<NotificationClientConfig>('/notifications/config');
 }
