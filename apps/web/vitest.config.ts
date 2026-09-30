@@ -58,6 +58,11 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.config.*',
         'src/main.tsx',
+        // `src/sw.ts` (issue #482) runs in a ServiceWorkerGlobalScope; it is
+        // exercised by `src/__tests__/pwa/service-worker.test.ts` with workbox
+        // mocked, but its build-time invariants are asserted against real
+        // build output rather than counted as line coverage.
+        'src/sw.ts',
       ],
       thresholds: {
         lines: 70,
@@ -72,6 +77,17 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(dirname(fileURLToPath(import.meta.url)), './src'),
+      // `virtual:pwa-register/react` (issue #482) is synthesised by `VitePWA()`
+      // at build time and does not exist on disk. This config deliberately
+      // does not run that plugin (a unit test should not depend on a Workbox
+      // build), so without this alias `components/pwa/UpdatePrompt.tsx` fails
+      // to resolve and takes every suite that renders `<App />` with it.
+      // `vi.mock()` cannot stand in: it cannot mock a specifier that does not
+      // resolve at all. The double is a real hook over `useState`.
+      'virtual:pwa-register/react': resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        './src/__tests__/mocks/pwa-register.ts',
+      ),
       // Pin React, RTL, react-router, MUI, and Emotion to the single copy
       // resolved by Node's upward walk from this config file. This prevents
       // dual-instance errors (two React runtimes) when a worktree has its
