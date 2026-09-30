@@ -143,6 +143,13 @@ export const PERMISSION_CATALOG: readonly PermissionDefinition[] = [
     description: 'Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys',
   },
 
+  // Admin notification broadcasts (Admin only, epic #481, issue #488)
+  { name: PERMISSIONS.BROADCASTS_READ, description: 'Admin: view notification broadcasts and audience size' },
+  {
+    name: PERMISSIONS.BROADCASTS_WRITE,
+    description: 'Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts',
+  },
+
   // PostgreSQL Database Backup & Restore (Admin only, epic #339)
   { name: PERMISSIONS.DB_BACKUP_READ, description: 'Admin: read database backup run history and status' },
   { name: PERMISSIONS.DB_BACKUP_WRITE, description: 'Admin: configure and trigger database backups' },
@@ -207,6 +214,9 @@ export const ROLE_PERMISSION_MATRIX: Record<RoleName, readonly PermissionName[]>
     // Web Push (VAPID) configuration: admin-only
     PERMISSIONS.PUSH_READ,
     PERMISSIONS.PUSH_WRITE,
+    // Admin notification broadcasts: admin-only
+    PERMISSIONS.BROADCASTS_READ,
+    PERMISSIONS.BROADCASTS_WRITE,
     // PostgreSQL Database Backup & Restore: admin-only
     PERMISSIONS.DB_BACKUP_READ,
     PERMISSIONS.DB_BACKUP_WRITE,

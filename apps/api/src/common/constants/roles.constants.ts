@@ -86,6 +86,12 @@ export const PERMISSIONS = {
   PUSH_READ: 'push:read',
   PUSH_WRITE: 'push:write',
 
+  // Admin notification broadcasts (Admin only, epic #481, issue #488).
+  // Separate from push:* — composing an announcement that reaches every user
+  // is a different capability from managing the VAPID keys it may travel on.
+  BROADCASTS_READ: 'broadcasts:read',
+  BROADCASTS_WRITE: 'broadcasts:write',
+
   // Sharing (Admin + Contributor; manage_any = Admin only)
   SHARES_MANAGE: 'shares:manage',
   SHARES_MANAGE_ANY: 'shares:manage_any',

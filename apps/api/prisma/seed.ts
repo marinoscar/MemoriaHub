@@ -97,6 +97,10 @@ const PERMISSIONS = [
   { name: 'push:read', description: 'Admin: view Web Push (VAPID) configuration' },
   { name: 'push:write', description: 'Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys' },
 
+  // Admin notification broadcasts (Admin only, epic #481, issue #488)
+  { name: 'broadcasts:read', description: 'Admin: view notification broadcasts and audience size' },
+  { name: 'broadcasts:write', description: 'Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts' },
+
   // PostgreSQL Database Backup & Restore (Admin only, epic #339)
   { name: 'db_backup:read', description: 'Admin: read database backup run history and status' },
   { name: 'db_backup:write', description: 'Admin: configure and trigger database backups' },
@@ -154,6 +158,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     // Web Push (VAPID) configuration: admin-only
     'push:read',
     'push:write',
+    // Admin notification broadcasts: admin-only
+    'broadcasts:read',
+    'broadcasts:write',
     // PostgreSQL Database Backup & Restore: admin-only
     'db_backup:read',
     'db_backup:write',
