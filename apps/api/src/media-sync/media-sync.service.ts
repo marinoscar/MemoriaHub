@@ -650,11 +650,12 @@ export class MediaSyncService {
       if (row.status === 'revoked') throw this.revoked(deviceId);
 
       const next = mutate(readConfig(row.config));
+      const expected = row.configVersion;
       const { count } = await this.prisma.mediaSyncDevice.updateMany({
-        where: { id: deviceId, configVersion: row.configVersion, status: 'active' },
-        data: { ...extra, config: next as Prisma.InputJsonObject, configVersion: row.configVersion + 1 },
+        where: { id: deviceId, configVersion: expected, status: 'active' },
+        data: { ...extra, config: next as Prisma.InputJsonObject, configVersion: expected + 1 },
       });
-      if (count === 1) return { config: next, configVersion: row.configVersion + 1 };
+      if (count === 1) return { config: next, configVersion: expected + 1 };
     }
     throw new ConflictException('The device config is being changed concurrently; try again');
   }
