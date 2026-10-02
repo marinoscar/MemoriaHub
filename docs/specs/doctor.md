@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
-| **Last Updated** | July 2026 |
+| **Version** | 1.3 |
+| **Last Updated** | October 2026 |
 | **Status** | Implemented |
 
 ---
@@ -24,7 +24,7 @@
 
 ## 1. Overview and Goals
 
-Doctor is an admin-only, on-demand configuration health sweep. A single button click (or `POST` call) runs twenty-five checks across core infrastructure, authentication, storage, AI, face recognition, geo, the job queue, and the distributed worker-node fleet, and returns a structured `DoctorReport`. It exists to give admins one place to verify that the application is correctly configured — instead of manually cross-checking environment variables, system settings, and provider credentials across half a dozen separate admin pages.
+Doctor is an admin-only, on-demand configuration health sweep. A single button click (or `POST` call) runs thirty-five checks across core infrastructure, authentication, storage, AI, face recognition, geo, the job queue, the distributed worker-node fleet, workflow automation, and the Android app, and returns a structured `DoctorReport`. It exists to give admins one place to verify that the application is correctly configured — instead of manually cross-checking environment variables, system settings, and provider credentials across half a dozen separate admin pages.
 
 A common failure mode Doctor is designed to catch: a feature flag is turned on (e.g. `features.autoTagging`) but the corresponding provider was never configured, so uploads silently enqueue jobs that will fail forever. Doctor's flag-consistency checks surface this class of misconfiguration directly, with an actionable next step.
 
@@ -124,7 +124,7 @@ Example response (`POST /api/admin/doctor/run`):
 
 ## 4. Check Catalog
 
-Thirty checks across nine sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
+Thirty-five checks across ten sections, defined in `DoctorService.runDiagnostics()` (`apps/api/src/doctor/doctor.service.ts`). Section status is the worst of its listed checks.
 
 ### Core (`core`)
 
@@ -161,6 +161,9 @@ Thirty checks across nine sections, defined in `DoctorService.runDiagnostics()` 
 | `ai.embedding` | Text embedding provider | Live test via `AiSettingsService.testEmbedding()` against `ai.features.embedding`; `skipped` if not configured; downgrades to `warning` if the provider returns a dimension `warning` | `error` — same action item as above |
 | `ai.flagConsistency` | Auto-tagging flag consistency | Cross-checks `features.autoTagging` against whether a tagging provider is configured | `error` if flag on / no provider — "Configure a tagging provider or disable the Auto-Tagging feature flag."; `warning` if provider configured / flag off — "Enable Auto-Tagging in Admin Settings → Tagging if desired." |
 | `ai.socialMedia` | Social media detection | `skipped` if `features.socialMediaDetection` is off; `warning` if the env kill-switch `SOCIAL_MEDIA_DETECTION_ENABLED=false` overrides an enabled flag, or if any `socialMedia.*` tunable is out of its documented range; otherwise probes `SocialMediaOcrService.getStatus()` — `ok` "Two-tier detection operational" when the OCR worker is healthy (or `ok` "Tier-1 (metadata/filename) only" when `socialMedia.ocrEnabled` is off), `warning` "Running Tier-1 only — OCR model unavailable (degraded)" when the OCR worker failed to initialize | `warning` — "Remove or set SOCIAL_MEDIA_DETECTION_ENABLED=true" / "Correct the social media detection parameters in Admin Settings." / "Ensure MODELS_DIR/tesseract is writable and traineddata can be fetched or pre-placed" |
+| `ai.duplicateDetection` | Duplicate detection (CLIP) | `skipped` if `features.duplicateDetection` is off; otherwise probes `VisualEmbeddingService.isAvailable()` — the CLIP model loaded, or the feature is running dHash-only | `warning` when degraded to dHash-only (never `error`: detection still works) |
+| `ai.pictureEnhancer` | AI picture enhancer | See [picture-enhancer.md](picture-enhancer.md): `skipped` when `features.pictureEnhancement` is off; `warning` on the `PICTURE_ENHANCEMENT_ENABLED` env override or no `ai.features.enhance` model; `error` when the resolved provider has no enabled credential | as described |
+| `ai.videoTagging` | Video AI tagging | See [video-auto-tagging.md](video-auto-tagging.md): the visual pass is required (`error` when unconfigured), transcription is optional (`warning`, the job runs visual-only); `skipped` when `features.autoTagging` or `autoTagging.video.enabled` is off | as described |
 
 ### Face Recognition (`face`)
 
@@ -195,6 +198,23 @@ Distributed compute fleet health (see [distributed-nodes.md §10.2](distributed-
 | `nodes.staleLeases` | Expired leases | Counts `enrichment_jobs` where `status='running'` and `leaseExpiresAt < now()` (claiming node likely died) | `warning` — "Reset stuck jobs from the Job Queue page (reset-stuck) so they are requeued." |
 | `nodes.capabilityHealth` | Node capability health | Inspects each online node's reported `capabilities` JSON for a degraded/error capability backing one of its `eligibleTypes`; `skipped` if no node has reported capabilities yet | `warning` — "Run `memoriahub node doctor` on the affected machine(s) to resolve the failing capability." |
 
+### Workflows (`workflows`)
+
+| Check key | Label | What it verifies | Failure → status + action item |
+|-----------|-------|-------------------|----------------------------------|
+| `workflows.state` | Workflow engine state | `skipped` when `features.workflows` is off; otherwise looks for non-terminal runs with no progress for 30 minutes, `awaiting_approval` runs past `workflows.previewTtlHours`, and enabled scheduled workflows while the scheduled trigger is switched off (see [workflows.md](workflows.md)) | `warning` combining every finding, with matching action items |
+
+### Android app (`android`)
+
+The Android app and its Media Sync companion (epic #498, issue #507; contract: [android-media-sync.md §20](android-media-sync.md#20-doctor)). Read-only like every other check: trusted apps come from `AndroidAppService`, releases and the upload target from `AndroidReleaseService` (both exported by `AndroidAppModule`), and Media Sync devices straight from Prisma (`DoctorModule` does not import `MediaSyncModule`). "Active device" means `media_sync_devices.status = 'active'`. The section status is the worst of its four checks.
+
+| Check key | Label | What it verifies | Failure → status + action item |
+|-----------|-------|-------------------|----------------------------------|
+| `android.assetlinks` | Digital Asset Links | Every distinct (`packageName`, `signingSha256`) an active device reports (`AndroidAppService.getReportedApps`) is in the trusted apps, and so is the current release's signer (fingerprints compared normalised). `skipped` when no active device has reported a signer and the current release (if any) is trusted; `ok` when every reported pair is trusted | `warning` naming up to 3 untrusted pairs (and/or the untrusted release signer): the app opens with a URL bar — "Trust it in Admin → Settings → Android app (/admin/settings/android)."; `error` when the trusted apps cannot be read |
+| `android.releases` | Android release | A release is current once phones are paired. `skipped` with no active device; `ok` message carries `devicesBehind` — active devices whose `appVersionCode` is below the current `versionCode` (same package, or no package reported). This is the only "devices behind" figure an administrator sees (spec D19) and is informational | `warning` when devices are paired but no release is current — publish with `memoriahub android release` or upload in Admin → Settings → Android app |
+| `android.mediaSync` | Media sync devices | Each active device: checked in within 48 h (`lastSeenAt`), `stats.blocked` is 0, `permission` is `full` (null = not reported yet, not flagged), and its paired PAT exists, is not revoked and has not expired. `skipped` with no active device | `warning` with per-reason counts and up to 5 devices named (`name, owner email: reasons`) — ask the owner to open Media Sync → Diagnostics, grant full access, resolve blocked files, or pair again |
+| `android.uploadPath` | Phone upload path | Resolves the ACTIVE storage provider exactly as the APK upload does (`AndroidReleaseService.resolveUploadTarget`). `ok` when it hands out presigned part URLs (`supportsPresignedParts`, S3/R2) or takes parts through the API route `PUT /api/storage/objects/:id/upload/parts/:n` (`writePart`, local disk, #506). Not skipped without devices: it answers whether a phone could upload before one is paired. The message names the provider key | `error` when the provider is unconfigured (no bucket, undecryptable credential) or supports neither part path — "Configure a storage provider in Admin Settings → Storage Providers." |
+
 ---
 
 ## 5. `runCheck` Design
@@ -211,7 +231,7 @@ All twenty check functions are invoked together:
 const settled = await Promise.allSettled(defs.map((def) => this.runCheck(def)));
 ```
 
-`Promise.allSettled` guarantees every check resolves (never rejects the whole batch), so a single check's exception can never prevent the other nineteen from completing. The `allSettled` rejection branch in `runDiagnostics()` is unreachable in practice — `runCheck()` already catches everything internally — and is kept only as defense in depth.
+`Promise.allSettled` guarantees every check resolves (never rejects the whole batch), so a single check's exception can never prevent the others from completing. The `allSettled` rejection branch in `runDiagnostics()` is unreachable in practice — `runCheck()` already catches everything internally — and is kept only as defense in depth.
 
 ### 10-second per-check timeout
 
@@ -252,6 +272,8 @@ Doctor does not implement its own provider connectivity logic. It calls the same
 | Storage | `StorageSettingsService` | `testConnection({ provider })` |
 | Job queue stats | `EnrichmentAdminService` | `getStats()` (same source as `/admin/settings/jobs`) |
 | Worker enabled flag | `isEnrichmentWorkerEnabled()` | exported helper from `enrichment/enrichment-job.worker.ts` |
+| Android trusted / reported apps | `AndroidAppService` | `getTrustedApps()`, `getReportedApps(trusted)` (same source as `GET /api/admin/android-app`) |
+| Android releases, upload target | `AndroidReleaseService` | `current()`, `resolveUploadTarget()` (the APK upload's own storage resolution) |
 
 The pgvector probe (`core.pgvector`) is Doctor-specific raw SQL — it is not backed by an existing settings service, since there is no "pgvector settings" page. It queries `pg_extension` for the `vector` extension and `to_regclass('public.media_item_embedding')` to confirm the embedding table exists, mirroring the requirements documented in the [Semantic Search spec](semantic-search.md).
 
@@ -338,3 +360,4 @@ Because `settings` is fetched once and reused across all checks, if an admin cha
 | 1.0 | July 2026 | AI Assistant | Initial specification |
 | 1.1 | July 2026 | AI Assistant | Add `ai.socialMedia` check (AI & Enrichment section) covering the social-media video detection feature flag, env override, `socialMedia.*` range validation, and OCR degraded-mode probing; check catalog is now twenty-one checks |
 | 1.2 | July 2026 | AI Assistant | Add `nodes` section (Worker Nodes) with four checks — `nodes.registeredCount`, `nodes.heartbeatFreshness`, `nodes.staleLeases`, `nodes.capabilityHealth` — covering the distributed compute fleet ([distributed-nodes.md §10.2](distributed-nodes.md)); check catalog is now twenty-five checks across eight sections |
+| 1.3 | October 2026 | AI Assistant | Add the `android` section (Android app, issue #507) with four checks — `android.assetlinks`, `android.releases`, `android.mediaSync`, `android.uploadPath`; catalog the existing `ai.duplicateDetection`, `ai.pictureEnhancer`, `ai.videoTagging` and `workflows.state` checks; the catalog is now thirty-five checks across ten sections |

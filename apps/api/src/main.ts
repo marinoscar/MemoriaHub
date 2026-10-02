@@ -12,6 +12,7 @@ import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
 import {
   fastifyAdapterOptions,
+  MULTIPART_PLUGIN_OPTIONS,
   registerRawPartBodyParser,
 } from './common/fastify-setup';
 import { createOpenApiDocument } from './openapi/document';
@@ -49,12 +50,7 @@ async function bootstrap() {
   });
 
   // Register multipart plugin for file uploads
-  await app.register(multipart, {
-    limits: {
-      fileSize: 100 * 1024 * 1024, // 100MB for simple upload
-      files: 1,
-    },
-  });
+  await app.register(multipart, MULTIPART_PLUGIN_OPTIONS);
 
   // Raw, streamed bodies for PUT /api/storage/objects/:id/upload/parts/:n
   // (issue #506). See common/fastify-setup.ts.

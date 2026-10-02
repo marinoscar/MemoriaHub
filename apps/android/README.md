@@ -96,6 +96,55 @@ Keystores (`*.jks`, `*.keystore`, `*.p12`, `keystore.properties`, `signing/`) ar
 `scripts/build-meta.sh` prints `product`, `slug`, `application_id`, `version_name` and
 `version_code` as `key=value` lines for CI (`>> "$GITHUB_OUTPUT"`).
 
+## Continuous integration
+
+[`.github/workflows/android.yml`](../../.github/workflows/android.yml) runs on pushes and pull
+requests to `main` that touch `apps/android/**`, `apps/web/pwa/manifest.ts` (the build checks the
+brand colours against it) or the workflow itself, and on manual dispatch. `ci.yml` never builds
+Android.
+
+| Job | When | Does |
+|---|---|---|
+| `test` | every run | `./gradlew testDebugUnitTest assembleDebug`; uploads the artifact `memoriahub-android-debug` (the debug APK) and, on failure, `android-test-reports` |
+| `release` | pushes to `main` (and dispatch on `main`) | signed `assembleRelease` with the committed `version.properties` (no override), `apksigner verify`, artifact `memoriahub-android`, then the rolling prerelease `android-latest` with the asset `memoriahub-android.apk` |
+
+The `android-latest` tag is force-moved to the built commit (the only tag CI ever force-pushes)
+and the release is created with `--latest=false`, so the repository's "Latest" release never
+moves. A phone accepts the APK as an update only when its `versionCode` is higher than the
+installed one, so bump `version.properties` to ship a new build.
+
+**CI never publishes to a MemoriaHub server.** Each server's administrator chooses the release
+its users get, with `memoriahub android publish|release` (#517) or `/admin/settings/android`
+(#516). The full procedure is the Android release runbook (#519).
+
+### Signing secrets
+
+The `release` job needs four repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | The keystore file, base64-encoded |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_ALIAS` | Key alias (CLI default `memoriahub`) |
+| `ANDROID_KEY_PASSWORD` | Key password |
+
+`memoriahub android keystore secrets` (#517) prints all four. By hand, with the keystore from
+`memoriahub android keystore init`:
+
+```bash
+base64 -w0 ~/.memoriahub/android/release.jks   # Linux; on macOS: base64 -i release.jks
+```
+
+Use the **same** keystore as the APKs your server publishes: Android only installs an update
+signed with the key of the installed copy, and the server's `/.well-known/assetlinks.json` lists
+that key's SHA-256 fingerprint.
+
+If any secret is missing, the `release` job emits a warning ("Android release skipped") and
+succeeds without building; the debug APK from `test` is still available. The decoded keystore
+lives in `$RUNNER_TEMP/release.jks` only for the build and is deleted in an `if: always()` step,
+even when the build fails. A build that does not produce a signed APK fails the job rather than
+publishing an unsigned one.
+
 ## What is in the app
 
 | Area | Code |
