@@ -1314,6 +1314,8 @@ Exit codes: `0` ok, `1` a tool or the server failed, `2` bad usage, `6` somethin
 
 The interactive menu has the same flow under **Settings ▸ Android app (build, publish, releases)**: status rows (Checkout, Local version, Keystore, Login/server, Server release, Newer?) and actions doctor, bump, build, publish, **release**, releases (with rollback) and login. Long-running steps run `memoriahub android …` as a child process and show its output; every confirmation defaults to No.
 
+Procedures: the [Android release runbook](../../docs/runbooks/android-release.md) (keystore backup, versioning, the four release routes, CI secrets, rollback with `releases current <id> --yes`) and the [Android app runbook](../../docs/runbooks/android-app.md) (install, trust, pair, troubleshoot).
+
 ---
 
 ## Data locations
