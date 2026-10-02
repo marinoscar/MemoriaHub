@@ -12,7 +12,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -28,6 +28,8 @@ import { StorageSettingsService } from '../storage-settings/storage-settings.ser
 import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
+import { AndroidAppService } from '../android-app/android-app.service';
+import { AndroidReleaseService } from '../android-app/releases/android-release.service';
 import { __setSpawnForTests } from '../db-backup/pg-dump.util';
 import { __resetPgVersionCacheForTests } from '../db-backup/pg-version.util';
 import {
@@ -50,7 +52,7 @@ function findCheck(report: DoctorReport, key: string): DoctorCheck {
 
 /** Routes prisma.$queryRaw calls to a canned result based on substring match
  * against the joined template-literal SQL text, so tests don't depend on the
- * concurrent call ordering of the 25 checks. */
+ * concurrent call ordering of the checks. */
 function mockQueryRawByText(prisma: MockPrismaService, handlers: Array<[string, unknown]>): void {
   (prisma.$queryRaw as unknown as jest.Mock).mockImplementation((strings: TemplateStringsArray) => {
     const text = Array.isArray(strings) ? strings.join('') : String(strings);
@@ -213,6 +215,8 @@ describe('DoctorService', () => {
   let mockSocialMediaOcr: jest.Mocked<Pick<SocialMediaOcrService, 'getStatus'>>;
   let mockVisualEmbeddingService: jest.Mocked<Pick<VisualEmbeddingService, 'isAvailable'>>;
   let mockAiProviderRegistry: { get: jest.Mock };
+  let mockAndroidApp: jest.Mocked<Pick<AndroidAppService, 'getTrustedApps' | 'getReportedApps'>>;
+  let mockAndroidReleases: jest.Mocked<Pick<AndroidReleaseService, 'current' | 'resolveUploadTarget'>>;
   const ORIGINAL_ENV = { ...process.env };
 
   beforeEach(async () => {
@@ -233,6 +237,22 @@ describe('DoctorService', () => {
       ),
     };
 
+    // Android app section (#507): defaults to "no device paired, no release,
+    // S3 presigned uploads" so the three device-scoped checks are skipped and
+    // android.uploadPath is ok in every fixture that does not override them.
+    mockAndroidApp = {
+      getTrustedApps: jest.fn().mockResolvedValue([]),
+      getReportedApps: jest.fn().mockResolvedValue([]),
+    };
+    mockAndroidReleases = {
+      current: jest.fn().mockResolvedValue(null),
+      resolveUploadTarget: jest
+        .fn()
+        .mockResolvedValue({ id: 's3', provider: { supportsPresignedParts: true } } as any),
+    };
+    (mockPrisma.mediaSyncDevice.count as jest.Mock).mockResolvedValue(0);
+    (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([]);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DoctorService,
@@ -246,6 +266,8 @@ describe('DoctorService', () => {
         { provide: EnrichmentAdminService, useValue: mockEnrichmentAdmin },
         { provide: SocialMediaOcrService, useValue: mockSocialMediaOcr },
         { provide: VisualEmbeddingService, useValue: mockVisualEmbeddingService },
+        { provide: AndroidAppService, useValue: mockAndroidApp },
+        { provide: AndroidReleaseService, useValue: mockAndroidReleases },
       ],
     }).compile();
 
@@ -280,7 +302,7 @@ describe('DoctorService', () => {
       mockNoWorkerNodes(mockPrisma);
     });
 
-    it('returns sections in the documented order: core, auth, storage, ai, face, geo, jobs, nodes, workflows', async () => {
+    it('returns sections in the documented order: core, auth, storage, ai, face, geo, jobs, nodes, workflows, android', async () => {
       const report = await service.runDiagnostics();
 
       expect(report.sections.map((s) => s.key)).toEqual([
@@ -293,6 +315,7 @@ describe('DoctorService', () => {
         'jobs',
         'nodes',
         'workflows',
+        'android',
       ]);
     });
 
@@ -328,7 +351,7 @@ describe('DoctorService', () => {
       }
     });
 
-    it('includes all 31 documented checks across the 9 sections', async () => {
+    it('includes all 35 documented checks across the 10 sections', async () => {
       const report = await service.runDiagnostics();
 
       const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
@@ -364,6 +387,10 @@ describe('DoctorService', () => {
         'nodes.staleLeases',
         'nodes.capabilityHealth',
         'workflows.state',
+        'android.assetlinks',
+        'android.releases',
+        'android.mediaSync',
+        'android.uploadPath',
       ]);
     });
   });
@@ -407,7 +434,7 @@ describe('DoctorService', () => {
       // Unrelated checks are unaffected.
       expect(findCheck(report, 'core.database').status).toBe('ok');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(31);
+      expect(report.summary.total).toBe(35);
     });
   });
 
@@ -447,7 +474,7 @@ describe('DoctorService', () => {
         // The rest of the report still completed normally.
         expect(findCheck(report, 'core.database').status).toBe('ok');
         expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(31);
+        expect(report.summary.total).toBe(35);
       } finally {
         jest.useRealTimers();
       }
@@ -1737,6 +1764,422 @@ describe('DoctorService', () => {
       expect(check.message).toContain('stuck non-terminal');
       expect(check.message).toContain('awaiting-approval');
       expect(check.message).toContain('enabled scheduled workflow(s)');
+    });
+  });
+
+  // =========================================================================
+  // Android app section (epic #498, issue #507)
+  // =========================================================================
+
+  describe('android section', () => {
+    const HOUR = 3_600_000;
+
+    function makeDevice(overrides: Record<string, unknown> = {}) {
+      return {
+        name: 'Pixel 8',
+        lastSeenAt: new Date(Date.now() - HOUR),
+        stats: { eligible: 10, uploaded: 10, blocked: 0 },
+        permission: 'full',
+        patId: 'pat-1',
+        pat: { revokedAt: null, expiresAt: new Date(Date.now() + 30 * 24 * HOUR) },
+        user: { email: 'alice@example.com' },
+        ...overrides,
+      };
+    }
+
+    function makeRelease(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'rel-1',
+        packageName: 'cr.marin.memoriahub',
+        versionName: '2.1.0',
+        versionCode: 21,
+        signingSha256: `AA${':AA'.repeat(31)}`,
+        isCurrent: true,
+        ...overrides,
+      } as any;
+    }
+
+    const TRUSTED = { packageName: 'cr.marin.memoriahub', sha256: `AA${':AA'.repeat(31)}` };
+
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
+        provider: 's3',
+        enabled: true,
+      });
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockNoWorkerNodes(mockPrisma);
+    });
+
+    it('is the last section, labelled "Android app", with the four checks in order', async () => {
+      const report = await service.runDiagnostics();
+      const section = report.sections.find((s) => s.key === 'android')!;
+
+      expect(report.sections[report.sections.length - 1].key).toBe('android');
+      expect(section.label).toBe('Android app');
+      expect(section.checks.map((c) => c.key)).toEqual([
+        'android.assetlinks',
+        'android.releases',
+        'android.mediaSync',
+        'android.uploadPath',
+      ]);
+    });
+
+    it('skips the three device-scoped checks with no paired device; the section is ok', async () => {
+      const report = await service.runDiagnostics();
+      const section = report.sections.find((s) => s.key === 'android')!;
+
+      expect(findCheck(report, 'android.assetlinks').status).toBe('skipped');
+      expect(findCheck(report, 'android.releases').status).toBe('skipped');
+      expect(findCheck(report, 'android.mediaSync').status).toBe('skipped');
+      expect(findCheck(report, 'android.uploadPath').status).toBe('ok');
+      expect(section.status).toBe('ok');
+    });
+
+    it('takes the worst check status as the section status', async () => {
+      (mockPrisma.mediaSyncDevice.count as jest.Mock).mockResolvedValue(1);
+      mockAndroidReleases.resolveUploadTarget.mockRejectedValue(new Error('boom'));
+
+      const report = await service.runDiagnostics();
+      const section = report.sections.find((s) => s.key === 'android')!;
+
+      expect(findCheck(report, 'android.releases').status).toBe('warning');
+      expect(findCheck(report, 'android.uploadPath').status).toBe('error');
+      expect(section.status).toBe('error');
+    });
+
+    // -----------------------------------------------------------------------
+    describe('android.assetlinks', () => {
+      it('is skipped when no active device has reported a signer and there is no release', async () => {
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.assetlinks');
+
+        expect(check.status).toBe('skipped');
+        expect(check.message).toContain('No active Media Sync device');
+      });
+
+      it('is ok when every reported pair (and the current release signer) is trusted', async () => {
+        mockAndroidApp.getTrustedApps.mockResolvedValue([TRUSTED]);
+        mockAndroidApp.getReportedApps.mockResolvedValue([
+          { ...TRUSTED, deviceCount: 2, lastSeenAt: null, trusted: true },
+        ]);
+        // The release spells the fingerprint as bare lowercase hex: still trusted.
+        mockAndroidReleases.current.mockResolvedValue(makeRelease({ signingSha256: 'aa'.repeat(32) }));
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.assetlinks');
+
+        expect(check.status).toBe('ok');
+        expect(check.message).toContain('All 1 reported');
+        expect(mockAndroidApp.getReportedApps).toHaveBeenCalledWith([TRUSTED]);
+      });
+
+      it('warns on an untrusted reported pair, listing at most three, with the trust action item', async () => {
+        const untrusted = ['a', 'b', 'c', 'd'].map((suffix) => ({
+          packageName: `cr.marin.${suffix}`,
+          sha256: `BB${':BB'.repeat(31)}`,
+          deviceCount: 1,
+          lastSeenAt: null,
+          trusted: false,
+        }));
+        mockAndroidApp.getReportedApps.mockResolvedValue(untrusted);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.assetlinks');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain('4 reported app signer(s) are not trusted');
+        expect(check.message).toContain('cr.marin.a');
+        expect(check.message).toContain('cr.marin.c');
+        expect(check.message).not.toContain('cr.marin.d');
+        expect(check.message).toContain('…');
+        expect(check.actionItem).toContain('Trust it in Admin → Settings → Android app');
+      });
+
+      it('warns when the current release signer is not trusted, even with no device reporting', async () => {
+        mockAndroidReleases.current.mockResolvedValue(makeRelease());
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.assetlinks');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain('current release 2.1.0 (21)');
+        expect(check.message).toContain('not trusted');
+      });
+
+      it('is error when the trusted apps cannot be read', async () => {
+        mockAndroidApp.getTrustedApps.mockRejectedValue(new Error('connection refused'));
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.assetlinks');
+
+        expect(check.status).toBe('error');
+        expect(check.message).toContain('connection refused');
+        expect(check.actionItem).toBeDefined();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    describe('android.releases', () => {
+      it('is skipped when no active device is paired', async () => {
+        mockAndroidReleases.current.mockResolvedValue(makeRelease());
+
+        const report = await service.runDiagnostics();
+
+        expect(findCheck(report, 'android.releases').status).toBe('skipped');
+      });
+
+      it('warns when devices are paired but no release is current', async () => {
+        (mockPrisma.mediaSyncDevice.count as jest.Mock).mockResolvedValue(3);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.releases');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain('3 active device(s)');
+        expect(check.actionItem).toContain('memoriahub android release');
+      });
+
+      it('is ok with a current release and reports devicesBehind', async () => {
+        (mockPrisma.mediaSyncDevice.count as jest.Mock).mockImplementation((args: any) =>
+          Promise.resolve(args?.where?.appVersionCode ? 1 : 3),
+        );
+        mockAndroidReleases.current.mockResolvedValue(makeRelease());
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.releases');
+
+        expect(check.status).toBe('ok');
+        expect(check.message).toContain('Current release 2.1.0 (21)');
+        expect(check.message).toContain('devicesBehind: 1 of 3');
+        expect(mockPrisma.mediaSyncDevice.count).toHaveBeenCalledWith({
+          where: {
+            status: 'active',
+            appVersionCode: { lt: 21 },
+            OR: [{ packageName: 'cr.marin.memoriahub' }, { packageName: null }],
+          },
+        });
+      });
+
+      it('is error (normalized) when the device count query fails', async () => {
+        (mockPrisma.mediaSyncDevice.count as jest.Mock).mockRejectedValue(new Error('db down'));
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.releases');
+
+        expect(check.status).toBe('error');
+        expect(check.message).toContain('db down');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    describe('android.mediaSync', () => {
+      it('is skipped when no active device is paired', async () => {
+        const report = await service.runDiagnostics();
+
+        expect(findCheck(report, 'android.mediaSync').status).toBe('skipped');
+        expect(mockPrisma.mediaSyncDevice.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { status: 'active' } }),
+        );
+      });
+
+      it('is ok when every active device is fresh, fully permitted, unblocked and holds a live token', async () => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+          makeDevice(),
+          makeDevice({ name: 'Galaxy S24' }),
+        ]);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('ok');
+        expect(check.message).toContain('All 2 active device(s)');
+      });
+
+      it('warns on a device with no check-in for more than 48h, naming it and its owner', async () => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+          makeDevice({ name: 'Old Phone', lastSeenAt: new Date(Date.now() - 72 * HOUR) }),
+          makeDevice(),
+        ]);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain('1 of 2 active device(s) need attention');
+        expect(check.message).toContain('1 silent >48h');
+        expect(check.message).toContain('Old Phone, alice@example.com: no check-in for 72h');
+        expect(check.actionItem).toBeDefined();
+      });
+
+      it('treats a device that never checked in as stale', async () => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+          makeDevice({ lastSeenAt: null, permission: null }),
+        ]);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain('never checked in');
+        // A null permission (not reported yet) is not flagged on its own.
+        expect(check.message).not.toContain('media permission');
+      });
+
+      it('warns on blocked files', async () => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+          makeDevice({ stats: { blocked: 4 } }),
+        ]);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain('4 blocked file(s)');
+        expect(check.message).toContain('1 with blocked files');
+      });
+
+      it('ignores malformed stats', async () => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+          makeDevice({ stats: { blocked: 'many' } }),
+          makeDevice({ stats: null }),
+          makeDevice({ stats: [1, 2] }),
+        ]);
+
+        const report = await service.runDiagnostics();
+
+        expect(findCheck(report, 'android.mediaSync').status).toBe('ok');
+      });
+
+      it.each(['partial', 'denied'])('warns when media permission is %s', async (permission) => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([makeDevice({ permission })]);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain(`media permission ${permission}`);
+        expect(check.message).toContain('1 without full media permission');
+      });
+
+      it.each([
+        ['revoked', { revokedAt: new Date(), expiresAt: new Date(Date.now() + HOUR) }, 'token revoked'],
+        ['expired', { revokedAt: null, expiresAt: new Date(Date.now() - HOUR) }, 'token expired'],
+      ])('warns when the paired PAT is %s', async (_label, pat, expected) => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([makeDevice({ pat })]);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain(expected);
+        expect(check.message).toContain('1 with a revoked/expired token');
+      });
+
+      it('warns when the device has no PAT at all (deleted)', async () => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+          makeDevice({ patId: null, pat: null }),
+        ]);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('warning');
+        expect(check.message).toContain('no token');
+      });
+
+      it('names at most five devices and counts every reason', async () => {
+        const devices = Array.from({ length: 7 }, (_, i) =>
+          makeDevice({ name: `Phone ${i + 1}`, permission: 'partial' }),
+        );
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue(devices);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.message).toContain('7 of 7 active device(s)');
+        expect(check.message).toContain('Phone 5');
+        expect(check.message).not.toContain('Phone 6');
+        expect(check.message).toContain('…');
+      });
+
+      it('is error (normalized) when the device query fails', async () => {
+        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockRejectedValue(new Error('db down'));
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.mediaSync');
+
+        expect(check.status).toBe('error');
+        expect(check.message).toContain('db down');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    describe('android.uploadPath', () => {
+      it('is ok for a provider with presigned parts (S3/R2), naming the provider', async () => {
+        mockAndroidReleases.resolveUploadTarget.mockResolvedValue({
+          id: 'r2',
+          provider: { supportsPresignedParts: true },
+        } as any);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.uploadPath');
+
+        expect(check.status).toBe('ok');
+        expect(check.message).toContain('"r2"');
+        expect(check.message).toContain('presigned');
+      });
+
+      it('is ok for the local provider through the API part route', async () => {
+        mockAndroidReleases.resolveUploadTarget.mockResolvedValue({
+          id: 'local',
+          provider: { supportsPresignedParts: false, writePart: jest.fn() },
+        } as any);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.uploadPath');
+
+        expect(check.status).toBe('ok');
+        expect(check.message).toContain('"local"');
+        expect(check.message).toContain('API part route');
+      });
+
+      it('is error when the active provider is unconfigured, naming its key', async () => {
+        mockAndroidReleases.resolveUploadTarget.mockRejectedValue(
+          new ServiceUnavailableException({
+            message: 'Object storage is not configured',
+            details: { reason: 'STORAGE_NOT_CONFIGURED', provider: 's3' },
+          }),
+        );
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.uploadPath');
+
+        expect(check.status).toBe('error');
+        expect(check.message).toContain('"s3"');
+        expect(check.actionItem).toContain('Storage Providers');
+      });
+
+      it('is error when the provider supports neither part path', async () => {
+        mockAndroidReleases.resolveUploadTarget.mockResolvedValue({
+          id: 'odd',
+          provider: { supportsPresignedParts: false },
+        } as any);
+
+        const report = await service.runDiagnostics();
+        const check = findCheck(report, 'android.uploadPath');
+
+        expect(check.status).toBe('error');
+        expect(check.message).toContain('"odd"');
+      });
     });
   });
 });
