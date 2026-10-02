@@ -6,17 +6,50 @@ export interface UploadResult {
   objectId: string;
 }
 
+/**
+ * How a part URL must be authenticated (issue #506).
+ *
+ * - `none`: a presigned S3/R2 URL. NO Authorization header — S3 rejects one,
+ *   and the credential must never leave for a third-party host.
+ * - `bearer`: the API's own `PUT /api/storage/objects/:id/upload/parts/:n`
+ *   route (the `local` storage provider has no presigned URLs). Sent with this
+ *   client's bearer credential, always to its own configured server.
+ *
+ * Absent on servers older than #506, which only ever hand out presigned URLs,
+ * so absent means `none`.
+ */
+export type PartUploadAuth = 'none' | 'bearer';
+
 interface InitUploadResponse {
   objectId: string;
   uploadId: string;
   partSize: number;
   totalParts: number;
   presignedUrls: Array<{ partNumber: number; url: string }>;
+  partUploadAuth?: PartUploadAuth;
 }
 
 interface PartUrlsResponse {
   presignedUrls: Array<{ partNumber: number; url: string }>;
+  partUploadAuth?: PartUploadAuth;
 }
+
+/** Where to PUT one part, and how to authenticate it. */
+interface PartTarget {
+  url: string;
+  auth: PartUploadAuth;
+}
+
+/** `details.reason` values the storage API attaches to upload errors. */
+const REASON_UPLOAD_PARTS_MISSING = 'UPLOAD_PARTS_MISSING';
+const REASON_UPLOAD_SESSION_INVALID = 'UPLOAD_SESSION_INVALID';
+
+/**
+ * How many times one upload re-sends parts the server reported missing before
+ * giving up. Each round re-sends only the listed parts; needing more than this
+ * means something is corrupting parts in transit, not a transient loss.
+ */
+const MAX_MISSING_PART_ROUNDS = 2;
 
 /** Minimal shape we care about from GET /api/storage/objects/:id/upload/status */
 interface UploadStatusResponse {
@@ -142,7 +175,44 @@ class StaleUploadSessionError extends Error {
  * our own DB row still advertised it as resumable (issue #179).
  */
 function isStaleUploadSession(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 404;
+  if (!(err instanceof ApiError)) return false;
+  if (err.status === 404) return true;
+  // The API's own part route (local provider, issue #506) reports a forgotten
+  // session as 409 UPLOAD_SESSION_INVALID rather than an S3-style 404.
+  return err.status === 409 && errorReason(err) === REASON_UPLOAD_SESSION_INVALID;
+}
+
+/** The `details.reason` of a structured API error body, when it has one. */
+function errorReason(err: ApiError): string | undefined {
+  const details = (err.body as { details?: { reason?: unknown } } | undefined)?.details;
+  return typeof details?.reason === 'string' ? details.reason : undefined;
+}
+
+/**
+ * The part numbers of a 409 `UPLOAD_PARTS_MISSING` from `complete` (issue
+ * #506), or null for any other error. The session is still valid: only those
+ * parts need to be sent again.
+ */
+function missingPartNumbers(err: unknown): number[] | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  if (errorReason(err) !== REASON_UPLOAD_PARTS_MISSING) return null;
+  const raw = (err.body as { details?: { partNumbers?: unknown } }).details?.partNumbers;
+  if (!Array.isArray(raw)) return null;
+  const parts = raw.filter((n): n is number => Number.isInteger(n) && n > 0);
+  return parts.length > 0 ? parts : null;
+}
+
+/**
+ * The API path of an absolute part URL the server returned with
+ * `partUploadAuth: 'bearer'`. Only the path is kept: the request then goes to
+ * this client's own configured server, so the bearer credential is never sent
+ * to a host taken from a response (and a server whose `APP_URL` names a
+ * different hostname than the one this CLI reaches it by still works).
+ */
+export function apiPathOfPartUrl(url: string): string {
+  if (url.startsWith('/')) return url;
+  const parsed = new URL(url);
+  return `${parsed.pathname}${parsed.search}`;
 }
 
 /**
@@ -161,29 +231,40 @@ function isStaleUploadSession(err: unknown): boolean {
  */
 function isStaleCompleteResponse(err: unknown): boolean {
   if (!(err instanceof ApiError)) return false;
-  if (err.status === 409) return true;
+  // A missing-parts conflict is recoverable in place; see missingPartNumbers.
+  if (err.status === 409) return errorReason(err) !== REASON_UPLOAD_PARTS_MISSING;
   return STALE_SESSION_MESSAGE_RE.test(err.serverMessage);
 }
 
 /**
  * Upload one part. Transient/throttle retries (429/500/502/503/504/network) are
- * owned by ApiClient.putRaw via the shared retry + cooldown machinery; here we
- * only add part-number context to a terminal failure. Returns the ETag.
+ * owned by ApiClient.putRaw / putPart via the shared retry + cooldown
+ * machinery; here we only add part-number context to a terminal failure.
+ * Returns the ETag.
  *
- * A 404 is translated into {@link StaleUploadSessionError} so the caller can
- * restart the upload instead of reporting a permanent per-part failure.
+ * `target.auth` decides the request (issue #506): a presigned storage URL is
+ * PUT with no credential; an API part URL is PUT with the bearer credential,
+ * always to this client's own server.
+ *
+ * A dead session is translated into {@link StaleUploadSessionError} so the
+ * caller can restart the upload instead of reporting a permanent per-part
+ * failure.
  */
 async function uploadPart(
   api: ApiClient,
-  url: string,
+  target: PartTarget,
   buffer: Buffer,
   partNumber: number,
   mimeType: string,
 ): Promise<string> {
   try {
-    return await api.putRaw(url, buffer, mimeType);
+    if (target.auth === 'bearer') {
+      return await api.putPart(apiPathOfPartUrl(target.url), buffer);
+    }
+    return await api.putRaw(target.url, buffer, mimeType);
   } catch (err) {
-    const msg = describeStorageFailure(err);
+    const msg =
+      target.auth === 'bearer' && err instanceof Error ? err.message : describeStorageFailure(err);
     if (isStaleUploadSession(err)) {
       throw new StaleUploadSessionError(`part ${partNumber}`, msg);
     }
@@ -218,14 +299,15 @@ async function fetchPartUrls(
   api: ApiClient,
   objectId: string,
   partNumbers: number[],
-): Promise<Map<number, string>> {
+): Promise<Map<number, PartTarget>> {
   const resp = await api.post<PartUrlsResponse>(
     `/api/storage/objects/${objectId}/upload/part-urls`,
     { partNumbers },
   );
-  const map = new Map<number, string>();
+  const auth = resp.partUploadAuth ?? 'none';
+  const map = new Map<number, PartTarget>();
   for (const { partNumber, url } of resp.presignedUrls) {
-    map.set(partNumber, url);
+    map.set(partNumber, { url, auth });
   }
   return map;
 }
@@ -349,7 +431,7 @@ async function runUploadSession(
   let objectId!: string;
   let partSize!: number;
   let totalParts!: number;
-  const urlCache = new Map<number, string>();
+  const urlCache = new Map<number, PartTarget>();
   // Merged list of ALL completed parts (resumed + newly uploaded).
   const completedParts: Array<{ partNumber: number; eTag: string }> = [];
   // Set of part numbers that were already done before this invocation.
@@ -402,15 +484,29 @@ async function runUploadSession(
     partSize = init.partSize;
     totalParts = init.totalParts;
 
-    // Seed URL cache with the presigned URLs from the init response.
+    // Seed URL cache with the part URLs from the init response.
+    const auth = init.partUploadAuth ?? 'none';
     for (const { partNumber, url } of init.presignedUrls) {
-      urlCache.set(partNumber, url);
+      urlCache.set(partNumber, { url, auth });
     }
 
     // Persist the session identifiers so a crash now still leaves enough
     // information to validate the session on the next attempt.
     persistence?.onInit(objectId, init.uploadId, partSize);
   }
+
+  /** Read one part's slice, PUT it, and persist its ETag before returning. */
+  const sendPart = async (partNumber: number, target: PartTarget): Promise<string> => {
+    const start = (partNumber - 1) * partSize;
+    const length = Math.min(partSize, fileSize - start);
+    const buffer = await readFileSlice(filePath, start, length);
+
+    const eTag = await uploadPart(api, target, buffer, partNumber, mimeType);
+
+    // Persist immediately so a crash after this PUT is not wasted.
+    persistence?.onPartComplete(partNumber, eTag);
+    return eTag;
+  };
 
   // ------------------------------------------------------------------
   // 3. Upload each part (skipping already-completed ones on resume)
@@ -445,16 +541,8 @@ async function runUploadSession(
       }
     }
 
-    const url = urlCache.get(partNumber)!;
-    const start = (partNumber - 1) * partSize;
-    const length = Math.min(partSize, fileSize - start);
-    const buffer = await readFileSlice(filePath, start, length);
-
-    const eTag = await uploadPart(api, url, buffer, partNumber, mimeType);
+    const eTag = await sendPart(partNumber, urlCache.get(partNumber)!);
     completedParts.push({ partNumber, eTag });
-
-    // Persist immediately so a crash after this PUT is not wasted.
-    persistence?.onPartComplete(partNumber, eTag);
 
     if (onProgress) {
       onProgress(partNumber / totalParts);
@@ -469,18 +557,39 @@ async function runUploadSession(
   // case, so the part-PUT stale-session check never runs. Guarding here is what
   // makes a fully-resumed file recoverable rather than permanently stuck
   // (issue #183).
-  try {
-    await api.post(`/api/storage/objects/${objectId}/upload/complete`, {
-      parts: completedParts,
-    });
-  } catch (err) {
-    if (isStaleCompleteResponse(err)) {
-      throw new StaleUploadSessionError(
-        'completing the upload',
-        describeStorageFailure(err),
-      );
+  //
+  // A 409 UPLOAD_PARTS_MISSING (issue #506 — the local storage provider checks
+  // every part's bytes at complete) keeps the session: re-send exactly the
+  // listed parts with fresh URLs and complete again.
+  for (let round = 0; ; round++) {
+    try {
+      await api.post(`/api/storage/objects/${objectId}/upload/complete`, {
+        parts: completedParts,
+      });
+      break;
+    } catch (err) {
+      const missing = missingPartNumbers(err);
+      if (missing && round < MAX_MISSING_PART_ROUNDS) {
+        const targets = await fetchPartUrls(api, objectId, missing);
+        for (const partNumber of missing) {
+          const target = targets.get(partNumber);
+          if (!target) throw err;
+          const eTag = await sendPart(partNumber, target);
+          const existing = completedParts.find((p) => p.partNumber === partNumber);
+          if (existing) existing.eTag = eTag;
+          else completedParts.push({ partNumber, eTag });
+        }
+        completedParts.sort((a, b) => a.partNumber - b.partNumber);
+        continue;
+      }
+      if (isStaleCompleteResponse(err)) {
+        throw new StaleUploadSessionError(
+          'completing the upload',
+          describeStorageFailure(err),
+        );
+      }
+      throw err;
     }
-    throw err;
   }
 
   // ------------------------------------------------------------------
