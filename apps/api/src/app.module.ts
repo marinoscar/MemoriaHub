@@ -44,6 +44,7 @@ import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
 import { MemoriesModule } from './memories/memories.module';
 import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { DbBackupModule } from './db-backup/db-backup.module';
+import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
 import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
@@ -134,6 +135,7 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     MemoriesModule,
     MaintenanceModule,
     DbBackupModule,
+    MediaSyncModule,
     AndroidAppModule,
 
     // Test modules (non-production only)

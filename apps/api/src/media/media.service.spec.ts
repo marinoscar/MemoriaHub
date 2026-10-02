@@ -368,6 +368,61 @@ describe('MediaService', () => {
       );
     });
 
+    describe('android sourceDeviceId attribution (#505)', () => {
+      const androidDto = (sourceDeviceId?: string) => ({
+        storageObjectId: randomUUID(),
+        type: 'photo' as const,
+        source: 'android' as const,
+        originalFilename: 'IMG_1.jpg',
+        circleId: CIRCLE_ID,
+        ...(sourceDeviceId !== undefined ? { sourceDeviceId } : {}),
+      });
+
+      beforeEach(() => {
+        mockPrisma.storageObject.findUnique.mockResolvedValue(makeStorageObject({ uploadedById: 'user-1' }) as any);
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+        mockPrisma.mediaItem.create.mockResolvedValue(makeMediaItem() as any);
+      });
+
+      it('rejects a foreign or unknown sourceDeviceId with 400 UNKNOWN_SOURCE_DEVICE', async () => {
+        mockPrisma.mediaSyncDevice.findFirst.mockResolvedValue(null);
+        const deviceId = randomUUID();
+
+        const error = await service.createMedia(androidDto(deviceId), 'user-1', ownPerms).catch((e) => e);
+
+        expect(error.getStatus()).toBe(400);
+        expect(error.getResponse()).toMatchObject({ details: { reason: 'UNKNOWN_SOURCE_DEVICE' } });
+        expect(mockPrisma.mediaSyncDevice.findFirst).toHaveBeenCalledWith({
+          where: { id: deviceId, userId: 'user-1', status: 'active' },
+          select: { id: true },
+        });
+        expect(mockPrisma.mediaItem.create).not.toHaveBeenCalled();
+      });
+
+      it('rejects a non-uuid sourceDeviceId without querying', async () => {
+        const error = await service.createMedia(androidDto('legacy-device'), 'user-1', ownPerms).catch((e) => e);
+
+        expect(error.getStatus()).toBe(400);
+        expect(mockPrisma.mediaSyncDevice.findFirst).not.toHaveBeenCalled();
+      });
+
+      it("accepts the caller's active device", async () => {
+        const deviceId = randomUUID();
+        mockPrisma.mediaSyncDevice.findFirst.mockResolvedValue({ id: deviceId } as any);
+
+        const result = await service.createMedia(androidDto(deviceId), 'user-1', ownPerms);
+
+        expect(result.deduplicated).toBe(false);
+      });
+
+      it('leaves an android upload without sourceDeviceId unaffected', async () => {
+        await service.createMedia(androidDto(), 'user-1', ownPerms);
+
+        expect(mockPrisma.mediaSyncDevice.findFirst).not.toHaveBeenCalled();
+        expect(mockPrisma.mediaItem.create).toHaveBeenCalled();
+      });
+    });
+
     it('should throw NotFoundException when StorageObject does not exist', async () => {
       mockPrisma.storageObject.findUnique.mockResolvedValue(null);
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
