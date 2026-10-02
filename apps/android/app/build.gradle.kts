@@ -287,6 +287,12 @@ androidComponents {
     }
 }
 
+// GeneratedShortcutsTest reads both variants' generated shortcuts.xml (targetPackage differs by
+// build type); generate them before any unit test run. The task is a cheap file write.
+tasks.withType<Test>().configureEach {
+    dependsOn("generateDebugShortcuts", "generateReleaseShortcuts")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
