@@ -75,11 +75,11 @@ class MediaScanner(
                 // Captured BEFORE the scan: anything changing during it is re-scanned next time.
                 val generation = gateway.currentGeneration(volume)
                 val startedSec = clock() / 1000
-                val since = if (volumeFull) {
-                    ScanCursor.full(volume)
-                } else {
-                    ScanCursor(volume, sinceGeneration = stored?.generation.takeIf { generation != null }, sinceDateModifiedSec = stored?.dateModifiedSec)
-                        .let { if (it.isFull) ScanCursor.full(volume) else it }
+                val since = when {
+                    volumeFull -> ScanCursor.full(volume)
+                    generation != null && stored?.generation != null -> ScanCursor(volume, sinceGeneration = stored.generation)
+                    stored?.dateModifiedSec != null -> ScanCursor(volume, sinceDateModifiedSec = stored.dateModifiedSec)
+                    else -> ScanCursor.full(volume)
                 }
                 val isFull = since.isFull
                 if (isFull) fullVolumes += volume
