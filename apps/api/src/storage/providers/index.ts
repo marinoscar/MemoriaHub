@@ -10,6 +10,11 @@ export {
   UploadPart,
   SignedUrlOptions,
   MultipartUploadInit,
+  WrittenPart,
+  WritePartOptions,
+  PartSizeMismatchError,
+  MultipartSessionNotFoundError,
+  MultipartPartsMissingError,
 } from './storage-provider.types';
 export { StorageProvidersModule } from './storage-providers.module';
 export { S3StorageProvider } from './s3/s3-storage.provider';

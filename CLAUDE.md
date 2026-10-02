@@ -320,9 +320,11 @@ Profile picture management (issue #354) — see the [Profile Picture spec](docs/
 - `DELETE /api/allowlist/{id}` - Remove email from allowlist
 
 ### Storage Objects
-- `POST /api/storage/objects/upload/init` - Initialize resumable upload
-- `GET /api/storage/objects/:id/upload/status` - Get upload progress
-- `POST /api/storage/objects/:id/upload/complete` - Complete multipart upload
+- `POST /api/storage/objects/upload/init` - Initialize resumable upload; returns the first ≤10 part URLs plus `partUploadAuth`: `'none'` for presigned S3/R2 URLs (PUT with no Authorization header), `'bearer'` for the API's own part route below (the `local` provider has no presigned URLs) — see [Storage Providers §8](docs/specs/storage-providers.md#multipart-part-urls-and-the-local-provider-issue-506)
+- `POST /api/storage/objects/:id/upload/part-urls` - More part URLs (≤100 per call), same `partUploadAuth`
+- `PUT /api/storage/objects/:id/upload/parts/:partNumber` - Upload one raw part through the API (local provider only; uploader only; streamed, never buffered; answers like S3 with an empty body and a quoted-MD5 `ETag`); 400 `details.reason` `UPLOAD_NOT_ACTIVE`/`PART_OUT_OF_RANGE`/`PART_SIZE_MISMATCH`
+- `GET /api/storage/objects/:id/upload/status` - Get upload progress; `uploadedParts` drives resume
+- `POST /api/storage/objects/:id/upload/complete` - Complete multipart upload; 409 `details.reason: 'UPLOAD_PARTS_MISSING'` (+ `details.partNumbers`: re-send just those) or `'UPLOAD_SESSION_INVALID'` (re-init)
 - `DELETE /api/storage/objects/:id/upload/abort` - Abort upload
 - `POST /api/storage/objects` - Simple file upload
 - `GET /api/storage/objects` - List objects (paginated)

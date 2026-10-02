@@ -108,7 +108,10 @@ describe('Storage Integration', () => {
         partSize: expect.any(Number),
         totalParts: expect.any(Number),
         presignedUrls: expect.any(Array),
+        // S3/R2 path unchanged: real presigned URLs, no bearer (issue #506).
+        partUploadAuth: 'none',
       });
+      expect(response.body.data.presignedUrls[0].url).toBe('https://mock-presigned-url.com/upload');
     });
 
     it('should return 401 for unauthenticated request', async () => {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { PartUploadAuth } from './init-upload.dto';
 
 export const getPartUrlsSchema = z.object({
   partNumbers: z
@@ -14,4 +15,6 @@ export interface GetPartUrlsResponseDto {
     partNumber: number;
     url: string;
   }>;
+  /** How to authenticate the PUT to each URL in `presignedUrls`. */
+  partUploadAuth: PartUploadAuth;
 }

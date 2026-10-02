@@ -4,7 +4,24 @@ import * as path from 'path';
 import { Readable } from 'stream';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
 import { LocalDiskStorageProvider } from './local-disk.provider';
+import {
+  MultipartPartsMissingError,
+  MultipartSessionNotFoundError,
+  PartSizeMismatchError,
+} from '../storage-provider.types';
+
+const md5 = (b: Buffer) => `"${createHash('md5').update(b).digest('hex')}"`;
+
+/** A Readable that yields `buf` in `chunkSize` slices, never as one chunk. */
+function chunked(buf: Buffer, chunkSize = 64 * 1024): Readable {
+  const slices: Buffer[] = [];
+  for (let i = 0; i < buf.length; i += chunkSize) {
+    slices.push(buf.subarray(i, i + chunkSize));
+  }
+  return Readable.from(slices);
+}
 
 describe('LocalDiskStorageProvider', () => {
   let provider: LocalDiskStorageProvider;
@@ -254,6 +271,146 @@ describe('LocalDiskStorageProvider', () => {
 
       expect(url).toMatch(/^file:\/\//);
       expect(url).toContain(key);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Multipart parts through the API (issue #506)
+  // -------------------------------------------------------------------------
+  describe('multipart parts (issue #506)', () => {
+    const partA = Buffer.alloc(300 * 1024, 'a');
+    const partB = Buffer.alloc(300 * 1024, 'b');
+    const partC = Buffer.from('tail-bytes');
+
+    it('declares that its part URLs are not client-reachable', () => {
+      expect(provider.supportsPresignedParts).toBe(false);
+    });
+
+    it('streams a part to disk and returns the quoted MD5 as eTag', async () => {
+      const { uploadId } = await provider.initMultipartUpload('big/file.bin', {
+        mimeType: 'application/octet-stream',
+      });
+
+      const written = await provider.writePart(uploadId, 1, chunked(partA), {
+        expectedSize: partA.length,
+      });
+
+      expect(written).toEqual({ partNumber: 1, eTag: md5(partA), size: partA.length });
+      const onDisk = fs.readFileSync(path.join(tmpDir, '.multipart', uploadId, 'part-1'));
+      expect(onDisk.equals(partA)).toBe(true);
+      // No temp files are left behind.
+      expect(fs.readdirSync(path.join(tmpDir, '.multipart', uploadId)).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    });
+
+    it('is idempotent: re-sending a part replaces it', async () => {
+      const { uploadId } = await provider.initMultipartUpload('k.bin', { mimeType: 'x/y' });
+      const other = Buffer.alloc(partA.length, 'z');
+
+      await provider.writePart(uploadId, 1, chunked(partA), { expectedSize: partA.length });
+      const second = await provider.writePart(uploadId, 1, chunked(other), {
+        expectedSize: other.length,
+      });
+
+      expect(second.eTag).toBe(md5(other));
+      const onDisk = fs.readFileSync(path.join(tmpDir, '.multipart', uploadId, 'part-1'));
+      expect(onDisk.equals(other)).toBe(true);
+    });
+
+    it('rejects a short part and keeps nothing', async () => {
+      const { uploadId } = await provider.initMultipartUpload('k.bin', { mimeType: 'x/y' });
+
+      await expect(
+        provider.writePart(uploadId, 2, chunked(partC), { expectedSize: partC.length + 1 }),
+      ).rejects.toBeInstanceOf(PartSizeMismatchError);
+      expect(fs.readdirSync(path.join(tmpDir, '.multipart', uploadId))).toEqual(['.init.json']);
+    });
+
+    it('cuts off an oversized part and keeps nothing', async () => {
+      const { uploadId } = await provider.initMultipartUpload('k.bin', { mimeType: 'x/y' });
+
+      const err = await provider
+        .writePart(uploadId, 1, chunked(partA), { expectedSize: 1024 })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(PartSizeMismatchError);
+      expect((err as PartSizeMismatchError).exceeded).toBe(true);
+      expect(fs.readdirSync(path.join(tmpDir, '.multipart', uploadId))).toEqual(['.init.json']);
+    });
+
+    it('rejects a write to an unknown session', async () => {
+      await expect(
+        provider.writePart('no-such-upload', 1, chunked(partC), { expectedSize: partC.length }),
+      ).rejects.toBeInstanceOf(MultipartSessionNotFoundError);
+    });
+
+    it('completes: concatenates parts in order and cleans up', async () => {
+      const key = 'uploads/1/full.bin';
+      const { uploadId } = await provider.initMultipartUpload(key, { mimeType: 'x/y' });
+      const a = await provider.writePart(uploadId, 1, chunked(partA), { expectedSize: partA.length });
+      const b = await provider.writePart(uploadId, 2, chunked(partB), { expectedSize: partB.length });
+      const c = await provider.writePart(uploadId, 3, chunked(partC), { expectedSize: partC.length });
+
+      // Deliberately out of order: the provider sorts by part number.
+      await provider.completeMultipartUpload(key, uploadId, [c, a, b]);
+
+      const result = fs.readFileSync(path.join(tmpDir, key));
+      expect(result.equals(Buffer.concat([partA, partB, partC]))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, '.multipart', uploadId))).toBe(false);
+    });
+
+    it('accepts unquoted eTags', async () => {
+      const key = 'unquoted.bin';
+      const { uploadId } = await provider.initMultipartUpload(key, { mimeType: 'x/y' });
+      const a = await provider.writePart(uploadId, 1, chunked(partC), { expectedSize: partC.length });
+
+      await provider.completeMultipartUpload(key, uploadId, [
+        { partNumber: 1, eTag: a.eTag.replace(/"/g, '') },
+      ]);
+
+      expect(fs.readFileSync(path.join(tmpDir, key)).equals(partC)).toBe(true);
+    });
+
+    it('refuses to complete with missing parts, lists them, and writes no object', async () => {
+      const key = 'uploads/1/missing.bin';
+      const { uploadId } = await provider.initMultipartUpload(key, { mimeType: 'x/y' });
+      const a = await provider.writePart(uploadId, 1, chunked(partA), { expectedSize: partA.length });
+
+      const err = await provider
+        .completeMultipartUpload(key, uploadId, [
+          a,
+          { partNumber: 2, eTag: md5(partB) },
+          { partNumber: 3, eTag: md5(partC) },
+        ])
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(MultipartPartsMissingError);
+      expect((err as MultipartPartsMissingError).partNumbers).toEqual([2, 3]);
+      expect(fs.existsSync(path.join(tmpDir, key))).toBe(false);
+      // The session survives so the client can re-send just those parts.
+      expect(fs.existsSync(path.join(tmpDir, '.multipart', uploadId, 'part-1'))).toBe(true);
+    });
+
+    it('refuses to complete when a part does not match its eTag, and writes no object', async () => {
+      const key = 'uploads/1/corrupt.bin';
+      const { uploadId } = await provider.initMultipartUpload(key, { mimeType: 'x/y' });
+      const a = await provider.writePart(uploadId, 1, chunked(partA), { expectedSize: partA.length });
+      await provider.writePart(uploadId, 2, chunked(partB), { expectedSize: partB.length });
+
+      const err = await provider
+        .completeMultipartUpload(key, uploadId, [a, { partNumber: 2, eTag: md5(partA) }])
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(MultipartPartsMissingError);
+      expect((err as MultipartPartsMissingError).partNumbers).toEqual([2]);
+      expect(fs.existsSync(path.join(tmpDir, key))).toBe(false);
+      expect(fs.readdirSync(path.join(tmpDir, 'uploads', '1'))).toEqual([]);
+    });
+
+    it('refuses to complete a session that no longer exists', async () => {
+      await expect(
+        provider.completeMultipartUpload('k.bin', 'gone', [{ partNumber: 1, eTag: '"x"' }]),
+      ).rejects.toBeInstanceOf(MultipartSessionNotFoundError);
+      expect(fs.existsSync(path.join(tmpDir, 'k.bin'))).toBe(false);
     });
   });
 });
