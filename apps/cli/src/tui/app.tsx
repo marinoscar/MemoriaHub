@@ -26,6 +26,7 @@ import { renderTui } from './raw-mode.js';
 import { HomeMenu } from './HomeMenu.js';
 import { Menu } from './Menu.js';
 import { LoginScreen } from './LoginScreen.js';
+import { AndroidScreen } from './AndroidScreen.js';
 import { FolderManager } from './FolderManager.js';
 import { CircleManager } from './CircleManager.js';
 import { PickFolders } from './PickFolders.js';
@@ -74,7 +75,9 @@ import type { MenuListItem } from './MenuList.js';
 // ---------------------------------------------------------------------------
 
 type Screen =
-  | { kind: 'login' }
+  /** `returnToPrevious`: a login started from another screen (Android) pops back to it. */
+  | { kind: 'login'; returnToPrevious?: boolean }
+  | { kind: 'android' }
   | { kind: 'folders' }
   | { kind: 'circles' }
   | { kind: 'pickFolders'; purpose?: 'sync' | 'scan' | 'organize' | 'convert' | 'dateInferDiagnose' | 'dateInferApply' | 'screenshotsFind' | 'screenshotsMove' | 'screenshotsDelete' }
@@ -135,7 +138,8 @@ function KeyHandler({ onBack }: { onBack: () => void }): null {
  * Deliberately NOT listed: 'nodeEnroll' (it IS the login), 'nodeInstallDeps'
  * (a purely local dependency install), and 'nodeStop' (stops a LOCAL daemon
  * over IPC and only needs a config for its last-resort server-side
- * deregister, which it reports on rather than requiring).
+ * deregister, which it reports on rather than requiring), and 'android' (doctor,
+ * bump and build work offline; it shows its own login state and "Log in" action).
  */
 const LOGIN_REQUIRED_SCREENS: ReadonlySet<Screen['kind']> = new Set<Screen['kind']>([
   'circles',
@@ -392,6 +396,9 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
       case 'node-stop':
         push({ kind: 'screen', screen: { kind: 'nodeStop' } });
         break;
+      case 'android':
+        push({ kind: 'screen', screen: { kind: 'android' } });
+        break;
       case 'help':
         push({ kind: 'screen', screen: { kind: 'help' } });
         break;
@@ -517,9 +524,17 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
                 }));
               })
               .catch(() => {})
-              .finally(() => resetToRoot());
+              .finally(() => (screen.returnToPrevious === true ? pop() : resetToRoot()));
           }}
           onBack={pop}
+        />
+      );
+
+    case 'android':
+      return (
+        <AndroidScreen
+          onBack={pop}
+          onLogin={() => push({ kind: 'screen', screen: { kind: 'login', returnToPrevious: true } })}
         />
       );
 

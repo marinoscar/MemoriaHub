@@ -57,6 +57,7 @@ export type MenuActionId =
   | 'node-list'
   | 'node-logs'
   | 'node-service'
+  | 'android'
   | 'help'
   | 'quit'
   | `report:${string}`;
@@ -246,6 +247,9 @@ export const MENU_TREE: MenuSubmenu = {
         // Root hides Login once logged in; it stays reachable here so a
         // logged-in user can still re-auth or point the CLI at another server.
         { kind: 'action', label: 'Login / Change server', action: 'login' },
+        // Building, signing and publishing the Android app (issue #517). Visible
+        // logged out: doctor/bump/build work offline; publishing asks for a login.
+        { kind: 'action', label: 'Android app (build, publish, releases)', action: 'android', loggedOut: true },
         {
           kind: 'action',
           label: 'Factory reset (delete all local data)',
