@@ -132,6 +132,12 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'Progress for the asynchronous "empty trash" run started from a circle, which hard-deletes ' +
           'every trashed item in the background rather than in the request.',
       },
+      {
+        name: 'Media Sync',
+        description:
+          'Phones running the Android Media Sync companion: pairing, the versioned desired config and ' +
+          'commands the web and the phone edit, check-ins, sync runs, diagnostics reports, and unpairing.',
+      },
     ],
   },
   {

@@ -55,6 +55,7 @@ import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
 import { MediaTouchService } from './media-touch.service';
+import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source';
 
 /**
  * Key for the tiered-browsing group-cover override map (Location Grouping,
@@ -159,6 +160,10 @@ export class MediaService {
     }
 
     await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, userPermissions, 'collaborator' as CircleRole);
+
+    // Android Media Sync attribution (#505): an android upload naming a
+    // device must name an active device of the caller's.
+    await assertMediaSyncSourceDevice(this.prisma, userId, dto.source, dto.sourceDeviceId);
 
     // Normalize the client-supplied hash once
     const hash = dto.contentHash?.toLowerCase() ?? null;
