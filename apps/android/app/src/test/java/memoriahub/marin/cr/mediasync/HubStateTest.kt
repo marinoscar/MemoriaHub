@@ -8,7 +8,7 @@ import memoriahub.marin.cr.ledger.SyncStats
 import memoriahub.marin.cr.pairing.PairingStatus
 import memoriahub.marin.cr.permissions.MediaPermissionState
 import memoriahub.marin.cr.testing.idleStatus
-import memoriahub.marin.cr.testing.syncConfig
+import memoriahub.marin.cr.testing.syncConfigView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -24,7 +24,7 @@ class HubStateTest {
         pairing: PairingStatus = paired,
         stats: SyncStats? = pending,
         status: SyncStatusView = idleStatus,
-        config: SyncConfigView? = syncConfig(),
+        config: SyncConfigView? = syncConfigView(),
         permission: MediaPermissionState = MediaPermissionState.FULL,
         conditions: DeviceConditions = DeviceConditions(connected = true, unmetered = true, charging = false),
         health: HealthLine? = null,
@@ -51,10 +51,10 @@ class HubStateTest {
     @Test fun `status line priority`() {
         assertEquals(HubStatus.NOT_PAIRED, status(inputs(pairing = PairingStatus())))
         assertEquals(HubStatus.PAIRING_EXPIRED, status(inputs(pairing = paired.copy(expired = true))))
-        assertEquals(HubStatus.SYNCING, status(inputs(status = idleStatus.copy(running = true), config = syncConfig(paused = true))))
-        assertEquals(HubStatus.PAUSED, status(inputs(config = syncConfig(paused = true), permission = MediaPermissionState.DENIED)))
+        assertEquals(HubStatus.SYNCING, status(inputs(status = idleStatus.copy(running = true), config = syncConfigView(paused = true))))
+        assertEquals(HubStatus.PAUSED, status(inputs(config = syncConfigView(paused = true), permission = MediaPermissionState.DENIED)))
         assertEquals(HubStatus.PERMISSION_NEEDED, status(inputs(permission = MediaPermissionState.DENIED)))
-        assertEquals(HubStatus.NO_FOLDERS, status(inputs(config = syncConfig(folderIds = emptyList()))))
+        assertEquals(HubStatus.NO_FOLDERS, status(inputs(config = syncConfigView(folderIds = emptyList()))))
         assertEquals(
             HubStatus.WAITING_FOR_NETWORK,
             status(inputs(conditions = DeviceConditions(connected = false, unmetered = false, charging = false))),
@@ -65,7 +65,7 @@ class HubStateTest {
         )
         assertEquals(
             HubStatus.WAITING_FOR_CHARGING,
-            status(inputs(config = syncConfig(requireCharging = true))),
+            status(inputs(config = syncConfigView(requireCharging = true))),
         )
         assertEquals(HubStatus.PARTIAL_ACCESS, status(inputs(permission = MediaPermissionState.PARTIAL)))
         assertEquals(HubStatus.IDLE, status(inputs()))
@@ -73,7 +73,7 @@ class HubStateTest {
 
     @Test fun `mobile data allowed means no waiting for wifi`() {
         val i = inputs(
-            config = syncConfig(network = NetworkMode.ANY),
+            config = syncConfigView(network = NetworkMode.ANY),
             conditions = DeviceConditions(connected = true, unmetered = false, charging = false),
         )
         assertEquals(HubStatus.IDLE, status(i))
@@ -81,7 +81,7 @@ class HubStateTest {
 
     @Test fun `nothing to upload never waits for wifi or charging`() {
         val done = SyncStats(eligible = 3, uploaded = 3)
-        val i = inputs(stats = done, config = syncConfig(requireCharging = true), conditions = DeviceConditions(true, false, false))
+        val i = inputs(stats = done, config = syncConfigView(requireCharging = true), conditions = DeviceConditions(true, false, false))
         val s = HubState.derive(i)
         assertEquals(HubStatus.IDLE, s.status)
         assertTrue(s.statusText.startsWith("Idle · everything is synced"))
@@ -107,16 +107,16 @@ class HubStateTest {
 
     @Test fun `primary action is stop, start or none`() {
         assertEquals(PrimaryAction.STOP, HubState.derive(inputs()).primaryAction)
-        assertEquals(PrimaryAction.START, HubState.derive(inputs(config = syncConfig(paused = true))).primaryAction)
+        assertEquals(PrimaryAction.START, HubState.derive(inputs(config = syncConfigView(paused = true))).primaryAction)
         assertEquals(PrimaryAction.NONE, HubState.derive(inputs(pairing = PairingStatus())).primaryAction)
-        assertFalse(HubState.derive(inputs(config = syncConfig(paused = true))).canSyncNow)
+        assertFalse(HubState.derive(inputs(config = syncConfigView(paused = true))).canSyncNow)
         assertTrue(HubState.derive(inputs()).canSyncNow)
     }
 
     @Test fun `permission and pairing problems open connect, no folders opens folders`() {
         assertTrue(HubState.derive(inputs(permission = MediaPermissionState.DENIED)).statusOpensConnect)
         assertTrue(HubState.derive(inputs(permission = MediaPermissionState.PARTIAL)).statusOpensConnect)
-        assertTrue(HubState.derive(inputs(config = syncConfig(folderIds = emptyList()))).statusOpensFolders)
+        assertTrue(HubState.derive(inputs(config = syncConfigView(folderIds = emptyList()))).statusOpensFolders)
         assertFalse(HubState.derive(inputs()).statusOpensConnect)
     }
 

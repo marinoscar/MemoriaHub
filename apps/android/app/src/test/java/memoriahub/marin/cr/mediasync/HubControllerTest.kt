@@ -17,7 +17,7 @@ import memoriahub.marin.cr.permissions.MediaPermissionState
 import memoriahub.marin.cr.testing.FakeHealthSummary
 import memoriahub.marin.cr.testing.RecordingSyncControl
 import memoriahub.marin.cr.testing.FakeUpdateStatus
-import memoriahub.marin.cr.testing.syncConfig
+import memoriahub.marin.cr.testing.syncConfigView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,7 +120,7 @@ class HubControllerTest {
 
     @Test fun `unpaired hub never runs actions`() = runTest {
         pairing = PairingStatus()
-        val control = RecordingSyncControl(syncConfig())
+        val control = RecordingSyncControl(syncConfigView())
         val (hub, scope) = hub(control)
         hub.syncNow(); advanceUntilIdle()
         assertTrue(control.calls.isEmpty())

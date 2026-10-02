@@ -13,7 +13,7 @@ import memoriahub.marin.cr.ledger.SyncStats
 import memoriahub.marin.cr.media.Bucket
 import memoriahub.marin.cr.permissions.MediaPermissionState
 import memoriahub.marin.cr.testing.RecordingSyncControl
-import memoriahub.marin.cr.testing.syncConfig
+import memoriahub.marin.cr.testing.syncConfigView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -103,7 +103,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `loads the saved selection and types`() = runTest {
-        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera"), includeVideos = false))
+        val control = RecordingSyncControl(syncConfigView(folderIds = listOf("camera"), includeVideos = false))
         val c = controller(control)
         c.load()
         advanceUntilIdle()
@@ -116,7 +116,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `saving online patches the config then syncs`() = runTest {
-        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera")))
+        val control = RecordingSyncControl(syncConfigView(folderIds = listOf("camera")))
         val c = controller(control)
         c.load(); advanceUntilIdle()
         c.toggle("wa")
@@ -129,7 +129,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `saving offline keeps the edit as saved for the outbox and does not sync`() = runTest {
-        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera"))).apply {
+        val control = RecordingSyncControl(syncConfigView(folderIds = listOf("camera"))).apply {
             result = Result.failure(IOException("no network"))
         }
         val c = controller(control)
@@ -145,7 +145,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `a server rejection shows the error and keeps the edit`() = runTest {
-        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera"))).apply {
+        val control = RecordingSyncControl(syncConfigView(folderIds = listOf("camera"))).apply {
             result = Result.failure(IllegalArgumentException("UNKNOWN_FOLDER"))
         }
         val c = controller(control)
@@ -169,7 +169,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `reload keeps unsaved edits`() = runTest {
-        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera")))
+        val control = RecordingSyncControl(syncConfigView(folderIds = listOf("camera")))
         val c = controller(control)
         c.load(); advanceUntilIdle()
         c.toggle("wa")

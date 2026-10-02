@@ -16,7 +16,7 @@ val idleStatus = SyncStatusView(
     lastRunAtMs = null, lastRunStatus = null, lastError = null, lastCheckinAtMs = null,
 )
 
-fun syncConfig(
+fun syncConfigView(
     folderIds: List<String> = listOf("camera"),
     network: NetworkMode = NetworkMode.WIFI,
     requireCharging: Boolean = false,
@@ -32,7 +32,7 @@ fun syncConfig(
 )
 
 /** Records every [SyncControl] call; results are configurable per test. (#512's real implementation is WorkManager.) */
-class RecordingSyncControl(var config: SyncConfigView? = syncConfig()) : SyncControl {
+class RecordingSyncControl(var config: SyncConfigView? = syncConfigView()) : SyncControl {
     override val status = MutableStateFlow(idleStatus)
     val calls = mutableListOf<String>()
     val patches = mutableListOf<ConfigPatch>()

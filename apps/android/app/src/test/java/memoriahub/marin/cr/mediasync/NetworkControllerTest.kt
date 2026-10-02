@@ -12,7 +12,7 @@ import memoriahub.marin.cr.contract.NetworkMode
 import memoriahub.marin.cr.notifications.SummaryNotificationPrefs
 import memoriahub.marin.cr.testing.FakeSharedPreferences
 import memoriahub.marin.cr.testing.RecordingSyncControl
-import memoriahub.marin.cr.testing.syncConfig
+import memoriahub.marin.cr.testing.syncConfigView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -40,7 +40,7 @@ class NetworkControllerTest {
     }
 
     @Test fun `saves only the changed fields`() = runTest {
-        val control = RecordingSyncControl(syncConfig())
+        val control = RecordingSyncControl(syncConfigView())
         val c = controller(control)
         c.setNetwork(NetworkMode.ANY)
         c.setRequireCharging(true)
@@ -51,7 +51,7 @@ class NetworkControllerTest {
     }
 
     @Test fun `only new ones needs a confirmation`() = runTest {
-        val control = RecordingSyncControl(syncConfig())
+        val control = RecordingSyncControl(syncConfigView())
         val c = controller(control)
         c.chooseUploadExisting(UploadExisting.FROM_PAIRING)
         assertTrue(c.state.value.confirmFromPairing)
@@ -65,14 +65,14 @@ class NetworkControllerTest {
     }
 
     @Test fun `going back to all is immediate`() = runTest {
-        val c = controller(RecordingSyncControl(syncConfig(uploadExisting = UploadExisting.FROM_PAIRING)))
+        val c = controller(RecordingSyncControl(syncConfigView(uploadExisting = UploadExisting.FROM_PAIRING)))
         c.chooseUploadExisting(UploadExisting.ALL)
         assertFalse(c.state.value.confirmFromPairing)
         assertEquals(ConfigPatch(uploadExisting = UploadExisting.ALL), c.state.value.patch())
     }
 
     @Test fun `offline save is queued, errors keep the edit`() = runTest {
-        val control = RecordingSyncControl(syncConfig()).apply { result = Result.failure(IOException("offline")) }
+        val control = RecordingSyncControl(syncConfigView()).apply { result = Result.failure(IOException("offline")) }
         val c = controller(control)
         c.setNetwork(NetworkMode.ANY)
         c.save(); advanceUntilIdle()
@@ -87,7 +87,7 @@ class NetworkControllerTest {
     }
 
     @Test fun `summary notifications toggle is stored locally`() = runTest {
-        val c = controller(RecordingSyncControl(syncConfig()))
+        val c = controller(RecordingSyncControl(syncConfigView()))
         c.setSummaryNotifications(false)
         assertFalse(prefs.enabled)
         assertFalse(c.state.value.summaryNotifications)
