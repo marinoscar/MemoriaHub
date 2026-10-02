@@ -29,44 +29,15 @@ Off by default (`features.memories`) — an admin turns it on in Admin Settings,
 - **Two-Layer Admin Model**: The global system Admin bypasses per-circle membership for full cross-circle management; per-circle roles govern everyday access
 - **Local Media Backup**: A registered worker node pull-mirrors a circle's original media bytes to its own disk over an incremental, sha256-verified change feed, with JSON sidecars, a queryable SQLite catalog, scheduling, reconcile, and restore — driven by the CLI's `memoriahub backup init|run|status|verify|prune|restore|schedule` commands (see [docs/local-backup.md](docs/local-backup.md))
 
-### Android App (Camera Backup)
-- **Native Android Client**: A Kotlin/Jetpack Compose app at `apps/android/` that provides always-on camera photo and video backup to any circle (personal by default); built with AGP 8.11.1, minSdk 26 (Android 8.0+)
-- **Device-Flow Login**: Authenticates against any self-hosted MemoriaHub server using the RFC 8628 Device Authorization Flow — no browser Google OAuth required on the device; tokens are stored in `EncryptedSharedPreferences`
-- **Durable Sync**: All upload state is persisted in a local Room database (`sync_files` / `sync_runs`) and survives app kills and device reboots; SHA-256 dedup pre-check prevents re-uploading existing files; attempt cap (5) prevents indefinite retries
-- **Resumable Uploads**: Uses the same multipart presigned-URL pipeline as the CLI; per-part progress is saved so interrupted uploads resume where they left off
-- **Per-Photo Visibility**: The Photos screen shows a Google-Photos-style adaptive grid with per-tile sync badges (synced / pending / syncing / failed); the Backup screen shows aggregate counts and a failures list with per-file retry
-
-### Media and Storage
-- **Media Domain**: Photos and videos as first-class `MediaItem` records with typed columns for capture date, camera make/model, GPS coordinates, reverse-geocoded country/region/city, tags, albums, favorites, and soft-delete. All items are circle-scoped (`circleId` required on create and list endpoints)
-- **Circle Dashboard**: The home page (`/`) shows a per-circle dashboard — On This Day (same month/day across all years), recent imports, favorites, and a review queue with deep-links to unreviewed and missing-location items
-- **Bulk Editing**: Multi-select media library with a bulk-action toolbar for setting location (map pin + place search), tags, favorite flag, and soft-delete across up to 500 items at once. The location picker reverse-geocodes the dropped pin using the offline on-server provider by default
-- **Geo Services**: On-demand reverse geocoding (`GET /api/media/geo/reverse`) and optional place-name forward search (`GET /api/media/geo/search`, requires `GEO_FORWARD_SEARCH_ENABLED=true`). Forward search sends only the typed query to Nominatim — GPS coordinates never leave the server
-- **Pluggable Storage**: AWS S3 (primary) and local-disk (backup); additional providers are interchangeable by design
-- **Resumable Uploads**: Multipart upload with pre-signed URLs and event-driven post-upload processing pipeline
-- **Personal Access Tokens**: Long-lived tokens for CLI tools, scripts, and automation workflows
-- **Metadata-First**: All media metadata stored in typed columns and queryable; exportable in JSON and CSV
-- **Social-Media Video Detection**: Two-tier (container-metadata/filename + on-server OCR) classifier flags TikTok/Instagram/Facebook re-shares with a "Social Media" + platform tag, skips face detection on them, and leaves archive/delete to the user via tag search
-
-### Distributed Worker Nodes (Elastic Compute)
-- **CLI-Registered Workers**: `memoriahub node register/start/stop/status/list/doctor` turns a spare laptop or desktop into a worker node that claims and runs enrichment jobs — face detection, near-duplicate/CLIP embedding, thumbnail generation, metadata extraction, social-media video detection, AI auto-tagging, and reverse geocoding — locally, submitting results back to the server
-- **Byte-Identical Compute**: A shared `packages/enrichment-compute` package (dual CJS/ESM build, exact-pinned native dependencies, golden-vector regression test) guarantees a node's output is numerically identical to the server's in-process worker, so face clusters and duplicate groups stay correct regardless of which machine ran the job
-- **No Storage Credentials, No Long-Lived Secrets on the Node**: Media bytes stream directly between the node and S3/R2 via short-lived presigned URLs — never proxied through the API; AI and geo provider calls use a transient, per-job credential fetched from the server and held in memory only, never written to disk or logged
-- **Daemon and systemd Service Mode**: `node start --daemon` backgrounds the process behind a pidfile and a Unix-socket IPC channel; `node service install` sets up a systemd user unit for always-on operation; a Tools ▸ Worker Node TUI dashboard can attach to the running daemon from a second terminal to watch live job history and counters
-- **Fully Optional**: The server's own in-process worker keeps processing every job type with zero nodes registered — worker nodes are pure elastic extra capacity, authenticated via the existing Personal Access Token system, nothing new to manage
-
-### Foundation
-- **Authentication**: Google OAuth 2.0 with JWT access tokens and refresh token rotation
-- **Device Authorization**: RFC 8628 Device Authorization Flow for CLI tools, mobile apps, and IoT devices
-- **Authorization**: Role-Based Access Control (RBAC) with three global roles (Admin, Contributor, Viewer) plus per-circle roles
-- **Access Control**: Email allowlist restricts application access; circle invites upsert the allowlist automatically
-- **User Management**: Admin interface for managing users, role assignments, and allowlist
-- **Settings Framework**: System-wide and per-user settings with type-safe schemas (includes `activeCircleId`)
-- **Observability**: OpenTelemetry instrumentation with traces, metrics, and structured logging
-- **API Documentation**: Interactive Scalar API reference at `/api/docs`, OpenAPI 3.1 document at `/api/openapi.json`
+### Android App (TWA + native Media Sync)
+- **Trusted Web Activity shell**: The Android app wraps the web app in a TWA and adds a native Media Sync module for always-on camera photo and video backup to any circle (personal by default); the APK is distributed from the web app at `/settings/android-app` (see [docs/specs/android-media-sync.md](docs/specs/android-media-sync.md))
+- **Pairing**: The app pairs with the server through the RFC 8628 device flow and the `/activate` page, then returns to the app through the `returnUri` deep link (see [docs/DEVICE-AUTH.md](docs/DEVICE-AUTH.md))
+- **Same upload pipeline as the CLI**: Uses the resumable multipart presigned-URL pipeline with SHA-256 dedup, and registers media with `source: android`
+- **Replaces the legacy native app**: The earlier standalone Kotlin/Compose app (package `cr.marin.memoriahub`) was retired. The new app's ID is `memoriahub.marin.cr`, so the two are different apps and both would upload if both were installed. **Uninstall the legacy app manually** before using the new one.
 - **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
 
 ### Planned Capabilities
-The roadmap covers further long-term enrichment such as platform import paths (Google Photos Takeout, OneDrive), Azure storage, and additional duplicate-detection tiers (Phase 09). The Android MVP (Phase 08), cross-cutting enrichment features (face recognition, AI auto-tagging, agentic search), and trip/event grouping (now shipped as part of Memories, above) are already shipped. See [docs/plan/ROADMAP.md](docs/plan/ROADMAP.md) for details.
+The roadmap covers further long-term enrichment such as platform import paths (Google Photos Takeout, OneDrive), Azure storage, and additional duplicate-detection tiers (Phase 09). The Android app (Phase 08, superseded by the TWA + native Media Sync app), cross-cutting enrichment features (face recognition, AI auto-tagging, agentic search), and trip/event grouping (now shipped as part of Memories, above) are already shipped.
 
 ## Technology Stack
 
@@ -250,8 +221,7 @@ MemoriaHub/
 │       │   └── services/      # API client
 │       └── src/__tests__/     # Component tests
 ├── docs/
-│   ├── plan/                  # Implementation roadmap and phase specs
-│   │   ├── ROADMAP.md         # Phase-by-phase implementation plan
+│   ├── plan/                  # Phase specs
 │   │   └── phase-01-media-domain.md  # (and other phase docs)
 │   ├── ARCHITECTURE.md        # System architecture
 │   ├── API.md                 # Complete API reference
@@ -276,7 +246,6 @@ MemoriaHub/
 ## Documentation
 
 - **[VISION.MD](VISION.MD)** - Product vision, MVP definition, and guiding principles
-- **[docs/plan/ROADMAP.md](docs/plan/ROADMAP.md)** - Phase-by-phase implementation plan
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System architecture and design decisions
 - **[docs/API.md](docs/API.md)** - Complete API reference
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development setup, common patterns, and troubleshooting
