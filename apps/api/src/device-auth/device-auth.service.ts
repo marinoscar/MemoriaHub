@@ -204,10 +204,7 @@ export class DeviceAuthService {
             'deviceAuth.patTtlDays',
             90,
           );
-          const patName =
-            typeof clientInfo.name === 'string' && clientInfo.name.trim()
-              ? clientInfo.name.trim()
-              : 'MemoriaHub CLI';
+          const patName = this.buildPatName(clientInfo);
 
           const pat = await this.patService.createToken(record.user.id, {
             name: patName,
@@ -228,11 +225,18 @@ export class DeviceAuthService {
             `Device authorized (PAT) for user: ${record.user.email}, ttl=${patTtlDays}d`,
           );
 
+          // `tokenType` stays the OAuth literal 'Bearer' (a PAT is presented
+          // as `Authorization: Bearer pat_...`); `credentialType` is the
+          // discriminator clients branch on (android-media-sync spec §6.7).
           return {
             accessToken: pat.token,
             refreshToken: '',
             tokenType: 'Bearer',
             expiresIn: patTtlDays * 86400,
+            credentialType: 'pat' as const,
+            expiresAt: pat.expiresAt,
+            tokenId: pat.id,
+            tokenName: pat.name,
           };
         }
 
@@ -264,6 +268,7 @@ export class DeviceAuthService {
           refreshToken: tokens.refreshToken!,
           tokenType: 'Bearer',
           expiresIn: tokens.expiresIn,
+          credentialType: 'session' as const,
         };
 
       default:
@@ -469,6 +474,33 @@ export class DeviceAuthService {
 
     this.logger.log(`Cleaned up ${result.count} expired device codes`);
     return result.count;
+  }
+
+  /**
+   * Derive the PAT display name from the device's (untrusted) `clientInfo`.
+   *
+   * The DTO already trims and caps `name` at 100 characters, but the service
+   * re-sanitises as defense-in-depth (it can be reached without the pipe, and
+   * rows written before issue #499 carry whatever was stored): control
+   * characters are stripped so a hostile caller cannot forge line breaks in
+   * the Access Tokens list, whitespace is collapsed, and the result is capped
+   * at the PAT API's own 100-character name limit. Falls back to
+   * `deviceName`, then to a generic label.
+   */
+  private buildPatName(clientInfo: Record<string, unknown>): string {
+    const clean = (value: unknown): string =>
+      typeof value === 'string'
+        ? value
+            // eslint-disable-next-line no-control-regex
+            .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 100)
+            .trim()
+        : '';
+    return (
+      clean(clientInfo.name) || clean(clientInfo.deviceName) || 'MemoriaHub CLI'
+    );
   }
 
   /**

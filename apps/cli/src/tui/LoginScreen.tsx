@@ -23,7 +23,7 @@ import TextInput from 'ink-text-input';
 import * as os from 'os';
 import { ApiClient } from '../api.js';
 import { saveConfig, type CliConfig } from '../config.js';
-import { requestDeviceCode, pollForDeviceToken, type DeviceTokenResult } from '../device-auth.js';
+import { buildPatClientInfo, requestDeviceCode, pollForDeviceToken, type DeviceTokenResult } from '../device-auth.js';
 import { openBrowser } from '../open-browser.js';
 import { BOX_BORDER, success, error as errorColor, warning } from './theme.js';
 
@@ -124,12 +124,10 @@ export function LoginScreen({
 
     void (async () => {
       try {
-        const resp = await requestDeviceCode(normalised, {
-          tokenType: 'pat',
-          name: 'MemoriaHub CLI',
-          hostname: os.hostname(),
-          platform: os.platform(),
-        });
+        const resp = await requestDeviceCode(
+          normalised,
+          buildPatClientInfo('MemoriaHub CLI', os.hostname(), os.platform()),
+        );
         if (cancelledRef.current) return;
         setDeviceInfo({
           userCode: resp.userCode,
