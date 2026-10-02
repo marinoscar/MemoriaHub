@@ -17,6 +17,7 @@ import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/
 import { createMockStorageProvider } from '../../../test/mocks/storage-provider.mock';
 import { OBJECT_UPLOADED_EVENT } from '../processing/events/object-uploaded.event';
 import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { MultipartPartsMissingError } from '../providers/storage-provider.types';
 
 describe('ObjectsService', () => {
   let service: ObjectsService;
@@ -474,6 +475,19 @@ describe('ObjectsService', () => {
         ).rejects.toThrow(ConflictException);
       });
 
+      it('carries details.reason UPLOAD_SESSION_INVALID (issue #506)', async () => {
+        const err = Object.assign(new Error('gone'), { name: 'NoSuchUpload' });
+        const dto = arrangeCompleteFailure(err);
+
+        const thrown = await service
+          .completeUpload(mockStorageObject.id, dto, testUserId)
+          .catch((e: unknown) => e);
+
+        expect((thrown as ConflictException).getResponse()).toMatchObject({
+          details: { reason: 'UPLOAD_SESSION_INVALID' },
+        });
+      });
+
       it('maps InvalidPart to 409 Conflict', async () => {
         const err = Object.assign(
           new Error('One or more of the specified parts could not be found.'),
@@ -512,6 +526,266 @@ describe('ObjectsService', () => {
         await expect(
           service.completeUpload(mockStorageObject.id, dto, testUserId),
         ).rejects.not.toThrow(ConflictException);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Part URLs and API-proxied parts (issue #506)
+  // -------------------------------------------------------------------------
+  describe('part URLs by provider capability (issue #506)', () => {
+    const configFor = (key: string, def?: unknown) => {
+      if (key === 'storage.partSize') return 10485760;
+      if (key === 'appUrl') return 'https://photos.example.test';
+      return def;
+    };
+
+    beforeEach(() => {
+      mockConfig.get.mockImplementation(configFor as any);
+      mockStorageProvider.initMultipartUpload.mockResolvedValue({
+        uploadId: 'upload-123',
+        key: 'k',
+      });
+      mockPrisma.storageObject.create.mockResolvedValue({
+        ...mockStorageObject,
+        id: 'new-obj-id',
+        status: 'pending',
+        s3UploadId: 'upload-123',
+      } as any);
+    });
+
+    it('S3/R2 (presigned parts): init returns provider URLs unchanged and partUploadAuth "none"', async () => {
+      mockStorageProvider.getSignedUploadUrl.mockImplementation(
+        async (_k: string, _u: string, n: number) => `https://bucket.s3.example/part?n=${n}&sig=x`,
+      );
+
+      const result = await service.initUpload(
+        { name: 'a.mp4', size: 25 * 1024 * 1024, mimeType: 'video/mp4' },
+        testUserId,
+      );
+
+      expect(result.partUploadAuth).toBe('none');
+      expect(result.presignedUrls).toEqual([1, 2, 3].map((n) => ({
+        partNumber: n,
+        url: `https://bucket.s3.example/part?n=${n}&sig=x`,
+      })));
+      expect(mockStorageProvider.getSignedUploadUrl).toHaveBeenCalledTimes(3);
+    });
+
+    it('S3/R2: part-urls returns provider URLs and partUploadAuth "none"', async () => {
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        ...mockStorageObject,
+        status: 'pending',
+        s3UploadId: 'upload-123',
+      } as any);
+
+      const result = await service.getPartUrls(mockStorageObject.id, { partNumbers: [11] }, testUserId);
+
+      expect(result).toEqual({
+        partUploadAuth: 'none',
+        presignedUrls: [{ partNumber: 11, url: 'https://mock-presigned-url.com/upload' }],
+      });
+    });
+
+    it('local (no presigned parts): init returns API part URLs and partUploadAuth "bearer"', async () => {
+      (mockStorageProvider as any).supportsPresignedParts = false;
+
+      const result = await service.initUpload(
+        { name: 'a.mp4', size: 25 * 1024 * 1024, mimeType: 'video/mp4' },
+        testUserId,
+      );
+
+      expect(result.partUploadAuth).toBe('bearer');
+      expect(result.presignedUrls).toEqual([1, 2, 3].map((n) => ({
+        partNumber: n,
+        url: `https://photos.example.test/api/storage/objects/new-obj-id/upload/parts/${n}`,
+      })));
+      expect(mockStorageProvider.getSignedUploadUrl).not.toHaveBeenCalled();
+    });
+
+    it('local: part-urls returns API part URLs and partUploadAuth "bearer"', async () => {
+      (mockStorageProvider as any).supportsPresignedParts = false;
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        ...mockStorageObject,
+        status: 'uploading',
+        s3UploadId: 'upload-123',
+      } as any);
+
+      const result = await service.getPartUrls(mockStorageObject.id, { partNumbers: [2] }, testUserId);
+
+      expect(result).toEqual({
+        partUploadAuth: 'bearer',
+        presignedUrls: [{
+          partNumber: 2,
+          url: `https://photos.example.test/api/storage/objects/${mockStorageObject.id}/upload/parts/2`,
+        }],
+      });
+    });
+  });
+
+  describe('uploadPart (issue #506)', () => {
+    const size = 25 * 1024 * 1024; // 10 MiB + 10 MiB + 5 MiB
+    const uploading = {
+      ...mockStorageObject,
+      size: BigInt(size),
+      status: 'pending',
+      s3UploadId: 'upload-123',
+    };
+
+    beforeEach(() => {
+      mockConfig.get.mockImplementation(((key: string, def?: unknown) =>
+        key === 'storage.partSize' ? 10485760 : def) as any);
+      (mockStorageProvider as any).supportsPresignedParts = false;
+      (mockStorageProvider as any).writePart = jest.fn().mockResolvedValue({
+        partNumber: 3,
+        eTag: '"abc"',
+        size: 5 * 1024 * 1024,
+      });
+      mockPrisma.storageObject.findUnique.mockResolvedValue(uploading as any);
+      mockPrisma.storageObjectChunk.upsert.mockResolvedValue({} as any);
+      mockPrisma.storageObject.updateMany.mockResolvedValue({ count: 1 } as any);
+    });
+
+    const body = () => Readable.from([Buffer.from('x')]);
+    const reasonOf = async (p: Promise<unknown>) =>
+      ((await p.catch((e: any) => e)) as any).getResponse().details;
+
+    it('streams the part with the exact expected size and records the chunk', async () => {
+      const stream = body();
+
+      const result = await service.uploadPart(mockStorageObject.id, 3, testUserId, stream);
+
+      expect(result.eTag).toBe('"abc"');
+      expect((mockStorageProvider as any).writePart).toHaveBeenCalledWith('upload-123', 3, stream, {
+        expectedSize: 5 * 1024 * 1024,
+      });
+      expect(mockPrisma.storageObjectChunk.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ partNumber: 3, eTag: '"abc"', size: BigInt(5 * 1024 * 1024) }),
+        }),
+      );
+      expect(mockPrisma.storageObject.updateMany).toHaveBeenCalledWith({
+        where: { id: mockStorageObject.id, status: 'pending' },
+        data: { status: 'uploading' },
+      });
+    });
+
+    it('rejects a declared Content-Length that differs, before reading the body', async () => {
+      const details = await reasonOf(
+        service.uploadPart(mockStorageObject.id, 1, testUserId, body(), 123),
+      );
+
+      expect(details).toMatchObject({ reason: 'PART_SIZE_MISMATCH', expectedSize: 10485760, receivedSize: 123 });
+      expect((mockStorageProvider as any).writePart).not.toHaveBeenCalled();
+    });
+
+    it('rejects a part number out of range', async () => {
+      const details = await reasonOf(service.uploadPart(mockStorageObject.id, 4, testUserId, body()));
+
+      expect(details).toEqual({ reason: 'PART_OUT_OF_RANGE', totalParts: 3 });
+    });
+
+    it.each(['processing', 'ready', 'failed'])('rejects an object in status %s', async (status) => {
+      mockPrisma.storageObject.findUnique.mockResolvedValue({ ...uploading, status } as any);
+
+      const details = await reasonOf(service.uploadPart(mockStorageObject.id, 1, testUserId, body()));
+
+      expect(details).toEqual({ reason: 'UPLOAD_NOT_ACTIVE', status });
+    });
+
+    it('accepts an object already uploading, without re-flipping its status', async () => {
+      mockPrisma.storageObject.findUnique.mockResolvedValue({ ...uploading, status: 'uploading' } as any);
+
+      await service.uploadPart(mockStorageObject.id, 3, testUserId, body());
+
+      expect(mockPrisma.storageObject.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses a provider that takes presigned parts', async () => {
+      (mockStorageProvider as any).supportsPresignedParts = true;
+
+      const details = await reasonOf(service.uploadPart(mockStorageObject.id, 1, testUserId, body()));
+
+      expect(details).toEqual({ reason: 'PRESIGNED_PARTS_REQUIRED' });
+    });
+
+    it('403 for a non-owner, 404 for an unknown object', async () => {
+      await expect(
+        service.uploadPart(mockStorageObject.id, 1, otherUserId, body()),
+      ).rejects.toThrow(ForbiddenException);
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue(null);
+      await expect(
+        service.uploadPart(mockStorageObject.id, 1, testUserId, body()),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('completeUpload on a provider without presigned parts (issue #506)', () => {
+    const size = 25 * 1024 * 1024;
+    const parts = [1, 2, 3].map((n) => ({ partNumber: n, eTag: `"e${n}"` }));
+
+    beforeEach(() => {
+      mockConfig.get.mockImplementation(((key: string, def?: unknown) =>
+        key === 'storage.partSize' ? 10485760 : def) as any);
+      (mockStorageProvider as any).supportsPresignedParts = false;
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        ...mockStorageObject,
+        size: BigInt(size),
+        status: 'uploading',
+        s3UploadId: 'upload-123',
+        chunks: [],
+      } as any);
+      mockPrisma.storageObject.update.mockResolvedValue({ ...mockStorageObject, status: 'processing' } as any);
+      mockPrisma.auditEvent.create.mockResolvedValue({} as any);
+    });
+
+    it('does not overwrite the chunk rows recorded as parts arrived', async () => {
+      await service.completeUpload(mockStorageObject.id, { parts }, testUserId);
+
+      expect(mockPrisma.storageObjectChunk.upsert).not.toHaveBeenCalled();
+      expect(mockStorageProvider.completeMultipartUpload).toHaveBeenCalled();
+    });
+
+    it('409 UPLOAD_PARTS_MISSING when the list does not cover every part', async () => {
+      const thrown = await service
+        .completeUpload(mockStorageObject.id, { parts: [parts[0], parts[2]] }, testUserId)
+        .catch((e: unknown) => e);
+
+      expect(thrown).toBeInstanceOf(ConflictException);
+      expect((thrown as ConflictException).getResponse()).toMatchObject({
+        details: { reason: 'UPLOAD_PARTS_MISSING', partNumbers: [2] },
+      });
+      expect(mockStorageProvider.completeMultipartUpload).not.toHaveBeenCalled();
+    });
+
+    it('409 UPLOAD_PARTS_MISSING from the provider, and forgets those chunk rows', async () => {
+      mockStorageProvider.completeMultipartUpload.mockRejectedValue(
+        new MultipartPartsMissingError([3, 1]) as never,
+      );
+      mockPrisma.storageObjectChunk.deleteMany.mockResolvedValue({ count: 2 } as any);
+
+      const thrown = await service
+        .completeUpload(mockStorageObject.id, { parts }, testUserId)
+        .catch((e: unknown) => e);
+
+      expect((thrown as ConflictException).getResponse()).toMatchObject({
+        details: { reason: 'UPLOAD_PARTS_MISSING', partNumbers: [1, 3] },
+      });
+      expect(mockPrisma.storageObjectChunk.deleteMany).toHaveBeenCalledWith({
+        where: { objectId: mockStorageObject.id, partNumber: { in: [3, 1] } },
+      });
+      expect(mockPrisma.storageObject.update).not.toHaveBeenCalled();
+    });
+
+    it('400 PART_OUT_OF_RANGE for a listed part beyond totalParts', async () => {
+      const thrown = await service
+        .completeUpload(mockStorageObject.id, { parts: [...parts, { partNumber: 4, eTag: '"x"' }] }, testUserId)
+        .catch((e: unknown) => e);
+
+      expect(thrown).toBeInstanceOf(BadRequestException);
+      expect((thrown as BadRequestException).getResponse()).toMatchObject({
+        details: { reason: 'PART_OUT_OF_RANGE', partNumbers: [4] },
       });
     });
   });

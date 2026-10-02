@@ -1,10 +1,10 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Readable } from 'stream';
+import { Readable, Transform, TransformCallback } from 'stream';
 import { pipeline } from 'stream/promises';
 import * as fs from 'fs';
 import * as path from 'path';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { StorageProvider } from '../storage-provider.interface';
 import {
   StorageUploadOptions,
@@ -12,10 +12,51 @@ import {
   MultipartUploadInit,
   UploadPart,
   SignedUrlOptions,
+  WrittenPart,
+  WritePartOptions,
+  PartSizeMismatchError,
+  MultipartSessionNotFoundError,
+  MultipartPartsMissingError,
 } from '../storage-provider.types';
+
+/** Strip S3-style quoting (and a weak `W/` prefix) from an ETag for comparison. */
+function normalizeETag(eTag: string): string {
+  return eTag.trim().replace(/^W\//, '').replace(/^"|"$/g, '').toLowerCase();
+}
+
+/**
+ * Pass-through that hashes and counts bytes, and fails fast once more than
+ * `limit` bytes have flowed — so an oversized body is cut off without ever
+ * landing on disk in full, let alone in memory.
+ */
+class PartMeter extends Transform {
+  readonly hash = createHash('md5');
+  bytes = 0;
+  exceeded = false;
+
+  constructor(private readonly limit: number) {
+    super();
+  }
+
+  override _transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback): void {
+    this.bytes += chunk.length;
+    if (this.bytes > this.limit) {
+      this.exceeded = true;
+      cb(new Error('part exceeds expected size'));
+      return;
+    }
+    this.hash.update(chunk);
+    cb(null, chunk);
+  }
+}
 
 @Injectable()
 export class LocalDiskStorageProvider implements StorageProvider {
+  /**
+   * Local disk has no URL a remote client can PUT a part to; the API proxies
+   * part uploads through {@link writePart} instead (issue #506).
+   */
+  readonly supportsPresignedParts = false;
   private readonly logger = new Logger(LocalDiskStorageProvider.name);
   private readonly localPath: string;
 
@@ -170,35 +211,145 @@ export class LocalDiskStorageProvider implements StorageProvider {
     return { uploadId, key };
   }
 
+  /**
+   * Placeholder only: local disk has no endpoint a client can PUT to. The API
+   * never hands this to a client — because `supportsPresignedParts` is false it
+   * returns its own part-upload route instead (issue #506).
+   */
   async getSignedUploadUrl(key: string, uploadId: string, partNumber: number, _expiresIn?: number): Promise<string> {
     void key;
     return `internal://local/upload/${uploadId}/part/${partNumber}`;
   }
 
-  async completeMultipartUpload(key: string, uploadId: string, parts: UploadPart[]): Promise<StorageUploadResult> {
-    const partsDir = path.join(this.localPath, '.multipart', uploadId);
-    const fullPath = this.resolvePath(key);
-    const dir = path.dirname(fullPath);
-    fs.mkdirSync(dir, { recursive: true });
+  private partsDir(uploadId: string): string {
+    return path.join(this.localPath, '.multipart', uploadId);
+  }
 
-    // Sort parts by part number and concat
-    const sortedParts = [...parts].sort((a, b) => a.partNumber - b.partNumber);
-    const writeStream = fs.createWriteStream(fullPath);
+  private partFile(uploadId: string, partNumber: number): string {
+    return path.join(this.partsDir(uploadId), `part-${partNumber}`);
+  }
 
-    for (const part of sortedParts) {
-      const partFile = path.join(partsDir, `part-${part.partNumber}`);
-      if (fs.existsSync(partFile)) {
-        const partStream = fs.createReadStream(partFile);
-        await pipeline(partStream, writeStream, { end: false });
-      }
+  /**
+   * Stream one part to `.multipart/<uploadId>/part-<n>` (issue #506).
+   *
+   * The body goes to a uniquely named temp file first and is renamed into
+   * place only once it is complete and the right size, so a retried part is
+   * idempotent (the last complete write wins), two concurrent writes of the
+   * same part cannot interleave, and a failed or oversized body leaves the
+   * previous good copy (if any) untouched. Bytes are hashed on the way through;
+   * nothing is ever buffered beyond the stream's own high-water mark.
+   */
+  async writePart(
+    uploadId: string,
+    partNumber: number,
+    stream: Readable,
+    options: WritePartOptions,
+  ): Promise<WrittenPart> {
+    const dir = this.partsDir(uploadId);
+    if (!fs.existsSync(dir)) {
+      throw new MultipartSessionNotFoundError(uploadId);
     }
-    writeStream.end();
-    await new Promise<void>((resolve, reject) => {
-      writeStream.on('finish', resolve);
-      writeStream.on('error', reject);
-    });
 
-    // Cleanup parts dir
+    const finalPath = this.partFile(uploadId, partNumber);
+    const tmpPath = `${finalPath}.${randomUUID()}.tmp`;
+    const meter = new PartMeter(options.expectedSize);
+
+    try {
+      await pipeline(stream, meter, fs.createWriteStream(tmpPath));
+    } catch (error) {
+      fs.rmSync(tmpPath, { force: true });
+      if (meter.exceeded) {
+        throw new PartSizeMismatchError(partNumber, options.expectedSize, meter.bytes, true);
+      }
+      throw error;
+    }
+
+    if (meter.bytes !== options.expectedSize) {
+      fs.rmSync(tmpPath, { force: true });
+      throw new PartSizeMismatchError(partNumber, options.expectedSize, meter.bytes, false);
+    }
+
+    fs.renameSync(tmpPath, finalPath);
+    const eTag = `"${meter.hash.digest('hex')}"`;
+    this.logger.debug(
+      `Part written: uploadId=${uploadId}, part=${partNumber}, ${meter.bytes} bytes`,
+    );
+    return { partNumber, eTag, size: meter.bytes };
+  }
+
+  /**
+   * Concatenate the listed parts into the final object.
+   *
+   * Refuses — and writes nothing at `key` — when any listed part file is
+   * missing or its MD5 differs from the eTag the client supplied, throwing
+   * {@link MultipartPartsMissingError} with every offending part number. It
+   * used to skip a missing part silently, "completing" an empty or truncated
+   * object (issue #506).
+   *
+   * The concatenation goes to a temp file next to the destination and is
+   * renamed into place only after every part verified, hashing each part on the
+   * same single read that copies it.
+   */
+  async completeMultipartUpload(key: string, uploadId: string, parts: UploadPart[]): Promise<StorageUploadResult> {
+    const partsDir = this.partsDir(uploadId);
+    if (!fs.existsSync(partsDir)) {
+      throw new MultipartSessionNotFoundError(uploadId);
+    }
+
+    const sortedParts = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+
+    // Cheap pass first, so every missing part is reported in one round-trip.
+    const missing = sortedParts
+      .filter((part) => !fs.existsSync(this.partFile(uploadId, part.partNumber)))
+      .map((part) => part.partNumber);
+    if (missing.length > 0) {
+      throw new MultipartPartsMissingError(missing);
+    }
+
+    const fullPath = this.resolvePath(key);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    const tmpPath = `${fullPath}.${randomUUID()}.tmp`;
+    const writeStream = fs.createWriteStream(tmpPath);
+    const corrupt: number[] = [];
+
+    try {
+      for (const part of sortedParts) {
+        const hash = createHash('md5');
+        const hasher = new Transform({
+          transform(chunk: Buffer, _enc, cb) {
+            hash.update(chunk);
+            cb(null, chunk);
+          },
+        });
+        await pipeline(
+          fs.createReadStream(this.partFile(uploadId, part.partNumber)),
+          hasher,
+          writeStream,
+          { end: false },
+        );
+        if (hash.digest('hex') !== normalizeETag(part.eTag)) {
+          corrupt.push(part.partNumber);
+        }
+      }
+      writeStream.end();
+      await new Promise<void>((resolve, reject) => {
+        writeStream.on('finish', resolve);
+        writeStream.on('error', reject);
+      });
+    } catch (error) {
+      writeStream.destroy();
+      fs.rmSync(tmpPath, { force: true });
+      throw error;
+    }
+
+    if (corrupt.length > 0) {
+      fs.rmSync(tmpPath, { force: true });
+      throw new MultipartPartsMissingError(corrupt);
+    }
+
+    fs.renameSync(tmpPath, fullPath);
+
+    // Cleanup parts dir only once the object is safely in place.
     fs.rmSync(partsDir, { recursive: true, force: true });
 
     const stat = fs.statSync(fullPath);
@@ -209,7 +360,7 @@ export class LocalDiskStorageProvider implements StorageProvider {
 
   async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
     void key;
-    const partsDir = path.join(this.localPath, '.multipart', uploadId);
+    const partsDir = this.partsDir(uploadId);
     if (fs.existsSync(partsDir)) {
       fs.rmSync(partsDir, { recursive: true, force: true });
     }

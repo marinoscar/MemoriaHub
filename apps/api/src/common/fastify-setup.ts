@@ -1,3 +1,5 @@
+import { errorCodes, type FastifyInstance } from 'fastify';
+
 // =============================================================================
 // Shared Fastify server setup
 // =============================================================================
@@ -84,3 +86,47 @@ export const MULTIPART_PLUGIN_OPTIONS = {
     files: 1,
   },
 } as const;
+
+// -----------------------------------------------------------------------------
+// Raw multipart-part bodies (issue #506)
+// -----------------------------------------------------------------------------
+
+/**
+ * The one route whose body is raw bytes streamed to disk:
+ * `PUT /api/storage/objects/:id/upload/parts/:partNumber`. Matched on the
+ * route's PATTERN (not the request URL) so a lookalike path can never opt in.
+ */
+const RAW_PART_ROUTE_RE = /\/storage\/objects\/:id\/upload\/parts\/:partNumber$/;
+
+/**
+ * Register the catch-all content-type parser that lets the part-upload route
+ * receive its body as an UNREAD stream (issue #506).
+ *
+ * Why a catch-all and not `application/octet-stream` alone: a client PUTting a
+ * part (the CLI today, the Android app next) naturally labels it with the
+ * file's own type — `image/jpeg`, `video/mp4` — exactly as it would for an S3
+ * presigned PUT, which does not care. `'*'` is only Fastify's FALLBACK: the
+ * JSON, urlencoded, text and multipart parsers still win for their own types.
+ *
+ * Scoped to that one route in effect: Fastify cannot attach a parser to a
+ * single route, so for every OTHER route this parser answers exactly what
+ * Fastify answered before it existed — 415 Unsupported Media Type — and the
+ * app's behaviour for unknown content types is unchanged.
+ *
+ * The body handed to the route is the payload stream itself, never read here,
+ * so Fastify's `bodyLimit` (which only governs buffering parsers) does not
+ * apply. The route enforces the exact part size while streaming instead —
+ * a stronger bound than any static limit — and nginx caps the request at
+ * `client_max_body_size` in front of it.
+ *
+ * Must run before `app.init()` / `listen()`, like every parser registration.
+ */
+export function registerRawPartBodyParser(instance: FastifyInstance): void {
+  instance.addContentTypeParser('*', (request, payload, done) => {
+    if (RAW_PART_ROUTE_RE.test(request.routeOptions?.url ?? '')) {
+      done(null, payload);
+      return;
+    }
+    done(new errorCodes.FST_ERR_CTP_INVALID_MEDIA_TYPE());
+  });
+}

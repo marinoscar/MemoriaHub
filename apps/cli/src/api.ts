@@ -711,6 +711,32 @@ export class ApiClient {
     });
   }
 
+  /**
+   * PUT a raw part buffer to the API's OWN part-upload route
+   * (`PUT /api/storage/objects/:id/upload/parts/:n`, issue #506) — the
+   * authenticated counterpart to {@link putRaw}, used when the server answered
+   * an upload init with `partUploadAuth: 'bearer'` (the `local` storage
+   * provider, which has no presigned URLs).
+   *
+   * Takes an API PATH, not a URL: it is always sent to this client's configured
+   * server, so the bearer credential can never be handed to a host named in a
+   * server response. Returns the `ETag` response header (quoted MD5), exactly
+   * like an S3 part PUT.
+   */
+  async putPart(path: string, buffer: Buffer): Promise<string> {
+    return this.run(async () => {
+      const res = await this.fetchWithGate(`${this.baseUrl}${path}`, {
+        method: 'PUT',
+        headers: {
+          ...this.authHeaders(),
+          'Content-Type': 'application/octet-stream',
+        },
+        body: buffer as unknown as BodyInit,
+      });
+      return res.headers.get('etag') ?? res.headers.get('ETag') ?? '';
+    });
+  }
+
   async listCircles(): Promise<Circle[]> {
     // GET /api/circles returns a paginated envelope: { data: { items, total, … } }.
     // parseOk() unwraps `data`, leaving the pagination object — so pull `items`.

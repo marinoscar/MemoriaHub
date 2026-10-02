@@ -59,6 +59,8 @@ export interface S3ProviderConfig {
  */
 @Injectable()
 export class S3StorageProvider implements StorageProvider {
+  /** Part URLs are real presigned S3/R2 URLs a client PUTs to directly. */
+  readonly supportsPresignedParts = true;
   private readonly logger = new Logger(S3StorageProvider.name);
   private readonly s3Client: S3Client;
   private readonly bucket: string;

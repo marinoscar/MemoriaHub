@@ -6,7 +6,11 @@ import {
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { AppModule } from '../../src/app.module';
-import { fastifyAdapterOptions, MULTIPART_PLUGIN_OPTIONS } from '../../src/common/fastify-setup';
+import {
+  fastifyAdapterOptions,
+  MULTIPART_PLUGIN_OPTIONS,
+  registerRawPartBodyParser,
+} from '../../src/common/fastify-setup';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { prismaMock } from '../mocks/prisma.mock';
 import { OfflineGeoLocationProvider } from '../../src/media/geo/offline-geo-location.provider';
@@ -139,6 +143,9 @@ export async function createTestApp(
   // Multipart parser, with the same options as main.ts, so multipart routes
   // (e.g. the Android APK upload, #504) are tested against the real parser.
   await app.register(multipart, MULTIPART_PLUGIN_OPTIONS);
+
+  // Same raw part-body parser main.ts registers (issue #506).
+  registerRawPartBodyParser(app.getHttpAdapter().getInstance());
 
   app.setGlobalPrefix('api');
   // Note: ZodValidationPipe is already registered globally via APP_PIPE in AppModule

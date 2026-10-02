@@ -10,7 +10,11 @@ import { Logger } from '@nestjs/common';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
-import { fastifyAdapterOptions, MULTIPART_PLUGIN_OPTIONS } from './common/fastify-setup';
+import {
+  fastifyAdapterOptions,
+  MULTIPART_PLUGIN_OPTIONS,
+  registerRawPartBodyParser,
+} from './common/fastify-setup';
 import { createOpenApiDocument } from './openapi/document';
 import {
   DOCS_PATH,
@@ -47,6 +51,10 @@ async function bootstrap() {
 
   // Register multipart plugin for file uploads
   await app.register(multipart, MULTIPART_PLUGIN_OPTIONS);
+
+  // Raw, streamed bodies for PUT /api/storage/objects/:id/upload/parts/:n
+  // (issue #506). See common/fastify-setup.ts.
+  registerRawPartBodyParser(app.getHttpAdapter().getInstance());
 
   // Global prefix for all routes
   app.setGlobalPrefix('api');
