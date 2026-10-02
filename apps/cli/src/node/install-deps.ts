@@ -66,7 +66,7 @@ export interface InstallStepResult {
 // Low-level process helpers
 // ---------------------------------------------------------------------------
 
-interface ProcessResult {
+export interface ProcessResult {
   code: number | null;
   stdout: string;
   stderr: string;
@@ -80,7 +80,7 @@ interface ProcessResult {
  * commands this drives (apt-get, docker pull, npm install) can run for
  * minutes, and a synchronous call would block the whole CLI process.
  */
-function runProcess(
+export function runProcess(
   cmd: string,
   args: string[],
   opts?: { cwd?: string; env?: NodeJS.ProcessEnv },

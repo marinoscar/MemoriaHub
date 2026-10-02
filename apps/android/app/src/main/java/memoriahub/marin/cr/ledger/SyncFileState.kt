@@ -1,0 +1,3 @@
+package memoriahub.marin.cr.ledger
+
+enum class SyncFileState { DISCOVERED, QUEUED, HASHING, UPLOADING, REGISTERING, UPLOADED, DEDUPLICATED, FAILED, BLOCKED, EXCLUDED }

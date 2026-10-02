@@ -38,6 +38,7 @@ const EmailSettingsPage = lazy(() => import('./pages/Admin/EmailSettingsPage'));
 const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
 const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
 const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
+const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
 const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
@@ -167,6 +168,7 @@ function AppRoutes() {
                 <Route path="/admin/settings/email" element={<EmailSettingsPage />} />
                 <Route path="/admin/settings/push" element={<PushConfigPage />} />
                 <Route path="/admin/settings/notifications" element={<NotificationPolicyPage />} />
+                <Route path="/admin/settings/android" element={<AndroidAppPage />} />
                 <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
                 <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
                 <Route path="/admin/settings/jobs" element={<JobsPage />} />
