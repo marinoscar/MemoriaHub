@@ -87,7 +87,8 @@ Generates a new device code pair to initiate the authorization flow.
 stripped by the global `ZodValidationPipe`. `tokenType` is `"session"` or
 `"pat"` (absent means session; anything else is a 400). With `"pat"` the token
 endpoint returns a `pat_...` personal access token named from `name`, tagged
-`credentialType: "pat"`, instead of a JWT pair. See
+`credentialType: "pat"`, instead of a JWT pair (which is tagged
+`credentialType: "session"`). See
 [docs/DEVICE-AUTH.md](../../../../docs/DEVICE-AUTH.md) for the full field table.
 
 **Response:**

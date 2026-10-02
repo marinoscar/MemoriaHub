@@ -281,14 +281,15 @@ Poll for authorization status and obtain tokens when approved.
 |-------|------|----------|-------------|
 | `deviceCode` | string | Yes | Device code from /auth/device/code |
 
-**Response (200 OK - Authorized):**
+**Response (200 OK - Authorized, session):**
 ```json
 {
   "data": {
     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "refreshToken": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
     "tokenType": "Bearer",
-    "expiresIn": 900
+    "expiresIn": 604800,
+    "credentialType": "session"
   }
 }
 ```
@@ -316,7 +317,7 @@ Poll for authorization status and obtain tokens when approved.
 | `refreshToken` | string | Refresh token for a session; empty string for a PAT (re-run the device login to renew it) |
 | `tokenType` | string | Always `"Bearer"`, for both kinds: it says how to present the token, not what kind it is |
 | `expiresIn` | number | Lifetime in seconds |
-| `credentialType` | `"pat"` | PAT only. **Absent** for a session. Clients must branch on this field, never on an empty `refreshToken`. The Android companion refuses a credential whose `credentialType` is not `pat` |
+| `credentialType` | `"pat"` \| `"session"` | Which credential was issued. Clients must branch on this field, never on an empty `refreshToken`. A server older than issue #499 omits it (and always issues a session). The Android companion refuses a credential whose `credentialType` is not `pat` ([android-media-sync.md §6.7](specs/android-media-sync.md#67-device-flow)) |
 | `expiresAt` | string | PAT only. Absolute ISO-8601 expiry |
 | `tokenId` | string | PAT only. Id of the personal access token (for `DELETE /api/pat/{id}`); not a secret |
 | `tokenName` | string | PAT only. Name of the personal access token as listed in Personal Access Tokens |
