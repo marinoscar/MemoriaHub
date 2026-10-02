@@ -33,6 +33,7 @@ import {
   type UploadDiagnosticsInput,
 } from './dto/media-sync.dto';
 import { applyCommand, applyPatch, defaultConfig, readConfig } from './media-sync-config';
+import { mediaSyncRefusal } from './media-sync-refusal';
 import {
   AUDIT_COMMAND,
   AUDIT_CONFIG_UPDATED,
@@ -41,7 +42,6 @@ import {
   LAST_ERROR_MAX,
   MEDIA_SYNC_REASONS,
   type MediaSyncCommand,
-  type MediaSyncReason,
   REPORTS_KEPT_PER_DEVICE,
   RUNS_KEPT_PER_DEVICE,
 } from './media-sync.constants';
@@ -94,20 +94,6 @@ type CurrentRelease = { packageName: string; versionCode: number } | null;
 export interface MediaSyncCaller {
   id: string;
   permissions: string[];
-}
-
-/**
- * A refusal with a stable `details.reason`. `HttpExceptionFilter` derives the
- * error `code` from the HTTP status and rebuilds the body from an allowlist,
- * so the reason and every extra field live under `details` (spec D1).
- */
-export function mediaSyncRefusal(
-  status: HttpStatus,
-  reason: MediaSyncReason,
-  message: string,
-  extra: Record<string, unknown> = {},
-): HttpException {
-  return new HttpException({ message, details: { reason, ...extra } }, status);
 }
 
 /**
