@@ -109,14 +109,36 @@ A change made on the phone is sent to the server immediately; if the phone is of
 
 The phone keeps a per-file ledger and is the source of truth. The Hub and the web show **Synced** (uploaded or already on the server), **Missing** (everything eligible that is not synced: pending, uploading, failed and blocked) and the failed and blocked counts. Deleting a photo on the phone **never** deletes it on the server.
 
+### 6.3 Reading the phone's screens
+
+Long-press the app icon for the shortcuts **Media sync** and **Diagnostics**. Once the phone is paired, **Sync now** and **Pause sync** (or **Resume sync**) are added. Each opens the matching screen or runs the action (`memoriahub://media-sync`, `…/diagnostics`, `?action=sync|pause|resume`).
+
+The **Media sync** hub shows, top to bottom: an update card when a newer release exists, the server address, the pairing state, the sync card, **Open MemoriaHub** and the version. The sync card has the big counts **Synced** and **Missing**, the **Failed** and **Blocked** counts, a status line, **Start syncing** or **Stop syncing**, **Sync now**, and the buttons **Folders**, **Network & power**, **Files** and **Diagnostics**, then a health line ("All checks pass" or "N problems, open Diagnostics", red when any check fails) and the target circle (changed on the web). The status line says what the phone is doing:
+
+| Status line | Meaning | What to do |
+|---|---|---|
+| Not paired | No pairing yet | Tap it, or **Connect** |
+| Pairing expired: re-pair to resume syncing | The server refused the token | **Re-pair** ([section 12](#12-unpair-re-pair-and-token-expiry)) |
+| Syncing · 3 of 120 · IMG_1234.jpg · 45% | A run is under way | Nothing |
+| Paused | Sync was stopped here or on the web | **Start syncing** |
+| Permission needed: allow access to photos and videos | Media access is denied | Tap **Connect**, grant access |
+| No folders selected: choose the folders to back up | Nothing is selected | Tap it to open **Folders** |
+| Waiting for a network connection / Waiting for Wi-Fi / Waiting for charging | Files are waiting for the network policy or for the charger | Connect, change the policy, or plug in |
+| Partial access: only the photos and videos you selected sync | Android 13/14 partial access | **Allow access to all photos** |
+| Idle · everything is synced · last sync 5 min ago | Nothing left to do | Nothing |
+
+**Files** has the tabs **Missing**, **Failed**, **Blocked**, **Synced** and **All**, with **Retry** on a row and **Retry all failed** and **Retry blocked** at the top. **Folders** has a **Photo access** card, the **Media types** switches, and a searchable folder list with **Select all** and **None**. **Network & power** has **Network** (Wi-Fi only, or Wi-Fi and mobile data), **Power** (only while charging), **Upload existing** (all, or only new ones, with a confirmation) and **Notifications**.
+
 ## 7. Background behaviour
 
 - **New photos are picked up in batches, not instantly.** The app asks Android to wake it when the media store changes, then waits about 15 seconds (up to 2 minutes) so a burst of photos becomes one run.
 - **A catch-up runs every 6 hours** regardless, to cover anything the trigger missed. Opening the app also starts a run (at most every 15 minutes).
 - **Constraints.** Runs wait for the right network (Wi-Fi for Wi-Fi only), for charging when required, and for the phone not to be low on storage.
-- **A notification shows progress** ("Uploading 3 of 120 · IMG_1234.jpg · 45%") with a **Pause** button whenever more than one file or more than 50 MB is pending. If you hide notifications on Android 13 and later, the work still runs.
+- **A notification shows progress** (channel **Upload progress**, "Uploading 3 of 120 · IMG_1234.jpg · 45%") with a **Pause** button whenever more than one file is waiting or more than 50 MB is pending. A low-importance summary ("12 photos backed up") follows a background run that uploaded something; switch it on or off under Network & power, then Notifications. If you hide notifications on Android 13 and later, the work still runs.
 - **Stop and start.** **Stop syncing** (phone) or **Stop** (web) pauses everything, including the triggers. **Start syncing** resumes and runs at once.
 - **Android 15 limit.** Android caps this kind of foreground work at about **6 hours per 24 hours**. When the cap is reached the run stops cleanly, is recorded as partial with the code `FGS_TIMEOUT`, and the next periodic or trigger run **resumes where it stopped** (finished parts are never re-sent). A very large first backup therefore takes several days of runs, which is expected.
+- **Android can stop a run.** If the network constraint goes away mid-run (for example Wi-Fi is lost under Wi-Fi only) the run is recorded as partial with `NETWORK_POLICY`; other system stops (low storage, quota) are also recorded as partial. Either way the work is retried when the condition returns and **resumes from the saved parts**.
+- **Edits made offline are kept.** Changes made on the phone while the server is unreachable wait in a small outbox and are sent first at the next check-in.
 - **Foreground start can be refused.** On Android 12 and later the system may refuse to show the progress notification from the background. The sync carries on as ordinary background work.
 
 ### 7.1 Exempt the app from battery optimization
@@ -162,25 +184,25 @@ Each row is one self-test check on the Diagnostics screen. **Warn** and **fail**
 | Check id | Symptom | Cause | Fix |
 |---|---|---|---|
 | `app.version` | Information only | Shows the version and build | None |
-| `app.update` | Warns "an update is available". `skip`: no release, the release is for another package (a debug build), the phone is not paired, or the check failed | The server's current release has a higher `versionCode` than the installed app | Tap **Get the update** (Hub update card or the check's action) or install from `/settings/android-app` ([section 2](#2-install-the-apk)) |
+| `app.update` | Warns "an update is available". `skip`: not paired, the server publishes no release, the release is for another package (a debug build), or the update check failed | The server's current release has a higher `versionCode` than the installed app | Tap **Get the update** (Hub update card or the check's action) or install from `/settings/android-app` ([section 2](#2-install-the-apk)) |
 | `server.configured` | Fails | No server address stored | Enter it ([section 3](#3-first-run-the-server-address)) |
 | `server.reachable` | Fails | No network, wrong address, or the deployment is down. `GET /api/health/live` must answer within 5 seconds | Open the address in the phone's browser; fix the address or the deployment |
 | `pairing.token` | Fails (no token) or warns (expires in under 14 days) | Not paired, or the token is close to expiry | **Re-pair** ([section 12](#12-unpair-re-pair-and-token-expiry)) |
 | `auth.valid` | Fails | The server answered 401 (token expired or revoked) or 404/409 (the device was removed or revoked) | **Re-pair** |
-| `api.connection` | Fails | The last check-in did not succeed in the past 24 hours | Fix `server.reachable` or `auth.valid` first, then **Sync now** |
+| `api.connection` | Warns (the phone has never checked in) or fails (the last successful check-in is 24 hours old or older) | The server has not heard from this phone: no network, an expired token, or background work blocked | Fix `server.reachable` or `auth.valid` first, then check `battery.optimization` and `work.periodic`, then **Sync now** (every sync starts with a check-in) |
 | `media.permission` | Passes (full), warns (partial: "only selected photos sync") or fails (denied) | Access to photos and videos was narrowed or refused | **Grant media access** from the check, or Android Settings, then Apps, then MemoriaHub, then Permissions. Pick "Allow all" |
 | `media.location` | Warns | `ACCESS_MEDIA_LOCATION` not granted, so GPS is stripped from uploads | **Grant media access**; allow photo location |
-| `media.folders` | Fails (none selected) or warns (a selected folder no longer exists) | No folders chosen, or a folder was deleted or renamed | **Choose folders** ([section 6](#6-choose-what-to-back-up)) |
-| `media.trigger` | Fails | The new-photo trigger is not scheduled (the app was force-stopped, or its work was cancelled). Not reported while paused | **Sync now** re-arms it; open the app |
-| `work.periodic` | Fails or warns | The 6-hour background run is not scheduled | **Sync now** re-schedules it; if it keeps disappearing see `battery.optimization` |
+| `media.folders` | Fails (none selected) or warns (a selected folder no longer exists on the phone) | No folders chosen, or a folder was deleted or renamed | **Choose folders** ([section 6](#6-choose-what-to-back-up)) |
+| `media.trigger` | Fails. `skip` while paused or not paired | The new-photo trigger is not armed (the app was force-stopped, or its work was cancelled), so new photos wait for the 6-hour catch-up | **Sync now** re-arms it; open the app |
+| `work.periodic` | Fails. `skip` while paused or not paired | The 6-hour background run is not scheduled | **Sync now** re-schedules it; if it keeps disappearing see `battery.optimization` |
 | `sync.paused` | Warns | Sync is paused | **Resume** |
 | `network.policy` | Warns | "Wi-Fi only" is set, the phone is on mobile data and files are waiting | Connect to Wi-Fi, or change the policy to Wi-Fi and mobile data ([section 6](#6-choose-what-to-back-up)) |
 | `battery.optimization` | Warns | The app is not exempt, so Android delays background work | Exempt it ([section 7.1](#71-exempt-the-app-from-battery-optimization)) |
-| `notifications.permission` | Warns (Android 13 and later) | Notifications are off | Allow them, or you will miss progress and "re-pair" messages. Syncing still works |
-| `sync.last` | Warns (last good run is older than 24 hours with files pending) or fails (three failed runs in a row) | The work is blocked (battery, no network), or runs keep failing | Fix `battery.optimization`, then **Sync now**; read the run's error code under the phone's card on the web |
-| `upload.backlog` | Warns (failed files) or fails (blocked files) | Files failed or were refused; the counts are in the detail | **Retry failed** ([section 8](#8-upload-problems)) |
+| `notifications.permission` | Warns (permission denied on Android 13 and later, or notifications turned off for the app) | Notifications are off | Allow them, or you will miss progress and "re-pair" messages. Syncing still works |
+| `sync.last` | Warns (no sync has run yet, or the last complete sync is 24 hours old or older while files are waiting) or fails (the last three runs failed) | The work is blocked (battery, no network), or runs keep failing | Fix `battery.optimization`, then **Sync now**; read the run's error code under the phone's card on the web |
+| `upload.backlog` | Warns (failed files, retried automatically) or fails (blocked files, no more automatic retries) | Files failed or were refused; the counts are in the detail | **Retry failed**, or see Files, then Failed or Blocked ([section 8](#8-upload-problems)) |
 | `upload.stalled` | Warns | A file has been uploading for over an hour with no progress | **Retry failed**; if it repeats on a big file, see the local-provider row in [section 8](#8-upload-problems) |
-| `upload.target` | Fails | The last upload got `TARGET_CIRCLE_FORBIDDEN` | Choose a different target circle on the web ([section 8](#8-upload-problems)) |
+| `upload.target` | Fails | The latest run stopped on `TARGET_CIRCLE_FORBIDDEN` (paused and skipped runs are ignored) | Choose a different target circle on the web ([section 8](#8-upload-problems)) |
 | `storage.space` | Warns under 500 MB free | Hashing and temporary files need room | Free some space on the phone |
 | `twa.verification` | Warns (never fails) | `/.well-known/assetlinks.json` does not list this package and signing key, could not be fetched, or Chrome cached an old answer. The app still works with a URL bar | Trust the build ([section 4](#4-make-the-app-open-full-screen)); check the `curl` output; reopen the app. The Doctor check `android.assetlinks` shows the same on the server |
 

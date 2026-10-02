@@ -252,7 +252,7 @@ The Android app (`apps/android/`, epic #498) is a Trusted Web Activity around th
 10. **Releases go through `memoriahub android release`** (CLI-first; the admin page upload is the alternative). CI builds only the GitHub prerelease `android-latest` and **never publishes to a MemoriaHub server**. There is no CLI `deploy` command and no `deploy --with-android`.
 11. **`/.well-known/assetlinks.json` is generated from the trusted list** (`android_app` system-settings row; a release made current trusts its signer) and is public and exempt from maintenance mode. Never hard-code a signer.
 12. **No new environment variable.** Pairing lifetime is `DEVICE_PAT_TTL_DAYS`, the download-link key is derived from `SECRETS_ENCRYPTION_KEY`, and storage stays runtime-configured.
-13. **Keep the runbook in step with the code.** The diagnostics check ids (spec §13.2) and the Doctor `android.*` keys are referenced by the Android app runbook's troubleshooting tables; renaming or adding one updates that table in the same change.
+13. **Keep the runbook in step with the code.** The 22 diagnostics check ids (`CheckIds` in `apps/android/.../diagnostics/Checks.kt`, spec §13.2), their statuses and thresholds, the Hub status-line states and the Doctor `android.*` keys are referenced by the troubleshooting tables in [docs/runbooks/android-app.md](docs/runbooks/android-app.md); renaming, adding or re-thresholding one updates that table in the same change.
 
 ## Key Commands
 
