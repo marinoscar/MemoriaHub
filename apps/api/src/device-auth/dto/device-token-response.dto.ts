@@ -4,9 +4,10 @@ import { ApiProperty } from '@nestjs/swagger';
  * Response DTO for successful device authorization.
  *
  * One shape for both credential kinds (RFC 8628 §3.5: the token response is
- * an OAuth 2.0 token response). The session branch is unchanged; the fields
- * below `expiresIn` are populated only when the device requested
- * `clientInfo.tokenType: "pat"` (issue #499).
+ * an OAuth 2.0 token response). `credentialType` says which kind was issued:
+ * `'pat'` when the device requested `clientInfo.tokenType: "pat"`, otherwise
+ * `'session'`. `expiresAt`, `tokenId` and `tokenName` are populated only for
+ * a PAT (issue #499; contract: docs/specs/android-media-sync.md §6.7).
  *
  * `tokenType` is the OAuth literal `Bearer` for BOTH kinds — a PAT is
  * presented as `Authorization: Bearer pat_...`. Clients tell the two apart by
@@ -47,13 +48,14 @@ export class DeviceTokenResponseDto {
 
   @ApiProperty({
     description:
-      'Present and equal to `pat` when the device requested `clientInfo.tokenType: "pat"` ' +
-      'and a personal access token was issued. ABSENT for the session credential.',
-    enum: ['pat'],
+      'Which credential was issued: `pat` when the device requested ' +
+      '`clientInfo.tokenType: "pat"` (a personal access token), otherwise `session` ' +
+      '(a JWT plus refresh token). Clients must branch on this field; the Android ' +
+      'companion refuses anything but `pat`.',
+    enum: ['pat', 'session'],
     example: 'pat',
-    required: false,
   })
-  credentialType?: 'pat';
+  credentialType!: 'pat' | 'session';
 
   @ApiProperty({
     description: 'Absolute PAT expiry, ISO-8601. PAT only.',

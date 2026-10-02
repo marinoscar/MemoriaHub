@@ -227,8 +227,7 @@ export class DeviceAuthService {
 
           // `tokenType` stays the OAuth literal 'Bearer' (a PAT is presented
           // as `Authorization: Bearer pat_...`); `credentialType` is the
-          // discriminator clients branch on. It is present only on this
-          // branch — absent means session, mirroring the request side.
+          // discriminator clients branch on (android-media-sync spec §6.7).
           return {
             accessToken: pat.token,
             refreshToken: '',
@@ -269,6 +268,7 @@ export class DeviceAuthService {
           refreshToken: tokens.refreshToken!,
           tokenType: 'Bearer',
           expiresIn: tokens.expiresIn,
+          credentialType: 'session' as const,
         };
 
       default:

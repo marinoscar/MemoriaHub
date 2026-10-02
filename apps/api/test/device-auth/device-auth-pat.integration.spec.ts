@@ -237,7 +237,7 @@ describe('Device flow → PAT over HTTP (issue #499)', () => {
     expect(data.accessToken.split('.')).toHaveLength(3); // a JWT
     expect(typeof data.refreshToken).toBe('string');
     expect(data.refreshToken.length).toBeGreaterThan(0);
-    expect(data).not.toHaveProperty('credentialType');
+    expect(data.credentialType).toBe('session');
     expect(pats).toHaveLength(0);
   });
 
@@ -245,7 +245,7 @@ describe('Device flow → PAT over HTTP (issue #499)', () => {
     const data = await runFlow();
 
     expect(data.accessToken).not.toMatch(/^pat_/);
-    expect(data).not.toHaveProperty('credentialType');
+    expect(data.credentialType).toBe('session');
     expect(pats).toHaveLength(0);
   });
 
@@ -253,7 +253,7 @@ describe('Device flow → PAT over HTTP (issue #499)', () => {
     const data = await runFlow({ tokenType: 'session', name: 'browser' });
 
     expect(data.accessToken).not.toMatch(/^pat_/);
-    expect(data).not.toHaveProperty('credentialType');
+    expect(data.credentialType).toBe('session');
     expect(pats).toHaveLength(0);
   });
 

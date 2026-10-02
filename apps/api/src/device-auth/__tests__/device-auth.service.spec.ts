@@ -523,6 +523,7 @@ describe('DeviceAuthService', () => {
       expect(mockPatService.createToken).not.toHaveBeenCalled();
       expect(result.accessToken).toBe('mock-access-token');
       expect(result.refreshToken).toBe('mock-refresh-token');
+      expect(result.credentialType).toBe('session');
     });
 
     it('should call authService.generateFullTokens when tokenType is not "pat"', async () => {
@@ -605,6 +606,7 @@ describe('DeviceAuthService', () => {
         refreshToken: 'mock-refresh-token',
         tokenType: 'Bearer',
         expiresIn: 900,
+        credentialType: 'session',
       });
     });
   });
