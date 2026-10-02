@@ -2743,20 +2743,30 @@ enum MediaSyncRunStatus {
 /// cannot express it; never declare it as @@unique and never replace it with a
 /// findFirst pre-check (make-current clears the old flag and sets the new one
 /// in one transaction; a second current row raises P2002). `size_bytes` is a
-/// BigInt: serialize it as a string in API responses.
+/// BigInt: serialize it as a string in API responses. APKs are NOT
+/// `storage_objects` rows; `storage_provider`/`bucket` record where the bytes
+/// live (#504).
 model AndroidAppRelease {
-  id            String   @id @default(uuid()) @db.Uuid
-  packageName   String   @map("package_name")
-  versionName   String   @map("version_name") @db.VarChar(50)
-  versionCode   Int      @map("version_code")
-  signingSha256 String   @map("signing_sha256")
-  fileSha256    String   @map("file_sha256") @db.Char(64)
-  sizeBytes     BigInt   @map("size_bytes")
-  storageKey    String   @map("storage_key")
-  notes         String?  @db.VarChar(2000)
-  isCurrent     Boolean  @default(false) @map("is_current")
-  uploadedById  String?  @map("uploaded_by_id") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id              String   @id @default(uuid()) @db.Uuid
+  packageName     String   @map("package_name")
+  versionName     String   @map("version_name") @db.VarChar(50)
+  versionCode     Int      @map("version_code")
+  signingSha256   String   @map("signing_sha256")
+  fileSha256      String   @map("file_sha256") @db.Char(64)
+  sizeBytes       BigInt   @map("size_bytes")
+  storageKey      String   @map("storage_key")
+  /// The provider (`s3`, `r2`, `local`, …) and bucket the APK was written to,
+  /// so downloads and deletes resolve the RECORDED provider and an old release
+  /// stays downloadable after the active provider changes (the
+  /// `StorageObject.storageProvider` / `DatabaseBackupRun` precedent). Null
+  /// only for rows written before #504 shipped, which fall back to the active
+  /// provider.
+  storageProvider String?  @map("storage_provider")
+  bucket          String?
+  notes           String?  @db.VarChar(2000)
+  isCurrent       Boolean  @default(false) @map("is_current")
+  uploadedById    String?  @map("uploaded_by_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   uploadedBy User? @relation("AndroidAppReleaseUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
 
