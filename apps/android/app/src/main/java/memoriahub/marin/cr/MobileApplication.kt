@@ -9,6 +9,12 @@ import kotlinx.coroutines.SupervisorJob
 import memoriahub.marin.cr.auth.EncryptedTokenStore
 import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
+import memoriahub.marin.cr.contract.HealthSummary
+import memoriahub.marin.cr.contract.SyncControl
+import memoriahub.marin.cr.contract.TempNoopHealthSummary
+import memoriahub.marin.cr.contract.TempNoopSyncControl
+import memoriahub.marin.cr.contract.TempNoopUpdateStatus
+import memoriahub.marin.cr.contract.UpdateStatus
 import memoriahub.marin.cr.diagnostics.AppLog
 import memoriahub.marin.cr.ledger.LedgerRepository
 import memoriahub.marin.cr.ledger.MediaSyncDatabase
@@ -163,6 +169,18 @@ class MobileApplication : Application() {
             networkPolicy = AndroidNetworkPolicy(this, networkPreference),
             errorReactions = apiErrorReactions,
         )
+
+    // TEMP(#513) replaced at merge by #512/#514: the three contract seams the native UI reads
+    // (issues #512–#514 contract). #512 provides WorkManagerSyncControl, #514 DiagnosticsHealth
+    // and UpdateChecker; until then the Hub runs against no-ops.
+    /** Start/Stop, Sync now, retry, config edits and live progress (#512). */
+    val syncControl: SyncControl by lazy { TempNoopSyncControl }
+
+    /** The Hub's "All checks pass" / "N problems" line (#514). */
+    val healthSummary: HealthSummary by lazy { TempNoopHealthSummary }
+
+    /** A newer published release, for the Hub's Update card (#514). */
+    val updateStatus: UpdateStatus by lazy { TempNoopUpdateStatus }
 
     /** Pairing as stored on the phone (hub card, diagnostics, workers' "may I sync?" gate). */
     fun pairingStatus(): PairingStatus = PairingStatus.read(tokenStore, pairingState)
