@@ -70,6 +70,20 @@ describe('InstallPrompt', () => {
     expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
   });
 
+  it('renders nothing inside the Android app (TWA), even when the browser offers an install', () => {
+    // Issue #515: the TWA IS the installed app; offering a second install of
+    // the PWA from inside it would be wrong.
+    window.sessionStorage.setItem('memoriahub.twa', '1');
+    try {
+      const { container } = render(<InstallPrompt />);
+      fireBeforeInstallPrompt();
+      expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByText(INSTALL_MESSAGE)).not.toBeInTheDocument();
+    } finally {
+      window.sessionStorage.removeItem('memoriahub.twa');
+    }
+  });
+
   it('offers installation once the browser fires beforeinstallprompt', () => {
     render(<InstallPrompt />);
 

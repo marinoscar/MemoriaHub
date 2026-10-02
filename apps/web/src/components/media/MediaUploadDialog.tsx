@@ -87,7 +87,7 @@ async function uploadFileWithRetry(
   circleId?: string,
 ): Promise<{ deduplicated: boolean; mediaItemId: string }> {
   // 1. Init upload
-  const { objectId, partSize, totalParts, presignedUrls } = await initUpload({
+  const { objectId, partSize, totalParts, presignedUrls, partUploadAuth } = await initUpload({
     name: file.name,
     size: file.size,
     mimeType: file.type,
@@ -117,7 +117,9 @@ async function uploadFileWithRetry(
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        etag = await uploadPart(url, chunk);
+        // `partUploadAuth: 'bearer'` (local storage provider, issue #506):
+        // the part URL is the API's own route and needs the bearer token.
+        etag = await uploadPart(url, chunk, partUploadAuth ?? 'none');
         break;
       } catch (err) {
         lastErr = err instanceof Error ? err : new Error(String(err));

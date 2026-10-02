@@ -11,12 +11,18 @@
  *   POST /api/admin/android-app/releases/:id/make-current
  *   DELETE /api/admin/android-app/releases/:id
  *
+ * and, for every signed-in user (`@Auth()`, no permission; #504/#515):
+ *
+ *   GET  /api/android-app/releases/latest              PublicRelease, 404 NO_RELEASE
+ *   POST /api/android-app/releases/:id/download-link   { url, expiresAt }
+ *
  * Errors: the API's `code` is derived from the HTTP status; the machine-readable
  * cause is always `details.reason` (docs/specs/android-media-sync.md §17), so
  * callers key off `errorReason(err)`, never `err.code`.
  */
 
 import { api, ApiError } from './api';
+import { ANDROID_PACKAGE_NAME } from '../utils/androidIdentity';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -24,8 +30,11 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 // Validation mirrored from the API (android-app.schema.ts, android-release.schema.ts)
 // -----------------------------------------------------------------------------
 
-/** The release build's applicationId (spec §2). Case-sensitive; never re-cased. */
-export const ANDROID_RELEASE_PACKAGE_NAME = 'memoriahub.marin.cr';
+/**
+ * The release build's applicationId (spec §2). Case-sensitive; never re-cased.
+ * Derived from the identity mirror so the two can never drift.
+ */
+export const ANDROID_RELEASE_PACKAGE_NAME = ANDROID_PACKAGE_NAME;
 
 /** At most this many trusted (packageName, sha256) pairs (`MAX_TRUSTED_ANDROID_APPS`). */
 export const MAX_TRUSTED_APPS = 10;
@@ -327,4 +336,66 @@ export function parseReleaseSidecar(text: string): ReleaseSidecar | null {
   if (typeof r.sizeBytes === 'number' && Number.isFinite(r.sizeBytes)) out.sizeBytes = r.sizeBytes;
   const useful = out.packageName || out.versionName || out.versionCode !== undefined || out.signingSha256;
   return useful ? out : null;
+}
+
+// -----------------------------------------------------------------------------
+// The user-facing download page (#515)
+// -----------------------------------------------------------------------------
+
+export const ANDROID_APP_SETTINGS_PATH = '/settings/android-app';
+export const MEDIA_SYNC_SETTINGS_PATH = '/settings/media-sync';
+/** The admin releases page (#516). */
+export const ANDROID_APP_ADMIN_PATH = '/admin/settings/android';
+
+/** What any signed-in user may see about a release (the API's `PublicRelease`). */
+export type PublicRelease = Release;
+
+export interface DownloadLink {
+  /** Same-origin path: `/api/android-app/download/<token>`. Navigate to it. */
+  url: string;
+  expiresAt: string;
+}
+
+/** The `details.reason` of a 404 when no release is current. */
+export const NO_RELEASE_REASON = ANDROID_APP_ERROR.NO_RELEASE;
+
+/** True when an error is the API's "no release published" 404. */
+export function isNoReleaseError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 404) return false;
+  const reason = errorReason(err);
+  // A 404 without a reason (an older server) means the same thing here.
+  return reason === null || reason === NO_RELEASE_REASON;
+}
+
+/** `GET /api/android-app/releases/latest` — the current release, or `null` when none is published. */
+export async function getLatestRelease(): Promise<PublicRelease | null> {
+  try {
+    return await api.get<PublicRelease>('/android-app/releases/latest');
+  } catch (err) {
+    if (isNoReleaseError(err)) return null;
+    throw err;
+  }
+}
+
+/** `POST /api/android-app/releases/:id/download-link` — a ten-minute, same-origin download path. */
+export function createDownloadLink(releaseId: string): Promise<DownloadLink> {
+  return api.post<DownloadLink>(`/android-app/releases/${encodeURIComponent(releaseId)}/download-link`);
+}
+
+/**
+ * The navigation seam. A real navigation (not a fetch/blob) is what lets
+ * Chrome and the TWA on Android download the file natively and hand it to the
+ * installer. Kept as an object so tests can observe it.
+ */
+export const downloadNavigator = {
+  assign(url: string): void {
+    window.location.assign(url);
+  },
+};
+
+/** "48.2 MB" from a decimal byte string. */
+export function formatMegabytes(sizeBytes: string | number): string {
+  const n = Number(sizeBytes);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }

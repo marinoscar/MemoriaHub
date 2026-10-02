@@ -13,6 +13,7 @@ import { ProfileSettings } from '../components/settings/ProfileSettings';
 import { SearchFieldsSettings } from '../components/settings/SearchFieldsSettings';
 import { NotificationSettings } from '../components/settings/NotificationSettings';
 import { MemoriesSettings } from '../components/settings/MemoriesSettings';
+import { AndroidAppPanel } from '../components/settings/AndroidAppPanel';
 import { PersonalAccessTokens } from '../components/settings/PersonalAccessTokens';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -118,6 +119,10 @@ export default function UserSettingsPage() {
               onSaved={setSuccessMessage}
               disabled={isSaving}
             />
+
+            {/* Android app + Media Sync (issue #515): download the APK and
+                see/manage the phones that back up to this server. */}
+            <AndroidAppPanel />
 
             {/* Memory Preferences (issue #313) — self-hiding when the
                 `features.memories` flag is off. */}

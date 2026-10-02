@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, IconButton, Snackbar } from '@mui/material';
 import { Close as CloseIcon } from '@mui/icons-material';
 import { APP_NAME } from '../../constants/app';
+import { isRunningInTwa } from '../../utils/twa';
 
 /**
  * The "install this app" offer.
@@ -118,7 +119,12 @@ export function InstallPrompt() {
    */
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState<boolean>(readDismissed);
-  const [installed, setInstalled] = useState<boolean>(isRunningInstalled);
+  // Inside the Android app's Trusted Web Activity (issue #515) the user is
+  // already running the installed app; offering to install the PWA on top of
+  // it would add a second, redundant launcher icon.
+  const [installed, setInstalled] = useState<boolean>(
+    () => isRunningInTwa() || isRunningInstalled(),
+  );
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (event: Event) => {

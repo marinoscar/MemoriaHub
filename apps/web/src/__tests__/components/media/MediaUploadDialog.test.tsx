@@ -286,6 +286,32 @@ describe('MediaUploadDialog', () => {
       expect(mockUploadPart).toHaveBeenCalledWith(
         'https://s3.example.com/presigned?part=1',
         expect.any(Blob),
+        'none',
+      );
+    });
+
+    it("forwards partUploadAuth 'bearer' from upload/init to uploadPart (issue #506)", async () => {
+      mockInitUpload.mockResolvedValue({
+        ...makeInitUploadResponse(),
+        presignedUrls: [
+          { partNumber: 1, url: 'http://localhost:3000/api/storage/objects/obj/upload/parts/1' },
+        ],
+        partUploadAuth: 'bearer',
+      });
+      const user = userEvent.setup();
+      render(<MediaUploadDialog {...defaultProps} />);
+      fireEvent.change(getFileInput(), { target: { files: [makeImageFile()] } });
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /upload \d+ file/i })).toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole('button', { name: /upload \d+ file/i }));
+
+      await waitFor(() => expect(mockUploadPart).toHaveBeenCalledTimes(1));
+      expect(mockUploadPart).toHaveBeenCalledWith(
+        'http://localhost:3000/api/storage/objects/obj/upload/parts/1',
+        expect.any(Blob),
+        'bearer',
       );
     });
 

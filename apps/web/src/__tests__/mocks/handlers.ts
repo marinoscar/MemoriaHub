@@ -404,6 +404,20 @@ export const handlers = [
     return new HttpResponse(null, { status: 503 });
   }),
 
+  // Android app + Media Sync (issue #515). The /settings "Android app"
+  // section reads both on every render of the settings page; default to "no
+  // phones, no release" so unrelated settings tests stay quiet.
+  http.get(`${API_BASE}/media-sync/devices`, () => {
+    return HttpResponse.json({ data: [] });
+  }),
+
+  http.get(`${API_BASE}/android-app/releases/latest`, () => {
+    return HttpResponse.json(
+      { statusCode: 404, code: 'NOT_FOUND', message: 'No Android release has been published', details: { reason: 'NO_RELEASE' } },
+      { status: 404 },
+    );
+  }),
+
   http.get(`${API_BASE}/notifications/config`, () => {
     return HttpResponse.json({
       data: { pushEnabled: false, vapidPublicKey: null, browserEnabled: true, pushTypes: [] },

@@ -278,7 +278,16 @@ export interface InitUploadResponse {
   partSize: number;
   totalParts: number;
   presignedUrls: PresignedUrlPart[];
+  /**
+   * How to authenticate the PUT of each URL (issue #506). `'none'`: a
+   * presigned S3/R2 URL, sent with no Authorization header. `'bearer'`: the
+   * API's own part route (local storage provider), sent with the caller's
+   * bearer token. Absent from older servers, which only ever presigned.
+   */
+  partUploadAuth?: PartUploadAuth;
 }
+
+export type PartUploadAuth = 'none' | 'bearer';
 
 export interface UploadPart {
   partNumber: number;
