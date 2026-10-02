@@ -194,7 +194,7 @@ Server-side symptoms:
 | A change on the web does not reach the phone | It applies at the next check-in | [Section 6.1](#61-how-applies-at-next-check-in-works) |
 | The app opens with an address bar | The build is not trusted yet | [Section 4](#4-make-the-app-open-full-screen) |
 | Pairing fails and syncs answer 503 | A maintenance window is open: the device-flow routes and the upload routes are blocked. `assetlinks.json` stays reachable | Close the window ([maintenance runbook](maintenance-mode.md)), then pair or sync again |
-| Upload of the APK answers 409 `RELEASE_VERSION_EXISTS` / `RELEASE_VERSION_NOT_NEWER`, or 503 `STORAGE_NOT_CONFIGURED` | Publishing problems | [Release runbook, troubleshooting](android-release.md#10-troubleshooting) |
+| Upload of the APK answers 409 `RELEASE_VERSION_EXISTS` / `RELEASE_VERSION_NOT_NEWER`, or 503 `STORAGE_NOT_CONFIGURED` | Publishing problems | [Release runbook, troubleshooting](android-release.md#12-troubleshooting) |
 
 ## 11. The Doctor `android` section
 
