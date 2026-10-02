@@ -136,11 +136,17 @@ export function MediaSyncConfigEditor({ device, circles, canWrite, onSaved }: Me
   const [folderError, setFolderError] = useState<string | null>(null);
   const [circleError, setCircleError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // The result of our own last save. Until the parent refetches the device,
+  // `device.config` is one version behind it; diffing against the stale copy
+  // would show the just-saved change as unsaved again.
+  const [lastSaved, setLastSaved] = useState<MediaSyncConfigResult | null>(null);
   const isMounted = useIsMounted();
+  const baseConfig =
+    lastSaved && lastSaved.configVersion > device.configVersion ? lastSaved.config : device.config;
 
   const patch = useMemo(
-    () => buildConfigPatch(device.config, draft, device.inventory),
-    [device.config, draft, device.inventory],
+    () => buildConfigPatch(baseConfig, draft, device.inventory),
+    [baseConfig, draft, device.inventory],
   );
   const dirty = Object.keys(patch).length > 0;
 
@@ -155,7 +161,7 @@ export function MediaSyncConfigEditor({ device, circles, canWrite, onSaved }: Me
   const inventory = device.inventory ?? [];
   const inventoryIds = new Set(inventory.map((f) => f.bucketId));
   // Folders the config selects but the phone no longer reports.
-  const missing = device.config.folders.filter((f) => !inventoryIds.has(f.bucketId));
+  const missing = baseConfig.folders.filter((f) => !inventoryIds.has(f.bucketId));
   const query = search.trim().toLowerCase();
   const visible = inventory.filter(
     (f) =>
@@ -198,6 +204,7 @@ export function MediaSyncConfigEditor({ device, circles, canWrite, onSaved }: Me
     try {
       const result = await updateDeviceConfig(device.id, patch);
       if (!isMounted()) return;
+      setLastSaved(result);
       setDraft(draftFromConfig(result.config));
       setSaved(true);
       onSaved(result);
@@ -396,7 +403,7 @@ export function MediaSyncConfigEditor({ device, circles, canWrite, onSaved }: Me
           <Button
             disabled={!dirty || saving}
             onClick={() => {
-              setDraft(draftFromConfig(device.config));
+              setDraft(draftFromConfig(baseConfig));
               setFolderError(null);
               setCircleError(null);
               setError(null);
