@@ -11,6 +11,21 @@ import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
 import memoriahub.marin.cr.diagnostics.AppLog
 import memoriahub.marin.cr.net.ApiClient
+import memoriahub.marin.cr.net.ApiMediaSyncDevicesApi
+import memoriahub.marin.cr.net.MediaSyncDevicesApi
+import memoriahub.marin.cr.notifications.AndroidPairingNotifier
+import memoriahub.marin.cr.notifications.MediaSyncNotifications
+import memoriahub.marin.cr.pairing.ApiDeviceFlowTransport
+import memoriahub.marin.cr.pairing.ApiErrorReactions
+import memoriahub.marin.cr.pairing.DeviceFlowPoller
+import memoriahub.marin.cr.pairing.DeviceInfo
+import memoriahub.marin.cr.pairing.PairingManager
+import memoriahub.marin.cr.pairing.PairingNotifier
+import memoriahub.marin.cr.pairing.PairingStateStore
+import memoriahub.marin.cr.pairing.PairingStatus
+import memoriahub.marin.cr.pairing.SharedPrefsPairingStateStore
+import memoriahub.marin.cr.sync.NoopSyncScheduling
+import memoriahub.marin.cr.sync.SyncScheduling
 import memoriahub.marin.cr.twa.TwaLauncherActivity
 
 /**
@@ -19,7 +34,8 @@ import memoriahub.marin.cr.twa.TwaLauncherActivity
  * and workers reach them through [MobileApplication.from].
  *
  * Seams later issues fill in (add a lazy property or a `newX()` factory here, nothing else):
- * - #509 pairing: `fun newPairingManager()` over [apiClient] + [tokenStore].
+ * - #509 pairing (done): [pairingState], [pairingNotifier], [mediaSyncDevices], [apiErrorReactions],
+ *   [newPairingManager], [pairingStatus].
  * - #510 media discovery + Room ledger: `val ledger` (the Room database `<prefix>_sync.db`, built once).
  * - #511 upload engine: `fun newUploader()` over [apiClient] and the ledger.
  * - #512 background sync: `val syncScheduler` (WorkManager), wired into [onAppOpen] and [onCreate].
@@ -41,6 +57,49 @@ class MobileApplication : Application() {
         )
     }
 
+    /** Non-secret pairing state: `pairingExpired`, `pairedAt` (plain prefs `<prefix>_pairing`). */
+    val pairingState: PairingStateStore by lazy { SharedPrefsPairingStateStore.create(this) }
+
+    /** "Pairing expired — re-pair" notification. */
+    val pairingNotifier: PairingNotifier by lazy { AndroidPairingNotifier(this) }
+
+    /** `POST`/`DELETE /api/media-sync/devices` (register, unpair). */
+    val mediaSyncDevices: MediaSyncDevicesApi by lazy { ApiMediaSyncDevicesApi(apiClient) }
+
+    /**
+     * The pairing ↔ background-sync seam. TODO(#512): the WorkManager `MediaSyncScheduler`.
+     * Pairing calls ensurePeriodic()/syncNow(INITIAL) after registering and cancelAll() on unpair
+     * or DEVICE_REVOKED; read through a provider so the swap needs no other change.
+     */
+    val syncScheduling: SyncScheduling by lazy { NoopSyncScheduling }
+
+    /**
+     * Global 401 / 409 `DEVICE_REVOKED` reactions. Every authenticated Media Sync caller (#510–#514)
+     * routes its failures through [ApiErrorReactions.handle] / [ApiErrorReactions.check].
+     */
+    val apiErrorReactions: ApiErrorReactions by lazy {
+        ApiErrorReactions(tokenStore, pairingState, { syncScheduling }, pairingNotifier)
+    }
+
+    /** A pairing attempt's manager (each view model gets its own poller). */
+    fun newPairingManager(): PairingManager {
+        val transport = ApiDeviceFlowTransport(apiClient)
+        return PairingManager(
+            transport = transport,
+            poller = DeviceFlowPoller(transport),
+            devices = mediaSyncDevices,
+            tokens = tokenStore,
+            state = pairingState,
+            scheduler = { syncScheduling },
+            notifier = pairingNotifier,
+            clientInfo = { DeviceInfo.clientInfo(this) },
+            deviceRegistration = { installationId -> DeviceInfo.registration(this, installationId) },
+        )
+    }
+
+    /** Pairing as stored on the phone (hub card, diagnostics, workers' "may I sync?" gate). */
+    fun pairingStatus(): PairingStatus = PairingStatus.read(tokenStore, pairingState)
+
     /** Process-wide scope for short fire-and-forget calls (e.g. the update check on app open). */
     val appScope: CoroutineScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
 
@@ -48,6 +107,7 @@ class MobileApplication : Application() {
         super.onCreate()
         AppLog.init(this)
         AppLog.i("App", "app.start version=${BuildConfig.VERSION_NAME} code=${BuildConfig.VERSION_CODE} sdk=${Build.VERSION.SDK_INT}")
+        MediaSyncNotifications.ensureChannels(this)
         // TODO(#512): re-assert the periodic sync (KEEP) when paired, e.g. after an app data restore.
     }
 

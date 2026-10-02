@@ -156,7 +156,13 @@ publishing an unsigned one.
 | Pairing credential store | `auth/TokenStore` (`SharedPrefsTokenStore`, `EncryptedTokenStore`) |
 | HTTP client (envelope unwrap, `ApiError`, no body logging) | `net/ApiClient`, `net/ApiResult` |
 | Redacted rolling log | `diagnostics/AppLog` (`Redaction`, `RollingLog`) |
-| Media Sync deep links (`memoriahub://media-sync/...`) | `deeplink/MediaSyncLinks` |
+| Media Sync deep links (`memoriahub://media-sync/...`), building and parsing | `deeplink/MediaSyncLinks` (`route`, `EXTRA_OPEN`) |
+| Pairing: RFC 8628 device flow for a `pat_`, device registration, unpair | `pairing/DeviceFlow` (`DeviceFlowPoller`), `pairing/PairingManager`, `pairing/DeviceInfo`, `net/MediaSyncDevicesApi` |
+| Pairing state and global 401 / 409 `DEVICE_REVOKED` reactions | `pairing/PairingStatus`, `pairing/PairingStateStore`, `pairing/ApiErrorReactions` |
+| Media Sync screens (Connect today; the Hub and the rest arrive with #513) | `mediasync/MediaSyncActivity`, `mediasync/ConnectScreen`, `pairing/PairingController` |
+| Pairing ↔ background sync seam (WorkManager in #512) | `sync/SyncScheduling` (`NoopSyncScheduling` until then) |
+| Media permission state (full / partial / denied) | `permissions/MediaPermissions` |
+| Sync issue notifications ("Pairing expired — re-pair") | `notifications/MediaSyncNotifications` |
 | Brand colours and identity | `util/Brand`, `ui/theme/Theme`, `util/AppInfo` |
 
 The TWA opens `<server>/?source=twa&appVersion=<versionName>&appVersionCode=<versionCode>`; the
