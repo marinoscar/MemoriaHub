@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Legacy Android app (issue #500, epic #498)** — `apps/android/` (package `cr.marin.memoriahub`: Kotlin/Compose, Hilt, Room, Retrofit) is deleted. It had no CI build, no release or update path, and its docs contradicted the code. It is replaced by an Android app built as a TWA plus a native Media Sync module (see [Android Media Sync](docs/specs/android-media-sync.md)). `docs/specs/android-sync.md` and `docs/plan/phase-08-android-sync.md` are now superseded stubs. **The new app's ID is `memoriahub.marin.cr`, a different package, so the legacy app must be uninstalled manually** or both would upload. Kept for other clients: `MediaSource.android`, `clientInfo.returnUri` / `sanitizeReturnUri` and the `/activate` deep-link redirect.
+
 ### Changed
 
 - **API documentation overhaul (epic #414)** — `/api/docs` is now a branded, interactive [Scalar](https://scalar.com) reference in place of the scaffold's unconfigured Swagger UI, and `/api/openapi.json` is a valid OpenAPI **3.1** document. See the [API Documentation spec](docs/specs/api-documentation.md).

@@ -7,7 +7,7 @@ import { z } from 'zod';
  *
  * KEYSET ONLY — there is deliberately no `page` escape hatch the way
  * `GET /api/media` has one. That endpoint's offset mode exists purely for
- * legacy clients (the Android app, the CLI) that predate keyset; nothing has
+ * legacy clients (the CLI) that predate keyset; nothing has
  * ever consumed memories, so the dual-mode complexity and its `COUNT(*)` are
  * not inherited.
  *

@@ -39,7 +39,7 @@ The MVP of MemoriaHub should focus on the essential capabilities required to pro
 4. Allow future support for other storage providers such as Azure and additional cloud platforms.
 5. Enable syncing with local hard drives or local network storage.
 6. Provide a web application for browsing, uploading, and managing media.
-7. Provide an Android app for mobile photo and video sync.
+7. Provide an Android app (TWA + native Media Sync) for mobile photo and video sync.
 8. Provide a CLI for importing and syncing media from a computer.
 9. Provide API support so other applications, tools, and automations can interact with MemoriaHub.
 10. Provide metadata export capabilities in formats such as JSON and CSV.
@@ -129,7 +129,7 @@ Users should not be forced into one upload method.
 MemoriaHub should support multiple ways to bring media into the system:
 
 * Web app upload
-* Android app sync
+* Android app (TWA + native Media Sync)
 * CLI import from a computer
 * Sync from local hard drives or local network locations
 * Import from exported libraries
@@ -200,9 +200,9 @@ The web app should be clean, simple, and focused on control rather than social s
 
 ## Android Application
 
-The Android app should allow users to sync photos and videos from mobile devices into MemoriaHub.
+The Android app is a Trusted Web Activity (TWA) shell around the web app plus a native Media Sync module (see [docs/specs/android-media-sync.md](docs/specs/android-media-sync.md)). It should allow users to sync photos and videos from mobile devices into MemoriaHub.
 
-The MVP Android app should allow users to:
+The Android app should allow users to:
 
 * Select media folders to sync.
 * Upload new photos and videos.
@@ -515,7 +515,7 @@ The ultimate goal is to give users peace of mind that their family memories are 
 The MVP will be successful if a user can:
 
 * Upload photos and videos into MemoriaHub.
-* Sync media from an Android device.
+* Sync media from an Android device (via the Android app: TWA + native Media Sync).
 * Import media from a computer using the CLI.
 * Import media from local folders or exported collections.
 * Store media in AWS.
