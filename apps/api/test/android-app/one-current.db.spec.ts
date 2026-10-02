@@ -9,8 +9,14 @@
  * `npm test` stays runnable without Postgres; a reachable but un-migrated
  * database fails loudly.
  */
+import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { ONE_CURRENT_RELEASE_INDEX } from '../../src/android-app/releases/android-release.constants';
+import {
+  AndroidReleaseService,
+  isUniqueViolationOn,
+} from '../../src/android-app/releases/android-release.service';
 
 const PKG = 'cr.marin.memoriahub.test';
 
@@ -53,6 +59,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
   afterAll(async () => {
     if (!prisma) return;
     await prisma.androidAppRelease.deleteMany({ where: { packageName: PKG } });
+    await prisma.auditEvent.deleteMany({ where: { actorUserId: userId } }).catch(() => undefined);
     await prisma.user.delete({ where: { id: userId } }).catch(() => undefined);
     await prisma.$disconnect();
   });
@@ -64,9 +71,11 @@ describe('android_app_releases one-current partial unique index (db)', () => {
   it('rejects a second is_current=true row with P2002', async () => {
     if (!prisma) return;
     await release(1, true);
-    await expect(release(2, true)).rejects.toMatchObject({
-      code: 'P2002',
-    });
+    const error = await release(2, true).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'P2002' });
+    // The release service recognises the index BY NAME in a real driver error
+    // (issue #504: P2002 on it becomes 409 RELEASE_CURRENT_CONFLICT).
+    expect(isUniqueViolationOn(error, ONE_CURRENT_RELEASE_INDEX)).toBe(true);
     await expect(release(2, true)).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
@@ -130,5 +139,50 @@ describe('android_app_releases one-current partial unique index (db)', () => {
 
     await prisma.mediaSyncDevice.delete({ where: { id: device.id } });
     expect(await prisma.mediaSyncRun.count({ where: { deviceId: device.id } })).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AndroidReleaseService.makeCurrent against the real index (issue #504).
+  // Kept in THIS file rather than a sibling: the index is deployment-wide, so
+  // two files creating current rows in parallel Jest workers would collide.
+  // ---------------------------------------------------------------------------
+
+  const service = () =>
+    new AndroidReleaseService(
+      prisma!,
+      { getActiveProvider: jest.fn(), getProviderFor: jest.fn() } as never,
+      { ensureTrusted: jest.fn().mockResolvedValue(false) } as never,
+    );
+
+  it('makeCurrent swaps the current release in one step, rollback included', async () => {
+    if (!prisma) return;
+    const one = await release(1, false);
+    const two = await release(2, true);
+
+    const view = await service().makeCurrent(one.id, userId);
+
+    expect(view).toMatchObject({ id: one.id, isCurrent: true, sizeBytes: '5000000000' });
+    const current = await prisma.androidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
+    expect(current.map((row) => row.id)).toEqual([one.id]);
+    expect((await prisma.androidAppRelease.findUnique({ where: { id: two.id } }))?.isCurrent).toBe(false);
+  });
+
+  it('two concurrent makeCurrent calls leave exactly one current release; a loser gets RELEASE_CURRENT_CONFLICT', async () => {
+    if (!prisma) return;
+    const rows = await Promise.all([1, 2, 3, 4].map((code) => release(code, false)));
+
+    const results = await Promise.allSettled(rows.map((row) => service().makeCurrent(row.id, userId)));
+
+    const current = await prisma.androidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
+    expect(current).toHaveLength(1);
+    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        expect(result.reason).toBeInstanceOf(ConflictException);
+        expect((result.reason as ConflictException).getResponse()).toMatchObject({
+          details: { reason: 'RELEASE_CURRENT_CONFLICT' },
+        });
+      }
+    }
   });
 });
