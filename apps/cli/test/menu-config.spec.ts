@@ -82,9 +82,10 @@ describe('menu-config', () => {
       expect(shown).not.toContain('Reports');
     });
 
-    it('within Settings when logged out, only the factory-reset loggedOut leaf is visible', () => {
+    it('within Settings when logged out, only the Android and factory-reset loggedOut leaves are visible', () => {
       const settings = findSubmenu('settings')!;
       expect(labels(visibleChildren(settings, false))).toEqual([
+        'Android app (build, publish, releases)',
         'Factory reset (delete all local data)',
       ]);
     });
@@ -96,6 +97,7 @@ describe('menu-config', () => {
         'Manage circles',
         'App settings',
         'Login / Change server',
+        'Android app (build, publish, releases)',
         'Factory reset (delete all local data)',
       ]);
     });
