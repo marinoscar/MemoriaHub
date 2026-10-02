@@ -23,7 +23,17 @@ import { StorageProviderResolver } from '../providers/storage-provider.resolver'
 import {
   InitUploadDto,
   InitUploadResponseDto,
+  PartUploadAuth,
 } from './dto/init-upload.dto';
+import {
+  UploadPartResponseDto,
+  UPLOAD_ERROR_REASONS,
+} from './dto/upload-part.dto';
+import {
+  MultipartPartsMissingError,
+  MultipartSessionNotFoundError,
+  PartSizeMismatchError,
+} from '../providers/storage-provider.types';
 import {
   CompleteUploadDto,
 } from './dto/complete-upload.dto';
@@ -74,11 +84,15 @@ const STALE_MULTIPART_ERROR_NAMES = new Set([
   'InvalidPartOrder',
 ]);
 
+/** Statuses in which an object still accepts multipart parts. */
+const IN_PROGRESS_STATUSES = new Set(['pending', 'uploading']);
+
 const STALE_MULTIPART_MESSAGE_RE =
   /multipart upload does not exist|parts could not be found|NoSuchUpload|InvalidPart/i;
 
 /** True when a provider error means the client must re-init the upload. */
 function isStaleMultipartSessionError(error: unknown): boolean {
+  if (error instanceof MultipartSessionNotFoundError) return true;
   if (error == null || typeof error !== 'object') return false;
   const name = (error as { name?: unknown }).name;
   if (typeof name === 'string' && STALE_MULTIPART_ERROR_NAMES.has(name)) {
@@ -166,19 +180,15 @@ export class ObjectsService {
       },
     });
 
-    // Generate presigned URLs for first batch (up to 10 parts)
+    // Part URLs for the first batch (up to 10 parts) — presigned provider URLs,
+    // or this API's own part route when the provider has none (issue #506).
     const urlBatchSize = Math.min(10, totalParts);
-    const presignedUrls = await Promise.all(
-      Array.from({ length: urlBatchSize }, (_, i) => i + 1).map(
-        async (partNumber) => ({
-          partNumber,
-          url: await activeProvider.getSignedUploadUrl(
-            storageKey,
-            uploadId,
-            partNumber,
-          ),
-        }),
-      ),
+    const { presignedUrls, partUploadAuth } = await this.buildPartUrls(
+      activeProvider,
+      storageObject.id,
+      storageKey,
+      uploadId,
+      Array.from({ length: urlBatchSize }, (_, i) => i + 1),
     );
 
     this.logger.log(
@@ -191,7 +201,187 @@ export class ObjectsService {
       partSize,
       totalParts,
       presignedUrls,
+      partUploadAuth,
     };
+  }
+
+  /**
+   * Part URLs a client can actually PUT to, plus how to authenticate them.
+   *
+   * A provider with real presigned part URLs (S3/R2) is unchanged: its URLs
+   * are returned verbatim with `partUploadAuth: 'none'`. A provider without
+   * them (`supportsPresignedParts === false`, i.e. local disk) would otherwise
+   * hand the client `internal://` placeholders no device can reach, so the
+   * client is given this API's own absolute part route instead, with
+   * `partUploadAuth: 'bearer'` (issue #506).
+   */
+  private async buildPartUrls(
+    provider: StorageProvider,
+    objectId: string,
+    storageKey: string,
+    uploadId: string,
+    partNumbers: number[],
+  ): Promise<{
+    presignedUrls: Array<{ partNumber: number; url: string }>;
+    partUploadAuth: PartUploadAuth;
+  }> {
+    if (provider.supportsPresignedParts === false) {
+      const appUrl = this.config
+        .get<string>('appUrl', 'http://localhost:3535')
+        .replace(/\/+$/, '');
+      return {
+        presignedUrls: partNumbers.map((partNumber) => ({
+          partNumber,
+          url: `${appUrl}/api/storage/objects/${objectId}/upload/parts/${partNumber}`,
+        })),
+        partUploadAuth: 'bearer',
+      };
+    }
+
+    const presignedUrls = await Promise.all(
+      partNumbers.map(async (partNumber) => ({
+        partNumber,
+        url: await provider.getSignedUploadUrl(storageKey, uploadId, partNumber),
+      })),
+    );
+    return { presignedUrls, partUploadAuth: 'none' };
+  }
+
+  /**
+   * The size every part of `objectSize` must have under the configured part
+   * size, and how many parts there are. Mirrors the arithmetic `initUpload`
+   * and `getUploadStatus` already use.
+   */
+  private partLayout(objectSize: number): {
+    partSize: number;
+    totalParts: number;
+    sizeOf: (partNumber: number) => number;
+  } {
+    const partSize = this.config.get<number>('storage.partSize', 10485760);
+    const totalParts = Math.max(1, Math.ceil(objectSize / partSize));
+    return {
+      partSize,
+      totalParts,
+      sizeOf: (partNumber) =>
+        partNumber < totalParts ? partSize : objectSize - partSize * (totalParts - 1),
+    };
+  }
+
+  /**
+   * Receive one part of a multipart upload through the API (issue #506).
+   *
+   * Only for providers whose part URLs a client cannot reach directly (local
+   * disk); `initUpload` / `getPartUrls` point clients here for those. The body
+   * is streamed straight to the provider — never buffered — and the part is
+   * recorded in `storage_object_chunks` so `GET :id/upload/status` reports it
+   * in `uploadedParts`, which is what drives a client's resume.
+   *
+   * @param declaredLength the request's Content-Length, when it sent one; a
+   *   wrong value is rejected before a single byte is read
+   */
+  async uploadPart(
+    objectId: string,
+    partNumber: number,
+    userId: string,
+    body: Readable,
+    declaredLength?: number,
+  ): Promise<UploadPartResponseDto> {
+    const storageObject = await this.prisma.storageObject.findUnique({
+      where: { id: objectId },
+    });
+
+    if (!storageObject) {
+      throw new NotFoundException('Upload not found');
+    }
+
+    // Ownership check mirrors getUploadStatus / getPartUrls.
+    if (storageObject.uploadedById !== userId) {
+      throw new ForbiddenException('You do not own this upload');
+    }
+
+    if (!storageObject.s3UploadId || !IN_PROGRESS_STATUSES.has(storageObject.status)) {
+      throw new BadRequestException({
+        message: `Upload is not in progress (status: ${storageObject.status})`,
+        details: { reason: UPLOAD_ERROR_REASONS.UPLOAD_NOT_ACTIVE, status: storageObject.status },
+      });
+    }
+
+    const provider = await this.resolver.getProviderFor(
+      storageObject.storageProvider,
+      storageObject.bucket,
+    );
+
+    if (provider.supportsPresignedParts !== false || !provider.writePart) {
+      throw new BadRequestException({
+        message:
+          'This upload takes its parts at the presigned URLs returned by upload/init ' +
+          'and upload/part-urls, not through the API.',
+        details: { reason: UPLOAD_ERROR_REASONS.PRESIGNED_PARTS_REQUIRED },
+      });
+    }
+
+    const { partSize, totalParts, sizeOf } = this.partLayout(Number(storageObject.size));
+
+    if (partNumber < 1 || partNumber > totalParts) {
+      throw new BadRequestException({
+        message: `Part number must be between 1 and ${totalParts}`,
+        details: { reason: UPLOAD_ERROR_REASONS.PART_OUT_OF_RANGE, totalParts },
+      });
+    }
+
+    const expectedSize = sizeOf(partNumber);
+    const sizeMismatch = (receivedSize: number | null) =>
+      new BadRequestException({
+        message: `Part ${partNumber} must be exactly ${expectedSize} bytes`,
+        details: {
+          reason: UPLOAD_ERROR_REASONS.PART_SIZE_MISMATCH,
+          partNumber,
+          expectedSize,
+          receivedSize,
+          partSize,
+        },
+      });
+
+    if (declaredLength !== undefined && declaredLength !== expectedSize) {
+      throw sizeMismatch(declaredLength);
+    }
+
+    let written;
+    try {
+      written = await provider.writePart(storageObject.s3UploadId, partNumber, body, {
+        expectedSize,
+      });
+    } catch (error) {
+      if (error instanceof PartSizeMismatchError) {
+        throw sizeMismatch(error.exceeded ? null : error.receivedSize);
+      }
+      if (error instanceof MultipartSessionNotFoundError) {
+        throw this.sessionInvalid(objectId);
+      }
+      throw error;
+    }
+
+    await this.prisma.storageObjectChunk.upsert({
+      where: { objectId_partNumber: { objectId, partNumber } },
+      create: {
+        objectId,
+        partNumber,
+        eTag: written.eTag,
+        size: BigInt(written.size),
+      },
+      update: { eTag: written.eTag, size: BigInt(written.size) },
+    });
+
+    // First part in: the object is now actively uploading. Conditional so a
+    // concurrent complete (status → processing) is never rolled back.
+    if (storageObject.status === 'pending') {
+      await this.prisma.storageObject.updateMany({
+        where: { id: objectId, status: 'pending' },
+        data: { status: 'uploading' },
+      });
+    }
+
+    return written;
   }
 
   /**
@@ -277,22 +467,19 @@ export class ObjectsService {
       storageObject.bucket,
     );
 
-    const presignedUrls = await Promise.all(
-      dto.partNumbers.map(async (partNumber) => ({
-        partNumber,
-        url: await partProvider.getSignedUploadUrl(
-          storageObject.storageKey,
-          storageObject.s3UploadId!,
-          partNumber,
-        ),
-      })),
+    const { presignedUrls, partUploadAuth } = await this.buildPartUrls(
+      partProvider,
+      objectId,
+      storageObject.storageKey,
+      storageObject.s3UploadId,
+      dto.partNumbers,
     );
 
     this.logger.log(
       `Minted ${presignedUrls.length} part URL(s) for object ${objectId}`,
     );
 
-    return { presignedUrls };
+    return { presignedUrls, partUploadAuth };
   }
 
   /**
@@ -325,35 +512,64 @@ export class ObjectsService {
 
     this.logger.log(`Completing upload ${objectId} with ${parts.length} parts`);
 
-    // Record chunks in database
-    await Promise.all(
-      parts.map((part) =>
-        this.prisma.storageObjectChunk.upsert({
-          where: {
-            objectId_partNumber: {
-              objectId,
-              partNumber: part.partNumber,
-            },
-          },
-          create: {
-            objectId,
-            partNumber: part.partNumber,
-            eTag: part.eTag,
-            size: BigInt(0), // We don't know exact part size from client
-          },
-          update: {
-            eTag: part.eTag,
-          },
-        }),
-      ),
-    );
-
     // Re-resolve from the object row so an active-provider switch between
     // initUpload and completeUpload cannot misroute to the wrong provider.
     const completeProvider = await this.resolver.getProviderFor(
       storageObject.storageProvider,
       storageObject.bucket,
     );
+
+    // Parts that went through the API (local disk, issue #506) were recorded
+    // with their real size and eTag as they arrived. For those the part list
+    // must also cover EVERY part of the object: concatenating 1 and 3 without 2
+    // is a corrupt file, not a smaller one.
+    const apiProxiedParts = completeProvider.supportsPresignedParts === false;
+
+    if (apiProxiedParts) {
+      const { totalParts } = this.partLayout(Number(storageObject.size));
+      const listed = new Set(parts.map((part) => part.partNumber));
+      const outOfRange = [...listed].filter((n) => n > totalParts);
+      if (outOfRange.length > 0) {
+        throw new BadRequestException({
+          message: `Part numbers must be between 1 and ${totalParts}`,
+          details: {
+            reason: UPLOAD_ERROR_REASONS.PART_OUT_OF_RANGE,
+            totalParts,
+            partNumbers: outOfRange.sort((a, b) => a - b),
+          },
+        });
+      }
+      const unlisted = Array.from({ length: totalParts }, (_, i) => i + 1).filter(
+        (n) => !listed.has(n),
+      );
+      if (unlisted.length > 0) {
+        throw this.partsMissing(objectId, unlisted);
+      }
+    } else {
+      // Record chunks in database. S3/R2 parts never pass through the API, so
+      // this is the first time the server learns about them.
+      await Promise.all(
+        parts.map((part) =>
+          this.prisma.storageObjectChunk.upsert({
+            where: {
+              objectId_partNumber: {
+                objectId,
+                partNumber: part.partNumber,
+              },
+            },
+            create: {
+              objectId,
+              partNumber: part.partNumber,
+              eTag: part.eTag,
+              size: BigInt(0), // We don't know exact part size from client
+            },
+            update: {
+              eTag: part.eTag,
+            },
+          }),
+        ),
+      );
+    }
 
     // Complete upload with storage provider.
     //
@@ -370,15 +586,17 @@ export class ObjectsService {
         parts,
       );
     } catch (error) {
+      if (error instanceof MultipartPartsMissingError) {
+        // Forget the bad parts so GET :id/upload/status stops reporting them
+        // as uploaded — a client resuming from status then re-sends exactly
+        // these, rather than skipping them forever.
+        await this.prisma.storageObjectChunk.deleteMany({
+          where: { objectId, partNumber: { in: error.partNumbers } },
+        });
+        throw this.partsMissing(objectId, error.partNumbers);
+      }
       if (isStaleMultipartSessionError(error)) {
-        this.logger.warn(
-          `Multipart session for object ${objectId} is no longer valid on the ` +
-            `storage provider; the client must re-initialize the upload.`,
-        );
-        throw new ConflictException(
-          'The multipart upload session is no longer valid on the storage ' +
-            'provider. Re-initialize the upload and send the parts again.',
-        );
+        throw this.sessionInvalid(objectId);
       }
       throw error;
     }
@@ -406,6 +624,43 @@ export class ObjectsService {
     this.logger.log(`Upload completed: ${objectId}`);
 
     return this.mapToResponseDto(updated);
+  }
+
+  /**
+   * 409 `UPLOAD_PARTS_MISSING`: the client re-sends exactly `partNumbers`
+   * (fresh URLs from `upload/part-urls`) and calls `complete` again. The
+   * session stays open, so the parts it already sent are kept.
+   */
+  private partsMissing(objectId: string, partNumbers: number[]): ConflictException {
+    const sorted = [...partNumbers].sort((a, b) => a - b);
+    this.logger.warn(
+      `Refusing to complete upload ${objectId}: missing or corrupt part(s) ${sorted.join(', ')}`,
+    );
+    return new ConflictException({
+      message:
+        'Some parts of this upload are missing or do not match their eTag. ' +
+        'Re-send the listed parts, then complete the upload again.',
+      details: { reason: UPLOAD_ERROR_REASONS.UPLOAD_PARTS_MISSING, partNumbers: sorted },
+    });
+  }
+
+  /**
+   * 409 `UPLOAD_SESSION_INVALID`: the provider no longer knows the multipart
+   * session (garbage-collected, already completed or aborted), or the client's
+   * ETags belong to another one. A CLIENT-STATE error, never a 500: the client
+   * aborts and re-initializes the upload (issues #183, #506).
+   */
+  private sessionInvalid(objectId: string): ConflictException {
+    this.logger.warn(
+      `Multipart session for object ${objectId} is no longer valid on the ` +
+        `storage provider; the client must re-initialize the upload.`,
+    );
+    return new ConflictException({
+      message:
+        'The multipart upload session is no longer valid on the storage ' +
+        'provider. Re-initialize the upload and send the parts again.',
+      details: { reason: UPLOAD_ERROR_REASONS.UPLOAD_SESSION_INVALID },
+    });
   }
 
   /**

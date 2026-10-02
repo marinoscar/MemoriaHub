@@ -5,6 +5,8 @@ import {
   MultipartUploadInit,
   UploadPart,
   SignedUrlOptions,
+  WrittenPart,
+  WritePartOptions,
 } from './storage-provider.types';
 
 /**
@@ -17,6 +19,36 @@ export const STORAGE_PROVIDER = Symbol('STORAGE_PROVIDER');
  * Supports both simple uploads and multipart resumable uploads
  */
 export interface StorageProvider {
+  /**
+   * Whether {@link getSignedUploadUrl} returns a URL a remote client (phone,
+   * CLI, browser) can PUT a part to directly.
+   *
+   * `true` for S3/R2 (real presigned URLs). `false` for local disk, whose part
+   * URLs are internal placeholders: for those the API hands out its own
+   * `PUT /api/storage/objects/:id/upload/parts/:n` route instead and streams
+   * each part through {@link writePart} (issue #506).
+   */
+  readonly supportsPresignedParts: boolean;
+
+  /**
+   * Stream one multipart part to the provider. Implemented only by providers
+   * with `supportsPresignedParts === false`; S3/R2 clients PUT parts straight
+   * to the presigned URL and never reach this.
+   *
+   * Must never buffer the whole part in memory, must be idempotent for a
+   * retried part (the last complete write wins), and must keep nothing when the
+   * body's size differs from `options.expectedSize`.
+   *
+   * @throws PartSizeMismatchError when the body is shorter or longer than expected
+   * @throws MultipartSessionNotFoundError when the upload session is gone
+   */
+  writePart?(
+    uploadId: string,
+    partNumber: number,
+    stream: Readable,
+    options: WritePartOptions,
+  ): Promise<WrittenPart>;
+
   /**
    * Simple upload for small to medium files
    * Stream is uploaded directly to storage

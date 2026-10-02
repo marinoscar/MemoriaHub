@@ -114,6 +114,39 @@ describe('ApiClient putRaw', () => {
   });
 });
 
+describe('ApiClient putPart (issue #506)', () => {
+  it('PUTs raw bytes with the bearer credential to its own server and returns the ETag', async () => {
+    const fetchMock = mockFetchSequence([
+      () => new Response(null, { status: 200, headers: { etag: '"md5"' } }),
+    ]);
+    const api = makeClient();
+
+    await expect(
+      api.putPart('/api/storage/objects/o1/upload/parts/2', Buffer.from('bytes')),
+    ).resolves.toBe('"md5"');
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://example.test/api/storage/objects/o1/upload/parts/2');
+    expect(init.method).toBe('PUT');
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer pat-123',
+      'Content-Type': 'application/octet-stream',
+    });
+  });
+
+  it('putRaw (presigned storage URLs) never sends the credential', async () => {
+    const fetchMock = mockFetchSequence([
+      () => new Response(null, { status: 200, headers: { etag: '"e"' } }),
+    ]);
+    const api = makeClient();
+
+    await api.putRaw('https://s3.test/part', Buffer.from('x'), 'image/jpeg');
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.headers).not.toHaveProperty('Authorization');
+  });
+});
+
 describe('ApiClient listCircles', () => {
   it('unwraps the paginated { data: { items } } envelope to an array', async () => {
     mockFetchSequence([

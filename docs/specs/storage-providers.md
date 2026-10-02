@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.0 |
-| **Last Updated** | June 2026 |
+| **Version** | 1.1 |
+| **Last Updated** | October 2026 |
 | **Status** | Specification |
 
 ---
@@ -258,6 +258,28 @@ This means:
 
 A multipart upload that is in progress when the active provider is switched will complete on the original provider because the upload initiation stamped a specific `storageProvider` value onto the `StorageObject` row. The complete-multipart call resolves the provider from the `StorageObject` row, not from the current active provider setting. Do not delete a provider's credentials while a multipart upload is in progress for that provider.
 
+### Multipart Part URLs and the `local` Provider (issue #506)
+
+A resumable upload is `POST /api/storage/objects/upload/init` → one `PUT` per part → `POST /api/storage/objects/:id/upload/complete`. Parts are **10 MiB** (`storage.partSize`, env `STORAGE_PART_SIZE`, minimum 5 MiB for S3), every part except the last is exactly that size, and clients must always use the `partSize`/`totalParts` the init response returned rather than assume one. Init returns the URLs of the first ≤10 parts; `POST :id/upload/part-urls` mints more (≤100 per call).
+
+Each provider declares `supportsPresignedParts` on the `StorageProvider` interface, and init and part-urls carry a **`partUploadAuth`** field telling the client how to send each part:
+
+| Provider | `supportsPresignedParts` | Part URLs | `partUploadAuth` | The client sends |
+|---|---|---|---|---|
+| `s3`, `r2` | `true` | presigned S3/R2 URLs, unchanged | `none` | **no** `Authorization` header (S3 rejects one, and the credential must not leave for a storage host) |
+| `local` | `false` | `${APP_URL}/api/storage/objects/:id/upload/parts/:n` | `bearer` | `Authorization: Bearer <JWT or pat_>`, the credential it uses for every other call |
+
+Local disk has no URL a device can reach, so its `getSignedUploadUrl` placeholders (`internal://…`) are never handed out; the API proxies the part instead:
+
+- **`PUT /api/storage/objects/:id/upload/parts/:partNumber`** — authenticated (`@Auth()`, JWT or PAT); only the object's uploader may call it (403 otherwise, 404 for an unknown object). The raw body (`application/octet-stream`; the file's own media type is accepted too, JSON and text are not) is **streamed** to `.multipart/<uploadId>/part-<n>` via a uniquely named temp file and a rename, through an MD5 meter, and never buffered. A retried part replaces the earlier copy (idempotent). The answer mirrors an S3 part PUT: `200`, empty body, the quoted MD5 in the `ETag` header. The part is recorded in `storage_object_chunks` with its real size, and the first part moves the object from `pending` to `uploading`.
+- Validation (`details.reason`): `UPLOAD_NOT_ACTIVE` (object not `pending`/`uploading`), `PART_OUT_OF_RANGE` (`partNumber` outside `1..totalParts`), `PART_SIZE_MISMATCH` (checked against `Content-Length` before reading, and again while streaming — an oversized body is cut off), `PRESIGNED_PARTS_REQUIRED` (the upload's provider takes presigned parts), all 400; `RAW_BODY_REQUIRED` 415.
+- **`complete` refuses missing or corrupt parts.** The part list must cover every part `1..totalParts`, and the local provider re-hashes each part file while concatenating it into a temp file. A part that is unlisted, absent on disk, or whose MD5 differs from the supplied `eTag` fails the call with **409 `details.reason: 'UPLOAD_PARTS_MISSING'`** and `details.partNumbers`; nothing is written at the object's key, the session stays open, and those parts' chunk rows are dropped. It used to skip a missing part file silently and "complete" a truncated object.
+- A session the provider no longer has (completed, aborted, cleaned up — or, on S3/R2, `NoSuchUpload`/`InvalidPart`) is **409 `details.reason: 'UPLOAD_SESSION_INVALID'`** on `complete` and on a part PUT: the client aborts and re-initializes.
+
+**Resume is driven by `GET /api/storage/objects/:id/upload/status`.** For the `local` provider its `uploadedParts` is exact: a part appears once it is stored and disappears again if `complete` reported it missing, so a client re-sends `totalParts` minus `uploadedParts` (or just `details.partNumbers` after a 409). For S3/R2 the server learns about parts only at `complete`, so `uploadedParts` can be empty while the parts exist in the bucket; there the client's own record of ETags is authoritative and `status` only confirms the session is still alive (`pending`/`uploading`) or already finished (`processing`/`ready`). See [Android Media Sync §9.1](android-media-sync.md#91-per-file-pipeline).
+
+The body never meets Fastify's `bodyLimit`: a catch-all content-type parser (`registerRawPartBodyParser`, `apps/api/src/common/fastify-setup.ts`) hands this one route the unread request stream and keeps 415 for every other route. nginx (`infra/nginx/nginx.conf`, `nginx.prod.conf`) has a dedicated `location ~ ^/api/storage/objects/[^/]+/upload/parts/` with `client_max_body_size 64m`, `proxy_request_buffering off` and 300 s timeouts; raise the 64m if `STORAGE_PART_SIZE` ever approaches it.
+
 ### Presigned URL Endpoint Correctness for R2
 
 Cloudflare R2 requires an explicit `endpoint` to be set (e.g. `https://<account_id>.r2.cloudflarestorage.com`). When constructing the S3-compatible client for R2, the resolver passes this endpoint to the AWS SDK v3 `S3Client`. Presigned URLs generated for R2 objects will include the R2 endpoint hostname. If the `endpoint` value in the credential row is wrong, presigned URLs will be malformed and downloads will fail. Always use `POST /api/storage-settings/test` to verify R2 connectivity before saving credentials.
@@ -380,3 +402,4 @@ One row per object in a migration run. Provides per-object progress and idempote
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | June 2026 | AI Assistant | Initial specification |
+| 1.1 | October 2026 | AI Assistant | Multipart part URLs and `partUploadAuth`; API-proxied part upload for the `local` provider; `UPLOAD_PARTS_MISSING` / `UPLOAD_SESSION_INVALID` (issue #506) |

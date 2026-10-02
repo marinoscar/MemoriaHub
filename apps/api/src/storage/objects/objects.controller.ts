@@ -4,7 +4,11 @@ import {
   Get,
   Delete,
   Patch,
+  Put,
   Param,
+  Res,
+  ParseIntPipe,
+  UnsupportedMediaTypeException,
   Body,
   Query,
   Req,
@@ -22,7 +26,8 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { FastifyRequest } from 'fastify';
+import { FastifyReply, FastifyRequest } from 'fastify';
+import { Readable } from 'stream';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { Auth } from '../../auth/decorators/auth.decorator';
@@ -54,6 +59,9 @@ import {
 import {
   DownloadUrlResponseDto,
 } from './dto/download-url-response.dto';
+import {
+  UPLOAD_ERROR_REASONS,
+} from './dto/upload-part.dto';
 import {
   GetPartUrlsDto,
   GetPartUrlsResponseDto,
@@ -289,6 +297,85 @@ export class ObjectsController {
   }
 
   /**
+   * Receive one multipart part through the API (issue #506).
+   *
+   * Used only when the upload's storage provider has no URL a device can PUT
+   * to (the `local` provider): `upload/init` and `upload/part-urls` then hand
+   * out this route with `partUploadAuth: 'bearer'`. The raw body is streamed
+   * straight to disk — the route's content-type parser (see
+   * `common/fastify-setup.ts`) passes the request stream through untouched,
+   * so a part is never buffered in memory.
+   */
+  @Put(':id/upload/parts/:partNumber')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Upload one part through the API',
+    description:
+      'Upload the raw bytes of one part of a multipart upload whose storage provider has no ' +
+      'presigned part URLs (the local provider). Use the URLs returned by upload/init and ' +
+      'upload/part-urls; when their partUploadAuth is "bearer" they point here and need the ' +
+      'usual Authorization: Bearer header (JWT or PAT). Send the bytes as ' +
+      'application/octet-stream (any non-JSON, non-text type is accepted). Each part except ' +
+      'the last must be exactly partSize bytes. Idempotent: re-sending a part replaces it. ' +
+      'Returns an empty body and the part MD5 as a quoted ETag header, to pass to complete.',
+  })
+  @ApiConsumes('application/octet-stream')
+  @ApiParam({ name: 'id', type: String, format: 'uuid', description: 'StorageObject ID' })
+  @ApiParam({ name: 'partNumber', type: Number, description: 'Part number, 1..totalParts' })
+  @ApiResponse({
+    status: 200,
+    description: 'Part stored. Empty body; the ETag header carries its quoted MD5',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Upload not in progress, provider takes presigned parts, part number out of range, or ' +
+      'wrong part size (details.reason)',
+  })
+  @ApiResponse({ status: 403, description: 'Access denied - you do not own this upload' })
+  @ApiResponse({ status: 404, description: 'Upload not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'details.reason UPLOAD_SESSION_INVALID: the session is gone; abort and re-init',
+  })
+  @ApiResponse({ status: 415, description: 'Body was not sent as raw bytes' })
+  async uploadPart(
+    @Param('id', ParseUUIDPipe) objectId: string,
+    @Param('partNumber', ParseIntPipe) partNumber: number,
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply,
+    @CurrentUser('id') userId: string,
+  ): Promise<void> {
+    // The raw-part parser hands the body over as the request stream. Anything
+    // else means a JSON or text parser already consumed it.
+    if (!(req.body instanceof Readable)) {
+      throw new UnsupportedMediaTypeException({
+        message: 'Send the part as raw bytes (Content-Type: application/octet-stream)',
+        details: { reason: UPLOAD_ERROR_REASONS.RAW_BODY_REQUIRED },
+      });
+    }
+
+    const lengthHeader = req.headers['content-length'];
+    const declaredLength =
+      typeof lengthHeader === 'string' && /^\d+$/.test(lengthHeader)
+        ? Number(lengthHeader)
+        : undefined;
+
+    const result = await this.objectsService.uploadPart(
+      objectId,
+      partNumber,
+      userId,
+      req.body,
+      declaredLength,
+    );
+
+    // Answer exactly like an S3 presigned part PUT: 200, empty body, quoted
+    // MD5 in ETag (docs/specs/android-media-sync.md §6.1). Clients read the
+    // header and need no second code path for API part URLs.
+    reply.status(HttpStatus.OK).header('ETag', result.eTag).send();
+  }
+
+  /**
    * Complete multipart upload
    */
   @Post(':id/upload/complete')
@@ -300,6 +387,12 @@ export class ObjectsController {
     status: 200,
     description: 'Upload completed successfully',
     type: Object,
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'details.reason UPLOAD_SESSION_INVALID: the session is gone, re-initialize; or ' +
+      'UPLOAD_PARTS_MISSING: re-send details.partNumbers and complete again',
   })
   async completeUpload(
     @Param('id') objectId: string,

@@ -66,6 +66,14 @@ const mockPollForDeviceToken = jest.fn<() => Promise<string>>();
 jest.unstable_mockModule('../../src/device-auth.js', () => ({
   requestDeviceCode: mockRequestDeviceCode,
   pollForDeviceToken: mockPollForDeviceToken,
+  // Pure helper (issue #499) — a faithful stand-in so the request body the
+  // screen sends can still be asserted.
+  buildPatClientInfo: (name: string, hostname: string, platform: string) => ({
+    tokenType: 'pat',
+    name,
+    hostname,
+    platform,
+  }),
 }));
 
 // ---------------------------------------------------------------------------

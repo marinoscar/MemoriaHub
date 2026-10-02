@@ -13,6 +13,9 @@ import {
  * All methods return sensible defaults that can be overridden in tests
  */
 export const createMockStorageProvider = (): jest.Mocked<StorageProvider> => ({
+  // Behaves like S3/R2: presigned part URLs a client PUTs to directly.
+  supportsPresignedParts: true,
+
   upload: jest.fn().mockResolvedValue({
     key: 'test-key',
     bucket: 'test-bucket',

@@ -14,7 +14,12 @@
 import * as os from 'os';
 import chalk from 'chalk';
 import { ui, createSpinner, printBox } from './ui.js';
-import { requestDeviceCode, pollForDeviceToken, type DeviceTokenResult } from './device-auth.js';
+import {
+  buildPatClientInfo,
+  requestDeviceCode,
+  pollForDeviceToken,
+  type DeviceTokenResult,
+} from './device-auth.js';
 import { openBrowser } from './open-browser.js';
 
 /**
@@ -36,12 +41,10 @@ export async function runDeviceLogin(
 
   let codeResp;
   try {
-    codeResp = await requestDeviceCode(serverUrl, {
-      tokenType: 'pat',
-      name: clientName,
-      hostname: os.hostname(),
-      platform: os.platform(),
-    });
+    codeResp = await requestDeviceCode(
+      serverUrl,
+      buildPatClientInfo(clientName, os.hostname(), os.platform()),
+    );
   } catch (err) {
     codeSpinner.fail(
       `Failed to request device code: ${err instanceof Error ? err.message : String(err)}`,
@@ -92,5 +95,15 @@ export async function runDeviceLogin(
   }
 
   pollSpinner.succeed('Device authorized');
+  if (tokenResult.credentialType !== 'pat') {
+    // A server older than the issue #499 fix drops `tokenType` and hands back
+    // a short-lived session token. It still works, so do not fail the login,
+    // but say why it will stop working in days rather than months.
+    ui.warn(
+      'The server issued a short-lived session token instead of a personal access token ' +
+        '(the server may need upgrading). You will need to run `memoriahub login` again ' +
+        'when it expires.',
+    );
+  }
   return tokenResult;
 }
