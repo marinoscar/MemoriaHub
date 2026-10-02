@@ -15,6 +15,8 @@ import DevicesIcon from '@mui/icons-material/Devices';
 import ComputerIcon from '@mui/icons-material/Computer';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import LocationIcon from '@mui/icons-material/LocationOn';
+import AppsIcon from '@mui/icons-material/Apps';
+import KeyIcon from '@mui/icons-material/VpnKey';
 import type { DeviceActivationInfo } from '../../types';
 
 interface DeviceInfoCardProps {
@@ -92,6 +94,35 @@ export function DeviceInfoCard({
       <Card variant="outlined" sx={{ mb: 3 }}>
         <CardContent>
           <Stack spacing={2.5}>
+            {/* Client name (issue #499), e.g. "MemoriaHub Android · Pixel 8" */}
+            {deviceInfo.clientInfo.name && (
+              <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
+                <AppsIcon sx={{ mr: 1.5, mt: 0.5, color: 'text.secondary' }} />
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    Application
+                  </Typography>
+                  <Typography
+                    variant="body1"
+                    sx={{ fontWeight: 'medium', wordBreak: 'break-word' }}
+                  >
+                    {deviceInfo.clientInfo.name}
+                  </Typography>
+                  {(deviceInfo.clientInfo.hostname || deviceInfo.clientInfo.platform) && (
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ wordBreak: 'break-word' }}
+                    >
+                      {[deviceInfo.clientInfo.hostname, deviceInfo.clientInfo.platform]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            )}
+
             {/* Device Name */}
             {deviceInfo.clientInfo.deviceName && (
               <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
@@ -132,6 +163,22 @@ export function DeviceInfoCard({
                   </Typography>
                   <Typography variant="body2">
                     {deviceInfo.clientInfo.ipAddress}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+
+            {/* Credential kind: a PAT outlives this session, so say so. */}
+            {deviceInfo.clientInfo.tokenType === 'pat' && (
+              <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
+                <KeyIcon sx={{ mr: 1.5, mt: 0.5, color: 'text.secondary' }} />
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Access granted
+                  </Typography>
+                  <Typography variant="body2">
+                    A long-lived personal access token. You can revoke it at any time
+                    in your settings under Personal Access Tokens.
                   </Typography>
                 </Box>
               </Box>

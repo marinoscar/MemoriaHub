@@ -1,4 +1,8 @@
-import { sanitizeReturnUri } from '../device-code-request.dto';
+import {
+  ClientInfoSchema,
+  DeviceCodeRequestSchema,
+  sanitizeReturnUri,
+} from '../device-code-request.dto';
 
 describe('sanitizeReturnUri', () => {
   // -------------------------------------------------------------------------
@@ -134,5 +138,61 @@ describe('sanitizeReturnUri', () => {
     it('returns null for a boolean', () => {
       expect(sanitizeReturnUri(true)).toBeNull();
     });
+  });
+});
+
+describe('ClientInfoSchema (issue #499)', () => {
+  it('keeps tokenType, name, hostname and platform', () => {
+    const parsed = ClientInfoSchema.parse({
+      tokenType: 'pat',
+      name: 'MemoriaHub CLI',
+      hostname: 'oscar-laptop',
+      platform: 'linux',
+    });
+    expect(parsed).toEqual({
+      tokenType: 'pat',
+      name: 'MemoriaHub CLI',
+      hostname: 'oscar-laptop',
+      platform: 'linux',
+    });
+  });
+
+  it('leaves tokenType absent when not sent (absent means session)', () => {
+    expect(ClientInfoSchema.parse({ deviceName: 'TV' })).toEqual({ deviceName: 'TV' });
+  });
+
+  it('accepts tokenType "session"', () => {
+    expect(ClientInfoSchema.parse({ tokenType: 'session' }).tokenType).toBe('session');
+  });
+
+  it.each(['PAT', 'admin', '', 'jwt'])('rejects unknown tokenType %p', (tokenType) => {
+    expect(ClientInfoSchema.safeParse({ tokenType }).success).toBe(false);
+  });
+
+  it('trims name and enforces the 100-char cap', () => {
+    expect(ClientInfoSchema.parse({ name: '  x  ' }).name).toBe('x');
+    expect(ClientInfoSchema.safeParse({ name: 'n'.repeat(100) }).success).toBe(true);
+    expect(ClientInfoSchema.safeParse({ name: 'n'.repeat(101) }).success).toBe(false);
+  });
+
+  it('bounds hostname (255) and platform (50)', () => {
+    expect(ClientInfoSchema.safeParse({ hostname: 'h'.repeat(256) }).success).toBe(false);
+    expect(ClientInfoSchema.safeParse({ platform: 'p'.repeat(51) }).success).toBe(false);
+  });
+
+  it('strips keys outside the allowlist (no passthrough)', () => {
+    expect(
+      ClientInfoSchema.parse({ tokenType: 'pat', isAdmin: true, scopes: ['*'] }),
+    ).toEqual({ tokenType: 'pat' });
+  });
+
+  it('still rejects a non-https/memoriahub returnUri', () => {
+    expect(
+      ClientInfoSchema.safeParse({ returnUri: 'javascript:alert(1)' }).success,
+    ).toBe(false);
+  });
+
+  it('parses a bodyless request as {}', () => {
+    expect(DeviceCodeRequestSchema.parse(undefined)).toEqual({});
   });
 });

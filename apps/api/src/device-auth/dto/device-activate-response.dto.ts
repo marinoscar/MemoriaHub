@@ -21,6 +21,38 @@ export class DeviceClientInfoDto {
 
   @ApiProperty({
     description:
+      'Human-readable client label supplied by the requesting app, e.g. ' +
+      '"MemoriaHub Android · Pixel 8". For a PAT this becomes the token name.',
+    example: 'MemoriaHub CLI',
+    required: false,
+  })
+  name?: string;
+
+  @ApiProperty({
+    description:
+      'Credential kind the device will receive once approved: `pat` (long-lived personal ' +
+      'access token) or `session`. Absent means session.',
+    enum: ['session', 'pat'],
+    required: false,
+  })
+  tokenType?: 'session' | 'pat';
+
+  @ApiProperty({
+    description: 'Hostname of the requesting machine (informational)',
+    example: 'oscar-laptop',
+    required: false,
+  })
+  hostname?: string;
+
+  @ApiProperty({
+    description: 'Platform of the requesting machine (informational)',
+    example: 'linux',
+    required: false,
+  })
+  platform?: string;
+
+  @ApiProperty({
+    description:
       'Deep-link URI the web activation page uses to redirect the user back into ' +
       'the requesting app after they approve or deny the device. ' +
       'Accepted schemes: memoriahub: or https:.',

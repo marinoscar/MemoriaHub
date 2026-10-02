@@ -36,6 +36,7 @@ import * as os from 'node:os';
 import { ApiClient } from '../api.js';
 import { saveConfig, type CliConfig } from '../config.js';
 import {
+  buildPatClientInfo,
   requestDeviceCode,
   pollForDeviceToken,
   type DeviceTokenResult,
@@ -163,12 +164,10 @@ export function NodeEnroll({ config, onEnrolled, onBack }: NodeEnrollProps): Rea
     const normalised = serverUrl.replace(/\/$/, '');
     void (async () => {
       try {
-        const resp = await requestDeviceCode(normalised, {
-          tokenType: 'pat',
-          name: 'MemoriaHub Node Enrollment',
-          hostname: os.hostname(),
-          platform: os.platform(),
-        });
+        const resp = await requestDeviceCode(
+          normalised,
+          buildPatClientInfo('MemoriaHub Node Enrollment', os.hostname(), os.platform()),
+        );
         if (cancelledRef.current) return;
         setDeviceInfo({
           userCode: resp.userCode,
