@@ -11,7 +11,9 @@ import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
 import memoriahub.marin.cr.diagnostics.AppLog
 import memoriahub.marin.cr.net.ApiClient
+import memoriahub.marin.cr.ledger.UploadLedger
 import memoriahub.marin.cr.net.ApiMediaSyncDevicesApi
+import memoriahub.marin.cr.net.ApiMediaUploadApi
 import memoriahub.marin.cr.net.MediaSyncDevicesApi
 import memoriahub.marin.cr.notifications.AndroidPairingNotifier
 import memoriahub.marin.cr.notifications.MediaSyncNotifications
@@ -27,6 +29,11 @@ import memoriahub.marin.cr.pairing.SharedPrefsPairingStateStore
 import memoriahub.marin.cr.sync.NoopSyncScheduling
 import memoriahub.marin.cr.sync.SyncScheduling
 import memoriahub.marin.cr.twa.TwaLauncherActivity
+import memoriahub.marin.cr.upload.AndroidContentSource
+import memoriahub.marin.cr.upload.AndroidNetworkPolicy
+import memoriahub.marin.cr.upload.NetworkPreference
+import memoriahub.marin.cr.upload.PartUploader
+import memoriahub.marin.cr.upload.UploadEngine
 
 /**
  * Process-wide singletons. Deliberately no DI framework (no Hilt/Dagger): every collaborator is
@@ -37,7 +44,7 @@ import memoriahub.marin.cr.twa.TwaLauncherActivity
  * - #509 pairing (done): [pairingState], [pairingNotifier], [mediaSyncDevices], [apiErrorReactions],
  *   [newPairingManager], [pairingStatus].
  * - #510 media discovery + Room ledger: `val ledger` (the Room database `<prefix>_sync.db`, built once).
- * - #511 upload engine: `fun newUploader()` over [apiClient] and the ledger.
+ * - #511 upload engine (done): [newUploadEngine] over [apiClient] and a ledger.
  * - #512 background sync: `val syncScheduler` (WorkManager), wired into [onAppOpen] and [onCreate].
  * - #514 diagnostics + updates: `val diagnostics`, `val updateChecker`, wired into [onAppOpen].
  */
@@ -96,6 +103,26 @@ class MobileApplication : Application() {
             deviceRegistration = { installationId -> DeviceInfo.registration(this, installationId) },
         )
     }
+
+    /**
+     * A resumable upload engine over [apiClient] (issue #511). #512 builds one per sync run:
+     * `newUploadEngine(ledger) { NetworkPreference.fromWire(config.network) }.run(target, …)`,
+     * where `target = UploadTarget(config.targetCircleId, tokenStore.deviceId!!, deviceName)`.
+     * Part PUTs use their own OkHttp client; the PAT is only ever sent to this server's origin.
+     */
+    fun newUploadEngine(ledger: UploadLedger, networkPreference: () -> NetworkPreference): UploadEngine =
+        UploadEngine(
+            ledger = ledger,
+            api = ApiMediaUploadApi(apiClient),
+            partUploader = PartUploader(
+                serverBaseUrl = { serverConfig.serverUrl },
+                tokenProvider = { tokenStore.token },
+                userAgent = ApiClient.userAgent(BuildConfig.VERSION_NAME),
+            ),
+            source = AndroidContentSource(this),
+            networkPolicy = AndroidNetworkPolicy(this, networkPreference),
+            errorReactions = apiErrorReactions,
+        )
 
     /** Pairing as stored on the phone (hub card, diagnostics, workers' "may I sync?" gate). */
     fun pairingStatus(): PairingStatus = PairingStatus.read(tokenStore, pairingState)
