@@ -10,7 +10,7 @@ import { Logger } from '@nestjs/common';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { AppModule } from './app.module';
-import { fastifyAdapterOptions } from './common/fastify-setup';
+import { fastifyAdapterOptions, MULTIPART_PLUGIN_OPTIONS } from './common/fastify-setup';
 import { createOpenApiDocument } from './openapi/document';
 import {
   DOCS_PATH,
@@ -46,12 +46,7 @@ async function bootstrap() {
   });
 
   // Register multipart plugin for file uploads
-  await app.register(multipart, {
-    limits: {
-      fileSize: 100 * 1024 * 1024, // 100MB for simple upload
-      files: 1,
-    },
-  });
+  await app.register(multipart, MULTIPART_PLUGIN_OPTIONS);
 
   // Global prefix for all routes
   app.setGlobalPrefix('api');
