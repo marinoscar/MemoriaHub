@@ -2335,6 +2335,8 @@ The Android app is distributed from the deployment itself. These endpoints host 
 - **`sizeBytes` is a string** (a 64-bit integer): never parse it as a JSON number.
 - **Fingerprints** are uppercase colon form (`AA:BB:…`) everywhere on the server; uploads and the CLI sidecar may use lowercase hex without colons and are normalised.
 
+---
+
 ### Media Sync (Android app devices)
 
 A **device** is one phone running the native Media Sync module. The server keeps a versioned *desired config* for it (folders, network policy, target circle, paused); the phone **pulls** that config on every check-in and reports counts, runs and diagnostics back. Conventions only; the endpoint reference is the OpenAPI. Design: [android-media-sync.md §5-6](specs/android-media-sync.md#5-desired-config-and-commands); operation: [Android app runbook](runbooks/android-app.md).
@@ -2362,6 +2364,8 @@ A **device** is one phone running the native Media Sync module. The server keeps
 - **Byte counts are strings** (`bytesUploaded` in runs, sizes in reports): they are 64-bit integers.
 - **Retention.** The newest 200 runs and 20 diagnostic reports per device are kept.
 - **Uploads reuse the Storage Objects pipeline.** The phone uploads bytes with `POST /api/storage/objects/upload/init` and the part routes ([Storage Objects](#storage-objects): `partUploadAuth` is `"bearer"` for the `local` provider), then registers the item with `POST /api/media` using `source: "android"` and its `sourceDeviceId`. Deduplication is by `(circleId, contentHash)`, so re-sending a file is harmless.
+
+---
 
 ### Health
 
