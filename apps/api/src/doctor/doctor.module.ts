@@ -10,6 +10,12 @@ import { StorageSettingsModule } from '../storage-settings/storage-settings.modu
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { SocialMediaModule } from '../social-media/social-media.module';
 import { DedupModule } from '../dedup/dedup.module';
+// Android checks (#507): AndroidAppService + AndroidReleaseService, read-only.
+// AndroidAppModule imports only StorageProvidersModule (→ SettingsModule), and
+// nothing imports DoctorModule except AppModule, so this closes no cycle.
+// Media Sync devices are read through the global PrismaModule; MediaSyncModule
+// (and its CirclesModule import) is deliberately NOT pulled in.
+import { AndroidAppModule } from '../android-app/android-app.module';
 
 @Module({
   imports: [
@@ -22,6 +28,7 @@ import { DedupModule } from '../dedup/dedup.module';
     EnrichmentModule,
     SocialMediaModule,
     DedupModule,
+    AndroidAppModule,
   ],
   controllers: [DoctorController],
   providers: [DoctorService],
