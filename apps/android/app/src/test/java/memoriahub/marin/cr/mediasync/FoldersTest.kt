@@ -12,7 +12,7 @@ import memoriahub.marin.cr.ledger.BucketStats
 import memoriahub.marin.cr.ledger.SyncStats
 import memoriahub.marin.cr.media.Bucket
 import memoriahub.marin.cr.permissions.MediaPermissionState
-import memoriahub.marin.cr.testing.FakeSyncControl
+import memoriahub.marin.cr.testing.RecordingSyncControl
 import memoriahub.marin.cr.testing.syncConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -90,7 +90,7 @@ class FoldersControllerTest {
         Bucket("wa", "WhatsApp Images", "Pictures/WhatsApp/", 3, 0, 1),
     )
 
-    private fun TestScope.controller(control: FakeSyncControl, paired: Boolean = true): FoldersController {
+    private fun TestScope.controller(control: RecordingSyncControl, paired: Boolean = true): FoldersController {
         val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         return FoldersController(
             control = control,
@@ -103,7 +103,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `loads the saved selection and types`() = runTest {
-        val control = FakeSyncControl(syncConfig(folderIds = listOf("camera"), includeVideos = false))
+        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera"), includeVideos = false))
         val c = controller(control)
         c.load()
         advanceUntilIdle()
@@ -116,7 +116,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `saving online patches the config then syncs`() = runTest {
-        val control = FakeSyncControl(syncConfig(folderIds = listOf("camera")))
+        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera")))
         val c = controller(control)
         c.load(); advanceUntilIdle()
         c.toggle("wa")
@@ -129,7 +129,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `saving offline keeps the edit as saved for the outbox and does not sync`() = runTest {
-        val control = FakeSyncControl(syncConfig(folderIds = listOf("camera"))).apply {
+        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera"))).apply {
             result = Result.failure(IOException("no network"))
         }
         val c = controller(control)
@@ -145,7 +145,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `a server rejection shows the error and keeps the edit`() = runTest {
-        val control = FakeSyncControl(syncConfig(folderIds = listOf("camera"))).apply {
+        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera"))).apply {
             result = Result.failure(IllegalArgumentException("UNKNOWN_FOLDER"))
         }
         val c = controller(control)
@@ -158,7 +158,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `unpaired phones cannot save`() = runTest {
-        val control = FakeSyncControl(null)
+        val control = RecordingSyncControl(null)
         val c = controller(control, paired = false)
         c.load(); advanceUntilIdle()
         c.toggle("wa")
@@ -169,7 +169,7 @@ class FoldersControllerTest {
     }
 
     @Test fun `reload keeps unsaved edits`() = runTest {
-        val control = FakeSyncControl(syncConfig(folderIds = listOf("camera")))
+        val control = RecordingSyncControl(syncConfig(folderIds = listOf("camera")))
         val c = controller(control)
         c.load(); advanceUntilIdle()
         c.toggle("wa")

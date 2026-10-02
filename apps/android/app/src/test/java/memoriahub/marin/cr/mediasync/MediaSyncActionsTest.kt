@@ -4,7 +4,7 @@ import kotlinx.coroutines.test.runTest
 import memoriahub.marin.cr.deeplink.MediaSyncAction
 import memoriahub.marin.cr.deeplink.MediaSyncLinks
 import memoriahub.marin.cr.deeplink.MediaSyncPath
-import memoriahub.marin.cr.testing.FakeSyncControl
+import memoriahub.marin.cr.testing.RecordingSyncControl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,7 +13,7 @@ import org.junit.Test
 
 class MediaSyncActionsTest {
     @Test fun `apply checks in and reports settings applied`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val outcome = MediaSyncActions.run(MediaSyncAction.APPLY, paired = true, control = control)
         assertEquals(listOf("checkinNow"), control.calls)
         assertEquals("Settings applied", outcome.message)
@@ -21,26 +21,26 @@ class MediaSyncActionsTest {
     }
 
     @Test fun `sync runs sync now`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         MediaSyncActions.run(MediaSyncAction.SYNC, paired = true, control = control)
         assertEquals(listOf("syncNow"), control.calls)
     }
 
     @Test fun `retry retries failed then syncs`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         MediaSyncActions.run(MediaSyncAction.RETRY, paired = true, control = control)
         assertEquals(listOf("retryFailed", "syncNow"), control.calls)
     }
 
     @Test fun `pause and resume set the paused flag`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         assertEquals("Sync paused", MediaSyncActions.run(MediaSyncAction.PAUSE, paired = true, control = control).message)
         assertEquals("Sync resumed", MediaSyncActions.run(MediaSyncAction.RESUME, paired = true, control = control).message)
         assertEquals(listOf("setPaused(true)", "setPaused(false)"), control.calls)
     }
 
     @Test fun `failures report the reason and do not sync`() = runTest {
-        val control = FakeSyncControl().apply { result = Result.failure(IllegalStateException("offline")) }
+        val control = RecordingSyncControl().apply { result = Result.failure(IllegalStateException("offline")) }
         val outcome = MediaSyncActions.run(MediaSyncAction.RETRY, paired = true, control = control)
         assertFalse(outcome.ok)
         assertEquals("Could not retry the failed files: offline", outcome.message)
@@ -49,7 +49,7 @@ class MediaSyncActionsTest {
     }
 
     @Test fun `nothing runs when the phone is not paired`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         for (action in MediaSyncAction.entries) {
             val outcome = MediaSyncActions.run(action, paired = false, control = control)
             assertFalse(outcome.ok)

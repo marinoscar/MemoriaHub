@@ -10,7 +10,7 @@ import kotlinx.coroutines.test.runTest
 import memoriahub.marin.cr.ledger.SyncFileEntity
 import memoriahub.marin.cr.ledger.SyncFileState
 import memoriahub.marin.cr.ledger.SyncStats
-import memoriahub.marin.cr.testing.FakeSyncControl
+import memoriahub.marin.cr.testing.RecordingSyncControl
 import memoriahub.marin.cr.testing.ledgerRow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -94,12 +94,12 @@ class FilesControllerTest {
 
     private fun rows(n: Int, state: SyncFileState) = (1..n).map { ledgerRow(state, it.toLong()).copy(id = it.toLong()) }
 
-    private fun TestScope.controller(ledger: FakeLedger, control: FakeSyncControl, paired: Boolean = true) =
+    private fun TestScope.controller(ledger: FakeLedger, control: RecordingSyncControl, paired: Boolean = true) =
         FilesController(ledger, control, { paired }, CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler)), clock = { 0 })
 
     @Test fun `loads the missing tab with a page and knows when there is more`() = runTest {
         val ledger = FakeLedger(rows(FilesController.PAGE + 5, SyncFileState.QUEUED))
-        val c = controller(ledger, FakeSyncControl())
+        val c = controller(ledger, RecordingSyncControl())
         c.reload(); advanceUntilIdle()
         assertEquals(FilesTab.MISSING.states to FilesController.PAGE + 1, ledger.queries.last())
         assertEquals(FilesController.PAGE, c.state.value.rows.size)
@@ -111,7 +111,7 @@ class FilesControllerTest {
 
     @Test fun `switching tabs queries that tab from the first page`() = runTest {
         val ledger = FakeLedger(rows(3, SyncFileState.FAILED))
-        val c = controller(ledger, FakeSyncControl())
+        val c = controller(ledger, RecordingSyncControl())
         c.selectTab(FilesTab.FAILED); advanceUntilIdle()
         assertEquals(setOf(SyncFileState.FAILED) to FilesController.PAGE + 1, ledger.queries.last())
         assertEquals(3, c.state.value.rows.size)
@@ -120,7 +120,7 @@ class FilesControllerTest {
 
     @Test fun `per-row retry requeues in the ledger then syncs`() = runTest {
         val ledger = FakeLedger(rows(1, SyncFileState.FAILED))
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val c = controller(ledger, control)
         c.retry(1); advanceUntilIdle()
         assertEquals(listOf(1L), ledger.retried)
@@ -130,7 +130,7 @@ class FilesControllerTest {
 
     @Test fun `retrying a row that already moved does not sync`() = runTest {
         val ledger = FakeLedger(rows(1, SyncFileState.UPLOADED))
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val c = controller(ledger, control)
         c.retry(1); advanceUntilIdle()
         assertTrue(control.calls.isEmpty())
@@ -138,7 +138,7 @@ class FilesControllerTest {
     }
 
     @Test fun `retry all failed goes through the control then syncs`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val c = controller(FakeLedger(rows(2, SyncFileState.FAILED)), control)
         c.retryAllFailed(); advanceUntilIdle()
         assertEquals(listOf("retryFailed", "syncNow"), control.calls)
@@ -146,7 +146,7 @@ class FilesControllerTest {
 
     @Test fun `retry blocked requeues blocked rows then syncs`() = runTest {
         val ledger = FakeLedger(rows(2, SyncFileState.BLOCKED))
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val c = controller(ledger, control)
         c.retryBlocked(); advanceUntilIdle()
         assertEquals(1, ledger.blockedRetried)
@@ -156,7 +156,7 @@ class FilesControllerTest {
 
     @Test fun `unpaired retries requeue but do not schedule a sync`() = runTest {
         val ledger = FakeLedger(rows(1, SyncFileState.FAILED))
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val c = controller(ledger, control, paired = false)
         c.retry(1); advanceUntilIdle()
         assertEquals(listOf(1L), ledger.retried)

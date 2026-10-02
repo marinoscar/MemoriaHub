@@ -8,6 +8,11 @@ export interface Circle {
   isPersonal: boolean;
   createdAt: string;
   updatedAt: string;
+  /**
+   * The caller's own per-circle role. `GET /api/circles` returns it on every
+   * item; other endpoints (a single circle, create) do not, so it is optional.
+   */
+  memberRole?: CircleRole;
 }
 
 export interface CircleMember {

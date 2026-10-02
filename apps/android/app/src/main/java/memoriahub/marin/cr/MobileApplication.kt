@@ -11,9 +11,6 @@ import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
 import memoriahub.marin.cr.contract.HealthSummary
 import memoriahub.marin.cr.contract.SyncControl
-import memoriahub.marin.cr.contract.TempNoopHealthSummary
-import memoriahub.marin.cr.contract.TempNoopSyncControl
-import memoriahub.marin.cr.contract.TempNoopUpdateStatus
 import memoriahub.marin.cr.contract.UpdateStatus
 import memoriahub.marin.cr.diagnostics.AppLog
 import memoriahub.marin.cr.ledger.LedgerRepository
@@ -48,6 +45,26 @@ import memoriahub.marin.cr.upload.MediaGatewayContentSource
 import memoriahub.marin.cr.upload.NetworkPreference
 import memoriahub.marin.cr.upload.PartUploader
 import memoriahub.marin.cr.upload.UploadEngine
+// #514 diagnostics + updates
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import memoriahub.marin.cr.contract.SyncConfigView
+import memoriahub.marin.cr.contract.SyncStatusView
+import memoriahub.marin.cr.diagnostics.AndroidDiagnosticsPlatform
+import memoriahub.marin.cr.diagnostics.ApiDiagnosticsApi
+import memoriahub.marin.cr.diagnostics.ApiServerProbe
+import memoriahub.marin.cr.diagnostics.AutoDiagnostics
+import memoriahub.marin.cr.diagnostics.DiagnosticsHealth
+import memoriahub.marin.cr.diagnostics.DiagnosticsService
+import memoriahub.marin.cr.diagnostics.LedgerDiagnosticsSource
+import memoriahub.marin.cr.diagnostics.PrefsAutoDiagnosticsStore
+import memoriahub.marin.cr.diagnostics.SelfTest
+import memoriahub.marin.cr.update.ApiReleaseApi
+import memoriahub.marin.cr.update.PrefsUpdateStore
+import memoriahub.marin.cr.update.ReleaseApi
+import memoriahub.marin.cr.update.UpdateChecker
+import memoriahub.marin.cr.update.openInBrowser
 
 /**
  * Process-wide singletons. Deliberately no DI framework (no Hilt/Dagger): every collaborator is
@@ -61,7 +78,8 @@ import memoriahub.marin.cr.upload.UploadEngine
  *   [ledger], [uploadLedger], [mediaScanner].
  * - #511 upload engine (done): [newUploadEngine] over [apiClient], [uploadLedger] and [mediaGateway].
  * - #512 background sync: `val syncScheduler` (WorkManager), wired into [onAppOpen] and [onCreate].
- * - #514 diagnostics + updates: `val diagnostics`, `val updateChecker`, wired into [onAppOpen].
+ * - #514 diagnostics + updates (done): [diagnostics] / [healthSummary], [autoDiagnostics], [updateStatus],
+ *   wired into [onAppOpen].
  */
 class MobileApplication : Application() {
     /** The server this app talks to (plain prefs `<prefix>_config`). */
@@ -170,17 +188,84 @@ class MobileApplication : Application() {
             errorReactions = apiErrorReactions,
         )
 
-    // TEMP(#513) replaced at merge by #512/#514: the three contract seams the native UI reads
-    // (issues #512–#514 contract). #512 provides WorkManagerSyncControl, #514 DiagnosticsHealth
-    // and UpdateChecker; until then the Hub runs against no-ops.
-    /** Start/Stop, Sync now, retry, config edits and live progress (#512). */
+    // ---------------------------------------------------------------------------------------------
+    // #514 diagnostics + updates (docs/specs/android-media-sync.md §13)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * TEMP(#514) replaced at merge by #512's `syncControl` (WorkManagerSyncControl). Diagnostics reads
+     * sync state only through this seam; the no-op reports nothing scheduled and no check-in yet.
+     */
     val syncControl: SyncControl by lazy { TempNoopSyncControl }
 
-    /** The Hub's "All checks pass" / "N problems" line (#514). */
-    val healthSummary: HealthSummary by lazy { TempNoopHealthSummary }
+    /** `GET /api/android-app/releases/latest`, `POST …/:id/download-link` (PAT). */
+    val releaseApi: ReleaseApi by lazy { ApiReleaseApi(apiClient) }
 
-    /** A newer published release, for the Hub's Update card (#514). */
-    val updateStatus: UpdateStatus by lazy { TempNoopUpdateStatus }
+    /** The Hub's update card (§13.6): checked on app open and Hub resume, at most every 12 h, only while paired. */
+    val updateStatus: UpdateStatus by lazy {
+        UpdateChecker(
+            api = releaseApi,
+            store = PrefsUpdateStore.from(this),
+            ownPackage = packageName,
+            ownVersionCode = BuildConfig.VERSION_CODE.toLong(),
+            isPaired = { pairingStatus().paired },
+            serverUrl = { serverConfig.serverUrl },
+            openUrl = { url -> openInBrowser(this, url) },
+            onApiFailure = { apiErrorReactions.handle(it) },
+        )
+    }
+
+    private val diagnosticsService: DiagnosticsService by lazy {
+        val api = ApiDiagnosticsApi(apiClient)
+        DiagnosticsService(
+            selfTest = {
+                SelfTest(
+                    platform = AndroidDiagnosticsPlatform(this),
+                    serverUrl = { serverConfig.serverUrl },
+                    server = ApiServerProbe(apiClient),
+                    api = api,
+                    releases = releaseApi,
+                    pairing = ::pairingStatus,
+                    sync = { syncControl },
+                    ledger = LedgerDiagnosticsSource(ledger, mediaSyncDatabase.syncFiles(), mediaScanner),
+                    onApiFailure = { apiErrorReactions.handle(it) },
+                )
+            },
+            api = api,
+            pairing = ::pairingStatus,
+            token = { tokenStore.token },
+            runs = { ledger.recentRuns(10) },
+            onApiFailure = { apiErrorReactions.handle(it) },
+        )
+    }
+
+    /** Self-test state shared by the Diagnostics screen and the Hub's health line. */
+    val diagnostics: DiagnosticsHealth by lazy {
+        DiagnosticsHealth(
+            service = diagnosticsService,
+            sync = { syncControl },
+            recentRuns = { limit -> ledger.recentRuns(limit) },
+            resetLedger = { ledger.resetLocalState() },
+            scope = appScope,
+        )
+    }
+
+    /** The Hub's `HealthLine` ("All checks pass" / "N problems"). */
+    val healthSummary: HealthSummary get() = diagnostics
+
+    /**
+     * Uploads a report after a `failed`/`partial` run (at most every 6 h, only when paired and live).
+     * #512's worker calls `autoDiagnostics.onRunFinished(status)` after recording each run.
+     */
+    val autoDiagnostics: AutoDiagnostics by lazy {
+        AutoDiagnostics(
+            pairing = ::pairingStatus,
+            server = ApiServerProbe(apiClient),
+            service = diagnosticsService,
+            store = PrefsAutoDiagnosticsStore.from(this),
+            scope = appScope,
+        )
+    }
 
     /** Pairing as stored on the phone (hub card, diagnostics, workers' "may I sync?" gate). */
     fun pairingStatus(): PairingStatus = PairingStatus.read(tokenStore, pairingState)
@@ -202,10 +287,31 @@ class MobileApplication : Application() {
      */
     fun onAppOpen() {
         // TODO(#512): MediaSyncScheduler.onAppOpen(this) — debounced "sync now" when paired.
-        // TODO(#514): AppUpdates.onAppOpen(this) — throttled check for a newer published release.
+        // #514: throttled (12 h) check for a newer published release; only while paired.
+        appScope.launch { updateStatus.checkNow() }
     }
 
     companion object {
         fun from(context: Context): MobileApplication = context.applicationContext as MobileApplication
     }
+}
+
+/** TEMP(#514) replaced at merge by #512's WorkManagerSyncControl. */
+private object TempNoopSyncControl : SyncControl {
+    override val status: StateFlow<SyncStatusView> = MutableStateFlow(
+        SyncStatusView(
+            running = false, currentFile = null, bytesSent = 0, bytesTotal = 0, filesDone = 0, filesTotal = 0,
+            lastRunAtMs = null, lastRunStatus = null, lastError = null, lastCheckinAtMs = null,
+        ),
+    )
+    override fun currentConfig(): SyncConfigView? = null
+    override fun syncNow() = Unit
+    override suspend fun setPaused(paused: Boolean): Result<Unit> = Result.failure(UnsupportedOperationException("Background sync is not available yet."))
+    override suspend fun retryFailed(): Result<Unit> = Result.failure(UnsupportedOperationException("Background sync is not available yet."))
+    override suspend fun updateConfig(patch: memoriahub.marin.cr.contract.ConfigPatch): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Background sync is not available yet."))
+    override suspend fun checkinNow(): Result<Unit> = Result.failure(UnsupportedOperationException("Background sync is not available yet."))
+    override fun isPeriodicScheduled(): Boolean = false
+    override fun isContentTriggerArmed(): Boolean = false
+    override fun lastContentTriggerAtMs(): Long? = null
 }

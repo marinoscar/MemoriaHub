@@ -32,7 +32,7 @@ fun syncConfig(
 )
 
 /** Records every [SyncControl] call; results are configurable per test. (#512's real implementation is WorkManager.) */
-class FakeSyncControl(var config: SyncConfigView? = syncConfig()) : SyncControl {
+class RecordingSyncControl(var config: SyncConfigView? = syncConfig()) : SyncControl {
     override val status = MutableStateFlow(idleStatus)
     val calls = mutableListOf<String>()
     val patches = mutableListOf<ConfigPatch>()

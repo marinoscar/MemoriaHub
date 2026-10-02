@@ -15,7 +15,7 @@ import memoriahub.marin.cr.ledger.SyncStats
 import memoriahub.marin.cr.pairing.PairingStatus
 import memoriahub.marin.cr.permissions.MediaPermissionState
 import memoriahub.marin.cr.testing.FakeHealthSummary
-import memoriahub.marin.cr.testing.FakeSyncControl
+import memoriahub.marin.cr.testing.RecordingSyncControl
 import memoriahub.marin.cr.testing.FakeUpdateStatus
 import memoriahub.marin.cr.testing.syncConfig
 import org.junit.Assert.assertEquals
@@ -31,7 +31,7 @@ class HubControllerTest {
     private val published = mutableListOf<Pair<Boolean, Boolean>>()
     private val circleLookups = mutableListOf<String>()
 
-    private fun TestScope.hub(control: FakeSyncControl, health: FakeHealthSummary = FakeHealthSummary(), updates: FakeUpdateStatus = FakeUpdateStatus()): Pair<HubController, CoroutineScope> {
+    private fun TestScope.hub(control: RecordingSyncControl, health: FakeHealthSummary = FakeHealthSummary(), updates: FakeUpdateStatus = FakeUpdateStatus()): Pair<HubController, CoroutineScope> {
         val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         val sources = HubSources(
             serverUrl = { "https://photos.example.com" },
@@ -49,7 +49,7 @@ class HubControllerTest {
     @Test fun `refresh reads the ledger, circle name, health and update, and publishes shortcuts`() = runTest {
         val health = FakeHealthSummary()
         val updates = FakeUpdateStatus()
-        val (hub, scope) = hub(FakeSyncControl(), health, updates)
+        val (hub, scope) = hub(RecordingSyncControl(), health, updates)
         hub.refresh(); advanceUntilIdle()
         val s = hub.state.value
         assertEquals(1, s.synced)
@@ -62,7 +62,7 @@ class HubControllerTest {
     }
 
     @Test fun `circle name is looked up once per circle`() = runTest {
-        val (hub, scope) = hub(FakeSyncControl())
+        val (hub, scope) = hub(RecordingSyncControl())
         hub.refresh(checkHealthAndUpdates = false); advanceUntilIdle()
         hub.refresh(checkHealthAndUpdates = false); advanceUntilIdle()
         assertEquals(1, circleLookups.size)
@@ -70,7 +70,7 @@ class HubControllerTest {
     }
 
     @Test fun `stop syncing pauses, reports and republishes the shortcuts`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val (hub, scope) = hub(control)
         advanceUntilIdle()
         hub.setPaused(true); advanceUntilIdle()
@@ -82,7 +82,7 @@ class HubControllerTest {
     }
 
     @Test fun `apply action checks in and says settings applied`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val (hub, scope) = hub(control)
         hub.runAction(MediaSyncAction.APPLY); advanceUntilIdle()
         assertEquals(listOf("checkinNow"), control.calls)
@@ -91,7 +91,7 @@ class HubControllerTest {
     }
 
     @Test fun `live progress re-derives the status line and reloads stats when a file finishes`() = runTest {
-        val control = FakeSyncControl()
+        val control = RecordingSyncControl()
         val (hub, scope) = hub(control)
         advanceUntilIdle()
         val before = statsReads
@@ -110,7 +110,7 @@ class HubControllerTest {
 
     @Test fun `health line updates as the self-test finishes`() = runTest {
         val health = FakeHealthSummary()
-        val (hub, scope) = hub(FakeSyncControl(), health)
+        val (hub, scope) = hub(RecordingSyncControl(), health)
         advanceUntilIdle()
         health.line.value = HealthLine(10, 0, 1, 1)
         advanceUntilIdle()
@@ -120,7 +120,7 @@ class HubControllerTest {
 
     @Test fun `unpaired hub never runs actions`() = runTest {
         pairing = PairingStatus()
-        val control = FakeSyncControl(syncConfig())
+        val control = RecordingSyncControl(syncConfig())
         val (hub, scope) = hub(control)
         hub.syncNow(); advanceUntilIdle()
         assertTrue(control.calls.isEmpty())
