@@ -8,6 +8,7 @@ import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { MaintenanceGate } from './components/common/MaintenanceGate';
+import { RequirePermission } from './components/common/RequirePermission';
 import { UpdatePrompt } from './components/pwa/UpdatePrompt';
 import { InstallPrompt } from './components/pwa/InstallPrompt';
 
@@ -20,6 +21,8 @@ const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
 const ActivateDevicePage = lazy(() => import('./pages/ActivateDevicePage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
 const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
+const AndroidAppDownloadPage = lazy(() => import('./pages/AndroidAppDownloadPage'));
+const MediaSyncPage = lazy(() => import('./pages/MediaSyncPage'));
 const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
@@ -129,6 +132,18 @@ function AppRoutes() {
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/settings" element={<UserSettingsPage />} />
+                {/* Android app + Media Sync (issue #515). Sub-routes of the
+                    stacked /settings page, which links to both from its
+                    "Android app" section. */}
+                <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
+                <Route
+                  path="/settings/media-sync"
+                  element={
+                    <RequirePermission permission="media:read" fallback={<Navigate to="/settings" replace />}>
+                      <MediaSyncPage />
+                    </RequirePermission>
+                  }
+                />
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
                 <Route path="/circles" element={<CircleListPage />} />
