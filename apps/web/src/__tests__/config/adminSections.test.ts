@@ -104,6 +104,35 @@ describe('adminSections', () => {
     });
   });
 
+  describe('Android app card (epic #498, issue #516)', () => {
+    it('is appended to General after Notifications, gated on the exact API permission', () => {
+      const general = ADMIN_SECTIONS.find((section) => section.label === 'General')!;
+      const last = general.cards[general.cards.length - 1];
+      const titles = general.cards.map((card) => card.title);
+
+      expect(titles.indexOf('Android app')).toBe(titles.indexOf('Notifications') + 1);
+      expect(last).toMatchObject({
+        title: 'Android app',
+        path: '/admin/settings/android',
+        // `GET /api/admin/android-app` and the release list enforce this string.
+        permission: 'system_settings:read',
+      });
+    });
+
+    it('is visible to a system_settings:read holder and resolves its AppBar title', () => {
+      const titles = visibleAdminSections(allowOnly('system_settings:read')).flatMap((s) =>
+        s.cards.map((c) => c.title),
+      );
+      expect(titles).toContain('Android app');
+      expect(adminPageTitle('/admin/settings/android')).toBe('Android app');
+    });
+
+    it('stays hidden without system_settings:read', () => {
+      const titles = visibleAdminSections(allowOnly('push:read')).flatMap((s) => s.cards.map((c) => c.title));
+      expect(titles).not.toContain('Android app');
+    });
+  });
+
   describe('visibleAdminSections', () => {
     it('drops individual cards the permission gate rejects', () => {
       const sections = visibleAdminSections(allowOnly('jobs:read'));
