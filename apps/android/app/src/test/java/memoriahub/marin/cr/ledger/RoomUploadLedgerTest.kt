@@ -150,8 +150,29 @@ class RoomUploadLedgerTest {
         assertTrue(ledger.isActive(dao.seed(ledgerRow(UPLOADING, 2)).id))
     }
 
+    @Test fun `session writes are ignored once the row holds no session (SOURCE_CHANGED mid-upload)`() = runTest {
+        // The file changed under the upload: T12/T13 cleared the session and failed the row.
+        val id = dao.seed(ledgerRow(FAILED, 1, attempts = 1, nextAttemptAt = 0)).id
+        val before = dao.rows[id]!!
+        ledger.savePartUploadAuth(id, "bearer")
+        ledger.recordPart(id, CompletedPart(1, "\"late\""))
+        ledger.replaceParts(id, listOf(CompletedPart(1, "\"late\"")))
+        ledger.markRegistering(id)
+        assertEquals(before, dao.rows[id]!!)
+        assertEquals(FAILED, dao.rows[id]!!.state)
+        assertNull(dao.rows[id]!!.completedPartsJson)
+    }
+
+    @Test fun `session writes still land while the row holds a session`() = runTest {
+        val id = dao.seed(ledgerRow(UPLOADING, 1, objectId = "o")).id
+        ledger.recordPart(id, CompletedPart(1, "e1"))
+        ledger.markRegistering(id)
+        assertEquals(REGISTERING, dao.rows[id]!!.state)
+        assertEquals(listOf(CompletedPart(1, "e1")), dao.rows[id]!!.completedParts)
+    }
+
     @Test fun `illegal engine writes throw in debug`() = runTest {
-        val id = dao.seed(ledgerRow(UPLOADED, 1)).id
+        val id = dao.seed(ledgerRow(UPLOADED, 1, objectId = "o")).id
         try {
             ledger.markRegistering(id)
             fail("UPLOADED -> REGISTERING is illegal")
