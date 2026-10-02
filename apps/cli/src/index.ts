@@ -19,6 +19,7 @@ import { jobsCommand } from './commands/jobs.js';
 import { reportsCommand } from './commands/reports.js';
 import { nodeCommand } from './commands/node.js';
 import { workflowCommand } from './commands/workflow.js';
+import { androidCommand } from './commands/android.js';
 import { printBanner } from './ui.js';
 import { printHeadlessUpdateNotice } from './update-notice.js';
 
@@ -64,6 +65,7 @@ program.addCommand(jobsCommand());
 program.addCommand(reportsCommand());
 program.addCommand(nodeCommand());
 program.addCommand(workflowCommand());
+program.addCommand(androidCommand());
 
 // Bare invocation: if TTY launch TUI, else show help
 if (process.argv.length === 2) {
