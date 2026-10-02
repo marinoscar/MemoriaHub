@@ -6,7 +6,8 @@ what the web cannot do (Media Sync: reading MediaStore and uploading in the back
 
 - Contract: [docs/specs/android-media-sync.md](../../docs/specs/android-media-sync.md)
 - Architecture: [docs/specs/native-companion-architecture.md](../../docs/specs/native-companion-architecture.md)
-- Epic: #498. This scaffold: #508.
+- Operators: [Android app runbook](../../docs/runbooks/android-app.md) (install, trust, pair, troubleshoot) and [Android release runbook](../../docs/runbooks/android-release.md) (build, publish, roll back)
+- Epic: #498.
 
 Sideload only (no Google Play). The legacy v1 app (`cr.marin.memoriahub`) is a different package;
 uninstall it by hand.
@@ -15,7 +16,8 @@ uninstall it by hand.
 
 Requirements: JDK 17 or newer and the Android SDK (`platforms;android-36`, `build-tools;36.0.0`,
 `platform-tools`). Point Gradle at the SDK with `ANDROID_HOME` (or `sdk.dir` in a git-ignored
-`local.properties`). `memoriahub android doctor --fix` installs both (#517).
+`local.properties`). `memoriahub android doctor --fix` installs both (see the
+[release runbook](../../docs/runbooks/android-release.md#3-prerequisites)).
 
 ```bash
 cd apps/android
@@ -73,7 +75,7 @@ CI builds. `versionCode` must strictly increase for every published APK and stay
 | `-Papp.serverUrl=https://photos.example.com` | Bakes in a server (`BuildConfig.DEFAULT_SERVER_URL`); empty by default, which shows the first-run Setup screen. A URL the user saves in the app wins |
 
 `-Pmemoriahub.versionName` / `-Pmemoriahub.versionCode` / `-Pmemoriahub.serverUrl` (the storage
-prefix) are accepted as aliases. The CLI (`memoriahub android build`, #517) passes the `app.` form.
+prefix) are accepted as aliases. The CLI (`memoriahub android build`) passes the `app.` form.
 
 ## Signing
 
@@ -114,8 +116,8 @@ moves. A phone accepts the APK as an update only when its `versionCode` is highe
 installed one, so bump `version.properties` to ship a new build.
 
 **CI never publishes to a MemoriaHub server.** Each server's administrator chooses the release
-its users get, with `memoriahub android publish|release` (#517) or `/admin/settings/android`
-(#516). The full procedure is the Android release runbook (#519).
+its users get, with `memoriahub android publish|release` or `/admin/settings/android`.
+The full procedure is the [Android release runbook](../../docs/runbooks/android-release.md).
 
 ### Signing secrets
 
@@ -128,7 +130,7 @@ The `release` job needs four repository secrets (Settings → Secrets and variab
 | `ANDROID_KEY_ALIAS` | Key alias (CLI default `memoriahub`) |
 | `ANDROID_KEY_PASSWORD` | Key password |
 
-`memoriahub android keystore secrets` (#517) prints all four. By hand, with the keystore from
+`memoriahub android keystore secrets` prints all four. By hand, with the keystore from
 `memoriahub android keystore init`:
 
 ```bash
@@ -159,8 +161,15 @@ publishing an unsigned one.
 | Media Sync deep links (`memoriahub://media-sync/...`), building and parsing | `deeplink/MediaSyncLinks` (`route`, `EXTRA_OPEN`) |
 | Pairing: RFC 8628 device flow for a `pat_`, device registration, unpair | `pairing/DeviceFlow` (`DeviceFlowPoller`), `pairing/PairingManager`, `pairing/DeviceInfo`, `net/MediaSyncDevicesApi` |
 | Pairing state and global 401 / 409 `DEVICE_REVOKED` reactions | `pairing/PairingStatus`, `pairing/PairingStateStore`, `pairing/ApiErrorReactions` |
-| Media Sync screens (Connect today; the Hub and the rest arrive with #513) | `mediasync/MediaSyncActivity`, `mediasync/ConnectScreen`, `pairing/PairingController` |
-| Pairing ↔ background sync seam (WorkManager in #512) | `sync/SyncScheduling` (`NoopSyncScheduling` until then) |
+| Media Sync screens: Hub, Connect, Folders, Network & power, Files, Diagnostics (one activity, an in-memory screen enum, `?action=` handling) | `mediasync/MediaSyncActivity`, `mediasync/HubScreen` + `HubState` + `HubController`, `ConnectScreen`, `FoldersScreen`, `NetworkScreen`, `FilesScreen` (each with a JVM-tested `*State`), `pairing/PairingController` |
+| Launcher shortcuts: static `media_sync` and `diagnostics` (generated per variant), dynamic Sync now and Pause sync / Resume sync | `mediasync/MediaSyncShortcuts`, `mediasync/MediaSyncActions`, the `GenerateShortcutsTask` in `app/build.gradle.kts` |
+| Background sync: WorkManager unique work `media-sync-periodic` (6 h), `media-sync-trigger` (MediaStore content trigger, 15 s / 2 min delays, re-arms itself) and `media-sync-now`; app-open debounce 15 min; constraints from the config | `sync/MediaSyncScheduler`, `sync/MediaSyncWorker`, `sync/MediaContentTriggerWorker`, `sync/SyncConstraints`, `sync/WorkManagerSyncControl` (implements `contract/SyncControl`) |
+| One sync run: check-in, scan, upload, check-in; foreground promotion (more than one file or more than 50 MB), Android 15 `dataSync` timeout and network-policy stops recorded as `partial` (`FGS_TIMEOUT`, `NETWORK_POLICY`) | `sync/SyncRunner`, `sync/StopReasons`, `sync/SyncCheckin` (with the offline `OutboxQueue`), `sync/ConfigApplier`, `sync/SyncNotifications` (channel `media_sync_progress`, **Pause** action via `SyncActionReceiver`) |
+| Diagnostics: the 22 self-test checks (pure functions), the screen, report upload, auto-report at most every 6 h, Hub health line | `diagnostics/Checks` (`CheckIds`), `SelfTest`, `DiagnosticsScreen`, `DiagnosticReport`, `AutoDiagnostics`, `DiagnosticsHealth` (implements `contract/HealthSummary`) |
+| In-app update check and the Update card | `update/UpdateChecker` (implements `contract/UpdateStatus`), `update/UpdatePolicy`, `update/UpdateCard` |
+| Media discovery: MediaStore inventory, incremental scan cursors, permission state | `media/MediaGateway` (`AndroidMediaGateway`), `media/MediaScanner`, `media/ScanCursorStore` |
+| Per-file sync ledger (Room `memoriahub_sync.db`; the source of truth per file) | `ledger/LedgerRepository`, `ledger/LedgerTransitions` (every status change goes through it), `ledger/RoomUploadLedger` |
+| Resumable multipart upload engine (constant memory, retry/backoff, network policy) | `upload/UploadEngine`, `upload/PartUploader`, `upload/UploadErrorPolicy`, `net/MediaUploadApi` |
 | Media permission state (full / partial / denied) | `permissions/MediaPermissions` |
 | Sync issue notifications ("Pairing expired — re-pair") | `notifications/MediaSyncNotifications` |
 | Brand colours and identity | `util/Brand`, `ui/theme/Theme`, `util/AppInfo` |

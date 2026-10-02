@@ -32,7 +32,10 @@ Off by default (`features.memories`) — an admin turns it on in Admin Settings,
 ### Android App (TWA + native Media Sync)
 - **Trusted Web Activity shell**: The Android app wraps the web app in a TWA and adds a native Media Sync module for always-on camera photo and video backup to any circle (personal by default); the APK is distributed from the web app at `/settings/android-app` (see [docs/specs/android-media-sync.md](docs/specs/android-media-sync.md))
 - **Pairing**: The app pairs with the server through the RFC 8628 device flow and the `/activate` page, then returns to the app through the `returnUri` deep link (see [docs/DEVICE-AUTH.md](docs/DEVICE-AUTH.md))
-- **Same upload pipeline as the CLI**: Uses the resumable multipart presigned-URL pipeline with SHA-256 dedup, and registers media with `source: android`
+- **Same upload pipeline as the CLI**: Uses the resumable multipart pipeline (presigned URLs for S3/R2, the API's own part route for the local provider) with SHA-256 dedup, and registers media with `source: android`
+- **Configured from the web or the phone**: folders, Wi-Fi-only or mobile data, charging, target circle and pause live on the server as a versioned config the phone pulls at each check-in; progress, failed files and diagnostics show up under Settings, then Media sync (`/settings/media-sync`)
+- **Released from the CLI**: `memoriahub android doctor --fix`, `keystore init`, `release --bump patch` builds, signs and publishes an APK to your server in one command; the admin page `/admin/settings/android` manages releases and the trusted signing keys behind `/.well-known/assetlinks.json` (see the [Android release runbook](docs/runbooks/android-release.md))
+- **Operate it**: install, trust, pair, choose folders, battery-optimization notes and troubleshooting by diagnostic check id are in the [Android app runbook](docs/runbooks/android-app.md); build, identity and CI details are in [apps/android/README.md](apps/android/README.md)
 - **Replaces the legacy native app**: The earlier standalone Kotlin/Compose app (package `cr.marin.memoriahub`) was retired. The new app's ID is `memoriahub.marin.cr`, so the two are different apps and both would upload if both were installed. **Uninstall the legacy app manually** before using the new one.
 - **Same-Origin Architecture**: Frontend and API served from the same host via Nginx reverse proxy
 
@@ -206,13 +209,15 @@ MemoriaHub/
 │   │   │   ├── pat/           # Personal access tokens
 │   │   │   ├── settings/      # Settings endpoints
 │   │   │   ├── device-auth/   # RFC 8628 device authorization
+│   │   │   ├── android-app/   # Android APK releases, trusted apps, assetlinks.json
+│   │   │   ├── media-sync/    # Android Media Sync devices, config, check-in
 │   │   │   └── health/        # Liveness and readiness probes
 │   │   ├── prisma/
 │   │   │   ├── schema.prisma  # Database schema
 │   │   │   ├── seed.ts        # Database seeds
 │   │   │   └── migrations/    # Migration history
 │   │   └── test/              # Integration tests
-│   └── web/                    # Frontend (React + MUI)
+│   ├── web/                    # Frontend (React + MUI)
 │       ├── src/
 │       │   ├── components/    # Reusable components
 │       │   ├── contexts/      # React contexts (Auth, Theme)
@@ -220,6 +225,8 @@ MemoriaHub/
 │       │   ├── hooks/         # Custom React hooks
 │       │   └── services/      # API client
 │       └── src/__tests__/     # Component tests
+│   ├── cli/                    # `memoriahub` CLI (import/sync, nodes, backup, `android` release commands)
+│   └── android/                # Android app: TWA shell + native Media Sync (Kotlin)
 ├── docs/
 │   ├── plan/                  # Phase specs
 │   │   └── phase-01-media-domain.md  # (and other phase docs)
@@ -229,6 +236,8 @@ MemoriaHub/
 │   ├── SECURITY-ARCHITECTURE.md  # Security design
 │   ├── TESTING.md             # Testing guide
 │   ├── DEVICE-AUTH.md         # Device Authorization Flow guide
+│   ├── runbooks/              # Operator procedures (android-app, android-release, database-restore, ...)
+│   ├── specs/                 # Feature specs and contracts (android-media-sync.md, ...)
 │   └── ssl-nginx-setup.md     # VPS/HTTPS deployment with Nginx
 ├── infra/
 │   ├── compose/               # Docker Compose configs
@@ -252,6 +261,9 @@ MemoriaHub/
 - **[docs/SECURITY-ARCHITECTURE.md](docs/SECURITY-ARCHITECTURE.md)** - Security design and implementation
 - **[docs/TESTING.md](docs/TESTING.md)** - Testing strategy and best practices
 - **[docs/DEVICE-AUTH.md](docs/DEVICE-AUTH.md)** - Device Authorization Flow guide and integration examples
+- **[docs/runbooks/android-app.md](docs/runbooks/android-app.md)** - Install, trust, pair and troubleshoot the Android app
+- **[docs/runbooks/android-release.md](docs/runbooks/android-release.md)** - Build, publish and roll back Android releases (CLI first)
+- **[docs/specs/android-media-sync.md](docs/specs/android-media-sync.md)** - Android Media Sync feature spec and contract ([architecture](docs/specs/native-companion-architecture.md))
 - **[docs/ssl-nginx-setup.md](docs/ssl-nginx-setup.md)** - VPS deployment with HTTPS and Nginx
 
 ## API Documentation

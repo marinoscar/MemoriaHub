@@ -227,10 +227,10 @@ The Device Authorization Flow enables input-constrained devices (CLI tools, IoT 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `clientInfo` | object | No | Optional metadata about client device |
-| `clientInfo.name` | string | No | Application name |
+| `clientInfo.name` | string | No | Human-readable client label, max 100 characters, e.g. `"MemoriaHub Android · Pixel 8"`. Shown on the activation page; for a PAT it becomes the token's name. |
 | `clientInfo.version` | string | No | Application version |
 | `clientInfo.platform` | string | No | Platform identifier |
-| `clientInfo.tokenType` | string | No | Set to `"pat"` to request a long-lived Personal Access Token on approval instead of a short-lived JWT. The CLI uses this to obtain a 90-day PAT (lifetime controlled by `DEVICE_PAT_TTL_DAYS`, default 90). The PAT is visible and revocable from the web app's Personal Access Tokens screen. |
+| `clientInfo.tokenType` | `"session"` \| `"pat"` | No | The credential minted when the device collects its token. Absent or `"session"`: a JWT plus refresh token (`DEVICE_TOKEN_EXPIRY_DAYS`, 7 days). `"pat"`: a long-lived, revocable personal access token (`pat_...`; lifetime `DEVICE_PAT_TTL_DAYS`, default 90). The CLI and the Android app request `"pat"`. Any other value is rejected with **400**. The PAT is visible and revocable from the web app's Personal Access Tokens screen. |
 | `clientInfo.returnUri` | string | No | Deep link URI the web activation page should redirect to after successful approval, so the requesting app is automatically reopened. Accepted schemes: `memoriahub:` (custom app scheme) or `https:`. Maximum 512 characters. Values that do not match the allowed schemes are silently stripped. The URI is echoed back in `GET /auth/device/activate` so the activation page can perform the redirect without storing any additional state. |
 
 **Response:**
@@ -269,17 +269,36 @@ The Device Authorization Flow enables input-constrained devices (CLI tools, IoT 
 }
 ```
 
-**Response (200 OK - Authorized):**
+**Response (200 OK - Authorized, session):**
 ```json
 {
   "data": {
     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "refreshToken": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
     "tokenType": "Bearer",
-    "expiresIn": 900
+    "expiresIn": 900,
+    "credentialType": "session"
   }
 }
 ```
+
+**Response (200 OK - Authorized, `clientInfo.tokenType: "pat"`):**
+```json
+{
+  "data": {
+    "accessToken": "pat_3f9a...e1",
+    "refreshToken": "",
+    "tokenType": "Bearer",
+    "expiresIn": 7776000,
+    "credentialType": "pat",
+    "expiresAt": "2027-01-01T12:00:00.000Z",
+    "tokenId": "123e4567-e89b-12d3-a456-426614174000",
+    "tokenName": "MemoriaHub Android · Pixel 8"
+  }
+}
+```
+
+`credentialType` (`"pat"` or `"session"`) says which credential was issued; clients must branch on it, never on an empty `refreshToken`. `tokenType` is always `"Bearer"` (how to present the token). `expiresAt`, `tokenId` and `tokenName` are present for a PAT only. The Android app refuses anything but `credentialType: "pat"`. See [DEVICE-AUTH.md](DEVICE-AUTH.md) for the full field table.
 
 **Error Responses (400 Bad Request):**
 
@@ -1391,7 +1410,7 @@ Register an uploaded `StorageObject` as a `MediaItem`.
 | `metadata` | object | No | Arbitrary JSONB metadata |
 | `originalCreatedAt` | ISO 8601 datetime | No | File system creation time |
 | `sourcePath` | string (max 2048) | No | Original path on source device |
-| `sourceDeviceId` | string (max 256) | No | |
+| `sourceDeviceId` | string (max 256) | No | With `source: "android"`, must be the id of an **active** [Media Sync device](#media-sync-android-app-devices) of the caller, else **400** `details.reason: "UNKNOWN_SOURCE_DEVICE"`. Attribution cannot be spoofed. |
 | `sourceDeviceName` | string (max 256) | No | |
 
 **Client-supplied location fallback (`takenLat`/`takenLng`/`takenAltitude`/`coordSource`):** These four fields let a client supply a fallback GPS location for an item that has no EXIF-derived coordinates — the primary consumer is the CLI's `memoriahub.json` per-folder override feature (see [CLI Metadata Override](specs/cli-metadata-override.md)). Server-extracted EXIF location always wins: if the uploaded file's own EXIF already supplies GPS, these fields are ignored and never overwrite the EXIF-derived coordinates. When the fallback **is** applied (i.e. the item has no EXIF GPS), the server reverse-geocodes the supplied coordinates — writing `geoCountry`, `geoAdmin1`, `geoAdmin2`, `geoLocality`, `geoPlaceName`, and `geoSource`, the same pipeline described in [Geocoding](specs/geocoding.md) — and stores `coordSource` as `'manual'`.
@@ -2288,6 +2307,63 @@ This endpoint is useful for bulk-populating an album from a date range, tag, loc
 |--------|-----------|
 | 403 | Caller is not a `collaborator` in the album's circle |
 | 404 | Album not found |
+
+---
+
+### Android App (releases, trusted apps, Digital Asset Links)
+
+The Android app is distributed from the deployment itself. These endpoints host the APK, record which app/key pairs may open the site full screen, and serve the Digital Asset Links file. Conventions only here; the per-endpoint reference (bodies, schemas) is the generated OpenAPI at `/api/docs`. Design: [android-media-sync.md §6.5](specs/android-media-sync.md#65-android-app-trusted-apps-assetlinks-releases); procedures: [Android release runbook](runbooks/android-release.md).
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /api/well-known/assetlinks.json` | **Public** | The Digital Asset Links statements (`delegate_permission/common.handle_all_urls`, one per trusted app). A bare JSON array, no `{ data }` envelope, because Chrome parses it directly. nginx also exposes it as `/.well-known/assetlinks.json`. Stays reachable during maintenance mode |
+| `GET /api/admin/android-app` | `system_settings:read` | `{ trustedApps, reportedApps, assetLinks }`. `reportedApps` are the `(packageName, sha256)` pairs phones have reported, with `deviceCount`, `lastSeenAt` and a `trusted` flag, so an admin can trust one with a click |
+| `PUT /api/admin/android-app` | `system_settings:write` | Replace the trusted list (`[{ packageName, sha256 }]`, at most 10, unique, fingerprints normalised to uppercase colon form) |
+| `POST /api/admin/android-app/releases` | `system_settings:write` (JWT or PAT) | Upload an APK as `multipart/form-data`. Text fields **first**: `packageName`, `versionName`, `versionCode`, `signingSha256` (hex, any case, colons optional), `notes?`, `makeCurrent?` (default true), `force?`; then the file field `apk`. Streamed to object storage, never buffered; max 150 MiB. `201` with the admin release |
+| `GET /api/admin/android-app/releases` | `system_settings:read` | All releases, newest first, with `isCurrent`, `signingSha256` and the uploader |
+| `POST /api/admin/android-app/releases/:id/make-current` | `system_settings:write` | Make a release current (also the **rollback**; idempotent). Trusts its signer when the list has room |
+| `DELETE /api/admin/android-app/releases/:id` | `system_settings:write` | `204`. Deletes the stored APK first, then the row. The current release cannot be deleted |
+| `GET /api/android-app/releases/latest` | any signed-in user (JWT or PAT) | The current release (`id`, `packageName`, `versionName`, `versionCode`, `fileSha256`, `sizeBytes` as a string, `notes`, `createdAt`). `404` `NO_RELEASE` when none |
+| `POST /api/android-app/releases/:id/download-link` | any signed-in user | `{ url: "/api/android-app/download/<token>", expiresAt }`, a signed same-origin link valid 10 minutes. The web page **navigates** to it so Android hands the file to the package installer |
+| `GET /api/android-app/download/:token` | **Public** (the signed token is the credential) | Streams the APK (`application/vnd.android.package-archive`, attachment `memoriahub-android-<versionName>.apk`). `404` `DOWNLOAD_LINK_INVALID` for a bad or tampered token, `410` `DOWNLOAD_LINK_EXPIRED` |
+
+**Conventions.**
+
+- **`details.reason`.** The response `code` always derives from the HTTP status; clients key off `details.reason`. Release errors: `RELEASE_NOT_AN_APK` (400), `RELEASE_INVALID_UPLOAD` (400, `details.issues[]`), `RELEASE_TOO_LARGE` (413), `RELEASE_VERSION_EXISTS` (409), `RELEASE_VERSION_NOT_NEWER` (409, `details.currentReleaseId`, `details.currentVersionCode`), `RELEASE_IS_CURRENT` (409), `RELEASE_CURRENT_CONFLICT` (409), `RELEASE_NOT_FOUND` (404), `STORAGE_NOT_CONFIGURED` (503). Trusted-app validation: `INVALID_FINGERPRINT`, `INVALID_PACKAGE_NAME`, `TOO_MANY_TRUSTED_APPS` (400).
+- **Version rule.** `versionCode` strictly increases per `(packageName, versionCode)`; a non-newer code cannot become current unless `force` is set.
+- **One current release** deployment-wide, enforced by the database (a partial unique index), not by the application.
+- **`sizeBytes` is a string** (a 64-bit integer): never parse it as a JSON number.
+- **Fingerprints** are uppercase colon form (`AA:BB:…`) everywhere on the server; uploads and the CLI sidecar may use lowercase hex without colons and are normalised.
+
+---
+
+### Media Sync (Android app devices)
+
+A **device** is one phone running the native Media Sync module. The server keeps a versioned *desired config* for it (folders, network policy, target circle, paused); the phone **pulls** that config on every check-in and reports counts, runs and diagnostics back. Conventions only; the endpoint reference is the OpenAPI. Design: [android-media-sync.md §5-6](specs/android-media-sync.md#5-desired-config-and-commands); operation: [Android app runbook](runbooks/android-app.md).
+
+| Endpoint | Credential | Purpose |
+|---|---|---|
+| `POST /api/media-sync/devices` | `media:write`, **PAT only** | Register (`201`) or re-attach (`200`) a phone, keyed by `installationId` (a UUID the phone keeps). Re-registering with a different PAT revokes the old one. A JWT is refused with `PAT_REQUIRED` |
+| `GET /api/media-sync/devices` | `media:read` | The caller's devices, most recently seen first |
+| `GET /api/media-sync/devices/:id` | `media:read` | One device: metadata, `status` (`active`\|`revoked`), `config`, `configVersion`, `appliedConfigVersion`, `configPending`, `inventory`, `stats`, `permission`, `networkState`, `batteryOptimized`, `lastSeenAt`, `lastSyncAt`, `lastSyncStatus`, `lastError`, `tokenExpiresAt`, `latestVersionCode`, `updateAvailable` |
+| `PATCH /api/media-sync/devices/:id/config` | `media:write`, JWT or PAT | Edit the desired config (`targetCircleId`, `folders`, `includePhotos`, `includeVideos`, `network`, `requireCharging`, `uploadExisting`). Returns `{ config, configVersion }`. `inventory` may be sent only by a PAT |
+| `POST /api/media-sync/devices/:id/commands` | `media:write`, JWT or PAT | `{ action: "pause" \| "resume" \| "retry_failed" \| "sync_now" }`. Returns `{ config, configVersion }`. Commands bump a generation counter the phone acts on at its next check-in |
+| `POST /api/media-sync/devices/:id/checkin` | `media:write`, the device's **own** PAT | The phone's report: applied config version, `stats`, `permission`, `networkState`, `batteryOptimized`, optional `inventory` (≤500 folders) and `run` (trigger, status, counts, `failedSample`). Returns `{ config, configVersion, serverTime }` |
+| `GET /api/media-sync/devices/:id/runs?limit=` | `media:read` | Recent runs (`limit` 50, max 200), newest first |
+| `POST /api/media-sync/devices/:id/diagnostics` | `media:write`, JWT or PAT | Store a phone's self-test report (`{ summary ≤500, report ≤256 KB }`) → `201 { id, createdAt }` |
+| `GET /api/media-sync/devices/:id/diagnostics?limit=` | `media:read` | List reports (`limit` 5, max 20) |
+| `GET /api/media-sync/devices/:id/diagnostics/:reportId` | `media:read` | One report with its full `report` |
+| `DELETE /api/media-sync/devices/:id` | `media:write` | `204`. Revokes the device **and** its PAT (unpair) |
+
+**Conventions.**
+
+- **Two independent credentials.** The web session (JWT) and the phone's `pat_` token are separate. The phone only ever uses the PAT, obtained through the [device flow](#device-authorization-rfc-8628) with `clientInfo.tokenType: "pat"`.
+- **Device scoping.** A PAT linked to a device may act only on that device; any other id answers **404**. A JWT or an unlinked PAT can manage all of the owner's devices. Another user's device is always **404, not 403**.
+- **Desired config, pulled.** Changes made on the web or the phone bump `configVersion`; the phone confirms with `appliedConfigVersion` in its check-in. `configPending` is true while they differ. `paused` and the `syncNowGeneration` / `retryFailedGeneration` counters change only through `commands`.
+- **Config validation errors** (`details.reason`): `UNKNOWN_FOLDER` (400, `details.bucketIds`: a folder the phone never reported), `TARGET_CIRCLE_FORBIDDEN` (403, `details.circleId`: the caller is not a collaborator of the circle), `INVENTORY_NOT_ALLOWED` (400), `PAT_REQUIRED` (400), `DEVICE_REVOKED` (409, a check-in for a revoked device), `NO_TARGET_CIRCLE` (409, no circle the user may write to).
+- **Byte counts are strings** (`bytesUploaded` in runs, sizes in reports): they are 64-bit integers.
+- **Retention.** The newest 200 runs and 20 diagnostic reports per device are kept.
+- **Uploads reuse the Storage Objects pipeline.** The phone uploads bytes with `POST /api/storage/objects/upload/init` and the part routes ([Storage Objects](#storage-objects): `partUploadAuth` is `"bearer"` for the `local` provider), then registers the item with `POST /api/media` using `source: "android"` and its `sourceDeviceId`. Deduplication is by `(circleId, contentHash)`, so re-sending a file is harmless.
 
 ---
 
