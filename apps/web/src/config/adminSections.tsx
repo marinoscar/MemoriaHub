@@ -45,6 +45,7 @@ import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
 import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
+import AndroidIcon from '@mui/icons-material/Android';
 
 export interface AdminCardDef {
   title: string;
@@ -107,6 +108,16 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
           'Turn browser notifications and web push on or off for everyone, and silence individual notification types.',
         Icon: NotificationsOutlinedIcon,
         path: '/admin/settings/notifications',
+        permission: 'system_settings:read',
+      },
+      {
+        // Issue #516 (epic #498): `GET /api/admin/android-app` and the release
+        // list both enforce `system_settings:read`; writes are gated inside
+        // the page on `system_settings:write`.
+        title: 'Android app',
+        description: 'Releases and trusted signing keys for the MemoriaHub Android app.',
+        Icon: AndroidIcon,
+        path: '/admin/settings/android',
         permission: 'system_settings:read',
       },
     ],

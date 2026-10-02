@@ -10,6 +10,14 @@ import memoriahub.marin.cr.auth.EncryptedTokenStore
 import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
 import memoriahub.marin.cr.diagnostics.AppLog
+import memoriahub.marin.cr.ledger.LedgerRepository
+import memoriahub.marin.cr.ledger.MediaSyncDatabase
+import memoriahub.marin.cr.ledger.RoomUploadLedger
+import memoriahub.marin.cr.media.AndroidMediaGateway
+import memoriahub.marin.cr.media.MediaGateway
+import memoriahub.marin.cr.media.MediaScanner
+import memoriahub.marin.cr.media.ScanCursorStore
+import memoriahub.marin.cr.media.SharedPrefsScanCursorStore
 import memoriahub.marin.cr.net.ApiClient
 import memoriahub.marin.cr.ledger.UploadLedger
 import memoriahub.marin.cr.net.ApiMediaSyncDevicesApi
@@ -43,8 +51,9 @@ import memoriahub.marin.cr.upload.UploadEngine
  * Seams later issues fill in (add a lazy property or a `newX()` factory here, nothing else):
  * - #509 pairing (done): [pairingState], [pairingNotifier], [mediaSyncDevices], [apiErrorReactions],
  *   [newPairingManager], [pairingStatus].
- * - #510 media discovery + Room ledger: `val ledger` (the Room database `<prefix>_sync.db`, built once).
- * - #511 upload engine (done): [newUploadEngine] over [apiClient] and a ledger.
+ * - #510 media discovery + Room ledger (done): [mediaSyncDatabase], [mediaGateway], [scanCursors],
+ *   [ledger], [uploadLedger], [mediaScanner].
+ * - #511 upload engine (done): [newUploadEngine] over [apiClient], [uploadLedger] and [mediaGateway].
  * - #512 background sync: `val syncScheduler` (WorkManager), wired into [onAppOpen] and [onCreate].
  * - #514 diagnostics + updates: `val diagnostics`, `val updateChecker`, wired into [onAppOpen].
  */
@@ -88,6 +97,33 @@ class MobileApplication : Application() {
         ApiErrorReactions(tokenStore, pairingState, { syncScheduling }, pairingNotifier)
     }
 
+    /** The Media Sync file ledger (Room, `<prefix>_sync.db`), built once per process. */
+    val mediaSyncDatabase: MediaSyncDatabase by lazy { MediaSyncDatabase.create(this) }
+
+    /** MediaStore: inventory, scans, byte ranges for uploads (D24 URI form), permission state. */
+    val mediaGateway: MediaGateway by lazy { AndroidMediaGateway(this) }
+
+    /** Per-volume scan cursors, last full-scan time and scanned scope (prefs `<prefix>_media_scan`). */
+    val scanCursors: ScanCursorStore by lazy { SharedPrefsScanCursorStore.create(this) }
+
+    /** Ledger policy: ingest, config re-evaluation, stats, retries, runs, local reset. */
+    val ledger: LedgerRepository by lazy {
+        LedgerRepository(
+            files = mediaSyncDatabase.syncFiles(),
+            runs = mediaSyncDatabase.syncRuns(),
+            tx = mediaSyncDatabase.transactions(),
+            cursors = scanCursors,
+        )
+    }
+
+    /** The upload engine's (#511) view of the ledger. */
+    val uploadLedger: RoomUploadLedger by lazy {
+        RoomUploadLedger(mediaSyncDatabase.syncFiles(), mediaSyncDatabase.transactions())
+    }
+
+    /** Discovery: incremental/full MediaStore scans into [ledger], plus the check-in inventory. */
+    val mediaScanner: MediaScanner by lazy { MediaScanner(mediaGateway, ledger, scanCursors) }
+
     /** A pairing attempt's manager (each view model gets its own poller). */
     fun newPairingManager(): PairingManager {
         val transport = ApiDeviceFlowTransport(apiClient)
@@ -105,8 +141,9 @@ class MobileApplication : Application() {
     }
 
     /**
-     * A resumable upload engine over [apiClient] (issue #511). #512 builds one per sync run:
-     * `newUploadEngine(ledger) { NetworkPreference.fromWire(config.network) }.run(target, …)`,
+     * A resumable upload engine over [apiClient], [uploadLedger] and [mediaGateway] (issue #511).
+     * #512 builds one per sync run:
+     * `newUploadEngine { NetworkPreference.fromWire(config.network) }.run(target, shouldStop = { isStopped })`,
      * where `target = UploadTarget(config.targetCircleId, tokenStore.deviceId!!, deviceName)`.
      * Part PUTs use their own OkHttp client; the PAT is only ever sent to this server's origin.
      */
