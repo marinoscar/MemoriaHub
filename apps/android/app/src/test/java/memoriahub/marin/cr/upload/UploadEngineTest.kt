@@ -64,6 +64,7 @@ class UploadEngineTest {
     private fun engine(
         network: NetworkPolicy = NetworkPolicy.ALWAYS,
         parallelism: Int = 1,
+        batchSize: Int = UploadEngine.DEFAULT_BATCH_SIZE,
     ): UploadEngine {
         val api = ApiClient(baseUrlProvider = { baseUrl }, tokenProvider = { tokens.token }, http = http, logger = { logs += it })
         return UploadEngine(
@@ -76,6 +77,7 @@ class UploadEngineTest {
             clock = { now },
             retryDelay = {},
             parallelism = parallelism,
+            batchSize = batchSize,
             logger = { logs += it },
         )
     }
@@ -417,6 +419,64 @@ class UploadEngineTest {
         assertTrue(sha(a) in byHash)
         assertTrue(sha(b) in byHash)
         assertEquals(2, result.filesProcessed)
+    }
+
+    @Test fun `in-flight rows returned again by nextBatch are not claimed twice`() = runBlocking {
+        val files = (1L..4L).map { it to queue(it, size = 35) }
+        val result = engine(parallelism = 2, batchSize = 1).run(target)
+        assertEquals(4, result.uploaded)
+        assertEquals(4, server.inits)
+        assertEquals(4, server.registrations.size)
+        files.forEach { (id, _) -> assertEquals(SyncFileState.UPLOADED, ledger.state(id)) }
+    }
+
+    @Test fun `a row excluded mid-upload is abandoned at the next part boundary`() = runBlocking {
+        queue(1)
+        queue(2)
+        ledger.onRecordPart = { id, part -> if (id == 1L && part.partNumber == 1) ledger.inactive += 1L }
+        val result = engine().run(target)
+        assertEquals("only part 1 of the excluded file was sent", 1, server.objects.getValue("obj-1").parts.size)
+        assertEquals(0, result.failed)
+        assertNull(result.stopReason)
+        assertEquals("the run goes on with the next file", SyncFileState.UPLOADED, ledger.state(2))
+        assertEquals(1, result.uploaded)
+        assertFalse(events.any { it.startsWith("ledger.failed:1") })
+    }
+
+    @Test fun `the part upload auth is recorded with the session`() = runBlocking {
+        server.mode = FakeMediaServer.Mode.LOCAL
+        queue(1)
+        engine().run(target)
+        assertEquals("bearer", ledger.partUploadAuth[1])
+        assertTrue(events.indexOf("ledger.auth:1:bearer") < events.indexOf("put1"))
+    }
+
+    @Test fun `a queued row with a stored hash still starts with markHashing`() = runBlocking {
+        val bytes = FakeContentSource.bytes(25)
+        val file = FakeUploadLedger.file(1, 25, contentHash = sha(bytes))
+        ledger.add(file)
+        source.put(file.uri, bytes)
+        source.opens = 0
+        engine().run(target)
+        assertTrue("ledger.hashing:1" in events)
+        assertFalse("the stored hash is reused", "ledger.hash:1" in events)
+        assertEquals(SyncFileState.UPLOADED, ledger.state(1))
+    }
+
+    @Test fun `a resumed row without a hash is hashed before uploading`() = runBlocking {
+        val bytes = FakeContentSource.bytes(25)
+        val obj = server.seedObject("s-1", 25)
+        val file = FakeUploadLedger.file(
+            1, 25, state = SyncFileState.UPLOADING, contentHash = null, objectId = obj.id, uploadId = obj.uploadId,
+            partSize = 10, totalParts = 3,
+        )
+        ledger.add(file)
+        source.put(file.uri, bytes)
+        val result = engine().run(target)
+        assertEquals(1, result.uploaded)
+        assertFalse("a resume is not re-claimed into HASHING", "ledger.hashing:1" in events)
+        assertTrue(events.indexOf("ledger.hash:1") < events.indexOf("put1"))
+        assertEquals(sha(bytes), server.registrations.single()["contentHash"]!!.jsonPrimitive.content)
     }
 
     @Test fun `more than ten parts fetch further URLs in batches`() = runBlocking {
