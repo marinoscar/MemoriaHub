@@ -126,8 +126,8 @@ Content-Type: application/json
 
 {
   "clientInfo": {
+    "tokenType": "pat",
     "name": "My CLI Tool",
-    "version": "1.0.0",
     "platform": "linux"
   }
 }
@@ -218,8 +218,9 @@ Generate a new device code pair to initiate the device authorization flow.
 ```json
 {
   "clientInfo": {
-    "name": "My Application",
-    "version": "1.0.0",
+    "tokenType": "pat",
+    "name": "MemoriaHub CLI",
+    "hostname": "oscar-laptop",
     "platform": "linux"
   }
 }
@@ -228,11 +229,16 @@ Generate a new device code pair to initiate the device authorization flow.
 **Request Fields:**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `clientInfo` | object | No | Optional metadata about the client device |
-| `clientInfo.name` | string | No | Application name |
-| `clientInfo.version` | string | No | Application version |
-| `clientInfo.platform` | string | No | Platform (linux, windows, macos, etc.) |
-| `clientInfo.returnUri` | string | No | Deep link URI the web activation page should open after a successful approval, returning the user to the requesting app. Accepted schemes: `memoriahub:` or `https:`. Maximum 512 characters. Values that do not match these schemes are silently stripped and the activation page behaves as if no `returnUri` was provided. |
+| `clientInfo` | object | No | Optional metadata about the client device. A bodyless request is accepted. |
+| `clientInfo.tokenType` | `"session"` \| `"pat"` | No | The credential minted when the device collects its token. Absent or `"session"`: a JWT plus refresh token valid `DEVICE_TOKEN_EXPIRY_DAYS` (7 days). `"pat"`: a long-lived, revocable personal access token (`pat_...`, `deviceAuth.patTtlDays`, 90 days by default). Any other value is rejected with **400**. |
+| `clientInfo.name` | string | No | Human-readable client label, max 100 characters (trimmed), e.g. `"MemoriaHub Android · Pixel 8"`. Shown on the activation page; for a PAT it becomes the token's name in Personal Access Tokens (falls back to `deviceName`, then `"MemoriaHub CLI"`). |
+| `clientInfo.hostname` | string | No | Requesting machine's hostname, max 255 characters. Informational, shown on the activation page. |
+| `clientInfo.platform` | string | No | Platform (`linux`, `windows`, `android`, ...), max 50 characters. Informational, shown on the activation page. |
+| `clientInfo.deviceName` | string | No | Device name, max 255 characters. |
+| `clientInfo.userAgent` | string | No | User-agent string, max 1024 characters. |
+| `clientInfo.returnUri` | string | No | Deep link URI the web activation page should open after a successful approval, returning the user to the requesting app. Accepted schemes: `memoriahub:` or `https:`. Maximum 512 characters. Any other scheme is rejected with **400**. |
+
+`clientInfo` is an explicit allowlist: any key not listed above is **stripped** before it is stored. Every field comes from an unauthenticated caller and is displayed to the approving user, so a client that needs to send a new field must have it added to `ClientInfoSchema` (with a bound) first. Until issue #499 the allowlist lacked `tokenType` and `name`, so they were silently dropped and every CLI login received a 7-day session instead of a PAT.
 
 **Response (200 OK):**
 ```json
@@ -287,13 +293,33 @@ Poll for authorization status and obtain tokens when approved.
 }
 ```
 
+**Response (200 OK - Authorized, `clientInfo.tokenType: "pat"`):**
+```json
+{
+  "data": {
+    "accessToken": "pat_3f9a...e1",
+    "refreshToken": "",
+    "tokenType": "Bearer",
+    "expiresIn": 7776000,
+    "credentialType": "pat",
+    "expiresAt": "2027-01-01T12:00:00.000Z",
+    "tokenId": "123e4567-e89b-12d3-a456-426614174000",
+    "tokenName": "MemoriaHub CLI"
+  }
+}
+```
+
 **Response Fields (Success):**
 | Field | Type | Description |
 |-------|------|-------------|
-| `accessToken` | string | JWT access token for API requests |
-| `refreshToken` | string | Refresh token for obtaining new access tokens |
-| `tokenType` | string | Token type (always "Bearer") |
-| `expiresIn` | number | Access token lifetime in seconds |
+| `accessToken` | string | Present as `Authorization: Bearer <accessToken>`. A JWT for a session; an opaque `pat_...` token for a PAT |
+| `refreshToken` | string | Refresh token for a session; empty string for a PAT (re-run the device login to renew it) |
+| `tokenType` | string | Always `"Bearer"`, for both kinds: it says how to present the token, not what kind it is |
+| `expiresIn` | number | Lifetime in seconds |
+| `credentialType` | `"pat"` | PAT only. **Absent** for a session. Clients must branch on this field, never on an empty `refreshToken`. The Android companion refuses a credential whose `credentialType` is not `pat` |
+| `expiresAt` | string | PAT only. Absolute ISO-8601 expiry |
+| `tokenId` | string | PAT only. Id of the personal access token (for `DELETE /api/pat/{id}`); not a secret |
+| `tokenName` | string | PAT only. Name of the personal access token as listed in Personal Access Tokens |
 
 **Error Responses:**
 
@@ -344,9 +370,10 @@ Authorization: Bearer <token>
     "verificationUri": "http://localhost:3535/device",
     "userCode": "ABCD-1234",
     "clientInfo": {
-      "name": "My CLI Tool",
-      "version": "1.0.0",
-      "platform": "linux",
+      "tokenType": "pat",
+      "name": "MemoriaHub Android · Pixel 8",
+      "hostname": "pixel-8",
+      "platform": "android",
       "returnUri": "memoriahub://auth/device-complete"
     },
     "expiresAt": "2026-06-27T12:15:00.000Z"
@@ -354,7 +381,7 @@ Authorization: Bearer <token>
 }
 ```
 
-`clientInfo.returnUri` is included only when the device supplied it in `POST /api/auth/device/code`. The activation page uses this value to navigate back to the requesting app after approval (see [Android deep-link return flow](#android-deep-link-return-flow) below).
+`clientInfo` echoes exactly the allowlisted fields the device sent. The activation page shows `name` (with `hostname` and `platform`) so the user knows which application they are approving, and states that approving issues a long-lived personal access token when `tokenType` is `"pat"`. `clientInfo.returnUri` is included only when the device supplied it in `POST /api/auth/device/code`. The activation page uses this value to navigate back to the requesting app after approval (see [Android deep-link return flow](#android-deep-link-return-flow) below).
 
 **Error Responses:**
 - **404 Not Found** - Invalid user code
@@ -420,8 +447,8 @@ Authorization: Bearer <token>
         "userCode": "ABCD-1234",
         "status": "approved",
         "clientInfo": {
+          "tokenType": "pat",
           "name": "My CLI Tool",
-          "version": "1.0.0",
           "platform": "linux"
         },
         "createdAt": "2024-01-01T12:00:00.000Z",
@@ -878,8 +905,8 @@ Native Android apps (and other apps that register a custom URI scheme) can be re
    ```json
    {
      "clientInfo": {
-       "name": "MemoriaHub Android",
-       "version": "1.0.0",
+       "tokenType": "pat",
+       "name": "MemoriaHub Android · Pixel 8",
        "platform": "android",
        "returnUri": "memoriahub://auth/device-complete"
      }
