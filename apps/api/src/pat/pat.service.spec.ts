@@ -363,6 +363,35 @@ describe('PatService', () => {
   // validateToken
   // ============================================================================
 
+  describe('resolveToken', () => {
+    it('returns the user AND the token row id for a valid token', async () => {
+      const patWithUser = {
+        ...mockPatRecord,
+        expiresAt: new Date(Date.now() + 86400000),
+        revokedAt: null,
+        user: mockUserWithRelations,
+      };
+      mockPrisma.personalAccessToken.findUnique.mockResolvedValue(patWithUser as any);
+      mockPrisma.personalAccessToken.update.mockResolvedValue(patWithUser as any);
+
+      const result = await service.resolveToken('pat_' + 'c'.repeat(64));
+
+      expect(result?.tokenId).toBe(mockPatRecord.id);
+      expect(result?.user).toMatchObject({ id: mockUserId });
+    });
+
+    it('returns null for a revoked token', async () => {
+      mockPrisma.personalAccessToken.findUnique.mockResolvedValue({
+        ...mockPatRecord,
+        expiresAt: new Date(Date.now() + 86400000),
+        revokedAt: new Date(),
+        user: mockUserWithRelations,
+      } as any);
+
+      expect(await service.resolveToken('pat_' + 'd'.repeat(64))).toBeNull();
+    });
+  });
+
   describe('validateToken', () => {
     it('should return user for a valid active token', async () => {
       const rawToken = 'pat_' + 'a'.repeat(64);
