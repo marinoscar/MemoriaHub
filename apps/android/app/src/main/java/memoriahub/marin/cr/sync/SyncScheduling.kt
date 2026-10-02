@@ -10,6 +10,11 @@ enum class SyncTrigger(val wire: String) {
     MANUAL("manual"),
     APP_OPEN("app_open"),
     INITIAL("initial"),
+    ;
+
+    companion object {
+        fun fromWire(value: String?): SyncTrigger? = entries.firstOrNull { it.wire == value }
+    }
 }
 
 /**
@@ -20,8 +25,9 @@ enum class SyncTrigger(val wire: String) {
  * - [syncNow]: enqueue one expedited run; pairing calls it with [SyncTrigger.INITIAL].
  * - [cancelAll]: cancel every queued/running sync work item; called on unpair and on `DEVICE_REVOKED`.
  *
- * #512 provides the WorkManager implementation (`MediaSyncScheduler`) and swaps it into
- * `MobileApplication.syncScheduling`; until then [NoopSyncScheduling] is used.
+ * #512 provides the WorkManager implementation ([MediaSyncScheduler], exposed through
+ * [WorkManagerSyncControl]) as `MobileApplication.syncScheduling`; [NoopSyncScheduling] remains
+ * for tests.
  */
 interface SyncScheduling {
     fun ensurePeriodic()
@@ -29,7 +35,7 @@ interface SyncScheduling {
     fun cancelAll()
 }
 
-/** Placeholder until #512: pairing works, nothing is scheduled. */
+/** Schedules nothing (tests, and builds without background sync). */
 object NoopSyncScheduling : SyncScheduling {
     override fun ensurePeriodic() = Unit
     override fun syncNow(trigger: SyncTrigger) = Unit

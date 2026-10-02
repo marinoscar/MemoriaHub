@@ -16,10 +16,14 @@ import memoriahub.marin.cr.pairing.PairingUiState
 class PairingViewModel(application: Application) : AndroidViewModel(application) {
     private val app = MobileApplication.from(application)
 
+    /** Set by the host (issue #513: the Hub refreshes and re-publishes its shortcuts). */
+    var onPairingChanged: (() -> Unit)? = null
+
     val controller = PairingController(
         manager = app.newPairingManager(),
         serverConfigured = { app.serverConfig.isConfigured },
         scope = viewModelScope,
+        onPairingChanged = { onPairingChanged?.invoke() },
     )
 
     val state: StateFlow<PairingUiState> get() = controller.state

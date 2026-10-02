@@ -223,10 +223,9 @@ if (!hasReleaseSigning) {
  *
  * [shortcuts] maps a shortcut id to the deep-link path it opens (`<scheme>://<path>`); its
  * labels are the string resources `shortcut_<id>_short`, `shortcut_<id>_long` and
- * `shortcut_<id>_disabled`. The scaffold (issue #508) ships none; issue #513 adds, with their
- * screen (docs/specs/android-media-sync.md §12.1):
- *   "media_sync" to "media-sync", "diagnostics" to "media-sync/diagnostics",
- * targeting `memoriahub.marin.cr.mediasync.MediaSyncActivity`.
+ * `shortcut_<id>_disabled`. Issue #513 (docs/specs/android-media-sync.md §12.1) ships
+ * [mediaSyncShortcuts], targeting `memoriahub.marin.cr.mediasync.MediaSyncActivity`; the dynamic
+ * "Sync now" / "Pause sync" shortcuts are published at runtime (mediasync/MediaSyncShortcuts.kt).
  */
 abstract class GenerateShortcutsTask : DefaultTask() {
     @get:Input abstract val targetPackage: Property<String>
@@ -267,20 +266,31 @@ abstract class GenerateShortcutsTask : DefaultTask() {
     }
 }
 
+/** Static long-press shortcuts (issue #513): id → deep-link path, in launcher order. */
+val mediaSyncShortcuts: Map<String, String> = linkedMapOf(
+    "media_sync" to "media-sync",
+    "diagnostics" to "media-sync/diagnostics",
+)
+
 androidComponents {
     onVariants { variant ->
         val task = tasks.register<GenerateShortcutsTask>(
             "generate${variant.name.replaceFirstChar { it.uppercase() }}Shortcuts",
         ) {
             targetPackage.set(variant.applicationId)
-            // Issue #513 points this at "$codeNamespace.mediasync.MediaSyncActivity" and fills `shortcuts`.
-            targetClass.set("$codeNamespace.twa.TwaLauncherActivity")
+            targetClass.set("$codeNamespace.mediasync.MediaSyncActivity")
             scheme.set(deepLinkScheme)
-            shortcuts.set(emptyMap<String, String>())
+            shortcuts.set(mediaSyncShortcuts)
             outputDir.set(layout.buildDirectory.dir("generated/identity/${variant.name}/res"))
         }
         variant.sources.res?.addGeneratedSourceDirectory(task, GenerateShortcutsTask::outputDir)
     }
+}
+
+// GeneratedShortcutsTest reads both variants' generated shortcuts.xml (targetPackage differs by
+// build type); generate them before any unit test run. The task is a cheap file write.
+tasks.withType<Test>().configureEach {
+    dependsOn("generateDebugShortcuts", "generateReleaseShortcuts")
 }
 
 dependencies {

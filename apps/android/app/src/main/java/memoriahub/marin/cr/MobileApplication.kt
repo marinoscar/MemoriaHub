@@ -9,6 +9,9 @@ import kotlinx.coroutines.SupervisorJob
 import memoriahub.marin.cr.auth.EncryptedTokenStore
 import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
+import memoriahub.marin.cr.contract.HealthSummary
+import memoriahub.marin.cr.contract.SyncControl
+import memoriahub.marin.cr.contract.UpdateStatus
 import memoriahub.marin.cr.diagnostics.AppLog
 import memoriahub.marin.cr.ledger.LedgerRepository
 import memoriahub.marin.cr.ledger.MediaSyncDatabase
@@ -34,14 +37,46 @@ import memoriahub.marin.cr.pairing.PairingNotifier
 import memoriahub.marin.cr.pairing.PairingStateStore
 import memoriahub.marin.cr.pairing.PairingStatus
 import memoriahub.marin.cr.pairing.SharedPrefsPairingStateStore
-import memoriahub.marin.cr.sync.NoopSyncScheduling
+import memoriahub.marin.cr.net.ApiMediaSyncCheckinApi
+import memoriahub.marin.cr.net.MediaSyncCheckinApi
+import memoriahub.marin.cr.sync.AndroidDeviceStateReader
+import memoriahub.marin.cr.sync.AndroidSyncRunNotifier
+import memoriahub.marin.cr.sync.ConfigApplier
+import memoriahub.marin.cr.sync.EngineUploader
+import memoriahub.marin.cr.sync.MediaSyncScheduler
+import memoriahub.marin.cr.sync.SharedPrefsSyncStateStore
+import memoriahub.marin.cr.sync.SyncCheckin
+import memoriahub.marin.cr.sync.SyncNotifications
+import memoriahub.marin.cr.sync.SyncRunner
 import memoriahub.marin.cr.sync.SyncScheduling
+import memoriahub.marin.cr.sync.SyncStateStore
+import memoriahub.marin.cr.sync.SyncStatusTracker
+import memoriahub.marin.cr.sync.WorkManagerSyncControl
+import memoriahub.marin.cr.sync.WorkManagerWork
+import memoriahub.marin.cr.sync.asApplierLedger
+import memoriahub.marin.cr.sync.effectiveConfig
 import memoriahub.marin.cr.twa.TwaLauncherActivity
 import memoriahub.marin.cr.upload.AndroidNetworkPolicy
 import memoriahub.marin.cr.upload.MediaGatewayContentSource
 import memoriahub.marin.cr.upload.NetworkPreference
 import memoriahub.marin.cr.upload.PartUploader
 import memoriahub.marin.cr.upload.UploadEngine
+// #514 diagnostics + updates
+import kotlinx.coroutines.launch
+import memoriahub.marin.cr.diagnostics.AndroidDiagnosticsPlatform
+import memoriahub.marin.cr.diagnostics.ApiDiagnosticsApi
+import memoriahub.marin.cr.diagnostics.ApiServerProbe
+import memoriahub.marin.cr.diagnostics.AutoDiagnostics
+import memoriahub.marin.cr.diagnostics.DiagnosticsHealth
+import memoriahub.marin.cr.diagnostics.DiagnosticsService
+import memoriahub.marin.cr.diagnostics.LedgerDiagnosticsSource
+import memoriahub.marin.cr.diagnostics.PrefsAutoDiagnosticsStore
+import memoriahub.marin.cr.diagnostics.SelfTest
+import memoriahub.marin.cr.update.ApiReleaseApi
+import memoriahub.marin.cr.update.PrefsUpdateStore
+import memoriahub.marin.cr.update.ReleaseApi
+import memoriahub.marin.cr.update.UpdateChecker
+import memoriahub.marin.cr.update.openInBrowser
 
 /**
  * Process-wide singletons. Deliberately no DI framework (no Hilt/Dagger): every collaborator is
@@ -54,8 +89,11 @@ import memoriahub.marin.cr.upload.UploadEngine
  * - #510 media discovery + Room ledger (done): [mediaSyncDatabase], [mediaGateway], [scanCursors],
  *   [ledger], [uploadLedger], [mediaScanner].
  * - #511 upload engine (done): [newUploadEngine] over [apiClient], [uploadLedger] and [mediaGateway].
- * - #512 background sync: `val syncScheduler` (WorkManager), wired into [onAppOpen] and [onCreate].
- * - #514 diagnostics + updates: `val diagnostics`, `val updateChecker`, wired into [onAppOpen].
+ * - #512 background sync (done): [syncState], [syncStatus], [syncScheduler], [syncCheckin],
+ *   [syncControl] (the shared `SyncControl` contract; also [syncScheduling]), [newSyncRunner];
+ *   wired into [onAppOpen] and [onCreate].
+ * - #514 diagnostics + updates (done): [diagnostics] / [healthSummary], [autoDiagnostics], [updateStatus],
+ *   wired into [onAppOpen].
  */
 class MobileApplication : Application() {
     /** The server this app talks to (plain prefs `<prefix>_config`). */
@@ -83,11 +121,11 @@ class MobileApplication : Application() {
     val mediaSyncDevices: MediaSyncDevicesApi by lazy { ApiMediaSyncDevicesApi(apiClient) }
 
     /**
-     * The pairing ↔ background-sync seam. TODO(#512): the WorkManager `MediaSyncScheduler`.
+     * The pairing ↔ background-sync seam (#509), implemented by the WorkManager control (#512).
      * Pairing calls ensurePeriodic()/syncNow(INITIAL) after registering and cancelAll() on unpair
-     * or DEVICE_REVOKED; read through a provider so the swap needs no other change.
+     * or DEVICE_REVOKED.
      */
-    val syncScheduling: SyncScheduling by lazy { NoopSyncScheduling }
+    val syncScheduling: SyncScheduling get() = mediaSyncControl
 
     /**
      * Global 401 / 409 `DEVICE_REVOKED` reactions. Every authenticated Media Sync caller (#510–#514)
@@ -164,6 +202,158 @@ class MobileApplication : Application() {
             errorReactions = apiErrorReactions,
         )
 
+    // ---------------------------------------------------------------------------------------
+    // #512 background sync
+
+    /** Cached desired config, applied versions, outbox, throttling clocks (prefs `<prefix>_media_sync`). */
+    val syncState: SyncStateStore by lazy { SharedPrefsSyncStateStore.create(this) }
+
+    /** Live run status for the Hub and the progress notification. */
+    val syncStatus: SyncStatusTracker by lazy { SyncStatusTracker(syncState) }
+
+    private val syncWork: WorkManagerWork by lazy { WorkManagerWork(this) }
+
+    /** WorkManager scheduling policy (periodic 6 h, content trigger, "now", app-open debounce). */
+    val syncScheduler: MediaSyncScheduler by lazy {
+        MediaSyncScheduler(syncWork, syncState, isPaired = { pairingStatus().paired })
+    }
+
+    /** `POST /devices/:id/checkin`, `PATCH /config`, `POST /commands`. */
+    val mediaSyncCheckinApi: MediaSyncCheckinApi by lazy { ApiMediaSyncCheckinApi(apiClient) }
+
+    /** Applies server configs: scope re-evaluation, aborts, generation deltas, work re-arming. */
+    val configApplier: ConfigApplier by lazy {
+        ConfigApplier(
+            store = syncState,
+            ledger = ledger.asApplierLedger(),
+            work = syncScheduler,
+            abortUpload = { objectId -> apiErrorReactions.check(ApiMediaUploadApi(apiClient).abortUpload(objectId)) },
+            pairedAt = { pairingState.pairedAt },
+        )
+    }
+
+    /** Check-in + the local outbox of edits, serialized by one mutex. */
+    val syncCheckin: SyncCheckin by lazy {
+        SyncCheckin(
+            api = mediaSyncCheckinApi,
+            store = syncState,
+            applier = configApplier,
+            reactions = apiErrorReactions::handle,
+            device = AndroidDeviceStateReader(this, ledger, mediaScanner, mediaGateway),
+            deviceId = { tokenStore.deviceId },
+            appVersion = BuildConfig.VERSION_NAME,
+            appVersionCode = BuildConfig.VERSION_CODE,
+        )
+    }
+
+    /** The WorkManager [SyncControl] (also the [SyncScheduling] seam pairing uses). */
+    val mediaSyncControl: WorkManagerSyncControl by lazy {
+        WorkManagerSyncControl(
+            scheduler = syncScheduler,
+            work = syncWork,
+            checkin = syncCheckin,
+            store = syncState,
+            tracker = syncStatus,
+            retryLocal = { ledger.retryFailed(); ledger.retryBlocked() },
+            scope = appScope,
+        )
+    }
+
+    /** Shared contract (#513 screens, #514 diagnostics): start/stop, sync now, config edits, status. */
+    val syncControl: SyncControl get() = mediaSyncControl
+
+    // ---------------------------------------------------------------------------------------------
+    // #514 diagnostics + updates (docs/specs/android-media-sync.md §13)
+    // ---------------------------------------------------------------------------------------------
+
+    /** `GET /api/android-app/releases/latest`, `POST …/:id/download-link` (PAT). */
+    val releaseApi: ReleaseApi by lazy { ApiReleaseApi(apiClient) }
+
+    /** The Hub's update card (§13.6): checked on app open and Hub resume, at most every 12 h, only while paired. */
+    val updateStatus: UpdateStatus by lazy {
+        UpdateChecker(
+            api = releaseApi,
+            store = PrefsUpdateStore.from(this),
+            ownPackage = packageName,
+            ownVersionCode = BuildConfig.VERSION_CODE.toLong(),
+            isPaired = { pairingStatus().paired },
+            serverUrl = { serverConfig.serverUrl },
+            openUrl = { url -> openInBrowser(this, url) },
+            onApiFailure = { apiErrorReactions.handle(it) },
+        )
+    }
+
+    private val diagnosticsService: DiagnosticsService by lazy {
+        val api = ApiDiagnosticsApi(apiClient)
+        DiagnosticsService(
+            selfTest = {
+                SelfTest(
+                    platform = AndroidDiagnosticsPlatform(this),
+                    serverUrl = { serverConfig.serverUrl },
+                    server = ApiServerProbe(apiClient),
+                    api = api,
+                    releases = releaseApi,
+                    pairing = ::pairingStatus,
+                    sync = { syncControl },
+                    ledger = LedgerDiagnosticsSource(ledger, mediaSyncDatabase.syncFiles(), mediaScanner),
+                    onApiFailure = { apiErrorReactions.handle(it) },
+                )
+            },
+            api = api,
+            pairing = ::pairingStatus,
+            token = { tokenStore.token },
+            runs = { ledger.recentRuns(10) },
+            onApiFailure = { apiErrorReactions.handle(it) },
+        )
+    }
+
+    /** Self-test state shared by the Diagnostics screen and the Hub's health line. */
+    val diagnostics: DiagnosticsHealth by lazy {
+        DiagnosticsHealth(
+            service = diagnosticsService,
+            sync = { syncControl },
+            recentRuns = { limit -> ledger.recentRuns(limit) },
+            resetLedger = { ledger.resetLocalState() },
+            scope = appScope,
+        )
+    }
+
+    /** One background run's orchestration (built per run by `MediaSyncWorker`). */
+    fun newSyncRunner(): SyncRunner = SyncRunner(
+        isPaired = { pairingStatus().paired },
+        checkin = syncCheckin,
+        store = syncState,
+        ledger = ledger,
+        scanner = mediaScanner,
+        // The network rule is re-read before every part, so a mid-run config change applies at once.
+        uploaderFactory = { EngineUploader(newUploadEngine { NetworkPreference.fromWire(effectiveConfig(syncState)?.network) }) },
+        permission = { mediaGateway.permissionState() },
+        pairedAt = { pairingState.pairedAt },
+        deviceId = { tokenStore.deviceId },
+        deviceName = DeviceInfo.makerModel(Build.MANUFACTURER, Build.MODEL),
+        notifier = AndroidSyncRunNotifier(this, syncState),
+        tracker = syncStatus,
+        // #514: throttled diagnostics upload after a failed/partial run (fire-and-forget, never throws).
+        onRunRecorded = { status -> autoDiagnostics.onRunFinished(status) },
+    )
+
+    /** The Hub's `HealthLine` ("All checks pass" / "N problems"). */
+    val healthSummary: HealthSummary get() = diagnostics
+
+    /**
+     * Uploads a report after a `failed`/`partial` run (at most every 6 h, only when paired and live).
+     * #512's worker calls `autoDiagnostics.onRunFinished(status)` after recording each run.
+     */
+    val autoDiagnostics: AutoDiagnostics by lazy {
+        AutoDiagnostics(
+            pairing = ::pairingStatus,
+            server = ApiServerProbe(apiClient),
+            service = diagnosticsService,
+            store = PrefsAutoDiagnosticsStore.from(this),
+            scope = appScope,
+        )
+    }
+
     /** Pairing as stored on the phone (hub card, diagnostics, workers' "may I sync?" gate). */
     fun pairingStatus(): PairingStatus = PairingStatus.read(tokenStore, pairingState)
 
@@ -175,7 +365,13 @@ class MobileApplication : Application() {
         AppLog.init(this)
         AppLog.i("App", "app.start version=${BuildConfig.VERSION_NAME} code=${BuildConfig.VERSION_CODE} sdk=${Build.VERSION.SDK_INT}")
         MediaSyncNotifications.ensureChannels(this)
-        // TODO(#512): re-assert the periodic sync (KEEP) when paired, e.g. after an app data restore.
+        SyncNotifications.ensureChannel(this)
+        // #512: re-assert the periodic and content-trigger work (KEEP) when paired and not paused.
+        try {
+            if (pairingStatus().paired) syncScheduler.ensurePeriodic()
+        } catch (e: Exception) {
+            AppLog.w("App", "sync.ensure_periodic.failed", e)
+        }
     }
 
     /**
@@ -183,8 +379,14 @@ class MobileApplication : Application() {
      * non-blocking: anything slow is enqueued or launched on [appScope].
      */
     fun onAppOpen() {
-        // TODO(#512): MediaSyncScheduler.onAppOpen(this) — debounced "sync now" when paired.
-        // TODO(#514): AppUpdates.onAppOpen(this) — throttled check for a newer published release.
+        // #512: debounced app-open sync (or a check-in only while paused).
+        try {
+            mediaSyncControl.onAppOpen()
+        } catch (e: Exception) {
+            AppLog.w("App", "sync.app_open.failed", e)
+        }
+        // #514: throttled (12 h) check for a newer published release; only while paired.
+        appScope.launch { updateStatus.checkNow() }
     }
 
     companion object {

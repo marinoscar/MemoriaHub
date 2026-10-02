@@ -16,6 +16,13 @@
         android:maxSdkVersion="32" />
     <!-- Without it EXIF GPS is redacted from the bytes read through MediaStore. -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!-- #512 background sync: long uploads run as a WorkManager foreground service of type dataSync
+         (Android 14+ requires the typed permission; docs/specs/android-media-sync.md §10.3, §11.1). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- #512/#514: lets Diagnostics open the one-tap "ignore battery optimizations" dialog
+         (sideloaded app, outside Play's policy for this permission; spec §10.5, §13). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <queries>
         <!-- Lets androidbrowserhelper find a browser that supports Custom Tabs / TWAs. -->
@@ -106,7 +113,8 @@
         <!-- Native Media Sync screens: memoriahub://media-sync[/connect|paired|folders|network|files|diagnostics].
              /paired is the device-flow returnUri: the activation page (in a Custom Tab) redirects there after
              approval and the app polls the pending code at once. singleTask keeps the one instance (and its
-             in-flight pairing) and delivers the return through onNewIntent. Issue #513 adds the Hub. -->
+             in-flight pairing) and delivers the return through onNewIntent. Issue #513: the Hub and screens,
+             ?action=apply|sync|retry|pause|resume, and the long-press shortcuts' target (res/xml/shortcuts.xml). -->
         <activity
             android:name=".mediasync.MediaSyncActivity"
             android:exported="true"
@@ -121,6 +129,17 @@
                     android:host="media-sync" />
             </intent-filter>
         </activity>
+
+        <!-- #512: WorkManager's foreground service hosts long Media Sync uploads (setForeground). -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <!-- #512: the "Pause" action of the "Upload progress" notification. -->
+        <receiver
+            android:name=".sync.SyncActionReceiver"
+            android:exported="false" />
 
         <!-- Lets the PWA's notifications and other trusted features be delegated to this app. -->
         <service
