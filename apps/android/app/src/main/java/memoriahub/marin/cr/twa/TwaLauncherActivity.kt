@@ -47,6 +47,15 @@ class TwaLauncherActivity : LauncherActivity() {
 
     override fun getLaunchingUrl(): Uri {
         val server = serverUrl ?: return super.getLaunchingUrl()
-        return Uri.parse(ServerUrls.twaLaunchUrl(server, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong()))
+        val path = intent?.getStringExtra(EXTRA_PATH)
+        return Uri.parse(ServerUrls.twaLaunchUrl(server, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong(), path ?: "/"))
+    }
+
+    companion object {
+        /**
+         * Optional web route to open instead of `/` (issue #513: the Files screen opens `/media`).
+         * Sanitized by [ServerUrls.safeAppPath]; the activity is not exported, so only this app sets it.
+         */
+        const val EXTRA_PATH = "path"
     }
 }

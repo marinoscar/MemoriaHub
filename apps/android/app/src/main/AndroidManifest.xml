@@ -113,7 +113,8 @@
         <!-- Native Media Sync screens: memoriahub://media-sync[/connect|paired|folders|network|files|diagnostics].
              /paired is the device-flow returnUri: the activation page (in a Custom Tab) redirects there after
              approval and the app polls the pending code at once. singleTask keeps the one instance (and its
-             in-flight pairing) and delivers the return through onNewIntent. Issue #513 adds the Hub. -->
+             in-flight pairing) and delivers the return through onNewIntent. Issue #513: the Hub and screens,
+             ?action=apply|sync|retry|pause|resume, and the long-press shortcuts' target (res/xml/shortcuts.xml). -->
         <activity
             android:name=".mediasync.MediaSyncActivity"
             android:exported="true"

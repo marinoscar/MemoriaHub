@@ -9,6 +9,9 @@ import kotlinx.coroutines.SupervisorJob
 import memoriahub.marin.cr.auth.EncryptedTokenStore
 import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
+import memoriahub.marin.cr.contract.HealthSummary
+import memoriahub.marin.cr.contract.SyncControl
+import memoriahub.marin.cr.contract.UpdateStatus
 import memoriahub.marin.cr.diagnostics.AppLog
 import memoriahub.marin.cr.ledger.LedgerRepository
 import memoriahub.marin.cr.ledger.MediaSyncDatabase
@@ -34,7 +37,6 @@ import memoriahub.marin.cr.pairing.PairingNotifier
 import memoriahub.marin.cr.pairing.PairingStateStore
 import memoriahub.marin.cr.pairing.PairingStatus
 import memoriahub.marin.cr.pairing.SharedPrefsPairingStateStore
-import memoriahub.marin.cr.contract.SyncControl
 import memoriahub.marin.cr.net.ApiMediaSyncCheckinApi
 import memoriahub.marin.cr.net.MediaSyncCheckinApi
 import memoriahub.marin.cr.sync.AndroidDeviceStateReader
@@ -61,8 +63,6 @@ import memoriahub.marin.cr.upload.PartUploader
 import memoriahub.marin.cr.upload.UploadEngine
 // #514 diagnostics + updates
 import kotlinx.coroutines.launch
-import memoriahub.marin.cr.contract.HealthSummary
-import memoriahub.marin.cr.contract.UpdateStatus
 import memoriahub.marin.cr.diagnostics.AndroidDiagnosticsPlatform
 import memoriahub.marin.cr.diagnostics.ApiDiagnosticsApi
 import memoriahub.marin.cr.diagnostics.ApiServerProbe
