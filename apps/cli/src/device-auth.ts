@@ -32,12 +32,52 @@ export interface DeviceCodeResponse {
   interval: number;
 }
 
+/**
+ * The `clientInfo` object sent with `POST /api/auth/device/code`.
+ *
+ * The server validates it against an explicit allowlist and STRIPS any other
+ * key, so only these fields ever reach it (issue #499). Before that fix the
+ * server's allowlist lacked `tokenType`/`name`, which silently turned every
+ * CLI login into a 7-day session instead of a personal access token.
+ */
 export interface DeviceClientInfo {
-  tokenType?: string;
+  /** `'pat'` asks for a long-lived personal access token; absent means session. */
+  tokenType?: 'session' | 'pat';
+  /** Label shown on the activation page and used as the PAT name (max 100). */
   name?: string;
+  /** Informational (max 255). */
   hostname?: string;
+  /** Informational (max 50). */
   platform?: string;
-  [key: string]: unknown;
+  deviceName?: string;
+  userAgent?: string;
+  returnUri?: string;
+}
+
+/**
+ * Server-side bounds on the `clientInfo` fields (see the API's
+ * `ClientInfoSchema`). A value over its bound is a 400, so the CLI clamps
+ * rather than letting an unusually long hostname fail the whole login.
+ */
+const CLIENT_INFO_LIMITS = { name: 100, hostname: 255, platform: 50 } as const;
+
+/**
+ * Build the `clientInfo` for a device login that must yield a personal access
+ * token, clamped to the server's field bounds. Shared by `memoriahub login`,
+ * `node enroll`, `backup` enrollment and the TUI screens so they cannot drift.
+ */
+export function buildPatClientInfo(
+  name: string,
+  hostname: string,
+  platform: string,
+): DeviceClientInfo {
+  const clamp = (value: string, max: number) => value.trim().slice(0, max);
+  return {
+    tokenType: 'pat',
+    name: clamp(name, CLIENT_INFO_LIMITS.name) || 'MemoriaHub CLI',
+    hostname: clamp(hostname, CLIENT_INFO_LIMITS.hostname),
+    platform: clamp(platform, CLIENT_INFO_LIMITS.platform),
+  };
 }
 
 /** Known RFC 8628 error codes returned by the token polling endpoint */
@@ -102,11 +142,17 @@ export interface DeviceTokenResult {
   /** The issued access token (PAT string). */
   accessToken: string;
   /**
-   * ISO 8601 timestamp when the token expires, computed from the server's
-   * `expiresIn` field (seconds from now).  Undefined when the server does not
-   * include an `expiresIn` value in the response.
+   * ISO 8601 timestamp when the token expires: the server's absolute
+   * `expiresAt` when it sends one (PAT responses do), otherwise computed from
+   * `expiresIn` (seconds from now). Undefined when the server sends neither.
    */
   expiresAt?: string;
+  /**
+   * `'pat'` when the server issued a personal access token. Absent means the
+   * server issued a short-lived session token instead, which happens against
+   * a server older than the issue #499 fix.
+   */
+  credentialType?: 'pat';
 }
 
 /**
@@ -156,8 +202,16 @@ export async function pollForDeviceToken(
     }
 
     if (res.ok) {
-      // Success: { data: { accessToken, refreshToken, tokenType, expiresIn } }
-      const envelope = parsed as { data: { accessToken: string; expiresIn?: number } };
+      // Success: { data: { accessToken, refreshToken, tokenType, expiresIn,
+      //   credentialType?, expiresAt? } }
+      const envelope = parsed as {
+        data: {
+          accessToken: string;
+          expiresIn?: number;
+          expiresAt?: string;
+          credentialType?: string;
+        };
+      };
       if (
         typeof envelope.data !== 'object' ||
         envelope.data === null ||
@@ -166,12 +220,20 @@ export async function pollForDeviceToken(
         throw new Error('Unexpected success response shape from /api/auth/device/token');
       }
       const { accessToken, expiresIn } = envelope.data;
-      // Compute an absolute expiry timestamp when the server provides expiresIn.
-      const expiresAt =
-        typeof expiresIn === 'number' && expiresIn > 0
-          ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      // Prefer the server's absolute expiry; otherwise derive it from expiresIn.
+      const serverExpiresAt =
+        typeof envelope.data.expiresAt === 'string' &&
+        !Number.isNaN(Date.parse(envelope.data.expiresAt))
+          ? new Date(envelope.data.expiresAt).toISOString()
           : undefined;
-      return { accessToken, expiresAt };
+      const expiresAt =
+        serverExpiresAt ??
+        (typeof expiresIn === 'number' && expiresIn > 0
+          ? new Date(Date.now() + expiresIn * 1000).toISOString()
+          : undefined);
+      const result: DeviceTokenResult = { accessToken, expiresAt };
+      if (envelope.data.credentialType === 'pat') result.credentialType = 'pat';
+      return result;
     }
 
     // Non-2xx: inspect the RFC error code

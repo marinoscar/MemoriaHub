@@ -29,7 +29,9 @@ const mockFetch = jest.fn<typeof fetch>();
 (globalThis as any).fetch = mockFetch;
 
 // Dynamic import AFTER setting up fetch mock
-const { requestDeviceCode, pollForDeviceToken } = await import('../src/device-auth.js');
+const { requestDeviceCode, pollForDeviceToken, buildPatClientInfo } = await import(
+  '../src/device-auth.js'
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -406,4 +408,83 @@ describe('pollForDeviceToken', () => {
 
 afterAll(() => {
   jest.useRealTimers();
+});
+
+// ---------------------------------------------------------------------------
+// Issue #499: the CLI asks for a PAT and learns whether it got one
+// ---------------------------------------------------------------------------
+
+describe('buildPatClientInfo', () => {
+  it('requests a PAT with the name, hostname and platform the server accepts', () => {
+    expect(buildPatClientInfo('MemoriaHub CLI', 'oscar-laptop', 'linux')).toEqual({
+      tokenType: 'pat',
+      name: 'MemoriaHub CLI',
+      hostname: 'oscar-laptop',
+      platform: 'linux',
+    });
+  });
+
+  it('clamps each field to the server-side bound so a long value never 400s the login', () => {
+    const info = buildPatClientInfo('n'.repeat(150), 'h'.repeat(300), 'p'.repeat(80));
+    expect(info.name).toHaveLength(100);
+    expect(info.hostname).toHaveLength(255);
+    expect(info.platform).toHaveLength(50);
+  });
+
+  it('falls back to a generic name when given a blank one', () => {
+    expect(buildPatClientInfo('   ', 'h', 'linux').name).toBe('MemoriaHub CLI');
+  });
+});
+
+describe('pollForDeviceToken credentialType (issue #499)', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('surfaces credentialType "pat" and prefers the server\'s absolute expiresAt', async () => {
+    mockFetch.mockResolvedValue(
+      makeJsonResponse({
+        data: {
+          accessToken: 'pat_abc',
+          refreshToken: '',
+          tokenType: 'Bearer',
+          expiresIn: 7776000,
+          credentialType: 'pat',
+          expiresAt: '2030-01-01T00:00:00.000Z',
+          tokenId: 'pat-1',
+          tokenName: 'MemoriaHub CLI',
+        },
+      }),
+    );
+
+    const promise = pollForDeviceToken('https://example.com', 'dc', 5, 3600);
+    await jest.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result).toEqual({
+      accessToken: 'pat_abc',
+      credentialType: 'pat',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('leaves credentialType absent for a session token (pre-#499 server)', async () => {
+    mockFetch.mockResolvedValue(
+      makeJsonResponse({
+        data: {
+          accessToken: 'eyJ.a.b',
+          refreshToken: 'rt',
+          tokenType: 'Bearer',
+          expiresIn: 604800,
+        },
+      }),
+    );
+
+    const promise = pollForDeviceToken('https://example.com', 'dc', 5, 3600);
+    await jest.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result.credentialType).toBeUndefined();
+    expect(result.expiresAt).toEqual(expect.any(String));
+  });
 });
