@@ -5,7 +5,10 @@ import {
 } from '@nestjs/platform-fastify';
 import fastifyCookie from '@fastify/cookie';
 import { AppModule } from '../../src/app.module';
-import { fastifyAdapterOptions } from '../../src/common/fastify-setup';
+import {
+  fastifyAdapterOptions,
+  registerRawPartBodyParser,
+} from '../../src/common/fastify-setup';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { prismaMock } from '../mocks/prisma.mock';
 import { OfflineGeoLocationProvider } from '../../src/media/geo/offline-geo-location.provider';
@@ -134,6 +137,9 @@ export async function createTestApp(
   await app.register(fastifyCookie, {
     secret: 'test-secret',
   });
+
+  // Same raw part-body parser main.ts registers (issue #506).
+  registerRawPartBodyParser(app.getHttpAdapter().getInstance());
 
   app.setGlobalPrefix('api');
   // Note: ZodValidationPipe is already registered globally via APP_PIPE in AppModule
