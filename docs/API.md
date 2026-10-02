@@ -1080,7 +1080,7 @@ The storage system provides file upload and management capabilities with support
 
 `POST /api/storage/objects/upload/init`
 
-**Requires Authentication** - Initialize a multipart upload for large files. Returns presigned URLs for direct-to-S3 uploads.
+**Requires Authentication** - Initialize a multipart upload for large files. Returns the URLs of the first ≤10 parts (`POST /api/storage/objects/:id/upload/part-urls` with `{ "partNumbers": [...] }`, ≤100 per call, mints more) and how to authenticate them.
 
 **Request Body:**
 ```json
@@ -1102,10 +1102,25 @@ The storage system provides file upload and management capabilities with support
     "presignedUrls": [
       { "partNumber": 1, "url": "https://..." },
       { "partNumber": 2, "url": "https://..." }
-    ]
+    ],
+    "partUploadAuth": "none"
   }
 }
 ```
+
+- `partSize` is 10 MiB by default (`STORAGE_PART_SIZE`). Every part except the last is exactly `partSize` bytes. Always use the returned `partSize`, never an assumed one.
+- `partUploadAuth: "none"`: the URLs are presigned S3/R2 URLs. PUT the bytes with **no** `Authorization` header and read the `ETag` response header.
+- `partUploadAuth: "bearer"`: the `local` storage provider has no presigned URLs, so the URLs are this API's own part route (below). PUT with the usual `Authorization: Bearer` header (JWT or `pat_`).
+
+---
+
+#### Upload a Part Through the API (local storage provider)
+
+`PUT /api/storage/objects/:id/upload/parts/:partNumber`
+
+**Requires Authentication** (uploader only) - Only returned when `partUploadAuth` is `"bearer"`. Body: the part's raw bytes (`Content-Type: application/octet-stream`), streamed to disk. Answers like S3: `200`, empty body, the part's quoted MD5 in the `ETag` header. Re-sending a part replaces it.
+
+Errors carry `details.reason`: 400 `UPLOAD_NOT_ACTIVE`, `PART_OUT_OF_RANGE`, `PART_SIZE_MISMATCH`, `PRESIGNED_PARTS_REQUIRED`; 403 not the uploader; 404 unknown object; 409 `UPLOAD_SESSION_INVALID` (re-initialize); 415 `RAW_BODY_REQUIRED`.
 
 ---
 
@@ -1113,16 +1128,18 @@ The storage system provides file upload and management capabilities with support
 
 `GET /api/storage/objects/:id/upload/status`
 
-**Requires Authentication** - Check progress of an in-progress upload.
+**Requires Authentication** - Check progress of an in-progress upload. This is what drives resume: re-send the parts missing from `uploadedParts`. On the `local` provider the list is exact; on S3/R2 parts are recorded only at `complete`, so trust your own ETag record there and use `status` to confirm the session is still `pending`/`uploading`.
 
 **Response:**
 ```json
 {
   "data": {
+    "objectId": "uuid",
     "status": "uploading",
-    "uploadedParts": 5,
+    "uploadedParts": [1, 2, 3, 4, 5],
     "totalParts": 10,
-    "progress": 50
+    "uploadedBytes": "52428800",
+    "totalBytes": "104857600"
   }
 }
 ```
@@ -1134,6 +1151,9 @@ The storage system provides file upload and management capabilities with support
 `POST /api/storage/objects/:id/upload/complete`
 
 **Requires Authentication** - Finalize multipart upload after all parts are uploaded.
+
+- **409** `details.reason: "UPLOAD_PARTS_MISSING"` with `details.partNumbers` (local provider): those parts are missing or do not match their `eTag`. Nothing was written; re-send just those parts and complete again.
+- **409** `details.reason: "UPLOAD_SESSION_INVALID"`: the storage provider no longer has this multipart session. Abort and re-initialize.
 
 **Request Body:**
 ```json
