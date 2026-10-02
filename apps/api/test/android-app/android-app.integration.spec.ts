@@ -199,22 +199,22 @@ describe('Android app trust API (Integration)', () => {
     });
 
     it.each([
-      ['a missing list', {}],
-      ['no body at all', undefined],
-      ['an unknown key', { trustedApps: [], extra: 1 }],
-      ['a bad package name', { trustedApps: [{ packageName: 'app', sha256: SHA_A }] }],
-      ['a bad fingerprint', { trustedApps: [{ packageName: PACKAGE, sha256: 'AB:CD' }] }],
+      ['a missing list', {}, 'INVALID_TRUSTED_APPS'],
+      ['no body at all', undefined, 'INVALID_TRUSTED_APPS'],
+      ['an unknown key', { trustedApps: [], extra: 1 }, 'INVALID_TRUSTED_APPS'],
+      ['a bad package name', { trustedApps: [{ packageName: 'app', sha256: SHA_A }] }, 'INVALID_PACKAGE_NAME'],
+      ['a bad fingerprint', { trustedApps: [{ packageName: PACKAGE, sha256: 'AB:CD' }] }, 'INVALID_FINGERPRINT'],
       [
         'more than ten apps',
         { trustedApps: Array.from({ length: 11 }, (_, i) => ({ packageName: `com.example.a${i}`, sha256: SHA_A })) },
+        'TOO_MANY_TRUSTED_APPS',
       ],
-    ])('rejects %s with 400 carrying details.reason, and writes nothing', async (_label, payload) => {
+    ])('rejects %s with 400 carrying details.reason, and writes nothing', async (_label, payload, reason) => {
       const req = request(server()).put(ADMIN_ROUTE).set(await adminAuth());
       const { body } = await (payload === undefined ? req : req.send(payload)).expect(400);
 
-      expect(body.details).toEqual(
-        expect.objectContaining({ reason: 'invalid_trusted_apps', issues: expect.any(Array) }),
-      );
+      expect(body.code).toBe('BAD_REQUEST');
+      expect(body.details).toEqual(expect.objectContaining({ reason, issues: expect.any(Array) }));
       expect(body).not.toHaveProperty('reason');
       expect(body).not.toHaveProperty('errors');
       expect(context.prismaMock.systemSettings.upsert).not.toHaveBeenCalled();

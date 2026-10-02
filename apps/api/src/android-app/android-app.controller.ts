@@ -28,7 +28,7 @@ import { TrustedAppsValidationPipe } from './trusted-apps-validation.pipe';
 // controllers under `admin/android-app/releases`.
 // =============================================================================
 
-@ApiTags('Admin: Android App')
+@ApiTags('Android app')
 @Controller('admin/android-app')
 export class AndroidAppController {
   constructor(private readonly androidApp: AndroidAppService) {}
@@ -60,8 +60,9 @@ export class AndroidAppController {
       '`keytool` prints it) or 64 hex digits, accepted in either case and stored uppercase ' +
       'colon-separated. Repeated pairs are dropped. `/.well-known/assetlinks.json` reflects the ' +
       'change immediately (clients may cache it for five minutes). Audited as ' +
-      '`android_app.trusted_apps.updated`. A malformed body is a 400 with ' +
-      '`details.reason = "invalid_trusted_apps"` and the problems under `details.issues`.',
+      '`android_app.trusted_apps.updated`. A malformed body is a 400 whose `details.reason` is ' +
+      '`TOO_MANY_TRUSTED_APPS`, `INVALID_PACKAGE_NAME`, `INVALID_FINGERPRINT` or (missing list, ' +
+      'unknown key) `INVALID_TRUSTED_APPS`, with every problem under `details.issues`.',
   })
   @ApiBody({ type: UpdateAndroidAppDto })
   @ApiResponse({ status: 200, description: 'The saved state', type: AndroidAppResponseDto })

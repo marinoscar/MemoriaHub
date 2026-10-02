@@ -1,4 +1,4 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Logger, Res } from '@nestjs/common';
 import { ApiOperation, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply } from 'fastify';
 
@@ -34,10 +34,12 @@ import { AndroidAppService } from './android-app.service';
 /** Short, so a newly trusted key takes effect within minutes. */
 export const ASSET_LINKS_CACHE_CONTROL = 'public, max-age=300';
 
-@ApiTags('Android App')
+@ApiTags('Android app')
 @Controller('well-known')
 @AllowDuringMaintenance()
 export class AssetLinksController {
+  private readonly logger = new Logger(AssetLinksController.name);
+
   constructor(private readonly androidApp: AndroidAppService) {}
 
   @Get('assetlinks.json')
@@ -56,6 +58,7 @@ export class AssetLinksController {
   @ApiResponse({ status: 200, description: 'The statement list (a bare JSON array)' })
   async getAssetLinks(@Res() reply: FastifyReply): Promise<void> {
     const statements = await this.androidApp.getAssetLinks();
+    this.logger.debug({ event: 'android_app.assetlinks.served', statements: statements.length });
 
     await reply
       .status(200)

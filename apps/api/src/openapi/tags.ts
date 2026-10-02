@@ -287,14 +287,15 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     ],
   },
   {
-    name: 'Android App',
+    name: 'Android',
     tags: [
       {
-        name: 'Android App',
+        name: 'Android app',
         description:
-          'Public surfaces of the Android app (a Trusted Web Activity plus the native Media Sync ' +
-          'companion), starting with the Digital Asset Links statement list served at ' +
-          '`/.well-known/assetlinks.json` — a bare JSON array, public, and reachable during maintenance.',
+          'The Android app (a Trusted Web Activity plus the native Media Sync companion): the ' +
+          'trusted signing keys (`system_settings:*`), the apps paired devices report, and the ' +
+          'public Digital Asset Links list served at `/.well-known/assetlinks.json` (a bare JSON ' +
+          'array, reachable during maintenance).',
       },
     ],
   },
@@ -454,13 +455,6 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
       {
         name: 'Admin: AI Picture Enhancer',
         description: 'Readiness status for the AI Picture Enhancer: feature flag, provider, model, and credential.',
-      },
-      {
-        name: 'Admin: Android App',
-        description:
-          'Which Android apps (package name + signing-certificate SHA-256) this deployment trusts to ' +
-          'open it as a Trusted Web Activity, alongside the apps paired Media Sync devices actually ' +
-          'report. The list is what `/.well-known/assetlinks.json` publishes. `system_settings:*`.',
       },
     ],
   },

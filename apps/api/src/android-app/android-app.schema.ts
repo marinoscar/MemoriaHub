@@ -39,8 +39,22 @@ export const MAX_TRUSTED_ANDROID_APPS = 10;
 /** The relation Chrome checks for a TWA. */
 export const ASSET_LINKS_RELATION = 'delegate_permission/common.handle_all_urls';
 
-/** `details.reason` of the 400 a malformed `PUT /api/admin/android-app` body gets. */
-export const INVALID_TRUSTED_APPS_REASON = 'invalid_trusted_apps';
+/**
+ * `details.reason` values of the 400 a malformed `PUT /api/admin/android-app`
+ * body gets (docs/specs/android-media-sync.md §17.2). Uppercase, like every
+ * other reason (§22 D22). `INVALID_TRUSTED_APPS` covers what the spec's three
+ * do not name: a missing or non-array `trustedApps`, an unknown key, a
+ * non-object entry.
+ */
+export const TRUSTED_APPS_ERROR_REASONS = {
+  INVALID_FINGERPRINT: 'INVALID_FINGERPRINT',
+  INVALID_PACKAGE_NAME: 'INVALID_PACKAGE_NAME',
+  TOO_MANY_TRUSTED_APPS: 'TOO_MANY_TRUSTED_APPS',
+  INVALID_TRUSTED_APPS: 'INVALID_TRUSTED_APPS',
+} as const;
+
+export type TrustedAppsErrorReason =
+  (typeof TRUSTED_APPS_ERROR_REASONS)[keyof typeof TRUSTED_APPS_ERROR_REASONS];
 
 /**
  * An Android application id: at least two dot-separated segments, each
