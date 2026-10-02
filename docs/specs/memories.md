@@ -803,7 +803,7 @@ A side effect worth naming: while the flag is off, a non-member also gets an emp
 
 ### 6.4 `GET /api/memories` — keyset, and why the cursor comes from the raw page
 
-Keyset only. There is deliberately **no** `page` escape hatch of the kind `GET /api/media` carries: that endpoint's offset mode exists purely for legacy clients (the Android app, the CLI) that predate keyset, and nothing has ever consumed memories, so neither the dual-mode branch nor its `COUNT(*)` is inherited. Ordering is `(generatedAt DESC, id DESC)`; the `id` tiebreak is not decorative — one generation run writes a whole batch of rows with near-identical `generatedAt`, so without it the keyset would be non-deterministic exactly where it is used most.
+Keyset only. There is deliberately **no** `page` escape hatch of the kind `GET /api/media` carries: that endpoint's offset mode exists purely for legacy clients (the CLI) that predate keyset, and nothing has ever consumed memories, so neither the dual-mode branch nor its `COUNT(*)` is inherited. Ordering is `(generatedAt DESC, id DESC)`; the `id` tiebreak is not decorative — one generation run writes a whole batch of rows with near-identical `generatedAt`, so without it the keyset would be non-deterministic exactly where it is used most.
 
 Filters:
 

@@ -896,7 +896,7 @@ Authorization: Bearer <token>
 
 ## Android Deep-Link Return Flow
 
-Native Android apps (and other apps that register a custom URI scheme) can be returned to automatically after the user approves a device — without the user having to manually switch back from the browser.
+The MemoriaHub Android app (TWA + native Media Sync, see [android-media-sync.md](specs/android-media-sync.md)), and other apps that register a custom URI scheme, can be returned to automatically after the user approves a device — without the user having to manually switch back from the browser.
 
 ### How It Works
 
@@ -905,10 +905,10 @@ Native Android apps (and other apps that register a custom URI scheme) can be re
    ```json
    {
      "clientInfo": {
-       "tokenType": "pat",
        "name": "MemoriaHub Android · Pixel 8",
        "platform": "android",
-       "returnUri": "memoriahub://auth/device-complete"
+       "tokenType": "pat",
+       "returnUri": "memoriahub://media-sync/paired"
      }
    }
    ```
@@ -923,11 +923,11 @@ Native Android apps (and other apps that register a custom URI scheme) can be re
 
    After OAuth completes, the callback redirects the browser to `/auth/callback?token=...&returnTo=%2Factivate%3Fcode%3DABCD-1234`, and the frontend forwards the user to `/activate?code=ABCD-1234`.
 
-4. **User approves the device** on the activation page. The page calls `POST /api/auth/device/authorize` and, on success, reads `clientInfo.returnUri` from the `GET /api/auth/device/activate` response and navigates the Custom Tab to `memoriahub://auth/device-complete`.
+4. **User approves the device** on the activation page. The page calls `POST /api/auth/device/authorize` and, on success, reads `clientInfo.returnUri` from the `GET /api/auth/device/activate` response and navigates the Custom Tab to `memoriahub://media-sync/paired`.
 
-5. **Android intercepts the deep link** via an intent-filter registered for `memoriahub://auth/device-complete`. The app is brought back to the foreground.
+5. **Android intercepts the deep link** via an intent-filter registered for `memoriahub://media-sync/paired`. The app is brought back to the foreground.
 
-6. **App completes login** via its out-of-band `POST /api/auth/device/token` poll, which succeeds immediately because the device code was just approved.
+6. **App completes pairing** via its out-of-band `POST /api/auth/device/token` poll, which succeeds immediately because the device code was just approved. The Media Sync module requests a long-lived Personal Access Token (`clientInfo.tokenType: 'pat'`, as in the request above) so it can sync in the background without refresh-cookie handling.
 
 ### Security Notes
 
