@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and below (android:fullBackupContent). allowBackup is false; these rules are a
+     second line of defence: the pairing token, installation id, server address and the Room
+     ledger are device-bound and must never be backed up. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="database" path="." />
+</full-backup-content>
