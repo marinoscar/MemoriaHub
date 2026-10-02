@@ -170,7 +170,10 @@ class UploadEngine(
         suspend fun claim(): LedgerFile? = mutex.withLock {
             if (stopReason != null || claimed >= maxFiles) return@withLock null
             if (queue.isEmpty() && !exhausted) {
-                val batch = ledger.nextBatch(batchSize, clock()).filter { it.id !in seen }
+                // nextBatch returns in-flight UPLOADING rows again: over-fetch by what this run
+                // has already claimed so they can never crowd out the rest of the queue.
+                val limit = batchSize + minOf(seen.size, MAX_SEEN_OVERFETCH)
+                val batch = ledger.nextBatch(limit, clock()).filter { it.id !in seen }
                 if (batch.isEmpty()) exhausted = true else queue.addAll(batch)
             }
             val next = queue.removeFirstOrNull() ?: return@withLock null
@@ -213,6 +216,9 @@ class UploadEngine(
         data class Failed(val code: String, val message: String, val retryable: Boolean, val network: Boolean = false) : Outcome
         data class Stopped(val reason: UploadStopReason) : Outcome
         data object Vanished : Outcome
+
+        /** The row left the upload path mid-file (excluded, T17, or vanished, T19): nothing to write. */
+        data object Abandoned : Outcome
     }
 
     /** Ends one file's pipeline with [outcome] (internal control flow, no stack trace). */
@@ -266,6 +272,7 @@ class UploadEngine(
                     logger("upload.file.vanished file=${file.id}")
                     synchronized(run) { run.vanishedIds += file.id }
                 }
+                is Outcome.Abandoned -> logger("upload.file.abandoned file=${file.id}")
                 is Outcome.Stopped -> {
                     logger("upload.file.stopped file=${file.id} reason=${outcome.reason}")
                     run.stop(outcome.reason)
@@ -313,14 +320,15 @@ class UploadEngine(
         suspend fun execute(): Outcome {
             if (!networkPolicy.allowsUpload()) return Outcome.Stopped(UploadStopReason.NETWORK_POLICY)
             checkStop()
-            if (file.sizeBytes <= 0) return Outcome.Failed(CODE_EMPTY_FILE, "The file is empty", retryable = false)
             logger("upload.file.start file=${file.id} size=${file.sizeBytes} state=${file.state} parts=${parts.size}")
 
             if (phase != SyncFileState.UPLOADING && phase != SyncFileState.REGISTERING) {
+                // Every claimed QUEUED/FAILED row starts hashing (T4/T5), even with a stored hash.
                 if (phase != SyncFileState.HASHING) {
                     ledger.markHashing(file.id)
                     phase = SyncFileState.HASHING
                 }
+                if (file.sizeBytes <= 0) return Outcome.Failed(CODE_EMPTY_FILE, "The file is empty", retryable = false)
                 ensureHash()
                 dedupCheck()?.let { mediaItemId ->
                     abandonOpenSession()
@@ -329,6 +337,7 @@ class UploadEngine(
                     return Outcome.Deduplicated(mediaItemId)
                 }
             } else if (contentHash == null) {
+                // A resumed row whose file changed under it lost its hash: hash before uploading.
                 ensureHash()
             }
 
@@ -455,6 +464,7 @@ class UploadEngine(
             parts.clear()
             urls.clear()
             auth = response.partUploadAuth
+            ledger.savePartUploadAuth(file.id, response.partUploadAuth ?: PartUploadAuth.NONE)
             response.presignedUrls.forEach { urls[it.partNumber] = it.url }
             logger(
                 "upload.file.init file=${file.id} size=${file.sizeBytes} partSize=${response.partSize} " +
@@ -506,6 +516,8 @@ class UploadEngine(
             for (n in missing) {
                 checkStop()
                 if (!networkPolicy.allowsUpload()) throw Halt(Outcome.Stopped(UploadStopReason.NETWORK_POLICY))
+                // Excluded or vanished meanwhile: the ledger ignores our writes, so stop here.
+                if (!ledger.isActive(file.id)) throw Halt(Outcome.Abandoned)
                 uploadPart(n, size, missing)
             }
         }
@@ -611,7 +623,10 @@ class UploadEngine(
             val id = objectId ?: throw SessionReset("no session")
             when (val result = api.partUrls(id, partNumbers)) {
                 is ApiResult.Success -> {
-                    result.value.partUploadAuth?.let { auth = it }
+                    result.value.partUploadAuth?.let { fresh ->
+                        if (fresh != auth) ledger.savePartUploadAuth(file.id, fresh)
+                        auth = fresh
+                    }
                     result.value.presignedUrls.forEach { urls[it.partNumber] = it.url }
                 }
                 is ApiResult.Failure -> fail(result.error, UploadStep.PART_URLS)
@@ -739,6 +754,7 @@ class UploadEngine(
         const val DEFAULT_URL_BATCH = 10
         const val DEFAULT_PART_TRIES = 3
         const val MAX_URLS_PER_CALL = 100
+        private const val MAX_SEEN_OVERFETCH = 1_000
         const val MAX_SESSION_RESETS = 2
         const val MAX_MISSING_PART_ROUNDS = 2
         const val NETWORK_FAILURES_TO_STOP = 2

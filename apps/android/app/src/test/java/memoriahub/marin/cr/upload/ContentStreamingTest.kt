@@ -75,7 +75,8 @@ class ContentStreamingTest {
         // 64 MiB generated on the fly: the body only ever holds one 64 KiB buffer.
         val size = 64L * 1024 * 1024
         val source = object : ContentSource {
-            override fun open(uri: String, offset: Long): InputStream = object : InputStream() {
+            override fun openStream(uri: String): InputStream = openRange(uri, 0, size)
+            override fun openRange(uri: String, offset: Long, length: Long): InputStream = object : InputStream() {
                 var pos = offset
                 override fun read(): Int = if (pos >= size) -1 else (pos++ % 251).toInt()
                 override fun read(b: ByteArray, off: Int, len: Int): Int {

@@ -26,7 +26,7 @@ class RoomUploadLedger(
         files.nextBatchRows(limit, nowMs).map { it.toLedgerFile() }
 
     /** Whether [id] is still on the upload path (not excluded, not removed). */
-    suspend fun isActive(id: Long): Boolean =
+    override suspend fun isActive(id: Long): Boolean =
         files.get(id)?.state?.let { it != SyncFileState.EXCLUDED } ?: false
 
     suspend fun state(id: Long): SyncFileState? = files.get(id)?.state
@@ -49,7 +49,7 @@ class RoomUploadLedger(
         }
 
     /** Records `none`/`bearer` (#506) for the current session; informational. */
-    suspend fun savePartUploadAuth(id: Long, partUploadAuth: String) = write(id, "savePartUploadAuth") { row ->
+    override suspend fun savePartUploadAuth(id: Long, partUploadAuth: String) = write(id, "savePartUploadAuth") { row ->
         row.copy(partUploadAuth = partUploadAuth)
     }
 

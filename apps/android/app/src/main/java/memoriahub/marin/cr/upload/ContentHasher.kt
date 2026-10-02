@@ -12,12 +12,12 @@ object ContentHasher {
     const val BUFFER_SIZE = 64 * 1024
 
     /**
-     * Hashes [uri] through [source] (offset 0, the same URI form the upload reads, D24).
+     * Hashes [uri] through [source] (the same URI form the upload reads, D24).
      * [onProgress] receives the running byte count after every buffer, for progress and for
      * cooperative cancellation (it may throw to abort).
      */
     fun sha256(source: ContentSource, uri: String, onProgress: (Long) -> Unit = {}): String =
-        source.open(uri, 0).use { sha256(it, onProgress) }
+        source.openStream(uri).use { sha256(it, onProgress) }
 
     fun sha256(input: InputStream, onProgress: (Long) -> Unit = {}): String {
         val digest = MessageDigest.getInstance("SHA-256")

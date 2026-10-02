@@ -23,4 +23,8 @@ interface UploadLedger {
     suspend fun resetUploadSession(id: Long)
     /** retryable=false or attempts reaching 5 → BLOCKED; else FAILED with nextAttemptAt from the backoff (30s, 2m, 10m, 1h). */
     suspend fun markFailed(id: Long, error: String, errorCode: String?, retryable: Boolean, nowMs: Long)
+    /** False once the row left the upload path (excluded by a config change, T17, or removed as vanished, T19): its writes are ignored, so the engine stops the file at the next part boundary. */
+    suspend fun isActive(id: Long): Boolean
+    /** Records `none`/`bearer` (#506) for the current multipart session; informational. */
+    suspend fun savePartUploadAuth(id: Long, partUploadAuth: String)
 }

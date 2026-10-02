@@ -47,7 +47,7 @@ class ContentRangeRequestBody(
 
     override fun writeTo(sink: BufferedSink) {
         val input = try {
-            source.open(uri, offset)
+            source.openRange(uri, offset, length)
         } catch (e: IOException) {
             throw SourceReadException("Could not open the file", e)
         } catch (e: SecurityException) {

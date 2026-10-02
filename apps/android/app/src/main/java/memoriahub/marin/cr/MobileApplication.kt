@@ -37,8 +37,8 @@ import memoriahub.marin.cr.pairing.SharedPrefsPairingStateStore
 import memoriahub.marin.cr.sync.NoopSyncScheduling
 import memoriahub.marin.cr.sync.SyncScheduling
 import memoriahub.marin.cr.twa.TwaLauncherActivity
-import memoriahub.marin.cr.upload.AndroidContentSource
 import memoriahub.marin.cr.upload.AndroidNetworkPolicy
+import memoriahub.marin.cr.upload.MediaGatewayContentSource
 import memoriahub.marin.cr.upload.NetworkPreference
 import memoriahub.marin.cr.upload.PartUploader
 import memoriahub.marin.cr.upload.UploadEngine
@@ -147,7 +147,10 @@ class MobileApplication : Application() {
      * where `target = UploadTarget(config.targetCircleId, tokenStore.deviceId!!, deviceName)`.
      * Part PUTs use their own OkHttp client; the PAT is only ever sent to this server's origin.
      */
-    fun newUploadEngine(ledger: UploadLedger, networkPreference: () -> NetworkPreference): UploadEngine =
+    fun newUploadEngine(
+        ledger: UploadLedger = uploadLedger,
+        networkPreference: () -> NetworkPreference,
+    ): UploadEngine =
         UploadEngine(
             ledger = ledger,
             api = ApiMediaUploadApi(apiClient),
@@ -156,7 +159,7 @@ class MobileApplication : Application() {
                 tokenProvider = { tokenStore.token },
                 userAgent = ApiClient.userAgent(BuildConfig.VERSION_NAME),
             ),
-            source = AndroidContentSource(this),
+            source = MediaGatewayContentSource(mediaGateway),
             networkPolicy = AndroidNetworkPolicy(this, networkPreference),
             errorReactions = apiErrorReactions,
         )

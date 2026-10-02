@@ -6,7 +6,6 @@ import memoriahub.marin.cr.ledger.SyncFileState
 import memoriahub.marin.cr.ledger.UploadLedger
 import memoriahub.marin.cr.upload.ContentSource
 import memoriahub.marin.cr.upload.UploadBackoff
-import memoriahub.marin.cr.upload.skipFully
 import java.io.ByteArrayInputStream
 import java.io.FileNotFoundException
 import java.io.InputStream
@@ -28,6 +27,9 @@ class FakeUploadLedger(private val events: MutableList<String> = java.util.Colle
     )
 
     val rows = linkedMapOf<Long, Row>()
+    /** Ids a config change excluded (T17) or a scan removed (T19) meanwhile: [isActive] is false. */
+    val inactive = java.util.Collections.synchronizedSet(mutableSetOf<Long>())
+    val partUploadAuth = mutableMapOf<Long, String>()
     val log: List<String> get() = events
     var onRecordPart: suspend (Long, CompletedPart) -> Unit = { _, _ -> }
 
@@ -99,6 +101,15 @@ class FakeUploadLedger(private val events: MutableList<String> = java.util.Colle
         }
     }
 
+    override suspend fun isActive(id: Long): Boolean = id !in inactive && rows.containsKey(id)
+
+    override suspend fun savePartUploadAuth(id: Long, partUploadAuth: String) {
+        synchronized(this) {
+            this.partUploadAuth[id] = partUploadAuth
+            events += "ledger.auth:$id:$partUploadAuth"
+        }
+    }
+
     companion object {
         fun file(
             id: Long,
@@ -144,12 +155,18 @@ class FakeContentSource : ContentSource {
 
     fun put(uri: String, bytes: ByteArray) = apply { files[uri] = bytes }
 
-    override fun open(uri: String, offset: Long): InputStream {
+    override fun openStream(uri: String): InputStream = open(uri, 0, Long.MAX_VALUE)
+
+    override fun openRange(uri: String, offset: Long, length: Long): InputStream = open(uri, offset, length)
+
+    private fun open(uri: String, offset: Long, length: Long): InputStream {
         synchronized(this) { opens++ }
         if (uri in missing) throw FileNotFoundException(uri)
         if (uri in denied) throw SecurityException("revoked")
         val bytes = files[uri] ?: throw FileNotFoundException(uri)
-        return ByteArrayInputStream(bytes).also { it.skipFully(offset) }
+        val start = offset.coerceAtMost(bytes.size.toLong()).toInt()
+        val end = minOf(bytes.size.toLong(), offset + minOf(length, Long.MAX_VALUE - offset)).toInt()
+        return ByteArrayInputStream(bytes, start, end - start)
     }
 
     companion object {
