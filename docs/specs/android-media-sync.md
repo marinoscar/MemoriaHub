@@ -915,11 +915,13 @@ A direct port of the evopath diagnostics (#514). The phone runs a self-test; the
 
 Same layout as evopath's `DiagnosticsScreen`: (1) summary card with pass, warn and fail counts and **Run self-test** ("Checking…" while running); (2) check rows sorted fail, then warn, then pass, each with a status icon and colour, the label, detail, remedy and an action button; (3) inventory card per selected folder ("photos · videos · uploaded/total · last file"); (4) recent runs card (last 10 local `sync_runs`); (5) log card (last ~100 `AppLog` lines plus **Refresh log**); (6) buttons **Sync now**, **Upload report** (then "Report uploaded (id abc12345…)" plus **Open Media sync settings**), **Share report** (`ACTION_SEND`), **Copy to clipboard** (marked `EXTRA_IS_SENSITIVE` on Android 13+), **Reset local sync state** (confirm dialog, calls `ledger.resetLocalState()`).
 
-`DiagnosticReport` is JSON: app, device, config (no token), stats, checks, inventory, recent runs, log tail, kept under 200 KB, uploaded with `POST /api/media-sync/devices/:id/diagnostics { summary, report }` (`summary` ≤500, report ≤256 KB serialized; 201 `{ id, createdAt }`).
+`DiagnosticReport` is JSON: app, device, config (no token), stats, checks, inventory, recent runs, log tail, kept under 200 KB (the log is halved first, then the runs, the inventory and the checks' `data`; redaction runs on every string of the JSON tree so a masked URL never breaks the document), uploaded with `POST /api/media-sync/devices/:id/diagnostics { summary, report }` (`summary` ≤500, report ≤256 KB serialized; 201 `{ id, createdAt }`).
 
 ### 13.4 `AutoDiagnostics`
 
 After a run that failed or was partial, upload a report **at most every 6 hours**, only when paired and `/api/health/live` answers. The throttle counts from the attempt, not the success.
+
+Integration: the sync worker (#512) calls `MobileApplication.autoDiagnostics.onRunFinished(status)` with the run's check-in `status` (`ok`, `partial`, `failed`, `skipped`, `paused`) after recording the run. It returns at once, ignores anything but `failed` and `partial`, and runs the self-test and upload on the app scope; it never throws. The last attempt time is kept in plain prefs `<prefix>_diagnostics`.
 
 ### 13.5 `AppLog` and redaction
 
