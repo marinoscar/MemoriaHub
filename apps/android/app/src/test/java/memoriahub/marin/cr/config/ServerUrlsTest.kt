@@ -74,6 +74,19 @@ class ServerUrlsTest {
             "https://app.example.com:8443/?source=twa&appVersion=1.0+beta%261&appVersionCode=12",
             ServerUrls.twaLaunchUrl("https://app.example.com:8443", "1.0 beta&1", 12),
         )
+
+    @Test fun `opens a web route in the twa`() =
+        assertEquals(
+            "https://photos.example.com/media?source=twa&appVersion=2.0.0&appVersionCode=100",
+            ServerUrls.twaLaunchUrl("https://photos.example.com", "2.0.0", 100, path = "/media"),
+        )
+
+    @Test fun `rejects unsafe twa paths`() {
+        for (bad in listOf(null, "", "media", "//evil.example.com", "/media?x=1", "/a b", "/%2e%2e", "https://x")) {
+            assertEquals("/", ServerUrls.safeAppPath(bad))
+        }
+        assertEquals("/media/abc-1_2", ServerUrls.safeAppPath("/media/abc-1_2"))
+    }
 }
 
 class ServerConfigTest {

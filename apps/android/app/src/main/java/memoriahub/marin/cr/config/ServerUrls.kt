@@ -57,8 +57,17 @@ object ServerUrls {
      * The URL the TWA opens. `source=twa` lets the web app know it runs inside the Android shell;
      * `appVersion`/`appVersionCode` tell it which build, so it can offer an update.
      */
-    fun twaLaunchUrl(server: String, versionName: String, versionCode: Long): String =
-        "${server.trimEnd('/')}/?source=twa" +
+    fun twaLaunchUrl(server: String, versionName: String, versionCode: Long, path: String = "/"): String =
+        "${server.trimEnd('/')}${safeAppPath(path)}?source=twa" +
             "&appVersion=${URLEncoder.encode(versionName, Charsets.UTF_8.name())}" +
             "&appVersionCode=$versionCode"
+
+    /**
+     * A same-origin web route for the TWA to open (e.g. `/media` from the Files screen, D20):
+     * letters, digits, `-`, `_` and `/` only, starting with one `/`. Anything else opens `/`.
+     */
+    fun safeAppPath(path: String?): String =
+        path?.takeIf { APP_PATH.matches(it) && !it.startsWith("//") } ?: "/"
+
+    private val APP_PATH = Regex("^/[A-Za-z0-9/_-]*$")
 }
