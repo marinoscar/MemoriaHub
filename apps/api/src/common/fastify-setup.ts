@@ -71,6 +71,22 @@ export function fastifyAdapterOptions(extra: Record<string, unknown> = {}) {
 // covers the one-click POST end to end, so a regression here surfaces as a test
 // failure rather than a dead unsubscribe button.
 
+/**
+ * Options the `@fastify/multipart` plugin is registered with, shared by
+ * `main.ts` and the integration-test app (`test/helpers/test-app.helper.ts`)
+ * so a multipart route is exercised against the parser the server really runs.
+ *
+ * The 100 MB `fileSize` is the default for simple uploads; a route that needs
+ * more (the 150 MiB Android APK upload, #504) passes its own `limits` to
+ * `req.parts()` / `req.file()`, which replace these for that request.
+ */
+export const MULTIPART_PLUGIN_OPTIONS = {
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB for simple upload
+    files: 1,
+  },
+} as const;
+
 // -----------------------------------------------------------------------------
 // Raw multipart-part bodies (issue #506)
 // -----------------------------------------------------------------------------
