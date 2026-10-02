@@ -29,6 +29,7 @@ A PAT authenticates as the user who created it, inheriting that user's roles and
 - **CLI tools** - Provide persistent credentials for command-line applications
 - **Scripts and automation** - Run scheduled jobs or batch processes under a specific user identity
 - **Third-party integrations** - Connect external services that call the API on behalf of a user
+- **Paired devices** - The CLI's `memoriahub login` and the Android app's Media sync pairing obtain a PAT through the [device flow](DEVICE-AUTH.md) (`clientInfo.tokenType: "pat"`), so it appears in the token list under the name the client sent (for example "MemoriaHub Android · Pixel 8"), lives `DEVICE_PAT_TTL_DAYS` (default 90) and can be revoked here. A phone's PAT is linked to its Media Sync device: it can act only on that device, and revoking the token or unpairing the device stops the phone ([Android app runbook](runbooks/android-app.md#12-unpair-re-pair-and-token-expiry))
 
 ---
 
