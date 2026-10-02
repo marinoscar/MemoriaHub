@@ -14,7 +14,8 @@
  * exercised without a running backend.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { api } from '../../services/api';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import {
@@ -373,8 +374,91 @@ describe('uploadPart', () => {
     } as unknown as Response);
 
     await expect(uploadPart('https://s3.example.com/presigned', new Blob(['data']))).rejects.toThrow(
-      'S3 did not return an ETag',
+      'did not return an ETag',
     );
+  });
+
+  describe("partUploadAuth: 'bearer' (local storage provider, issue #506)", () => {
+    const sameOrigin = 'http://localhost:3000/api/storage/objects/obj-1/upload/parts/1';
+    const okResponse = (status = 200) =>
+      ({
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: status === 401 ? 'Unauthorized' : 'OK',
+        headers: { get: (name: string) => (name === 'ETag' ? '"md5"' : null) },
+      }) as unknown as Response;
+
+    afterEach(() => {
+      api.setAccessToken(null);
+      vi.restoreAllMocks();
+    });
+
+    it('sends the bearer token and octet-stream body to a same-origin part URL', async () => {
+      api.setAccessToken('jwt-1');
+      const fetchMock = vi.fn().mockResolvedValue(okResponse());
+      global.fetch = fetchMock;
+
+      const etag = await uploadPart(sameOrigin, new Blob(['data']), 'bearer');
+
+      expect(etag).toBe('"md5"');
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(sameOrigin);
+      expect(init.method).toBe('PUT');
+      expect(init.headers).toEqual({
+        'Content-Type': 'application/octet-stream',
+        Authorization: 'Bearer jwt-1',
+      });
+    });
+
+    it('also accepts a relative part URL', async () => {
+      api.setAccessToken('jwt-1');
+      const fetchMock = vi.fn().mockResolvedValue(okResponse());
+      global.fetch = fetchMock;
+
+      await uploadPart('/api/storage/objects/obj-1/upload/parts/2', new Blob(['x']), 'bearer');
+
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer jwt-1');
+    });
+
+    it('refuses to send the token to another origin', async () => {
+      api.setAccessToken('jwt-1');
+      const fetchMock = vi.fn();
+      global.fetch = fetchMock;
+
+      await expect(
+        uploadPart('https://evil.example.com/api/storage/objects/o/upload/parts/1', new Blob(['x']), 'bearer'),
+      ).rejects.toThrow(/another origin/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the access token once on a 401 and retries', async () => {
+      api.setAccessToken('stale');
+      const refresh = vi.spyOn(api, 'refreshToken').mockImplementation(async () => {
+        api.setAccessToken('fresh');
+        return true;
+      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(okResponse(401))
+        .mockResolvedValueOnce(okResponse());
+      global.fetch = fetchMock;
+
+      const etag = await uploadPart(sameOrigin, new Blob(['x']), 'bearer');
+
+      expect(etag).toBe('"md5"');
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer fresh');
+    });
+
+    it('never sends a token for a presigned (none) URL even when signed in', async () => {
+      api.setAccessToken('jwt-1');
+      const fetchMock = vi.fn().mockResolvedValue(okResponse());
+      global.fetch = fetchMock;
+
+      await uploadPart('https://s3.example.com/presigned', new Blob(['x']));
+
+      expect(fetchMock.mock.calls[0][1].headers).toBeUndefined();
+    });
   });
 });
 

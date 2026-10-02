@@ -59,6 +59,24 @@ import memoriahub.marin.cr.upload.MediaGatewayContentSource
 import memoriahub.marin.cr.upload.NetworkPreference
 import memoriahub.marin.cr.upload.PartUploader
 import memoriahub.marin.cr.upload.UploadEngine
+// #514 diagnostics + updates
+import kotlinx.coroutines.launch
+import memoriahub.marin.cr.contract.HealthSummary
+import memoriahub.marin.cr.contract.UpdateStatus
+import memoriahub.marin.cr.diagnostics.AndroidDiagnosticsPlatform
+import memoriahub.marin.cr.diagnostics.ApiDiagnosticsApi
+import memoriahub.marin.cr.diagnostics.ApiServerProbe
+import memoriahub.marin.cr.diagnostics.AutoDiagnostics
+import memoriahub.marin.cr.diagnostics.DiagnosticsHealth
+import memoriahub.marin.cr.diagnostics.DiagnosticsService
+import memoriahub.marin.cr.diagnostics.LedgerDiagnosticsSource
+import memoriahub.marin.cr.diagnostics.PrefsAutoDiagnosticsStore
+import memoriahub.marin.cr.diagnostics.SelfTest
+import memoriahub.marin.cr.update.ApiReleaseApi
+import memoriahub.marin.cr.update.PrefsUpdateStore
+import memoriahub.marin.cr.update.ReleaseApi
+import memoriahub.marin.cr.update.UpdateChecker
+import memoriahub.marin.cr.update.openInBrowser
 
 /**
  * Process-wide singletons. Deliberately no DI framework (no Hilt/Dagger): every collaborator is
@@ -74,7 +92,8 @@ import memoriahub.marin.cr.upload.UploadEngine
  * - #512 background sync (done): [syncState], [syncStatus], [syncScheduler], [syncCheckin],
  *   [syncControl] (the shared `SyncControl` contract; also [syncScheduling]), [newSyncRunner];
  *   wired into [onAppOpen] and [onCreate].
- * - #514 diagnostics + updates: `val diagnostics`, `val updateChecker`, wired into [onAppOpen].
+ * - #514 diagnostics + updates (done): [diagnostics] / [healthSummary], [autoDiagnostics], [updateStatus],
+ *   wired into [onAppOpen].
  */
 class MobileApplication : Application() {
     /** The server this app talks to (plain prefs `<prefix>_config`). */
@@ -243,6 +262,62 @@ class MobileApplication : Application() {
     /** Shared contract (#513 screens, #514 diagnostics): start/stop, sync now, config edits, status. */
     val syncControl: SyncControl get() = mediaSyncControl
 
+    // ---------------------------------------------------------------------------------------------
+    // #514 diagnostics + updates (docs/specs/android-media-sync.md §13)
+    // ---------------------------------------------------------------------------------------------
+
+    /** `GET /api/android-app/releases/latest`, `POST …/:id/download-link` (PAT). */
+    val releaseApi: ReleaseApi by lazy { ApiReleaseApi(apiClient) }
+
+    /** The Hub's update card (§13.6): checked on app open and Hub resume, at most every 12 h, only while paired. */
+    val updateStatus: UpdateStatus by lazy {
+        UpdateChecker(
+            api = releaseApi,
+            store = PrefsUpdateStore.from(this),
+            ownPackage = packageName,
+            ownVersionCode = BuildConfig.VERSION_CODE.toLong(),
+            isPaired = { pairingStatus().paired },
+            serverUrl = { serverConfig.serverUrl },
+            openUrl = { url -> openInBrowser(this, url) },
+            onApiFailure = { apiErrorReactions.handle(it) },
+        )
+    }
+
+    private val diagnosticsService: DiagnosticsService by lazy {
+        val api = ApiDiagnosticsApi(apiClient)
+        DiagnosticsService(
+            selfTest = {
+                SelfTest(
+                    platform = AndroidDiagnosticsPlatform(this),
+                    serverUrl = { serverConfig.serverUrl },
+                    server = ApiServerProbe(apiClient),
+                    api = api,
+                    releases = releaseApi,
+                    pairing = ::pairingStatus,
+                    sync = { syncControl },
+                    ledger = LedgerDiagnosticsSource(ledger, mediaSyncDatabase.syncFiles(), mediaScanner),
+                    onApiFailure = { apiErrorReactions.handle(it) },
+                )
+            },
+            api = api,
+            pairing = ::pairingStatus,
+            token = { tokenStore.token },
+            runs = { ledger.recentRuns(10) },
+            onApiFailure = { apiErrorReactions.handle(it) },
+        )
+    }
+
+    /** Self-test state shared by the Diagnostics screen and the Hub's health line. */
+    val diagnostics: DiagnosticsHealth by lazy {
+        DiagnosticsHealth(
+            service = diagnosticsService,
+            sync = { syncControl },
+            recentRuns = { limit -> ledger.recentRuns(limit) },
+            resetLedger = { ledger.resetLocalState() },
+            scope = appScope,
+        )
+    }
+
     /** One background run's orchestration (built per run by `MediaSyncWorker`). */
     fun newSyncRunner(): SyncRunner = SyncRunner(
         isPaired = { pairingStatus().paired },
@@ -259,6 +334,23 @@ class MobileApplication : Application() {
         notifier = AndroidSyncRunNotifier(this, syncState),
         tracker = syncStatus,
     )
+
+    /** The Hub's `HealthLine` ("All checks pass" / "N problems"). */
+    val healthSummary: HealthSummary get() = diagnostics
+
+    /**
+     * Uploads a report after a `failed`/`partial` run (at most every 6 h, only when paired and live).
+     * #512's worker calls `autoDiagnostics.onRunFinished(status)` after recording each run.
+     */
+    val autoDiagnostics: AutoDiagnostics by lazy {
+        AutoDiagnostics(
+            pairing = ::pairingStatus,
+            server = ApiServerProbe(apiClient),
+            service = diagnosticsService,
+            store = PrefsAutoDiagnosticsStore.from(this),
+            scope = appScope,
+        )
+    }
 
     /** Pairing as stored on the phone (hub card, diagnostics, workers' "may I sync?" gate). */
     fun pairingStatus(): PairingStatus = PairingStatus.read(tokenStore, pairingState)
@@ -291,7 +383,8 @@ class MobileApplication : Application() {
         } catch (e: Exception) {
             AppLog.w("App", "sync.app_open.failed", e)
         }
-        // TODO(#514): AppUpdates.onAppOpen(this) — throttled check for a newer published release.
+        // #514: throttled (12 h) check for a newer published release; only while paired.
+        appScope.launch { updateStatus.checkNow() }
     }
 
     companion object {

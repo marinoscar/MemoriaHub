@@ -10,6 +10,7 @@ import { SearchProvider } from '../../contexts/SearchContext';
 import { MaintenanceBanner } from './MaintenanceBanner';
 import { TimezonePrompt } from '../settings/TimezonePrompt';
 import { NotificationPermissionBanner } from '../notifications/NotificationPermissionBanner';
+import { AndroidUpdateBanner } from './AndroidUpdateBanner';
 import { usePushSubscriptionSync } from '../../hooks/usePushSubscriptionSync';
 import { useNotificationClickHandling } from '../../hooks/useNotificationClickHandling';
 
@@ -151,6 +152,10 @@ export function Layout({ fullBleed = false }: LayoutProps) {
                   isRequestingPermission={pushSync.isRequestingPermission}
                 />
               )}
+              {/* Android app update (issue #515): renders only inside the
+                  app's TWA when the installed build is older than the
+                  hosted release; null (and no request) everywhere else. */}
+              {!fullBleed && <AndroidUpdateBanner />}
               <Outlet />
             </Box>
           </Box>
