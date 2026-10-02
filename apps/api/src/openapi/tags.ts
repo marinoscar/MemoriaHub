@@ -287,6 +287,19 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     ],
   },
   {
+    name: 'Android',
+    tags: [
+      {
+        name: 'Android app',
+        description:
+          'The Android app (a Trusted Web Activity plus the native Media Sync companion): the ' +
+          'trusted signing keys (`system_settings:*`), the apps paired devices report, and the ' +
+          'public Digital Asset Links list served at `/.well-known/assetlinks.json` (a bare JSON ' +
+          'array, reachable during maintenance).',
+      },
+    ],
+  },
+  {
     name: 'Worker Nodes',
     tags: [
       {
