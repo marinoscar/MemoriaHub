@@ -357,6 +357,12 @@ export interface DeviceActivationInfo {
     deviceName?: string;
     userAgent?: string;
     ipAddress?: string;
+    /** Client label, e.g. "MemoriaHub Android · Pixel 8"; becomes the PAT name (issue #499). */
+    name?: string;
+    /** `pat` = the device will receive a long-lived personal access token; absent = session. */
+    tokenType?: 'session' | 'pat';
+    hostname?: string;
+    platform?: string;
     /** Deep-link URI the device wants the browser to call after approval (e.g. memoriahub://auth/device-complete). */
     returnUri?: string;
   };
