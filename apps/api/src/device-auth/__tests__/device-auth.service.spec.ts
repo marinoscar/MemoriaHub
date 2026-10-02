@@ -350,6 +350,62 @@ describe('DeviceAuthService', () => {
       const result = await service.pollForToken(deviceCode);
 
       expect(result.accessToken).toBe('pat_specifictoken999');
+      // Issue #499: the PAT branch is tagged so clients can branch on it.
+      expect(result).toMatchObject({
+        credentialType: 'pat',
+        tokenId: 'pat-id-x',
+        tokenName: 'MemoriaHub CLI',
+      });
+      expect((result as any).expiresAt).toEqual(expect.any(String));
+    });
+
+    it('sanitises the PAT name: strips control chars, collapses whitespace, caps at 100', async () => {
+      const deviceCode = getUniqueDeviceCode();
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValue({
+        id: 'dc-pat-name',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo: {
+          tokenType: 'pat',
+          name: `  Evil\r\nToken\u0000${'x'.repeat(200)}`,
+        },
+      } as any);
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      await service.pollForToken(deviceCode);
+
+      const { name } = mockPatService.createToken.mock.calls[0][1];
+      expect(name.startsWith('Evil Token ')).toBe(true);
+      expect(name).not.toMatch(/[\u0000-\u001f]/);
+      expect(name.length).toBeLessThanOrEqual(100);
+    });
+
+    it('falls back to deviceName, then a generic label, for the PAT name', async () => {
+      const approved = (clientInfo: Record<string, unknown>) => ({
+        id: 'dc-pat-fallback',
+        status: DeviceCodeStatus.approved,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        userId: 'user-1',
+        user: mockUser,
+        clientInfo,
+      });
+      mockPrisma.deviceCode.update.mockResolvedValue({} as any);
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValueOnce(
+        approved({ tokenType: 'pat', name: '   ', deviceName: 'Pixel 8' }) as any,
+      );
+      await service.pollForToken(getUniqueDeviceCode());
+
+      mockPrisma.deviceCode.findUnique.mockResolvedValueOnce(
+        approved({ tokenType: 'pat' }) as any,
+      );
+      await service.pollForToken(getUniqueDeviceCode());
+
+      expect(mockPatService.createToken.mock.calls[0][1].name).toBe('Pixel 8');
+      expect(mockPatService.createToken.mock.calls[1][1].name).toBe('MemoriaHub CLI');
     });
 
     it('should NOT call authService.generateFullTokens when tokenType is pat', async () => {
