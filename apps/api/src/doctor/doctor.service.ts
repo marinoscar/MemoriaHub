@@ -3,7 +3,8 @@
 // =============================================================================
 //
 // On-demand configuration health sweep for admins. Runs a fixed catalog of
-// checks across core infra, auth, storage, AI, face, geo, and the job queue —
+// checks across core infra, auth, storage, AI, face, geo, the job queue,
+// worker nodes, workflows and the Android app —
 // concurrently, with a per-check timeout and exception normalization. No
 // result is persisted; every call recomputes the report from scratch.
 // =============================================================================
@@ -25,6 +26,9 @@ import { resolveWorkerMode } from '../enrichment/enrichment-job.worker';
 import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import { DEFAULT_FACE_VECTOR_BACKEND } from '../face/face-matching.service';
+import { AndroidAppService } from '../android-app/android-app.service';
+import { AndroidReleaseService } from '../android-app/releases/android-release.service';
+import { normalizeSha256Fingerprint, trustedAppKey } from '../android-app/android-app.schema';
 // Pure utility import — `pg-version.util.ts` has no Nest providers and no
 // module of its own, so this adds NO module edge and DoctorModule is unchanged.
 import {
@@ -72,6 +76,21 @@ const CHECK_TIMEOUT_MS = 10_000;
  */
 const WORKFLOW_STUCK_MINUTES = 30;
 
+/**
+ * A paired Android Media Sync device that has not checked in for this long is
+ * flagged by `android.mediaSync` (#507). The phone's WorkManager check-in runs
+ * at least every few hours; two days of silence means it is off, uninstalled
+ * without unpairing, or blocked by the OS.
+ */
+const ANDROID_DEVICE_STALE_HOURS = 48;
+
+/** How many devices / apps a single Android check names before eliding with "…". */
+const ANDROID_LIST_LIMIT_DEVICES = 5;
+const ANDROID_LIST_LIMIT_APPS = 3;
+
+/** Where an administrator manages trusted apps and APK releases. */
+const ANDROID_SETTINGS_HINT = 'Admin → Settings → Android app (/admin/settings/android)';
+
 /** Sentinel thrown by the timeout race branch; never surfaced to callers. */
 const TIMEOUT_SENTINEL = Symbol('doctor-check-timeout');
 
@@ -90,6 +109,8 @@ export class DoctorService {
     private readonly enrichmentAdmin: EnrichmentAdminService,
     private readonly socialMediaOcr: SocialMediaOcrService,
     private readonly visualEmbeddingService: VisualEmbeddingService,
+    private readonly androidApp: AndroidAppService,
+    private readonly androidReleases: AndroidReleaseService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -195,6 +216,15 @@ export class DoctorService {
         label: 'Workflow engine state',
         fn: () => this.checkWorkflowsState(settings),
       },
+      // Android app (epic #498, issue #507)
+      {
+        key: 'android.assetlinks',
+        label: 'Digital Asset Links',
+        fn: () => this.checkAndroidAssetLinks(),
+      },
+      { key: 'android.releases', label: 'Android release', fn: () => this.checkAndroidReleases() },
+      { key: 'android.mediaSync', label: 'Media sync devices', fn: () => this.checkAndroidMediaSync() },
+      { key: 'android.uploadPath', label: 'Phone upload path', fn: () => this.checkAndroidUploadPath() },
     ];
 
     const settled = await Promise.allSettled(defs.map((def) => this.runCheck(def)));
@@ -279,6 +309,11 @@ export class DoctorService {
         key: 'workflows',
         label: 'Workflows',
         checkKeys: ['workflows.state'],
+      },
+      {
+        key: 'android',
+        label: 'Android app',
+        checkKeys: ['android.assetlinks', 'android.releases', 'android.mediaSync', 'android.uploadPath'],
       },
     ];
 
@@ -1582,5 +1617,281 @@ export class DoctorService {
 
     const backedTypes = capToJobTypes[key];
     return backedTypes.some((t) => eligibleTypes.includes(t));
+  }
+
+  // ===========================================================================
+  // Android app checks (epic #498, issue #507)
+  //
+  // Read-only, like every Doctor check: trusted apps come from
+  // AndroidAppService (its own `android_app` settings row), releases from
+  // AndroidReleaseService, and Media Sync devices straight from Prisma (the
+  // Media Sync module owns their writes; DoctorModule deliberately does not
+  // import it). "Active device" always means `media_sync_devices.status =
+  // 'active'`.
+  // ===========================================================================
+
+  /**
+   * `android.assetlinks` — every (package, signer) an active device reports,
+   * and the current release's signer, is vouched for by assetlinks.json.
+   * An untrusted pair opens the PWA shell with a URL bar.
+   */
+  private async checkAndroidAssetLinks(): Promise<CheckOutcome> {
+    let trusted: Awaited<ReturnType<AndroidAppService['getTrustedApps']>>;
+    let reported: Awaited<ReturnType<AndroidAppService['getReportedApps']>>;
+    let current: Awaited<ReturnType<AndroidReleaseService['current']>>;
+    try {
+      trusted = await this.androidApp.getTrustedApps();
+      [reported, current] = await Promise.all([
+        this.androidApp.getReportedApps(trusted),
+        this.androidReleases.current(),
+      ]);
+    } catch (err) {
+      return {
+        status: 'error',
+        message: `Could not read the trusted Android apps: ${err instanceof Error ? err.message : String(err)}`,
+        actionItem: `Check the database connection, then open ${ANDROID_SETTINGS_HINT}.`,
+      };
+    }
+
+    const trustedKeys = new Set(trusted.map((app) => trustedAppKey(app.packageName, app.sha256)));
+    const releaseUntrusted =
+      current !== null && !trustedKeys.has(trustedAppKey(current.packageName, current.signingSha256));
+
+    if (reported.length === 0 && !releaseUntrusted) {
+      return {
+        status: 'skipped',
+        message: 'No active Media Sync device has reported its app signer.',
+      };
+    }
+
+    const untrusted = reported.filter((app) => !app.trusted);
+    const problems: string[] = [];
+    if (untrusted.length > 0) {
+      const listed = untrusted
+        .slice(0, ANDROID_LIST_LIMIT_APPS)
+        .map((app) => `${app.packageName} (${app.sha256}, ${app.deviceCount} device(s))`)
+        .join('; ');
+      const more = untrusted.length > ANDROID_LIST_LIMIT_APPS ? '; …' : '';
+      problems.push(
+        `${untrusted.length} reported app signer(s) are not trusted, so the app opens with a URL bar: ${listed}${more}`,
+      );
+    }
+    if (releaseUntrusted && current) {
+      problems.push(
+        `the current release ${current.versionName} (${current.versionCode}) is signed by ` +
+          `${current.packageName} (${normalizeSha256Fingerprint(current.signingSha256)}), which is not trusted`,
+      );
+    }
+
+    if (problems.length > 0) {
+      return {
+        status: 'warning',
+        message: `${problems.join('. ')}.`,
+        actionItem: `Trust it in ${ANDROID_SETTINGS_HINT}.`,
+      };
+    }
+
+    return {
+      status: 'ok',
+      message: `All ${reported.length} reported app signer(s) are trusted in assetlinks.json.`,
+    };
+  }
+
+  /**
+   * `android.releases` — a hosted APK exists once phones are paired. The ok
+   * message carries `devicesBehind`, the only "devices behind" figure an
+   * administrator sees (spec D19): an update is the user's act, not a fault.
+   */
+  private async checkAndroidReleases(): Promise<CheckOutcome> {
+    const [activeDevices, current] = await Promise.all([
+      this.prisma.mediaSyncDevice.count({ where: { status: 'active' } }),
+      this.androidReleases.current(),
+    ]);
+
+    if (activeDevices === 0) {
+      return { status: 'skipped', message: 'No active Media Sync device is paired.' };
+    }
+
+    if (!current) {
+      return {
+        status: 'warning',
+        message: `${activeDevices} active device(s) are paired but no Android release is current, so phones cannot download or update the app from this server.`,
+        actionItem: `Publish one with \`memoriahub android release\` or upload it in ${ANDROID_SETTINGS_HINT}.`,
+      };
+    }
+
+    // A device that has not reported a package name is counted when its
+    // versionCode is lower; one running a different package (a debug build)
+    // is not, since the current release cannot update it.
+    const devicesBehind = await this.prisma.mediaSyncDevice.count({
+      where: {
+        status: 'active',
+        appVersionCode: { lt: current.versionCode },
+        OR: [{ packageName: current.packageName }, { packageName: null }],
+      },
+    });
+
+    return {
+      status: 'ok',
+      message:
+        `Current release ${current.versionName} (${current.versionCode}); ` +
+        `devicesBehind: ${devicesBehind} of ${activeDevices} active device(s) run an older build.`,
+    };
+  }
+
+  /**
+   * `android.mediaSync` — active devices are checking in and able to upload.
+   * Warns on a device silent for more than 48 h, with blocked files, without
+   * full media permission, or whose paired PAT is revoked/expired/gone (the
+   * phone can no longer authenticate, so it will never check in again).
+   */
+  private async checkAndroidMediaSync(): Promise<CheckOutcome> {
+    const devices = await this.prisma.mediaSyncDevice.findMany({
+      where: { status: 'active' },
+      select: {
+        name: true,
+        lastSeenAt: true,
+        stats: true,
+        permission: true,
+        patId: true,
+        pat: { select: { revokedAt: true, expiresAt: true } },
+        user: { select: { email: true } },
+      },
+      orderBy: { lastSeenAt: 'asc' },
+    });
+
+    if (devices.length === 0) {
+      return { status: 'skipped', message: 'No active Media Sync device is paired.' };
+    }
+
+    const now = Date.now();
+    const staleMs = ANDROID_DEVICE_STALE_HOURS * 3_600_000;
+    const counts = { stale: 0, blocked: 0, permission: 0, credential: 0 };
+    const flagged: string[] = [];
+
+    for (const device of devices) {
+      const reasons: string[] = [];
+
+      if (!device.lastSeenAt || now - device.lastSeenAt.getTime() > staleMs) {
+        counts.stale += 1;
+        reasons.push(
+          device.lastSeenAt
+            ? `no check-in for ${Math.floor((now - device.lastSeenAt.getTime()) / 3_600_000)}h`
+            : 'never checked in',
+        );
+      }
+
+      const blocked = this.readBlockedCount(device.stats);
+      if (blocked > 0) {
+        counts.blocked += 1;
+        reasons.push(`${blocked} blocked file(s)`);
+      }
+
+      // null = not reported yet (no check-in); the staleness rule covers that.
+      if (device.permission !== null && device.permission !== 'full') {
+        counts.permission += 1;
+        reasons.push(`media permission ${device.permission}`);
+      }
+
+      const pat = device.pat;
+      if (!device.patId || !pat || pat.revokedAt || pat.expiresAt.getTime() <= now) {
+        counts.credential += 1;
+        reasons.push(
+          pat?.revokedAt ? 'token revoked' : pat && pat.expiresAt.getTime() <= now ? 'token expired' : 'no token',
+        );
+      }
+
+      if (reasons.length > 0) {
+        const owner = device.user?.email ? `, ${device.user.email}` : '';
+        flagged.push(`${device.name}${owner}: ${reasons.join(', ')}`);
+      }
+    }
+
+    if (flagged.length === 0) {
+      return {
+        status: 'ok',
+        message: `All ${devices.length} active device(s) checked in within ${ANDROID_DEVICE_STALE_HOURS}h with full media permission and no blocked files.`,
+      };
+    }
+
+    const tally = [
+      counts.stale ? `${counts.stale} silent >${ANDROID_DEVICE_STALE_HOURS}h` : null,
+      counts.blocked ? `${counts.blocked} with blocked files` : null,
+      counts.permission ? `${counts.permission} without full media permission` : null,
+      counts.credential ? `${counts.credential} with a revoked/expired token` : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(', ');
+    const listed = flagged.slice(0, ANDROID_LIST_LIMIT_DEVICES).join('; ');
+    const more = flagged.length > ANDROID_LIST_LIMIT_DEVICES ? '; …' : '';
+
+    return {
+      status: 'warning',
+      message: `${flagged.length} of ${devices.length} active device(s) need attention (${tally}): ${listed}${more}.`,
+      actionItem:
+        'Ask the owner to open the app (Media Sync → Diagnostics) on each device: grant full photo/video access, ' +
+        'resolve blocked files, or pair again if the token is gone. Owners see the details at /settings/media-sync.',
+    };
+  }
+
+  /** `stats.blocked` from a device's last check-in, or 0 when absent/malformed. */
+  private readBlockedCount(stats: unknown): number {
+    if (!stats || typeof stats !== 'object' || Array.isArray(stats)) return 0;
+    const blocked = (stats as Record<string, unknown>)['blocked'];
+    return typeof blocked === 'number' && Number.isFinite(blocked) && blocked > 0 ? blocked : 0;
+  }
+
+  /**
+   * `android.uploadPath` — the ACTIVE storage provider can take a phone's
+   * multipart upload: presigned part URLs (S3/R2), or the API part route
+   * (`PUT /api/storage/objects/:id/upload/parts/:n`, #506) for local disk.
+   * Reuses the APK upload's own "is storage configured" resolution so the two
+   * can never disagree. Not skipped without devices: it answers whether a
+   * phone COULD upload before anyone pairs one.
+   */
+  private async checkAndroidUploadPath(): Promise<CheckOutcome> {
+    let target: Awaited<ReturnType<AndroidReleaseService['resolveUploadTarget']>>;
+    try {
+      target = await this.androidReleases.resolveUploadTarget();
+    } catch (err) {
+      const provider = this.providerFromError(err);
+      return {
+        status: 'error',
+        message: `Phones cannot upload: the active storage provider "${provider}" is not configured.`,
+        actionItem: 'Configure a storage provider in Admin Settings → Storage Providers.',
+      };
+    }
+
+    const { id, provider } = target;
+    if (provider.supportsPresignedParts !== false) {
+      return {
+        status: 'ok',
+        message: `Active provider "${id}": phones upload parts to presigned URLs.`,
+      };
+    }
+    if (typeof provider.writePart === 'function') {
+      return {
+        status: 'ok',
+        message: `Active provider "${id}": phones upload parts through the API part route (bearer auth).`,
+      };
+    }
+    return {
+      status: 'error',
+      message: `Active provider "${id}" supports neither presigned part URLs nor API part uploads, so phones cannot upload.`,
+      actionItem: 'Switch the active provider in Admin Settings → Storage Providers.',
+    };
+  }
+
+  /** The provider key carried in a `STORAGE_NOT_CONFIGURED` refusal's details, else 'unknown'. */
+  private providerFromError(err: unknown): string {
+    const response =
+      err && typeof err === 'object' && 'getResponse' in err && typeof err.getResponse === 'function'
+        ? (err.getResponse() as unknown)
+        : null;
+    const details =
+      response && typeof response === 'object' ? (response as Record<string, unknown>)['details'] : null;
+    const provider =
+      details && typeof details === 'object' ? (details as Record<string, unknown>)['provider'] : null;
+    return typeof provider === 'string' && provider.length > 0 ? provider : 'unknown';
   }
 }
