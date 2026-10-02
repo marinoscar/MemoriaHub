@@ -15,6 +15,9 @@ import memoriahub.marin.cr.diagnostics.AppLog
  *   vanished, T19) ignores further writes; the engine sees it with [isActive] and stops at the
  *   next part boundary.
  * - [markFailed] counts an attempt; network-policy, pause and timeout stops must NOT call it.
+ * - Session writes ([recordPart], [replaceParts], [markRegistering], [savePartUploadAuth]) are
+ *   ignored when the row holds no `objectId` (the session was dropped under the engine, e.g. the
+ *   file changed mid-upload); [startUpload] always comes first and sets it.
  */
 class RoomUploadLedger(
     private val files: SyncFileDao,
@@ -49,19 +52,19 @@ class RoomUploadLedger(
         }
 
     /** Records `none`/`bearer` (#506) for the current session; informational. */
-    override suspend fun savePartUploadAuth(id: Long, partUploadAuth: String) = write(id, "savePartUploadAuth") { row ->
+    override suspend fun savePartUploadAuth(id: Long, partUploadAuth: String) = sessionWrite(id, "savePartUploadAuth") { row ->
         row.copy(partUploadAuth = partUploadAuth)
     }
 
-    override suspend fun recordPart(id: Long, part: CompletedPart) = write(id, "recordPart") { row ->
+    override suspend fun recordPart(id: Long, part: CompletedPart) = sessionWrite(id, "recordPart") { row ->
         uploading(row).copy(completedPartsJson = CompletedParts.encode(CompletedParts.plus(row.completedParts, part)))
     }
 
-    override suspend fun replaceParts(id: Long, parts: List<CompletedPart>) = write(id, "replaceParts") { row ->
+    override suspend fun replaceParts(id: Long, parts: List<CompletedPart>) = sessionWrite(id, "replaceParts") { row ->
         uploading(row).copy(completedPartsJson = CompletedParts.encode(parts))
     }
 
-    override suspend fun markRegistering(id: Long) = write(id, "markRegistering") { row ->
+    override suspend fun markRegistering(id: Long) = sessionWrite(id, "markRegistering") { row ->
         if (row.state == SyncFileState.REGISTERING) row else move(uploading(row), SyncFileState.REGISTERING)
     }
 
@@ -104,11 +107,30 @@ class RoomUploadLedger(
         return row.copy(state = to)
     }
 
-    private suspend fun write(id: Long, op: String, change: (SyncFileEntity) -> SyncFileEntity) {
+    /**
+     * A write that belongs to the current multipart session. Ignored when the row no longer holds
+     * a session (`objectId` null): the file changed under the upload (`SOURCE_CHANGED`, T12/T13,
+     * which clears the session and moves the row to `FAILED`) or the session was reset, so a late
+     * part/registration from the in-flight attempt must not land on the new state (a `FAILED` row
+     * must never jump to `REGISTERING`).
+     */
+    private suspend fun sessionWrite(id: Long, op: String, change: (SyncFileEntity) -> SyncFileEntity) =
+        write(id, op, requireSession = true, change = change)
+
+    private suspend fun write(
+        id: Long,
+        op: String,
+        requireSession: Boolean = false,
+        change: (SyncFileEntity) -> SyncFileEntity,
+    ) {
         tx.run {
             val row = files.get(id)
             if (row == null || row.state == SyncFileState.EXCLUDED) {
                 AppLog.i(TAG, "ledger.write.skipped op=$op id=$id state=${row?.state ?: "gone"}")
+                return@run
+            }
+            if (requireSession && row.objectId == null) {
+                AppLog.i(TAG, "ledger.write.skipped op=$op id=$id state=${row.state} reason=no_session")
                 return@run
             }
             val next = change(row)
