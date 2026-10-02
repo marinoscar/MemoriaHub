@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- app_name is generated from identity.properties by app/build.gradle.kts. -->
+    <!-- Placeholder only: TwaLauncherActivity computes the real URL from the configured server. -->
+    <string name="twa_default_url" translatable="false">https://localhost/?source=twa</string>
+</resources>
