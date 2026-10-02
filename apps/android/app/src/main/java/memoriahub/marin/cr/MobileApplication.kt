@@ -10,6 +10,14 @@ import memoriahub.marin.cr.auth.EncryptedTokenStore
 import memoriahub.marin.cr.auth.TokenStore
 import memoriahub.marin.cr.config.ServerConfig
 import memoriahub.marin.cr.diagnostics.AppLog
+import memoriahub.marin.cr.ledger.LedgerRepository
+import memoriahub.marin.cr.ledger.MediaSyncDatabase
+import memoriahub.marin.cr.ledger.RoomUploadLedger
+import memoriahub.marin.cr.media.AndroidMediaGateway
+import memoriahub.marin.cr.media.MediaGateway
+import memoriahub.marin.cr.media.MediaScanner
+import memoriahub.marin.cr.media.ScanCursorStore
+import memoriahub.marin.cr.media.SharedPrefsScanCursorStore
 import memoriahub.marin.cr.net.ApiClient
 import memoriahub.marin.cr.net.ApiMediaSyncDevicesApi
 import memoriahub.marin.cr.net.MediaSyncDevicesApi
@@ -36,7 +44,8 @@ import memoriahub.marin.cr.twa.TwaLauncherActivity
  * Seams later issues fill in (add a lazy property or a `newX()` factory here, nothing else):
  * - #509 pairing (done): [pairingState], [pairingNotifier], [mediaSyncDevices], [apiErrorReactions],
  *   [newPairingManager], [pairingStatus].
- * - #510 media discovery + Room ledger: `val ledger` (the Room database `<prefix>_sync.db`, built once).
+ * - #510 media discovery + Room ledger (done): [mediaSyncDatabase], [mediaGateway], [scanCursors],
+ *   [ledger], [uploadLedger], [mediaScanner].
  * - #511 upload engine: `fun newUploader()` over [apiClient] and the ledger.
  * - #512 background sync: `val syncScheduler` (WorkManager), wired into [onAppOpen] and [onCreate].
  * - #514 diagnostics + updates: `val diagnostics`, `val updateChecker`, wired into [onAppOpen].
@@ -80,6 +89,33 @@ class MobileApplication : Application() {
     val apiErrorReactions: ApiErrorReactions by lazy {
         ApiErrorReactions(tokenStore, pairingState, { syncScheduling }, pairingNotifier)
     }
+
+    /** The Media Sync file ledger (Room, `<prefix>_sync.db`), built once per process. */
+    val mediaSyncDatabase: MediaSyncDatabase by lazy { MediaSyncDatabase.create(this) }
+
+    /** MediaStore: inventory, scans, byte ranges for uploads (D24 URI form), permission state. */
+    val mediaGateway: MediaGateway by lazy { AndroidMediaGateway(this) }
+
+    /** Per-volume scan cursors, last full-scan time and scanned scope (prefs `<prefix>_media_scan`). */
+    val scanCursors: ScanCursorStore by lazy { SharedPrefsScanCursorStore.create(this) }
+
+    /** Ledger policy: ingest, config re-evaluation, stats, retries, runs, local reset. */
+    val ledger: LedgerRepository by lazy {
+        LedgerRepository(
+            files = mediaSyncDatabase.syncFiles(),
+            runs = mediaSyncDatabase.syncRuns(),
+            tx = mediaSyncDatabase.transactions(),
+            cursors = scanCursors,
+        )
+    }
+
+    /** The upload engine's (#511) view of the ledger. */
+    val uploadLedger: RoomUploadLedger by lazy {
+        RoomUploadLedger(mediaSyncDatabase.syncFiles(), mediaSyncDatabase.transactions())
+    }
+
+    /** Discovery: incremental/full MediaStore scans into [ledger], plus the check-in inventory. */
+    val mediaScanner: MediaScanner by lazy { MediaScanner(mediaGateway, ledger, scanCursors) }
 
     /** A pairing attempt's manager (each view model gets its own poller). */
     fun newPairingManager(): PairingManager {
