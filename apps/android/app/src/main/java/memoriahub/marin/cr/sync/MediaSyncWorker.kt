@@ -46,7 +46,6 @@ class MediaSyncWorker(context: Context, params: WorkerParameters) : CoroutineWor
             if (promoted) NotificationManagerCompat.from(applicationContext).cancel(SyncNotifications.PROGRESS_ID)
             if (isStopped) AppLog.w(TAG, "sync.worker.stopped reason=${StopReasons.describe(stopReason)}")
         }
-        // TODO(#514): AutoDiagnostics.afterRun(outcome) — uploads a report when a run failed (throttled).
         val result = outcome.toWorkResult(runAttemptCount)
         AppLog.i(TAG, "sync.worker.end outcome=${outcome.kind} result=$result")
         return when (result) {

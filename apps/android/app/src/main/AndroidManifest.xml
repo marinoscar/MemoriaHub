@@ -20,6 +20,9 @@
          (Android 14+ requires the typed permission; docs/specs/android-media-sync.md §10.3, §11.1). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- #512/#514: lets Diagnostics open the one-tap "ignore battery optimizations" dialog
+         (sideloaded app, outside Play's policy for this permission; spec §10.5, §13). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <queries>
         <!-- Lets androidbrowserhelper find a browser that supports Custom Tabs / TWAs. -->

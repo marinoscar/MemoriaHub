@@ -99,7 +99,8 @@ object ForegroundPolicy {
  *    the issue notification (at most once per 24 h).
  * 3. `recoverInterrupted` (T14), scan (full when periodic and due), then upload until the queue is
  *    empty, stopped, or the network policy blocks; promote to the foreground when there is work.
- * 4. Record the run locally (`sync_runs`) and check in after with the `run` block.
+ * 4. Record the run locally (`sync_runs`), hand its status to [onRunRecorded] (#514's throttled
+ *    auto-diagnostics report after a `failed`/`partial` run), and check in after with the `run` block.
  *
  * A stop by the system (Android 15 dataSync timeout, constraints lost) cancels the coroutine; the
  * run is still recorded (`partial`, the stop's error code) under [NonCancellable] before the
@@ -119,6 +120,8 @@ class SyncRunner(
     private val notifier: SyncRunNotifier,
     private val tracker: SyncStatusTracker,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Called with the run's check-in status after it is recorded (#514 auto-diagnostics); never throws into the run. */
+    private val onRunRecorded: (String) -> Unit = {},
 ) {
     /**
      * Runs one sync. [stop] returns non-null once the system stopped the worker; [promote] moves
@@ -280,6 +283,11 @@ class SyncRunner(
             AppLog.w(TAG, "sync.run.record_failed", e)
         }
         tracker.runFinished(record)
+        try {
+            onRunRecorded(record.status)
+        } catch (e: Exception) {
+            AppLog.w(TAG, "sync.run.on_recorded_failed", e)
+        }
         if (checkinAfter && isPaired()) {
             val after = checkin.checkin(run = record, runNowOnResume = false)
             if (after is CheckinOutcome.Failed && after.reaction != ApiErrorReaction.NONE) {

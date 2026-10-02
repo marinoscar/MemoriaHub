@@ -333,6 +333,8 @@ class MobileApplication : Application() {
         deviceName = DeviceInfo.makerModel(Build.MANUFACTURER, Build.MODEL),
         notifier = AndroidSyncRunNotifier(this, syncState),
         tracker = syncStatus,
+        // #514: throttled diagnostics upload after a failed/partial run (fire-and-forget, never throws).
+        onRunRecorded = { status -> autoDiagnostics.onRunFinished(status) },
     )
 
     /** The Hub's `HealthLine` ("All checks pass" / "N problems"). */
