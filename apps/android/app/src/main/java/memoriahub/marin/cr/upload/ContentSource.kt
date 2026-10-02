@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.AssetFileDescriptor
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -85,9 +86,12 @@ class AndroidContentSource(context: Context) : ContentSource {
         if (afd != null) {
             val stream = afd.createInputStream()
             if (offset > 0) {
-                val positioned = (stream as? FileInputStream)?.let { fis ->
-                    runCatching { fis.channel.position(fis.channel.position() + offset) }.isSuccess
-                } ?: false
+                // Seek only a whole-file descriptor: a sub-range stream (declared length or start
+                // offset) tracks its own remaining count, which a raw channel seek would bypass.
+                val wholeFile = afd.declaredLength == AssetFileDescriptor.UNKNOWN_LENGTH && afd.startOffset == 0L
+                val positioned = wholeFile && (stream as? FileInputStream)?.let { fis ->
+                    runCatching { fis.channel.position(offset) }.isSuccess
+                } == true
                 if (!positioned) stream.skipFully(offset)
             }
             return stream
