@@ -214,10 +214,12 @@ class ApiClient(
             var message: String? = null
             var reason: String? = null
             var oauthError: String? = null
+            var details: JsonObject? = null
             if (obj != null) {
                 code = obj.string("code")
                 message = obj.string("message")
-                reason = (obj["details"] as? JsonObject)?.string("reason")
+                details = obj["details"] as? JsonObject
+                reason = details?.string("reason")
                 when (val err = obj["error"]) {
                     // RFC 8628: { "error": "authorization_pending", "error_description": "…" }
                     is JsonPrimitive -> if (err.isString) {
@@ -228,7 +230,8 @@ class ApiClient(
                     is JsonObject -> {
                         code = code ?: err.string("code")
                         message = message ?: err.string("message")
-                        reason = reason ?: (err["details"] as? JsonObject)?.string("reason")
+                        details = details ?: (err["details"] as? JsonObject)
+                        reason = reason ?: details?.string("reason")
                     }
                     else -> Unit
                 }
@@ -243,6 +246,7 @@ class ApiClient(
                 message = message?.takeIf { it.isNotBlank() } ?: "The server returned HTTP $status.",
                 reason = reason,
                 oauthError = oauthError,
+                details = details,
             )
         }
 

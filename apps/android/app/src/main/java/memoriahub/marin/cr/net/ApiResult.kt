@@ -1,5 +1,7 @@
 package memoriahub.marin.cr.net
 
+import kotlinx.serialization.json.JsonObject
+
 /** Result of one API call. Never throws for HTTP/network problems; inspect [Failure.error]. */
 sealed interface ApiResult<out T> {
     data class Success<T>(val value: T, val httpStatus: Int) : ApiResult<T>
@@ -26,6 +28,8 @@ data class ApiError(
     val reason: String? = null,
     /** RFC 8628 `error` (`authorization_pending`, `slow_down`, `expired_token`, `access_denied`, …). */
     val oauthError: String? = null,
+    /** The whole `details` object (e.g. `partNumbers` on 409 `UPLOAD_PARTS_MISSING`); [reason] is its `reason`. */
+    val details: JsonObject? = null,
     val cause: Throwable? = null,
 ) {
     enum class Kind {
