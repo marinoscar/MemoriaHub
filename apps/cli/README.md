@@ -301,6 +301,13 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `node set-concurrency <n>` | (none) | Adjust concurrency live over IPC when a daemon is running, else persist to config | Worker Node ▸ Node config |
 | `node heap-snapshot` | (none) | Ask the running daemon to write a V8 heap snapshot to the log directory (memory-leak diagnosis, [issue #156](https://github.com/marinoscar/MemoriaHub/issues/156)) | — |
 | `node service install\|uninstall\|status` | (none) | Install/remove/inspect the systemd user unit that keeps the node always on | — |
+| `android doctor` | `--fix` / `-y, --yes` / `--dry-run` / `--json` | Check (and with `--fix` install) the Android toolchain: JDK 17+, SDK, Gradle wrapper, keystore, login (see [Android app](#android-app-build-sign-publish)) | Settings ▸ Android app → Doctor |
+| `android keystore init\|import <file>\|show\|secrets` | `--alias <a>` / `--dname <dn>` | Create, import or show the release signing keystore; `secrets` prints the four CI secrets | — |
+| `android version` | `--bump patch\|minor\|major` / `--set x.y.z` / `--code <n>` / `--json` | Show or change `apps/android/version.properties` (every change also increments `versionCode`) | Settings ▸ Android app → Bump version |
+| `android build` | `--server-url <url>` / `--debug` | Build and sign the APK into `dist/android/` with a sidecar JSON | Settings ▸ Android app → Build |
+| `android publish [apk]` | `--notes <t>` / `--no-current` / `--force` | Upload a built APK to the logged-in server (needs `system_settings:write`) | Settings ▸ Android app → Publish |
+| `android releases` | `--json`; `releases current <id> [--yes]` | List the server's releases; `current <id>` makes one current (rollback) | Settings ▸ Android app → Releases |
+| `android release` | `--bump <part>` / `--notes <t>` / `--server-url <url>` / `--no-commit` | One command: pre-check → bump → build → publish → commit `version.properties` | Settings ▸ Android app → Release |
 | `import <folder>` | `-r, --recursive` / `--dry-run` | One-shot import alias for `sync <folder>` (legacy back-compat) | — |
 | `menu` | (none) | Launch the interactive terminal UI (requires a TTY) | — |
 
@@ -1257,6 +1264,58 @@ The interactive menu's **Backup** submenu offers **Backup dashboard** (live stat
 
 ---
 
+## Android app (build, sign, publish)
+
+`memoriahub android …` builds, signs, versions and publishes the MemoriaHub Android app ([epic #498](https://github.com/marinoscar/MemoriaHub/issues/498), [spec §14](../../docs/specs/android-media-sync.md#14-release-model)). It is the **primary release path**: build and push a release from the CLI, and paired phones see the update. Each self-hosted server publishes its own releases; the admin page (`/admin/settings/android`) and CI's `android-latest` prerelease are secondary routes.
+
+### First release on a fresh machine
+
+```bash
+git clone https://github.com/marinoscar/MemoriaHub.git && cd MemoriaHub
+memoriahub login
+memoriahub android doctor --fix --yes      # Android SDK (+ JDK on Debian/Ubuntu, via apt)
+memoriahub android keystore init           # once — then BACK UP ~/.memoriahub/android/
+memoriahub android release --bump patch --notes "first"
+```
+
+The release then appears in `/admin/settings/android` and `/settings/android-app`, `/.well-known/assetlinks.json` lists its signer, and paired phones offer the update.
+
+### A checkout is required to build
+
+The curl installer ships only the CLI, not the app sources. Every command that needs `apps/android` resolves the checkout in this order: `--repo <path>` (an option of `android`, accepted anywhere on the line), `MEMORIAHUB_REPO_ROOT`, then the nearest ancestor of the current directory that contains `apps/android/version.properties`. Without one the command exits **6** with "No MemoriaHub checkout found. Clone the repo …". `releases`, `releases current`, `publish <apk>` and `keystore …` work anywhere.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `android doctor [--json]` | Checks `repo`, `gradlew`, `version`, `jdk` (17+, from `JAVA_HOME` or `PATH`), the SDK and its parts (`platform-tools`, `platforms;android-36`, `build-tools;36.0.0`, `apksigner`), `keystore`, `fingerprint`, and `login` (a hint only). Exits 6 when a required check fails. `--json` prints `{ ok, checks: [{ id, label, status, detail, fix? }] }`. |
+| `android doctor --fix [--yes] [--dry-run]` | Prints a plan, then runs it with `--yes` or after an interactive "y" (default No). Downloads `commandlinetools-<os>-13114758_latest.zip` into the SDK directory, accepts the licences and installs the packages above. On Debian/Ubuntu it installs `openjdk-17-jdk-headless` (or `openjdk-21-jdk-headless` where 17 is no longer packaged) with `apt-get`; every `sudo` command is printed before it runs. Other OSes get instructions only. `--dry-run` prints the plan and executes nothing. It **never** creates a keystore. |
+| `android keystore init [--alias] [--dname]` | `keytool -genkeypair -keyalg RSA -keysize 4096 -validity 36500` into `~/.memoriahub/android/release.jks` (default alias `memoriahub`), passwords in `signing.json` (mode 0600). Password: `ANDROID_KEYSTORE_PASSWORD`, else a prompt, else 24 random bytes. **Refuses to overwrite.** *BACK UP THIS FILE. Losing it forces every user to uninstall and reinstall.* |
+| `android keystore import <file> [--alias]` | Uses an existing keystore; passwords from `ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_PASSWORD` or a prompt, verified with `keytool -list -v` before the file is copied. |
+| `android keystore show` | Path, alias and SHA-256 (colon form). |
+| `android keystore secrets` | Prints `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` for the GitHub Actions secrets of the Android workflow. **The output contains secrets.** |
+| `android version [--bump …] [--set x.y.z] [--code n] [--json]` | Edits `apps/android/version.properties`. Every bump or set also does `versionCode += 1`; `--code` must increase. No flags prints the current version. |
+| `android build [--server-url <url>] [--debug]` | `gradlew assembleRelease\|assembleDebug -Papp.versionName=… -Papp.versionCode=… [-Papp.serverUrl=…] --console=plain $MEMORIAHUB_GRADLE_ARGS`, with the SDK and the four signing variables in Gradle's environment. A release must be signed by the configured keystore (`apksigner verify --print-certs`), else it fails. Copies the APK to `dist/android/memoriahub-android-<ver>.apk` and writes `memoriahub-android-<ver>.json`: `{ packageName, versionName, versionCode, signingSha256, fileSha256, sizeBytes, builtAt, gitSha }` (`signingSha256` lowercase hex, no colons). |
+| `android publish [apk] [--notes] [--no-current] [--force]` | Uploads the newest APK in `dist/android` (or the one given, with its sidecar JSON) to `POST /api/admin/android-app/releases`, text fields first, then the file, streamed with a 15-minute timeout. Needs `system_settings:write` (checked first with `GET /api/auth/me`). A version refusal (`RELEASE_VERSION_EXISTS`, `RELEASE_VERSION_NOT_NEWER`) says to run `memoriahub android version --bump patch`. |
+| `android releases [--json]` | The server's releases, the current one marked `*`. |
+| `android releases current <id> [--yes]` | Makes a release current — the **rollback**. A lower `versionCode` asks first (phones that installed the newer build keep it; Android refuses downgrades). |
+| `android release [--bump …] [--notes] [--server-url] [--no-commit]` | Pre-checks **before any change**: the checkout, the toolchain essentials (JDK, SDK, keystore), a login with `system_settings:write`, and that the (bumped) `versionCode` is above the server's current release. Then bump, build (the default server baked in is the logged-in one), publish as current (the server trusts the signer in `assetlinks.json`), and `git commit -- apps/android/version.properties -m "chore(android): release <name> (<code>)"` unless `--no-commit` (never pushed). Without `--bump` the current version is released if it is newer; re-running with nothing changed is refused ("not newer — pass `--bump`"). A failure after the bump says how to retry without bumping again (`memoriahub android build && memoriahub android publish`). |
+
+Exit codes: `0` ok, `1` a tool or the server failed, `2` bad usage, `6` something to set up first (no checkout, no SDK/JDK, no keystore, not logged in, not newer).
+
+### Locations and environment
+
+| | |
+|---|---|
+| `~/.memoriahub/android/` | `release.jks` + `signing.json` (directory 0700, files 0600). Back it up. `MEMORIAHUB_STATE_DIR` moves it with the rest of `~/.memoriahub`. |
+| `~/.memoriahub/android-sdk/` | Where `doctor --fix` installs the SDK, unless `ANDROID_HOME` or `ANDROID_SDK_ROOT` is set. |
+| `MEMORIAHUB_REPO_ROOT` | The checkout, when `--repo` is not given. |
+| `MEMORIAHUB_GRADLE_ARGS` | Extra Gradle arguments, e.g. `--no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx2g` on a small machine. `GRADLE_OPTS`, `JAVA_HOME` and proxy variables reach Gradle unchanged. |
+
+The interactive menu has the same flow under **Settings ▸ Android app (build, publish, releases)**: status rows (Checkout, Local version, Keystore, Login/server, Server release, Newer?) and actions doctor, bump, build, publish, **release**, releases (with rollback) and login. Long-running steps run `memoriahub android …` as a child process and show its output; every confirmation defaults to No.
+
+---
+
 ## Data locations
 
 | Path | Purpose |
@@ -1274,6 +1333,8 @@ The interactive menu's **Backup** submenu offers **Backup dashboard** (live stat
 | `<backup root>/media/`, `<backup root>/archived/` | Backed-up original files, bucketed by capture month (see [Local backup](#local-backup-mirror-your-library)) |
 | `<backup root>/_quarantine/` | Backed-up files a reconcile pass could no longer find server-side; removed only by `memoriahub backup prune --yes` |
 | `<backup root>/catalog/` | `albums.json` / `people.json` / `tags.json` / `manifest.json`, written after each completed backup run |
+| `~/.memoriahub/android/` | Android release keystore and its passwords (`release.jks`, `signing.json`) — see [Android app](#android-app-build-sign-publish); back it up |
+| `~/.memoriahub/android-sdk/` | Android SDK installed by `memoriahub android doctor --fix` (unless `ANDROID_HOME`/`ANDROID_SDK_ROOT` is set) |
 | `<backup root>/.memoriahub/backup.db` | The backup catalog — a plain SQLite file, query it directly with any `sqlite3` client |
 
 ---
