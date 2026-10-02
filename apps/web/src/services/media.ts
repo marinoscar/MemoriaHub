@@ -16,6 +16,7 @@ import type {
   TagItem,
   InitUploadDto,
   InitUploadResponse,
+  PartUploadAuth,
   UploadPart,
   Album,
   AlbumListResponse,
@@ -281,27 +282,73 @@ export async function initUpload(dto: InitUploadDto): Promise<InitUploadResponse
 }
 
 /**
- * Upload a single part directly to the presigned S3 URL.
- * Must NOT use the `api` singleton (no auth headers, no credential cookies).
- * Returns the ETag from the response header — required for CompleteMultipartUpload.
+ * True when `url` points at this page's own origin. A bearer token is only
+ * ever attached to such a URL: `partUploadAuth: 'bearer'` comes from the
+ * server, but the token must never leave for a third-party host even if a
+ * misconfigured server hands one out.
+ */
+export function isSameOriginUrl(url: string): boolean {
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Upload a single part of a multipart upload.
  *
+ * - `auth: 'none'` (default): `url` is a presigned S3/R2 URL. It is
+ *   self-authorizing, so the request carries NO Authorization header and no
+ *   cookies — S3 rejects a request with both a signature and a bearer token.
+ * - `auth: 'bearer'` (issue #506): `url` is the API's own
+ *   `PUT /api/storage/objects/:id/upload/parts/:n` route, used by the local
+ *   storage provider. It needs the caller's bearer token, sent only to a
+ *   same-origin URL, and the raw bytes as `application/octet-stream`. A 401
+ *   refreshes the access token once and retries.
+ *
+ * Returns the ETag header — required for CompleteMultipartUpload.
  * Throws on HTTP error so callers can implement retry logic.
  */
-export async function uploadPart(presignedUrl: string, chunk: Blob): Promise<string> {
-  const response = await fetch(presignedUrl, {
-    method: 'PUT',
-    body: chunk,
-    // No Authorization header, no credentials — presigned URL is self-authorizing
-  });
+export async function uploadPart(
+  url: string,
+  chunk: Blob,
+  auth: PartUploadAuth = 'none',
+): Promise<string> {
+  let response: Response;
+  if (auth === 'bearer') {
+    if (!isSameOriginUrl(url)) {
+      throw new Error('Refusing to send credentials to a part URL on another origin');
+    }
+    const send = () =>
+      fetch(url, {
+        method: 'PUT',
+        body: chunk,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          ...(api.getAccessToken() ? { Authorization: `Bearer ${api.getAccessToken()}` } : {}),
+        },
+      });
+    response = await send();
+    if (response.status === 401 && (await api.refreshToken())) {
+      response = await send();
+    }
+  } else {
+    response = await fetch(url, {
+      method: 'PUT',
+      body: chunk,
+      // No Authorization header, no credentials — presigned URL is self-authorizing
+    });
+  }
 
   if (!response.ok) {
     throw new Error(`Part upload failed: ${response.status} ${response.statusText}`);
   }
 
-  // S3 returns ETag in the response header (without quotes stripped)
+  // S3 (and the API's part route) return the ETag in a response header
   const etag = response.headers.get('ETag') ?? response.headers.get('etag');
   if (!etag) {
-    throw new Error('S3 did not return an ETag for the uploaded part');
+    throw new Error('The storage server did not return an ETag for the uploaded part');
   }
 
   return etag;
