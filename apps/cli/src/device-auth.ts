@@ -148,11 +148,11 @@ export interface DeviceTokenResult {
    */
   expiresAt?: string;
   /**
-   * `'pat'` when the server issued a personal access token. Absent means the
-   * server issued a short-lived session token instead, which happens against
-   * a server older than the issue #499 fix.
+   * Which credential the server issued: `'pat'` (personal access token) or
+   * `'session'` (short-lived JWT). Absent when the server predates the issue
+   * #499 fix, which also means it issued a session token.
    */
-  credentialType?: 'pat';
+  credentialType?: 'pat' | 'session';
 }
 
 /**
@@ -232,7 +232,12 @@ export async function pollForDeviceToken(
           ? new Date(Date.now() + expiresIn * 1000).toISOString()
           : undefined);
       const result: DeviceTokenResult = { accessToken, expiresAt };
-      if (envelope.data.credentialType === 'pat') result.credentialType = 'pat';
+      if (
+        envelope.data.credentialType === 'pat' ||
+        envelope.data.credentialType === 'session'
+      ) {
+        result.credentialType = envelope.data.credentialType;
+      }
       return result;
     }
 

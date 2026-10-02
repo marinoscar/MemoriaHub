@@ -468,6 +468,26 @@ describe('pollForDeviceToken credentialType (issue #499)', () => {
     });
   });
 
+  it('surfaces credentialType "session" for a session token', async () => {
+    mockFetch.mockResolvedValue(
+      makeJsonResponse({
+        data: {
+          accessToken: 'eyJ.a.b',
+          refreshToken: 'rt',
+          tokenType: 'Bearer',
+          expiresIn: 604800,
+          credentialType: 'session',
+        },
+      }),
+    );
+
+    const promise = pollForDeviceToken('https://example.com', 'dc', 5, 3600);
+    await jest.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result.credentialType).toBe('session');
+  });
+
   it('leaves credentialType absent for a session token (pre-#499 server)', async () => {
     mockFetch.mockResolvedValue(
       makeJsonResponse({
