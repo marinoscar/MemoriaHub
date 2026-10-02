@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import memoriahub.marin.cr.MobileApplication
 import memoriahub.marin.cr.deeplink.MediaSyncLinks
 import memoriahub.marin.cr.deeplink.MediaSyncRoute
 import memoriahub.marin.cr.diagnostics.AppLog
@@ -40,6 +41,8 @@ class MediaSyncActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handle(intent)
+        // #512: opening Media sync counts as an app open (debounced sync, or a check-in while paused).
+        if (savedInstanceState == null) MobileApplication.from(this).onAppOpen()
 
         setContent {
             AppTheme {

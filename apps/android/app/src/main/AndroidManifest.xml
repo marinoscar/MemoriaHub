@@ -16,6 +16,10 @@
         android:maxSdkVersion="32" />
     <!-- Without it EXIF GPS is redacted from the bytes read through MediaStore. -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!-- #512 background sync: long uploads run as a WorkManager foreground service of type dataSync
+         (Android 14+ requires the typed permission; docs/specs/android-media-sync.md §10.3, §11.1). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <queries>
         <!-- Lets androidbrowserhelper find a browser that supports Custom Tabs / TWAs. -->
@@ -121,6 +125,17 @@
                     android:host="media-sync" />
             </intent-filter>
         </activity>
+
+        <!-- #512: WorkManager's foreground service hosts long Media Sync uploads (setForeground). -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <!-- #512: the "Pause" action of the "Upload progress" notification. -->
+        <receiver
+            android:name=".sync.SyncActionReceiver"
+            android:exported="false" />
 
         <!-- Lets the PWA's notifications and other trusted features be delegated to this app. -->
         <service
