@@ -123,7 +123,10 @@ class ChecksTest {
 
         assertStatus(CheckStatus.PASS, Checks.mediaLocation(28, false))
         assertStatus(CheckStatus.PASS, Checks.mediaLocation(34, true))
-        assertStatus(CheckStatus.WARN, Checks.mediaLocation(34, false))
+        val noLocation = Checks.mediaLocation(34, false)
+        assertStatus(CheckStatus.WARN, noLocation)
+        assertTrue("videos lose their location too (#545)", "videos" in noLocation.detail)
+        assertEquals(CheckAction.GRANT_MEDIA, noLocation.action)
         assertStatus(CheckStatus.SKIP, Checks.mediaLocation(34, null))
     }
 

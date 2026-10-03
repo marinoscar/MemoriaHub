@@ -78,7 +78,7 @@ object CheckLabels {
     const val AUTH_VALID = "Token accepted"
     const val API_CONNECTION = "API connection"
     const val MEDIA_PERMISSION = "Photo & video access"
-    const val MEDIA_LOCATION = "Photo location access"
+    const val MEDIA_LOCATION = "Photo & video location access"
     const val MEDIA_FOLDERS = "Folders selected"
     const val MEDIA_TRIGGER = "New-photo trigger"
     const val WORK_PERIODIC = "Background sync scheduled"
@@ -378,18 +378,18 @@ object Checks {
         }
     }
 
-    /** `media.location`: warn when `ACCESS_MEDIA_LOCATION` is missing (Android 10+), since uploads lose GPS. */
+    /** `media.location`: warn when `ACCESS_MEDIA_LOCATION` is missing (Android 10+), since photo and video uploads lose their location. */
     fun mediaLocation(sdkInt: Int, granted: Boolean?): CheckResult {
         val id = CheckIds.MEDIA_LOCATION
         val label = CheckLabels.MEDIA_LOCATION
         return when {
-            sdkInt < 29 -> CheckResult.of(id, label, CheckStatus.PASS, "Photo locations are readable (no separate permission before Android 10).")
+            sdkInt < 29 -> CheckResult.of(id, label, CheckStatus.PASS, "Photo and video locations are readable (no separate permission before Android 10).")
             granted == null -> CheckResult.of(id, label, CheckStatus.SKIP, "Could not read the location permission.")
-            granted -> CheckResult.of(id, label, CheckStatus.PASS, "Uploads keep the photos' GPS location.")
+            granted -> CheckResult.of(id, label, CheckStatus.PASS, "Uploads keep the location of photos and videos.")
             else -> CheckResult.of(
                 id, label, CheckStatus.WARN,
-                "Photo location access is not granted: Android strips the GPS location from uploaded photos.",
-                remedy = "Allow access to photo locations.",
+                "Location access is not granted: Android strips the location from uploaded photos and videos.",
+                remedy = "Allow access to photo and video locations.",
                 action = CheckAction.GRANT_MEDIA,
             )
         }
