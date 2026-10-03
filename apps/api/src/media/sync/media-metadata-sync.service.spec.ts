@@ -534,4 +534,118 @@ describe('MediaMetadataSyncService', () => {
       await expect(service.syncFromStorageObject(storageObjectId)).rejects.toBe(networkError);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Video GPS from ISO 6709 container tags (issue #545)
+  // -------------------------------------------------------------------------
+
+  describe('video-probe location', () => {
+    const GEOCODE = {
+      country: 'United States',
+      countryCode: 'US',
+      admin1: 'Texas',
+      locality: 'Conroe',
+      source: 'offline',
+      geocodedAt: '2026-06-20T21:00:00.000Z',
+    };
+
+    async function syncWith(
+      processing: Record<string, unknown>,
+      itemOverrides: Record<string, unknown> = {},
+    ) {
+      const storageObjectId = randomUUID();
+      const mediaItem = makeMediaItem(itemOverrides);
+      mockPrisma.storageObject.findUnique.mockResolvedValue(
+        makeStorageObject({ id: storageObjectId, metadata: { _processing: processing } }) as any,
+      );
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(mediaItem as any);
+      mockPrisma.mediaItem.update.mockResolvedValue(mediaItem as any);
+
+      await service.syncFromStorageObject(storageObjectId);
+
+      const calls = (mockPrisma.mediaItem.update as jest.Mock).mock.calls;
+      return calls.length > 0 ? calls[0][0].data : undefined;
+    }
+
+    it('maps video-probe lat/lng/altitude to takenLat/takenLng/takenAltitude with coordSource=exif', async () => {
+      const data = await syncWith({
+        'video-probe': { durationMs: 5000, latitude: 30.1234, longitude: -95.4567, altitude: 12.3 },
+      });
+
+      expect(data.takenLat).toBe(30.1234);
+      expect(data.takenLng).toBe(-95.4567);
+      expect(data.takenAltitude).toBe(12.3);
+      expect(data.coordSource).toBe('exif');
+    });
+
+    it('omits takenAltitude when the container stated none', async () => {
+      const data = await syncWith({
+        'video-probe': { latitude: 30.1234, longitude: -95.4567 },
+      });
+      expect(data.takenLat).toBe(30.1234);
+      expect(data).not.toHaveProperty('takenAltitude');
+    });
+
+    it('ignores a half-present coordinate pair', async () => {
+      const data = await syncWith({
+        'video-probe': { durationMs: 5000, latitude: 30.1234 },
+      });
+      expect(data).not.toHaveProperty('takenLat');
+      expect(data).not.toHaveProperty('takenLng');
+      expect(data).not.toHaveProperty('coordSource');
+    });
+
+    it('lets EXIF coordinates win over video-probe coordinates', async () => {
+      const data = await syncWith({
+        exif: { latitude: 9.9281, longitude: -84.0907, altitude: 1150 },
+        'video-probe': { latitude: 30.1234, longitude: -95.4567, altitude: 12.3 },
+      });
+
+      expect(data.takenLat).toBe(9.9281);
+      expect(data.takenLng).toBe(-84.0907);
+      expect(data.takenAltitude).toBe(1150);
+      expect(data.coordSource).toBe('exif');
+    });
+
+    it('overwrites an inferred coordinate with real container GPS', async () => {
+      const data = await syncWith(
+        { 'video-probe': { latitude: 30.1234, longitude: -95.4567 } },
+        { coordSource: 'inferred', takenLat: 1, takenLng: 2 },
+      );
+      expect(data.takenLat).toBe(30.1234);
+      expect(data.coordSource).toBe('exif');
+    });
+
+    it('never overwrites a manual coordinate, nor the geocode derived from the skipped GPS', async () => {
+      const data = await syncWith(
+        {
+          'video-probe': { durationMs: 5000, latitude: 30.1234, longitude: -95.4567 },
+          geocode: GEOCODE,
+        },
+        { coordSource: 'manual', takenLat: 9.9281, takenLng: -84.0907 },
+      );
+
+      // Other video fields still sync.
+      expect(data.durationMs).toBe(5000);
+      expect(data).not.toHaveProperty('takenLat');
+      expect(data).not.toHaveProperty('takenLng');
+      expect(data).not.toHaveProperty('takenAltitude');
+      expect(data).not.toHaveProperty('coordSource');
+      expect(data).not.toHaveProperty('geoCountry');
+      expect(data).not.toHaveProperty('geoLocality');
+      expect(data).not.toHaveProperty('geoSource');
+    });
+
+    it('applies the geocode entry alongside video coordinates', async () => {
+      const data = await syncWith({
+        'video-probe': { latitude: 30.3119, longitude: -95.4561 },
+        geocode: GEOCODE,
+      });
+
+      expect(data.takenLat).toBe(30.3119);
+      expect(data.geoCountry).toBe('United States');
+      expect(data.geoLocality).toBe('Conroe');
+      expect(data.geoSource).toBe('offline');
+    });
+  });
 });
