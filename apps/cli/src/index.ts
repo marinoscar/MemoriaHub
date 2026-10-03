@@ -22,6 +22,7 @@ import { workflowCommand } from './commands/workflow.js';
 import { androidCommand } from './commands/android.js';
 import { printBanner } from './ui.js';
 import { printHeadlessUpdateNotice } from './update-notice.js';
+import { NativeSqliteUnavailableError } from './db/native-sqlite-error.js';
 
 // ESM-safe package.json read: createRequire allows require() in ESM modules.
 // dist/index.js → ../package.json resolves to apps/cli/package.json at runtime.
@@ -32,6 +33,21 @@ const pkg = require('../package.json') as { version: string };
 if (process.argv.includes('--no-color')) {
   process.env['NO_COLOR'] = '1';
 }
+
+// A missing better-sqlite3 native binary (issue #541) is an install problem,
+// not a bug: print its actionable message instead of a stack trace. Async
+// command actions surface it as an unhandled rejection; anything else keeps
+// Node's default crash behaviour (rethrown as an uncaught exception).
+function exitOnNativeSqliteError(err: unknown): void {
+  if (err instanceof NativeSqliteUnavailableError) {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(1);
+  }
+}
+process.on('unhandledRejection', (reason) => {
+  exitOnNativeSqliteError(reason);
+  throw reason;
+});
 
 const program = new Command();
 
@@ -73,7 +89,8 @@ if (process.argv.length === 2) {
     // Dynamic import keeps Ink/React out of headless code paths
     const { launchTui } = await import('./tui/app.js');
     await launchTui({ currentVersion: pkg.version });
-    process.exit(0);
+    // Honour an exit code set by the TUI (e.g. a missing SQLite binary).
+    process.exit();
   } else {
     program.help();
   }
@@ -99,4 +116,9 @@ if (!isHelpOrVersion) {
   await printHeadlessUpdateNotice(pkg.version);
 }
 
-program.parse(process.argv);
+try {
+  program.parse(process.argv);
+} catch (err) {
+  exitOnNativeSqliteError(err);
+  throw err;
+}

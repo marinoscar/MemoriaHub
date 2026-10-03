@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import tty from 'node:tty';
 import { render } from 'ink';
 import type { ReactElement } from 'react';
+import { NativeSqliteUnavailableError } from '../db/native-sqlite-error.js';
 
 /**
  * True only when `stream` is a TTY whose `setRawMode` actually works. The probe
@@ -94,6 +95,13 @@ export async function renderTui(element: ReactElement): Promise<void> {
     const instance = render(element, { stdin });
     await instance.waitUntilExit();
   } catch (err) {
+    // A missing SQLite native binary has nothing to do with the terminal:
+    // print only its actionable message, without the SSH/PTY advice.
+    if (err instanceof NativeSqliteUnavailableError) {
+      process.stdout.write(`${err.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     process.stdout.write(
       `The interactive UI could not start (${message}).\n` +
