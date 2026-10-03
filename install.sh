@@ -495,21 +495,93 @@ info "Installing runtime dependencies (omitting devDeps) …"
 ok "Runtime dependencies installed"
 
 # ---------------------------------------------------------------------------
-# Step 4b: Verify native SQLite module
+# Step 4b: Verify native SQLite module (and self-heal it)
 # ---------------------------------------------------------------------------
+# npm 11 no longer runs dependency install scripts unless the package is
+# allow-listed (`allowScripts` in package.json). better-sqlite3's install
+# script is what fetches its native `.node` binary, so an npm that ignores or
+# predates the allowlist can leave the package with no binary at all. The
+# binding loads lazily inside `new Database()`, so a bare `require()` passes
+# even then: probe by actually opening an in-memory database. Running
+# prebuild-install directly is not a lifecycle script, so npm's allowlist does
+# not apply to it.
+SQLITE_PKG_DIR="$APP_DIR/node_modules/better-sqlite3"
+
+sqlite_probe() {
+  node -e '
+    const D = require(process.argv[1]);
+    new D(":memory:").prepare("select 1").get();
+  ' "$SQLITE_PKG_DIR" >/dev/null 2>&1
+}
+
+# Indent a command's output as dim lines (never fails the pipeline).
+_dim_output() {
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && dim "$line"
+  done
+  return 0
+}
+
 info "Verifying native SQLite module …"
-if ! node -e "require('$APP_DIR/node_modules/better-sqlite3')" 2>/dev/null; then
-  err "better-sqlite3 native module did not load correctly."
-  warn "The prebuilt SQLite binary is unavailable for this platform/Node version."
-  warn "Remediation options:"
-  dim "  1. Install build tools and re-run the installer:"
-  dim "       Debian/Ubuntu : sudo apt install build-essential python3"
-  dim "       macOS         : xcode-select --install"
-  dim "  2. Force a source build:"
-  dim "       npm_config_build_from_source=true bash install.sh"
-  exit 1
+if ! sqlite_probe; then
+  warn "better-sqlite3 has no loadable native binary (npm may have skipped its install script)."
+
+  # Attempt 1: download the prebuilt binary (honors npm proxy settings).
+  if [[ -x "$SQLITE_PKG_DIR/../.bin/prebuild-install" ]]; then
+    info "Downloading prebuilt SQLite binary (prebuild-install) …"
+    if ( cd "$SQLITE_PKG_DIR" && ../.bin/prebuild-install ) 2>&1 | _dim_output \
+      && sqlite_probe; then
+      ok "Prebuilt SQLite binary installed"
+    else
+      dim "Prebuilt binary unavailable or still not loadable."
+    fi
+  else
+    dim "prebuild-install not found in $APP_DIR/node_modules/.bin — skipping download."
+  fi
+
+  # Attempt 2: build from source (needs build-essential/python3 or Xcode CLT).
+  if ! sqlite_probe; then
+    info "Building SQLite native module from source (node-gyp) …"
+    if ( cd "$SQLITE_PKG_DIR" && npm exec --yes -- node-gyp rebuild --release ) 2>&1 | _dim_output \
+      && sqlite_probe; then
+      ok "SQLite native module built from source"
+    else
+      dim "Source build failed or produced an unloadable binary."
+    fi
+  fi
+
+  if ! sqlite_probe; then
+    err "better-sqlite3 native module did not load correctly."
+    warn "npm 11+ blocks dependency install scripts unless allow-listed, and no"
+    warn "prebuilt or source-built SQLite binary could be installed for this"
+    warn "platform/Node version. Remediation options:"
+    dim "  1. Download the prebuilt binary manually:"
+    dim "       cd ~/.memoriahub/app/node_modules/better-sqlite3 && ../.bin/prebuild-install"
+    dim "  2. Install build tools and re-run the installer:"
+    dim "       Debian/Ubuntu : sudo apt install build-essential python3"
+    dim "       macOS         : xcode-select --install"
+    dim "  3. Force a source build:"
+    dim "       npm_config_build_from_source=true bash install.sh"
+    exit 1
+  fi
 fi
 ok "$(_c $GREEN "SQLite native module OK")"
+
+# onnxruntime-node is optional (CLIP duplicate detection on worker nodes). Its
+# postinstall is skipped by the same npm 11 rule; run it directly when the
+# package is present but its native binary does not load. Never fatal.
+ORT_PKG_DIR="$APP_DIR/node_modules/onnxruntime-node"
+if [[ -d "$ORT_PKG_DIR" ]]; then
+  if ! node -e 'require(process.argv[1])' "$ORT_PKG_DIR" >/dev/null 2>&1; then
+    info "onnxruntime-node native binary not loadable — running its install script …"
+    if ( cd "$ORT_PKG_DIR" && node ./script/install ) 2>&1 | _dim_output \
+      && node -e 'require(process.argv[1])' "$ORT_PKG_DIR" >/dev/null 2>&1; then
+      ok "onnxruntime-node native binary installed"
+    else
+      warn "onnxruntime-node could not be repaired (optional; CLIP duplicate detection on worker nodes will be unavailable)."
+    fi
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Step 5: Write bin shim
