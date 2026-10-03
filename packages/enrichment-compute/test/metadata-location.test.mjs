@@ -186,3 +186,27 @@ test('extractVideoLocation returns undefined when no tag carries a location', as
   assert.equal(extractVideoLocation({}), undefined);
   assert.equal(extractVideoLocation({ encoder: 'Lavf60', location: 'garbage' }), undefined);
 });
+
+test('buildVideoProbeEntry emits latitude/longitude/altitude from the location tag', async () => {
+  const { buildVideoProbeEntry } = await import(MOD);
+  const { entry, location } = buildVideoProbeEntry({
+    streams: [{ codec_type: 'video', codec_name: 'hevc' }],
+    format: { tags: { 'com.apple.quicktime.location.ISO6709': '+30.1234-095.4567+012.345/' } },
+  });
+  near(entry.latitude, 30.1234, 'lat');
+  near(entry.longitude, -95.4567, 'lng');
+  near(entry.altitude, 12.345, 'alt');
+  assert.equal(location.tag, 'com.apple.quicktime.location.iso6709');
+});
+
+test('buildVideoProbeEntry omits coordinates when no location tag parses', async () => {
+  const { buildVideoProbeEntry } = await import(MOD);
+  const { entry, location } = buildVideoProbeEntry({
+    streams: [{ codec_type: 'video', tags: { location: '+00.0000+000.0000/' } }],
+    format: {},
+  });
+  assert.equal(location, undefined);
+  assert.equal('latitude' in entry, false);
+  assert.equal('longitude' in entry, false);
+  assert.equal('altitude' in entry, false);
+});

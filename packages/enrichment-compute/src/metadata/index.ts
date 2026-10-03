@@ -20,6 +20,7 @@
 
 import { runFfprobe } from '../ffmpeg/index.js';
 import { getOrientedDimensions } from '../image/index.js';
+import { extractVideoLocation, type VideoLocation } from './location.js';
 
 export * from './location.js';
 
@@ -555,6 +556,7 @@ export interface VideoProbeEntryResult {
   /** The `_processing['video-probe']` record persisted on the StorageObject. */
   entry: Record<string, unknown>;
   capture?: VideoCaptureTimestamp;
+  location?: VideoLocation;
 }
 
 /**
@@ -567,14 +569,22 @@ export interface VideoProbeEntryResult {
  * upload path moved to civil timestamps in #443).
  *
  * Shape: { durationMs?, width?, height?, codec?, capturedAt?,
- *          capturedAtOffset?, formatName?, formatTags, streamTags }.
+ *          capturedAtOffset?, latitude?, longitude?, altitude?, formatName?,
+ *          formatTags, streamTags }.
  * Absent values are omitted, never written as null.
+ *
+ * latitude/longitude/altitude come from the container's ISO 6709 location tag
+ * (issue #545) — the video counterpart of EXIF GPS, keyed exactly like the
+ * `exif` entry so MediaMetadataSyncService and the reverse-geocode step read
+ * them the same way.
  */
 export function buildVideoProbeEntry(data: FfprobeDataLike): VideoProbeEntryResult {
   const { durationMs, width, height, codec, formatName, formatTags, streamTags } =
     extractContainerMetadata(data);
 
-  const capture = parseVideoCaptureTimestamp(videoProbeTags(data));
+  const tags = videoProbeTags(data);
+  const capture = parseVideoCaptureTimestamp(tags);
+  const location = extractVideoLocation(tags);
 
   const entry: Record<string, unknown> = {};
   if (durationMs !== undefined) entry['durationMs'] = durationMs;
@@ -585,9 +595,18 @@ export function buildVideoProbeEntry(data: FfprobeDataLike): VideoProbeEntryResu
   if (capture?.capturedAtOffset !== undefined) {
     entry['capturedAtOffset'] = capture.capturedAtOffset;
   }
+  if (location !== undefined) {
+    entry['latitude'] = location.latitude;
+    entry['longitude'] = location.longitude;
+    if (location.altitude !== undefined) entry['altitude'] = location.altitude;
+  }
   if (formatName !== undefined) entry['formatName'] = formatName;
   entry['formatTags'] = formatTags;
   entry['streamTags'] = streamTags;
 
-  return { entry, ...(capture !== undefined ? { capture } : {}) };
+  return {
+    entry,
+    ...(capture !== undefined ? { capture } : {}),
+    ...(location !== undefined ? { location } : {}),
+  };
 }

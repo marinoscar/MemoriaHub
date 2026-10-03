@@ -433,4 +433,87 @@ describe('VideoProbeProcessor', () => {
       ).resolves.toMatchObject({ success: true });
     });
   });
+
+  describe('process — location from ISO 6709 container tags (#545)', () => {
+    function withFormatTags(tags: Record<string, string>) {
+      return makeSyntheticProbeData({
+        format: { duration: 5, format_name: 'mov,mp4,m4a,3gp,3g2,mj2', tags } as any,
+      });
+    }
+
+    it('should emit latitude/longitude from an Android `location` format tag', async () => {
+      setupFfprobeSuccess(withFormatTags({
+        location: '+30.1234-095.4567/',
+        'location-eng': '+30.1234-095.4567/',
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.latitude).toBeCloseTo(30.1234, 6);
+      expect(result.metadata?.longitude).toBeCloseTo(-95.4567, 6);
+      expect(result.metadata).not.toHaveProperty('altitude');
+    });
+
+    it('should emit altitude from the iPhone ISO6709 tag (case-insensitive key)', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 5,
+          tags: { 'com.apple.quicktime.location.ISO6709': '+30.1234-095.4567+012.345/' },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject('video/quicktime'), makeGetStream());
+      expect(result.metadata?.latitude).toBeCloseTo(30.1234, 6);
+      expect(result.metadata?.longitude).toBeCloseTo(-95.4567, 6);
+      expect(result.metadata?.altitude).toBeCloseTo(12.345, 6);
+    });
+
+    it('should fall back to the video stream tags when the format carries no location', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [
+          {
+            codec_type: 'video',
+            codec_name: 'h264',
+            width: 1920,
+            height: 1080,
+            tags: { LOCATION: '-33.8688+151.2093/' },
+          } as any,
+        ],
+        format: { duration: 5 } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.latitude).toBeCloseTo(-33.8688, 6);
+      expect(result.metadata?.longitude).toBeCloseTo(151.2093, 6);
+    });
+
+    it('should prefer the format tag over a conflicting video-stream tag', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [
+          { codec_type: 'video', codec_name: 'h264', tags: { location: '+10.0000+020.0000/' } } as any,
+        ],
+        format: { duration: 5, tags: { location: '+30.1234-095.4567/' } } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.latitude).toBeCloseTo(30.1234, 6);
+    });
+
+    it('should omit coordinates for a 0,0 (no-fix) location', async () => {
+      setupFfprobeSuccess(withFormatTags({ location: '+00.0000+000.0000/' }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata).not.toHaveProperty('latitude');
+      expect(result.metadata).not.toHaveProperty('longitude');
+    });
+
+    it('should omit coordinates when the container has no location tag', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData());
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata).not.toHaveProperty('latitude');
+      expect(result.metadata).not.toHaveProperty('longitude');
+    });
+  });
 });

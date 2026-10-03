@@ -27,14 +27,21 @@ import { buildVideoProbeEntry } from '@memoriahub/enrichment-compute/metadata';
  * Requires ffmpeg/ffprobe to be installed in the container (see Dockerfile).
  *
  * Writes: { durationMs: number, width: number, height: number, codec: string,
- *           capturedAt?: string, formatName?: string,
+ *           capturedAt?: string, capturedAtOffset?: number,
+ *           latitude?: number, longitude?: number, altitude?: number,
+ *           formatName?: string,
  *           formatTags: Record<string,string>,
  *           streamTags: Array<Record<string,string>> }
  *
- * capturedAt is an ISO-8601 string derived from the video's creation_time tag
- * (format.tags.creation_time, or the video-stream's tags.creation_time).  Only
- * written when the tag is present and parseable as a valid date; invalid or
+ * capturedAt is an ISO-8601 string derived from the video's capture-time tags
+ * (see parseVideoCaptureTimestamp). Only written when a tag parses; invalid or
  * missing values are silently omitted.
+ *
+ * latitude/longitude/altitude come from the container's ISO 6709 location tag
+ * (`location`, `location-eng`, `com.apple.quicktime.location.ISO6709` —
+ * issue #545), the video counterpart of EXIF GPS. The `geocode` processor
+ * (priority 30) reverse-geocodes them, and MediaMetadataSyncService maps them
+ * to takenLat/takenLng/takenAltitude when EXIF supplied none.
  *
  * formatName, formatTags, and streamTags carry the container-level metadata used
  * by the social-media video detection feature.  Tag collections have lowercased
@@ -86,7 +93,7 @@ export class VideoProbeProcessor implements ObjectProcessor {
       // container carries no local information at all — the true zone is then
       // unknowable, and guessing one would be worse than a known-imperfect
       // value.
-      const { entry: metadata, capture } = buildVideoProbeEntry(probeData);
+      const { entry: metadata, capture, location } = buildVideoProbeEntry(probeData);
       const { durationMs, width, height, codec, formatName } = metadata;
       const capturedAt = capture?.capturedAt;
 
@@ -102,6 +109,7 @@ export class VideoProbeProcessor implements ObjectProcessor {
       this.logger.debug(
         `video-probe for object ${object.id}: ${durationMs}ms ${width}x${height} ${codec}` +
           (capturedAt ? ` capturedAt=${capturedAt}` : '') +
+          (location ? ` location(${location.tag})` : '') +
           (formatName ? ` format=${formatName}` : ''),
       );
 
