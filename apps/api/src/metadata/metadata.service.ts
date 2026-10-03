@@ -10,7 +10,7 @@ import {
   extractExif,
   extractDimensions,
   probeVideo,
-  extractContainerMetadata,
+  buildVideoProbeEntry,
   FfprobeDataLike,
 } from '@memoriahub/enrichment-compute/metadata';
 import { PrismaService } from '../prisma/prisma.service';
@@ -259,7 +259,8 @@ export class MetadataExtractionService {
    *           server-side, from the exif lat/lng — mirrors
    *           ReverseGeocodeProcessor's output shape and its success-with-{}
    *           no-GPS path)
-   *   videos: `video-probe`
+   *   videos: `video-probe`, plus `geocode` when the probe found container
+   *           GPS (issue #545)
    *
    * Compute errors carried in `result.errors` become `<name>_error` entries;
    * an errored part's success entry is not written (matching the loop).
@@ -292,45 +293,67 @@ export class MetadataExtractionService {
       // Node results never include geocode data: reverse geocoding needs the
       // server's configured provider (offline dataset / Nominatim / encrypted
       // Google credential), so it always runs in the persist half.
-      const lat = exifFields['latitude'];
-      const lng = exifFields['longitude'];
-      try {
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          const { result: geo, source } = await this.geoLocationService.reverseGeocode(
-            lat as number,
-            lng as number,
-          );
-          if (geo) {
-            const geocode: Record<string, unknown> = {
-              source,
-              geocodedAt: new Date().toISOString(),
-            };
-            if (geo.country !== undefined) geocode['country'] = geo.country;
-            if (geo.countryCode !== undefined) geocode['countryCode'] = geo.countryCode;
-            if (geo.admin1 !== undefined) geocode['admin1'] = geo.admin1;
-            if (geo.admin2 !== undefined) geocode['admin2'] = geo.admin2;
-            if (geo.locality !== undefined) geocode['locality'] = geo.locality;
-            if (geo.placeName !== undefined) geocode['placeName'] = geo.placeName;
-            allMetadata['geocode'] = geocode;
-          } else {
-            allMetadata['geocode'] = {};
-          }
-        } else {
-          // No usable GPS — clean no-op entry, mirroring ReverseGeocodeProcessor.
-          allMetadata['geocode'] = {};
-        }
-      } catch (err) {
-        allMetadata['geocode_error'] = err instanceof Error ? err.message : String(err);
-      }
+      Object.assign(
+        allMetadata,
+        await this.buildGeocodeEntry(exifFields['latitude'], exifFields['longitude']),
+      );
     } else if (mimeType.startsWith('video/')) {
       if (errors['video-probe']) {
         allMetadata['video-probe_error'] = errors['video-probe'];
       } else if (result.probe) {
         allMetadata['video-probe'] = result.probe;
+
+        // ------- geocode (SERVER-SIDE ONLY), from container GPS -------
+        // A video's coordinates come from its ISO 6709 location tag, parsed
+        // into the probe entry (issue #545) — geocoded here exactly like a
+        // photo's EXIF GPS, so the admin metadata backfill heals videos
+        // imported before container GPS was read. Unlike the photo path, no
+        // `geocode: {}` placeholder is written for a video without GPS (or
+        // whose probe failed): the entry only appears when there is something
+        // to geocode.
+        const lat = result.probe['latitude'];
+        const lng = result.probe['longitude'];
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          Object.assign(allMetadata, await this.buildGeocodeEntry(lat, lng));
+        }
       }
     }
 
     return allMetadata;
+  }
+
+  /**
+   * Reverse-geocode one coordinate pair into the `geocode` `_processing`
+   * entry, mirroring ReverseGeocodeProcessor's output shape: the resolved
+   * place on success, `{}` for no usable GPS or no provider result, and a
+   * `geocode_error` entry (never a throw) on provider failure.
+   */
+  private async buildGeocodeEntry(lat: unknown, lng: unknown): Promise<Record<string, unknown>> {
+    try {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        // No usable GPS — clean no-op entry, mirroring ReverseGeocodeProcessor.
+        return { geocode: {} };
+      }
+      const { result: geo, source } = await this.geoLocationService.reverseGeocode(
+        lat as number,
+        lng as number,
+      );
+      if (!geo) return { geocode: {} };
+
+      const geocode: Record<string, unknown> = {
+        source,
+        geocodedAt: new Date().toISOString(),
+      };
+      if (geo.country !== undefined) geocode['country'] = geo.country;
+      if (geo.countryCode !== undefined) geocode['countryCode'] = geo.countryCode;
+      if (geo.admin1 !== undefined) geocode['admin1'] = geo.admin1;
+      if (geo.admin2 !== undefined) geocode['admin2'] = geo.admin2;
+      if (geo.locality !== undefined) geocode['locality'] = geo.locality;
+      if (geo.placeName !== undefined) geocode['placeName'] = geo.placeName;
+      return { geocode };
+    } catch (err) {
+      return { geocode_error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -439,39 +462,16 @@ export class MetadataExtractionService {
 }
 
 /**
- * Build the `video-probe` `_processing` entry from a raw ffprobe result —
- * mirrors VideoProbeProcessor (durationMs/width/height/codec/capturedAt/
- * formatName/formatTags/streamTags, capturedAt derived from creation_time).
- * Exported for the unit tests; the CLI node module replicates the same
- * mapping so node results match byte-for-byte.
+ * Build the `video-probe` `_processing` entry from a raw ffprobe result.
+ *
+ * Thin alias over the shared package's buildVideoProbeEntry — the SAME
+ * function VideoProbeProcessor and the worker node's metadata compute call —
+ * so an upload, a re-run and a node result produce byte-identical entries.
+ * (Before this, the re-run kept its own copy that still stored
+ * `creation_time` as a bare instant after #443 moved the upload path to civil
+ * timestamps, so a metadata backfill silently undid that fix.) Exported for
+ * the unit tests.
  */
 export function buildProbeEntry(probeData: FfprobeDataLike): Record<string, unknown> {
-  const container = extractContainerMetadata(probeData);
-  const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;
-
-  // creation_time → capturedAt: prefer format-level tag, fall back to the
-  // video stream's tag (mirrors VideoProbeProcessor).
-  const videoStream = probeData.streams?.find((s) => s.codec_type === 'video');
-  const rawCreationTime: unknown =
-    probeData.format?.tags?.['creation_time'] ?? videoStream?.tags?.['creation_time'];
-
-  let capturedAt: string | undefined;
-  if (typeof rawCreationTime === 'string' && rawCreationTime.length > 0) {
-    const d = new Date(rawCreationTime);
-    if (!isNaN(d.getTime())) {
-      capturedAt = d.toISOString();
-    }
-  }
-
-  const metadata: Record<string, unknown> = {};
-  if (durationMs !== undefined) metadata['durationMs'] = durationMs;
-  if (typeof width === 'number') metadata['width'] = width;
-  if (typeof height === 'number') metadata['height'] = height;
-  if (typeof codec === 'string') metadata['codec'] = codec;
-  if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
-  if (formatName !== undefined) metadata['formatName'] = formatName;
-  metadata['formatTags'] = formatTags;
-  metadata['streamTags'] = streamTags;
-
-  return metadata;
+  return buildVideoProbeEntry(probeData).entry;
 }

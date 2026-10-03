@@ -137,6 +137,26 @@ For worker lifecycle, retry configuration, and queue architecture see [enrichmen
 
 `GeoModule` (`apps/api/src/geo/geo.module.ts`) registers `GeoSettingsController`, `GeocodeAdminController`, `GeocodeMediaController`, `GeoSettingsService`, `GeocodeBackfillService`, and `GeocodeHandler`. It imports `MediaGeoLocationModule` (which provides the three provider implementations and `GeoLocationService`) and the `EnrichmentModule`.
 
+
+### 3.4 Video GPS (issue #545)
+
+Videos carry no EXIF. Phones write the capture location into the MP4/MOV container as an **ISO 6709** point string, which ffprobe surfaces as a format tag (occasionally a video-stream tag):
+
+| Tag (matched case-insensitively) | Writer | Example |
+|---|---|---|
+| `com.apple.quicktime.location.ISO6709` | iPhone | `+30.1234-095.4567+012.345/` |
+| `location`, `location-eng` | Android, Samsung (`©xyz`) | `+30.1234-095.4567/` |
+
+`parseIso6709` / `extractVideoLocation` (`packages/enrichment-compute/src/metadata/location.ts`) parse it in the shared parity package, so the API and worker nodes agree. Decimal-degree, degrees-minutes and degrees-minutes-seconds forms are accepted; out-of-range values, ambiguous digit counts and an exact `0,0` (a device with no fix) are rejected.
+
+The flow mirrors photos:
+
+1. `buildVideoProbeEntry` (the one builder behind the upload `video-probe` processor, the `metadata_extraction` re-run and node results) writes `latitude`, `longitude` and optional `altitude` into `_processing['video-probe']`.
+2. Reverse geocoding: at upload, the `geocode` processor (priority 30) reads those coordinates from the `video-probe` result (priority 20) instead of downloading the video again, and a geocoder failure only logs rather than failing the video. In the re-run, `persistMetadata` geocodes them exactly as it does EXIF GPS.
+3. `MediaMetadataSyncService` maps them to `takenLat`/`takenLng`/`takenAltitude` with `coordSource='exif'`, only when EXIF supplied none, and **never over a `coordSource='manual'` value** (the geocode entry derived from the skipped coordinates is skipped too).
+
+**Existing videos heal through `POST /api/admin/metadata/backfill`**, which re-probes each video and geocodes it in the same job (use `force: true` for videos whose metadata status is already `processed`). Once `takenLat` is set, `POST /api/admin/geocode/backfill` also covers them.
+
 ---
 
 ## 4. Credential Management and Encryption

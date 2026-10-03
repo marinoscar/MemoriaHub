@@ -36,10 +36,18 @@ export interface ObjectProcessor {
    * Process the object asynchronously
    * @param object The storage object metadata
    * @param getStream Function to get a fresh stream of the object content
+   * @param priorResults Read-only snapshot of the metadata already produced by
+   *   lower-priority processors in this same run, keyed by processor name
+   *   (e.g. `priorResults['video-probe']`). Optional: callers that run a
+   *   processor in isolation omit it, so a processor must tolerate its absence.
+   *   It exists so a processor can reuse an expensive earlier result (the
+   *   geocode processor reads video-probe coordinates instead of downloading
+   *   and probing a multi-GB video a second time).
    * @returns Processing result with optional metadata
    */
   process(
     object: StorageObject,
     getStream: () => Promise<Readable>,
+    priorResults?: Readonly<Record<string, unknown>>,
   ): Promise<ObjectProcessorResult>;
 }

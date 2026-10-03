@@ -33,40 +33,20 @@ import {
   extractExif,
   extractDimensions,
   probeVideo,
-  extractContainerMetadata,
+  buildVideoProbeEntry,
 } from '@memoriahub/enrichment-compute/metadata';
 import { CapabilityUnavailableError, type ComputeFn } from '../capabilities.js';
 
-/** Mirrors MetadataExtractionService.buildProbeEntry's shape exactly. */
+/**
+ * Probe the video and build its `video-probe` entry through the shared
+ * package's buildVideoProbeEntry — the same function the server's
+ * VideoProbeProcessor and MetadataExtractionService.buildProbeEntry call, so a
+ * node result is byte-identical to a server-computed one.
+ */
 async function buildProbeEntry(filePath: string): Promise<Record<string, unknown>> {
   const timeoutMs = Number(process.env['FFPROBE_TIMEOUT_MS']) || 30000;
   const probeData = await probeVideo(filePath, { ffprobeTimeoutMs: timeoutMs });
-  const container = extractContainerMetadata(probeData);
-  const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;
-
-  const videoStream = probeData.streams?.find((s) => s.codec_type === 'video');
-  const rawCreationTime: unknown =
-    probeData.format?.tags?.['creation_time'] ?? videoStream?.tags?.['creation_time'];
-
-  let capturedAt: string | undefined;
-  if (typeof rawCreationTime === 'string' && rawCreationTime.length > 0) {
-    const d = new Date(rawCreationTime);
-    if (!isNaN(d.getTime())) {
-      capturedAt = d.toISOString();
-    }
-  }
-
-  const metadata: Record<string, unknown> = {};
-  if (durationMs !== undefined) metadata['durationMs'] = durationMs;
-  if (typeof width === 'number') metadata['width'] = width;
-  if (typeof height === 'number') metadata['height'] = height;
-  if (typeof codec === 'string') metadata['codec'] = codec;
-  if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
-  if (formatName !== undefined) metadata['formatName'] = formatName;
-  metadata['formatTags'] = formatTags;
-  metadata['streamTags'] = streamTags;
-
-  return metadata;
+  return buildVideoProbeEntry(probeData).entry;
 }
 
 const computeMetadata: ComputeFn = async (inputPath, params) => {

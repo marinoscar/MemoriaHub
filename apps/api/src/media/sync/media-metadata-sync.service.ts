@@ -42,6 +42,9 @@ import {
  *   _processing['video-probe'].durationMs       → durationMs
  *   _processing['video-probe'].capturedAt       → capturedAt (videos, only when exif absent)
  *   _processing['video-probe'].capturedAtOffset → capturedAtOffset (with the above)
+ *   _processing['video-probe'].latitude    → takenLat  (videos, only when exif absent;
+ *   _processing['video-probe'].longitude   → takenLng   never over a manual coordinate;
+ *   _processing['video-probe'].altitude    → takenAltitude  coordSource='exif')
  *   _processing['geocode'].country              → geoCountry
  *   _processing['geocode'].countryCode          → geoCountryCode
  *   _processing['geocode'].admin1               → geoAdmin1
@@ -93,7 +96,7 @@ export class MediaMetadataSyncService {
     // Find the linked MediaItem
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { storageObjectId },
-      select: { id: true, contentHash: true },
+      select: { id: true, contentHash: true, coordSource: true },
     });
 
     if (!mediaItem) {
@@ -203,6 +206,10 @@ export class MediaMetadataSyncService {
 
     // --- video-probe (videos; overrides dimensions if both somehow present) ---
     const videoProbeMeta = processing['video-probe'];
+    // Set when container GPS was skipped to protect a manual coordinate; the
+    // geocode entry was derived from those same skipped coordinates, so it
+    // must not land on the item either.
+    let videoCoordsSuppressed = false;
     if (videoProbeMeta) {
       if (typeof videoProbeMeta['width'] === 'number') {
         update.width = videoProbeMeta['width'];
@@ -225,11 +232,39 @@ export class MediaMetadataSyncService {
           update.capturedAtOffset = videoProbeMeta['capturedAtOffset'];
         }
       }
+
+      // GPS from the container's ISO 6709 location tag (issue #545) — the
+      // video counterpart of EXIF GPS, so it shares EXIF's provenance and
+      // present-only rule: written only when this run actually found a
+      // location, and only when EXIF did not already supply coordinates.
+      //
+      // A coordinate the user set by hand (`coordSource='manual'`) is never
+      // overwritten: with videos now carrying container GPS, an admin metadata
+      // backfill would otherwise replace every hand-placed video location with
+      // whatever the file says.
+      const videoLat = videoProbeMeta['latitude'];
+      const videoLng = videoProbeMeta['longitude'];
+      if (
+        update.takenLat === undefined &&
+        typeof videoLat === 'number' &&
+        typeof videoLng === 'number'
+      ) {
+        if (mediaItem.coordSource === 'manual') {
+          videoCoordsSuppressed = true;
+        } else {
+          update.takenLat = videoLat;
+          update.takenLng = videoLng;
+          if (typeof videoProbeMeta['altitude'] === 'number') {
+            update.takenAltitude = videoProbeMeta['altitude'];
+          }
+          update.coordSource = 'exif';
+        }
+      }
     }
 
     // --- geocode ---
     const geocodeMeta = processing['geocode'];
-    if (geocodeMeta) {
+    if (geocodeMeta && !videoCoordsSuppressed) {
       if (typeof geocodeMeta['country'] === 'string') {
         update.geoCountry = geocodeMeta['country'];
       }

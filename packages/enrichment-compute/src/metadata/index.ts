@@ -20,6 +20,9 @@
 
 import { runFfprobe } from '../ffmpeg/index.js';
 import { getOrientedDimensions } from '../image/index.js';
+import { extractVideoLocation, type VideoLocation } from './location.js';
+
+export * from './location.js';
 
 // =============================================================================
 // EXIF
@@ -517,4 +520,93 @@ export function extractContainerMetadata(data: FfprobeDataLike): ContainerMetada
   );
 
   return { formatName, formatTags, streamTags, durationMs, width, height, codec };
+}
+
+// =============================================================================
+// Video-probe `_processing` entry
+// =============================================================================
+
+/**
+ * Merge a probe result's video-stream and format tags into one map with
+ * lower-cased keys, format tags winning on collision (they carry the
+ * authoritative container-level values, e.g. Apple's creationdate).
+ *
+ * Built from the RAW probe data rather than the size-capped `formatTags`, so a
+ * large tag set can never cap away the capture time or location itself.
+ */
+export function videoProbeTags(data: FfprobeDataLike): Record<string, unknown> {
+  const videoStream = data.streams?.find((s) => s.codec_type === 'video');
+  return {
+    ...lowerCaseKeys(videoStream?.tags),
+    ...lowerCaseKeys(data.format?.tags),
+  };
+}
+
+function lowerCaseKeys(tags: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!tags) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(tags)) {
+    out[key.toLowerCase()] = value;
+  }
+  return out;
+}
+
+/** The video-probe entry plus the derivations behind it, for host logging. */
+export interface VideoProbeEntryResult {
+  /** The `_processing['video-probe']` record persisted on the StorageObject. */
+  entry: Record<string, unknown>;
+  capture?: VideoCaptureTimestamp;
+  location?: VideoLocation;
+}
+
+/**
+ * Build the `_processing['video-probe']` entry from a raw ffprobe result.
+ *
+ * ONE implementation shared by every producer of that entry — the upload
+ * pipeline's VideoProbeProcessor, the metadata_extraction re-run, and a worker
+ * node's metadata compute — so the three cannot drift (they had: the re-run
+ * and node paths still stored `creation_time` as a bare instant after the
+ * upload path moved to civil timestamps in #443).
+ *
+ * Shape: { durationMs?, width?, height?, codec?, capturedAt?,
+ *          capturedAtOffset?, latitude?, longitude?, altitude?, formatName?,
+ *          formatTags, streamTags }.
+ * Absent values are omitted, never written as null.
+ *
+ * latitude/longitude/altitude come from the container's ISO 6709 location tag
+ * (issue #545) — the video counterpart of EXIF GPS, keyed exactly like the
+ * `exif` entry so MediaMetadataSyncService and the reverse-geocode step read
+ * them the same way.
+ */
+export function buildVideoProbeEntry(data: FfprobeDataLike): VideoProbeEntryResult {
+  const { durationMs, width, height, codec, formatName, formatTags, streamTags } =
+    extractContainerMetadata(data);
+
+  const tags = videoProbeTags(data);
+  const capture = parseVideoCaptureTimestamp(tags);
+  const location = extractVideoLocation(tags);
+
+  const entry: Record<string, unknown> = {};
+  if (durationMs !== undefined) entry['durationMs'] = durationMs;
+  if (typeof width === 'number') entry['width'] = width;
+  if (typeof height === 'number') entry['height'] = height;
+  if (typeof codec === 'string') entry['codec'] = codec;
+  if (capture !== undefined) entry['capturedAt'] = capture.capturedAt;
+  if (capture?.capturedAtOffset !== undefined) {
+    entry['capturedAtOffset'] = capture.capturedAtOffset;
+  }
+  if (location !== undefined) {
+    entry['latitude'] = location.latitude;
+    entry['longitude'] = location.longitude;
+    if (location.altitude !== undefined) entry['altitude'] = location.altitude;
+  }
+  if (formatName !== undefined) entry['formatName'] = formatName;
+  entry['formatTags'] = formatTags;
+  entry['streamTags'] = streamTags;
+
+  return {
+    entry,
+    ...(capture !== undefined ? { capture } : {}),
+    ...(location !== undefined ? { location } : {}),
+  };
 }

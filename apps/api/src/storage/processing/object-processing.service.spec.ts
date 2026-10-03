@@ -171,6 +171,68 @@ describe('ObjectProcessingService', () => {
       expect(executionOrder).toEqual(['processor1', 'processor2']);
     });
 
+    it('should hand each processor a snapshot of the earlier processors\' results', async () => {
+      // The geocode processor reads `priorResults['video-probe']` rather than
+      // downloading and probing a video a second time (issue #545).
+      mockProcessor1.process.mockResolvedValue({
+        success: true,
+        metadata: { latitude: 30.1234, longitude: -95.4567 },
+      });
+      mockProcessor2.process.mockImplementation(async (_obj, _getStream, prior) => {
+        // A processor mutating its snapshot must not alter what gets persisted.
+        (prior as Record<string, unknown>)['processor1'] = 'tampered';
+        return { success: true, metadata: { sawPrior: true } };
+      });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        ...mockStorageObject,
+        metadata: null,
+      } as any);
+      mockPrisma.storageObject.update.mockResolvedValue({
+        ...mockStorageObject,
+        status: 'ready',
+      } as any);
+
+      await service.handleObjectUploaded(new ObjectUploadedEvent(mockStorageObject as any));
+
+      expect(mockProcessor1.process.mock.calls[0][2]).toEqual({});
+      expect(mockProcessor2.process).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.storageObject.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            metadata: expect.objectContaining({
+              _processing: {
+                processor1: { latitude: 30.1234, longitude: -95.4567 },
+                processor2: { sawPrior: true },
+              },
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('should pass processor 1\'s result to processor 2 as priorResults', async () => {
+      mockProcessor1.process.mockResolvedValue({
+        success: true,
+        metadata: { latitude: 30.1234, longitude: -95.4567 },
+      });
+
+      mockPrisma.storageObject.findUnique.mockResolvedValue({
+        ...mockStorageObject,
+        metadata: null,
+      } as any);
+      mockPrisma.storageObject.update.mockResolvedValue({
+        ...mockStorageObject,
+        status: 'ready',
+      } as any);
+
+      await service.handleObjectUploaded(new ObjectUploadedEvent(mockStorageObject as any));
+
+      expect(mockProcessor2.process.mock.calls[0][2]).toEqual({
+        processor1: { latitude: 30.1234, longitude: -95.4567 },
+      });
+    });
+
     it('should aggregate metadata from all processors', async () => {
       mockProcessor1.process.mockResolvedValue({
         success: true,
@@ -323,14 +385,16 @@ describe('ObjectProcessingService', () => {
       const event = new ObjectUploadedEvent(mockStorageObject as any);
       await service.handleObjectUploaded(event);
 
-      // Verify each processor got a stream
+      // Verify each processor got a stream (and the prior-results snapshot)
       expect(mockProcessor1.process).toHaveBeenCalledWith(
         expect.anything(),
         expect.any(Function),
+        expect.any(Object),
       );
       expect(mockProcessor2.process).toHaveBeenCalledWith(
         expect.anything(),
         expect.any(Function),
+        expect.any(Object),
       );
 
       // Verify stream factory was called for each processor

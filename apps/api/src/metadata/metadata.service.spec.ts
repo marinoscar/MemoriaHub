@@ -16,7 +16,7 @@
 import { Readable } from 'stream';
 import sharp from 'sharp';
 import { Test, TestingModule } from '@nestjs/testing';
-import { MetadataExtractionService } from './metadata.service';
+import { MetadataExtractionService, buildProbeEntry } from './metadata.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
@@ -261,6 +261,94 @@ describe('MetadataExtractionService', () => {
       expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
     });
 
+    it('geocodes a video from its container GPS (#545) so a metadata backfill heals it', async () => {
+      (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue(
+        makeStorageObject({ mimeType: 'video/mp4' }),
+      );
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ storageObject: { id: 'so-1', storageKey: 'vid/clip.mp4', mimeType: 'video/mp4' } }),
+      );
+      mockGeoLocationService.reverseGeocode.mockResolvedValue({
+        result: { country: 'United States', countryCode: 'US', admin1: 'Texas', locality: 'Conroe' },
+        source: 'offline',
+      });
+
+      await service.persistMetadata(makeJob(), {
+        exif: {},
+        probe: {
+          durationMs: 5000,
+          latitude: 30.3119,
+          longitude: -95.4561,
+          altitude: 12.3,
+          formatTags: {},
+          streamTags: [],
+        },
+      });
+
+      expect(mockGeoLocationService.reverseGeocode).toHaveBeenCalledWith(30.3119, -95.4561);
+      const updateCall = (mockPrisma.storageObject.update as jest.Mock).mock.calls[0][0];
+      const processing = (updateCall.data.metadata as Record<string, unknown>)['_processing'] as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(processing['video-probe']['latitude']).toBe(30.3119);
+      expect(processing['geocode']).toMatchObject({
+        country: 'United States',
+        admin1: 'Texas',
+        locality: 'Conroe',
+        source: 'offline',
+      });
+      // The sync reads the merged _processing, mapping takenLat/Lng + geo columns.
+      expect(mockMediaMetadataSyncService.syncFromStorageObject).toHaveBeenCalledWith('so-1');
+    });
+
+    it('records a geocode_error (never throws) when geocoding a video fails', async () => {
+      (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue(
+        makeStorageObject({ mimeType: 'video/mp4' }),
+      );
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ storageObject: { id: 'so-1', storageKey: 'vid/clip.mp4', mimeType: 'video/mp4' } }),
+      );
+      mockGeoLocationService.reverseGeocode.mockRejectedValue(new Error('Nominatim 429'));
+
+      await service.persistMetadata(makeJob(), {
+        exif: {},
+        probe: { latitude: 30.3119, longitude: -95.4561, formatTags: {}, streamTags: [] },
+      });
+
+      const updateCall = (mockPrisma.storageObject.update as jest.Mock).mock.calls[0][0];
+      const processing = (updateCall.data.metadata as Record<string, unknown>)['_processing'] as Record<
+        string,
+        unknown
+      >;
+      expect(processing['geocode_error']).toBe('Nominatim 429');
+      expect(processing['geocode']).toBeUndefined();
+    });
+
+    it('writes no geocode entry for a video whose probe failed', async () => {
+      (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue(
+        makeStorageObject({ mimeType: 'video/mp4' }),
+      );
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ storageObject: { id: 'so-1', storageKey: 'vid/clip.mp4', mimeType: 'video/mp4' } }),
+      );
+
+      await service.persistMetadata(makeJob(), {
+        exif: {},
+        probe: null,
+        errors: { 'video-probe': 'ffprobe timed out' },
+      });
+
+      const updateCall = (mockPrisma.storageObject.update as jest.Mock).mock.calls[0][0];
+      const processing = (updateCall.data.metadata as Record<string, unknown>)['_processing'] as Record<
+        string,
+        unknown
+      >;
+      expect(processing['video-probe_error']).toBe('ffprobe timed out');
+      expect(processing['geocode']).toBeUndefined();
+      expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
+    });
+
     it('preserves existing _processing keys and top-level metadata on merge', async () => {
       const existingMeta = { existingKey: 'existingValue', _processing: { oldData: 123 } };
       (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue(
@@ -382,5 +470,45 @@ describe('MetadataExtractionService', () => {
 
       expect(mockMediaMetadataSyncService.syncFromStorageObject).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildProbeEntry — parity with the upload pipeline's VideoProbeProcessor
+// ---------------------------------------------------------------------------
+
+describe('buildProbeEntry', () => {
+  it('re-encodes an Apple local-time tag as a civil timestamp, like the upload path (#443)', () => {
+    // A metadata re-run used to keep its own probe mapping that still stored
+    // creation_time as a bare UTC instant, so a backfill would undo #443.
+    const entry = buildProbeEntry({
+      streams: [{ codec_type: 'video', codec_name: 'hevc', width: 1920, height: 1080 }],
+      format: {
+        duration: 5,
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+        tags: {
+          creation_time: '2026-06-21T02:16:07.000000Z',
+          'com.apple.quicktime.creationdate': '2026-06-20T20:16:07-0600',
+        },
+      },
+    });
+
+    expect(entry).toMatchObject({
+      durationMs: 5000,
+      width: 1920,
+      height: 1080,
+      codec: 'hevc',
+      capturedAt: '2026-06-20T20:16:07.000Z',
+      capturedAtOffset: -360,
+    });
+  });
+
+  it('keeps a bare UTC creation_time as the instant and records no offset', () => {
+    const entry = buildProbeEntry({
+      streams: [{ codec_type: 'video' }],
+      format: { tags: { creation_time: '2026-06-21T02:16:07.000000Z' } },
+    });
+    expect(entry['capturedAt']).toBe('2026-06-21T02:16:07.000Z');
+    expect(entry).not.toHaveProperty('capturedAtOffset');
   });
 });

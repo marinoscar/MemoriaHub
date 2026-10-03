@@ -77,6 +77,8 @@ export class ObjectProcessingService {
             );
             return provider.download(object.storageKey);
           },
+          // Snapshot, so a processor can never mutate an earlier result.
+          { ...allMetadata },
         );
 
         if (result.success && result.metadata) {
