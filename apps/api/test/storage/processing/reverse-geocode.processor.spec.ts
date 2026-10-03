@@ -132,12 +132,13 @@ describe('ReverseGeocodeProcessor', () => {
       expect(processor.canProcess(makeObject('image/heic'))).toBe(true);
     });
 
-    it('should return false for video/mp4', () => {
-      expect(processor.canProcess(makeObject('video/mp4'))).toBe(false);
+    // Videos are geocoded from the container GPS video-probe parsed (#545).
+    it('should return true for video/mp4', () => {
+      expect(processor.canProcess(makeObject('video/mp4'))).toBe(true);
     });
 
-    it('should return false for video/quicktime', () => {
-      expect(processor.canProcess(makeObject('video/quicktime'))).toBe(false);
+    it('should return true for video/quicktime', () => {
+      expect(processor.canProcess(makeObject('video/quicktime'))).toBe(true);
     });
 
     it('should return false for application/pdf', () => {
