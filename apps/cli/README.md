@@ -30,7 +30,17 @@ MEMORIAHUB_SRC=~/MemoriaHub bash ~/MemoriaHub/install.sh
 
 The installed footprint is approximately **~38 MB**, which includes the Ink/React TUI runtime and the native `better-sqlite3` binary.
 
-`better-sqlite3` ships prebuilt binaries for Node 20, 22, 23, 24, 25, 26 on `linux-x64`, `linux-arm64`, and `macOS` (x64 and arm64). Most users will not need a C compiler. The installer probes the native module after installation and prints a clear remediation message if the prebuilt binary is unavailable for your platform or Node version. To force a source build:
+`better-sqlite3` ships prebuilt binaries for Node 20, 22, 23, 24, 25, 26 on `linux-x64`, `linux-arm64`, and `macOS` (x64 and arm64). Most users will not need a C compiler.
+
+npm 11 (bundled with Node 24) no longer runs dependency install scripts unless the package is allow-listed, and `better-sqlite3`'s install script is what downloads its native binary. The CLI's `package.json` allow-lists `better-sqlite3` and `onnxruntime-node` (`allowScripts`), and the installer verifies the module by actually opening an in-memory database. If that fails it repairs it on its own: first by running `prebuild-install` directly (a download, not a lifecycle script, so the allowlist does not apply), then by a `node-gyp` source build. It prints a remediation message only if both fail.
+
+If the CLI reports that its SQLite engine is missing its native binary (for example after upgrading Node), download the prebuilt binary by hand, or re-run the installer:
+
+```bash
+cd ~/.memoriahub/app/node_modules/better-sqlite3 && ../.bin/prebuild-install
+```
+
+To force a source build:
 
 ```bash
 npm_config_build_from_source=true bash install.sh

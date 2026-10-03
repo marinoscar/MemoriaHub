@@ -17,6 +17,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { dbPath } from '../paths.js';
 import { runMigrations } from './migrations.js';
 import { importLegacyManifests } from '../migrate-manifests.js';
+import { toNativeSqliteError } from './native-sqlite-error.js';
 
 // better-sqlite3 is a CommonJS module; use createRequire for ESM compatibility.
 const require = createRequire(import.meta.url);
@@ -44,7 +45,15 @@ export function openDb(dbFilePath?: string): BetterSqlite3.Database {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const db = new Database(filePath) as BetterSqlite3.Database;
+  // The native binding loads lazily here, so a package installed without its
+  // `.node` binary fails at this call. Translate that into an actionable
+  // NativeSqliteUnavailableError (issue #541); rethrow anything else as-is.
+  let db: BetterSqlite3.Database;
+  try {
+    db = new Database(filePath) as BetterSqlite3.Database;
+  } catch (err) {
+    throw toNativeSqliteError(err);
+  }
 
   // Performance and integrity settings.
   db.pragma('journal_mode = WAL');

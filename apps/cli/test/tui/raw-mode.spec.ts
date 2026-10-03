@@ -33,6 +33,7 @@ jest.unstable_mockModule('node:fs', () => ({
 }));
 
 const { canUseRawMode, renderTui } = await import('../../src/tui/raw-mode.js');
+const { NativeSqliteUnavailableError } = await import('../../src/db/native-sqlite-error.js');
 
 // ---------------------------------------------------------------------------
 // canUseRawMode
@@ -162,5 +163,27 @@ describe('renderTui', () => {
     const written = stdoutWriteSpy.mock.calls.map((c) => String(c[0])).join('');
     expect(written).toContain('could not start');
     expect(written).toContain('EIO');
+  });
+
+  it('prints only the friendly message (no SSH/PTY advice) and sets exit code 1 for a missing SQLite binary', async () => {
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    const fakeStdin = { isTTY: true, setRawMode: jest.fn() };
+    Object.defineProperty(process, 'stdin', { value: fakeStdin, configurable: true });
+    const friendly = "MemoriaHub's SQLite engine (better-sqlite3) is missing its native binary.";
+    mockRender.mockReturnValue({
+      waitUntilExit: () => Promise.reject(new NativeSqliteUnavailableError(friendly)),
+    });
+    const previousExitCode = process.exitCode;
+
+    try {
+      await expect(renderTui(element)).resolves.toBeUndefined();
+
+      const written = stdoutWriteSpy.mock.calls.map((c) => String(c[0])).join('');
+      expect(written).toBe(`${friendly}\n`);
+      expect(written).not.toContain('SSH');
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
   });
 });

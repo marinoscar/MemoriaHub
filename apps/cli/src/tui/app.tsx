@@ -17,6 +17,7 @@ import { Box, Text, useApp, useInput } from 'ink';
 
 import { loadConfig, type CliConfig } from '../config.js';
 import { openDb } from '../db/database.js';
+import { NativeSqliteUnavailableError } from '../db/native-sqlite-error.js';
 import { ApiClient, type Circle } from '../api.js';
 import { factoryReset } from '../reset.js';
 import { resolveUpdateStatus } from '../version-check.js';
@@ -199,7 +200,20 @@ function App({ currentVersion }: { currentVersion: string }): React.ReactElement
   // Load config + db + identity on mount; also fire a throttled update check.
   useEffect(() => {
     const cfg = loadConfig();
-    const db  = openDb();
+
+    // A missing better-sqlite3 native binary (issue #541) must not reach Ink's
+    // error boundary, which would paint a full stack trace. Exit the app with
+    // the error instead so renderTui prints only its friendly message.
+    let db: BetterSqlite3.Database;
+    try {
+      db = openDb();
+    } catch (err) {
+      if (err instanceof NativeSqliteUnavailableError) {
+        exit(err);
+        return;
+      }
+      throw err;
+    }
 
     // Cheap local read — drives HomeMenu's "no folders registered" hint. A
     // failure here must never block the menu, so it degrades to "unknown"
