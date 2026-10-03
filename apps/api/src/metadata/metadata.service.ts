@@ -10,7 +10,7 @@ import {
   extractExif,
   extractDimensions,
   probeVideo,
-  extractContainerMetadata,
+  buildVideoProbeEntry,
   FfprobeDataLike,
 } from '@memoriahub/enrichment-compute/metadata';
 import { PrismaService } from '../prisma/prisma.service';
@@ -439,39 +439,16 @@ export class MetadataExtractionService {
 }
 
 /**
- * Build the `video-probe` `_processing` entry from a raw ffprobe result —
- * mirrors VideoProbeProcessor (durationMs/width/height/codec/capturedAt/
- * formatName/formatTags/streamTags, capturedAt derived from creation_time).
- * Exported for the unit tests; the CLI node module replicates the same
- * mapping so node results match byte-for-byte.
+ * Build the `video-probe` `_processing` entry from a raw ffprobe result.
+ *
+ * Thin alias over the shared package's buildVideoProbeEntry — the SAME
+ * function VideoProbeProcessor and the worker node's metadata compute call —
+ * so an upload, a re-run and a node result produce byte-identical entries.
+ * (Before this, the re-run kept its own copy that still stored
+ * `creation_time` as a bare instant after #443 moved the upload path to civil
+ * timestamps, so a metadata backfill silently undid that fix.) Exported for
+ * the unit tests.
  */
 export function buildProbeEntry(probeData: FfprobeDataLike): Record<string, unknown> {
-  const container = extractContainerMetadata(probeData);
-  const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;
-
-  // creation_time → capturedAt: prefer format-level tag, fall back to the
-  // video stream's tag (mirrors VideoProbeProcessor).
-  const videoStream = probeData.streams?.find((s) => s.codec_type === 'video');
-  const rawCreationTime: unknown =
-    probeData.format?.tags?.['creation_time'] ?? videoStream?.tags?.['creation_time'];
-
-  let capturedAt: string | undefined;
-  if (typeof rawCreationTime === 'string' && rawCreationTime.length > 0) {
-    const d = new Date(rawCreationTime);
-    if (!isNaN(d.getTime())) {
-      capturedAt = d.toISOString();
-    }
-  }
-
-  const metadata: Record<string, unknown> = {};
-  if (durationMs !== undefined) metadata['durationMs'] = durationMs;
-  if (typeof width === 'number') metadata['width'] = width;
-  if (typeof height === 'number') metadata['height'] = height;
-  if (typeof codec === 'string') metadata['codec'] = codec;
-  if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
-  if (formatName !== undefined) metadata['formatName'] = formatName;
-  metadata['formatTags'] = formatTags;
-  metadata['streamTags'] = streamTags;
-
-  return metadata;
+  return buildVideoProbeEntry(probeData).entry;
 }

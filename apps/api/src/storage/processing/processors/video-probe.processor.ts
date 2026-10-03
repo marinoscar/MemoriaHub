@@ -7,8 +7,8 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { ObjectProcessor, ObjectProcessorResult } from '../object-processor.interface';
 import { streamToTempFile } from './stream-utils';
-import { probeVideoFileWithTimeout, extractContainerMetadata } from './ffprobe.util';
-import { parseVideoCaptureTimestamp } from '@memoriahub/enrichment-compute/metadata';
+import { probeVideoFileWithTimeout } from './ffprobe.util';
+import { buildVideoProbeEntry } from '@memoriahub/enrichment-compute/metadata';
 
 /**
  * VideoProbeProcessor — extracts duration, dimensions, codec, and container
@@ -70,9 +70,6 @@ export class VideoProbeProcessor implements ObjectProcessor {
       const timeoutMs = parseInt(process.env.FFPROBE_TIMEOUT_MS ?? '30000', 10);
       const probeData = await probeVideoFileWithTimeout(tmpPath, timeoutMs);
 
-      const container = extractContainerMetadata(probeData);
-      const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;
-
       // --- capture time → capturedAt (+ capturedAtOffset) ---
       //
       // `captured_at` is a CIVIL timestamp for photos — the wall clock at
@@ -82,19 +79,15 @@ export class VideoProbeProcessor implements ObjectProcessor {
       // zone landed on the NEXT calendar day and separated from photos taken
       // minutes beside it (#443).
       //
-      // parseVideoCaptureTimestamp applies the same wall-clock re-encode the
-      // photo path uses whenever a tag states a local time with its offset
-      // (Apple writes `com.apple.quicktime.creationdate`), and falls back to
-      // the old instant behaviour only when the container carries no local
-      // information at all — the true zone is then unknowable, and guessing
-      // one would be worse than a known-imperfect value.
-      const videoStream = probeData.streams?.find(s => s.codec_type === 'video');
-      const captureTags: Record<string, unknown> = {
-        ...lowerCaseKeys(videoStream?.tags),
-        ...lowerCaseKeys(probeData.format?.tags),
-      };
-
-      const capture = parseVideoCaptureTimestamp(captureTags);
+      // buildVideoProbeEntry (shared with the metadata re-run and worker
+      // nodes, so the three cannot drift) applies the same wall-clock
+      // re-encode the photo path uses whenever a tag states a local time with
+      // its offset, and falls back to the old instant behaviour only when the
+      // container carries no local information at all — the true zone is then
+      // unknowable, and guessing one would be worse than a known-imperfect
+      // value.
+      const { entry: metadata, capture } = buildVideoProbeEntry(probeData);
+      const { durationMs, width, height, codec, formatName } = metadata;
       const capturedAt = capture?.capturedAt;
 
       if (capture?.source === 'instant') {
@@ -105,19 +98,6 @@ export class VideoProbeProcessor implements ObjectProcessor {
             `capturedAt kept as a UTC instant from '${capture.tag}'`,
         );
       }
-
-      const metadata: Record<string, unknown> = {};
-      if (durationMs !== undefined) metadata['durationMs'] = durationMs;
-      if (typeof width === 'number') metadata['width'] = width;
-      if (typeof height === 'number') metadata['height'] = height;
-      if (typeof codec === 'string') metadata['codec'] = codec;
-      if (capturedAt !== undefined) metadata['capturedAt'] = capturedAt;
-      if (capture?.capturedAtOffset !== undefined) {
-        metadata['capturedAtOffset'] = capture.capturedAtOffset;
-      }
-      if (formatName !== undefined) metadata['formatName'] = formatName;
-      metadata['formatTags'] = formatTags;
-      metadata['streamTags'] = streamTags;
 
       this.logger.debug(
         `video-probe for object ${object.id}: ${durationMs}ms ${width}x${height} ${codec}` +
@@ -138,17 +118,3 @@ export class VideoProbeProcessor implements ObjectProcessor {
   }
 }
 
-/**
- * Lower-case a tag map's keys so lookups are container-case-independent
- * (ffprobe reports `creation_time` but some muxers write `Creation_Time`).
- * Built from the RAW probe data rather than the size-capped `formatTags`, so a
- * large tag set can never cap away the capture time itself.
- */
-function lowerCaseKeys(tags: Record<string, unknown> | undefined): Record<string, unknown> {
-  if (!tags) return {};
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(tags)) {
-    out[key.toLowerCase()] = value;
-  }
-  return out;
-}

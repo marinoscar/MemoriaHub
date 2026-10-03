@@ -16,7 +16,7 @@
 import { Readable } from 'stream';
 import sharp from 'sharp';
 import { Test, TestingModule } from '@nestjs/testing';
-import { MetadataExtractionService } from './metadata.service';
+import { MetadataExtractionService, buildProbeEntry } from './metadata.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
@@ -382,5 +382,45 @@ describe('MetadataExtractionService', () => {
 
       expect(mockMediaMetadataSyncService.syncFromStorageObject).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildProbeEntry — parity with the upload pipeline's VideoProbeProcessor
+// ---------------------------------------------------------------------------
+
+describe('buildProbeEntry', () => {
+  it('re-encodes an Apple local-time tag as a civil timestamp, like the upload path (#443)', () => {
+    // A metadata re-run used to keep its own probe mapping that still stored
+    // creation_time as a bare UTC instant, so a backfill would undo #443.
+    const entry = buildProbeEntry({
+      streams: [{ codec_type: 'video', codec_name: 'hevc', width: 1920, height: 1080 }],
+      format: {
+        duration: 5,
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+        tags: {
+          creation_time: '2026-06-21T02:16:07.000000Z',
+          'com.apple.quicktime.creationdate': '2026-06-20T20:16:07-0600',
+        },
+      },
+    });
+
+    expect(entry).toMatchObject({
+      durationMs: 5000,
+      width: 1920,
+      height: 1080,
+      codec: 'hevc',
+      capturedAt: '2026-06-20T20:16:07.000Z',
+      capturedAtOffset: -360,
+    });
+  });
+
+  it('keeps a bare UTC creation_time as the instant and records no offset', () => {
+    const entry = buildProbeEntry({
+      streams: [{ codec_type: 'video' }],
+      format: { tags: { creation_time: '2026-06-21T02:16:07.000000Z' } },
+    });
+    expect(entry['capturedAt']).toBe('2026-06-21T02:16:07.000Z');
+    expect(entry).not.toHaveProperty('capturedAtOffset');
   });
 });

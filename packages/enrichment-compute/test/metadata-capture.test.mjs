@@ -137,3 +137,39 @@ test('a video and a photo captured a minute apart land on the same civil day', a
   assert.equal(photo.slice(0, 10), video.slice(0, 10));
   assert.ok(new Date(video) < new Date(photo));
 });
+
+test('buildVideoProbeEntry applies the civil re-encode from merged, lower-cased tags', async () => {
+  const { buildVideoProbeEntry } = await import(MOD);
+  const { entry, capture } = buildVideoProbeEntry({
+    streams: [
+      { codec_type: 'audio', tags: { 'com.apple.quicktime.creationdate': '1999-01-01T00:00:00+0000' } },
+      { codec_type: 'video', codec_name: 'h264', width: 1280, height: 720, tags: { Creation_Time: '2026-06-21T02:16:07.000000Z' } },
+    ],
+    format: {
+      duration: '2.5',
+      format_name: 'mov,mp4',
+      tags: { 'COM.APPLE.QUICKTIME.CREATIONDATE': '2026-06-20T20:16:07-0600' },
+    },
+  });
+
+  // Format tags win; the audio stream's tags are never consulted.
+  assert.equal(entry.capturedAt, '2026-06-20T20:16:07.000Z');
+  assert.equal(entry.capturedAtOffset, -360);
+  assert.equal(capture.source, 'wall_clock');
+  assert.equal(entry.durationMs, 2500);
+  assert.equal(entry.width, 1280);
+  assert.equal(entry.codec, 'h264');
+  assert.equal(entry.formatName, 'mov,mp4');
+  assert.ok(entry.formatTags);
+  assert.ok(Array.isArray(entry.streamTags));
+});
+
+test('buildVideoProbeEntry omits capture fields when no tag parses', async () => {
+  const { buildVideoProbeEntry } = await import(MOD);
+  const { entry, capture } = buildVideoProbeEntry({ streams: [], format: {} });
+  assert.equal(capture, undefined);
+  assert.equal('capturedAt' in entry, false);
+  assert.equal('capturedAtOffset' in entry, false);
+  assert.deepEqual(entry.formatTags, {});
+  assert.deepEqual(entry.streamTags, []);
+});
