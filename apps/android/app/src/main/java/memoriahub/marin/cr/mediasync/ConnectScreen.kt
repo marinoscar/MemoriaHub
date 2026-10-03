@@ -1,10 +1,7 @@
 package memoriahub.marin.cr.mediasync
 
 import android.Manifest
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -40,9 +37,9 @@ import memoriahub.marin.cr.util.Brand
 
 /**
  * Connect (docs/specs/android-media-sync.md §7, §12.4): pairing with the account, the media
- * permission and the Android 13+ notification permission. Hosted by [MediaSyncActivity]; #513
- * adds it to the Hub's screen enum. [mediaPermissionChanged] lets the host refresh whatever
- * depends on the grant (the ledger, #510).
+ * permission (the shared [MediaPermissionCard], also on Folders) and the Android 13+
+ * notification permission. Hosted by [MediaSyncActivity]. [mediaPermissionChanged] lets the host
+ * refresh whatever depends on the grant (the ledger, #510).
  */
 @Composable
 fun ConnectScreen(
@@ -64,7 +61,7 @@ fun ConnectScreen(
             onRetryRegistration = controller::retryRegistration,
             onUnpair = { confirmUnpair = true },
         )
-        MediaPermissionSection(mediaPermissionChanged)
+        MediaPermissionCard(onChanged = mediaPermissionChanged, showWhenFull = true)
         NotificationPermissionSection()
     }
 
@@ -179,39 +176,6 @@ private fun CodeShown(pairing: PairingUiState, onOpenPage: () -> Unit, onCancel:
 private fun Notes(pairing: PairingUiState) {
     pairing.note?.let { Text(it) }
     pairing.error?.let { ErrorText(it) }
-}
-
-@Composable
-private fun MediaPermissionSection(onChanged: (MediaPermissionState) -> Unit) {
-    val context = LocalContext.current
-    var permission by remember { mutableStateOf(MediaPermissions.state(context)) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        permission = MediaPermissions.state(context)
-        onChanged(permission)
-    }
-    SectionCard(title = "Photos and videos") {
-        when (permission) {
-            MediaPermissionState.FULL -> Text("Access to all photos and videos: allowed.")
-            MediaPermissionState.PARTIAL -> {
-                Text("Only the photos and videos you selected sync.")
-                Button(onClick = { launcher.launch(MediaPermissions.requestSet().toTypedArray()) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Allow access to all photos")
-                }
-                TextButton(onClick = {
-                    context.startActivity(
-                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }) { Text("Open app settings") }
-            }
-            MediaPermissionState.DENIED -> {
-                Text("${Brand.name} needs access to your photos and videos to back them up.")
-                Button(onClick = { launcher.launch(MediaPermissions.requestSet().toTypedArray()) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Allow access to photos and videos")
-                }
-            }
-        }
-    }
 }
 
 @Composable
