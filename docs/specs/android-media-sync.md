@@ -541,7 +541,7 @@ Every sleep is padded by 250 ms. After approval the activation page redirects to
 
 ## 8. The device ledger
 
-Room database `memoriahub_sync.db` (#510). The ledger is **the source of truth per file** on the phone. Interfaces: `MediaGateway` (plain Kotlin) with the `AndroidMediaGateway` implementation over `ContentResolver`; `LedgerRepository`; `LedgerTransitions` (pure Kotlin, encodes the table below, every status write goes through it, an illegal transition throws in debug builds and logs in release).
+Room database `memoriahub_sync.db` (#510). The ledger is **the source of truth per file** on the phone. Interfaces: `MediaGateway` (plain Kotlin) with the `AndroidMediaGateway` implementation over `ContentResolver`; `LedgerRepository`; `LedgerTransitions` (pure Kotlin, encodes the table below, every status write goes through it, an illegal transition throws in debug builds and logs in release). The schema is exported to `apps/android/app/schemas`; a change ships as a Room migration in `LedgerMigrations`, never a destructive fallback (losing the ledger loses in-flight sessions and every count). Version 2 is a data-only migration: the stale video hash reset of D24 (#545).
 
 ### 8.1 Tables
 
@@ -655,7 +655,7 @@ Local `stats()` also carries a `perBucket` breakdown (not sent to the server). T
 
 ### 9.1 Per-file pipeline
 
-1. **HASHING.** Stream SHA-256 from `contentResolver.openInputStream` with a 64 KB buffer; store `contentHash`. Skip when a hash is stored and `sizeBytes`/`dateModified` are unchanged. **The hash and the upload must read the same bytes**: open the same URI form for both (for photos with `ACCESS_MEDIA_LOCATION` granted, use `MediaStore.setRequireOriginal` for both, with a fallback that uses the plain URI for both when it throws), or dedup would miss.
+1. **HASHING.** Stream SHA-256 from `contentResolver.openInputStream` with a 64 KB buffer; store `contentHash`. Skip when a hash is stored and `sizeBytes`/`dateModified` are unchanged. **The hash and the upload must read the same bytes**: open the same URI form for both (for photos and videos with `ACCESS_MEDIA_LOCATION` granted, use `MediaStore.setRequireOriginal` for both, with a fallback that uses the plain URI for both when it throws), or dedup would miss. See D24 for why videos are included and how hashes stored before that were reset.
 2. **Dedup pre-check.** `GET /api/media?circleId=<targetCircleId>&contentHash=<sha>&pageSize=1` (omit `page`). If an item exists, the row becomes `DEDUPLICATED` with that `mediaItemId` (T7). The pre-check is an optimisation; `POST /api/media` is authoritative.
 3. **Resume or init.**
    - If the row has an `objectId`/`uploadId`, call `GET /api/storage/objects/:id/upload/status`.
@@ -769,7 +769,7 @@ Rebuilt from the current config every time work is enqueued:
 | `READ_MEDIA_VIDEO` | API 33+ | Read videos |
 | `READ_MEDIA_VISUAL_USER_SELECTED` | API 34+ | Partial access ("Select photos and videos") |
 | `READ_EXTERNAL_STORAGE` | `android:maxSdkVersion="32"` | Android 12 and below |
-| `ACCESS_MEDIA_LOCATION` | API 29+; requested together with media access | Without it EXIF GPS is redacted from the bytes we upload |
+| `ACCESS_MEDIA_LOCATION` | API 29+; requested together with media access | Without it location metadata is redacted from the bytes we upload: EXIF GPS in photos, the location atom in videos (D24) |
 | `POST_NOTIFICATIONS` | API 33+ runtime | Progress and issue notifications |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` | | Long uploads (`dataSync`) |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | | The "exempt this app" prompt (fallbacks to the battery settings list) |
@@ -794,7 +794,7 @@ Google Play restricts `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` to apps whose core 
 
 ### 11.4 Privacy
 
-What leaves the phone: the file bytes, its path (`sourcePath`), its capture date, the device name, and (with `ACCESS_MEDIA_LOCATION`) embedded GPS. Nothing is uploaded from folders that are not selected. Tokens are stored encrypted and never logged.
+What leaves the phone: the file bytes, its path (`sourcePath`), its capture date, the device name, and (with `ACCESS_MEDIA_LOCATION`) the location embedded in photos and videos. Nothing is uploaded from folders that are not selected. Tokens are stored encrypted and never logged.
 
 ## 12. Native UI map
 
@@ -894,7 +894,7 @@ A direct port of the evopath diagnostics (#514). The phone runs a self-test; the
 | `auth.valid` | Token accepted | `GET /api/media-sync/devices/:id`: 401 fails (expired), 409 or 404 fails (revoked) | `REPAIR` |
 | `api.connection` | API connection | the last check-in succeeded within 24 h | `SYNC_NOW` |
 | `media.permission` | Photo & video access | `full` passes, `partial` warns ("only selected photos sync"), `denied` fails | `GRANT_MEDIA` |
-| `media.location` | Photo location access | warn when `ACCESS_MEDIA_LOCATION` is not granted (GPS stripped) | `GRANT_MEDIA` |
+| `media.location` | Photo & video location access | warn when `ACCESS_MEDIA_LOCATION` is not granted (location stripped from photos and videos) | `GRANT_MEDIA` |
 | `media.folders` | Folders selected | fail when 0 selected; warn when a selected bucket no longer exists | `CHOOSE_FOLDERS` |
 | `media.trigger` | New-photo trigger | the `media-sync-trigger` work is `ENQUEUED` (`getWorkInfosForUniqueWork`); fail otherwise, unless paused | `SYNC_NOW` (re-arms) |
 | `work.periodic` | Background sync scheduled | `media-sync-periodic` is enqueued | `SYNC_NOW` |
@@ -1195,7 +1195,7 @@ Where the issue bodies disagree with each other or with the code as it stands, t
 | D21 | Android 13 has no partial state in #510 | Exactly one of `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` granted is `partial` (and disables vanished detection) |
 | D22 | Storage-not-configured reason naming (evopath used lowercase) | `STORAGE_NOT_CONFIGURED`, uppercase like every other reason |
 | D23 | Foreground service start can be refused on Android 12+ when the app is in the background | Failure to enter the foreground is not an error: log `sync.foreground.denied` and keep running as background work |
-| D24 | Photos with `ACCESS_MEDIA_LOCATION`: the plain content URI returns GPS-redacted bytes, so hashing and uploading different URI forms would defeat dedup | Hash and upload use the same URI form (`setRequireOriginal` when permitted, with a fallback applied to both) |
+| D24 | Photos and videos with `ACCESS_MEDIA_LOCATION`: the plain content URI returns location-redacted bytes (EXIF GPS in photos, the location atom in videos), so hashing and uploading different URI forms would defeat dedup, and uploading the plain form loses the location | Hash and upload use the same URI form (`setRequireOriginal` for any `images` or `video` MediaStore URI when permitted, with a fallback applied to both). Videos were originally read through the plain URI (#545); ledger version 2 (`LedgerMigrations.MIGRATION_1_2`) clears the stored hash and the session parts of video rows not yet `UPLOADED`, `DEDUPLICATED` or `REGISTERING`, so they re-hash the original and start a fresh session (the old one is aborted). Already uploaded videos are not re-uploaded |
 | D25 | `uploadExisting` re-evaluation: #510 only describes the `all` to `from_pairing` direction | Config application re-evaluates eligibility for every non-uploaded row, so either direction (and folder/type changes) restore or exclude rows correctly without a reason column |
 | D26 | Debug builds | `memoriahub.marin.cr.debug` is a different package: it needs its own trusted-signer entry for full-screen mode and never sees the release as an update (`app.update` is `skip`) |
 | D27 | No CLI `deploy` and no `deploy --with-android` | Explicitly out of scope per the product owner |
