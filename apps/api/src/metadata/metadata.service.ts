@@ -259,7 +259,8 @@ export class MetadataExtractionService {
    *           server-side, from the exif lat/lng — mirrors
    *           ReverseGeocodeProcessor's output shape and its success-with-{}
    *           no-GPS path)
-   *   videos: `video-probe`
+   *   videos: `video-probe`, plus `geocode` when the probe found container
+   *           GPS (issue #545)
    *
    * Compute errors carried in `result.errors` become `<name>_error` entries;
    * an errored part's success entry is not written (matching the loop).
@@ -292,45 +293,67 @@ export class MetadataExtractionService {
       // Node results never include geocode data: reverse geocoding needs the
       // server's configured provider (offline dataset / Nominatim / encrypted
       // Google credential), so it always runs in the persist half.
-      const lat = exifFields['latitude'];
-      const lng = exifFields['longitude'];
-      try {
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          const { result: geo, source } = await this.geoLocationService.reverseGeocode(
-            lat as number,
-            lng as number,
-          );
-          if (geo) {
-            const geocode: Record<string, unknown> = {
-              source,
-              geocodedAt: new Date().toISOString(),
-            };
-            if (geo.country !== undefined) geocode['country'] = geo.country;
-            if (geo.countryCode !== undefined) geocode['countryCode'] = geo.countryCode;
-            if (geo.admin1 !== undefined) geocode['admin1'] = geo.admin1;
-            if (geo.admin2 !== undefined) geocode['admin2'] = geo.admin2;
-            if (geo.locality !== undefined) geocode['locality'] = geo.locality;
-            if (geo.placeName !== undefined) geocode['placeName'] = geo.placeName;
-            allMetadata['geocode'] = geocode;
-          } else {
-            allMetadata['geocode'] = {};
-          }
-        } else {
-          // No usable GPS — clean no-op entry, mirroring ReverseGeocodeProcessor.
-          allMetadata['geocode'] = {};
-        }
-      } catch (err) {
-        allMetadata['geocode_error'] = err instanceof Error ? err.message : String(err);
-      }
+      Object.assign(
+        allMetadata,
+        await this.buildGeocodeEntry(exifFields['latitude'], exifFields['longitude']),
+      );
     } else if (mimeType.startsWith('video/')) {
       if (errors['video-probe']) {
         allMetadata['video-probe_error'] = errors['video-probe'];
       } else if (result.probe) {
         allMetadata['video-probe'] = result.probe;
+
+        // ------- geocode (SERVER-SIDE ONLY), from container GPS -------
+        // A video's coordinates come from its ISO 6709 location tag, parsed
+        // into the probe entry (issue #545) — geocoded here exactly like a
+        // photo's EXIF GPS, so the admin metadata backfill heals videos
+        // imported before container GPS was read. Unlike the photo path, no
+        // `geocode: {}` placeholder is written for a video without GPS (or
+        // whose probe failed): the entry only appears when there is something
+        // to geocode.
+        const lat = result.probe['latitude'];
+        const lng = result.probe['longitude'];
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          Object.assign(allMetadata, await this.buildGeocodeEntry(lat, lng));
+        }
       }
     }
 
     return allMetadata;
+  }
+
+  /**
+   * Reverse-geocode one coordinate pair into the `geocode` `_processing`
+   * entry, mirroring ReverseGeocodeProcessor's output shape: the resolved
+   * place on success, `{}` for no usable GPS or no provider result, and a
+   * `geocode_error` entry (never a throw) on provider failure.
+   */
+  private async buildGeocodeEntry(lat: unknown, lng: unknown): Promise<Record<string, unknown>> {
+    try {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        // No usable GPS — clean no-op entry, mirroring ReverseGeocodeProcessor.
+        return { geocode: {} };
+      }
+      const { result: geo, source } = await this.geoLocationService.reverseGeocode(
+        lat as number,
+        lng as number,
+      );
+      if (!geo) return { geocode: {} };
+
+      const geocode: Record<string, unknown> = {
+        source,
+        geocodedAt: new Date().toISOString(),
+      };
+      if (geo.country !== undefined) geocode['country'] = geo.country;
+      if (geo.countryCode !== undefined) geocode['countryCode'] = geo.countryCode;
+      if (geo.admin1 !== undefined) geocode['admin1'] = geo.admin1;
+      if (geo.admin2 !== undefined) geocode['admin2'] = geo.admin2;
+      if (geo.locality !== undefined) geocode['locality'] = geo.locality;
+      if (geo.placeName !== undefined) geocode['placeName'] = geo.placeName;
+      return { geocode };
+    } catch (err) {
+      return { geocode_error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   // ---------------------------------------------------------------------------

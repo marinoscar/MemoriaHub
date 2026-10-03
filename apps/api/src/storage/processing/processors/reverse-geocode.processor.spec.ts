@@ -90,8 +90,13 @@ describe('ReverseGeocodeProcessor', () => {
       expect(processor.canProcess(makeStorageObject({ mimeType: 'image/jpeg' }))).toBe(true);
     });
 
-    it('returns false for video/* MIME types', () => {
-      expect(processor.canProcess(makeStorageObject({ mimeType: 'video/mp4' }))).toBe(false);
+    it('returns true for video/* MIME types (container GPS, issue #545)', () => {
+      expect(processor.canProcess(makeStorageObject({ mimeType: 'video/mp4' }))).toBe(true);
+      expect(processor.canProcess(makeStorageObject({ mimeType: 'video/quicktime' }))).toBe(true);
+    });
+
+    it('returns false for non-media MIME types', () => {
+      expect(processor.canProcess(makeStorageObject({ mimeType: 'application/pdf' }))).toBe(false);
     });
   });
 
@@ -172,6 +177,85 @@ describe('ReverseGeocodeProcessor', () => {
       const result = await processor.process(makeStorageObject(), makeGetStream());
 
       expect(result).toEqual({ success: true, metadata: {} });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Videos — geocode the container GPS video-probe already parsed (#545)
+  // -------------------------------------------------------------------------
+
+  describe('videos', () => {
+    const video = () => makeStorageObject({ mimeType: 'video/mp4', name: 'clip.mp4' });
+    const neverCalledStream = () => jest.fn(() => Promise.reject(new Error('must not download')));
+
+    it('geocodes video-probe coordinates without downloading or parsing the video', async () => {
+      mockGeoLocationService.reverseGeocode.mockResolvedValue({
+        result: { country: 'United States', countryCode: 'US', admin1: 'Texas', locality: 'Conroe' },
+        source: 'offline',
+      });
+      const getStream = neverCalledStream();
+
+      const result = await processor.process(video(), getStream, {
+        'video-probe': { durationMs: 5000, latitude: 30.3119, longitude: -95.4561 },
+      });
+
+      expect(getStream).not.toHaveBeenCalled();
+      expect(parse).not.toHaveBeenCalled();
+      expect(mockGeoLocationService.reverseGeocode).toHaveBeenCalledWith(30.3119, -95.4561);
+      expect(result.success).toBe(true);
+      expect(result.metadata).toMatchObject({
+        country: 'United States',
+        countryCode: 'US',
+        admin1: 'Texas',
+        locality: 'Conroe',
+        source: 'offline',
+      });
+      expect(typeof result.metadata?.['geocodedAt']).toBe('string');
+    });
+
+    it.each([
+      ['no priorResults at all', undefined],
+      ['no video-probe result (probe failed)', { 'video-probe_error': 'ffprobe timed out' }],
+      ['a probe result without coordinates', { 'video-probe': { durationMs: 5000 } }],
+      ['non-finite coordinates', { 'video-probe': { latitude: NaN, longitude: -95.4 } }],
+      ['string coordinates', { 'video-probe': { latitude: '30.1', longitude: '-95.4' } }],
+    ])('returns a clean no-op for %s', async (_label, prior) => {
+      const getStream = neverCalledStream();
+
+      const result = await processor.process(video(), getStream, prior as any);
+
+      expect(result).toEqual({ success: true, metadata: {} });
+      expect(getStream).not.toHaveBeenCalled();
+      expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
+    });
+
+    it('returns a clean no-op when the geocoder yields no result', async () => {
+      mockGeoLocationService.reverseGeocode.mockResolvedValue({ result: null, source: 'offline' });
+
+      const result = await processor.process(video(), neverCalledStream(), {
+        'video-probe': { latitude: 30.3119, longitude: -95.4561 },
+      });
+
+      expect(result).toEqual({ success: true, metadata: {} });
+    });
+
+    it('does not fail the video when the geocoder throws', async () => {
+      mockGeoLocationService.reverseGeocode.mockRejectedValue(new Error('Nominatim 429'));
+
+      const result = await processor.process(video(), neverCalledStream(), {
+        'video-probe': { latitude: 30.3119, longitude: -95.4561 },
+      });
+
+      expect(result).toEqual({ success: true, metadata: {} });
+    });
+
+    it('still fails a PHOTO when the geocoder throws (unchanged behaviour)', async () => {
+      parse.mockResolvedValue({ latitude: 9.9281, longitude: -84.0907 } as any);
+      mockGeoLocationService.reverseGeocode.mockRejectedValue(new Error('Nominatim 429'));
+
+      const result = await processor.process(makeStorageObject(), makeGetStream());
+
+      expect(result).toEqual({ success: false, error: 'Nominatim 429' });
     });
   });
 });
