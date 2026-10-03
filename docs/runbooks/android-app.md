@@ -75,6 +75,7 @@ Pairing links this phone to your account with a long-lived token that only works
 4. You should see **Paired. Token expires <date>.** and, under **Settings, then Media sync** on the web, a card for the phone with status active. The token lasts `DEVICE_PAT_TTL_DAYS` (default 90 days).
 5. On the Connect screen, **allow access to photos and videos**, **allow photo location** and **allow notifications** (Android 13 and later):
    - **Full access** (all photos and videos) is what you want. Choosing "Select photos and videos" on Android 14 and later gives *partial* access: only the items you picked sync, and the app says so. Use **Allow access to all photos** to widen it.
+   - The same **Photos and videos** card appears on the **Folders** screen, so you can grant access there too. If you deny the request and Android stops asking (it shows the dialog at most twice), the button changes to **Open app settings**: turn it on under Permissions, then Photos and videos, then Allow. The app picks the change up when you come back.
    - **Photo location** (`ACCESS_MEDIA_LOCATION`): without it Android strips GPS from the bytes the app uploads. Allow it if you want locations in the library.
    - **Notifications** show upload progress and tell you when something needs attention.
 
@@ -121,13 +122,13 @@ The **Media sync** hub shows, top to bottom: an update card when a newer release
 | Pairing expired: re-pair to resume syncing | The server refused the token | **Re-pair** ([section 12](#12-unpair-re-pair-and-token-expiry)) |
 | Syncing · 3 of 120 · IMG_1234.jpg · 45% | A run is under way | Nothing |
 | Paused | Sync was stopped here or on the web | **Start syncing** |
-| Permission needed: allow access to photos and videos | Media access is denied | Tap **Connect**, grant access |
+| Permission needed: allow access to photos and videos | Media access is denied | Tap it (it opens **Connect**) or open **Folders**, then **Allow access to photos and videos**. If the button reads **Open app settings**, Android no longer asks: allow it there |
 | No folders selected: choose the folders to back up | Nothing is selected | Tap it to open **Folders** |
 | Waiting for a network connection / Waiting for Wi-Fi / Waiting for charging | Files are waiting for the network policy or for the charger | Connect, change the policy, or plug in |
 | Partial access: only the photos and videos you selected sync | Android 13/14 partial access | **Allow access to all photos** |
 | Idle · everything is synced · last sync 5 min ago | Nothing left to do | Nothing |
 
-**Files** has the tabs **Missing**, **Failed**, **Blocked**, **Synced** and **All**, with **Retry** on a row and **Retry all failed** and **Retry blocked** at the top. **Folders** has a **Photo access** card, the **Media types** switches, and a searchable folder list with **Select all** and **None**. **Network & power** has **Network** (Wi-Fi only, or Wi-Fi and mobile data), **Power** (only while charging), **Upload existing** (all, or only new ones, with a confirmation) and **Notifications**.
+**Files** has the tabs **Missing**, **Failed**, **Blocked**, **Synced** and **All**, with **Retry** on a row and **Retry all failed** and **Retry blocked** at the top. **Folders** is a checklist of the phone's photo and video folders, not a form: you tick folders, you never type names. It has the **Photos and videos** permission card (only while access is not full; it asks in place, or offers **Open app settings** once Android stops asking), the **Media types** switches, and the folder list with **Select all** and **None** (shown when there are folders) and a **Search folders** field (only with more than 8 folders). With access denied the list says "Allow photo access to see the folders on this phone."; with access but no media it says "No photo or video folders found on this phone.". The list works before pairing; **Save** needs a paired phone. **Network & power** has **Network** (Wi-Fi only, or Wi-Fi and mobile data), **Power** (only while charging), **Upload existing** (all, or only new ones, with a confirmation) and **Notifications**.
 
 ## 7. Background behaviour
 
@@ -190,7 +191,7 @@ Each row is one self-test check on the Diagnostics screen. **Warn** and **fail**
 | `pairing.token` | Fails (no token) or warns (expires in under 14 days) | Not paired, or the token is close to expiry | **Re-pair** ([section 12](#12-unpair-re-pair-and-token-expiry)) |
 | `auth.valid` | Fails | The server answered 401 (token expired or revoked) or 404/409 (the device was removed or revoked) | **Re-pair** |
 | `api.connection` | Warns (the phone has never checked in) or fails (the last successful check-in is 24 hours old or older) | The server has not heard from this phone: no network, an expired token, or background work blocked | Fix `server.reachable` or `auth.valid` first, then check `battery.optimization` and `work.periodic`, then **Sync now** (every sync starts with a check-in) |
-| `media.permission` | Passes (full), warns (partial: "only selected photos sync") or fails (denied) | Access to photos and videos was narrowed or refused | **Grant media access** from the check, or Android Settings, then Apps, then MemoriaHub, then Permissions. Pick "Allow all" |
+| `media.permission` | Passes (full), warns (partial: "only selected photos sync") or fails (denied) | Access to photos and videos was narrowed or refused | **Grant media access** from the check: it asks in place, or opens the app's settings once Android no longer shows the request. Or Android Settings, then Apps, then MemoriaHub, then Permissions. Pick "Allow all" |
 | `media.location` | Warns | `ACCESS_MEDIA_LOCATION` not granted, so GPS is stripped from uploads | **Grant media access**; allow photo location |
 | `media.folders` | Fails (none selected) or warns (a selected folder no longer exists on the phone) | No folders chosen, or a folder was deleted or renamed | **Choose folders** ([section 6](#6-choose-what-to-back-up)) |
 | `media.trigger` | Fails. `skip` while paused or not paired | The new-photo trigger is not armed (the app was force-stopped, or its work was cancelled), so new photos wait for the 6-hour catch-up | **Sync now** re-arms it; open the app |

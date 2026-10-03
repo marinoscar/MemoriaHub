@@ -140,6 +140,11 @@ private fun MediaSyncApp(
     val snackbar = remember { SnackbarHostState() }
     val navigate: (MediaSyncScreen) -> Unit = { screenFlow.value = it }
     val toHub = { screenFlow.value = MediaSyncScreen.Hub }
+    // The media grant changed on Connect or Folders (both host the shared permission card).
+    val mediaPermissionChanged: (MediaPermissionState) -> Unit = { permission ->
+        mediaVm.hub.refresh(checkHealthAndUpdates = false)
+        if (permission != MediaPermissionState.DENIED && pairingVm.state.value.status.paired) mediaVm.hub.syncNow()
+    }
 
     LaunchedEffect(mediaVm) { mediaVm.hub.messages.collect { snackbar.showSnackbar(it) } }
     BackHandler(enabled = screen != MediaSyncScreen.Hub, onBack = toHub)
@@ -181,12 +186,13 @@ private fun MediaSyncApp(
                 )
                 MediaSyncScreen.Connect -> ConnectScreen(
                     controller = pairingVm.controller,
-                    mediaPermissionChanged = { permission ->
-                        mediaVm.hub.refresh(checkHealthAndUpdates = false)
-                        if (permission != MediaPermissionState.DENIED && pairingVm.state.value.status.paired) mediaVm.hub.syncNow()
-                    },
+                    mediaPermissionChanged = mediaPermissionChanged,
                 )
-                MediaSyncScreen.Folders -> FoldersScreen(mediaVm.folders, onOpenConnect = { navigate(MediaSyncScreen.Connect) })
+                MediaSyncScreen.Folders -> FoldersScreen(
+                    folders = mediaVm.folders,
+                    onOpenConnect = { navigate(MediaSyncScreen.Connect) },
+                    onMediaPermissionChanged = mediaPermissionChanged,
+                )
                 MediaSyncScreen.Network -> NetworkScreen(mediaVm.network, onOpenConnect = { navigate(MediaSyncScreen.Connect) })
                 MediaSyncScreen.Files -> FilesScreen(mediaVm.files, onOpenSynced = { onOpenWebApp(MEDIA_WEB_PATH) })
                 MediaSyncScreen.Diagnostics -> DiagnosticsScreen(onBack = toHub)
