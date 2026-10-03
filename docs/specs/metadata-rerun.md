@@ -86,7 +86,7 @@ Processors not in the allowlist — including `visual-hash` (used by burst detec
 4. Run each allowlisted processor in priority order. Processors that return `canProcess = false` are skipped. Processor failures are caught individually and recorded as `${name}_error` keys in the merged metadata; they do not abort the run.
 5. Deep-merge processor output into `storageObject.metadata._processing`, preserving existing keys not touched by this run. Write `_processedAt` timestamp.
 6. Persist the merged metadata back to `StorageObject`.
-7. Call `MediaMetadataSyncService.syncFromStorageObject(storageObjectId)` to write typed columns (GPS coordinates, capture timestamp, dimensions, video duration, etc.) into `media_items` directly.
+7. Call `MediaMetadataSyncService.syncFromStorageObject(storageObjectId)` to write typed columns (GPS coordinates, capture timestamp, dimensions, video duration, etc.) into `media_items` directly. For videos, GPS comes from the container's ISO 6709 location tag via `video-probe` and is geocoded in the same pass, so a backfill also heals videos imported before container GPS was read (see [geocoding.md §3.4](geocoding.md#34-video-gps-issue-545)).
 8. **Do NOT emit `OBJECT_PROCESSED_EVENT`.** This is intentional: the event would trigger `AutoTaggingEnqueueListener`, `FaceDetectionEnqueueListener`, and `BurstEnqueueListener`, which is not desired for a metadata-only correction.
 9. Upsert `media_metadata_status` to `processed` with `processedAt = now`.
 
