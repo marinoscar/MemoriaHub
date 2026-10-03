@@ -21,6 +21,8 @@
 import { runFfprobe } from '../ffmpeg/index.js';
 import { getOrientedDimensions } from '../image/index.js';
 
+export * from './location.js';
+
 // =============================================================================
 // EXIF
 // =============================================================================
