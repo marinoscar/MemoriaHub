@@ -1006,6 +1006,66 @@ describe('MediaService', () => {
       expect(call[0].cursor).toBeUndefined();
       expect(call[0].skip).toBeUndefined();
     });
+
+    describe("sortBy: 'displayAt'", () => {
+      it('orders by [{ displayAt: desc }, { id: desc }]', async () => {
+        mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
+
+        await service.listMedia({ ...keysetQuery, sortBy: 'displayAt' }, 'user-1', ownPerms);
+
+        const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+        expect(call[0].orderBy).toEqual([{ displayAt: 'desc' }, { id: 'desc' }]);
+        expect(call[0].take).toBe(3);
+      });
+
+      it('orders by [{ displayAt: asc }, { id: asc }] when sortOrder is asc', async () => {
+        mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
+
+        await service.listMedia(
+          { ...keysetQuery, sortBy: 'displayAt', sortOrder: 'asc' },
+          'user-1',
+          ownPerms,
+        );
+
+        const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+        expect(call[0].orderBy).toEqual([{ displayAt: 'asc' }, { id: 'asc' }]);
+      });
+
+      it('keeps keyset cursor handling: cursor { id } + skip 1, nextCursor is the last item id', async () => {
+        const cursorId = randomUUID();
+        mockPrisma.mediaItem.findMany.mockResolvedValue([
+          makeMediaItem({ id: 'item-1' }),
+          makeMediaItem({ id: 'item-2' }),
+          makeMediaItem({ id: 'item-3' }),
+        ] as any);
+
+        const result = await service.listMedia(
+          { ...keysetQuery, sortBy: 'displayAt', cursor: cursorId },
+          'user-1',
+          ownPerms,
+        );
+
+        const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+        expect(call[0].cursor).toEqual({ id: cursorId });
+        expect(call[0].skip).toBe(1);
+        expect(result.meta).toEqual({ pageSize: 2, nextCursor: 'item-2', hasMore: true });
+      });
+
+      it('legacy offset mode (page set) also orders by displayAt without a cursor', async () => {
+        mockPrisma.mediaItem.findMany.mockResolvedValue([] as any);
+        mockPrisma.mediaItem.count.mockResolvedValue(0);
+
+        await service.listMedia(
+          { ...defaultMediaQuery, sortBy: 'displayAt' },
+          'user-1',
+          ownPerms,
+        );
+
+        const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
+        expect(call[0].orderBy).toEqual([{ displayAt: 'desc' }, { id: 'desc' }]);
+        expect(call[0].cursor).toBeUndefined();
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
