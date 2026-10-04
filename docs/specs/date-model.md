@@ -138,6 +138,48 @@ calendar date rather than by a zone, and its label is derived from the key so
 a bucket holding both kinds cannot be labelled with a different day than it is
 keyed by.
 
+### Feed ordering (`display_at`, issue #549)
+
+The server's order and the client's bucketing have to agree, or the timeline
+scatters. With `sortBy=capturedAt`, Postgres sorts `NULL` capture dates
+**first** on `DESC`, ordered among themselves by random UUID, while
+`groupByDay` files each undated item under its `importedAt` day. Undated items
+therefore appeared at the top of the feed in no meaningful order, far from the
+day they were bucketed into, and (together with the observer stall fixed in
+#548) broke infinite scroll.
+
+`media_items.display_at` is the column that makes the two agree:
+
+```sql
+display_at timestamptz GENERATED ALWAYS AS (COALESCE(captured_at, imported_at)) STORED
+```
+
+It is never `NULL` (`imported_at` is `NOT NULL`), so keyset pagination has no
+`NULLS FIRST/LAST` to reason about. `GET /api/media?sortBy=displayAt` orders
+`(display_at DESC, id DESC)` and is served by the hand-authored partial index
+`media_items_display_gallery_idx (circle_id, display_at DESC, id DESC) WHERE
+deleted_at IS NULL AND archived_at IS NULL` (migration
+`20260817000000_add_media_display_at`; the older `media_items_gallery_idx` stays
+for `sortBy=capturedAt`). Prisma exposes the field as `displayAt`; it is
+generated, never written by application code, and sits in the global
+`omit.mediaItem` (like `perceptualHash`), so it is usable in
+`orderBy`/`cursor`/`where` but is **not** in API item responses — clients keep
+reading `capturedAt` / `importedAt` and bucketing them as above.
+
+- **Who uses it.** The web Home and Album galleries send `sortBy: 'displayAt'`,
+  and `useInfiniteMedia`'s default `listMedia` path defaults to it when no
+  `sortBy` is given (custom fetchers are unaffected). The API **default stays
+  `capturedAt`**, so the CLI, the Android app and legacy offset-mode clients are
+  unchanged.
+- **Caveat — it mixes the two kinds in SQL.** `captured_at` is a civil timestamp
+  and `imported_at` a real instant (§1), so `COALESCE` compares them as if they
+  were the same kind. Around midnight the comparison is off by up to the
+  viewer's UTC offset. The client still buckets each value by its own rule
+  (UTC for `capturedAt`, viewer-local for `importedAt`), so this can only
+  misorder items **within adjacent days**, never scatter them across the feed.
+  Do not "fix" it by shifting `imported_at` inside the generated column: a
+  stored expression cannot know the viewer's zone.
+
 ### Android
 
 `PhotosViewModel` groups the phone's own MediaStore rows, where `DATE_TAKEN`
