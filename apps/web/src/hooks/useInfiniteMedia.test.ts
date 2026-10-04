@@ -7,11 +7,14 @@
  * invoked from this suite.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useInfiniteMedia } from './useInfiniteMedia';
 import type { InfiniteMediaFetcher } from './useInfiniteMedia';
 import type { MediaItem, MediaQueryParams } from '../types/media';
+import { listMedia } from '../services/media';
+
+vi.mock('../services/media', () => ({ listMedia: vi.fn() }));
 
 function makeItem(id: string): MediaItem {
   return { id } as MediaItem;
@@ -193,5 +196,85 @@ describe('useInfiniteMedia', () => {
 
     expect(result.current.items.map((i) => i.id)).toEqual(['fresh']);
     expect(result.current.error).toBeNull();
+  });
+
+  describe('default listMedia path (no custom fetcher)', () => {
+    beforeEach(() => {
+      vi.mocked(listMedia).mockReset();
+      vi.mocked(listMedia).mockResolvedValue({
+        items: [makeItem('a')],
+        meta: { pageSize: 50, nextCursor: null, hasMore: false },
+      } as Awaited<ReturnType<typeof listMedia>>);
+    });
+
+    it("sends sortBy 'displayAt' when the caller gives no sortBy (issue #549)", async () => {
+      const { result } = renderHook(() => useInfiniteMedia(BASE_PARAMS, 50));
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(listMedia).toHaveBeenCalledTimes(1);
+      expect(listMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          circleId: 'circle-1',
+          sortBy: 'displayAt',
+          cursor: null,
+          pageSize: 50,
+        }),
+      );
+    });
+
+    it('respects an explicit sortBy from the caller', async () => {
+      const { result } = renderHook(() =>
+        useInfiniteMedia({ ...BASE_PARAMS, sortBy: 'capturedAt' }, 50),
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(listMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ sortBy: 'capturedAt' }),
+      );
+    });
+
+    it('treats an explicit undefined sortBy as absent and defaults to displayAt', async () => {
+      const { result } = renderHook(() =>
+        useInfiniteMedia({ ...BASE_PARAMS, sortBy: undefined }, 50),
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(listMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ sortBy: 'displayAt' }),
+      );
+    });
+
+    it('does not refetch on rerender with equal params (default is not part of the reset key)', async () => {
+      const { result, rerender } = renderHook(
+        ({ params }: { params: Omit<MediaQueryParams, 'page' | 'pageSize'> }) =>
+          useInfiniteMedia(params, 50),
+        { initialProps: { params: { ...BASE_PARAMS } } },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      rerender({ params: { ...BASE_PARAMS } });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(listMedia).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('does not inject sortBy into a custom fetcher (fetcher receives only cursor and pageSize)', async () => {
+    vi.mocked(listMedia).mockReset();
+    const fetcher: InfiniteMediaFetcher = vi
+      .fn()
+      .mockResolvedValue({ items: [makeItem('a')], nextCursor: null });
+
+    const { result } = renderHook(() =>
+      useInfiniteMedia(BASE_PARAMS, 50, true, { fetcher }),
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetcher).toHaveBeenCalledWith(null, 50);
+    expect(listMedia).not.toHaveBeenCalled();
   });
 });
