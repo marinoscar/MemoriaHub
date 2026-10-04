@@ -619,6 +619,79 @@ describe('MediaGallery', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Infinite-scroll re-arm (issue #548)
+  // -------------------------------------------------------------------------
+  describe('infinite-scroll sentinel re-arm', () => {
+    function latestSentinelOptions(): { rearmKey?: unknown; disabled?: boolean } {
+      const calls = mockUseIntersectionObserver.mock.calls;
+      const last = calls[calls.length - 1];
+      if (!last) throw new Error('useIntersectionObserver was never called');
+      return last[2] as { rearmKey?: unknown; disabled?: boolean };
+    }
+
+    it('changes the re-arm key only when a page load completes, so a still-visible sentinel loads the next page', async () => {
+      mockListMedia.mockResolvedValueOnce({
+        items: [makeItem('p1-a'), makeItem('p1-b')],
+        meta: { pageSize: 2, nextCursor: 'cursor-2', hasMore: true },
+      });
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          queryParams={{ circleId: 'circle-1' }}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(latestSentinelOptions().rearmKey).toBe(2);
+      });
+      expect(latestSentinelOptions().disabled).toBe(false);
+
+      // Hold the second page in flight: the key must NOT change while loading
+      // (that is what caused chain-loading in issue #291).
+      let resolvePage2!: (v: Awaited<ReturnType<typeof listMedia>>) => void;
+      mockListMedia.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolvePage2 = resolve;
+        }),
+      );
+      await act(async () => {
+        latestFeedLoadMore()();
+      });
+      expect(latestSentinelOptions().rearmKey).toBe(2);
+
+      // Completing the load changes the key, which re-creates the real
+      // observer and re-fires the callback if the sentinel is still visible.
+      await act(async () => {
+        resolvePage2({
+          items: [makeItem('p2-a')],
+          meta: { pageSize: 2, nextCursor: 'cursor-3', hasMore: true },
+        });
+      });
+      await waitFor(() => {
+        expect(latestSentinelOptions().rearmKey).toBe(3);
+      });
+      expect(latestSentinelOptions().disabled).toBe(false);
+
+      // A third request is then possible straight away.
+      mockListMedia.mockResolvedValueOnce({
+        items: [makeItem('p3-a')],
+        meta: { pageSize: 2, nextCursor: null, hasMore: false },
+      });
+      await act(async () => {
+        latestFeedLoadMore()();
+      });
+      await waitFor(() => {
+        expect(latestSentinelOptions().rearmKey).toBe(4);
+      });
+      // No more pages: the observer is disabled, so no re-arm loop.
+      expect(latestSentinelOptions().disabled).toBe(true);
+      expect(mockListMedia).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // (c) Per-group "Select all"
   // -------------------------------------------------------------------------
   describe('per-group select all', () => {
