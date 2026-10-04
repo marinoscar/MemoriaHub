@@ -183,7 +183,7 @@ export default function AlbumPage() {
         ? {
             circleId: activeCircle.id,
             albumId,
-            sortBy: 'capturedAt' as const,
+            sortBy: 'displayAt' as const,
             sortOrder: 'desc' as const,
           }
         : undefined,

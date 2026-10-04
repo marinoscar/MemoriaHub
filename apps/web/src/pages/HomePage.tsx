@@ -38,7 +38,7 @@ export default function HomePage() {
   const mediaParams = useMemo(
     () => ({
       circleId: activeCircleId ?? undefined,
-      sortBy: 'capturedAt' as const,
+      sortBy: 'displayAt' as const,
       sortOrder: 'desc' as const,
     }),
     [activeCircleId],

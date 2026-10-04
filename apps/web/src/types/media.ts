@@ -60,7 +60,13 @@ export interface LocationExtent {
 
 export type MediaType = 'photo' | 'video';
 export type MediaSource = 'web' | 'cli' | 'android' | 'import' | 'sync';
-export type MediaSortBy = 'capturedAt' | 'importedAt' | 'createdAt';
+/**
+ * `displayAt` = COALESCE(capturedAt, importedAt): the same date the gallery's
+ * day grouping (`groupByDay`) files an item under, so feed order matches the
+ * day headers. Undated items sort by their import time instead of floating to
+ * the top (issue #549).
+ */
+export type MediaSortBy = 'capturedAt' | 'importedAt' | 'createdAt' | 'displayAt';
 export type SortOrder = 'asc' | 'desc';
 
 export interface MediaItem {

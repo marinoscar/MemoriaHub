@@ -42,6 +42,8 @@ export interface UseInfiniteMediaOptions {
   queryKey?: string;
 }
 
+const DEFAULT_FEED_SORT_BY = 'displayAt' as const;
+
 export function useInfiniteMedia(
   params: Omit<MediaQueryParams, 'page' | 'pageSize'>,
   pageSize = 50,
@@ -89,7 +91,11 @@ export function useInfiniteMedia(
       const response = fetcher
         ? await fetcher(cursor, pageSizeRef.current)
         : await listMedia({
+            // Every gallery feed is grouped by day on COALESCE(capturedAt,
+            // importedAt), so default the feed order to match (issue #549).
+            // Applied here, not to `params`, so the reset key is unaffected.
             ...paramsRef.current,
+            sortBy: paramsRef.current.sortBy ?? DEFAULT_FEED_SORT_BY,
             cursor,
             pageSize: pageSizeRef.current,
           }).then((r) => ({ items: r.items, nextCursor: r.meta.nextCursor }));
