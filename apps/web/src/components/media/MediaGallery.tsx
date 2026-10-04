@@ -540,15 +540,28 @@ export function MediaGallery({
 
   // Infinite scroll sentinel
   const sentinelRef = useRef<HTMLDivElement>(null);
-  // `feedIsLoading` is deliberately NOT part of `disabled`: flipping it tears
-  // the observer down and re-creates it, and `observe()` always delivers an
-  // initial callback — so a sentinel still inside the root margin re-fires
-  // immediately, chain-loading page after page (issue #291). Concurrency is
-  // already guarded by `useInfiniteMedia`'s `inflightRef`; the sentinel must
-  // now genuinely leave and re-enter the root margin to load again.
+  // `feedIsLoading` is deliberately NOT part of `disabled` or the re-arm key:
+  // flipping it when a load STARTS tears the observer down and re-creates it,
+  // and `observe()` always delivers an initial callback — so a sentinel still
+  // inside the root margin re-fires immediately, chain-loading page after page
+  // (issue #291). Concurrency is guarded by `useInfiniteMedia`'s `inflightRef`.
+  //
+  // The observer only reports visibility transitions, though. An intersection
+  // that happens while a fetch is in flight is dropped by `inflightRef`, and a
+  // page whose items barely add height (e.g. undated items that `groupByDay`
+  // scatters into existing day groups by importedAt) leaves the sentinel inside
+  // the 300px margin, so no new transition ever occurs and loading stalls
+  // permanently (issue #548). `rearmKey` fixes this by re-creating the observer
+  // when a page load COMPLETES (the loaded item count changes), which re-fires
+  // the callback if the sentinel is still visible. Re-arming on completed loads
+  // is safe: #291's real cause was the width feedback loop, fixed by the width
+  // clamp, and each re-arm needs real progress to happen. There is no loop on
+  // error (items.length is unchanged, so no re-arm) nor when `hasMore` is false
+  // (the observer is disabled).
   useIntersectionObserver(sentinelRef, feedLoadMore, {
     rootMargin: '300px',
     disabled: !isFeedMode || !feedHasMore || !circleId,
+    rearmKey: feedItems.length,
   });
 
   // -------------------------------------------------------------------------
