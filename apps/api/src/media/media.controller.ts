@@ -995,7 +995,13 @@ export class MediaController {
   @ApiQuery({ name: 'locality', required: false, type: String, description: 'Matches geoLocality (contains), case-insensitive' })
   @ApiQuery({ name: 'place', required: false, type: String, description: 'Substring match on geoPlaceName, case-insensitive' })
   @ApiQuery({ name: 'location', required: false, type: String, description: 'Free-text search across all geo tiers' })
-  @ApiQuery({ name: 'sortBy', required: false, enum: ['capturedAt', 'importedAt', 'createdAt'] })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['capturedAt', 'importedAt', 'createdAt', 'displayAt'],
+    description:
+      "Sort column (default capturedAt). 'displayAt' is the display date: capture date, else import date (never null); used by the day-grouped gallery so feed order matches its grouping.",
+  })
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
   @ApiQuery({ name: 'cameraMake', required: false, type: String, description: 'Camera make (contains, case-insensitive)' })
   @ApiQuery({ name: 'cameraModel', required: false, type: String, description: 'Camera model (contains, case-insensitive)' })
