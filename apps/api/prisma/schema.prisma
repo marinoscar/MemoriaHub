@@ -535,6 +535,14 @@ model MediaItem {
   capturedAt       DateTime?   @map("captured_at") @db.Timestamptz
   capturedAtOffset Int?        @map("captured_at_offset") // UTC offset in minutes at capture time
   importedAt       DateTime    @default(now()) @map("imported_at") @db.Timestamptz
+  // Issue #549: the date the gallery DISPLAYS and orders by,
+  // COALESCE(captured_at, imported_at). A Postgres STORED GENERATED column
+  // (migration 20260817000000_add_media_display_at): GENERATED, NEVER WRITTEN by
+  // app code (Prisma omits it from INSERT/UPDATE because it has a DB default;
+  // setting it explicitly would fail at the database). Never NULL. Omitted from
+  // default reads via the global `omit` in PrismaService; usable in
+  // orderBy/cursor/where, and readable via an explicit `select`.
+  displayAt        DateTime    @default(dbgenerated("COALESCE(captured_at, imported_at)")) @map("display_at") @db.Timestamptz
   source           MediaSource
   contentHash      String?     @map("content_hash")
 

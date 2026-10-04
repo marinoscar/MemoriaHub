@@ -50,9 +50,16 @@ export class PrismaService
       // burst detection. It is not part of the public API surface and is omitted
       // globally to keep MediaItem responses clean. Burst detection code that
       // needs it reads it via an explicit `select`, which overrides this omit.
+      //
+      // displayAt (issue #549) is a Postgres-generated column,
+      // COALESCE(captured_at, imported_at), used only for gallery ordering. It
+      // is omitted for the same reason, so no new field leaks into API item
+      // responses; it remains valid in orderBy/cursor/where, and an explicit
+      // `select: { displayAt: true }` reads it.
       omit: {
         mediaItem: {
           perceptualHash: true,
+          displayAt: true,
         },
       },
       log: [
