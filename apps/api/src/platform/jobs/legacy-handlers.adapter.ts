@@ -57,7 +57,11 @@ import { videoJobTimeoutMs } from './legacy-env';
 // `video_face_detection`, `face_auto_archive_sweep`, `metadata_extraction`,
 // `thumbnail_regen` and `thumbnail_repair` native `JobHandler`s; they register
 // with `JobHandlerRegistry` themselves (and `face_detection` its own `face`
-// throttle key), never through `EnrichmentHandlerRegistry`.
+// throttle key), never through `EnrichmentHandlerRegistry`. RETRO-C5 (#594)
+// did the same for `duplicate_detection`, `duplicate_detection_batch`,
+// `duplicate_confidence_backfill`, `burst_detection` and
+// `social_media_detection` (which now declares the 20-minute video profile
+// itself).
 //
 // The orchestration (claim, lease, retry, deferral, settle) is the platform's;
 // none of it is reimplemented here.
@@ -73,11 +77,11 @@ export const LEGACY_THROTTLE_KEYS: Readonly<Record<string, string>> = {
 
 /**
  * The video job types still on the adapter: download + ffmpeg + per-frame
- * provider calls legitimately exceed 10 minutes. (`video_face_detection` is
- * native since RETRO-C3 and declares the same profile itself.)
+ * provider calls legitimately exceed 10 minutes. (`video_face_detection`,
+ * native since RETRO-C3, and `social_media_detection`, native since RETRO-C5,
+ * declare the same profile themselves.)
  */
 export const VIDEO_JOB_TYPES: ReadonlySet<string> = new Set([
-  'social_media_detection',
   'video_auto_tagging',
 ]);
 
