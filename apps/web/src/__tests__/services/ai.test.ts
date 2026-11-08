@@ -274,11 +274,11 @@ describe('testAiProvider', () => {
 // ---------------------------------------------------------------------------
 
 describe('getAiModels', () => {
-  it('sends GET to /ai/models with provider query param', async () => {
+  it('sends GET to /ai/settings/models with provider query param', async () => {
     let capturedUrl = '';
 
     server.use(
-      http.get('*/api/ai/models', ({ request }) => {
+      http.get('*/api/ai/settings/models', ({ request }) => {
         capturedUrl = request.url;
         return HttpResponse.json({ data: ['gpt-4o', 'gpt-4'] });
       }),
@@ -286,13 +286,13 @@ describe('getAiModels', () => {
 
     await getAiModels('openai');
 
-    expect(capturedUrl).toContain('/ai/models');
+    expect(capturedUrl).toContain('/ai/settings/models');
     expect(capturedUrl).toContain('provider=openai');
   });
 
   it('returns the array of model names', async () => {
     server.use(
-      http.get('*/api/ai/models', () => {
+      http.get('*/api/ai/settings/models', () => {
         return HttpResponse.json({ data: ['gpt-4o', 'gpt-4', 'gpt-3.5-turbo'] });
       }),
     );
@@ -306,7 +306,7 @@ describe('getAiModels', () => {
     let capturedUrl = '';
 
     server.use(
-      http.get('*/api/ai/models', ({ request }) => {
+      http.get('*/api/ai/settings/models', ({ request }) => {
         capturedUrl = request.url;
         return HttpResponse.json({ data: [] });
       }),
@@ -319,7 +319,7 @@ describe('getAiModels', () => {
 
   it('returns an empty array when no models available', async () => {
     server.use(
-      http.get('*/api/ai/models', () => {
+      http.get('*/api/ai/settings/models', () => {
         return HttpResponse.json({ data: [] });
       }),
     );
@@ -331,7 +331,7 @@ describe('getAiModels', () => {
 
   it('propagates ApiError on 401', async () => {
     server.use(
-      http.get('*/api/ai/models', () => {
+      http.get('*/api/ai/settings/models', () => {
         return HttpResponse.json({ message: 'Unauthorized', code: 'UNAUTHORIZED' }, { status: 401 });
       }),
     );
