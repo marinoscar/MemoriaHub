@@ -1118,6 +1118,7 @@ export class MediaService {
 
     // Backup change feed: tag joins don't touch the MediaItem row (issue #310).
     await this.mediaTouch.touchMediaItems([item.id]);
+    this.metrics?.add('mediaTagsApplied', result.length, { media_type: item.type, source: 'manual' });
 
     this.logger.log(
       `Attached ${dto.names.length} tag(s) to MediaItem ${mediaItemId}`,
@@ -2157,12 +2158,38 @@ export class MediaService {
     if (added > 0 || removed > 0) {
       await this.mediaTouch.touchMediaItems(dto.ids);
     }
+    if (added > 0 && this.metrics) await this.countBulkTagsApplied(dto, added, addSource);
 
     this.logger.log(
       `bulkTags: added=${added} removed=${removed} for ${dto.ids.length} items by user ${userId}`,
     );
 
     return { added, removed };
+  }
+
+  /**
+   * `app.media.tags.applied` for a bulk add (RETRO-T3): the joins created, split by media type in
+   * proportion to the selection (one extra read of the selected items' types). Never throws.
+   */
+  private async countBulkTagsApplied(dto: BulkTagsDto, added: number, source: MediaTagSource): Promise<void> {
+    try {
+      const rows = await this.prisma.mediaItem.groupBy({
+        by: ['type'],
+        where: { id: { in: dto.ids }, circleId: dto.circleId },
+        _count: { _all: true },
+      });
+      const total = rows.reduce((sum, row) => sum + row._count._all, 0);
+      for (const row of rows) {
+        if (total > 0) {
+          this.metrics?.add('mediaTagsApplied', Math.round((added * row._count._all) / total), {
+            media_type: row.type,
+            source,
+          });
+        }
+      }
+    } catch {
+      // Metrics never fail a tag write.
+    }
   }
 
   async bulkDelete(

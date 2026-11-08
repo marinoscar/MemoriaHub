@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { EnrichmentJob, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Readable } from 'stream';
 import { autoTaggingResultSchema, type AutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
@@ -58,6 +59,8 @@ export class AutoTaggingService {
     private readonly resolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly mediaTouch: MediaTouchService,
+    // App metrics (RETRO-T3, #628): `app.media.tags.applied{source=ai}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   async processMediaItem(job: EnrichmentJob): Promise<void> {
@@ -373,7 +376,7 @@ export class AutoTaggingService {
 
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: job.mediaItemId },
-      select: { id: true, circleId: true, addedById: true },
+      select: { id: true, circleId: true, addedById: true, type: true },
     });
     if (!mediaItem) {
       throw new Error(`MediaItem ${job.mediaItemId} not found`);
@@ -451,6 +454,9 @@ export class AutoTaggingService {
         });
       }
     });
+
+    // The AI tag set this run left on the item (a re-run counts its set again).
+    this.metrics?.add('mediaTagsApplied', normalizedLabels.length, { media_type: mediaItem.type, source: 'ai' });
 
     // Backup change feed (issue #310): the parseOk branch above already bumps
     // updatedAt via mediaItem.update; when the parse failed, only MediaTag rows
