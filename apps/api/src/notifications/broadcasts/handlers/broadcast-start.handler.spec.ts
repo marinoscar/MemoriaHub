@@ -13,7 +13,7 @@ function job(payload: unknown = { broadcastId: BID }): EnrichmentJob {
 
 function build(broadcast: Record<string, unknown> | null) {
   const prisma = {
-    notificationBroadcast: {
+    mhLegacyNotificationBroadcast: {
       findUnique: jest.fn().mockResolvedValue(broadcast),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
@@ -42,7 +42,7 @@ describe('BroadcastStartHandler', () => {
     const t = build(scheduled);
     await t.handler.process(job());
 
-    const claim = t.prisma.notificationBroadcast.updateMany.mock.calls[0][0];
+    const claim = t.prisma.mhLegacyNotificationBroadcast.updateMany.mock.calls[0][0];
     expect(claim.where).toEqual({ id: BID, status: 'scheduled' });
     expect(claim.data.status).toBe('sending');
     expect(claim.data.startedAt).toBe(claim.data.audienceCutoff);
@@ -50,7 +50,7 @@ describe('BroadcastStartHandler', () => {
     expect(t.prisma.user.count).toHaveBeenCalledWith({
       where: { isActive: true, createdAt: { lte: claim.data.audienceCutoff } },
     });
-    expect(t.prisma.notificationBroadcast.updateMany.mock.calls[1][0]).toEqual({
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany.mock.calls[1][0]).toEqual({
       where: { id: BID, status: 'sending' },
       data: { recipientCount: 42 },
     });
@@ -61,7 +61,7 @@ describe('BroadcastStartHandler', () => {
 
   it('is a no-op when the CAS matches nothing (lost race / cancelled)', async () => {
     const t = build(scheduled);
-    t.prisma.notificationBroadcast.updateMany.mockResolvedValueOnce({ count: 0 });
+    t.prisma.mhLegacyNotificationBroadcast.updateMany.mockResolvedValueOnce({ count: 0 });
     await t.handler.process(job());
     expect(t.prisma.user.count).not.toHaveBeenCalled();
     expect(t.jobs.enqueue).not.toHaveBeenCalled();
@@ -69,7 +69,7 @@ describe('BroadcastStartHandler', () => {
 
   it('queues no chunk when a cancel lands between claim and hand-off', async () => {
     const t = build(scheduled);
-    t.prisma.notificationBroadcast.updateMany
+    t.prisma.mhLegacyNotificationBroadcast.updateMany
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 0 });
     await t.handler.process(job());
@@ -78,7 +78,7 @@ describe('BroadcastStartHandler', () => {
 
   it.each([null, 'canceled', 'sent', 'failed'])('does nothing for a deleted or %s broadcast', async (status) => {
     const t = build(status === null ? null : { ...scheduled, status });
-    t.prisma.notificationBroadcast.updateMany.mockResolvedValue({ count: 0 });
+    t.prisma.mhLegacyNotificationBroadcast.updateMany.mockResolvedValue({ count: 0 });
     await t.handler.process(job());
     expect(t.jobs.enqueue).not.toHaveBeenCalled();
   });
@@ -86,7 +86,7 @@ describe('BroadcastStartHandler', () => {
   it('ignores a job with no broadcastId payload', async () => {
     const t = build(scheduled);
     await t.handler.process(job({}));
-    expect(t.prisma.notificationBroadcast.findUnique).not.toHaveBeenCalled();
+    expect(t.prisma.mhLegacyNotificationBroadcast.findUnique).not.toHaveBeenCalled();
   });
 
   it('finishes an interrupted hand-off using the STORED cutoff (no re-claim)', async () => {
@@ -99,7 +99,7 @@ describe('BroadcastStartHandler', () => {
     expect(t.prisma.user.count).toHaveBeenCalledWith({ where: { isActive: true, createdAt: { lte: cutoff } } });
     expect(t.jobs.enqueue).toHaveBeenCalledTimes(1);
     // never re-stamps the cutoff
-    for (const [arg] of t.prisma.notificationBroadcast.updateMany.mock.calls) {
+    for (const [arg] of t.prisma.mhLegacyNotificationBroadcast.updateMany.mock.calls) {
       expect(arg.data).not.toHaveProperty('audienceCutoff');
     }
   });

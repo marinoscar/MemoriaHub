@@ -2,7 +2,7 @@ import { Controller, Get, Logger, Res } from '@nestjs/common';
 import { ApiOperation, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply } from 'fastify';
 
-import { Public } from '../auth/decorators/public.decorator';
+import { Public } from '@marinoscar/platform-api/identity';
 import { AllowDuringMaintenance } from '@marinoscar/platform-api/core';
 import { AndroidAppService } from './android-app.service';
 

@@ -14,7 +14,7 @@ import { SearchFieldsSettings } from '../components/settings/SearchFieldsSetting
 import { NotificationSettings } from '../components/settings/NotificationSettings';
 import { MemoriesSettings } from '../components/settings/MemoriesSettings';
 import { AndroidAppPanel } from '../components/settings/AndroidAppPanel';
-import { PersonalAccessTokens } from '../components/settings/PersonalAccessTokens';
+import { PersonalAccessTokens } from '@marinoscar/platform-web/identity/ui';
 import { useUserSettings } from '../hooks/useUserSettings';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 

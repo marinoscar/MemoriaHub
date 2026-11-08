@@ -24,8 +24,8 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { StorageSettingsService } from './storage-settings.service';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { KNOWN_STORAGE_PROVIDERS } from './providers/storage-provider.registry';
 import { UpsertStorageCredentialsDto } from './dto/storage-credentials.dto';

@@ -324,6 +324,8 @@ memoriahub android release --bump patch --notes "..."          # build, sign, pu
 
 ## API Endpoints (MVP)
 
+> **Identity is the platform's (RETRO-B2, issue #611).** The Authentication, Device Authorization, Users, Allowlist and Personal Access Token routes below are `@marinoscar/platform-api/identity`, mounted once in `apps/api/src/platform/identity/` (single-organization mode; `TENANCY_MODE` unset). The routes, permission strings and behaviours are as documented, except: `GET /api/auth/me` is the platform payload (adds `tenancyMode`, `activeOrg`, `memberships`, `providerProfileImageUrl`, `hasUploadedProfileImage`; no `createdAt`; `roles` lists the system role and the org role, so an administrator lists `admin` and `org_admin`) and the **raw per-user `timezone` is `extensions.memoriahub.timezone`** (a `registerCurrentUserExtension`, `app-registrations/identity.ts`); `POST /api/auth/device/code` answers 200; the profile-picture routes live in `apps/api/src/profile/` over the `user_profiles` side table. Do not look for `src/auth`, `src/users`, `src/allowlist`, `src/pat`, `src/device-auth` or `src/test-auth`: they are deleted. Decorators (`@Auth`, `@Public`, `@AuthCredential`, `@Roles`, `@Permissions`) import from `@marinoscar/platform-api/identity`; `@CurrentUser()` from `src/common/decorators/current-user.decorator.ts` (a wrapper, see `docs/platform-adoption/local-exceptions.md`). Permissions are declared in `src/app-registrations/memoriahub-permissions.ts` and rendered to `prisma/catalog/permissions.json` (`npm run catalog:permissions --workspace=api`); the seed writes them and runs on every update.
+
 ### Authentication
 - `GET /api/auth/providers` - List enabled OAuth providers
 - `GET /api/auth/google` - Initiate Google OAuth; optional `?returnTo=<same-site-path>` query param carries a destination through the OAuth `state` (HMAC-signed; must start with `/`, no `//`, no scheme) — used by the device activation page to land the user on `/activate?code=…` after login
@@ -331,7 +333,7 @@ memoriahub android release --bump patch --notes "..."          # build, sign, pu
 - `POST /api/auth/refresh` - Refresh access token
 - `POST /api/auth/logout` - Logout and invalidate session
 - `POST /api/auth/logout-all` - Logout from all devices
-- `GET /api/auth/me` - Get current user; `timezone` (string | null) is the **raw** `user_settings.timezone` value — `null` when the user has never expressed a preference, never resolved to `'UTC'` — so the client can tell "chose UTC" from "never chose" and decide whether to prompt (issue #444; see the `user_settings` table entry below)
+- `GET /api/auth/me` - Get current user; `extensions.memoriahub.timezone` (string | null) is the **raw** `user_settings.timezone` value — `null` when the user has never expressed a preference, never resolved to `'UTC'` — so the client can tell "chose UTC" from "never chose" and decide whether to prompt (issue #444; see the `user_settings` table entry below)
 
 ### Device Authorization (RFC 8628)
 - `POST /api/auth/device/code` - Generate device code (Public); optional `clientInfo.tokenType` (`'session'` | `'pat'`; `'pat'` mints a long-lived `pat_` token on approval, as the CLI and the Android app request; other values are 400), `clientInfo.name` (≤100 chars, shown on the activation page and used as the PAT's name) and `clientInfo.returnUri` — deep-link URI (`memoriahub:` or `https:` scheme only, max 512 chars) the activation page redirects to after approval, returning the user to the requesting app (e.g. Android Custom Tab flow)
@@ -348,7 +350,7 @@ memoriahub android release --bump patch --notes "..."          # build, sign, pu
 - `PUT /api/users/{id}/roles` - Update user roles
 
 ### Users / Profile Picture (authenticated, any role — self-scoped, no permission)
-Profile picture management (issue #354) — see the [Profile Picture spec](docs/specs/profile-picture.md). Every route is self-scoped to the caller's own `userId`; a bare `@Auth()` guards all six, since a user's own avatar is inherently personal and there is nothing an Admin-gated permission would protect — the same rationale as `GET /api/features`. `UserAvatarService` is the sole writer of `User.avatarSource`/`avatarStorageKey`/`avatarVersion`/`linkedPersonId`/`profileImageUrl`.
+Profile picture management (issue #354) — see the [Profile Picture spec](docs/specs/profile-picture.md). State lives in the app-owned `user_profiles` table (RETRO-B2); `users.profile_image_url` stays the materialised URL. Every route is self-scoped to the caller's own `userId`; a bare `@Auth()` guards all six, since a user's own avatar is inherently personal and there is nothing an Admin-gated permission would protect — the same rationale as `GET /api/features`. `UserAvatarService` is the sole writer of `User.avatarSource`/`avatarStorageKey`/`avatarVersion`/`linkedPersonId`/`profileImageUrl`.
 - `GET /api/users/me/profile` - Get the caller's profile: `displayName`, resolved `avatarUrl`, `avatarSource` (`oauth`|`upload`|`person`), `providerProfileImageUrl`, `linkedPerson`
 - `PATCH /api/users/me/profile` body `{ displayName?, linkedPersonId?, avatarSource? }` - Each field independently actionable; linking a person also re-renders the avatar from them unless the same request sets `avatarSource` explicitly; unlinking (`linkedPersonId: null`) deliberately leaves the displayed picture alone
 - `POST /api/users/me/avatar` - Multipart upload (max 5 MB); auto-oriented, EXIF-stripped, cropped to a 512x512 JPEG; sets `avatarSource: 'upload'`
@@ -1053,10 +1055,9 @@ Served by the platform host core (`PlatformHostCoreModule`, RETRO-B1 #597; the o
 
 ## RBAC Model
 
-### System Roles
-- **Admin**: Full access, manage users, system settings, and all circles
-- **Contributor**: Standard capabilities, manage own settings, create/manage circles
-- **Viewer**: Least privilege (default), manage own settings, create/manage circles
+### System and org roles (platform migration 0024)
+- **admin** (SYSTEM role, `user_roles`): operates the deployment: users, system settings, every `*_settings`, `jobs`, `db_backup`, `push`, `broadcasts` and the `*_any` permissions. Every administrator also holds `org_admin` on the default-organization membership, so an administrator has everything below too.
+- **org_admin** / **contributor** / **viewer** (ORG roles, on the membership): `contributor` manages own settings, uploads and shares and creates/manages circles; `viewer` (the default) has least privilege but may still manage own settings, media and circles. A user's effective permissions are the union of their system roles' and their membership role's grants.
 
 ### Key Permissions
 - `system_settings:read/write` - System settings access
@@ -1107,7 +1108,7 @@ The circle owner is automatically assigned `circle_admin` on circle creation. Ev
 
 ## Database Tables
 
-- `users` - User accounts with profile info. Profile picture management (issue #354, migration `20260810010000_add_user_avatar_source_and_person_link`; see the [Profile Picture spec](docs/specs/profile-picture.md)) adds `avatar_source` (`UserAvatarSource` enum: `oauth`|`upload`|`person`, default `oauth`), `avatar_storage_key` (Text?, the derived 512x512 JPEG's storage key), `avatar_version` (Text?, cache-buster regenerated on every render), and `linked_person_id` (FK → `people`, **`ON DELETE SET NULL`** — a hard-deleted or merged-away Person never blocks or cascades into the user row, mirroring the existing `burst_groups.suggested_best_item_id` nullable-FK precedent); indexed on `linked_person_id`. **`profile_image_url` is repurposed as the materialized, resolved avatar URL** — written only by `UserAvatarService`, never a raw user-supplied override — which is what propagates the feature to `AuthService.getCurrentUser`, `CirclesService.listMembers`, and the admin users table with zero changes to any of those existing consumers. `provider_profile_image_url` is untouched, still written only by the OAuth login refresh.
+- `users` - User accounts with profile info. Profile picture management (issue #354, migration `20260810010000_add_user_avatar_source_and_person_link`; MOVED OFF `users` into the app-owned `user_profiles` table by RETRO-B2's migration `20261108030000_move_user_avatar_off_users`, see the [Profile Picture spec](docs/specs/profile-picture.md)) added `avatar_source` (`UserAvatarSource` enum: `oauth`|`upload`|`person`, default `oauth`), `avatar_storage_key` (Text?, the derived 512x512 JPEG's storage key), `avatar_version` (Text?, cache-buster regenerated on every render), and `linked_person_id` (FK → `people`, **`ON DELETE SET NULL`** — a hard-deleted or merged-away Person never blocks or cascades into the user row, mirroring the existing `burst_groups.suggested_best_item_id` nullable-FK precedent); indexed on `linked_person_id`. **`profile_image_url` is repurposed as the materialized, resolved avatar URL** — written only by `UserAvatarService`, never a raw user-supplied override — which is what propagates the feature to `AuthService.getCurrentUser`, `CirclesService.listMembers`, and the admin users table with zero changes to any of those existing consumers. `provider_profile_image_url` is untouched, still written only by the OAuth login refresh.
 - `user_identities` - OAuth provider identities (provider + subject)
 - `roles` / `permissions` / `role_permissions` - RBAC
 - `user_roles` - User-to-role assignments

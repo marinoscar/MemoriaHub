@@ -10,7 +10,7 @@ import { Controller, Get, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JobReason } from '@prisma/client';
 import { InsightsService, InsightsMetrics, RefreshState } from './insights.service';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
 // ---------------------------------------------------------------------------

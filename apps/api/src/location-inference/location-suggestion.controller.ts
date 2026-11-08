@@ -13,10 +13,9 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags }
 import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { LocationSuggestionService } from './location-suggestion.service';
 import { ReviewRunService } from '../review-runs/review-run.service';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
 import { BulkResolveLocationSuggestionsDto } from './dto/bulk-resolve-location-suggestions.dto';

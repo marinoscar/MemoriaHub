@@ -11,7 +11,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EnrichmentJobService, EnqueueInput } from './enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,7 +23,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'face_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.pending,
+    status: MhLegacyJobStatus.pending,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,
@@ -112,7 +112,7 @@ describe('EnrichmentJobService', () => {
         mediaItemId: 'media-99',
         circleId: 'circle-99',
         reason: JobReason.rerun,
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       });
     });
   });
@@ -205,7 +205,7 @@ describe('EnrichmentJobService', () => {
   describe('idempotency', () => {
     it('returns existing job and does not call create when a pending job exists', async () => {
       // Arrange
-      const existingJob = makeJob({ status: JobStatus.pending });
+      const existingJob = makeJob({ status: MhLegacyJobStatus.pending });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(existingJob);
 
       // Act
@@ -218,7 +218,7 @@ describe('EnrichmentJobService', () => {
 
     it('returns existing job and does not call create when a running job exists', async () => {
       // Arrange
-      const existingJob = makeJob({ status: JobStatus.running });
+      const existingJob = makeJob({ status: MhLegacyJobStatus.running });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(existingJob);
 
       // Act
@@ -242,7 +242,7 @@ describe('EnrichmentJobService', () => {
         where: {
           type: 'face_detection',
           mediaItemId: 'media-1',
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
     });
@@ -262,7 +262,7 @@ describe('EnrichmentJobService', () => {
     });
 
     it('always calls create even when a global job of the same type already exists', async () => {
-      const existingJob = makeJob({ id: 'existing-global', type: 'storage_migration', mediaItemId: null, status: JobStatus.pending });
+      const existingJob = makeJob({ id: 'existing-global', type: 'storage_migration', mediaItemId: null, status: MhLegacyJobStatus.pending });
       const newJob = makeJob({ id: 'new-job-2', type: 'storage_migration', mediaItemId: null });
 
       // findFirst would return the existing job, but with skipDedup it should never be called

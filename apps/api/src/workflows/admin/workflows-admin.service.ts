@@ -3,7 +3,7 @@ import { Prisma, WorkflowRun, WorkflowRunStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { isWorkflowsEnabled } from '../../common/types/settings.types';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowRunService } from '../runs/workflow-run.service';
 
 /** The resolved settings object returned by SystemSettingsService.getSettings(). */

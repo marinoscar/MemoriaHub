@@ -1,7 +1,7 @@
 import { createECDH, randomUUID } from 'node:crypto';
 
 import { Injectable, Logger } from '@nestjs/common';
-import type { Prisma, PushSubscription } from '@prisma/client';
+import type { Prisma, MhLegacyPushSubscription } from '@prisma/client';
 import * as webpush from 'web-push';
 import { WebPushError } from 'web-push';
 
@@ -87,7 +87,7 @@ export class PushTestService {
         where: { key: PUSH_CONFIG_KEY },
         select: { value: true },
       }),
-      this.prisma.pushSubscription.findMany({
+      this.prisma.mhLegacyPushSubscription.findMany({
         where: { userId },
         orderBy: { createdAt: 'asc' },
       }),
@@ -264,7 +264,7 @@ export class PushTestService {
   private diagnoseBrowser(
     input: PushTestRequest,
     active: ActiveVapidConfig | null,
-    subscriptions: readonly PushSubscription[],
+    subscriptions: readonly MhLegacyPushSubscription[],
   ): PushTestBrowserDiagnostics {
     const endpointProvided = input.endpoint !== undefined;
     return {
@@ -285,7 +285,7 @@ export class PushTestService {
 
   private async sendAll(
     active: ActiveVapidConfig,
-    subscriptions: readonly PushSubscription[],
+    subscriptions: readonly MhLegacyPushSubscription[],
     payload: string,
   ): Promise<PushTestSendResult[]> {
     const vapidDetails = {
@@ -316,7 +316,7 @@ export class PushTestService {
       outcomes.map(async (outcome, i): Promise<PushTestSendResult> => {
         const sub = subscriptions[i];
         if (outcome.ok) {
-          await this.prisma.pushSubscription
+          await this.prisma.mhLegacyPushSubscription
             .update({ where: { id: sub.id }, data: { lastSuccessAt: new Date(), failureCount: 0 } })
             .catch((err) =>
               this.logger.warn(`Push test: could not record success for ${sub.id}: ${describeThrown(err)}`),
@@ -332,7 +332,7 @@ export class PushTestService {
 
         const err = outcome.err;
         if (err instanceof WebPushError && (err.statusCode === 404 || err.statusCode === 410)) {
-          await this.prisma.pushSubscription
+          await this.prisma.mhLegacyPushSubscription
             .delete({ where: { id: sub.id } })
             .catch((e) =>
               this.logger.warn(`Push test: could not prune dead subscription ${sub.id}: ${describeThrown(e)}`),

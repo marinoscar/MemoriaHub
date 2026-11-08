@@ -35,7 +35,7 @@ import { FaceMatchingService } from './face-matching.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { EnrichmentJob, JobReason, JobStatus, MediaFaceStatusType } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaFaceStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 
@@ -49,7 +49,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'face_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,

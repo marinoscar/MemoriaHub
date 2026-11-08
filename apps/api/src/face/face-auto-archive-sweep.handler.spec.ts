@@ -13,7 +13,7 @@
  *    id of the first page as the cursor.
  */
 
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,7 +31,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'face_auto_archive_sweep',
     mediaItemId: null,
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.backfill,
     priority: 100,
     providerKey: null,

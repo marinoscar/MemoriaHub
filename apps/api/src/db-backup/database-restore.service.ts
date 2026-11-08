@@ -75,7 +75,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DatabaseBackupTrigger } from '@prisma/client';
+import { MhLegacyDatabaseBackupTrigger } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import * as fsp from 'node:fs/promises';
@@ -307,7 +307,7 @@ export class DatabaseRestoreService {
     runId: string,
     opts: StartRestoreOptions,
   ): Promise<StartRestoreResult> {
-    const run = await this.prisma.databaseBackupRun.findUnique({
+    const run = await this.prisma.mhLegacyDatabaseBackupRun.findUnique({
       where: { id: runId },
     });
     if (!run) throw new DatabaseRestoreNotFoundError(runId);
@@ -409,7 +409,7 @@ export class DatabaseRestoreService {
    * so both paths are one API call.
    */
   async rollback(runId: string, opts: { userId: string }): Promise<RollbackResult> {
-    const run = await this.prisma.databaseBackupRun.findUnique({
+    const run = await this.prisma.mhLegacyDatabaseBackupRun.findUnique({
       where: { id: runId },
     });
     if (!run) throw new DatabaseRestoreNotFoundError(runId);
@@ -1004,7 +1004,7 @@ export class DatabaseRestoreService {
     tmpPath: string,
     pg: PgConnectionConfig,
   ): Promise<void> {
-    const run = await this.prisma.databaseBackupRun.findUniqueOrThrow({
+    const run = await this.prisma.mhLegacyDatabaseBackupRun.findUniqueOrThrow({
       where: { id: runId },
       select: {
         storageProvider: true,
@@ -1065,7 +1065,7 @@ export class DatabaseRestoreService {
       `Taking a pre-restore safety backup before restoring ${runId} (rollbackMode=pre_restore_dump)`,
     );
     const result = await this.backupRunner.runBackup({
-      trigger: DatabaseBackupTrigger.pre_restore,
+      trigger: MhLegacyDatabaseBackupTrigger.pre_restore,
       createdById: userId,
     });
     await this.writeRestoreState(runId, { preRestoreBackupId: result.runId });
@@ -1276,7 +1276,7 @@ export class DatabaseRestoreService {
     runId: string,
     overrides: Record<string, unknown>,
   ): Promise<Record<string, unknown>[]> {
-    const rows = await this.prisma.databaseBackupRun.findMany({
+    const rows = await this.prisma.mhLegacyDatabaseBackupRun.findMany({
       orderBy: { startedAt: 'asc' },
     });
     return rows.map((row) =>
@@ -1411,7 +1411,7 @@ export class DatabaseRestoreService {
   // -------------------------------------------------------------------------
 
   private async assertNoRestoreInProgress(): Promise<void> {
-    const active = await this.prisma.databaseBackupRun.findFirst({
+    const active = await this.prisma.mhLegacyDatabaseBackupRun.findFirst({
       where: { restoreStatus: { in: ACTIVE_RESTORE_STATUSES } },
       select: { id: true },
     });
@@ -1423,7 +1423,7 @@ export class DatabaseRestoreService {
     data: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await this.prisma.databaseBackupRun.update({
+      await this.prisma.mhLegacyDatabaseBackupRun.update({
         where: { id: runId },
         data: data as never,
       });

@@ -21,7 +21,6 @@
 
 import type { SvgIconComponent } from '@mui/icons-material';
 import AdminIcon from '@mui/icons-material/AdminPanelSettings';
-import PeopleIcon from '@mui/icons-material/People';
 import AiIcon from '@mui/icons-material/SmartToy';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import FaceIcon from '@mui/icons-material/Face';
@@ -48,6 +47,7 @@ import AndroidIcon from '@mui/icons-material/Android';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
+import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
 
 export interface AdminCardDef {
   title: string;
@@ -75,13 +75,9 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/general',
         permission: 'system_settings:read',
       },
-      {
-        title: 'Users & Allowlist',
-        description: 'Manage user accounts, roles, and control who can access the application.',
-        Icon: PeopleIcon,
-        path: '/admin/settings/users',
-        permission: 'users:read',
-      },
+      // Users & Allowlist: the identity slice's card, as data (RETRO-B2). The
+      // Organization cards are not spread: single-organization mode hides them.
+      ...identityAdminSections.access,
       {
         title: 'Archiving & Deletion',
         description: 'Manage the Trash retention period and review how archiving and deletion work.',

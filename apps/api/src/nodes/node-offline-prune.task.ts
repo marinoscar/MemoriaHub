@@ -17,7 +17,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobStatus, NodeStatus } from '@prisma/client';
+import { MhLegacyJobStatus, MhLegacyNodeStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Retention window (days) for offline node rows before they are pruned. */
@@ -47,9 +47,9 @@ export class NodeOfflinePruneTask {
   async prune(): Promise<number> {
     const cutoff = new Date(Date.now() - retentionDays() * 86_400_000);
 
-    const candidates = await this.prisma.workerNode.findMany({
+    const candidates = await this.prisma.mhLegacyWorkerNode.findMany({
       where: {
-        status: NodeStatus.offline,
+        status: MhLegacyNodeStatus.offline,
         OR: [
           { lastHeartbeatAt: { lt: cutoff } },
           // Never heartbeated at all — age by registration time instead.
@@ -70,7 +70,7 @@ export class NodeOfflinePruneTask {
     const busy = await this.prisma.enrichmentJob.findMany({
       where: {
         claimedByNodeId: { in: candidateIds },
-        status: JobStatus.running,
+        status: MhLegacyJobStatus.running,
       },
       select: { claimedByNodeId: true },
       distinct: ['claimedByNodeId'],
@@ -82,7 +82,7 @@ export class NodeOfflinePruneTask {
       return 0;
     }
 
-    const { count } = await this.prisma.workerNode.deleteMany({
+    const { count } = await this.prisma.mhLegacyWorkerNode.deleteMany({
       where: { id: { in: prunableIds } },
     });
 

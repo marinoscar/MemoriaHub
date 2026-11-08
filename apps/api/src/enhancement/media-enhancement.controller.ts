@@ -21,10 +21,9 @@ import {
 import { MediaEnhancementStatus } from '@prisma/client';
 import type { FastifyReply } from 'fastify';
 import { MediaEnhancementService } from './media-enhancement.service';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { EnhanceParamsDto } from './dto/enhance-params.dto';
 import { BulkEnhanceDto } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilterDto } from './dto/bulk-enhance-by-filter.dto';

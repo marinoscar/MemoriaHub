@@ -53,7 +53,7 @@
 // =============================================================================
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Notification, NotificationType, Prisma } from '@prisma/client';
+import { MhLegacyNotification, NotificationType, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationItemDto } from './dto/notification-response.dto';
@@ -236,15 +236,15 @@ export class NotificationsService {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 20));
 
-    const where: Prisma.NotificationWhereInput = {
+    const where: Prisma.MhLegacyNotificationWhereInput = {
       userId,
       ...(query.circleId ? { circleId: query.circleId } : {}),
       ...this.buildStatusWhere(status),
     };
 
     const [totalItems, rows] = await Promise.all([
-      this.prisma.notification.count({ where }),
-      this.prisma.notification.findMany({
+      this.prisma.mhLegacyNotification.count({ where }),
+      this.prisma.mhLegacyNotification.findMany({
         where,
         // `id` tiebreak keeps pagination deterministic when several rows share
         // a created_at (a producer sweep can write many rows in one statement).
@@ -276,7 +276,7 @@ export class NotificationsService {
       return { count: hit.value };
     }
 
-    const count = await this.prisma.notification.count({
+    const count = await this.prisma.mhLegacyNotification.count({
       where: { userId, readAt: null, dismissedAt: null },
     });
 
@@ -361,7 +361,7 @@ export class NotificationsService {
 
   /** Hard-delete one notification row. 404 when it is not the caller's. */
   async remove(userId: string, id: string): Promise<void> {
-    const result = await this.prisma.notification.deleteMany({
+    const result = await this.prisma.mhLegacyNotification.deleteMany({
       where: { id, userId },
     });
 
@@ -414,7 +414,7 @@ export class NotificationsService {
           ${circleClause}
       `);
 
-      const b = await tx.notification.updateMany({
+      const b = await tx.mhLegacyNotification.updateMany({
         where: {
           userId,
           readAt: null,
@@ -473,7 +473,7 @@ export class NotificationsService {
       // #251 gate + admin kill switch — a suppressed type writes NO row.
       if (!(await this.isInboxDeliverable(input.userId, input.type))) return;
 
-      const row = await this.prisma.notification.create({
+      const row = await this.prisma.mhLegacyNotification.create({
         data: {
           userId: input.userId,
           circleId: input.circleId ?? null,
@@ -531,15 +531,15 @@ export class NotificationsService {
         dismissedAt: null,
       };
 
-      const updated = await this.prisma.notification.updateMany({
+      const updated = await this.prisma.mhLegacyNotification.updateMany({
         where: liveKey,
         data: payload,
       });
 
-      let created: Notification | null = null;
+      let created: MhLegacyNotification | null = null;
       if (updated.count === 0) {
         try {
-          created = await this.prisma.notification.create({
+          created = await this.prisma.mhLegacyNotification.create({
             data: {
               userId: input.userId,
               circleId: input.circleId,
@@ -554,7 +554,7 @@ export class NotificationsService {
           ) {
             // Lost the race — a concurrent producer created the live row
             // between our updateMany and our create. Fold into it.
-            await this.prisma.notification.updateMany({
+            await this.prisma.mhLegacyNotification.updateMany({
               where: liveKey,
               data: payload,
             });
@@ -618,7 +618,7 @@ export class NotificationsService {
 
       // What to fan out once the transaction has COMMITTED (never inside it).
       const outcome = await this.prisma.$transaction(async (tx): Promise<
-        | { kind: 'created'; row: Notification }
+        | { kind: 'created'; row: MhLegacyNotification }
         | { kind: 'incremented'; id: string; reunread: boolean }
       > => {
         // Aggregation key — must contain everything the lookup predicate below
@@ -695,7 +695,7 @@ export class NotificationsService {
             reunread: input.reunreadOnIncrement === true,
           };
         } else {
-          const row = await tx.notification.create({
+          const row = await tx.mhLegacyNotification.create({
             data: {
               userId: input.userId,
               circleId,
@@ -719,7 +719,7 @@ export class NotificationsService {
       if (outcome?.kind === 'created') {
         this.dispatcher.dispatch(outcome.row, 'created');
       } else if (outcome?.kind === 'incremented' && outcome.reunread) {
-        const row = await this.prisma.notification.findUnique({ where: { id: outcome.id } });
+        const row = await this.prisma.mhLegacyNotification.findUnique({ where: { id: outcome.id } });
         if (row) this.dispatcher.dispatch(row, 'incremented');
       }
     } catch (err) {
@@ -983,7 +983,7 @@ export class NotificationsService {
   /** Load the rows just re-marked unread and dispatch each. Never throws. */
   private async dispatchReunread(ids: readonly string[]): Promise<void> {
     try {
-      const rows = await this.prisma.notification.findMany({
+      const rows = await this.prisma.mhLegacyNotification.findMany({
         where: { id: { in: [...ids] }, readAt: null, dismissedAt: null },
       });
       for (const row of rows ?? []) this.dispatcher.dispatch(row, 'reunread');
@@ -1000,7 +1000,7 @@ export class NotificationsService {
    */
   private buildStatusWhere(
     status: NotificationStatusFilter,
-  ): Prisma.NotificationWhereInput {
+  ): Prisma.MhLegacyNotificationWhereInput {
     switch (status) {
       case 'unread':
         return { dismissedAt: null, readAt: null };
@@ -1014,7 +1014,7 @@ export class NotificationsService {
     }
   }
 
-  private toDto(row: Notification): NotificationItemDto {
+  private toDto(row: MhLegacyNotification): NotificationItemDto {
     return {
       id: row.id,
       circleId: row.circleId,

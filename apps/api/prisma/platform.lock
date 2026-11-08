@@ -79,18 +79,10 @@
     "20260815010000_add_admin_broadcast_notification_types",
     "20260816000000_add_android_app_and_media_sync",
     "20260816010000_add_android_release_storage_location",
-    "20260817000000_rename_legacy_platform_tables"
+    "20260817000000_rename_legacy_platform_tables",
+    "20261108030000_move_user_avatar_off_users"
   ],
   "deviations": [
-    {
-      "expectDiff": [
-        "ALTER TABLE \"users\" ADD COLUMN \"avatar_source\" \"UserAvatarSource\" NOT NULL DEFAULT 'oauth', ADD COLUMN \"avatar_storage_key\" TEXT, ADD COLUMN \"avatar_version\" TEXT, ADD COLUMN \"linked_person_id\" UUID;",
-        "CREATE INDEX \"users_linked_person_id_idx\" ON \"users\"(\"linked_person_id\" ASC);",
-        "ALTER TABLE \"users\" ADD CONSTRAINT \"users_linked_person_id_fkey\" FOREIGN KEY (\"linked_person_id\") REFERENCES \"people\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;"
-      ],
-      "id": "memoriahub:users-avatar",
-      "reason": "MemoriaHub-only columns users.avatar_source, avatar_storage_key, avatar_version, linked_person_id, their index and users_linked_person_id_fkey (migration 20260810010000_add_user_avatar_source_and_person_link). Temporary: RETRO-B2 moves them off users and removes this entry."
-    },
     {
       "expectDiff": [
         "CREATE TYPE \"MhLegacyDatabaseBackupStatus\" AS ENUM ('pending', 'running', 'completed', 'failed', 'stale');",
@@ -491,7 +483,11 @@
         "ALTER TABLE \"workflow_runs\" ADD CONSTRAINT \"workflow_runs_started_by_id_fkey\" FOREIGN KEY (\"started_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;",
         "ALTER TABLE \"workflow_runs\" ADD CONSTRAINT \"workflow_runs_workflow_id_fkey\" FOREIGN KEY (\"workflow_id\") REFERENCES \"workflows\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"workflows\" ADD CONSTRAINT \"workflows_circle_id_fkey\" FOREIGN KEY (\"circle_id\") REFERENCES \"circles\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
-        "ALTER TABLE \"workflows\" ADD CONSTRAINT \"workflows_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;"
+        "ALTER TABLE \"workflows\" ADD CONSTRAINT \"workflows_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;",
+        "ALTER TABLE \"user_profiles\" ADD CONSTRAINT \"user_profiles_linked_person_id_fkey\" FOREIGN KEY (\"linked_person_id\") REFERENCES \"people\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+        "ALTER TABLE \"user_profiles\" ADD CONSTRAINT \"user_profiles_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+        "CREATE INDEX \"user_profiles_linked_person_id_idx\" ON \"user_profiles\"(\"linked_person_id\" ASC);",
+        "CREATE TABLE \"user_profiles\" ( \"user_id\" UUID NOT NULL, \"avatar_source\" \"UserAvatarSource\" NOT NULL DEFAULT 'oauth', \"avatar_storage_key\" TEXT, \"avatar_version\" TEXT, \"linked_person_id\" UUID, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"user_profiles_pkey\" PRIMARY KEY (\"user_id\") );"
       ],
       "id": "memoriahub:domain-schema",
       "reason": "MemoriaHub domain tables and enums created by app-only migrations; not a change to a platform table. A permanent record of what the app owns."

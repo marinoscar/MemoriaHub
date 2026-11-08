@@ -4,7 +4,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { CircleProvider } from './contexts/CircleContext';
 import { ThemeContextProvider, useThemeContext } from './contexts/ThemeContext';
-import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { RequirePermission } from './components/common/RequirePermission';
@@ -16,22 +15,30 @@ import { InstallPrompt, MaintenanceGate, UpdatePrompt } from '@marinoscar/platfo
 // so the packaged `UpdatePrompt` takes the hook as a prop.
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { AppPlatformHostProvider } from './platform/platformHost';
+// The packaged identity UI (RETRO-B2, #611): sign-in, callback, device
+// activation, access tokens, users and allowlist, behind the identity guards.
+import { RequireAuth } from '@marinoscar/platform-web/identity/headless';
+import {
+  ActivateDevicePage,
+  AuthCallbackPage,
+  LoginPage,
+  UserTokensPage,
+  UsersPage,
+} from '@marinoscar/platform-web/identity/ui';
+import { IdentityWebAdaptersProvider } from '@marinoscar/platform-web/identity/headless';
+import { appIdentityAdapters } from './platform/identityAdapters';
 import { APP_NAME } from './constants/app';
 
 // Pages (lazy loaded)
 import { Suspense, lazy } from 'react';
 import { LoadingSpinner } from './components/common/LoadingSpinner';
 
-const LoginPage = lazy(() => import('./pages/LoginPage'));
-const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
-const ActivateDevicePage = lazy(() => import('./pages/ActivateDevicePage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
 const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
 const AndroidAppDownloadPage = lazy(() => import('./pages/AndroidAppDownloadPage'));
 const MediaSyncPage = lazy(() => import('./pages/MediaSyncPage'));
 const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
-const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
 const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
@@ -137,9 +144,11 @@ function AppRoutes() {
             )}
 
             {/* Protected routes */}
-            <Route element={<ProtectedRoute />}>
+            <Route element={<RequireAuth loading={<LoadingSpinner fullScreen />} />}>
               {/* Device activation page - without layout for full-screen experience */}
-              <Route path="/activate" element={<ActivateDevicePage />} />
+              {/* The Android pairing returns to the app with `clientInfo.returnUri`
+                  (`memoriahub:` deep links; `https:` is always accepted). */}
+              <Route path="/activate" element={<ActivateDevicePage returnUriSchemes={['memoriahub']} />} />
 
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
@@ -163,7 +172,15 @@ function AppRoutes() {
                 {/* Settings Hub */}
                 <Route path="/admin/settings" element={<SettingsHubPage />} />
                 <Route path="/admin/settings/general" element={<SystemSettingsPage />} />
-                <Route path="/admin/settings/users" element={<UserManagementPage />} />
+                <Route
+                  path="/admin/settings/users"
+                  element={
+                    <RequirePermission permission="users:read" fallback={<Navigate to="/" replace />}>
+                      <UsersPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route path="/settings/tokens" element={<UserTokensPage />} />
                 <Route path="/admin/settings/ai" element={<AiSettingsPage />} />
                 <Route path="/admin/settings/tagging" element={<TaggingSettingsPage />} />
                 <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
@@ -314,9 +331,11 @@ export default function App() {
             packaged page and hook reads. Inside the auth provider (it reads the
             signed-in user's permissions), above the router outlet. */}
         <AppPlatformHostProvider>
-          <CircleProvider>
-            <AppRoutes />
-          </CircleProvider>
+          <IdentityWebAdaptersProvider adapters={appIdentityAdapters}>
+            <CircleProvider>
+              <AppRoutes />
+            </CircleProvider>
+          </IdentityWebAdaptersProvider>
         </AppPlatformHostProvider>
       </AuthProvider>
     </ThemeContextProvider>

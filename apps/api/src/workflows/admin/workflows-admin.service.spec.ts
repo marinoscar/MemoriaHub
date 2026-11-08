@@ -24,7 +24,7 @@ import { WorkflowsAdminService } from './workflows-admin.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { WorkflowRunService } from '../runs/workflow-run.service';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
 import {

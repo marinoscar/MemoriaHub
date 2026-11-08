@@ -31,7 +31,7 @@ import {
   NodeBackupRunKind,
   NodeBackupRunStatus,
   Prisma,
-  WorkerNode,
+  MhLegacyWorkerNode,
 } from '@prisma/client';
 import { isSupportedTimeZone } from '../common/time/zone.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -177,7 +177,7 @@ export class NodeBackupService {
   // Config serialization
   // ---------------------------------------------------------------------------
 
-  private async serializeConfig(node: WorkerNode, config: NodeBackupConfig) {
+  private async serializeConfig(node: MhLegacyWorkerNode, config: NodeBackupConfig) {
     const { runStaleMinutes } = await this.getBackupSettings();
 
     const scope = await this.queryService.resolveScope(

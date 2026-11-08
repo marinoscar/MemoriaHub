@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Notification } from '@prisma/client';
+import type { MhLegacyNotification } from '@prisma/client';
 import * as webpush from 'web-push';
 import { WebPushError } from 'web-push';
 
@@ -84,7 +84,7 @@ function truncate(value: string, max: number): string {
 }
 
 export function buildPushPayload(
-  notification: Pick<Notification, 'id' | 'type' | 'title' | 'body' | 'link' | 'circleId'>,
+  notification: Pick<MhLegacyNotification, 'id' | 'type' | 'title' | 'body' | 'link' | 'circleId'>,
 ): PushPayload {
   return {
     id: notification.id,
@@ -109,7 +109,7 @@ export class PushNotificationChannel {
   ) {}
 
   async deliver(
-    notification: Pick<Notification, 'id' | 'userId' | 'type' | 'title' | 'body' | 'link' | 'circleId'>,
+    notification: Pick<MhLegacyNotification, 'id' | 'userId' | 'type' | 'title' | 'body' | 'link' | 'circleId'>,
     vapid?: ActiveVapidConfig | null,
   ): Promise<PushDeliveryResult> {
     try {
@@ -127,7 +127,7 @@ export class PushNotificationChannel {
   }
 
   private async deliverInner(
-    notification: Pick<Notification, 'id' | 'userId' | 'type' | 'title' | 'body' | 'link' | 'circleId'>,
+    notification: Pick<MhLegacyNotification, 'id' | 'userId' | 'type' | 'title' | 'body' | 'link' | 'circleId'>,
     vapidArg?: ActiveVapidConfig | null,
   ): Promise<PushDeliveryResult> {
     const empty = { attempted: 0, sent: 0, failed: 0, pruned: 0 };
@@ -137,7 +137,7 @@ export class PushNotificationChannel {
       return { success: false, ...empty, error: 'Web Push is not configured or is disabled' };
     }
 
-    const subscriptions = await this.prisma.pushSubscription.findMany({
+    const subscriptions = await this.prisma.mhLegacyPushSubscription.findMany({
       where: { userId: notification.userId },
     });
     if (subscriptions.length === 0) {
@@ -175,7 +175,7 @@ export class PushNotificationChannel {
 
         if (result.status === 'fulfilled') {
           sent++;
-          await this.prisma.pushSubscription
+          await this.prisma.mhLegacyPushSubscription
             .update({ where: { id: sub.id }, data: { lastSuccessAt: new Date(), failureCount: 0 } })
             .catch((err) =>
               this.logger.warn(`Could not record push success for ${sub.id}: ${describeThrown(err)}`),
@@ -186,7 +186,7 @@ export class PushNotificationChannel {
         const err = result.reason;
         if (err instanceof WebPushError && (err.statusCode === 404 || err.statusCode === 410)) {
           pruned++;
-          await this.prisma.pushSubscription
+          await this.prisma.mhLegacyPushSubscription
             .delete({ where: { id: sub.id } })
             .catch((e) =>
               this.logger.warn(`Could not prune dead push subscription ${sub.id}: ${describeThrown(e)}`),
@@ -195,7 +195,7 @@ export class PushNotificationChannel {
         }
 
         failed++;
-        const updated = await this.prisma.pushSubscription
+        const updated = await this.prisma.mhLegacyPushSubscription
           .update({
             where: { id: sub.id },
             data: { failureCount: { increment: 1 } },
@@ -208,7 +208,7 @@ export class PushNotificationChannel {
 
         if (updated && updated.failureCount >= MAX_PUSH_FAILURE_COUNT) {
           pruned++;
-          await this.prisma.pushSubscription
+          await this.prisma.mhLegacyPushSubscription
             .delete({ where: { id: sub.id } })
             .catch((e) =>
               this.logger.warn(`Could not prune exhausted push subscription ${sub.id}: ${describeThrown(e)}`),

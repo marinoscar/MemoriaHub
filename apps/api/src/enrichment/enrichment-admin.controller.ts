@@ -24,9 +24,9 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { JobStatus } from '@prisma/client';
+import { MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentAdminService } from './enrichment-admin.service';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
 const listJobsQuerySchema = z.object({
   status: z
-    .enum([JobStatus.pending, JobStatus.running, JobStatus.succeeded, JobStatus.failed])
+    .enum([MhLegacyJobStatus.pending, MhLegacyJobStatus.running, MhLegacyJobStatus.succeeded, MhLegacyJobStatus.failed])
     .optional(),
   type: z.string().min(1).optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -184,7 +184,7 @@ export class EnrichmentAdminController {
   @ApiQuery({
     name: 'status',
     required: false,
-    enum: [JobStatus.pending, JobStatus.running, JobStatus.succeeded, JobStatus.failed],
+    enum: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running, MhLegacyJobStatus.succeeded, MhLegacyJobStatus.failed],
     description: 'Filter by job status',
   })
   @ApiQuery({ name: 'type', required: false, description: 'Filter by job type string' })

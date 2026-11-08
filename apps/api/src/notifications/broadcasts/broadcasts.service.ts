@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JobReason, NotificationBroadcast, Prisma } from '@prisma/client';
+import { JobReason, MhLegacyNotificationBroadcast, Prisma } from '@prisma/client';
 
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -43,7 +43,7 @@ const MAX_RESUME_ERROR_LENGTH = 500;
 const USER_SUMMARY = { select: { id: true, email: true, displayName: true } } as const;
 const WITH_USERS = { createdBy: USER_SUMMARY, canceledBy: USER_SUMMARY } as const;
 
-type BroadcastWithUsers = Prisma.NotificationBroadcastGetPayload<{ include: typeof WITH_USERS }>;
+type BroadcastWithUsers = Prisma.MhLegacyNotificationBroadcastGetPayload<{ include: typeof WITH_USERS }>;
 
 @Injectable()
 export class BroadcastsService {
@@ -66,16 +66,16 @@ export class BroadcastsService {
 
   async list(query: BroadcastListQuery): Promise<BroadcastListResponse> {
     const { page, pageSize, status } = query;
-    const where: Prisma.NotificationBroadcastWhereInput = status ? { status } : {};
+    const where: Prisma.MhLegacyNotificationBroadcastWhereInput = status ? { status } : {};
     const [rows, totalItems] = await Promise.all([
-      this.prisma.notificationBroadcast.findMany({
+      this.prisma.mhLegacyNotificationBroadcast.findMany({
         where,
         include: WITH_USERS,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      this.prisma.notificationBroadcast.count({ where }),
+      this.prisma.mhLegacyNotificationBroadcast.count({ where }),
     ]);
     return {
       items: rows.map(toDto),
@@ -93,7 +93,7 @@ export class BroadcastsService {
 
   /** Record the broadcast as `scheduled`, then (after commit) queue its start job. */
   async create(dto: CreateBroadcastInput, adminUserId: string): Promise<BroadcastResponse> {
-    const row = await this.prisma.notificationBroadcast.create({
+    const row = await this.prisma.mhLegacyNotificationBroadcast.create({
       data: {
         title: dto.title,
         body: dto.body,
@@ -129,7 +129,7 @@ export class BroadcastsService {
    * alone — the handlers' status checks make them no-ops.
    */
   async cancel(id: string, adminUserId: string): Promise<BroadcastResponse> {
-    const res = await this.prisma.notificationBroadcast.updateMany({
+    const res = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
       where: { id, status: { in: [...CANCELABLE_STATUSES] } },
       data: { status: 'canceled', canceledAt: new Date(), canceledById: adminUserId },
     });
@@ -162,7 +162,7 @@ export class BroadcastsService {
       );
     }
     const claimed = existing.audienceCutoff !== null;
-    const flipped = await this.prisma.notificationBroadcast.updateMany({
+    const flipped = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
       where: { id, status: 'failed' },
       data: { status: claimed ? 'sending' : 'scheduled', finishedAt: null, lastError: null },
     });
@@ -187,7 +187,7 @@ export class BroadcastsService {
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      await this.prisma.notificationBroadcast.updateMany({
+      await this.prisma.mhLegacyNotificationBroadcast.updateMany({
         where: { id, status: claimed ? 'sending' : 'scheduled' },
         data: {
           status: 'failed',
@@ -211,7 +211,7 @@ export class BroadcastsService {
     if (row.status === 'sending') {
       throw new ConflictException(`Broadcast ${id} is currently sending and cannot be deleted; cancel it first`);
     }
-    await this.prisma.notificationBroadcast.delete({ where: { id } });
+    await this.prisma.mhLegacyNotificationBroadcast.delete({ where: { id } });
     await this.audit(adminUserId, 'notification_broadcast.deleted', id, { status: row.status });
   }
 
@@ -275,7 +275,7 @@ export class BroadcastsService {
   }
 
   private async require(id: string): Promise<BroadcastWithUsers> {
-    const row = await this.prisma.notificationBroadcast.findUnique({ where: { id }, include: WITH_USERS });
+    const row = await this.prisma.mhLegacyNotificationBroadcast.findUnique({ where: { id }, include: WITH_USERS });
     if (!row) throw new NotFoundException(`Broadcast ${id} not found`);
     return row;
   }
@@ -295,7 +295,7 @@ function iso(d: Date | null): string | null {
   return d ? d.toISOString() : null;
 }
 
-export function toDto(row: NotificationBroadcast & Partial<Pick<BroadcastWithUsers, 'createdBy' | 'canceledBy'>>): BroadcastResponse {
+export function toDto(row: MhLegacyNotificationBroadcast & Partial<Pick<BroadcastWithUsers, 'createdBy' | 'canceledBy'>>): BroadcastResponse {
   return {
     id: row.id,
     title: row.title,

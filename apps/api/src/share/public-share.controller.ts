@@ -11,7 +11,7 @@ import { ApiTags, ApiOperation, ApiParam, ApiQuery, ApiResponse } from '@nestjs/
 import { FastifyReply } from 'fastify';
 import { IncomingMessage } from 'http';
 
-import { Public } from '../auth/decorators/public.decorator';
+import { Public } from '@marinoscar/platform-api/identity';
 import { ShareService } from './share.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { Readable } from 'stream';

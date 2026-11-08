@@ -35,8 +35,7 @@ import request from 'supertest';
 
 import { UserSettingsController } from './user-settings.controller';
 import { UserSettingsService } from './user-settings.service';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { AuthenticatedUser } from '../../auth/interfaces/authenticated-user.interface';
+import { JwtAuthGuard, AuthenticatedUser } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
 import {
   NAVIGATION_MAX_PINNED,

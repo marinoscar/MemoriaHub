@@ -52,7 +52,9 @@ function sessionWith(timezone: string | null) {
           permissions: [],
           isActive: true,
           createdAt: new Date().toISOString(),
-          timezone,
+          // The raw stored zone travels as the memoriahub current-user extension
+          // (RETRO-B2); it was a top-level field before the identity slice.
+          extensions: { memoriahub: { timezone } },
         },
       }),
     ),

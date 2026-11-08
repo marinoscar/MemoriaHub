@@ -1,5 +1,7 @@
 # Profile Picture Management — Feature Spec
 
+> **Storage moved (RETRO-B2, issue #611).** The four avatar columns (`avatar_source`, `avatar_storage_key`, `avatar_version`, `linked_person_id`) no longer live on `users`, which is the identity slice's table. They are the app-owned side table `user_profiles` (`apps/api/prisma/fragments/user-profile.prisma`; migration `20261108030000_move_user_avatar_off_users`, which copies every non-default state and drops the columns in one transaction). A user with no row has the defaults (`oauth`, no key, no link). `users.profile_image_url` (a platform column) is unchanged: it stays the materialised resolved avatar URL, written only by `UserAvatarService` (now `apps/api/src/profile/`) in the same transaction as the `user_profiles` row. The six routes (`GET|PATCH /api/users/me/profile`, `POST|DELETE /api/users/me/avatar`, `POST /api/users/me/avatar/from-person`, `GET /api/users/:id/avatar`) and their behaviour are unchanged. `ON DELETE SET NULL` on `linked_person_id` and `ON DELETE CASCADE` from the user are kept. Where this page says `User.avatarSource` and the like, read `UserProfile`.
+
 | Field | Value |
 |-------|-------|
 | **Issue** | #354 |

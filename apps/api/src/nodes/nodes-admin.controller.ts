@@ -18,7 +18,7 @@ import {
 import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { NodesService } from './nodes.service';
 import { NodeCredentialService } from './node-credential.service';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { AdminNodeCredentialListItemDto } from './dto/node-credential-response.dto';
 

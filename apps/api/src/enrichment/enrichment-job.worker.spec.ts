@@ -38,7 +38,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { RateLimitError } from './rate-limit.error';
 // Import with a regular import; for the isolated-module tests we re-import below.
 import {
@@ -69,7 +69,7 @@ function makeClaimMock(mockPrisma: MockPrismaService): { claim: jest.Mock } {
       const now = new Date();
       const job = await (mockPrisma.enrichmentJob.findFirst as jest.Mock)({
         where: {
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
         },
         orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
@@ -78,7 +78,7 @@ function makeClaimMock(mockPrisma: MockPrismaService): { claim: jest.Mock } {
       const claimed = await (mockPrisma.enrichmentJob.update as jest.Mock)({
         where: { id: job.id },
         data: {
-          status: JobStatus.running,
+          status: MhLegacyJobStatus.running,
           startedAt: new Date(),
           scheduledFor: null,
           // Claim-time attempt charge, mirroring the real claim SQL.
@@ -108,7 +108,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'face_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.pending,
+    status: MhLegacyJobStatus.pending,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,
@@ -231,7 +231,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const where = findFirstArg.where as Record<string, unknown>;
 
       // Status must be pending
-      expect(where.status).toBe(JobStatus.pending);
+      expect(where.status).toBe(MhLegacyJobStatus.pending);
 
       // OR clause must include both branches
       expect(where.OR).toBeDefined();
@@ -267,8 +267,8 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob();
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
-        .mockResolvedValueOnce({ ...job, status: JobStatus.succeeded });
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.succeeded });
 
       (await buildWorker(EnrichmentJobWorker)).mockHandler.process.mockResolvedValue(undefined);
 
@@ -292,7 +292,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       const firstUpdate = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls[0][0];
       expect(firstUpdate.data.scheduledFor).toBeNull();
-      expect(firstUpdate.data.status).toBe(JobStatus.running);
+      expect(firstUpdate.data.status).toBe(MhLegacyJobStatus.running);
       // Claim-time attempt charging: the claim UPDATE itself increments
       // attempts so a job that SIGKILLs the process still carries its charge.
       expect(firstUpdate.data.attempts).toEqual({ increment: 1 });
@@ -327,7 +327,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited', undefined, 'anthropic'));
@@ -344,7 +344,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       // value (claimed row had attempts=1 → written back to 0).
       expect(rlUpdate.data.attempts).toBe(0);
       // status remains pending (hits=1 < max=10)
-      expect(rlUpdate.data.status).toBe(JobStatus.pending);
+      expect(rlUpdate.data.status).toBe(MhLegacyJobStatus.pending);
       // scheduledFor is a future Date
       expect(rlUpdate.data.scheduledFor).toBeInstanceOf(Date);
       expect((rlUpdate.data.scheduledFor as Date).getTime()).toBeGreaterThan(Date.now());
@@ -363,7 +363,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited', retryAfterMs));
@@ -386,7 +386,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     executor: null, attempts: 0 }); // hits 8 → 9 < 10 → still pending
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited'));
@@ -397,7 +397,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const rlUpdate = updateCalls[updateCalls.length - 1][0];
 
       expect(rlUpdate.data.rateLimitHits).toBe(9);
-      expect(rlUpdate.data.status).toBe(JobStatus.pending);
+      expect(rlUpdate.data.status).toBe(MhLegacyJobStatus.pending);
     });
   });
 
@@ -427,7 +427,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('rate limited'));
@@ -438,7 +438,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const rlUpdate = updateCalls[updateCalls.length - 1][0];
 
       expect(rlUpdate.data.rateLimitHits).toBe(10); // 9+1
-      expect(rlUpdate.data.status).toBe(JobStatus.failed);
+      expect(rlUpdate.data.status).toBe(MhLegacyJobStatus.failed);
       expect(rlUpdate.data.finishedAt).toBeInstanceOf(Date);
       // scheduledFor cleared on giveUp
       expect(rlUpdate.data.scheduledFor).toBeNull();
@@ -455,7 +455,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new RateLimitError('too many requests from Anthropic'));
@@ -494,7 +494,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       // Plain object with status=429 (not a RateLimitError instance)
@@ -506,7 +506,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const rlUpdate = updateCalls[updateCalls.length - 1][0];
 
       expect(rlUpdate.data.rateLimitHits).toBe(1);
-      expect(rlUpdate.data.status).toBe(JobStatus.pending);
+      expect(rlUpdate.data.status).toBe(MhLegacyJobStatus.pending);
       // attempts un-charged back to the pre-claim value (claimed 1 → 0)
       expect(rlUpdate.data.attempts).toBe(0);
     });
@@ -519,7 +519,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue({
@@ -535,7 +535,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       expect(rlUpdate.data.rateLimitHits).toBe(1);
       // un-charged back to the pre-claim value (claimed 2 → written back 1)
       expect(rlUpdate.data.attempts).toBe(1);
-      expect(rlUpdate.data.status).toBe(JobStatus.pending);
+      expect(rlUpdate.data.status).toBe(MhLegacyJobStatus.pending);
     });
   });
 
@@ -562,7 +562,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
         // Claimed row carries the claim-time charge: attempts=1 (< MAX 3)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('transient failure'));
@@ -575,7 +575,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       // attempts already charged at claim time — the failure write must not
       // touch it (no double-charge).
       expect(retryUpdate.data.attempts).toBeUndefined();
-      expect(retryUpdate.data.status).toBe(JobStatus.pending);
+      expect(retryUpdate.data.status).toBe(MhLegacyJobStatus.pending);
       expect(retryUpdate.data.scheduledFor).toBeInstanceOf(Date);
       expect((retryUpdate.data.scheduledFor as Date).getTime()).toBeGreaterThan(Date.now());
       expect(retryUpdate.data.lastError).toBe('transient failure');
@@ -591,7 +591,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('still failing'));
@@ -601,7 +601,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const retryUpdate = updateCalls[updateCalls.length - 1][0];
 
-      expect(retryUpdate.data.status).toBe(JobStatus.pending);
+      expect(retryUpdate.data.status).toBe(MhLegacyJobStatus.pending);
       expect(retryUpdate.data.attempts).toBeUndefined();
       expect(retryUpdate.data.scheduledFor).toBeInstanceOf(Date);
       expect(retryUpdate.data.finishedAt).toBeUndefined();
@@ -613,7 +613,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('fatal error'));
@@ -625,7 +625,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       // attempts is not written on the failure path (claim already charged it)
       expect(failUpdate.data.attempts).toBeUndefined();
-      expect(failUpdate.data.status).toBe(JobStatus.failed);
+      expect(failUpdate.data.status).toBe(MhLegacyJobStatus.failed);
       expect(failUpdate.data.finishedAt).toBeInstanceOf(Date);
       expect(failUpdate.data.scheduledFor).toBeNull();
     });
@@ -635,7 +635,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('non-rl error'));
@@ -649,7 +649,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       expect(retryUpdate.data.rateLimitHits).toBeUndefined();
       // and attempts is no longer written here either (charged at claim time)
       expect(retryUpdate.data.attempts).toBeUndefined();
-      expect(retryUpdate.data.status).toBe(JobStatus.pending);
+      expect(retryUpdate.data.status).toBe(MhLegacyJobStatus.pending);
     });
   });
 
@@ -683,7 +683,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob({ type: 'metadata_extraction', attempts: 0, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       // Handler never resolves — only the timeout can settle the race.
@@ -702,7 +702,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       expect(timeoutUpdate.data.attempts).toBeUndefined();
       expect(timeoutUpdate.data.rateLimitHits).toBeUndefined();
       // still retryable (claimed attempts 1 < MAX_ATTEMPTS default 3): pending + future scheduledFor
-      expect(timeoutUpdate.data.status).toBe(JobStatus.pending);
+      expect(timeoutUpdate.data.status).toBe(MhLegacyJobStatus.pending);
       expect(timeoutUpdate.data.scheduledFor).toBeInstanceOf(Date);
       expect((timeoutUpdate.data.scheduledFor as Date).getTime()).toBeGreaterThan(Date.now());
       // timeout message stored as lastError
@@ -720,7 +720,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob({ type: 'metadata_extraction', attempts: 2, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
@@ -734,7 +734,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const failUpdate = updateCalls[updateCalls.length - 1][0];
 
       expect(failUpdate.data.attempts).toBeUndefined();
-      expect(failUpdate.data.status).toBe(JobStatus.failed);
+      expect(failUpdate.data.status).toBe(MhLegacyJobStatus.failed);
       expect(failUpdate.data.finishedAt).toBeInstanceOf(Date);
       expect(failUpdate.data.scheduledFor).toBeNull();
       expect(String(failUpdate.data.lastError)).toContain('timed out');
@@ -755,9 +755,9 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       // The claim update returns the claimed job (processJob uses its id/type),
       // so each tick's claim must echo the right job back.
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...jobA, status: JobStatus.running, attempts: 1 }) // tick 1 claim
+        .mockResolvedValueOnce({ ...jobA, status: MhLegacyJobStatus.running, attempts: 1 }) // tick 1 claim
         .mockResolvedValueOnce({}) // tick 1 timeout-failure update
-        .mockResolvedValueOnce({ ...jobB, status: JobStatus.running, attempts: 1 }) // tick 2 claim
+        .mockResolvedValueOnce({ ...jobB, status: MhLegacyJobStatus.running, attempts: 1 }) // tick 2 claim
         .mockResolvedValueOnce({}); // tick 2 success update
 
       // A hangs (times out); B resolves normally.
@@ -783,7 +783,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const lastUpdate = updateCalls[updateCalls.length - 1][0];
       expect(lastUpdate.where.id).toBe('job-B');
-      expect(lastUpdate.data.status).toBe(JobStatus.succeeded);
+      expect(lastUpdate.data.status).toBe(MhLegacyJobStatus.succeeded);
 
       worker.onModuleDestroy();
     });
@@ -814,7 +814,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob({ id: 'job-video', type: 'video_face_detection', attempts: 0 });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       // Handler never resolves — only a timeout can settle the race.
@@ -841,7 +841,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const timeoutUpdate = updateCalls[updateCalls.length - 1][0];
       expect(String(timeoutUpdate.data.lastError)).toContain(`timed out after ${VIDEO_TIMEOUT_MS}ms`);
       // Claimed attempts 1 < MAX 3 → retryable
-      expect(timeoutUpdate.data.status).toBe(JobStatus.pending);
+      expect(timeoutUpdate.data.status).toBe(MhLegacyJobStatus.pending);
       expect(timeoutUpdate.data.scheduledFor).toBeInstanceOf(Date);
 
       worker.onModuleDestroy();
@@ -853,7 +853,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob({ id: 'job-social', type: 'social_media_detection', attempts: 0 });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
@@ -883,7 +883,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const job = makeJob({ type: 'metadata_extraction', attempts: 0 });
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockReturnValue(new Promise<void>(() => {}));
@@ -919,7 +919,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
     it('delegates claiming to the shared claim service with the server-plane args, taking the first returned job', async () => {
       const { worker, mockClaim } = await buildWorker(EnrichmentJobWorker);
 
-      const jobA = makeJob({ id: 'job-A', type: 'metadata_extraction', status: JobStatus.running });
+      const jobA = makeJob({ id: 'job-A', type: 'metadata_extraction', status: MhLegacyJobStatus.running });
       // Override the delegating default: return a single claimed job.
       mockClaim.claim.mockResolvedValueOnce([jobA]);
 
@@ -965,8 +965,8 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       // terminal updates return {}. Keyed off data.status so ordering is robust.
       (mockPrisma.enrichmentJob.update as jest.Mock).mockImplementation(
         async ({ where, data }: any) => {
-          if (data?.status === JobStatus.running) {
-            return { ...makeJob({ id: where.id, type: 'metadata_extraction' }), status: JobStatus.running };
+          if (data?.status === MhLegacyJobStatus.running) {
+            return { ...makeJob({ id: where.id, type: 'metadata_extraction' }), status: MhLegacyJobStatus.running };
           }
           return {};
         },
@@ -1040,7 +1040,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
         .mockRejectedValueOnce(new Error('transient DB error'))
         .mockResolvedValueOnce({});
 
-      const data = { status: JobStatus.succeeded, finishedAt: new Date() };
+      const data = { status: MhLegacyJobStatus.succeeded, finishedAt: new Date() };
       await (terminal as any).safeTerminalUpdate('job-retry-1', 'face_detection', data);
 
       // Both attempts used the same where/data payload.
@@ -1068,7 +1068,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
         .mockRejectedValueOnce(new Error('db down'))
         .mockRejectedValueOnce(new Error('still down'));
 
-      const data = { status: JobStatus.failed, finishedAt: new Date(), lastError: 'boom' };
+      const data = { status: MhLegacyJobStatus.failed, finishedAt: new Date(), lastError: 'boom' };
 
       // Must not throw — the caller (processJob) relies on this being swallowed
       // so the worker slot is freed even when the DB write itself fails.
@@ -1092,7 +1092,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValueOnce({});
 
       await (terminal as any).safeTerminalUpdate('job-ok', 'face_detection', {
-        status: JobStatus.succeeded,
+        status: MhLegacyJobStatus.succeeded,
       });
 
       expect(mockPrisma.enrichmentJob.update).toHaveBeenCalledTimes(1);
@@ -1123,7 +1123,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValueOnce(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running }) // claim
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running }) // claim
         .mockRejectedValueOnce(new Error('flaky write')) // first terminal write attempt
         .mockResolvedValueOnce({}); // retried terminal write succeeds
 
@@ -1132,7 +1132,7 @@ describe('EnrichmentJobWorker — scheduledFor and rate-limit paths', () => {
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       // claim + first (failed) terminal write + retried terminal write
       expect(updateCalls).toHaveLength(3);
-      expect(updateCalls[2][0].data.status).toBe(JobStatus.succeeded);
+      expect(updateCalls[2][0].data.status).toBe(MhLegacyJobStatus.succeeded);
 
       w2.onModuleDestroy();
     });

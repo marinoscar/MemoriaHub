@@ -16,7 +16,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { z } from 'zod';
 import { autoTaggingResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { AutoTaggingHandler } from './auto-tagging.handler';
@@ -29,7 +29,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'auto_tagging',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 20,
     providerKey: 'anthropic',

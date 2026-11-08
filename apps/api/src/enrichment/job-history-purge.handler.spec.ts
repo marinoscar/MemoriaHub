@@ -15,7 +15,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus } from '@prisma/client';
+import { MhLegacyJobStatus } from '@prisma/client';
 import type { EnrichmentJob } from '@prisma/client';
 import { JobHistoryPurgeHandler } from './job-history-purge.handler';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
@@ -80,7 +80,7 @@ describe('JobHistoryPurgeHandler', () => {
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (ops: unknown) =>
       Array.isArray(ops) ? Promise.all(ops) : undefined,
     );
-    (mockPrisma.jobStatsRollup.upsert as jest.Mock).mockResolvedValue(undefined);
+    (mockPrisma.mhLegacyJobStatsRollup.upsert as jest.Mock).mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -195,7 +195,7 @@ describe('JobHistoryPurgeHandler', () => {
       expect(mockPrisma.enrichmentJob.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            status: { in: [JobStatus.succeeded, JobStatus.failed] },
+            status: { in: [MhLegacyJobStatus.succeeded, MhLegacyJobStatus.failed] },
           }),
         }),
       );
@@ -272,14 +272,14 @@ describe('JobHistoryPurgeHandler', () => {
       const started = new Date('2025-01-01T00:00:00.000Z');
       const finished = new Date('2025-01-01T00:00:02.000Z'); // 2000ms duration
       mockPrisma.enrichmentJob.findMany.mockResolvedValue([
-        { id: 'a', type: 'face_detection', status: JobStatus.succeeded, startedAt: started, finishedAt: finished },
-        { id: 'b', type: 'face_detection', status: JobStatus.failed, startedAt: null, finishedAt: finished },
+        { id: 'a', type: 'face_detection', status: MhLegacyJobStatus.succeeded, startedAt: started, finishedAt: finished },
+        { id: 'b', type: 'face_detection', status: MhLegacyJobStatus.failed, startedAt: null, finishedAt: finished },
       ] as any);
       mockPrisma.enrichmentJob.deleteMany.mockResolvedValue({ count: 2 });
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.jobStatsRollup.upsert).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyJobStatsRollup.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { type: 'face_detection' },
           update: expect.objectContaining({

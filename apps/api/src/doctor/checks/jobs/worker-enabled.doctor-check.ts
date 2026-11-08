@@ -103,7 +103,7 @@ export class WorkerEnabledDoctorCheck implements DoctorCheck, OnModuleInit {
     // fleet — are there online nodes with a fresh heartbeat that cover at least
     // one heavy media-compute type?
     const cutoff = new Date(Date.now() - nodeStaleWindowMs());
-    const freshNodes = await this.prisma.workerNode.count({
+    const freshNodes = await this.prisma.mhLegacyWorkerNode.count({
       where: {
         status: 'online',
         lastHeartbeatAt: { gte: cutoff },

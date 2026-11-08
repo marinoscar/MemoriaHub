@@ -19,7 +19,7 @@ import {
   applyOrientationTransform,
   OrientationOp,
 } from '../storage/processing/image-orientation.util';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 
 export interface OrientationEditResult {
   status: string;

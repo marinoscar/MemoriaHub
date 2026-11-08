@@ -31,8 +31,7 @@ import {
   forEachOperation,
 } from '@marinoscar/platform-api/host';
 import type { MutableDocument, PlatformOpenApiOptions } from '@marinoscar/platform-api/host';
-import { RBAC_EXTENSION_KEY } from '../auth/decorators/auth.decorator';
-import type { RbacExtension } from '../auth/decorators/auth.decorator';
+import { RBAC_EXTENSION_KEY, type RbacExtension } from '@marinoscar/platform-api/identity';
 import { buildApiDescription } from './description';
 import { OPENAPI_TAGS, OPENAPI_TAG_GROUPS } from './tags';
 import { resolveApiVersion } from './version';
@@ -103,9 +102,16 @@ function applyNodeCredentialScheme(document: OpenAPIObject, mutable: MutableDocu
  * (`..., plus permission \`x\` and per-circle role \`y\` or higher.`), exactly
  * as the document read before the platform took the RBAC pass over.
  */
+/**
+ * The platform's `x-rbac` extension, plus the app's documentation-only
+ * `circleRole`. The identity slice's `@Auth` has no such option, so no route
+ * carries the clause today; the pass stays for routes that stamp it on their own.
+ */
+type CircleAwareRbac = RbacExtension & { circleRole?: string };
+
 function applyCircleRoleRequirements(document: MutableDocument): void {
   forEachOperation(document, (operation) => {
-    const rbac = operation[RBAC_EXTENSION_KEY] as RbacExtension | undefined;
+    const rbac = operation[RBAC_EXTENSION_KEY] as CircleAwareRbac | undefined;
     if (!rbac?.circleRole || typeof operation.description !== 'string') return;
     const at = operation.description.indexOf(REQUIREMENTS_MARKER);
     if (at < 0) return;
@@ -113,7 +119,7 @@ function applyCircleRoleRequirements(document: MutableDocument): void {
   });
 }
 
-function describeRequirements(rbac: RbacExtension): string {
+function describeRequirements(rbac: CircleAwareRbac): string {
   const code = (value: string) => `\`${value}\``;
   const clauses: string[] = [];
   const roles = rbac.roles ?? [];

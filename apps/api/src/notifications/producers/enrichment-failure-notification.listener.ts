@@ -41,7 +41,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { JobStatus, NotificationType } from '@prisma/client';
+import { MhLegacyJobStatus, NotificationType } from '@prisma/client';
 
 import { ROLES } from '../../common/constants/roles.constants';
 import {
@@ -89,7 +89,7 @@ export class EnrichmentFailureNotificationListener {
         where: { id: event.jobId },
         select: { status: true, lastError: true },
       });
-      if (!job || job.status !== JobStatus.failed) return;
+      if (!job || job.status !== MhLegacyJobStatus.failed) return;
 
       const adminIds = await this.loadAdminUserIds();
       if (adminIds.length === 0) return;

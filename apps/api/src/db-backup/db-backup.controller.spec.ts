@@ -17,10 +17,7 @@ import {
 } from './database-restore.service';
 
 import { DatabaseBackupController } from './db-backup.controller';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
-import { ROLES_KEY } from '../auth/decorators/roles.decorator';
+import { PermissionsGuard, RolesGuard, PERMISSIONS_KEY, ROLES_KEY } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
 /**

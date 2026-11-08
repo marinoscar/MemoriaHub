@@ -11,7 +11,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus, JobReason } from '@prisma/client';
+import { MhLegacyJobStatus, JobReason } from '@prisma/client';
 import { InsightsRefreshTask } from './insights-refresh.task';
 import { InsightsService } from './insights.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
@@ -49,7 +49,7 @@ describe('InsightsRefreshTask', () => {
   beforeEach(async () => {
     mockInsights = {
       getLatest: jest.fn(),
-      enqueueRefresh: jest.fn().mockResolvedValue({ id: 'job-new', status: JobStatus.pending }),
+      enqueueRefresh: jest.fn().mockResolvedValue({ id: 'job-new', status: MhLegacyJobStatus.pending }),
       getRefreshState: jest.fn().mockResolvedValue(makeRefreshState('idle')),
     };
 

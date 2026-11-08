@@ -150,11 +150,22 @@ export class AndroidMediaSyncDoctorCheck implements DoctorCheck, OnModuleInit {
         stats: true,
         permission: true,
         patId: true,
-        pat: { select: { revokedAt: true, expiresAt: true } },
         user: { select: { email: true } },
       },
       orderBy: { lastSeenAt: 'asc' },
     });
-    return decideAndroidMediaSync(devices, Date.now());
+    // PLATFORM-ADOPTION-SHIM(RETRO-B2): the pat_id relation is not modelled; read the tokens in one query.
+    const patIds = [...new Set(devices.map((d) => d.patId).filter((id): id is string => !!id))];
+    const pats = patIds.length
+      ? await this.prisma.personalAccessToken.findMany({
+          where: { id: { in: patIds } },
+          select: { id: true, revokedAt: true, expiresAt: true },
+        })
+      : [];
+    const byId = new Map(pats.map((p) => [p.id, { revokedAt: p.revokedAt, expiresAt: p.expiresAt }]));
+    return decideAndroidMediaSync(
+      devices.map((d) => ({ ...d, pat: d.patId ? (byId.get(d.patId) ?? null) : null })),
+      Date.now(),
+    );
   }
 }

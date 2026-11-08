@@ -72,6 +72,9 @@ jest.mock('@memoriahub/enrichment-compute/image', () => ({
 // fs: avoid any real network download / disk I/O. existsSync=true means
 // ensureModel() short-circuits before ever calling fetch().
 jest.mock('fs', () => ({
+  // The real module underneath: the platform packages (loaded through the app's
+  // Prisma service) read `fs.constants` at import time.
+  ...jest.requireActual('fs'),
   existsSync: jest.fn().mockReturnValue(true),
   promises: {
     mkdir: jest.fn().mockResolvedValue(undefined),

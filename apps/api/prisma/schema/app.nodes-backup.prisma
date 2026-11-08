@@ -59,7 +59,7 @@ model NodeBackupConfig {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  node WorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  node MhLegacyWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
 
   @@index([nextRunAt])
   @@map("node_backup_configs")
@@ -97,7 +97,7 @@ model NodeBackupRun {
   cursorEndId          String?   @map("cursor_end_id") @db.Uuid
 
   // Relations
-  node WorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  node MhLegacyWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
 
   @@index([nodeId, startedAt(sort: Desc)])
   @@index([status])

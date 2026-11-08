@@ -127,8 +127,8 @@ function mockQueryRawByText(prisma: MockPrismaService, handlers: Array<[string, 
  * registered) rather than throwing on the deep-mocked Prisma client's default
  * `undefined` return value. */
 function mockNoWorkerNodes(prisma: MockPrismaService): void {
-  (prisma.workerNode.count as jest.Mock).mockResolvedValue(0);
-  (prisma.workerNode.findMany as jest.Mock).mockResolvedValue([]);
+  (prisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
+  (prisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue([]);
   (prisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 }
 
@@ -1349,7 +1349,7 @@ describe('MemoriaHub Doctor checks', () => {
     it("is ok in mode 'system' when a fresh heavy-media node is registered", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
       mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(2);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(2);
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'jobs.workerEnabled');
@@ -1362,11 +1362,11 @@ describe('MemoriaHub Doctor checks', () => {
     it('the fresh-node count is scoped to online, fresh-heartbeat nodes serving heavy media types', async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
       mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(1);
 
       await service.runDiagnostics();
 
-      const heavyCall = (mockPrisma.workerNode.count as jest.Mock).mock.calls.find(
+      const heavyCall = (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mock.calls.find(
         ([arg]) => arg?.where?.eligibleTypes !== undefined,
       );
       expect(heavyCall).toBeDefined();
@@ -1381,7 +1381,7 @@ describe('MemoriaHub Doctor checks', () => {
     it("is warning in mode 'system' when enrichment features are on but no healthy node exists", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
       mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'jobs.workerEnabled');
@@ -1394,7 +1394,7 @@ describe('MemoriaHub Doctor checks', () => {
     it("is warning (not error) in mode 'system' when no features are on and no nodes exist", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
       mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features off
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
 
@@ -1404,7 +1404,7 @@ describe('MemoriaHub Doctor checks', () => {
     it("is warning in mode 'off' with fresh nodes — no server fallback", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
       mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(3);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(3);
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'jobs.workerEnabled');
@@ -1417,7 +1417,7 @@ describe('MemoriaHub Doctor checks', () => {
     it("is error in mode 'off' when enrichment features are on and no healthy nodes exist", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
       mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'jobs.workerEnabled');
@@ -1435,7 +1435,7 @@ describe('MemoriaHub Doctor checks', () => {
       delete process.env['ENRICHMENT_WORKER_MODE'];
       delete process.env['FACE_WORKER_ENABLED'];
       mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
 
@@ -1445,7 +1445,7 @@ describe('MemoriaHub Doctor checks', () => {
     it("is plain warning in mode 'off' when no features are on and no nodes exist", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
       mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features off
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'jobs.workerEnabled');
@@ -1479,7 +1479,7 @@ describe('MemoriaHub Doctor checks', () => {
       // 'ok' and doesn't interfere with this check's isolated assertions —
       // checkNodesHeartbeat and checkNodesCapabilityHealth both read from the
       // same mocked workerNode.findMany() call.
-      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(1);
     });
 
     /** A single online node fixture with a fresh heartbeat. */
@@ -1495,7 +1495,7 @@ describe('MemoriaHub Doctor checks', () => {
     }
 
     it('is status:warning when a node reports operational:false on a capability backing one of its eligibleTypes (#148 shape)', async () => {
-      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           eligibleTypes: ['face_detection'],
           capabilities: {
@@ -1519,7 +1519,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('does not flag operational:false for a capability that backs none of the node eligibleTypes', async () => {
-      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           // geocode has no capability requirements at all (JOB_TYPE_REQUIREMENTS.geocode === []),
           // and tesseract only backs social_media_detection — not eligible here.
@@ -1543,7 +1543,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('backward-compat: a node reporting presence-only capabilities (no operational field, pre-#148 shape) is classified exactly as before this change — not degraded', async () => {
-      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           eligibleTypes: ['face_detection'],
           capabilities: {
@@ -1566,7 +1566,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('still recognizes the legacy flat-string status shape ({ face: "error" }) as degraded — unchanged by #148', async () => {
-      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           eligibleTypes: ['face_detection'],
           capabilities: { face: 'error' },
@@ -1581,7 +1581,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:skipped when no online node has reported a capability summary at all', async () => {
-      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({ eligibleTypes: ['face_detection'], capabilities: undefined }),
       );
 
@@ -1776,6 +1776,18 @@ describe('MemoriaHub Doctor checks', () => {
         user: { email: 'alice@example.com' },
         ...overrides,
       };
+    }
+
+    /**
+     * The check reads devices, then their personal access tokens in one batched
+     * query (the `pat_id` relation is not modelled, RETRO-B2): serve both from the
+     * same fixture rows.
+     */
+    function mockDevices(devices: Array<Record<string, any>>) {
+      (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue(devices);
+      (mockPrisma.personalAccessToken.findMany as jest.Mock).mockResolvedValue(
+        devices.filter((d) => d.patId && d.pat).map((d) => ({ id: d.patId, ...d.pat })),
+      );
     }
 
     function makeRelease(overrides: Record<string, unknown> = {}) {
@@ -1975,7 +1987,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
 
       it('is ok when every active device is fresh, fully permitted, unblocked and holds a live token', async () => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+        mockDevices([
           makeDevice(),
           makeDevice({ name: 'Galaxy S24' }),
         ]);
@@ -1988,7 +2000,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
 
       it('warns on a device with no check-in for more than 48h, naming it and its owner', async () => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+        mockDevices([
           makeDevice({ name: 'Old Phone', lastSeenAt: new Date(Date.now() - 72 * HOUR) }),
           makeDevice(),
         ]);
@@ -2004,7 +2016,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
 
       it('treats a device that never checked in as stale', async () => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+        mockDevices([
           makeDevice({ lastSeenAt: null, permission: null }),
         ]);
 
@@ -2018,7 +2030,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
 
       it('warns on blocked files', async () => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+        mockDevices([
           makeDevice({ stats: { blocked: 4 } }),
         ]);
 
@@ -2031,7 +2043,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
 
       it('ignores malformed stats', async () => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+        mockDevices([
           makeDevice({ stats: { blocked: 'many' } }),
           makeDevice({ stats: null }),
           makeDevice({ stats: [1, 2] }),
@@ -2043,7 +2055,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
 
       it.each(['partial', 'denied'])('warns when media permission is %s', async (permission) => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([makeDevice({ permission })]);
+        mockDevices([makeDevice({ permission })]);
 
         const report = await service.runDiagnostics();
         const check = findCheck(report, 'android.mediaSync');
@@ -2057,7 +2069,7 @@ describe('MemoriaHub Doctor checks', () => {
         ['revoked', { revokedAt: new Date(), expiresAt: new Date(Date.now() + HOUR) }, 'token revoked'],
         ['expired', { revokedAt: null, expiresAt: new Date(Date.now() - HOUR) }, 'token expired'],
       ])('warns when the paired PAT is %s', async (_label, pat, expected) => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([makeDevice({ pat })]);
+        mockDevices([makeDevice({ pat })]);
 
         const report = await service.runDiagnostics();
         const check = findCheck(report, 'android.mediaSync');
@@ -2068,7 +2080,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
 
       it('warns when the device has no PAT at all (deleted)', async () => {
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([
+        mockDevices([
           makeDevice({ patId: null, pat: null }),
         ]);
 
@@ -2083,7 +2095,7 @@ describe('MemoriaHub Doctor checks', () => {
         const devices = Array.from({ length: 7 }, (_, i) =>
           makeDevice({ name: `Phone ${i + 1}`, permission: 'partial' }),
         );
-        (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue(devices);
+        mockDevices(devices);
 
         const report = await service.runDiagnostics();
         const check = findCheck(report, 'android.mediaSync');

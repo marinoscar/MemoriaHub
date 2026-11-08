@@ -13,7 +13,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus } from '@prisma/client';
+import { MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentAdminService, INSIGHTS_WINDOW_DAYS } from './enrichment-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
@@ -24,16 +24,16 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 // ---------------------------------------------------------------------------
 
 /** Build a status-groupBy result for getStats() */
-function makeStatusGroups(counts: Partial<Record<JobStatus, number>> = {}) {
+function makeStatusGroups(counts: Partial<Record<MhLegacyJobStatus, number>> = {}) {
   return Object.entries(counts).map(([status, count]) => ({
-    status: status as JobStatus,
+    status: status as MhLegacyJobStatus,
     _count: { id: count as number },
   }));
 }
 
 /** Build a type+status groupBy result for getStats() */
 function makeTypeStatusGroups(
-  entries: Array<{ type: string; status: JobStatus; count: number }>,
+  entries: Array<{ type: string; status: MhLegacyJobStatus; count: number }>,
 ) {
   return entries.map(({ type, status, count }) => ({
     type,
@@ -161,7 +161,7 @@ describe('EnrichmentAdminService.getInsights', () => {
     (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
 
     // Lifetime rollup of purged rows — default empty so lifetime = live only.
-    (mockPrisma.jobStatsRollup.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.mhLegacyJobStatsRollup.findMany as jest.Mock).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -243,9 +243,9 @@ describe('EnrichmentAdminService.getInsights', () => {
     it('returns basis=none when overall history has samples=0', async () => {
       // Some pending jobs exist but no completed history
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 5 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 5 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 5 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 5 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -259,9 +259,9 @@ describe('EnrichmentAdminService.getInsights', () => {
 
     it('returns etaMs=null when basis=none', async () => {
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 3 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 3 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'auto_tagging', status: JobStatus.pending, count: 3 },
+          { type: 'auto_tagging', status: MhLegacyJobStatus.pending, count: 3 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -275,10 +275,10 @@ describe('EnrichmentAdminService.getInsights', () => {
 
     it('returns perType avgMs=null and etcMs=null for all types when basis=none', async () => {
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 2, [JobStatus.running]: 1 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 2, [MhLegacyJobStatus.running]: 1 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 2 },
-          { type: 'auto_tagging', status: JobStatus.running, count: 1 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 2 },
+          { type: 'auto_tagging', status: MhLegacyJobStatus.running, count: 1 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -295,10 +295,10 @@ describe('EnrichmentAdminService.getInsights', () => {
 
     it('still counts totalRemaining correctly even with no history', async () => {
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 4, [JobStatus.running]: 1 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 4, [MhLegacyJobStatus.running]: 1 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 4 },
-          { type: 'face_detection', status: JobStatus.running, count: 1 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 4 },
+          { type: 'face_detection', status: MhLegacyJobStatus.running, count: 1 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -320,9 +320,9 @@ describe('EnrichmentAdminService.getInsights', () => {
       delete process.env['ENRICHMENT_WORKER_CONCURRENCY'];
 
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 10 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 10 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 10 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 10 },
         ]),
       });
       // Per-type history exists for face_detection (avg 2s = 2000ms)
@@ -340,9 +340,9 @@ describe('EnrichmentAdminService.getInsights', () => {
 
       // 10 pending, concurrency=1, avgMs=2000ms → etaMs = 10*2000/1 = 20000
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 10 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 10 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 10 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 10 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -359,9 +359,9 @@ describe('EnrichmentAdminService.getInsights', () => {
 
       // 10 pending, concurrency=2, avgMs=2000ms → etaMs = 10*2000/2 = 10000
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 10 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 10 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 10 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 10 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -377,10 +377,10 @@ describe('EnrichmentAdminService.getInsights', () => {
       delete process.env['ENRICHMENT_WORKER_CONCURRENCY'];
 
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 6 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 6 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 3 },
-          { type: 'auto_tagging', status: JobStatus.pending, count: 3 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 3 },
+          { type: 'auto_tagging', status: MhLegacyJobStatus.pending, count: 3 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -405,9 +405,9 @@ describe('EnrichmentAdminService.getInsights', () => {
 
       // face_detection: 4 pending, avg 3s = 3000ms → etcMs = 4*3000/1 = 12000
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 4 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 4 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 4 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 4 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -425,9 +425,9 @@ describe('EnrichmentAdminService.getInsights', () => {
 
       // face_detection has succeeded only, no pending/running
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.succeeded]: 20 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.succeeded]: 20 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.succeeded, count: 20 },
+          { type: 'face_detection', status: MhLegacyJobStatus.succeeded, count: 20 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -451,10 +451,10 @@ describe('EnrichmentAdminService.getInsights', () => {
 
       // Two types pending: face_detection has history, auto_tagging does not
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 6 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 6 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 3 },
-          { type: 'auto_tagging', status: JobStatus.pending, count: 3 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 3 },
+          { type: 'auto_tagging', status: MhLegacyJobStatus.pending, count: 3 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -475,10 +475,10 @@ describe('EnrichmentAdminService.getInsights', () => {
       // auto_tagging has no history; overall avg = 2s = 2000ms
       // auto_tagging: 3 pending → etcMs = 3*2000/1 = 6000
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 6 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 6 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 3 },
-          { type: 'auto_tagging', status: JobStatus.pending, count: 3 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 3 },
+          { type: 'auto_tagging', status: MhLegacyJobStatus.pending, count: 3 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -501,10 +501,10 @@ describe('EnrichmentAdminService.getInsights', () => {
       // auto_tagging: 3 pending, falls back to overall avg 2s → 3*2000 = 6000
       // total: 12000ms / concurrency(1) = 12000
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 6 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 6 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 3 },
-          { type: 'auto_tagging', status: JobStatus.pending, count: 3 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 3 },
+          { type: 'auto_tagging', status: MhLegacyJobStatus.pending, count: 3 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -521,10 +521,10 @@ describe('EnrichmentAdminService.getInsights', () => {
       delete process.env['ENRICHMENT_WORKER_CONCURRENCY'];
 
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.pending]: 4 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.pending]: 4 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.pending, count: 2 },
-          { type: 'auto_tagging', status: JobStatus.pending, count: 2 },
+          { type: 'face_detection', status: MhLegacyJobStatus.pending, count: 2 },
+          { type: 'auto_tagging', status: MhLegacyJobStatus.pending, count: 2 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -550,9 +550,9 @@ describe('EnrichmentAdminService.getInsights', () => {
     it('returns etaMs=0 when totalRemaining=0', async () => {
       // All jobs are succeeded (no pending or running)
       setupGroupByMocks(mockPrisma, {
-        statusGroups: makeStatusGroups({ [JobStatus.succeeded]: 100 }),
+        statusGroups: makeStatusGroups({ [MhLegacyJobStatus.succeeded]: 100 }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.succeeded, count: 100 },
+          { type: 'face_detection', status: MhLegacyJobStatus.succeeded, count: 100 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -579,12 +579,12 @@ describe('EnrichmentAdminService.getInsights', () => {
     it('returns totalRemaining=0 when only succeeded/failed jobs exist', async () => {
       setupGroupByMocks(mockPrisma, {
         statusGroups: makeStatusGroups({
-          [JobStatus.succeeded]: 50,
-          [JobStatus.failed]: 5,
+          [MhLegacyJobStatus.succeeded]: 50,
+          [MhLegacyJobStatus.failed]: 5,
         }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.succeeded, count: 50 },
-          { type: 'face_detection', status: JobStatus.failed, count: 5 },
+          { type: 'face_detection', status: MhLegacyJobStatus.succeeded, count: 50 },
+          { type: 'face_detection', status: MhLegacyJobStatus.failed, count: 5 },
         ]),
       });
       (mockPrisma.$queryRaw as jest.Mock)
@@ -698,12 +698,12 @@ describe('EnrichmentAdminService.getInsights', () => {
     it('merges live all-time counts/durations with the purged rollup', async () => {
       setupGroupByMocks(mockPrisma, {
         statusGroups: makeStatusGroups({
-          [JobStatus.succeeded]: 10,
-          [JobStatus.failed]: 2,
+          [MhLegacyJobStatus.succeeded]: 10,
+          [MhLegacyJobStatus.failed]: 2,
         }),
         typeStatusGroups: makeTypeStatusGroups([
-          { type: 'face_detection', status: JobStatus.succeeded, count: 10 },
-          { type: 'face_detection', status: JobStatus.failed, count: 2 },
+          { type: 'face_detection', status: MhLegacyJobStatus.succeeded, count: 10 },
+          { type: 'face_detection', status: MhLegacyJobStatus.failed, count: 2 },
         ]),
       });
       // $queryRaw order: durByType, durOverall, lifeDurByType
@@ -713,7 +713,7 @@ describe('EnrichmentAdminService.getInsights', () => {
         // live all-time durations: 10 samples summing 20s (=20000ms)
         .mockResolvedValueOnce([{ type: 'face_detection', samples: 10, sum_sec: 20 }]);
       // Purged rollup: 90 succeeded / 8 failed, 90 duration samples summing 180000ms
-      (mockPrisma.jobStatsRollup.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyJobStatsRollup.findMany as jest.Mock).mockResolvedValue([
         {
           type: 'face_detection',
           succeededCount: 90,
@@ -746,7 +746,7 @@ describe('EnrichmentAdminService.getInsights', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce(makeDurOverall(0, 0))
         .mockResolvedValueOnce([]);
-      (mockPrisma.jobStatsRollup.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyJobStatsRollup.findMany as jest.Mock).mockResolvedValue([]);
 
       const result = await service.getInsights();
 
@@ -762,11 +762,11 @@ describe('EnrichmentAdminService.getInsights', () => {
 
   describe('resetHistory', () => {
     it('clears the rollup table and returns the cleared row count', async () => {
-      (mockPrisma.jobStatsRollup.deleteMany as jest.Mock).mockResolvedValue({ count: 4 });
+      (mockPrisma.mhLegacyJobStatsRollup.deleteMany as jest.Mock).mockResolvedValue({ count: 4 });
 
       const result = await service.resetHistory();
 
-      expect(mockPrisma.jobStatsRollup.deleteMany).toHaveBeenCalledWith({});
+      expect(mockPrisma.mhLegacyJobStatsRollup.deleteMany).toHaveBeenCalledWith({});
       expect(result.reset).toBe(4);
     });
   });

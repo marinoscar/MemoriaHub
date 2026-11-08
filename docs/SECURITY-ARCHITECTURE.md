@@ -15,6 +15,15 @@ This document provides a comprehensive overview of the security architecture for
 
 **Security Posture**: Production-grade security suitable for enterprise applications handling sensitive user data.
 
+> **Identity is the platform's (RETRO-B2, issue #611).** Sign-in, sessions, the guards (`JwtAuthGuard`, `RolesGuard`, `PermissionsGuard`), users, the allowlist, personal access tokens and the device flow are `@marinoscar/platform-api/identity`, mounted once in `apps/api/src/platform/identity/` (single-organization mode: `TENANCY_MODE` unset). Section references below to `src/auth`, `src/users`, `src/allowlist`, `src/pat` and `src/device-auth` now name that package; the behaviour they describe is unchanged. What differs in the security model:
+>
+> - **RBAC is two-scoped** (platform migration `0024`). `admin` is the SYSTEM role (held in `user_roles`); `org_admin`, `contributor` and `viewer` are ORG roles held on the membership of the default organization. A user's effective permissions are the grants of their system roles united with the grants of their membership role, and every administrator also holds `org_admin`, so nobody's permission set changed (proved per user by `apps/api/scripts/verify-identity-transform.mjs`). The matrix is declared once, in `apps/api/src/app-registrations/memoriahub-permissions.ts` plus the platform slices, rendered to `apps/api/prisma/catalog/permissions.json` and written by the idempotent seed (`prisma/seed.ts`, run on every install and update). `rbac.catalog.ts` and the boot-time RBAC reconcile are gone.
+> - **`nod_` worker credentials** are accepted only under `/api/nodes/*` and `pat_` tokens on every authenticated route (the `identity` conformance suite checks both against the real guard). `IDENTITY_NODE_CREDENTIALS` is bound to the app's `NodeCredentialService` until RETRO-C2.
+> - **`@CurrentUser()`** is the app's wrapper (`src/common/decorators/current-user.decorator.ts`), because the packaged decorator hands a bare `@Auth()` route the raw user graph (no `permissions`), the defect of issue #406.
+> - **Sign-in side effects** (the personal circle, claiming circle invites) run on the `identity.user.created` and `identity.login.succeeded` events after the user's transaction commits (`src/circles/identity-listeners.ts`).
+> - Every foreign key to `User` is classified in `app-registrations/user-owned-models.ts` and enforced by the `user-owned-data` conformance suite.
+> - The API still connects as the bootstrap superuser (RETRO-A5/D1), so row-level security is inert; the Doctor `db.rls_role` failure is a documented exception.
+
 ---
 
 ## 1. Authentication Architecture

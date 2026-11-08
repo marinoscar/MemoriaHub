@@ -9,7 +9,6 @@ import { CircleRole } from '@prisma/client';
 import { CirclesService } from './circles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
-import { AllowlistService } from '../allowlist/allowlist.service';
 import { EmailService } from '../email/email.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
@@ -17,7 +16,6 @@ describe('CirclesService', () => {
   let service: CirclesService;
   let mockPrisma: MockPrismaService;
   let mockMembership: jest.Mocked<CircleMembershipService>;
-  let mockAllowlist: jest.Mocked<AllowlistService>;
   let mockEmail: jest.Mocked<EmailService>;
 
   const mockUser = {
@@ -34,14 +32,6 @@ describe('CirclesService', () => {
       resolveRole: jest.fn().mockResolvedValue(CircleRole.circle_admin),
     } as any;
 
-    mockAllowlist = {
-      isEmailAllowed: jest.fn().mockResolvedValue(true),
-      markEmailClaimed: jest.fn().mockResolvedValue(undefined),
-      addEmail: jest.fn(),
-      removeEmail: jest.fn(),
-      listAllowedEmails: jest.fn(),
-    } as any;
-
     mockEmail = {
       sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'mock-message-id' }),
       sendEmailAsync: jest.fn(),
@@ -52,7 +42,6 @@ describe('CirclesService', () => {
         CirclesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
-        { provide: AllowlistService, useValue: mockAllowlist },
         { provide: EmailService, useValue: mockEmail },
       ],
     }).compile();

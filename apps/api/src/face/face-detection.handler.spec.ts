@@ -11,7 +11,7 @@
  */
 
 import { FaceDetectionHandler } from './face-detection.handler';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { faceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
 
 // ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'face_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.pending,
+    status: MhLegacyJobStatus.pending,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,

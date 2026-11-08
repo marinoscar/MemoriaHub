@@ -15,8 +15,7 @@
 
 import request from 'supertest';
 
-import { PERMISSIONS_KEY } from '../../src/auth/decorators/permissions.decorator';
-import { IS_PUBLIC_KEY } from '../../src/auth/decorators/public.decorator';
+import { PERMISSIONS_KEY, IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
 import { AndroidAppController } from '../../src/android-app/android-app.controller';
 import { AssetLinksController } from '../../src/android-app/asset-links.controller';
 import {

@@ -60,7 +60,7 @@ export class NodesCapabilityHealthDoctorCheck implements DoctorCheck, OnModuleIn
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const onlineNodes = await this.prisma.workerNode.findMany({
+    const onlineNodes = await this.prisma.mhLegacyWorkerNode.findMany({
       where: { status: 'online' },
       select: { name: true, eligibleTypes: true, capabilities: true },
     });

@@ -14,7 +14,8 @@
 import request from 'supertest';
 import { randomUUID } from 'crypto';
 
-import { PatService } from '../../src/pat/pat.service';
+import { PatService } from '@marinoscar/platform-api/identity';
+import { MOCK_DEFAULT_ORG_ID } from '../fixtures/test-data.factory';
 import { TestContext, createTestApp, closeTestApp } from '../helpers/test-app.helper';
 import { resetPrismaMock } from '../mocks/prisma.mock';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
@@ -96,6 +97,16 @@ describe('Media Sync device API (integration)', () => {
       return { ...row, user };
     });
     m.personalAccessToken.update.mockResolvedValue({});
+    // The `pat_id` relation is not modelled (RETRO-B2): the service reads a device's
+    // token in one batched query.
+    m.personalAccessToken.findMany.mockImplementation(async ({ where }: any) =>
+      [...pats.values()]
+        .filter((p) => where.id.in.includes(p.id))
+        .map((p) => ({ id: p.id, expiresAt: p.expiresAt, revokedAt: p.revokedAt })),
+    );
+    // Minting a PAT binds it to the default organization (platform 0023/0024).
+    m.organization.findFirst.mockResolvedValue({ id: MOCK_DEFAULT_ORG_ID } as any);
+    m.membership.findUnique.mockResolvedValue({ status: 'active' } as any);
     m.personalAccessToken.updateMany.mockImplementation(async ({ where, data }: any) => {
       let count = 0;
       for (const row of pats.values()) {
@@ -130,10 +141,10 @@ describe('Media Sync device API (integration)', () => {
       const row = devices.find((d) => d.userId === key.userId && d.installationId === key.installationId);
       return row ? { patId: row.patId } : null;
     });
-    m.mediaSyncDevice.findFirst.mockImplementation(async ({ where, include }: any) => {
+    m.mediaSyncDevice.findFirst.mockImplementation(async ({ where, include, select }: any) => {
       const row = devices.find((d) => matches(d, where));
       if (!row) return null;
-      return include ? withPat(row) : { id: row.id };
+      return include || !select ? withPat(row) : { id: row.id };
     });
     m.mediaSyncDevice.findMany.mockImplementation(async ({ where }: any) =>
       devices.filter((d) => matches(d, where)).map(withPat),
@@ -205,7 +216,7 @@ describe('Media Sync device API (integration)', () => {
       async ({ where }: any) => reports.find((r) => r.id === where.id && r.deviceId === where.deviceId) ?? null,
     );
 
-    m.androidAppRelease.findFirst.mockResolvedValue(null);
+    m.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue(null);
     m.auditEvent.create.mockResolvedValue({});
     m.$executeRaw.mockResolvedValue(0);
   });

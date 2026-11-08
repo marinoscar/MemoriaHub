@@ -15,12 +15,11 @@ import { Controller, Get, Post, Body, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { NodeStatus } from '@prisma/client';
+import { MhLegacyNodeStatus } from '@prisma/client';
 import { NodesService } from './nodes.service';
 import { SubmitJobResultDto, ReportJobFailureDto } from './dto/compute-result.dto';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 
 // ---------------------------------------------------------------------------
@@ -41,10 +40,10 @@ export class RegisterNodeDto extends createZodDto(registerNodeSchema) {}
 const heartbeatSchema = z.object({
   status: z
     .enum([
-      NodeStatus.online,
-      NodeStatus.draining,
-      NodeStatus.offline,
-      NodeStatus.disabled,
+      MhLegacyNodeStatus.online,
+      MhLegacyNodeStatus.draining,
+      MhLegacyNodeStatus.offline,
+      MhLegacyNodeStatus.disabled,
     ])
     .optional(),
   // Arbitrary `node doctor` capability summary JSON.

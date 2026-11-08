@@ -4,7 +4,7 @@
 // Distributed Worker Nodes
 // =============================================================================
 
-enum NodeStatus {
+enum MhLegacyNodeStatus {
   online
   draining
   offline
@@ -13,7 +13,7 @@ enum NodeStatus {
   @@map("MhLegacyNodeStatus")
 }
 
-model WorkerNode {
+model MhLegacyWorkerNode {
   id              String     @id @default(uuid()) @db.Uuid
   name            String
   hostname        String
@@ -21,7 +21,7 @@ model WorkerNode {
   cliVersion      String     @map("cli_version")
   eligibleTypes   String[]   @map("eligible_types")
   concurrency     Int        @default(1)
-  status          NodeStatus @default(online)
+  status          MhLegacyNodeStatus @default(online)
   // Latest `node doctor` capability summary reported via heartbeat (per-capability ok/warn/error).
   capabilities    Json?      @db.JsonB
   registeredAt    DateTime   @default(now()) @map("registered_at") @db.Timestamptz
@@ -49,7 +49,7 @@ model WorkerNode {
 // (enforced by JwtAuthGuard's route allowlist) and may never expire
 // (`expiresAt` NULL = never). Mirrors PersonalAccessToken minus the duration
 // bookkeeping. Migration 20260716020000_add_node_credentials.
-model NodeCredential {
+model MhLegacyNodeCredential {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @map("user_id") @db.Uuid
   name        String

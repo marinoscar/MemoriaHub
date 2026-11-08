@@ -71,6 +71,19 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'cannot complete OAuth sign-in at all. Admin only.',
       },
       {
+        name: 'Organizations',
+        description:
+          "The identity slice's organization routes: members, invitations and the deployment's organizations. " +
+          'MemoriaHub runs in single-organization mode (`TENANCY_MODE` unset), where the web UI hides them; ' +
+          'the default organization is the only one.',
+      },
+      {
+        name: 'Roles',
+        description:
+          'The roles the deployment knows (`admin`, `org_admin`, `contributor`, `viewer`), with their scope and ' +
+          'whether they can be assigned.',
+      },
+      {
         name: 'Test Authentication',
         description:
           'Token minting for automated tests. Registered only when `NODE_ENV !== "production"`, so ' +

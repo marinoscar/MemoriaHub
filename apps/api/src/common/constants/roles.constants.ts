@@ -2,8 +2,11 @@
 // Role Constants
 // =============================================================================
 
+// Since platform migration 0024 `admin` is the SYSTEM role (held in `user_roles`);
+// `org_admin`, `contributor` and `viewer` are ORG roles held on a membership.
 export const ROLES = {
   ADMIN: 'admin',
+  ORG_ADMIN: 'org_admin',
   CONTRIBUTOR: 'contributor',
   VIEWER: 'viewer',
 } as const;
@@ -109,3 +112,17 @@ export type PermissionName = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 // =============================================================================
 
 export const DEFAULT_ROLE = ROLES.VIEWER;
+
+// =============================================================================
+// Typed names in the identity slice's decorators (RETRO-B2)
+// =============================================================================
+//
+// `@Auth({ permissions, roles })` lives in `@marinoscar/platform-api/identity`,
+// which cannot know this app's ids. This augmentation widens the slice's
+// permission and role names to exactly this app's, so a typo in a route's
+// permission stays a compile error. `common/constants/roles.constants.spec.ts`
+// proves every constant above is a registered permission.
+declare module '@marinoscar/platform-api/identity' {
+  interface IdentityPermissionIds extends Record<PermissionName, true> {}
+  interface IdentityRoleIds extends Record<RoleName, true> {}
+}

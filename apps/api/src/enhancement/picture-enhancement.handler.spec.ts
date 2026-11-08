@@ -35,7 +35,7 @@ jest.mock('../storage/processing/image-orientation.util', () => ({
 
 import { Readable } from 'stream';
 import sharp from 'sharp';
-import { EnrichmentJob, JobReason, JobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
@@ -53,7 +53,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'picture_enhancement',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.rerun,
     priority: 0,
     providerKey: 'openai',

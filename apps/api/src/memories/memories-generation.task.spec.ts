@@ -12,7 +12,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import {
   MEMORY_GENERATION_JOB_TYPE,
   MemoriesGenerationTask,
@@ -191,7 +191,7 @@ describe('MemoriesGenerationTask', () => {
       expect(prisma.enrichmentJob.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            status: { in: [JobStatus.pending, JobStatus.running] },
+            status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
           }),
         }),
       );
@@ -282,7 +282,7 @@ describe('MemoriesGenerationTask', () => {
 
       expect(prisma.enrichmentJob.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ status: JobStatus.succeeded }),
+          where: expect.objectContaining({ status: MhLegacyJobStatus.succeeded }),
         }),
       );
     });

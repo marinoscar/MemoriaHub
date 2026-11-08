@@ -7,12 +7,11 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus } from '@prisma/client';
+import { MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentAdminController, ListJobsQueryDto, RetryAllFailedDto, ResetStuckDto } from './enrichment-admin.controller';
 import { EnrichmentAdminService } from './enrichment-admin.service';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { ROLES_KEY } from '../auth/decorators/roles.decorator';
-import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
+import { ROLES_KEY, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
 // ---------------------------------------------------------------------------
 // Mock EnrichmentAdminService
 // ---------------------------------------------------------------------------
@@ -34,7 +33,7 @@ function makeJobItem(overrides: Record<string, unknown> = {}) {
   return {
     id: 'job-uuid-1',
     type: 'face_detection',
-    status: JobStatus.pending,
+    status: MhLegacyJobStatus.pending,
     reason: 'upload',
     priority: 0,
     mediaItemId: 'media-uuid-1',
@@ -76,7 +75,7 @@ describe('EnrichmentAdminController', () => {
       ],
     })
       // Override guards so auth infrastructure is not required in unit tests
-      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
+      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
       .useValue({ canActivate: () => true })
       .compile();
 
@@ -118,11 +117,11 @@ describe('EnrichmentAdminController', () => {
       };
       mockAdminService.listJobs.mockResolvedValue(listResult);
 
-      const query = { status: JobStatus.failed, type: 'ocr', page: 2, pageSize: 10 } as ListJobsQueryDto;
+      const query = { status: MhLegacyJobStatus.failed, type: 'ocr', page: 2, pageSize: 10 } as ListJobsQueryDto;
       const result = await controller.listJobs(query);
 
       expect(mockAdminService.listJobs).toHaveBeenCalledWith({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         type: 'ocr',
         page: 2,
         pageSize: 10,
@@ -148,7 +147,7 @@ describe('EnrichmentAdminController', () => {
 
   describe('retryJob', () => {
     it('delegates to adminService.retryJob with the id param', async () => {
-      const updatedJob = makeJobItem({ status: JobStatus.pending });
+      const updatedJob = makeJobItem({ status: MhLegacyJobStatus.pending });
       mockAdminService.retryJob.mockResolvedValue(updatedJob);
 
       const result = await controller.retryJob('job-uuid-1');

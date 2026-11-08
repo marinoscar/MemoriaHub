@@ -4,7 +4,7 @@
 // Face Recognition
 // =============================================================================
 
-enum JobStatus {
+enum MhLegacyJobStatus {
   pending
   running
   succeeded
@@ -26,7 +26,7 @@ model EnrichmentJob {
   type            String
   mediaItemId     String?   @map("media_item_id") @db.Uuid
   circleId        String?   @map("circle_id") @db.Uuid
-  status          JobStatus @default(pending)
+  status          MhLegacyJobStatus @default(pending)
   reason          JobReason
   priority        Int       @default(0)
   providerKey     String?   @map("provider_key")
@@ -48,7 +48,7 @@ model EnrichmentJob {
   // Relations
   mediaItem     MediaItem?  @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
   circle        Circle?     @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  claimedByNode WorkerNode? @relation(fields: [claimedByNodeId], references: [id], onDelete: SetNull)
+  claimedByNode MhLegacyWorkerNode? @relation(fields: [claimedByNodeId], references: [id], onDelete: SetNull)
 
   @@index([status, priority, createdAt])
   @@index([status, scheduledFor, priority, createdAt])
@@ -100,7 +100,7 @@ model EnrichmentJob {
 // duration survive history purging for analytics and the insights dashboard.
 // Only counts and total duration are kept (exactly mergeable) — percentiles are
 // not stored here and remain computed live over the recent window.
-model JobStatsRollup {
+model MhLegacyJobStatsRollup {
   type            String   @id
   succeededCount  Int      @default(0) @map("succeeded_count")
   failedCount     Int      @default(0) @map("failed_count")

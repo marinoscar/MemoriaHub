@@ -39,7 +39,7 @@ function build(opts: { broadcast?: Record<string, unknown> | null; page?: Return
         }
       : opts.broadcast;
   const prisma = {
-    notificationBroadcast: {
+    mhLegacyNotificationBroadcast: {
       findUnique: jest.fn().mockImplementation(({ select }: { select?: unknown }) =>
         Promise.resolve(select ? { status: 'sending' } : broadcast),
       ),
@@ -77,11 +77,11 @@ describe('BroadcastChunkHandler', () => {
 
     expect(t.delivery.deliver).toHaveBeenCalledTimes(3);
     expect(t.delivery.deliver).toHaveBeenCalledWith(expect.objectContaining({ id: BID }), { id: 'u-0000', email: 'u0@x.test' });
-    expect(t.prisma.notificationBroadcast.updateMany).toHaveBeenNthCalledWith(1, {
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenNthCalledWith(1, {
       where: { id: BID, status: 'sending', cursorUserId: null },
       data: { cursorUserId: 'u-0002', processedCount: { increment: 3 } },
     });
-    expect(t.prisma.notificationBroadcast.updateMany).toHaveBeenLastCalledWith({
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenLastCalledWith({
       where: { id: BID, status: 'sending' },
       data: { status: 'sent', finishedAt: expect.any(Date) },
     });
@@ -92,7 +92,7 @@ describe('BroadcastChunkHandler', () => {
     const t = build({ page: users(BROADCAST_CHUNK_SIZE) });
     await t.handler.process(job());
 
-    const commits = t.prisma.notificationBroadcast.updateMany.mock.calls.map(([a]) => a);
+    const commits = t.prisma.mhLegacyNotificationBroadcast.updateMany.mock.calls.map(([a]) => a);
     expect(commits).toHaveLength(BROADCAST_CHUNK_SIZE / BROADCAST_STATUS_RECHECK_INTERVAL);
     expect(commits[0].where.cursorUserId).toBeNull();
     expect(commits[1].where.cursorUserId).toBe(commits[0].data.cursorUserId);
@@ -103,7 +103,7 @@ describe('BroadcastChunkHandler', () => {
 
   it('stops without a successor when the cursor CAS loses (another execution moved it)', async () => {
     const t = build({ page: users(BROADCAST_CHUNK_SIZE) });
-    t.prisma.notificationBroadcast.updateMany.mockResolvedValueOnce({ count: 0 });
+    t.prisma.mhLegacyNotificationBroadcast.updateMany.mockResolvedValueOnce({ count: 0 });
     await t.handler.process(job());
     expect(t.delivery.deliver).toHaveBeenCalledTimes(BROADCAST_STATUS_RECHECK_INTERVAL);
     expect(t.jobs.enqueue).not.toHaveBeenCalled();
@@ -111,7 +111,7 @@ describe('BroadcastChunkHandler', () => {
 
   it('stops mid-page within one group when the broadcast is cancelled', async () => {
     const t = build({ page: users(BROADCAST_CHUNK_SIZE) });
-    t.prisma.notificationBroadcast.findUnique.mockImplementation(({ select }: { select?: unknown }) =>
+    t.prisma.mhLegacyNotificationBroadcast.findUnique.mockImplementation(({ select }: { select?: unknown }) =>
       Promise.resolve(select ? { status: 'canceled' } : {
         id: BID, status: 'sending', audienceCutoff: CUTOFF, cursorUserId: null, channels: ['inbox'], critical: false,
         title: 't', body: 'b', link: null, ctaLabel: null,
@@ -126,7 +126,7 @@ describe('BroadcastChunkHandler', () => {
     const t = build({ page: [] });
     await t.handler.process(job());
     expect(t.delivery.deliver).not.toHaveBeenCalled();
-    expect(t.prisma.notificationBroadcast.updateMany).toHaveBeenCalledWith(
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'sent' }) }),
     );
   });
@@ -149,7 +149,7 @@ describe('BroadcastChunkHandler', () => {
     expect(t.delivery.deliver).toHaveBeenCalledTimes(2);
 
     const u = build({ page: users(2) });
-    u.prisma.notificationBroadcast.updateMany.mockRejectedValue(new Error('db down'));
+    u.prisma.mhLegacyNotificationBroadcast.updateMany.mockRejectedValue(new Error('db down'));
     await expect(u.handler.process(job())).rejects.toThrow('db down');
   });
 

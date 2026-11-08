@@ -20,7 +20,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_GENERATION_JOB_TYPE } from '../memories-generation.task';
@@ -192,7 +192,7 @@ describe('MemoryBackfillService', () => {
         where: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: { in: ['c1', 'c2', 'c3'] },
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
     });

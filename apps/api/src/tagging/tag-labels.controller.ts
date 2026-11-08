@@ -23,7 +23,7 @@ import {
 } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { parse as csvParse } from 'csv-parse/sync';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import {
   TagLabelsService,

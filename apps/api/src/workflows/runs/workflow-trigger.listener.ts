@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { JobReason, JobStatus, MediaType, WorkflowTrigger } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus, MediaType, WorkflowTrigger } from '@prisma/client';
 import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
@@ -243,7 +243,7 @@ export class WorkflowTriggerListener {
         where: {
           mediaItemId,
           type: { in: IN_FLIGHT_PRODUCER_TYPES },
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
         select: { type: true },
       }),

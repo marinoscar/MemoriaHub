@@ -17,7 +17,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 
 interface FastifyRequestWithUser {
   user?: RequestUser;
@@ -38,7 +38,7 @@ export class NodeOwnershipGuard implements CanActivate {
       throw new ForbiddenException('Missing authenticated user or node id');
     }
 
-    const node = await this.prisma.workerNode.findUnique({
+    const node = await this.prisma.mhLegacyWorkerNode.findUnique({
       where: { id: nodeId },
       select: { createdById: true },
     });

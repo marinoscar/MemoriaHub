@@ -22,8 +22,8 @@ import {
 } from '@nestjs/swagger';
 import { NotificationType } from '@prisma/client';
 
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { NotificationListQueryDto } from './dto/notification-query.dto';
 import {
   BulkResultDto,

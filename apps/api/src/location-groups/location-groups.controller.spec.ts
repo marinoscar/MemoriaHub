@@ -16,10 +16,7 @@ import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { LocationGroupsController } from './location-groups.controller';
 import { LocationGroupsAdminController } from './location-groups-admin.controller';
 import { LocationGroupsService } from './location-groups.service';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { ROLES_KEY } from '../auth/decorators/roles.decorator';
-import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
+import { RolesGuard, PermissionsGuard, ROLES_KEY, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
 const mockService = {

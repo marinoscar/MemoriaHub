@@ -8,7 +8,7 @@
  * all dependencies are fully mocked.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { TrashPurgeTask } from './trash-purge.task';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -55,7 +55,7 @@ describe('TrashPurgeTask', () => {
 
   beforeEach(async () => {
     mockEnrichmentJobService = {
-      enqueue: jest.fn().mockResolvedValue({ id: 'job-new', status: JobStatus.pending }),
+      enqueue: jest.fn().mockResolvedValue({ id: 'job-new', status: MhLegacyJobStatus.pending }),
     };
 
     mockPrisma = createMockPrismaService();
@@ -141,7 +141,7 @@ describe('TrashPurgeTask', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             type: 'trash_purge',
-            status: { in: expect.arrayContaining([JobStatus.pending, JobStatus.running]) },
+            status: { in: expect.arrayContaining([MhLegacyJobStatus.pending, MhLegacyJobStatus.running]) },
           }),
         }),
       );

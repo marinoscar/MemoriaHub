@@ -44,7 +44,7 @@ function build(opts: { active?: boolean; subs?: any[]; row?: unknown; policy?: a
         opts.row === undefined ? { value: { enabled: true } } : opts.row,
       ),
     },
-    pushSubscription: {
+    mhLegacyPushSubscription: {
       findMany: jest.fn().mockResolvedValue(opts.subs ?? []),
       update: jest.fn().mockResolvedValue({}),
       delete: jest.fn().mockResolvedValue({}),
@@ -87,7 +87,7 @@ describe('PushTestService', () => {
   it('only loads the CALLER\'s subscriptions', async () => {
     const { service, prisma } = build();
     await service.runTest('caller', {});
-    expect(prisma.pushSubscription.findMany).toHaveBeenCalledWith(
+    expect(prisma.mhLegacyPushSubscription.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: 'caller' } }),
     );
   });
@@ -101,7 +101,7 @@ describe('PushTestService', () => {
     expect(res.browser).toEqual({ endpointProvided: true, endpointRegistered: true, keyMatchesServer: true });
     const [, , options] = send.mock.calls[0];
     expect(options).toMatchObject({ timeout: 10_000, vapidDetails: { publicKey: KEYS.publicKey } });
-    expect(prisma.pushSubscription.update).toHaveBeenCalledWith({
+    expect(prisma.mhLegacyPushSubscription.update).toHaveBeenCalledWith({
       where: { id: 's1' },
       data: expect.objectContaining({ failureCount: 0 }),
     });
@@ -119,8 +119,8 @@ describe('PushTestService', () => {
     expect(res.overall).toBe('failed');
     expect(res.subscriptions.map((s) => s.result.status)).toEqual(['pruned', 'failed']);
     expect(res.subscriptions[1].result.responseBody).toBe('bad jwt');
-    expect(prisma.pushSubscription.delete).toHaveBeenCalledWith({ where: { id: 's1' } });
-    expect(prisma.pushSubscription.update).not.toHaveBeenCalled();
+    expect(prisma.mhLegacyPushSubscription.delete).toHaveBeenCalledWith({ where: { id: 's1' } });
+    expect(prisma.mhLegacyPushSubscription.update).not.toHaveBeenCalled();
   });
 
   it('never leaks the private key, subscription keys, or a full endpoint', async () => {

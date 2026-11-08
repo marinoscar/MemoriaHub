@@ -242,7 +242,7 @@ export class ReviewQueueReconcileService {
     // deliberately accepted: a member DEMOTED to viewer (or removed from the
     // circle) is outside this set, so their now-unactionable row is not
     // resolved here — they can dismiss it, and #248's retention sweep reaps it.
-    const liveRows = (await this.prisma.notification.findMany({
+    const liveRows = (await this.prisma.mhLegacyNotification.findMany({
       where: {
         userId: { in: userIds },
         circleId: circle.id,

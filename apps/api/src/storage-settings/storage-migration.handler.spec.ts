@@ -21,7 +21,7 @@
 import {
   EnrichmentJob,
   JobReason,
-  JobStatus,
+  MhLegacyJobStatus,
   StorageMigrationItemStatus,
   StorageMigrationStatus,
   StorageObjectStatus,
@@ -40,7 +40,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'storage_migration',
     mediaItemId: null,
     circleId: null,
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.backfill,
     priority: 100,
     providerKey: null,

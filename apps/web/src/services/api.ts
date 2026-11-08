@@ -12,6 +12,30 @@ interface RequestOptions extends RequestInit {
 class ApiService {
   private accessToken: string | null = null;
   private refreshPromise: Promise<boolean> | null = null;
+  private sessionExpiredListeners = new Set<() => void>();
+
+  /**
+   * Subscribe to a refused refresh of a LIVE session (the request carried a
+   * token and the refresh cookie no longer works). The identity `AuthProvider`
+   * (`AuthSessionClient.onSessionExpired`) uses it to sign the user out with the
+   * "session expired" notice. Returns the unsubscribe.
+   */
+  onSessionExpired(listener: () => void): () => void {
+    this.sessionExpiredListeners.add(listener);
+    return () => {
+      this.sessionExpiredListeners.delete(listener);
+    };
+  }
+
+  private notifySessionExpired() {
+    for (const listener of [...this.sessionExpiredListeners]) {
+      try {
+        listener();
+      } catch {
+        // A listener must never break the request that discovered the expiry.
+      }
+    }
+  }
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
@@ -48,6 +72,7 @@ class ApiService {
 
     if (response.status === 401 && !skipAuth) {
       // Try to refresh token (only once, avoid infinite loops)
+      const hadSession = this.accessToken !== null;
       const refreshed = await this.refreshToken();
       if (refreshed) {
         // Update authorization header with new token and retry ONCE
@@ -74,6 +99,7 @@ class ApiService {
         const data = await retryResponse.json();
         return (data && typeof data === 'object' && 'data' in data) ? data.data : data;
       }
+      if (hadSession) this.notifySessionExpired();
       throw new ApiError('Unauthorized', 401);
     }
 

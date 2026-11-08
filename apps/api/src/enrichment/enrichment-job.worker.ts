@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { EnrichmentClaimService } from './enrichment-claim.service';
 import { EnrichmentTerminalService } from './enrichment-terminal.service';
-import { EnrichmentJob, JobStatus } from '@prisma/client';
+import { EnrichmentJob, MhLegacyJobStatus } from '@prisma/client';
 import { ProviderThrottleService } from './provider-throttle.service';
 
 // The terminal state machine (succeeded / rate-limit deferral / exponential
@@ -355,7 +355,7 @@ export class EnrichmentJobWorker implements OnApplicationBootstrap, OnModuleDest
       await this.prisma.enrichmentJob.update({
         where: { id: job.id },
         data: {
-          status: JobStatus.failed,
+          status: MhLegacyJobStatus.failed,
           lastError: errMsg,
           finishedAt: new Date(),
           // Release the claim/lease on this terminal failure.

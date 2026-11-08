@@ -45,7 +45,7 @@ describe('DatabaseBackupRetentionService (issue #342)', () => {
     order = [];
 
     prisma = {
-      databaseBackupRun: {
+      mhLegacyDatabaseBackupRun: {
         findMany: jest.fn(async ({ where, orderBy }: any) => {
           let out = rows.filter((r) => r.status === where.status);
           if (where.trigger?.not) out = out.filter((r) => r.trigger !== where.trigger.not);
@@ -161,7 +161,7 @@ describe('DatabaseBackupRetentionService (issue #342)', () => {
 
       const result = await service.pruneAfterSuccessfulRun();
 
-      expect(prisma.databaseBackupRun.delete).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.delete).not.toHaveBeenCalled();
       expect(result.prunedByCount).toBe(0);
       expect(result.errors).toBeGreaterThan(0);
       expect(rows.map((r) => r.id)).toContain('victim');
@@ -186,7 +186,7 @@ describe('DatabaseBackupRetentionService (issue #342)', () => {
       const result = await service.pruneAfterSuccessfulRun();
 
       expect(result.prunedByCount).toBe(0);
-      expect(prisma.databaseBackupRun.delete).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.delete).not.toHaveBeenCalled();
     });
 
     it('never prunes a non-completed run by count', async () => {
@@ -309,7 +309,7 @@ describe('DatabaseBackupRetentionService (issue #342)', () => {
     });
 
     it('never throws when a query fails', async () => {
-      prisma.databaseBackupRun.findMany.mockRejectedValue(new Error('boom'));
+      prisma.mhLegacyDatabaseBackupRun.findMany.mockRejectedValue(new Error('boom'));
 
       const result = await service.pruneAfterSuccessfulRun();
 

@@ -37,8 +37,8 @@ export class NodesRegisteredDoctorCheck implements DoctorCheck, OnModuleInit {
 
   async run(): Promise<DoctorCheckOutcome> {
     const [total, online] = await Promise.all([
-      this.prisma.workerNode.count(),
-      this.prisma.workerNode.count({ where: { status: 'online' } }),
+      this.prisma.mhLegacyWorkerNode.count(),
+      this.prisma.mhLegacyWorkerNode.count({ where: { status: 'online' } }),
     ]);
     return decideNodesRegistered(total, online);
   }

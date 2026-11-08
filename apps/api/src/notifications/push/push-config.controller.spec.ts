@@ -6,10 +6,7 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
-import { PERMISSIONS_KEY } from '../../auth/decorators/permissions.decorator';
-import { ROLES_KEY } from '../../auth/decorators/roles.decorator';
-import { PermissionsGuard } from '../../auth/guards/permissions.guard';
-import { RolesGuard } from '../../auth/guards/roles.guard';
+import { PERMISSIONS_KEY, ROLES_KEY, PermissionsGuard, RolesGuard } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
 import {
   generatePushConfigSchema,

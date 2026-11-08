@@ -237,7 +237,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
       grantNodePermissions(context, nodeOwner.id);
       setupCircleMocks(context, nodeOwner.id, CIRCLE_ID, 'collaborator');
       setupActorPermissions(context, ['media:write']);
-      context.prismaMock.workerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
+      context.prismaMock.mhLegacyWorkerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
 
       const itemId = randomUUID();
       const run = makeRunRow({ approvedById: nodeOwner.id, startedById: nodeOwner.id });
@@ -326,7 +326,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
     it('rejects a late node result submission once the job is no longer held by that node (already reaped/re-claimed/completed)', async () => {
       const nodeOwner = await createMockContributorUser(context);
       grantNodePermissions(context, nodeOwner.id);
-      context.prismaMock.workerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
+      context.prismaMock.mhLegacyWorkerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
 
       const itemId = randomUUID();
       const runId = randomUUID();
@@ -385,7 +385,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
       grantNodePermissions(context, nodeOwner.id);
       setupCircleMocks(context, nodeOwner.id, CIRCLE_ID, 'collaborator');
       setupActorPermissions(context, ['media:write']);
-      context.prismaMock.workerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
+      context.prismaMock.mhLegacyWorkerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
 
       const handler = context.module.get(WorkflowExecuteBatchHandler);
 

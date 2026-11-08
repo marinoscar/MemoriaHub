@@ -46,7 +46,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { JobStatus, NodeStatus } from '@prisma/client';
+import { MhLegacyJobStatus, MhLegacyNodeStatus } from '@prisma/client';
 import { z } from 'zod';
 import { NodesService } from './nodes.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -88,7 +88,7 @@ function makeHeldJob(overrides: Record<string, unknown> = {}) {
     type: 'duplicate_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     attempts: 1,
     rateLimitHits: 0,
     claimedByNodeId: NODE_ID,
@@ -162,7 +162,7 @@ describe('NodesService — result/failure ingestion', () => {
     mockObjects = module.get(ObjectsService);
 
     // Default: node exists and is owned by the caller.
-    (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(makeNode());
+    (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(makeNode());
   });
 
   afterEach(() => {
@@ -182,7 +182,7 @@ describe('NodesService — result/failure ingestion', () => {
     });
 
     it('throws ForbiddenException when the node belongs to another user', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ createdById: 'someone-else' }),
       );
 
@@ -201,7 +201,7 @@ describe('NodesService — result/failure ingestion', () => {
 
     it.each([
       ['claimed by another node', { claimedByNodeId: 'other-node' }],
-      ['not running', { status: JobStatus.pending }],
+      ['not running', { status: MhLegacyJobStatus.pending }],
       ['lease missing', { leaseExpiresAt: null }],
       ['lease expired', { leaseExpiresAt: new Date(Date.now() - 1_000) }],
     ])('throws ConflictException (409) when the job is %s', async (_label, override) => {
@@ -403,7 +403,7 @@ describe('NodesService — result/failure ingestion', () => {
       const res = await service.heartbeat(USER_ID, NODE_ID, { concurrency: 8 });
 
       expect(res).toEqual({ ok: true });
-      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.update).toHaveBeenCalledWith({
         where: { id: NODE_ID },
         data: expect.objectContaining({ concurrency: 8 }),
       });
@@ -412,7 +412,7 @@ describe('NodesService — result/failure ingestion', () => {
     it('leaves concurrency untouched when the heartbeat omits it', async () => {
       await service.heartbeat(USER_ID, NODE_ID, {});
 
-      const call = (mockPrisma.workerNode.update as jest.Mock).mock.calls[0][0];
+      const call = (mockPrisma.mhLegacyWorkerNode.update as jest.Mock).mock.calls[0][0];
       expect(call.data).not.toHaveProperty('concurrency');
     });
 
@@ -423,7 +423,7 @@ describe('NodesService — result/failure ingestion', () => {
         concurrency: 12,
       });
 
-      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.update).toHaveBeenCalledWith({
         where: { id: NODE_ID },
         data: expect.objectContaining({
           status: 'draining',
@@ -434,14 +434,14 @@ describe('NodesService — result/failure ingestion', () => {
     });
 
     it('rejects with ForbiddenException when the node belongs to another user (ownership still enforced)', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ createdById: 'someone-else' }),
       );
 
       await expect(
         service.heartbeat(USER_ID, NODE_ID, { concurrency: 5 }),
       ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyWorkerNode.update).not.toHaveBeenCalled();
     });
 
     // NOTE ON THE CLAIM-BOUND SIDE EFFECT: proving that a *subsequent live
@@ -455,17 +455,17 @@ describe('NodesService — result/failure ingestion', () => {
     // a real DB read would after the update commits) and asserts `claim()`
     // reads `node.concurrency` fresh and bounds the claim limit to it.
     it('claim() bounds its limit to a concurrency value newly persisted by heartbeat (simulated DB round-trip)', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValueOnce(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValueOnce(
         makeNode({ concurrency: 2 }),
       );
       await service.heartbeat(USER_ID, NODE_ID, { concurrency: 10 });
-      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.update).toHaveBeenCalledWith({
         where: { id: NODE_ID },
         data: expect.objectContaining({ concurrency: 10 }),
       });
 
       // Simulate the row now reflecting the persisted value on the next read.
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ concurrency: 10 }),
       );
       mockClaimService.claim.mockResolvedValue([]);
@@ -896,18 +896,18 @@ describe('NodesService — result/failure ingestion', () => {
     };
 
     it('creates a new node and returns reattached:false when no (owner, name) row exists', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.workerNode.create as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.mhLegacyWorkerNode.create as jest.Mock).mockResolvedValue(
         makeNode({ id: 'new-node' }),
       );
 
       const res = await service.register(USER_ID, registerDto);
 
       expect(res).toEqual({ nodeId: 'new-node', reattached: false });
-      expect(mockPrisma.workerNode.findUnique).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.findUnique).toHaveBeenCalledWith({
         where: { createdById_name: { createdById: USER_ID, name: 'worker-a' } },
       });
-      expect(mockPrisma.workerNode.create).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           name: 'worker-a',
           hostname: 'replica-1',
@@ -916,12 +916,12 @@ describe('NodesService — result/failure ingestion', () => {
           createdById: USER_ID,
         }),
       });
-      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyWorkerNode.update).not.toHaveBeenCalled();
     });
 
     it('reattaches to an existing (owner, name) row: refreshes fields, flips status online, returns reattached:true', async () => {
       // A stale row left behind by a previous container run.
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({
           id: 'existing-node',
           name: 'worker-a',
@@ -929,14 +929,14 @@ describe('NodesService — result/failure ingestion', () => {
           lastHeartbeatAt: new Date(Date.now() - 3_600_000),
         }),
       );
-      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.update as jest.Mock).mockResolvedValue(
         makeNode({ id: 'existing-node' }),
       );
 
       const res = await service.register(USER_ID, registerDto);
 
       expect(res).toEqual({ nodeId: 'existing-node', reattached: true });
-      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.update).toHaveBeenCalledWith({
         where: { id: 'existing-node' },
         data: expect.objectContaining({
           hostname: 'replica-1',
@@ -948,14 +948,14 @@ describe('NodesService — result/failure ingestion', () => {
           lastHeartbeatAt: expect.any(Date),
         }),
       });
-      expect(mockPrisma.workerNode.create).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyWorkerNode.create).not.toHaveBeenCalled();
     });
 
     it('warns (last writer wins) but still reattaches when the existing row has a FRESH heartbeat', async () => {
       const warnSpy = jest
         .spyOn(service['logger'], 'warn')
         .mockImplementation(() => undefined);
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({
           id: 'existing-node',
           name: 'worker-a',
@@ -963,7 +963,7 @@ describe('NodesService — result/failure ingestion', () => {
           lastHeartbeatAt: new Date(Date.now() - 1_000),
         }),
       );
-      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.update as jest.Mock).mockResolvedValue(
         makeNode({ id: 'existing-node' }),
       );
 
@@ -977,13 +977,13 @@ describe('NodesService — result/failure ingestion', () => {
       const warnSpy = jest
         .spyOn(service['logger'], 'warn')
         .mockImplementation(() => undefined);
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({
           id: 'existing-node',
           lastHeartbeatAt: new Date(Date.now() - 3_600_000),
         }),
       );
-      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.update as jest.Mock).mockResolvedValue(
         makeNode({ id: 'existing-node' }),
       );
 
@@ -995,18 +995,18 @@ describe('NodesService — result/failure ingestion', () => {
     it('scopes the lookup by owner: the same name under a DIFFERENT user creates a separate row', async () => {
       // No row exists for THIS user + name (another user's identically-named
       // node does not match the compound unique lookup).
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
-      (mockPrisma.workerNode.create as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.mhLegacyWorkerNode.create as jest.Mock).mockResolvedValue(
         makeNode({ id: 'other-users-node', createdById: 'user-2' }),
       );
 
       const res = await service.register('user-2', registerDto);
 
       expect(res).toEqual({ nodeId: 'other-users-node', reattached: false });
-      expect(mockPrisma.workerNode.findUnique).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.findUnique).toHaveBeenCalledWith({
         where: { createdById_name: { createdById: 'user-2', name: 'worker-a' } },
       });
-      expect(mockPrisma.workerNode.create).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ createdById: 'user-2', name: 'worker-a' }),
       });
     });
@@ -1014,30 +1014,30 @@ describe('NodesService — result/failure ingestion', () => {
     it('falls back to reattach when a concurrent replica wins the find-then-create race (P2002)', async () => {
       const racedRow = makeNode({ id: 'raced-node', name: 'worker-a' });
       // First lookup: no row yet; second lookup (post-P2002): the winner's row.
-      (mockPrisma.workerNode.findUnique as jest.Mock)
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock)
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(racedRow);
-      (mockPrisma.workerNode.create as jest.Mock).mockRejectedValue(
+      (mockPrisma.mhLegacyWorkerNode.create as jest.Mock).mockRejectedValue(
         Object.assign(new Error('unique violation'), { code: 'P2002' }),
       );
-      (mockPrisma.workerNode.update as jest.Mock).mockResolvedValue(racedRow);
+      (mockPrisma.mhLegacyWorkerNode.update as jest.Mock).mockResolvedValue(racedRow);
 
       const res = await service.register(USER_ID, registerDto);
 
       expect(res).toEqual({ nodeId: 'raced-node', reattached: true });
-      expect(mockPrisma.workerNode.update).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyWorkerNode.update).toHaveBeenCalledWith({
         where: { id: 'raced-node' },
         data: expect.objectContaining({ status: 'online' }),
       });
     });
 
     it('rethrows non-P2002 create errors unchanged', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(null);
       const boom = Object.assign(new Error('connection lost'), { code: 'P1001' });
-      (mockPrisma.workerNode.create as jest.Mock).mockRejectedValue(boom);
+      (mockPrisma.mhLegacyWorkerNode.create as jest.Mock).mockRejectedValue(boom);
 
       await expect(service.register(USER_ID, registerDto)).rejects.toBe(boom);
-      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyWorkerNode.update).not.toHaveBeenCalled();
     });
   });
 
@@ -1048,11 +1048,11 @@ describe('NodesService — result/failure ingestion', () => {
   describe('getNode', () => {
     it('returns { ...node, health, jobCounts } for a node owned by the caller', async () => {
       const node = makeNode({ lastHeartbeatAt: new Date() });
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(node);
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(node);
       (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([
-        { claimedByNodeId: NODE_ID, status: JobStatus.running, _count: { _all: 2 } },
-        { claimedByNodeId: NODE_ID, status: JobStatus.succeeded, _count: { _all: 5 } },
-        { claimedByNodeId: NODE_ID, status: JobStatus.failed, _count: { _all: 1 } },
+        { claimedByNodeId: NODE_ID, status: MhLegacyJobStatus.running, _count: { _all: 2 } },
+        { claimedByNodeId: NODE_ID, status: MhLegacyJobStatus.succeeded, _count: { _all: 5 } },
+        { claimedByNodeId: NODE_ID, status: MhLegacyJobStatus.failed, _count: { _all: 1 } },
       ]);
 
       const result = await service.getNode(USER_ID, NODE_ID);
@@ -1066,7 +1066,7 @@ describe('NodesService — result/failure ingestion', () => {
 
     it('defaults jobCounts to zeros when the node has no claimed jobs', async () => {
       const node = makeNode({ lastHeartbeatAt: new Date() });
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(node);
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(node);
       (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
 
       const result = await service.getNode(USER_ID, NODE_ID);
@@ -1075,7 +1075,7 @@ describe('NodesService — result/failure ingestion', () => {
     });
 
     it('throws NotFoundException when the node does not exist', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(service.getNode(USER_ID, NODE_ID)).rejects.toBeInstanceOf(
         NotFoundException,
@@ -1083,7 +1083,7 @@ describe('NodesService — result/failure ingestion', () => {
     });
 
     it('throws ForbiddenException when the node belongs to another user', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ createdById: 'someone-else' }),
       );
 
@@ -1123,9 +1123,9 @@ describe('NodesService — result/failure ingestion', () => {
 
     /** Run the sweep and hand back the predicate it issued. */
     async function sweepWhere(): Promise<any> {
-      (mockPrisma.workerNode.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyWorkerNode.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
       await service.markStaleNodesOffline();
-      return (mockPrisma.workerNode.updateMany as jest.Mock).mock.calls[0][0].where;
+      return (mockPrisma.mhLegacyWorkerNode.updateMany as jest.Mock).mock.calls[0][0].where;
     }
 
     afterEach(() => {
@@ -1134,18 +1134,18 @@ describe('NodesService — result/failure ingestion', () => {
     });
 
     it('issues ONE set-based updateMany to offline and returns the count', async () => {
-      (mockPrisma.workerNode.updateMany as jest.Mock).mockResolvedValue({ count: 4 });
+      (mockPrisma.mhLegacyWorkerNode.updateMany as jest.Mock).mockResolvedValue({ count: 4 });
 
       const transitioned = await service.markStaleNodesOffline();
 
       expect(transitioned).toBe(4);
-      expect(mockPrisma.workerNode.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mhLegacyWorkerNode.updateMany).toHaveBeenCalledTimes(1);
       expect(
-        (mockPrisma.workerNode.updateMany as jest.Mock).mock.calls[0][0].data,
-      ).toEqual({ status: NodeStatus.offline });
+        (mockPrisma.mhLegacyWorkerNode.updateMany as jest.Mock).mock.calls[0][0].data,
+      ).toEqual({ status: MhLegacyNodeStatus.offline });
       // Never a read-then-write-per-row loop.
-      expect(mockPrisma.workerNode.update).not.toHaveBeenCalled();
-      expect(mockPrisma.workerNode.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyWorkerNode.update).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyWorkerNode.findMany).not.toHaveBeenCalled();
     });
 
     it('transitions an ONLINE node whose heartbeat is stale past the threshold', async () => {
@@ -1153,7 +1153,7 @@ describe('NodesService — result/failure ingestion', () => {
 
       expect(
         matchesWhere(where, {
-          status: NodeStatus.online,
+          status: MhLegacyNodeStatus.online,
           lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
         }),
       ).toBe(true);
@@ -1164,7 +1164,7 @@ describe('NodesService — result/failure ingestion', () => {
 
       expect(
         matchesWhere(where, {
-          status: NodeStatus.draining,
+          status: MhLegacyNodeStatus.draining,
           lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
         }),
       ).toBe(true);
@@ -1173,10 +1173,10 @@ describe('NodesService — result/failure ingestion', () => {
     it('NEVER transitions a DISABLED node, no matter how stale — admin intent must survive', async () => {
       const where = await sweepWhere();
 
-      expect(where.status.in).not.toContain(NodeStatus.disabled);
+      expect(where.status.in).not.toContain(MhLegacyNodeStatus.disabled);
       expect(
         matchesWhere(where, {
-          status: NodeStatus.disabled,
+          status: MhLegacyNodeStatus.disabled,
           lastHeartbeatAt: new Date(Date.now() - 365 * 24 * 60 * MINUTE),
         }),
       ).toBe(false);
@@ -1185,10 +1185,10 @@ describe('NodesService — result/failure ingestion', () => {
     it('excludes already-OFFLINE nodes — that status is terminal, so the sweep is a no-op for them', async () => {
       const where = await sweepWhere();
 
-      expect(where.status.in).toEqual([NodeStatus.online, NodeStatus.draining]);
+      expect(where.status.in).toEqual([MhLegacyNodeStatus.online, MhLegacyNodeStatus.draining]);
       expect(
         matchesWhere(where, {
-          status: NodeStatus.offline,
+          status: MhLegacyNodeStatus.offline,
           lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
         }),
       ).toBe(false);
@@ -1199,7 +1199,7 @@ describe('NodesService — result/failure ingestion', () => {
 
       expect(
         matchesWhere(where, {
-          status: NodeStatus.online,
+          status: MhLegacyNodeStatus.online,
           lastHeartbeatAt: new Date(),
         }),
       ).toBe(false);
@@ -1207,7 +1207,7 @@ describe('NodesService — result/failure ingestion', () => {
       // first missed heartbeat would make the status column flap.
       expect(
         matchesWhere(where, {
-          status: NodeStatus.online,
+          status: MhLegacyNodeStatus.online,
           lastHeartbeatAt: new Date(Date.now() - 2 * MINUTE),
         }),
       ).toBe(false);
@@ -1219,7 +1219,7 @@ describe('NodesService — result/failure ingestion', () => {
       // Registered long ago, never checked in — swept.
       expect(
         matchesWhere(where, {
-          status: NodeStatus.online,
+          status: MhLegacyNodeStatus.online,
           lastHeartbeatAt: null,
           registeredAt: new Date(Date.now() - 60 * MINUTE),
         }),
@@ -1227,7 +1227,7 @@ describe('NodesService — result/failure ingestion', () => {
       // Registered seconds ago and still coming up — left alone.
       expect(
         matchesWhere(where, {
-          status: NodeStatus.online,
+          status: MhLegacyNodeStatus.online,
           lastHeartbeatAt: null,
           registeredAt: new Date(),
         }),
@@ -1288,9 +1288,9 @@ describe('NodesService — result/failure ingestion', () => {
       // The whole point of the sweep is that the status column and the
       // heartbeat-derived health stop contradicting each other in the admin
       // fleet view. Post-sweep, the status short-circuit wins.
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({
-          status: NodeStatus.offline,
+          status: MhLegacyNodeStatus.offline,
           lastHeartbeatAt: new Date(Date.now() - 60 * MINUTE),
         }),
       );

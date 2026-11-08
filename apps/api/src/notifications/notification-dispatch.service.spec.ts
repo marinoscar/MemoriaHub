@@ -1,5 +1,5 @@
 /** NotificationDispatchService (epic #481, issue #484). */
-import { Notification } from '@prisma/client';
+import { MhLegacyNotification } from '@prisma/client';
 
 import {
   NOTIFICATION_DISPATCHED_EVENT,
@@ -10,7 +10,7 @@ import { DEFAULT_NOTIFICATION_POLICY } from './notification-policy.service';
 
 const VAPID = { publicKey: 'P', privateKey: 'K', subject: 'mailto:a@example.com' };
 
-function row(overrides: Partial<Notification> = {}): Notification {
+function row(overrides: Partial<MhLegacyNotification> = {}): MhLegacyNotification {
   return {
     id: 'n-1',
     userId: 'u-1',
@@ -25,13 +25,13 @@ function row(overrides: Partial<Notification> = {}): Notification {
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
-  } as Notification;
+  } as MhLegacyNotification;
 }
 
 function build(opts: { policy?: any; pushPref?: boolean; subs?: number; vapid?: any; sent?: boolean } = {}) {
   const prisma = {
-    pushSubscription: { count: jest.fn().mockResolvedValue(opts.subs ?? 1) },
-    notificationDelivery: {
+    mhLegacyPushSubscription: { count: jest.fn().mockResolvedValue(opts.subs ?? 1) },
+    mhLegacyNotificationDelivery: {
       create: jest.fn().mockResolvedValue({ id: 'd-1' }),
       update: jest.fn().mockResolvedValue({}),
     },
@@ -71,7 +71,7 @@ describe('NotificationDispatchService', () => {
     await t.svc.drain();
 
     expect(t.channel.deliver).toHaveBeenCalledWith(expect.objectContaining({ id: 'n-1' }), VAPID);
-    expect(t.prisma.notificationDelivery.create).toHaveBeenCalledWith(
+    expect(t.prisma.mhLegacyNotificationDelivery.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
           notificationId: 'n-1',
@@ -82,7 +82,7 @@ describe('NotificationDispatchService', () => {
         },
       }),
     );
-    expect(t.prisma.notificationDelivery.update).toHaveBeenCalledWith(
+    expect(t.prisma.mhLegacyNotificationDelivery.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'd-1' }, data: expect.objectContaining({ status: 'sent', error: null }) }),
     );
     expect(t.events.emit).toHaveBeenCalledWith(
@@ -101,7 +101,7 @@ describe('NotificationDispatchService', () => {
     const t = build({ sent: false });
     t.svc.dispatch(row());
     await t.svc.drain();
-    expect(t.prisma.notificationDelivery.update).toHaveBeenCalledWith(
+    expect(t.prisma.mhLegacyNotificationDelivery.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed', error: expect.stringMatching(/Push failed/) }) }),
     );
     expect(t.events.emit.mock.calls[0][1].pushed).toBe(false);
@@ -118,7 +118,7 @@ describe('NotificationDispatchService', () => {
     t.svc.dispatch(row());
     await t.svc.drain();
     expect(t.channel.deliver).not.toHaveBeenCalled();
-    expect(t.prisma.notificationDelivery.create).not.toHaveBeenCalled();
+    expect(t.prisma.mhLegacyNotificationDelivery.create).not.toHaveBeenCalled();
     // The SSE event still fires so an open tab can update its inbox.
     expect(t.events.emit).toHaveBeenCalledTimes(1);
     expect(t.events.emit.mock.calls[0][1].pushed).toBe(false);
@@ -178,11 +178,11 @@ describe('NotificationDispatchService', () => {
 
   it('a delivery-row write failure does not stop the push', async () => {
     const t = build();
-    t.prisma.notificationDelivery.create.mockRejectedValue(new Error('db'));
+    t.prisma.mhLegacyNotificationDelivery.create.mockRejectedValue(new Error('db'));
     t.svc.dispatch(row());
     await t.svc.drain();
     expect(t.channel.deliver).toHaveBeenCalled();
-    expect(t.prisma.notificationDelivery.update).not.toHaveBeenCalled();
+    expect(t.prisma.mhLegacyNotificationDelivery.update).not.toHaveBeenCalled();
   });
 
   it('works without an EventEmitter2', async () => {
@@ -210,12 +210,12 @@ describe('NotificationDispatchService', () => {
     const destroyed = t.svc.onModuleDestroy();
     release();
     await destroyed;
-    expect(t.prisma.notificationDelivery.update).toHaveBeenCalled();
+    expect(t.prisma.mhLegacyNotificationDelivery.update).toHaveBeenCalled();
   });
 
   it('hasActivePushSubscription is false on error', async () => {
     const t = build();
-    t.prisma.pushSubscription.count.mockRejectedValueOnce(new Error('x'));
+    t.prisma.mhLegacyPushSubscription.count.mockRejectedValueOnce(new Error('x'));
     await expect(t.svc.hasActivePushSubscription('u')).resolves.toBe(false);
   });
 });
