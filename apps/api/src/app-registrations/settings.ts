@@ -30,6 +30,7 @@
 // =============================================================================
 
 import { AI_SYSTEM_SETTINGS } from '@marinoscar/platform-api/ai';
+import { ONBOARDING_USER_SETTINGS } from '@marinoscar/platform-api/onboarding';
 import type {
   SettingsDefaultsOverride,
   SystemSettingsNamespace,
@@ -128,6 +129,11 @@ export const APP_USER_SETTINGS_NAMESPACES: readonly UserSettingsNamespace[] = [
   NOTIFICATIONS_USER_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D3)
   MEMORIES_USER_SETTINGS,
   TIMEZONE_USER_SETTINGS,
+  // RETRO-H3 (#599): the platform onboarding slice's UI state (welcomeSeenAt, checklistDismissedAt,
+  // adminDismissedAt, skipped), declared by `@marinoscar/platform-api/onboarding` and extended below
+  // by `MEMORIAHUB_ONBOARDING_SETTINGS_EXTENSION`. Its merge refuses a `skipped` id that is not a
+  // registered, skippable step (`platform/onboarding/onboarding.manifest.ts`).
+  ONBOARDING_USER_SETTINGS,
 ] as unknown as readonly UserSettingsNamespace[];
 
 /** Fields this app stores in a platform-declared user namespace that the platform lacks. */

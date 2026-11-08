@@ -34,7 +34,7 @@ const SYSTEM_KEYS = [
   'pictureEnhancement', 'backup', 'workflows', 'memories',
   'telemetry', // the telemetry slice's declaration, appended by the app (RETRO-T2)
 ];
-const USER_KEYS = ['dataTables', 'navigation', 'search', 'notifications', 'memories', 'timezone'];
+const USER_KEYS = ['dataTables', 'navigation', 'search', 'notifications', 'memories', 'timezone', 'onboarding'];
 
 describe('settings registry', () => {
   let h: SettingsHarness;
@@ -310,6 +310,17 @@ describe('settings registry', () => {
         timezone: 'Europe/Paris',
       });
       expect(raw.profile).toMatchObject({ displayName: 'Person A', imageSource: 'provider' });
+    });
+
+    it('stores the onboarding namespace with MemoriaHub\'s establishedAt field (RETRO-H3)', async () => {
+      h.user.seed(userId, { theme: 'system', profile: {} });
+      const at = '2026-11-08T10:00:00.000Z';
+      await h.user.patch(userId, { onboarding: { establishedAt: at, welcomeSeenAt: at } } as never);
+      expect(h.user.raw(userId)['onboarding']).toEqual({ establishedAt: at, welcomeSeenAt: at });
+      // `reopen` (the "Getting started" menu item) clears the platform fields only.
+      await h.user.patch(userId, { onboarding: { welcomeSeenAt: null } } as never);
+      expect(h.user.raw(userId)['onboarding']).toEqual({ establishedAt: at });
+      await expect(async () => h.user.patch(userId, { onboarding: { establishedAt: 'yesterday' } } as never)).rejects.toThrow();
     });
 
     it('refuses to point the platform picture at an uploaded object (the avatar is the app\'s own)', async () => {

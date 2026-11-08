@@ -13,7 +13,6 @@ import {
   registerUserSettingsNamespaces,
   type UserSettingsNamespace,
 } from '@marinoscar/platform-api/settings';
-import { ONBOARDING_USER_SETTINGS } from '@marinoscar/platform-api/onboarding';
 
 import {
   APP_USER_SETTINGS_EXTENSIONS,
@@ -24,9 +23,6 @@ import {
 export const PLATFORM_USER_SETTINGS_NAMESPACES: readonly UserSettingsNamespace[] = [
   DATA_TABLES_USER_SETTINGS as UserSettingsNamespace,
   NAVIGATION_USER_SETTINGS as UserSettingsNamespace,
-  // RETRO-H3 (#599): the onboarding slice's UI state (welcomeSeenAt, checklistDismissedAt,
-  // adminDismissedAt, skipped), extended by `MEMORIAHUB_ONBOARDING_SETTINGS_EXTENSION`.
-  ONBOARDING_USER_SETTINGS as unknown as UserSettingsNamespace,
 ];
 
 /** The final, ordered list this deployment registers. */
