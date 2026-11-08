@@ -23,7 +23,7 @@ const SYSTEM_MODELS = [
   'MediaEnhancement', 'MediaEnhancementBatch', 'Memory', 'MemoryItem', 'MemoryUserState', 'MediaSyncDevice',
   'MediaSyncRun', 'MediaSyncDiagnosticReport', 'NodeBackupConfig', 'NodeBackupRun', 'EnrichmentJob',
   'AiProviderCredential', 'FaceProviderCredential', 'GeoProviderCredential', 'StorageProviderCredential',
-  'StorageMigrationRun', 'StorageMigrationItem', 'MhLegacyNotification', 'MhLegacyPushSubscription',
+  'MhLegacyStorageMigrationRun', 'MhLegacyStorageMigrationItem', 'MhLegacyNotification', 'MhLegacyPushSubscription',
   'MhLegacyNotificationDelivery', 'MhLegacyNotificationBroadcast', 'MhLegacyWorkerNode',
   'MhLegacyNodeCredential', 'MhLegacyDatabaseBackupRun', 'MhLegacyAndroidAppRelease',
 ] as const satisfies readonly Prisma.ModelName[];

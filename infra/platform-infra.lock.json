@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-next.22",
+  "version": "0.1.0-next.27",
   "identity": {
     "cliName": "memoriahub",
     "envPrefix": "MEMORIAHUB_",
@@ -16,7 +16,7 @@
         "infra/compose/devdb.compose.yml": "3eb626711e6a4cd68178fe09ed8449c10c9c862782f1797891ad2a61bf9f6441",
         "infra/compose/prod.compose.yml": "027ca7b6c38af5c056a465d849af205528f78a3c2ebc6a57b7a8534877125e6a",
         "infra/compose/vps.compose.yml": "0f1cf995d83c6184a886a9b6500500e96ded567e88246f192593e26bc6ede0fd",
-        "infra/compose/worker.compose.yml": "9704b77f92d253a3e367d3514140eea6c4fd9744a5539680e601629616d5530d",
+        "infra/compose/worker.compose.yml": "19e0fc305e43f0480d06960c68a832380d0a2895b2e2f370e3b1cc7ce1898ddd",
         "infra/compose/worker.build.compose.yml": "8675ce8b0dfb5e8de057d9fed224bea918abfebf6c856d8c643156baf28c27d8",
         "infra/compose/test.compose.yml": "79bce51e7e427297b57e9c95eba579010041cb4988eba33780f1537762415b1a",
         "infra/compose/postgres-init/10-application-role.sh": "a7ea0ac5bdd7fa7537a3653e9e0c92fa8ca512718b1a7de60832666552dfb1f0"
@@ -38,7 +38,7 @@
     "env": {
       "files": {
         "infra/compose/.env.example": "f4480510975bd626b81cdd528ca068bcdce317d2883c6fd2fe99fa0ca0fad0d8",
-        "infra/compose/.env.worker.example": "b89f963f81d62ba31a76ed57cfaf9bcf8403bd69c1eb8dbe0223b01579ea40bc"
+        "infra/compose/.env.worker.example": "af78299cba0a9c90efac1daca2b385e2f4237684a83f2e3fb3dc8e8116893a5c"
       }
     },
     "telemetry": {

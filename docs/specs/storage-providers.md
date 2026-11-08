@@ -189,6 +189,8 @@ A migration run copies objects from a source provider to a target provider at ba
 
 ### Run / Item Tables
 
+> **RETRO-A5b (#653).** These two tables are now `mh_legacy_storage_migration_runs` / `mh_legacy_storage_migration_items` (models `MhLegacyStorageMigrationRun` / `MhLegacyStorageMigrationItem`, enums `MhLegacyStorageMigrationStatus` / `MhLegacyStorageMigrationItemStatus`): platform migration `0042_add_storage_migrations` creates its own `storage_migration_*` tables of a different shape. The names below are the original ones; the behaviour is unchanged until RETRO-D1 moves the feature onto the platform storage slice.
+
 | Table | Purpose |
 |-------|---------|
 | `storage_migration_runs` | One row per migration run; tracks overall status and counts |
