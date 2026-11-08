@@ -1,5 +1,5 @@
 /** broadcast_chunk (issue #488): paging, per-group CAS cursor, cancel, finish, successor. */
-import { EnrichmentJob } from '@prisma/client';
+import type { Job } from '@marinoscar/platform-api/jobs';
 
 import { BroadcastChunkHandler } from './broadcast-chunk.handler';
 import {
@@ -11,8 +11,8 @@ import {
 const BID = '11111111-1111-4111-8111-111111111111';
 const CUTOFF = new Date('2030-01-01T00:00:00Z');
 
-function job(): EnrichmentJob {
-  return { id: 'job-c', type: BROADCAST_CHUNK_TYPE, payload: { broadcastId: BID } } as unknown as EnrichmentJob;
+function job(): Job {
+  return { id: 'job-c', type: BROADCAST_CHUNK_TYPE, payload: { broadcastId: BID } } as unknown as Job;
 }
 
 function users(n: number, from = 0) {
