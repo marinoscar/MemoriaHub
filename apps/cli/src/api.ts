@@ -435,6 +435,77 @@ export interface JobInsights {
   };
 }
 
+/**
+ * The answer of `GET /api/admin/jobs/insights` since the server's queue became the platform's
+ * (RETRO-C1, #575): `generatedAt` instead of `computedAt`, no top-level `live.pending` / `running`
+ * / `failed` (they are in `live.byStatus`), and `eta` an array with one entry per type that has
+ * work outstanding (`estimatedMs`) instead of an object with a total.
+ */
+export interface PlatformJobInsights {
+  generatedAt: string;
+  windowDays: number;
+  concurrency: number;
+  live: {
+    total: number;
+    byStatus: { pending: number; running: number; succeeded: number; failed: number };
+    scheduled: number;
+    rateLimited: number;
+    retried: number;
+    byType: Array<{ type: string; pending: number; running: number; succeeded: number; failed: number; total: number }>;
+  };
+  history: JobInsights['history'];
+  eta: Array<{
+    type: string;
+    remaining: number;
+    avgMs: number;
+    basis: 'live' | 'partial' | 'none';
+    estimatedMs: number;
+  }>;
+}
+
+/**
+ * The CLI's own insights shape from either answer: the platform's (above) or the pre-cutover one,
+ * which is returned unchanged. The queue ETA is the sum of the per-type estimates (every type shares
+ * the same worker slots; the server divides each by its concurrency), its basis the weakest of theirs.
+ */
+export function normalizeJobInsights(raw: PlatformJobInsights | JobInsights): JobInsights {
+  if (!Array.isArray((raw as PlatformJobInsights).eta)) return raw as JobInsights;
+
+  const platform = raw as PlatformJobInsights;
+  const outstanding = platform.eta.filter((entry) => entry.remaining > 0);
+  const basisRank = { live: 0, partial: 1, none: 2 } as const;
+  const basis = outstanding.reduce<'live' | 'partial' | 'none'>(
+    (worst, entry) => (basisRank[entry.basis] > basisRank[worst] ? entry.basis : worst),
+    'live',
+  );
+  const totalRemaining = outstanding.reduce((sum, entry) => sum + entry.remaining, 0);
+  const etaMs = outstanding.length === 0 ? 0 : basis === 'none' ? null : outstanding.reduce((sum, entry) => sum + entry.estimatedMs, 0);
+
+  return {
+    computedAt: platform.generatedAt,
+    windowDays: platform.windowDays,
+    concurrency: platform.concurrency,
+    live: {
+      ...platform.live,
+      pending: platform.live.byStatus.pending,
+      running: platform.live.byStatus.running,
+      failed: platform.live.byStatus.failed,
+    },
+    history: platform.history,
+    eta: {
+      totalRemaining,
+      etaMs,
+      basis: outstanding.length === 0 ? 'none' : basis,
+      perType: platform.eta.map((entry) => ({
+        type: entry.type,
+        remaining: entry.remaining,
+        avgMs: entry.basis === 'none' ? null : entry.avgMs,
+        etcMs: entry.basis === 'none' ? null : entry.estimatedMs,
+      })),
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Worker-node types
 // ---------------------------------------------------------------------------
@@ -1048,9 +1119,9 @@ export class ApiClient {
   }
 
   /** Fetch live job queue insights. windowDays defaults to 7 on the server. */
-  getJobInsights(windowDays?: number): Promise<JobInsights> {
+  async getJobInsights(windowDays?: number): Promise<JobInsights> {
     const qs = windowDays !== undefined ? `?windowDays=${windowDays}` : '';
-    return this.get<JobInsights>(`/api/admin/jobs/insights${qs}`);
+    return normalizeJobInsights(await this.get<PlatformJobInsights | JobInsights>(`/api/admin/jobs/insights${qs}`));
   }
 
   // -------------------------------------------------------------------------

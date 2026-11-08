@@ -30,7 +30,6 @@ export const APP_ENV_SPEC: EnvSpecFragment = {
     APP_BIND_PORT: { validate: validatePort },
     DB_CONNECTION_LIMIT: { validate: validatePositiveInteger },
     DEVICE_PAT_TTL_DAYS: { validate: validatePositiveInteger },
-    ENRICHMENT_WORKER_CONCURRENCY: { validate: validatePositiveInteger },
     FACE_VECTOR_BACKEND: { validate: oneOf('pgvector', 'app') },
     GEO_PROVIDER: { validate: oneOf('offline', 'nominatim') },
     GEO_FORWARD_SEARCH_ENABLED: { validate: validateBoolean },
