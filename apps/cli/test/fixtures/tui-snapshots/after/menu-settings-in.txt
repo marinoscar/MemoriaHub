@@ -1,0 +1,16 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub CLI v1.4.0 · Home › Settings                                                         │
+│                                                                                                  │
+│  Choose an entry. Esc goes up one level.                                                         │
+│                                                                                                  │
+│  ❯ 1. Manage folders                                                                             │
+│    2. Manage circles                                                                             │
+│    3. App settings                                                                               │
+│    4. Login / Change server                                                                      │
+│    5. Android app (build, publish, releases)                                                     │
+│    6. Factory reset (delete all local data)                                                      │
+│                                                                                                  │
+│  ↑↓ move  ·  enter select  ·  1-9 jump  ·  esc back  ·  ctrl-c exit                              │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

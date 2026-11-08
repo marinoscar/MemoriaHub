@@ -1,0 +1,17 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub CLI v1.4.0 · Menu                                                                    │
+│                                                                                                  │
+│  Server: https://app.example.test                                                                │
+│                                                                                                  │
+│  ❯ 1. Login / Change server                                                                      │
+│    2. Scan ▸                                                                                     │
+│    3. File Tools ▸                                                                               │
+│    4. Settings ▸                                                                                 │
+│    5. Help                                                                                       │
+│    6. Deploy  (this server)                                                                      │
+│    Quit                                                                                          │
+│                                                                                                  │
+│  ↑↓ move  ·  enter select  ·  1-9 jump  ·  q quit  ·  ctrl-c exit                                │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

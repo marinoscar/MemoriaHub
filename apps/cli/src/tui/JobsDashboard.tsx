@@ -16,7 +16,7 @@ import Spinner from 'ink-spinner';
 import type { ApiClient, JobInsights } from '../api.js';
 import { formatDuration } from '../format-duration.js';
 import { BOX_BORDER } from './theme.js';
-import { renderTui } from './raw-mode.js';
+import { renderTui } from './render-tui.js';
 
 // ---------------------------------------------------------------------------
 // Props

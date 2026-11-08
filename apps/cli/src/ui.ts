@@ -14,7 +14,7 @@ import chalk from 'chalk';
 import ora, { Ora } from 'ora';
 import boxen from 'boxen';
 import Table from 'cli-table3';
-import { brandColorize } from './tui/theme.js';
+import { brandColorize } from './brand.js';
 
 // ---------------------------------------------------------------------------
 // TTY / color detection

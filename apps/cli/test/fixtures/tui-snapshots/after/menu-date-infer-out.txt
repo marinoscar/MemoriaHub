@@ -1,0 +1,12 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub CLI v1.4.0 · Home › File Tools › Date Inference                                      │
+│                                                                                                  │
+│  Choose an entry. Esc goes up one level.                                                         │
+│                                                                                                  │
+│  ❯ 1. Diagnose (report only)…                                                                    │
+│    2. Infer & write dates…                                                                       │
+│                                                                                                  │
+│  ↑↓ move  ·  enter select  ·  1-9 jump  ·  esc back  ·  ctrl-c exit                              │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -1,13 +1,16 @@
 /**
- * test/tui/raw-mode.spec.ts
+ * test/tui/render-tui.spec.ts  (was raw-mode.spec.ts; RETRO-F4, #582)
  *
- * Unit tests for tui/raw-mode.ts — the safe Ink launch + raw-mode resolution
- * module that fixes the `setRawMode EIO` crash on terminals that can't
- * support raw mode (serial/LXC/hypervisor consoles, redirected stdin).
+ * Unit tests for tui/render-tui.ts, the safe Ink launch the two standalone
+ * dashboards (`jobs`, `scan`) use. The raw-mode probe and the `/dev/tty`
+ * fallback it relies on moved to the platform (`canUseRawMode`,
+ * `resolveInteractiveStdin` in `@marinoscar/platform-cli/tui`), so the 1.3
+ * `canUseRawMode` cases now run against the platform export and every
+ * `renderTui` case runs unchanged against the new module: this still fixes the
+ * `setRawMode EIO` crash on terminals that can't support raw mode
+ * (serial/LXC/hypervisor consoles, redirected stdin).
  *
- * `canUseRawMode` is tested directly. `resolveInteractiveStdin` has no
- * separate export (it reads the real `process.stdin` / opens `/dev/tty`
- * internally), so it is exercised indirectly through `renderTui`, with
+ * `resolveInteractiveStdin` is exercised through `renderTui`, with
  * `process.stdin`/`process.stdout.isTTY` stubbed and `node:fs`'s `openSync`
  * mocked. Ink's `render` is mocked via jest.unstable_mockModule since this
  * module calls it directly as a side-effecting launcher rather than being a
@@ -15,6 +18,7 @@
  * that shape in this repo.
  */
 
+import { createRequire } from 'node:module';
 import { jest } from '@jest/globals';
 
 // ---------------------------------------------------------------------------
@@ -26,13 +30,18 @@ jest.unstable_mockModule('ink', () => ({
   render: mockRender,
 }));
 
+// Only `openSync` is replaced: the platform's TUI module graph reads other `node:fs` exports
+// (readFileSync, ...) when it loads, so the rest of the real module stays.
 const mockOpenSync = jest.fn();
+const realFs = createRequire(import.meta.url)('node:fs') as Record<string, unknown>;
 jest.unstable_mockModule('node:fs', () => ({
-  default: { openSync: mockOpenSync },
+  ...realFs,
+  default: { ...realFs, openSync: mockOpenSync },
   openSync: mockOpenSync,
 }));
 
-const { canUseRawMode, renderTui } = await import('../../src/tui/raw-mode.js');
+const { canUseRawMode } = await import('@marinoscar/platform-cli/tui');
+const { renderTui } = await import('../../src/tui/render-tui.js');
 
 // ---------------------------------------------------------------------------
 // canUseRawMode

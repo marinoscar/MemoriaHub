@@ -1,0 +1,35 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│                                                                                                  │
+│   MemoriaHub CLI — Help  ·  v1.4.0                                                               │
+│                                                                                                  │
+│   Use the interactive menu to manage folders, scan, and run syncs.                               │
+│   Run `memoriahub` (no args) or `memoriahub menu` to open this UI.                               │
+│                                                                                                  │
+│   Navigating the menu:                                                                           │
+│     ↑/↓ or j/k   move   ·   Enter select   ·   1-9 jump straight to an item                      │
+│     Esc          back one level (not all the way to the root)   ·   q  quit from the main menu   │
+│     ▸ marks a submenu   ·   … marks an action that asks something first                          │
+│                                                                                                  │
+│   Headless commands (bypass TUI):                                                                │
+│     memoriahub login      Configure server + PAT                                                 │
+│     memoriahub import     Import a folder once (add + sync)                                      │
+│     memoriahub sync       Run a sync (add --scan to reconcile a prior scan)                      │
+│     memoriahub scan       Dry-run preview: report what a sync would do                           │
+│     memoriahub organize   Move files into YEAR/MM - Month/ folders by capture date               │
+│     memoriahub screenshots  Find (and optionally move/delete) screenshot files                   │
+│     memoriahub convert    Convert video files to MP4                                             │
+│     memoriahub status     Show sync status and counts                                            │
+│     memoriahub folders    Manage watched folders                                                 │
+│     memoriahub circles    Manage active circle                                                   │
+│     memoriahub retry      Retry failed files                                                     │
+│     memoriahub jobs       Live job queue monitor                                                 │
+│     memoriahub reports    Show reports (overview, runs, storage, duplicates)                     │
+│     memoriahub backup     Back up circle media to a local folder                                 │
+│     memoriahub node       Worker node: enroll, install-deps, register, start/stop                │
+│     memoriahub settings   Manage settings                                                        │
+│                                                                                                  │
+│   [Esc/q] back                                                                                   │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

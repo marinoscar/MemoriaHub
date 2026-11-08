@@ -1,0 +1,13 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub CLI v1.4.0 · Home › File Tools › Convert videos to MP4                               │
+│                                                                                                  │
+│  Choose an entry. Esc goes up one level.                                                         │
+│                                                                                                  │
+│  ❯ 1. Convert a single file…                                                                     │
+│    2. Convert selected folder(s)…                                                                │
+│    3. Convert all registered folders                                                             │
+│                                                                                                  │
+│  ↑↓ move  ·  enter select  ·  1-9 jump  ·  esc back  ·  ctrl-c exit                              │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

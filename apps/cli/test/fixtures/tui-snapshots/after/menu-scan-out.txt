@@ -1,0 +1,13 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub CLI v1.4.0 · Home › Scan                                                             │
+│                                                                                                  │
+│  Dry-run preview — reports what a sync would do, without uploading                               │
+│                                                                                                  │
+│  ❯ 1. Scan all folders                                                                           │
+│    2. Scan selected folders…                                                                     │
+│    3. View last scan report                                                                      │
+│                                                                                                  │
+│  ↑↓ move  ·  enter select  ·  1-9 jump  ·  esc back  ·  ctrl-c exit                              │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

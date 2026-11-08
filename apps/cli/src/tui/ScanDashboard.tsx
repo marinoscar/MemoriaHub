@@ -17,7 +17,7 @@ import type { ScanReport } from '../scan/report.js';
 import { formatBytes } from '../format-bytes.js';
 import { formatDuration } from '../format-duration.js';
 import { BOX_BORDER, METER } from './theme.js';
-import { renderTui } from './raw-mode.js';
+import { renderTui } from './render-tui.js';
 
 export interface ScanDashboardProps {
   report: ScanReport;
