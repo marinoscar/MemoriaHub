@@ -1,5 +1,5 @@
 {
-  "name": "enterprise-app",
+  "name": "memoriahub",
   "private": true,
   "workspaces": [
     "apps/*",
