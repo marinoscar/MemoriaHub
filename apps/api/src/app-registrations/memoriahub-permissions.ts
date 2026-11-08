@@ -32,18 +32,18 @@
 // REMOVED BY SLICE: email_settings:* (D2, done: the platform email routes check
 // system_settings:read|write), ai_settings:* (E1), storage_settings:* (D1, done:
 // replaced by the storage slice's storage_config:read|write, admin only),
-// db_backup:* (D4), push:* and broadcasts:* (D3). Their ids are permanent: the
-// web cards and the CLI use the strings exactly.
+// storage:* (D1: the storage slice's set, registered through `permissions.ts`),
+// db_backup:* (D4), push:* and broadcasts:* (D3, done: the notifications slice
+// declares them, plus the org-scoped org_broadcasts:* granted to org_admin). Their
+// ids are permanent: the web cards and the CLI use the strings exactly.
 //
-// STORAGE (RETRO-D1): the storage slice's routes are mounted, but its permission
-// SET is not registered (`permissions.ts` leaves `storage` out of `slices`): the
-// ids are declared here instead, with ONE grant the platform's matrix lacks.
-// `storage:write` goes to `viewer` too: before RETRO-D1 the objects API was a bare
-// `@Auth()`, so every member (the default role is `viewer`) uploaded, and the
-// per-circle role decided where the media item may go. The platform grants
-// `storage:write` to org_admin and contributor only, and an app cannot add a grant
-// to a platform role. PLATFORM-ADOPTION-SHIM(RETRO-SEAM-STORAGE-2): register the
-// slice's set once an app may widen a platform permission's grants.
+// STORAGE (RETRO-D1): `storage:read|write`, `storage:delete_any` and
+// `storage_config:read|write` are the storage slice's (`permissions.ts` lists
+// `storage` in `slices`), with ONE grant widened through
+// `platformGrants` (platform 0.1.0-next.28): `storage:write` for `viewer` too.
+// Before RETRO-D1 the objects API was a bare `@Auth()`, so every member (the
+// default role is `viewer`) uploaded, and the per-circle role decided where the
+// media item may go; the platform grants it to org_admin and contributor only.
 // =============================================================================
 
 import type { PermissionDeclaration } from '@marinoscar/platform-api/core';
@@ -52,26 +52,6 @@ const ALL_ORG_ROLES = ['org_admin', 'contributor', 'viewer'] as const;
 const ORG_WRITERS = ['org_admin', 'contributor'] as const;
 
 export const MEMORIAHUB_PERMISSIONS = {
-  // Storage objects (the storage slice's ids; see the header for the viewer grant)
-  STORAGE_READ: {
-    id: 'storage:read',
-    description: 'Read object metadata, get download URLs',
-    scope: 'org',
-    defaultGrants: [...ALL_ORG_ROLES],
-  },
-  STORAGE_WRITE: {
-    id: 'storage:write',
-    description: 'Upload, update metadata',
-    scope: 'org',
-    defaultGrants: [...ALL_ORG_ROLES],
-  },
-  STORAGE_DELETE_ANY: {
-    id: 'storage:delete_any',
-    description: 'Admin: delete any object',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-
   // Media
   MEDIA_READ: {
     id: 'media:read',
@@ -186,21 +166,6 @@ export const MEMORIAHUB_PERMISSIONS = {
   GEO_SETTINGS_WRITE: {
     id: 'geo_settings:write',
     description: 'Configure geo provider credentials and active reverse-geocoding provider',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  // The storage slice's configuration permissions (RETRO-D1): same ids, grants and meaning as the
-  // slice's STORAGE_CONFIG_PERMISSIONS; they replace MemoriaHub's storage_settings:*.
-  STORAGE_CONFIG_READ: {
-    id: 'storage_config:read',
-    description: 'View the object-storage configuration and the masked status of its stored secret key',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  STORAGE_CONFIG_WRITE: {
-    id: 'storage_config:write',
-    description:
-      'Change the object-storage provider, bucket, endpoint and credential, test a configuration, and provision a bucket',
     scope: 'system',
     defaultGrants: ['admin'],
   },

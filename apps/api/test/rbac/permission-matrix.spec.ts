@@ -1,4 +1,4 @@
-import { permissionRegistry } from '@marinoscar/platform-api/core';
+import { permissionRegistry, roleGrantRegistry } from '@marinoscar/platform-api/core';
 
 import '../../src/app-registrations/permission-manifest';
 
@@ -134,12 +134,17 @@ const RETIRED_BY_SLICE: Record<string, string> = {
   'storage_settings:write': 'storage_config:write',
 };
 
+/** A role's permissions: the declared defaults plus the explicit grants (`platformGrants`, RETRO-D1). */
 function grants(role: string): string[] {
-  return permissionRegistry
+  const byDefault = permissionRegistry
     .list()
     .filter((permission) => permission.defaultGrants.includes(role))
-    .map((permission) => permission.id)
-    .sort();
+    .map((permission) => permission.id);
+  const granted = roleGrantRegistry
+    .list()
+    .filter((grant) => grant.role === role)
+    .map((grant) => grant.permission);
+  return [...new Set([...byDefault, ...granted])].sort();
 }
 
 describe('role permission matrix', () => {
@@ -147,7 +152,7 @@ describe('role permission matrix', () => {
     expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor, ...(GAINED_BY_SLICE.contributor ?? [])].sort());
   });
 
-  it('viewer is what it was, plus storage:write (RETRO-D1: the objects API was a bare @Auth(), viewers uploaded)', () => {
+  it('viewer is what it was, plus storage:write (RETRO-D1: the objects API was a bare @Auth(), viewers uploaded; widened through platformGrants)', () => {
     expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, 'storage:write'].sort());
   });
 

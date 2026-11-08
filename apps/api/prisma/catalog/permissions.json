@@ -69,6 +69,21 @@
       "scope": "system"
     },
     {
+      "name": "storage:read",
+      "description": "Read object metadata, get download URLs",
+      "scope": "org"
+    },
+    {
+      "name": "storage:write",
+      "description": "Upload, update metadata",
+      "scope": "org"
+    },
+    {
+      "name": "storage:delete_any",
+      "description": "Admin: delete any object",
+      "scope": "system"
+    },
+    {
       "name": "jobs:read",
       "description": "View queued, running and completed jobs",
       "scope": "system"
@@ -111,6 +126,16 @@
     {
       "name": "push:write",
       "description": "Generate, rotate, enable/disable and remove Web Push VAPID keys",
+      "scope": "system"
+    },
+    {
+      "name": "storage_config:read",
+      "description": "View the object-storage configuration and the masked status of its stored secret key",
+      "scope": "system"
+    },
+    {
+      "name": "storage_config:write",
+      "description": "Change the object-storage provider, bucket, endpoint and credential, test a configuration, and provision a bucket",
       "scope": "system"
     },
     {
@@ -204,21 +229,6 @@
       "scope": "org"
     },
     {
-      "name": "storage:read",
-      "description": "Read object metadata, get download URLs",
-      "scope": "org"
-    },
-    {
-      "name": "storage:write",
-      "description": "Upload, update metadata",
-      "scope": "org"
-    },
-    {
-      "name": "storage:delete_any",
-      "description": "Admin: delete any object",
-      "scope": "system"
-    },
-    {
       "name": "media:read",
       "description": "Read own media items",
       "scope": "org"
@@ -307,16 +317,6 @@
       "name": "geo_settings:write",
       "description": "Configure geo provider credentials and active reverse-geocoding provider",
       "scope": "system"
-    },
-    {
-      "name": "storage_settings:read",
-      "description": "View storage provider configuration and test connectivity",
-      "scope": "system"
-    },
-    {
-      "name": "storage_settings:write",
-      "description": "Configure storage provider credentials, set active provider, run migrations",
-      "scope": "system"
     }
   ],
   "rolePermissions": {
@@ -328,6 +328,7 @@
       "rbac:manage",
       "allowlist:read",
       "allowlist:write",
+      "storage:delete_any",
       "jobs:read",
       "jobs:write",
       "db_backup:read",
@@ -337,6 +338,8 @@
       "broadcasts:write",
       "push:read",
       "push:write",
+      "storage_config:read",
+      "storage_config:write",
       "ai_config:read",
       "ai_config:write",
       "telemetry:read",
@@ -344,7 +347,6 @@
       "telemetry:query",
       "organizations:read",
       "organizations:write",
-      "storage:delete_any",
       "media:read_any",
       "media:write_any",
       "media:delete_any",
@@ -355,16 +357,14 @@
       "face_settings:read",
       "face_settings:write",
       "geo_settings:read",
-      "geo_settings:write",
-      "storage_settings:read",
-      "storage_settings:write"
+      "geo_settings:write"
     ],
     "contributor": [
       "user_settings:read",
       "user_settings:write",
-      "ai:use",
       "storage:read",
       "storage:write",
+      "ai:use",
       "media:read",
       "media:write",
       "media:delete",
@@ -377,6 +377,7 @@
       "user_settings:read",
       "user_settings:write",
       "storage:read",
+      "storage:write",
       "media:read",
       "media:write",
       "media:delete",
@@ -387,6 +388,8 @@
     "org_admin": [
       "user_settings:read",
       "user_settings:write",
+      "storage:read",
+      "storage:write",
       "ai:use",
       "org_ai_config:read",
       "org_ai_config:write",
@@ -398,8 +401,6 @@
       "org_settings:write",
       "org_broadcasts:read",
       "org_broadcasts:write",
-      "storage:read",
-      "storage:write",
       "media:read",
       "media:write",
       "media:delete",
