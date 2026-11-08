@@ -21,8 +21,8 @@ import type {
   AiProvider,
   ChatRequest,
   ChatStreamEvent,
-} from '../../ai/providers/ai-provider.interface';
-import { AiProviderRegistry } from '../../ai/providers/ai-provider.registry';
+} from '../../ai-port/legacy-ai-provider.types';
+import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
 import { AiSettingsService } from '../../ai/ai-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {

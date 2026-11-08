@@ -70,7 +70,7 @@ export async function testAiProvider(body: {
 }
 
 export async function getAiModels(provider: string): Promise<string[]> {
-  return api.get<string[]>(`/ai/models?provider=${encodeURIComponent(provider)}`);
+  return api.get<string[]>(`/ai/settings/models?provider=${encodeURIComponent(provider)}`);
 }
 
 export async function putAiSearchFeature(body: {
@@ -96,7 +96,7 @@ export async function putAiEmbeddingFeature(body: {
 
 export async function getAiEmbeddingModels(provider: string): Promise<string[]> {
   return api.get<string[]>(
-    `/ai/models?provider=${encodeURIComponent(provider)}&capability=embedding`,
+    `/ai/settings/models?provider=${encodeURIComponent(provider)}&capability=embedding`,
   );
 }
 
@@ -121,7 +121,7 @@ export async function putAiMemoriesFeature(body: {
 
 export async function getAiImageModels(provider: string): Promise<string[]> {
   return api.get<string[]>(
-    `/ai/models?provider=${encodeURIComponent(provider)}&capability=image`,
+    `/ai/settings/models?provider=${encodeURIComponent(provider)}&capability=image`,
   );
 }
 

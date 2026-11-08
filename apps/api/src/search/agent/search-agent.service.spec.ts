@@ -12,7 +12,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException, BadRequestException } from '@nestjs/common';
 import { SearchAgentService, AgentSseEvent } from './search-agent.service';
 import { AiSettingsService } from '../../ai/ai-settings.service';
-import { AiProviderRegistry } from '../../ai/providers/ai-provider.registry';
+import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
 import { SearchService } from '../search.service';
 import { PrismaService } from '../../prisma/prisma.service';
 

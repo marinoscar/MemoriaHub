@@ -704,6 +704,16 @@ export class NodesService {
    *
    * Reuses the same held-job guard as submitJobResult/reportJobFailure (404
    * unknown job, 409 if not held by this node under a live lease).
+   *
+   * PLATFORM-ADOPTION-SHIM(#1083): the platform AI rule is that keys are never
+   * brokered to a worker node (AI jobs are server-only), and the platform's
+   * own per-job secret delivery to nodes (EnterpriseAppBase #1083) is not
+   * released. Until RETRO-C4 decides server-only (or the platform path ships),
+   * this app-owned path keeps node execution of `auto_tagging`,
+   * `video_auto_tagging` and `geocode` working. The keys still come from
+   * `ai_provider_credentials` (AI) and the platform credential store (geo);
+   * the AI job types keep their permanent non-`ai.*` strings, so the
+   * platform's `ai-jobs-server-only` suite does not claim them (RETRO-E1).
    */
   async getJobCredentials(
     userId: string,

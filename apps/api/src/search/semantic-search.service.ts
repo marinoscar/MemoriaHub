@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
+import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 
 @Injectable()
 export class SemanticSearchService {

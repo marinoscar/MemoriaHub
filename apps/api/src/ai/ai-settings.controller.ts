@@ -99,11 +99,16 @@ export class AiSettingsController {
     return this.aiSettingsService.testEmbedding(dto);
   }
 
-  @Get('models')
+  // RETRO-E1 (#595): was `GET /api/ai/models`. The platform AI slice owns that path (a user's
+  // usable models, `UserAiKeysController`), and two handlers on one route fail at boot, so the
+  // legacy admin listing moved under `settings/`. Same query, same answer. Retired with the old
+  // admin page by RETRO-E4.
+  @Get('settings/models')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_READ] })
   @ApiOperation({
     summary: 'List available models for a provider (Admin)',
     description:
+      'Moved from GET /api/ai/models (RETRO-E1), which is now the platform AI slice\'s route. ' +
       'When capability=embedding, returns embedding model IDs instead of chat model IDs. ' +
       'When capability=image, returns image-edit (enhancement) model IDs. ' +
       'When capability=transcription, returns speech-to-text model IDs. ' +

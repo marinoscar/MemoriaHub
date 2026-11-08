@@ -1,5 +1,16 @@
 // =============================================================================
-// AI Provider Interface
+// MemoriaHub's legacy AI provider contract (moved by RETRO-E1, #595)
+// =============================================================================
+//
+// PLATFORM-ADOPTION-SHIM(#595): the provider-shaped interface every MemoriaHub
+// AI call site was written against (tagging, video tagging, semantic search,
+// the search agent, memory titles, the picture enhancer, the Doctor checks).
+// It used to live in `src/ai/providers/` beside the SDK-backed providers; those
+// are gone, and `legacy-ai-provider.adapter.ts` now implements this interface
+// on top of the platform's framework-free provider adapters
+// (`@marinoscar/platform-ai-providers`), so no provider SDK is imported in
+// `apps/`. RETRO-E2 replaces each call site with `AiService.forUser(...)` and
+// deletes this file. docs/platform-adoption/local-exceptions.md lists it.
 // =============================================================================
 
 export interface AiProviderCredentials {

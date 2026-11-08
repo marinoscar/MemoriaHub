@@ -12,6 +12,7 @@ import { StorageModule } from './storage/storage.module';
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
 import { AiModule } from './ai/ai.module';
+import { aiModule } from './platform/ai/ai.config';
 import { FaceModule } from './face/face.module';
 import { EnrichmentModule } from './enrichment/enrichment.module';
 import { SearchModule } from './search/search.module';
@@ -115,6 +116,9 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     MediaModule,
     CirclesModule,
     AiModule,
+    // The platform AI slice (RETRO-E1, #595). `AiModule` above is MemoriaHub's legacy AI settings
+    // module (the old /api/ai/* admin routes and the provider registry), kept until RETRO-E2/E4.
+    aiModule,
     FaceModule,
     EnrichmentModule,
     SearchModule,

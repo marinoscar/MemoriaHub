@@ -47,7 +47,7 @@ import { buildVideoTaggingPrompt } from '@memoriahub/enrichment-compute/ai';
 import { AutoTaggingService } from './auto-tagging.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
+import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError } from '../enrichment/rate-limit.error';

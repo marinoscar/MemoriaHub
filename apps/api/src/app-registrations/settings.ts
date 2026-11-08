@@ -15,9 +15,9 @@
 //   user   (app list): search, memories, timezone, memoriahubNotifications
 //   user   (platform): dataTables, navigation (extended with MemoriaHub's `pinned`), notifications (RETRO-D3)
 //
-// Three of the app namespaces are TEMPORARY copies of a namespace whose platform slice MemoriaHub
-// adopts later (`PLATFORM-ADOPTION-SHIM`): ai (RETRO-E1), email (D2), storage (D1). `notifications`
-// (system and user) was swapped for the platform declarations by RETRO-D3 (#576), whose carry-over
+// The app namespaces below marked `PLATFORM-ADOPTION-SHIM` are TEMPORARY copies of a namespace whose
+// platform slice MemoriaHub adopts later: email (D2), storage (D1). `notifications` (system and
+// user) was swapped for the platform declarations by RETRO-D3 (#576), whose carry-over
 // (`npm run notifications:migrate-legacy`) rewrites the stored values into the platform's shape. `jobs` was the sixth; the
 // jobs slice (RETRO-C1) swapped it for the platform declaration, same stored shape. `databaseBackup`
 // was the fifth; the db-backup slice (RETRO-D4) swapped it for the platform declaration, and
@@ -30,6 +30,7 @@
 // what keeps `email.smtpPassword` in the row and out of every response.
 // =============================================================================
 
+import { AI_SYSTEM_SETTINGS } from '@marinoscar/platform-api/ai';
 import type {
   SettingsDefaultsOverride,
   SystemSettingsNamespace,
@@ -38,7 +39,6 @@ import type {
   UserSettingsNamespaceExtension,
 } from '@marinoscar/platform-api/settings';
 
-import { AI_SYSTEM_SETTINGS, type AiSettingsValue } from '../settings/registry/namespaces/system/ai';
 import { AUTO_TAGGING_SYSTEM_SETTINGS, type AutoTaggingSettingsValue } from '../settings/registry/namespaces/system/auto-tagging';
 import { BACKUP_SYSTEM_SETTINGS, type BackupSettingsValue } from '../settings/registry/namespaces/system/backup';
 import { BURST_SYSTEM_SETTINGS, type BurstSettingsValue } from '../settings/registry/namespaces/system/burst';
@@ -65,12 +65,16 @@ import {
 import { SEARCH_USER_SETTINGS, type SearchPreferencesValue } from '../settings/registry/namespaces/user/search';
 import { TIMEZONE_USER_SETTINGS } from '../settings/registry/namespaces/user/timezone';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { MEMORIAHUB_AI_SETTINGS_EXTENSION } from '../platform/ai/ai-settings.extension';
 
 /** MemoriaHub's system namespaces, in order (the platform's `maintenance` is registered by the host). */
 export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] = [
   UI_SYSTEM_SETTINGS,
   FEATURES_SYSTEM_SETTINGS,
-  AI_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-E1)
+  // The platform AI slice's policy since RETRO-E1 (#595), kept at this position so the stored key
+  // order of the `global` row does not change; MemoriaHub's `features` selections are folded in by
+  // `MEMORIAHUB_AI_SETTINGS_EXTENSION` below.
+  AI_SYSTEM_SETTINGS as unknown as SystemSettingsNamespace,
   AUTO_TAGGING_SYSTEM_SETTINGS,
   FACE_SYSTEM_SETTINGS,
   STORAGE_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D1)
@@ -90,8 +94,15 @@ export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] 
   // `databaseBackup` is the db-backup slice's since RETRO-D4 (#580): settings/registry/system-settings.manifest.ts.
 ] as unknown as readonly SystemSettingsNamespace[];
 
-/** Fields this app stores in a platform-declared system namespace that the platform lacks. None. */
-export const APP_SYSTEM_SETTINGS_EXTENSIONS: readonly SystemSettingsNamespaceExtension[] = [];
+/**
+ * Fields this app stores in a platform-declared system namespace that the platform lacks.
+ *
+ * `ai` (RETRO-E1, #595): the per-feature provider/model selections (`features.*`) MemoriaHub has
+ * always stored in the `ai` block; same names and shapes, so the row is unchanged.
+ */
+export const APP_SYSTEM_SETTINGS_EXTENSIONS: readonly SystemSettingsNamespaceExtension[] = [
+  MEMORIAHUB_AI_SETTINGS_EXTENSION,
+];
 
 /**
  * Defaults where this app differs from the platform's declaration.
@@ -124,8 +135,11 @@ export const APP_USER_SETTINGS_EXTENSIONS: readonly UserSettingsNamespaceExtensi
   NAVIGATION_USER_SETTINGS_EXTENSION,
 ];
 
+// `ai` is the platform AI slice's since RETRO-E1 (#595): the platform declares and augments it, and
+// MemoriaHub adds `features` through `MEMORIAHUB_AI_SETTINGS_EXTENSION` (read through
+// `AppSystemSettings.ai`).
 // The augmentation covers the namespaces MemoriaHub owns for good. The temporary ones (system:
-// ai, storage, email) are left out ON
+// storage, email) are left out ON
 // PURPOSE: the platform slices declare the same keys with their own types, and declaring a key twice
 // with different types is TS2717 (and which one wins depends on file order). The app reads those
 // through `AppSystemSettings` (settings/app-settings.types.ts) instead.

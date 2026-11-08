@@ -14,12 +14,13 @@
 // So those keys are NOT augmented, and the app reads the document through this type instead
 // (`AppSystemSettingsService.getSettings()` and `readKnownValue()` are typed with it). Each slice
 // adoption removes a key's entry here and augments the interface instead.
-// PLATFORM-ADOPTION-SHIM: RETRO-E1 (ai), D1 (storage), D2 (email).
+// PLATFORM-ADOPTION-SHIM: D1 (storage), D2 (email). `ai` is the platform AI
+// slice's since RETRO-E1 (#595); `ai` below is MemoriaHub's view of it (its `features` extension).
 // `jobs` and `retention` are the jobs slice's (RETRO-C1), `databaseBackup` the db-backup slice's (RETRO-D4),
 // `notifications` the notifications slice's (RETRO-D3).
 // =============================================================================
 
-import type { AiSettingsValue } from './registry/namespaces/system/ai';
+import type { AiSettingsValue } from '../platform/ai/ai-settings.extension';
 import type { AutoTaggingSettingsValue } from './registry/namespaces/system/auto-tagging';
 import type { BackupSettingsValue } from './registry/namespaces/system/backup';
 import type { BurstSettingsValue } from './registry/namespaces/system/burst';

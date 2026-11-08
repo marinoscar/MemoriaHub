@@ -114,6 +114,31 @@
       "scope": "system"
     },
     {
+      "name": "ai_config:read",
+      "description": "View the deployment-wide AI platform policy",
+      "scope": "system"
+    },
+    {
+      "name": "ai_config:write",
+      "description": "Change whether AI is enabled, the key policy, per-provider configuration and the deployment-wide defaults",
+      "scope": "system"
+    },
+    {
+      "name": "ai:use",
+      "description": "Call AI models using a saved key",
+      "scope": "org"
+    },
+    {
+      "name": "org_ai_config:read",
+      "description": "View this organization's AI keys, usage and AI policy overrides",
+      "scope": "org"
+    },
+    {
+      "name": "org_ai_config:write",
+      "description": "Set or remove this organization's AI provider keys and tighten its AI policy",
+      "scope": "org"
+    },
+    {
       "name": "org_members:read",
       "description": "View the members of the organization and their organization roles",
       "scope": "org"
@@ -297,6 +322,8 @@
       "broadcasts:write",
       "push:read",
       "push:write",
+      "ai_config:read",
+      "ai_config:write",
       "organizations:read",
       "organizations:write",
       "storage:delete_any",
@@ -317,6 +344,7 @@
     "contributor": [
       "user_settings:read",
       "user_settings:write",
+      "ai:use",
       "storage:read",
       "storage:write",
       "media:read",
@@ -341,6 +369,9 @@
     "org_admin": [
       "user_settings:read",
       "user_settings:write",
+      "ai:use",
+      "org_ai_config:read",
+      "org_ai_config:write",
       "org_members:read",
       "org_members:write",
       "org_invites:read",
