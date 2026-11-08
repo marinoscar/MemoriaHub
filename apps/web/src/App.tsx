@@ -17,6 +17,7 @@ import { InstallPrompt, MaintenanceGate, UpdatePrompt } from '@marinoscar/platfo
 // `virtual:pwa-register/react` exists only in this app's bundler (vite-plugin-pwa),
 // so the packaged `UpdatePrompt` takes the hook as a prop.
 import { useRegisterSW } from 'virtual:pwa-register/react';
+import './platform/notifications';
 import { AppPlatformHostProvider } from './platform/platformHost';
 // The packaged identity UI (RETRO-B2, #611): sign-in, callback, device
 // activation, access tokens, users and allowlist, behind the identity guards.
@@ -67,9 +68,16 @@ const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const EmailSettingsPage = lazy(() =>
   import('@marinoscar/platform-web/email/ui').then((m) => ({ default: m.EmailSettingsPage })),
 );
-const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
-const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
-const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
+// RETRO-D3 (#576): the notifications slice's admin pages.
+const PushConfigPage = lazy(() =>
+  import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.PushConfigPage })),
+);
+const NotificationPolicyPage = lazy(() =>
+  import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.NotificationSettingsPage })),
+);
+const BroadcastsPage = lazy(() =>
+  import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.BroadcastsPage })),
+);
 const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
 // The platform's Jobs and Job Insights pages (RETRO-C1, #575); the Jobs one is a thin binding that adds
 // the app's "Repair missing thumbnails" action to the page toolbar.

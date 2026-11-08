@@ -6,8 +6,8 @@
 //   npm run credentials:migrate-legacy --workspace=api -- --purpose geo --apply
 //   npm run credentials:migrate-legacy --workspace=api -- --purpose all            # dry run of every plan
 //
-// Purposes: face, geo (applicable now); storage, smtp, ses, push_vapid (dry-run plans that
-// RETRO-D1/D2/D3 apply when their reader switches). Needs SECRETS_ENCRYPTION_KEY (the key that
+// Purposes: face, geo, smtp, ses, push_vapid (applicable; push_vapid since RETRO-D3); storage (a
+// dry-run plan that RETRO-D1 applies when its reader switches). Needs SECRETS_ENCRYPTION_KEY (the key that
 // encrypted the legacy rows) and the database settings of the API.
 //
 // Prints counts, ids and last-4 hints only, NEVER a secret. Exit 1 when a row cannot be decrypted

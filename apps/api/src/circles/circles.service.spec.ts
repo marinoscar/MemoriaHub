@@ -9,14 +9,16 @@ import { CircleRole } from '@prisma/client';
 import { CirclesService } from './circles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
-import { AppEmailSender } from '../platform/email/app-email.sender';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
+
+import { notificationsForwardingTo } from '../../test/mocks/email-notifications.adapter';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 describe('CirclesService', () => {
   let service: CirclesService;
   let mockPrisma: MockPrismaService;
   let mockMembership: jest.Mocked<CircleMembershipService>;
-  let mockEmail: jest.Mocked<AppEmailSender>;
+  let mockEmail: { sendEmail: jest.Mock; sendEmailAsync: jest.Mock };
 
   const mockUser = {
     id: 'user-1',
@@ -42,7 +44,7 @@ describe('CirclesService', () => {
         CirclesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
-        { provide: AppEmailSender, useValue: mockEmail },
+        { provide: NotificationsService, useValue: notificationsForwardingTo(mockEmail) },
       ],
     }).compile();
 
@@ -445,7 +447,7 @@ describe('CirclesService', () => {
 
     // ---- Email graceful degradation ----
 
-    it('should still create the invite even if AppEmailSender.sendEmailAsync throws', async () => {
+    it('should still create the invite even if the notification dispatch throws', async () => {
       mockMembership.assertCircleAccess.mockResolvedValue({
         role: CircleRole.circle_admin,
         isSuperAdmin: false,
@@ -540,7 +542,7 @@ describe('CirclesService', () => {
       expect(mockPrisma.circleMember.upsert).not.toHaveBeenCalled();
     });
 
-    it('should still add the member even if AppEmailSender.sendEmailAsync throws', async () => {
+    it('should still add the member even if the notification dispatch throws', async () => {
       mockMembership.assertCircleAccess.mockResolvedValue({
         role: CircleRole.circle_admin,
         isSuperAdmin: false,

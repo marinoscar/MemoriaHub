@@ -387,7 +387,7 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
         description: 'Transactional email provider (SES or SMTP), masked credentials, and test sends.',
       },
       {
-        name: 'Push Settings',
+        name: 'Push Configuration',
         description:
           'Web Push (VAPID) key pair: generate, rotate, enable/disable, remove, and a diagnostic ' +
           "test send to the caller's own devices. The private key is never returned.",

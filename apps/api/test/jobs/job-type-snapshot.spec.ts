@@ -5,7 +5,8 @@
  * type string is what a worker dispatches on, so a handler may be re-homed or
  * rewritten but its string never changes and never disappears. The spec pins:
  *
- *   - the 38 type strings the app registers,
+ *   - the 35 type strings the app registers a handler for, plus the three
+ *     notification types RETRO-D3 retired (still dispatching, as no-ops),
  *   - which of them are node-eligible (a handler that carries BOTH
  *     `nodeResultSchema` and `persistNodeResult`; eligibility is derived,
  *     there is no flag), and
@@ -31,7 +32,12 @@ import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handl
 import type { EnrichmentHandler } from '../../src/enrichment/enrichment-handler.interface';
 import { LegacyEnrichmentHandlerAdapter } from '../../src/platform/jobs/legacy-handlers.adapter';
 import {
+  RETIRED_NOTIFICATION_JOB_TYPES,
+  RetiredNotificationJobTypes,
+} from '../../src/platform/notifications/retired-notification-job-types';
+import {
   ALL_HANDLER_CLASSES,
+  EXPECTED_RETIRED_NOTIFICATION_TYPES,
   EXPECTED_CAN_DELETE_TYPES,
   EXPECTED_JOB_TYPES,
   EXPECTED_NODE_ELIGIBLE_TYPES,
@@ -50,8 +56,8 @@ describe('job type snapshot (job type strings are permanent)', () => {
     for (const handler of handlers) registry.register(handler);
   });
 
-  it('registers exactly the 38 pinned type strings', () => {
-    expect(ALL_HANDLER_CLASSES).toHaveLength(38);
+  it('registers exactly the 35 pinned type strings', () => {
+    expect(ALL_HANDLER_CLASSES).toHaveLength(35);
     expect(registry.types().sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
   });
 
@@ -126,5 +132,22 @@ describe('job type snapshot through the platform adapter (RETRO-C1)', () => {
   it('forwards canDelete for exactly the veto types', () => {
     const vetoes = EXPECTED_JOB_TYPES.filter((type) => typeof platform.get(type)!.canDelete === 'function');
     expect(vetoes.sort()).toEqual([...EXPECTED_CAN_DELETE_TYPES].sort());
+  });
+});
+
+describe('job type snapshot: the notification types RETRO-D3 retired', () => {
+  it('keeps the three permanent strings dispatching on the platform registry, as server-only no-ops', async () => {
+    expect([...RETIRED_NOTIFICATION_JOB_TYPES].sort()).toEqual([...EXPECTED_RETIRED_NOTIFICATION_TYPES].sort());
+    const platform = new JobHandlerRegistry();
+    new RetiredNotificationJobTypes(platform).onModuleInit();
+    for (const type of EXPECTED_RETIRED_NOTIFICATION_TYPES) {
+      const handler = platform.get(type)!;
+      expect(handler).toBeDefined();
+      expect(handler.nodeResultSchema).toBeUndefined();
+      expect(handler.persistNodeResult).toBeUndefined();
+      expect(handler.canDelete).toBeUndefined();
+      await expect(handler.process({ id: 'job-1', type, payload: { broadcastId: 'b-1' } } as never)).resolves.toBeUndefined();
+    }
+    expect(platform.serverOnlyTypes().sort()).toEqual([...EXPECTED_RETIRED_NOTIFICATION_TYPES].sort());
   });
 });

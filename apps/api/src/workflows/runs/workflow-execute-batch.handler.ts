@@ -18,7 +18,7 @@ import { WorkflowActionExecutor } from '../actions/workflow-action.executor';
 import { WorkflowAction, WorkflowActionContext } from '../actions/action-executor.types';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { revalidateItemMatches } from '../execution/item-revalidation.util';
-import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
+import { WorkflowRunNotificationService } from '../../notification-producers/workflow-run-notification.service';
 import {
   runJobPayload,
   vetoDeleteWhileRunActive,

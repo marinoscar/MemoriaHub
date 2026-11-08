@@ -11,6 +11,8 @@
 | **Builds on** | [Notification Center](notifications.md) (the inbox model, the three write primitives, per-type preferences) |
 | **Runbook** | [VAPID keys](../runbooks/vapid-keys.md) |
 
+> **Since RETRO-D3 ([#576](https://github.com/marinoscar/MemoriaHub/issues/576)): the platform's channels.** The stream, Web Push (VAPID in the credential store, purpose `push_vapid`), push subscriptions, the delivery log, the channel policy (`notifications` system namespace: `browserEnabled`, `channels.<id>.enabled`, `disabledEvents`) and the per-user channel-outer preferences are `@marinoscar/platform-api/notifications`; the web client, permission banner, push sync and service-worker handlers are `@marinoscar/platform-web/notifications` (`apps/web/src/sw.ts` calls `registerNotificationServiceWorkerHandlers`). The rest of this document is the original design. Carry-over: [notifications cutover runbook](../runbooks/notifications-cutover.md).
+
 This spec documents what the code in this repository does. The feature was ported from EnterpriseAppBase (EAB) onto MemoriaHub's existing Notification Center; where the two differ (there is no notification registry, no email channel per type, and no environment-variable VAPID fallback here) the difference is called out.
 
 ---

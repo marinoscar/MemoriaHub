@@ -15,6 +15,7 @@ import '../../app-registrations/jobs';
 
 import { MAINTENANCE_SYSTEM_SETTINGS } from '@marinoscar/platform-api/host';
 import { JOBS_SYSTEM_SETTINGS, RETENTION_SYSTEM_SETTINGS } from '@marinoscar/platform-api/jobs';
+import { NOTIFICATIONS_SYSTEM_SETTINGS } from '@marinoscar/platform-api/notifications';
 import {
   assembleSystemSettingsNamespaces,
   registerSystemSettingsNamespaces,
@@ -36,6 +37,9 @@ export const PLATFORM_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespa
   // shape (`storageProvider: null`, `restoreRollbackMode: 'pre_restore_dump'`) is rewritten by
   // `scripts/migrate-db-backup-settings.ts`; until then the platform reads it field by field.
   DATABASE_BACKUP_SYSTEM_SETTINGS as SystemSettingsNamespace,
+  // NotificationsModule (RETRO-D3): the deployment policy, its org layer, and dismiss-on-disable
+  // (`onWrite`, inside the settings transaction).
+  NOTIFICATIONS_SYSTEM_SETTINGS as SystemSettingsNamespace,
 ];
 
 /** The final, ordered list this deployment registers. */

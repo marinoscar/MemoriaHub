@@ -6,41 +6,58 @@ import type {
   RoleChangedNotice,
   UserWelcomeNotice,
 } from '@marinoscar/platform-api/identity';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
+
+import { IDENTITY_EVENT_KEYS } from '../../notifications-registry/platform-slice.notifications';
 
 // =============================================================================
-// IDENTITY_NOTIFIER -> MemoriaHub's email code (RETRO-B2, issue #611)
+// IDENTITY_NOTIFIER -> the platform notification dispatcher (RETRO-D3, #576)
 // =============================================================================
 //
-// The identity slice raises four notifications: role changed, welcome,
-// allowlist invitation, organization invitation. MemoriaHub's email service
-// (`src/email`) has templates for circle invitations, membership confirmations,
-// broadcasts and the memory digest only, and before this slice nothing sent any
-// of the four. To keep the behaviour (no new mail on sign-up or on a role edit),
-// every method logs at debug level and drops; the organization invitation drops
-// by design, since single-organization mode hides invitations.
-//
-// PLATFORM-ADOPTION-SHIM(RETRO-D2): the email slice brings the four templates;
-// the notifications slice (RETRO-D3) replaces this adapter with the platform's
-// notification dispatcher.
+// The identity slice raises four notifications. Three go through the platform
+// `NotificationsService` as the events declared in
+// `notifications-registry/platform-slice.notifications.ts` (`user.welcome`,
+// `allowlist.invitation`, `security.role_changed`), each bound to the platform
+// email template of the same purpose. MemoriaHub sent none of them before this
+// slice, so those events are declared `defaultEnabled: false`: an existing user
+// receives nothing new unless they turn one on. The organization invitation
+// drops by design: single-organization mode hides invitations.
 // =============================================================================
 
 @Injectable()
 export class MemoriaHubIdentityNotifier implements IdentityNotifier {
   private readonly logger = new Logger(MemoriaHubIdentityNotifier.name);
 
-  async roleChanged(userId: string, _notice: RoleChangedNotice): Promise<void> {
-    this.logger.debug(`role-changed notice for user ${userId} dropped (no template)`);
+  constructor(private readonly notifications: NotificationsService) {}
+
+  async roleChanged(userId: string, notice: RoleChangedNotice): Promise<void> {
+    await this.notifications.notify(IDENTITY_EVENT_KEYS.roleChanged, userId, {
+      recipientEmail: notice.recipientEmail,
+      previousRoles: notice.previousRoles,
+      currentRoles: notice.currentRoles,
+      changedAt: notice.changedAt,
+      ...(notice.appUrl ? { appUrl: notice.appUrl } : {}),
+    });
   }
 
-  async userWelcomed(userId: string, _notice: UserWelcomeNotice): Promise<void> {
-    this.logger.debug(`welcome notice for user ${userId} dropped (no template)`);
+  async userWelcomed(userId: string, notice: UserWelcomeNotice): Promise<void> {
+    await this.notifications.notify(IDENTITY_EVENT_KEYS.welcome, userId, {
+      recipientEmail: notice.recipientEmail,
+      ...(notice.recipientName ? { recipientName: notice.recipientName } : {}),
+      roles: notice.roles,
+      ...(notice.appUrl ? { appUrl: notice.appUrl } : {}),
+    });
   }
 
-  async allowlistInvitation(_email: string, _notice: AllowlistInvitationNotice): Promise<void> {
-    this.logger.debug('allowlist-invitation notice dropped (no template)');
+  async allowlistInvitation(email: string, notice: AllowlistInvitationNotice): Promise<void> {
+    await this.notifications.notifyAddress(IDENTITY_EVENT_KEYS.allowlistInvitation, email, {
+      recipientEmail: notice.recipientEmail,
+      ...(notice.invitedBy ? { invitedBy: notice.invitedBy } : {}),
+      ...(notice.signInUrl ? { signInUrl: notice.signInUrl } : {}),
+    });
   }
 
-  async orgInvitation(_email: string, _notice: OrgInvitationNotice): Promise<void> {
-    this.logger.debug('organization-invitation notice dropped (single-organization mode)');
+  async orgInvitation(_email: string, notice: OrgInvitationNotice): Promise<void> {
+    this.logger.debug(`organization invitation to "${notice.orgName}" dropped (single-organization mode)`);
   }
 }

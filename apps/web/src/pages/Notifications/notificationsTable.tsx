@@ -29,17 +29,16 @@
  * - **No `status` filter column.** The tabs own `status` (issue #250 specifies
  *   them); a second control for the same param is worse than one.
  *
- * ## The `circleId` column carries the one filter this page does have
+ * ## The `circleId` column
  *
- * Its cell shows the circle NAME (that is what a reader wants), while its enum
- * operands are circle IDs (that is what the endpoint wants). The chip strip
- * resolves the id back to a label through `enumValues`, so the user never sees
- * a UUID. `null` circleId — a global row such as `enrichment_failed` — is
- * rendered as an explicit "All circles" rather than a bare dash.
+ * Its cell shows the circle NAME of the row's scope; a deployment-wide row
+ * (`media.enrichment_failed`, a broadcast) reads "All circles". Since RETRO-D3
+ * the list is the platform's `GET /api/notifications`, which takes no scope
+ * filter, so the column is not filterable (it was, on the pre-platform API).
  */
 
 import { Box, Chip, Link as MuiLink, Tooltip, Typography } from '@mui/material';
-import type { DataTableColumn, DataTableEnumValue, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 import { notificationMeta } from '../../components/notifications/notificationMeta';
 import { relativeTime } from '../../utils/formatBytes';
 import type { NotificationItem } from '../../types/notifications';
@@ -101,29 +100,6 @@ const STATUS_COLORS: Record<NotificationRowStatus, 'primary' | 'default'> = {
 };
 
 // ---------------------------------------------------------------------------
-// Filter-model → query param (pure)
-// ---------------------------------------------------------------------------
-
-/**
- * Read the active circle scope out of the normalized filter model.
- *
- * Returns `undefined` for "every circle", which is exactly what both
- * `GET /api/notifications` and the two bulk endpoints treat as unscoped — so
- * this one value feeds the list query AND `markAllRead(circleId)` /
- * `dismissAll(circleId)` without a second mapping.
- *
- * Only a COMPLETE `is` filter counts: a draft the user is still composing
- * carries `value: ''`, and sending that as `circleId=` would scope the whole
- * page to a circle that does not exist.
- */
-export function circleScopeFromFilters(filters: DataTableFilterModel): string | undefined {
-  const filter = filters.find(
-    (f) => f.columnId === CIRCLE_COLUMN_ID && f.operator === 'is',
-  );
-  return typeof filter?.value === 'string' && filter.value ? filter.value : undefined;
-}
-
-// ---------------------------------------------------------------------------
 // Cells
 // ---------------------------------------------------------------------------
 
@@ -137,8 +113,8 @@ interface TitleCellProps {
  *
  * The title is a real `button` (via `Link component="button"`) rather than an
  * anchor, because opening a notification is not a plain navigation: it marks
- * the row read and, for a circle-scoped row, switches the active circle FIRST
- * (see `NotificationsPage.handleOpen`). A row with no `link` renders as plain
+ * the row read and navigates to its link, which for a circle's row carries
+ * `?c=<circleId>` so the shell switches the active circle first. A row with no `link` renders as plain
  * text — a control that navigates nowhere is worse than no control.
  *
  * `minHeight: 44` is the touch-target floor (issue #243). It fits the grid's
@@ -231,8 +207,6 @@ function TitleCell({ notification, onOpen }: TitleCellProps) {
 export interface NotificationColumnOptions {
   /** circleId → display name, for the circle cell. */
   circleNames: Map<string, string>;
-  /** Circle options for the enum filter. Operands are circle IDs. */
-  circleOptions: DataTableEnumValue[];
   /** Tap handler for the primary cell. */
   onOpen: (notification: NotificationItem) => void;
 }
@@ -253,7 +227,6 @@ export interface NotificationColumnOptions {
  */
 export function buildNotificationColumns({
   circleNames,
-  circleOptions,
   onOpen,
 }: NotificationColumnOptions): DataTableColumn<NotificationItem>[] {
   return [
@@ -281,13 +254,8 @@ export function buildNotificationColumns({
       label: 'Circle',
       priority: 'secondary',
       minWidth: 160,
-      filterable: ['is'],
-      filterType: 'enum',
-      enumValues: circleOptions,
-      // The cell shows the NAME; the filter operand is the ID (see the module
-      // docblock). An id with no matching circle — a notification that outlived
-      // the user's membership — falls back to a muted "Unknown circle" rather
-      // than printing a UUID.
+      // An id with no matching circle — a notification that outlived the user's
+      // membership — falls back to "Unknown circle" rather than printing a UUID.
       value: (n) =>
         n.circleId === null ? 'All circles' : (circleNames.get(n.circleId) ?? 'Unknown circle'),
     },

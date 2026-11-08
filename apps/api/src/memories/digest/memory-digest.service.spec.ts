@@ -7,7 +7,7 @@
  * NEVER receives one, a member whose own preference filter empties the list
  * receives nothing, and a provider failure is counted rather than thrown.
  *
- * NOTHING HERE CAN SEND MAIL OR TOUCH A NETWORK: AppEmailSender is a jest mock,
+ * NOTHING HERE CAN SEND MAIL OR TOUCH A NETWORK: the platform dispatcher is a jest mock,
  * Prisma is a mock, and the storage/thumbnail layer is a stub. The only real
  * code that runs is this service, the preference resolver it reuses from #307,
  * and the token codec.
@@ -17,7 +17,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MemoryType } from '@prisma/client';
 
 import { MemoryDigestService } from './memory-digest.service';
-import { AppEmailSender, isEmailConfigured } from '../../platform/email/app-email.sender';
+import { EmailSettingsService } from '@marinoscar/platform-api/email';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { verifyDigestImageToken, verifyDigestUnsubscribeToken } from './digest-token.util';
@@ -90,15 +91,26 @@ describe('MemoryDigestService', () => {
     // (RETRO-D2): readiness is derived from it with the sender's own predicate.
     email = {
       sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'x' }),
-      isConfigured: jest.fn(async () => isEmailConfigured((await settings.getSettings()).email ?? {})),
+      isConfigured: jest.fn(),
     };
+    // RETRO-D3: the digest is the `memories.digest` event through the platform
+    // `notifyNow(eventKey, userId, data)`. `sendEmail(address, template, data)`
+    // records each dispatch (the fixture's address is `<userId>@example.test`); a
+    // dispatch the platform reports as rate limited counts as failed.
+    const notifyNow = jest.fn(async (eventKey: string, userId: string, data: object) => {
+      expect(eventKey).toBe('memories.digest');
+      const result = await email.sendEmail(`${userId}@example.test`, 'memory-digest', data);
+      return { rateLimited: !result?.success, retryAfterMs: null };
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: settings },
-        { provide: AppEmailSender, useValue: email },
+        { provide: NotificationsService, useValue: { notifyNow } },
+        // Email readiness: the platform `email` row (the fixture's `email` key stands in for it).
+        { provide: EmailSettingsService, useValue: { get: jest.fn(async () => (await settings.getSettings()).email ?? {}) } },
         {
           provide: MediaThumbnailService,
           useValue: {
@@ -342,7 +354,7 @@ describe('MemoryDigestService', () => {
   // Robustness
   // -------------------------------------------------------------------------
 
-  it('counts a provider failure instead of throwing', async () => {
+  it('counts a dispatch the platform reports as rate limited as failed, instead of throwing', async () => {
     email.sendEmail
       .mockResolvedValueOnce({ success: false, error: 'smtp down' })
       .mockResolvedValueOnce({ success: true });

@@ -2,23 +2,20 @@
  * The housekeeping job reads and purges against real PostgreSQL (RETRO-C8, #608).
  *
  * A mocked Prisma cannot prove the queries these paths build against the
- * platform `jobs` table and the legacy notification tables: the digest
- * watermark (newest SUCCEEDED `memory_digest` row of the circle, a failed or a
- * running row never counts), the insights refresh state (newest
- * `storage_insights` row), and the `retention.appNotifications` purge (dismissed
- * and read rows past the window go, unread rows never do, delivery audit rows
- * go by age).
+ * platform `jobs` table: the digest watermark (newest SUCCEEDED
+ * `memory_digest` row of the circle, a failed or a running row never counts)
+ * and the insights refresh state (newest `storage_insights` row). RETRO-D3
+ * (#576) removed the `retention.appNotifications` case: the platform
+ * notifications slice owns the inbox purge.
  *
  * Needs a database migrated to the latest schema (`npm run prisma:migrate`).
  * Skips (reported as skipped, never passed) when nothing listens on the port.
  */
 import { randomUUID } from 'crypto';
 import { Logger } from '@nestjs/common';
-import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 
 import { InsightsService } from '../../src/insights/insights.service';
 import { MemoryDigestService } from '../../src/memories/digest/memory-digest.service';
-import { NotificationsRetentionHandler } from '../../src/notifications/notifications-retention.handler';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
@@ -55,7 +52,6 @@ describeMaybeDb('Housekeeping jobs (DB_GATED: real PostgreSQL)', () => {
 
   afterAll(async () => {
     await prisma.job.deleteMany({ where: { id: { in: jobIds } } });
-    await prisma.mhLegacyNotificationDelivery.deleteMany({ where: { userId } });
     await prisma.circle.deleteMany({ where: { id: circleId } });
     await prisma.user.deleteMany({ where: { id: userId } });
     jest.restoreAllMocks();
@@ -63,7 +59,7 @@ describeMaybeDb('Housekeeping jobs (DB_GATED: real PostgreSQL)', () => {
   });
 
   it('memory_digest watermark: the newest SUCCEEDED row of the circle, never a failed or running one', async () => {
-    const digest = new MemoryDigestService(prisma, {} as never, {} as never, {} as never);
+    const digest = new MemoryDigestService(prisma, {} as never, {} as never, {} as never, {} as never);
     const subject = { subjectType: 'circle', subjectId: circleId };
 
     await expect(digest.lastDigestAt(circleId)).resolves.toBeNull();
@@ -94,49 +90,5 @@ describeMaybeDb('Housekeeping jobs (DB_GATED: real PostgreSQL)', () => {
     await expect(insights.getRefreshState()).resolves.toEqual({ state: 'pending', jobId: pending, lastError: null });
     await prisma.job.update({ where: { id: pending }, data: { status: 'succeeded' as never, finishedAt: new Date() } });
     await expect(insights.getRefreshState()).resolves.toEqual({ state: 'idle', jobId: null, lastError: null });
-  });
-
-  it('retention.appNotifications deletes resolved rows and old deliveries, never an unread row', async () => {
-    const make = (readAt: Date | null, dismissedAt: Date | null) =>
-      prisma.mhLegacyNotification.create({
-        data: { userId, circleId, type: 'upload_completed', title: 'Title A', readAt, dismissedAt },
-        select: { id: true },
-      });
-    const dismissedOld = await make(ago(60), ago(60));
-    const dismissedRecent = await make(ago(60), ago(2));
-    const readOld = await make(ago(60), null);
-    const readRecent = await make(ago(2), null);
-    const unread = await make(null, null);
-    await prisma.$executeRaw`UPDATE mh_legacy_notifications SET created_at = ${ago(400)} WHERE id = ${unread.id}::uuid`;
-
-    const deliveryOld = await prisma.mhLegacyNotificationDelivery.create({
-      data: { userId, type: 'upload_completed', channel: 'push', status: 'sent', createdAt: ago(60) },
-      select: { id: true },
-    });
-    const deliveryRecent = await prisma.mhLegacyNotificationDelivery.create({
-      data: { userId, type: 'upload_completed', channel: 'push', status: 'sent', createdAt: ago(2) },
-      select: { id: true },
-    });
-
-    const settings = { getRetentionPolicy: async () => ({ appNotifications: { enabled: true, days: 30 } }) };
-    const handler = new NotificationsRetentionHandler(
-      { register: jest.fn() } as unknown as JobHandlerRegistry,
-      prisma,
-      settings as never,
-    );
-    await handler.process({ id: 'housekeeping-db-spec' } as Job);
-
-    const left = (await prisma.mhLegacyNotification.findMany({ where: { userId }, select: { id: true } })).map(
-      (r) => r.id,
-    );
-    expect(left.sort()).toEqual([dismissedRecent.id, readRecent.id, unread.id].sort());
-    expect(left).not.toContain(dismissedOld.id);
-    expect(left).not.toContain(readOld.id);
-
-    const deliveries = (
-      await prisma.mhLegacyNotificationDelivery.findMany({ where: { userId }, select: { id: true } })
-    ).map((r) => r.id);
-    expect(deliveries).toContain(deliveryRecent.id);
-    expect(deliveries).not.toContain(deliveryOld.id);
   });
 });

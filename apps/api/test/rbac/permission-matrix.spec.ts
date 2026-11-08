@@ -98,6 +98,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   'ai_config:write',
   'org_ai_config:read',
   'org_ai_config:write',
+  // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
+  'org_broadcasts:read',
+  'org_broadcasts:write',
   'org_invites:read',
   'org_invites:write',
   'org_members:read',
