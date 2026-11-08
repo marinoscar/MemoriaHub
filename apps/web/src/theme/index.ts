@@ -1,39 +1,19 @@
-import { createTheme, ThemeOptions } from '@mui/material/styles';
+/**
+ * MemoriaHub's themes, built with the packaged `createShellTheme`
+ * (`@marinoscar/platform-web/shell/headless`, RETRO-F1 #571): Inter, 600-weight
+ * headings, an 8px radius, no-uppercase buttons, the flat AppBar with a
+ * hairline border and the soft card shadow are the shell's (the same values
+ * this app used to declare itself); the brand palettes below are the app's.
+ */
+import type { Theme } from '@mui/material/styles';
+import { createShellTheme } from '@marinoscar/platform-web/shell/headless';
 import { lightPalette } from './light';
 import { darkPalette } from './dark';
-import { componentOverrides } from './components';
 
-const baseTheme: ThemeOptions = {
-  typography: {
-    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-    h1: { fontWeight: 600 },
-    h2: { fontWeight: 600 },
-    h3: { fontWeight: 600 },
-    h4: { fontWeight: 600 },
-    h5: { fontWeight: 600 },
-    h6: { fontWeight: 600 },
-  },
-  shape: {
-    borderRadius: 8,
-  },
-};
+export const lightTheme: Theme = createShellTheme('light', { palette: lightPalette });
+export const darkTheme: Theme = createShellTheme('dark', { palette: darkPalette });
 
-export const lightTheme = createTheme({
-  ...baseTheme,
-  palette: {
-    mode: 'light',
-    ...lightPalette,
-  },
-  components: componentOverrides('light'),
-});
-
-export const darkTheme = createTheme({
-  ...baseTheme,
-  palette: {
-    mode: 'dark',
-    ...darkPalette,
-  },
-  components: componentOverrides('dark'),
-});
+/** What `ShellRoot` / `ShellThemeProvider` resolve the viewer's mode against. */
+export const APP_THEMES = { light: lightTheme, dark: darkTheme };
 
 export type ThemeMode = 'light' | 'dark' | 'system';

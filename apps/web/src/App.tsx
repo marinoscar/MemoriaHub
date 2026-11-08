@@ -1,9 +1,12 @@
-import { ThemeProvider } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { CircleProvider } from './contexts/CircleContext';
-import { ThemeContextProvider, useThemeContext } from './contexts/ThemeContext';
+// The packaged shell theme (RETRO-F1, #571): `ShellRoot` is the theme-mode
+// provider plus MUI's ThemeProvider and CssBaseline, under the same
+// `theme_mode` key.
+import { ShellRoot } from '@marinoscar/platform-web/shell/ui';
+import { THEME_STORAGE_KEY } from './contexts/ThemeContext';
+import { APP_THEMES } from './theme';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { RequirePermission } from './components/common/RequirePermission';
@@ -119,11 +122,8 @@ const TestLoginPage = import.meta.env.PROD
   : lazy(() => import('./pages/TestLoginPage'));
 
 function AppRoutes() {
-  const { theme } = useThemeContext();
-
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
+    <>
       {/* PWA (issue #482): outside <Routes>, <ErrorBoundary> and the
           maintenance gate, so the service worker registers — and a waiting
           update can be offered — on every route, including /login, public
@@ -501,10 +501,9 @@ function AppRoutes() {
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/trash" element={<TrashPage />} />
                 <Route path="/trash/runs/:runId" element={<TrashEmptyRunPage />} />
-              </Route>
-
-              {/* Full-bleed layout — map owns the entire content area (no padding) */}
-              <Route element={<Layout fullBleed />}>
+                {/* The map owns the whole content area: it asks the shell for the
+                    full-bleed <main> itself (useShellMainVariant), so the shell is
+                    not remounted on the way in or out. */}
                 <Route path="/map" element={<MediaMapPage />} />
               </Route>
             </Route>
@@ -515,13 +514,13 @@ function AppRoutes() {
         </Suspense>
         </MaintenanceGate>
       </ErrorBoundary>
-    </ThemeProvider>
+    </>
   );
 }
 
 export default function App() {
   return (
-    <ThemeContextProvider>
+    <ShellRoot themes={APP_THEMES} storageKey={THEME_STORAGE_KEY}>
       <AuthProvider>
         {/* The platform host (RETRO-B1, #597): the transport and viewer every
             packaged page and hook reads. Inside the auth provider (it reads the
@@ -534,6 +533,6 @@ export default function App() {
           </IdentityWebAdaptersProvider>
         </AppPlatformHostProvider>
       </AuthProvider>
-    </ThemeContextProvider>
+    </ShellRoot>
   );
 }
