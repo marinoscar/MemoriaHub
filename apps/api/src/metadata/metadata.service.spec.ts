@@ -25,7 +25,7 @@ import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
-import { EnrichmentJob, JobReason, JobStatus, MediaMetadataStatusType } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,7 +37,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'metadata_extraction',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.rerun,
     priority: 0,
     providerKey: null,

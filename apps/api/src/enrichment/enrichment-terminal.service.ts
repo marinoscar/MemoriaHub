@@ -18,7 +18,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { EnrichmentJob, JobStatus, Prisma } from '@prisma/client';
+import { EnrichmentJob, MhLegacyJobStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RateLimitError, classifyRateLimit } from './rate-limit.error';
 import { computeQueueBackoffMs } from './backoff.util';
@@ -121,7 +121,7 @@ export class EnrichmentTerminalService {
     }
 
     await this.safeTerminalUpdate(job.id, job.type, {
-      status: JobStatus.succeeded,
+      status: MhLegacyJobStatus.succeeded,
       finishedAt: new Date(),
       // Release the claim/lease so the terminal row is unowned. `executor` is
       // intentionally NOT nulled here — succeeded is always terminal, so the
@@ -192,7 +192,7 @@ export class EnrichmentTerminalService {
       const giveUp = hits >= RL_MAX_HITS;
 
       await this.safeTerminalUpdate(job.id, job.type, {
-        status: giveUp ? JobStatus.failed : JobStatus.pending,
+        status: giveUp ? MhLegacyJobStatus.failed : MhLegacyJobStatus.pending,
         rateLimitHits: hits,
         rateLimitedAt: new Date(),
         scheduledFor: giveUp ? null : new Date(Date.now() + delayMs),
@@ -232,7 +232,7 @@ export class EnrichmentTerminalService {
       });
 
       await this.safeTerminalUpdate(job.id, job.type, {
-        status: shouldRetry ? JobStatus.pending : JobStatus.failed,
+        status: shouldRetry ? MhLegacyJobStatus.pending : MhLegacyJobStatus.failed,
         lastError: message,
         scheduledFor: shouldRetry ? new Date(Date.now() + delayMs) : null,
         // Release the claim/lease so a requeued (or failed) job is unowned.

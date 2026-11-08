@@ -40,7 +40,7 @@ import {
 import {
   EnrichmentJob,
   JobReason,
-  JobStatus,
+  MhLegacyJobStatus,
   MediaTagStatusType,
   MediaType,
 } from '@prisma/client';
@@ -59,7 +59,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'auto_tagging',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 20,
     providerKey: null,

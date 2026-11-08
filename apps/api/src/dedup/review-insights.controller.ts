@@ -1,10 +1,9 @@
 import { Controller, Get, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ReviewInsightsService } from './review-insights.service';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 
 @ApiTags('Review Insights')
 @ApiBearerAuth('JWT-auth')

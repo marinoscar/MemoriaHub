@@ -71,7 +71,7 @@ export class BroadcastChunkHandler implements EnrichmentHandler, OnModuleInit {
       return;
     }
 
-    const broadcast = await this.prisma.notificationBroadcast.findUnique({ where: { id: broadcastId } });
+    const broadcast = await this.prisma.mhLegacyNotificationBroadcast.findUnique({ where: { id: broadcastId } });
     if (!broadcast) {
       this.logger.log(`Broadcast ${broadcastId} no longer exists; chunk job ${job.id} is a no-op`);
       return;
@@ -109,7 +109,7 @@ export class BroadcastChunkHandler implements EnrichmentHandler, OnModuleInit {
       emailFailures += await this.deliverGroup(broadcast, group);
 
       const next = group[group.length - 1].id;
-      const committed = await this.prisma.notificationBroadcast.updateMany({
+      const committed = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
         where: { id: broadcastId, status: 'sending', cursorUserId: cursor },
         data: { cursorUserId: next, processedCount: { increment: group.length } },
       });
@@ -170,7 +170,7 @@ export class BroadcastChunkHandler implements EnrichmentHandler, OnModuleInit {
   }
 
   private async stillSending(broadcastId: string): Promise<boolean> {
-    const row = await this.prisma.notificationBroadcast.findUnique({
+    const row = await this.prisma.mhLegacyNotificationBroadcast.findUnique({
       where: { id: broadcastId },
       select: { status: true },
     });
@@ -178,7 +178,7 @@ export class BroadcastChunkHandler implements EnrichmentHandler, OnModuleInit {
   }
 
   private async finish(broadcastId: string, jobId: string): Promise<void> {
-    const done = await this.prisma.notificationBroadcast.updateMany({
+    const done = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
       where: { id: broadcastId, status: 'sending' },
       data: { status: 'sent', finishedAt: new Date() },
     });

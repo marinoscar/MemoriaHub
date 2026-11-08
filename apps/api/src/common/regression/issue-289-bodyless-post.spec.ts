@@ -51,8 +51,7 @@ import { EnrichmentAdminController } from '../../enrichment/enrichment-admin.con
 import { EnrichmentAdminService } from '../../enrichment/enrichment-admin.service';
 import { AdminMetadataController } from '../../metadata/admin-metadata.controller';
 import { MetadataBackfillService } from '../../metadata/metadata-backfill.service';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { AuthenticatedUser } from '../../auth/interfaces/authenticated-user.interface';
+import { JwtAuthGuard, AuthenticatedUser } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../constants/roles.constants';
 
 /** Builds a minimal AuthenticatedUser-shaped fixture with the given roles/permissions. */

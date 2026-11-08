@@ -110,7 +110,7 @@ describe('ReviewQueueReconcileService', () => {
 
     (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([CIRCLE_A]);
     (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([{ userId: USER_A }]);
-    (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -225,7 +225,7 @@ describe('ReviewQueueReconcileService', () => {
   describe('re-unread rule', () => {
     it('a read row whose count decreases is updated in place WITHOUT re-marking unread', async () => {
       const readAt = new Date('2026-08-01T00:00:00Z');
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([
         makeLiveRow({ id: 'row-1', userId: USER_A, readAt, data: { count: 10, countAtRead: 10 } }),
       ]);
       mockMediaService.computeReviewCounts.mockResolvedValue(
@@ -246,7 +246,7 @@ describe('ReviewQueueReconcileService', () => {
 
     it('a read row whose count stays EQUAL to countAtRead is not re-marked unread', async () => {
       const readAt = new Date('2026-08-01T00:00:00Z');
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([
         makeLiveRow({ id: 'row-1', userId: USER_A, readAt, data: { count: 10, countAtRead: 10 } }),
       ]);
       mockMediaService.computeReviewCounts.mockResolvedValue(
@@ -260,7 +260,7 @@ describe('ReviewQueueReconcileService', () => {
 
     it('a read row whose count GROWS past countAtRead is re-marked unread', async () => {
       const readAt = new Date('2026-08-01T00:00:00Z');
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([
         makeLiveRow({ id: 'row-1', userId: USER_A, readAt, data: { count: 5, countAtRead: 5 } }),
       ]);
       mockMediaService.computeReviewCounts.mockResolvedValue(
@@ -276,7 +276,7 @@ describe('ReviewQueueReconcileService', () => {
 
     it('a read row with NO countAtRead snapshot is NOT re-marked unread even though the count grew', async () => {
       const readAt = new Date('2026-08-01T00:00:00Z');
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([
         makeLiveRow({ id: 'row-1', userId: USER_A, readAt, data: { count: 5 } }), // no countAtRead key
       ]);
       mockMediaService.computeReviewCounts.mockResolvedValue(
@@ -294,7 +294,7 @@ describe('ReviewQueueReconcileService', () => {
     });
 
     it('an UNREAD live row is never re-marked (there is nothing to re-mark)', async () => {
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([
         makeLiveRow({ id: 'row-1', userId: USER_A, readAt: null, data: { count: 5, countAtRead: 5 } }),
       ]);
       mockMediaService.computeReviewCounts.mockResolvedValue(
@@ -313,7 +313,7 @@ describe('ReviewQueueReconcileService', () => {
 
   describe('drained queue resolves the live row', () => {
     it('resolves every live row of a type whose count has dropped to 0', async () => {
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([
         makeLiveRow({ id: 'row-1', userId: USER_A, data: { count: 3 } }),
       ]);
       mockMediaService.computeReviewCounts.mockResolvedValue(
@@ -445,7 +445,7 @@ describe('ReviewQueueReconcileService', () => {
   describe('countAtRead carry-forward', () => {
     it('carries the existing countAtRead snapshot forward unchanged, even while re-unreading', async () => {
       const readAt = new Date('2026-08-01T00:00:00Z');
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([
         makeLiveRow({ id: 'row-1', userId: USER_A, readAt, data: { count: 7, countAtRead: 7 } }),
       ]);
       mockMediaService.computeReviewCounts.mockResolvedValue(

@@ -11,7 +11,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { EnrichmentJob, JobReason, JobStatus, MediaMetadataStatusType } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
 import { GeocodeHandler } from './geocode.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { GeoLocationService } from '../media/geo/geo-location.service';
@@ -29,7 +29,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'geocode',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.backfill,
     priority: 100,
     providerKey: null,

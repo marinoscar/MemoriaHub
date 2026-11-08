@@ -9,7 +9,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentJobService } from './enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
@@ -39,7 +39,7 @@ export class JobHistoryPurgeTask {
       const existing = await this.prisma.enrichmentJob.findFirst({
         where: {
           type: 'job_history_purge',
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
 

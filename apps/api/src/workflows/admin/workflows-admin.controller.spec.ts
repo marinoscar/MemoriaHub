@@ -26,10 +26,7 @@ import request from 'supertest';
 import { randomUUID } from 'crypto';
 import { WorkflowsAdminController } from './workflows-admin.controller';
 import { WorkflowsAdminService } from './workflows-admin.service';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../../auth/guards/roles.guard';
-import { PermissionsGuard } from '../../auth/guards/permissions.guard';
-import { AuthenticatedUser } from '../../auth/interfaces/authenticated-user.interface';
+import { JwtAuthGuard, RolesGuard, PermissionsGuard, AuthenticatedUser } from '@marinoscar/platform-api/identity';
 
 const WORKFLOW_ID = randomUUID();
 const RUN_ID = randomUUID();

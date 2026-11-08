@@ -8,10 +8,9 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { IsIn } from 'class-validator';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { OrientationOp } from '../storage/processing/image-orientation.util';
 import { MediaOrientationEditService } from './media-orientation-edit.service';
 

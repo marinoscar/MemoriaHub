@@ -1,4 +1,4 @@
-import { Module, DynamicModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -6,14 +6,8 @@ import { APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { PrismaModule } from './prisma/prisma.module';
-import { CommonModule } from './common/common.module';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
 import { SettingsModule } from './settings/settings.module';
-import { AllowlistModule } from './allowlist/allowlist.module';
-import { DeviceAuthModule } from './device-auth/device-auth.module';
 import { StorageModule } from './storage/storage.module';
-import { PatModule } from './pat/pat.module';
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
 import { AiModule } from './ai/ai.module';
@@ -47,31 +41,15 @@ import { AndroidAppModule } from './android-app/android-app.module';
 import { doctorModule } from './doctor/doctor.config';
 import { DoctorChecksModule } from './doctor/doctor-checks.module';
 import { LoggerModule } from './common/logger/logger.module';
-import { TestAuthModule } from './test-auth/test-auth.module';
 
 import { platformHostModule } from './platform/platform-host.module';
+import { identityModule } from './platform/identity/identity.config';
+import { ProfileModule } from './profile/profile.module';
 import { HostCorePortsModule } from './platform/host-core-ports.module';
 import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 
 import configuration from './config/configuration';
-
-/**
- * Modules registered only outside production.
- *
- * `TestAuthModule` mints tokens without a real OAuth round-trip, so it must
- * never exist in a production process — and, because a controller that is not
- * registered is invisible to `SwaggerModule.createDocument`, keeping it out of
- * the module list is also what keeps its routes out of the published API
- * document.
- *
- * Extracted from the inline conditional so that fact is directly testable.
- * `main.ts` additionally refuses to boot when `TEST_AUTH_ENABLED=true` in
- * production, but nothing asserted the module gate itself.
- */
-export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
-  return process.env.NODE_ENV !== 'production' ? [TestAuthModule] : [];
-}
 
 @Module({
   imports: [
@@ -96,10 +74,16 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     // Logger
     LoggerModule,
 
+    // Identity (RETRO-B2, #611): sign-in, sessions, users, allowlist, PATs, the
+    // device flow and RBAC, from @marinoscar/platform-api/identity, in
+    // single-organization mode. Provides the `@Auth` guards every module's
+    // controllers use. `POST /api/auth/test/login` is mounted by it outside
+    // production only (`enableTestAuth`).
+    identityModule,
+    // The app-owned half of the user: profile picture and person link.
+    ProfileModule,
+
     // Feature modules
-    CommonModule,
-    AuthModule,
-    UsersModule,
     SettingsModule,
     // What the host core injects from slices not adopted yet (settings token,
     // Doctor registries). PLATFORM-ADOPTION-SHIM(#597); see the file header.
@@ -116,10 +100,7 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     hostCoreModule,
     // `GET /api/admin/about` (`system_settings:read`).
     aboutModule,
-    AllowlistModule,
-    DeviceAuthModule,
     StorageModule,
-    PatModule,
     MediaModule,
     CirclesModule,
     AiModule,
@@ -154,9 +135,6 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     DbBackupModule,
     MediaSyncModule,
     AndroidAppModule,
-
-    // Test modules (non-production only)
-    ...testOnlyModules(),
   ],
   providers: [
     // Global validation pipe (Zod)

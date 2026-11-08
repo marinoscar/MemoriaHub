@@ -9,7 +9,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { MetadataBackfillService } from './metadata-backfill.service';
 

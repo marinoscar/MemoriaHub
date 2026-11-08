@@ -85,7 +85,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
     latestRun = null;
 
     prisma = {
-      databaseBackupRun: {
+      mhLegacyDatabaseBackupRun: {
         findMany: jest.fn(async ({ where }: any) => applyStaleWhere(staleCandidates, where)),
         findFirst: jest.fn(async () => latestRun),
         updateMany: jest.fn(async () => ({ count: 1 })),
@@ -191,7 +191,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
       expect(runner.runBackup).not.toHaveBeenCalled();
       // The staleness sweep still runs — releasing an orphaned run must not
       // depend on the schedule being switched on.
-      expect(prisma.databaseBackupRun.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.mhLegacyDatabaseBackupRun.findMany).toHaveBeenCalledTimes(1);
     });
 
     it('respects a weekly schedule (no fire on the wrong day)', async () => {
@@ -261,7 +261,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
       await task.handleTick();
 
       expect(systemSettings.getSettings).not.toHaveBeenCalled();
-      expect(prisma.databaseBackupRun.findMany).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.findMany).not.toHaveBeenCalled();
       expect(runner.runBackup).not.toHaveBeenCalled();
     });
 
@@ -359,8 +359,8 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
 
       await task.handleTick();
 
-      expect(prisma.databaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
-      const [[args]] = prisma.databaseBackupRun.updateMany.mock.calls;
+      expect(prisma.mhLegacyDatabaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
+      const [[args]] = prisma.mhLegacyDatabaseBackupRun.updateMany.mock.calls;
       expect(args.where).toEqual({ id: 'dead', status: 'running' });
       expect(args.data.status).toBe('stale');
       expect(args.data.finishedAt).toBeInstanceOf(Date);
@@ -378,7 +378,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
 
       await task.handleTick();
 
-      const [[args]] = prisma.databaseBackupRun.updateMany.mock.calls;
+      const [[args]] = prisma.mhLegacyDatabaseBackupRun.updateMany.mock.calls;
       expect(args.data.status).toBe('stale');
       expect(['pending', 'running']).not.toContain(args.data.status);
       // And nothing was restarted on this tick's behalf.
@@ -393,7 +393,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
 
       await task.handleTick();
 
-      expect(prisma.databaseBackupRun.updateMany).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.updateMany).not.toHaveBeenCalled();
       expect(provider.delete).not.toHaveBeenCalled();
     });
 
@@ -407,7 +407,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
 
       await task.handleTick();
 
-      expect(prisma.databaseBackupRun.updateMany).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.updateMany).not.toHaveBeenCalled();
     });
 
     it('ages a zombie row with no heartbeat at all by startedAt', async () => {
@@ -422,7 +422,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
 
       await task.handleTick();
 
-      expect(prisma.databaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.mhLegacyDatabaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
     });
 
     it('does not delete the object when the row was no longer `running`', async () => {
@@ -430,7 +430,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
         runRow({ id: 'raced', lastHeartbeatAt: new Date('2026-03-10T01:00:00.000Z') }),
       ];
       latestRun = { id: 'raced', startedAt: new Date('2026-03-10T02:00:30.000Z') };
-      prisma.databaseBackupRun.updateMany.mockResolvedValue({ count: 0 });
+      prisma.mhLegacyDatabaseBackupRun.updateMany.mockResolvedValue({ count: 0 });
 
       await task.handleTick();
 
@@ -447,7 +447,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
       await expect(task.handleTick()).resolves.toBeUndefined();
 
       // The row was still released, and the schedule still fired.
-      expect(prisma.databaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.mhLegacyDatabaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
       expect(runner.runBackup).toHaveBeenCalledTimes(1);
     });
 
@@ -464,7 +464,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
 
       await task.handleTick();
 
-      expect(prisma.databaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.mhLegacyDatabaseBackupRun.updateMany).toHaveBeenCalledTimes(1);
       expect(providerResolver.getProviderFor).not.toHaveBeenCalled();
     });
 
@@ -475,7 +475,7 @@ describe('DatabaseBackupScheduleTask (issue #342)', () => {
       latestRun = null;
 
       const order: string[] = [];
-      prisma.databaseBackupRun.updateMany.mockImplementation(async () => {
+      prisma.mhLegacyDatabaseBackupRun.updateMany.mockImplementation(async () => {
         order.push('release');
         return { count: 1 };
       });

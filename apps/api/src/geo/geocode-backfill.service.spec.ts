@@ -16,7 +16,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { JobReason, JobStatus, MediaMetadataStatusType } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
 import { GeocodeBackfillService } from './geocode-backfill.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -32,7 +32,7 @@ function makeJob(overrides: Record<string, unknown> = {}) {
     type: 'geocode',
     mediaItemId: null,
     circleId: null,
-    status: JobStatus.pending,
+    status: MhLegacyJobStatus.pending,
     reason: JobReason.backfill,
     priority: 100,
     providerKey: null,
@@ -256,7 +256,7 @@ describe('GeocodeBackfillService', () => {
       } as any);
       mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as any);
       mockEnrichmentJobService.enqueue.mockResolvedValue(
-        makeJob({ id: 'job-rerun', status: JobStatus.pending, reason: JobReason.rerun, priority: 0 }),
+        makeJob({ id: 'job-rerun', status: MhLegacyJobStatus.pending, reason: JobReason.rerun, priority: 0 }),
       );
 
       await service.enqueueRerun('media-1', 'user-1');
@@ -292,12 +292,12 @@ describe('GeocodeBackfillService', () => {
       } as any);
       mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as any);
       mockEnrichmentJobService.enqueue.mockResolvedValue(
-        makeJob({ id: 'job-xyz', status: JobStatus.pending }),
+        makeJob({ id: 'job-xyz', status: MhLegacyJobStatus.pending }),
       );
 
       const result = await service.enqueueRerun('media-1', 'user-1');
 
-      expect(result).toEqual({ jobId: 'job-xyz', status: JobStatus.pending });
+      expect(result).toEqual({ jobId: 'job-xyz', status: MhLegacyJobStatus.pending });
     });
 
     it('throws NotFoundException when mediaItem is not found', async () => {

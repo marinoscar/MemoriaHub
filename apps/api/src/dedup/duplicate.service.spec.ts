@@ -39,7 +39,7 @@ import {
   CircleRole,
   DuplicateGroupStatus,
   JobReason,
-  JobStatus,
+  MhLegacyJobStatus,
   MediaType,
   ReviewRunAction,
   ReviewRunStatus,
@@ -1546,7 +1546,7 @@ describe('DuplicateService', () => {
       });
       mockEnrichmentJobService.enqueue.mockResolvedValue({
         id: 'job-rerun-1',
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       });
 
       await service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE);
@@ -1611,7 +1611,7 @@ describe('DuplicateService', () => {
       });
       mockEnrichmentJobService.enqueue.mockResolvedValue({
         id: 'job-rerun-1',
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       });
 
       const result = await service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE);
@@ -1625,7 +1625,7 @@ describe('DuplicateService', () => {
           priority: 0,
         }),
       );
-      expect(result).toEqual({ data: { jobId: 'job-rerun-1', status: JobStatus.pending } });
+      expect(result).toEqual({ data: { jobId: 'job-rerun-1', status: MhLegacyJobStatus.pending } });
     });
   });
 });

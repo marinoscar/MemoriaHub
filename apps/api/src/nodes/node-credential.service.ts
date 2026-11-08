@@ -17,7 +17,7 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { createHash, randomBytes } from 'crypto';
 import { CreateNodeCredentialDto } from './dto/create-node-credential.dto';
-import { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
+import { PRINCIPAL_USER_INCLUDE, type AuthenticatedUser } from '@marinoscar/platform-api/identity';
 
 @Injectable()
 export class NodeCredentialService {
@@ -43,7 +43,7 @@ export class NodeCredentialService {
     // Nullable expiry: omitted/null = never expires
     const expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
 
-    const credential = await this.prisma.nodeCredential.create({
+    const credential = await this.prisma.mhLegacyNodeCredential.create({
       data: {
         userId,
         name: dto.name,
@@ -69,7 +69,7 @@ export class NodeCredentialService {
    * List all node credentials for a user (without token hashes)
    */
   async listForUser(userId: string) {
-    const credentials = await this.prisma.nodeCredential.findMany({
+    const credentials = await this.prisma.mhLegacyNodeCredential.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -90,7 +90,7 @@ export class NodeCredentialService {
    * Revoke a node credential by ID (ownership-checked)
    */
   async revoke(userId: string, credentialId: string): Promise<void> {
-    const credential = await this.prisma.nodeCredential.findFirst({
+    const credential = await this.prisma.mhLegacyNodeCredential.findFirst({
       where: { id: credentialId, userId },
     });
 
@@ -102,7 +102,7 @@ export class NodeCredentialService {
       throw new NotFoundException('Credential already revoked');
     }
 
-    await this.prisma.nodeCredential.update({
+    await this.prisma.mhLegacyNodeCredential.update({
       where: { id: credential.id },
       data: { revokedAt: new Date() },
     });
@@ -115,7 +115,7 @@ export class NodeCredentialService {
    * user's email/display name (never the hash or raw token).
    */
   async listAll() {
-    const credentials = await this.prisma.nodeCredential.findMany({
+    const credentials = await this.prisma.mhLegacyNodeCredential.findMany({
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -150,7 +150,7 @@ export class NodeCredentialService {
    * Admin: revoke ANY node credential regardless of owner (soft revoke).
    */
   async revokeAny(credentialId: string): Promise<void> {
-    const credential = await this.prisma.nodeCredential.findUnique({
+    const credential = await this.prisma.mhLegacyNodeCredential.findUnique({
       where: { id: credentialId },
     });
 
@@ -162,7 +162,7 @@ export class NodeCredentialService {
       throw new NotFoundException('Credential already revoked');
     }
 
-    await this.prisma.nodeCredential.update({
+    await this.prisma.mhLegacyNodeCredential.update({
       where: { id: credential.id },
       data: { revokedAt: new Date() },
     });
@@ -178,24 +178,12 @@ export class NodeCredentialService {
   async validateToken(rawToken: string): Promise<AuthenticatedUser | null> {
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 
-    const credential = await this.prisma.nodeCredential.findUnique({
+    const credential = await this.prisma.mhLegacyNodeCredential.findUnique({
       where: { tokenHash },
       include: {
-        user: {
-          include: {
-            userRoles: {
-              include: {
-                role: {
-                  include: {
-                    rolePermissions: {
-                      include: { permission: true },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        // The principal graph the identity slice's PrincipalFactory reads: system
+        // roles and the memberships with their org roles (platform 0024).
+        user: { include: PRINCIPAL_USER_INCLUDE },
       },
     });
 
@@ -219,7 +207,7 @@ export class NodeCredentialService {
     }
 
     // Fire-and-forget update of lastUsedAt
-    this.prisma.nodeCredential
+    this.prisma.mhLegacyNodeCredential
       .update({ where: { id: credential.id }, data: { lastUsedAt: new Date() } })
       .catch(() => {});
 

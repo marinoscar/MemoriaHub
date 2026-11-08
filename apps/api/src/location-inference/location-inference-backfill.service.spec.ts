@@ -15,7 +15,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -80,7 +80,7 @@ describe('LocationInferenceBackfillService', () => {
         { circleId: 'circle-b', _count: 20 },
       ]);
       (mockPrisma.enrichmentJob.findFirst as jest.Mock)
-        .mockResolvedValueOnce({ id: 'existing-job', status: JobStatus.running }) // circle-a: guarded
+        .mockResolvedValueOnce({ id: 'existing-job', status: MhLegacyJobStatus.running }) // circle-a: guarded
         .mockResolvedValueOnce(null); // circle-b: eligible
 
       const result = await service.backfillAllCircles({});
@@ -104,7 +104,7 @@ describe('LocationInferenceBackfillService', () => {
         where: {
           type: 'location_inference',
           circleId: 'circle-a',
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
     });

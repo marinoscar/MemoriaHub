@@ -14,10 +14,9 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { CircleRole, JobReason, MediaMetadataStatusType } from '@prisma/client';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';

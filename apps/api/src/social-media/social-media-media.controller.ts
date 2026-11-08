@@ -15,11 +15,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CircleRole } from '@prisma/client';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../common/types/settings.types';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';

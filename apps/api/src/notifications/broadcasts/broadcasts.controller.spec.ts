@@ -10,7 +10,7 @@ import { ConflictException, ExecutionContext } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import request from 'supertest';
 
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
 import { BroadcastsController } from './broadcasts.controller';
 import { BroadcastsService } from './broadcasts.service';

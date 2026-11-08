@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   CircleRole,
-  JobStatus,
+  MhLegacyJobStatus,
   MediaType,
   MediaEnhancementBatch,
   MediaEnhancementStatus,
@@ -29,7 +29,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isPictureEnhancementEnabled } from '../common/types/settings.types';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
@@ -773,7 +773,7 @@ export class MediaEnhancementService {
       await this.prisma.enrichmentJob.deleteMany({
         where: {
           type: 'picture_enhancement',
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           OR: pendingRows.map((r) => ({
             payload: { path: ['enhancementId'], equals: r.id },
           })),

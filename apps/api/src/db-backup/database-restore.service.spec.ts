@@ -250,7 +250,7 @@ function build(overrides: {
   const run = { ...COMPLETED_RUN, ...(overrides.run ?? {}) };
 
   const prisma = {
-    databaseBackupRun: {
+    mhLegacyDatabaseBackupRun: {
       findUnique: jest.fn().mockResolvedValue(run),
       findUniqueOrThrow: jest.fn().mockResolvedValue(run),
       findMany: jest
@@ -385,7 +385,7 @@ describe('pre-flight gates', () => {
     expect(result.guided.runbook).toContain('database-restore.md');
     // A capability failure must not create anything.
     expect(h.events).not.toContain('create-database');
-    expect(prisma.databaseBackupRun.update).toHaveBeenCalledWith(
+    expect(prisma.mhLegacyDatabaseBackupRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ restoreStatus: 'guided' }),
       }),
@@ -656,7 +656,7 @@ describe('mid-restore failure', () => {
     );
     expect(drops.some((d) => d.text.includes(CTX.scratchDatabase))).toBe(true);
 
-    expect(harness.prisma.databaseBackupRun.update).toHaveBeenCalledWith(
+    expect(harness.prisma.mhLegacyDatabaseBackupRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ restoreStatus: 'failed' }),
       }),

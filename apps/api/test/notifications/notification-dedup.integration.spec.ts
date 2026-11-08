@@ -223,7 +223,7 @@ describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', (
   }
 
   async function countLive(userId: string, circleId: string | null, type: string): Promise<number> {
-    return prisma.notification.count({
+    return prisma.mhLegacyNotification.count({
       where: { userId, circleId, type: type as any, dismissedAt: null },
     });
   }
@@ -269,7 +269,7 @@ describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', (
     it(
       'dismissing the first row allows a fresh live row for the same (user, circle, type) to insert successfully',
       async () => {
-        await prisma.notification.update({
+        await prisma.mhLegacyNotification.update({
           where: { id: firstRowId },
           data: { dismissedAt: new Date() },
         });
@@ -287,7 +287,7 @@ describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', (
         });
 
         expect(await countLive(userId, circleId, type)).toBe(1);
-        const row = await prisma.notification.findUnique({ where: { id: secondRowId } });
+        const row = await prisma.mhLegacyNotification.findUnique({ where: { id: secondRowId } });
         expect(row).not.toBeNull();
         expect(row!.dismissedAt).toBeNull();
       },
@@ -317,7 +317,7 @@ describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', (
           title: `Event exemption test — upload 2 (${RUN_ID})`,
         });
 
-        const count = await prisma.notification.count({
+        const count = await prisma.mhLegacyNotification.count({
           where: { userId: USER_1_ID, circleId: CIRCLE_1_ID, type: 'upload_completed' },
         });
         expect(count).toBe(2);
@@ -342,7 +342,7 @@ describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', (
           title: `Event exemption test — global failure 2 (${RUN_ID})`,
         });
 
-        const count = await prisma.notification.count({
+        const count = await prisma.mhLegacyNotification.count({
           where: { userId: USER_1_ID, circleId: null, type: 'enrichment_failed' },
         });
         expect(count).toBe(2);
@@ -446,7 +446,7 @@ describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', (
           count: 5,
         });
 
-        const afterFirst = await prisma.notification.findMany({
+        const afterFirst = await prisma.mhLegacyNotification.findMany({
           where: { userId, circleId, type, dismissedAt: null },
         });
         expect(afterFirst).toHaveLength(1);
@@ -464,7 +464,7 @@ describeMaybeDb('Notification review-queue dedup (DB_GATED: real PostgreSQL)', (
           count: 42,
         });
 
-        const afterSecond = await prisma.notification.findMany({
+        const afterSecond = await prisma.mhLegacyNotification.findMany({
           where: { userId, circleId, type, dismissedAt: null },
         });
         expect(afterSecond).toHaveLength(1);
@@ -521,7 +521,7 @@ async function cleanupFixtures(prisma: PrismaClient): Promise<void> {
   // Reverse-order teardown to respect FK constraints. Deleting notifications
   // explicitly first (rather than relying on the ON DELETE CASCADE from
   // circles/users) keeps this scoped and makes the cleanup order obvious.
-  await prisma.notification.deleteMany({
+  await prisma.mhLegacyNotification.deleteMany({
     where: { userId: { in: [USER_1_ID, USER_2_ID] } },
   });
   await prisma.circle.deleteMany({ where: { id: { in: [CIRCLE_1_ID, CIRCLE_2_ID] } } });

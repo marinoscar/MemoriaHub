@@ -18,10 +18,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { DuplicateService } from './duplicate.service';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';

@@ -2,7 +2,7 @@ import { ForbiddenException, HttpException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { DeepMockProxy, mockDeep } from 'jest-mock-extended';
 
-import type { AuthCredentialInfo } from '../auth/decorators/auth-credential.decorator';
+import { type AuthCredentialInfo } from '@marinoscar/platform-api/identity';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CheckinInput, MediaSyncConfig } from './dto/media-sync.dto';
@@ -119,6 +119,11 @@ describe('MediaSyncService', () => {
     devices = [deviceRow(), deviceRow({ id: DEVICE_B, installationId: 'b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1', patId: PAT_B })];
 
     (prisma.$transaction as jest.Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
+    // The `pat_id` relation is not modelled (RETRO-B2): the service reads each device's token in
+    // one batched query, served here from the same fixture rows.
+    (prisma.personalAccessToken.findMany as jest.Mock).mockImplementation(async ({ where }) =>
+      devices.filter((d) => d.patId && where.id.in.includes(d.patId)).map((d) => ({ id: d.patId, ...d.pat })),
+    );
     (prisma.mediaSyncDevice.findFirst as jest.Mock).mockImplementation(async ({ where }) =>
       devices.find((d) => matches(d, where)) ?? null,
     );
@@ -137,7 +142,7 @@ describe('MediaSyncService', () => {
       }
       return { count };
     });
-    (prisma.androidAppRelease.findFirst as jest.Mock).mockResolvedValue(null);
+    (prisma.mhLegacyAndroidAppRelease.findFirst as jest.Mock).mockResolvedValue(null);
     (prisma.auditEvent.create as jest.Mock).mockResolvedValue({});
     (prisma.$executeRaw as unknown as jest.Mock).mockResolvedValue(0);
   });
@@ -248,7 +253,7 @@ describe('MediaSyncService', () => {
     it('builds the view: configPending, tokenExpiresAt, update availability', async () => {
       devices[0].configVersion = 3;
       devices[0].appliedConfigVersion = 2;
-      (prisma.androidAppRelease.findFirst as jest.Mock).mockResolvedValue({
+      (prisma.mhLegacyAndroidAppRelease.findFirst as jest.Mock).mockResolvedValue({
         packageName: 'memoriahub.marin.cr',
         versionCode: 2,
       });

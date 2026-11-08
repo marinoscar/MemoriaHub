@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { CircleRole, Prisma, type MediaSyncDevice, type MediaSyncDiagnosticReport, type MediaSyncRun } from '@prisma/client';
 
-import type { AuthCredentialInfo } from '../auth/decorators/auth-credential.decorator';
+import { type AuthCredentialInfo } from '@marinoscar/platform-api/identity';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { staticLogger } from '../common/logger/logger.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -86,7 +86,27 @@ type Tx = Prisma.TransactionClient;
 
 type DeviceWithPat = MediaSyncDevice & { pat: { expiresAt: Date; revokedAt: Date | null } | null };
 
-const WITH_PAT = { pat: { select: { expiresAt: true, revokedAt: true } } } as const;
+type PatState = { expiresAt: Date; revokedAt: Date | null };
+
+/**
+ * PLATFORM-ADOPTION-SHIM(RETRO-B2): the foreign key `media_sync_devices.pat_id` exists but is not
+ * modelled (PersonalAccessToken is not `@extensible`), so a device's token state is read with one
+ * batched query instead of an `include`.
+ */
+async function attachPats<T extends MediaSyncDevice>(
+  client: Pick<Prisma.TransactionClient, 'personalAccessToken'>,
+  devices: T[],
+): Promise<Array<T & { pat: PatState | null }>> {
+  const ids = [...new Set(devices.map((d) => d.patId).filter((id): id is string => !!id))];
+  const rows = ids.length
+    ? await client.personalAccessToken.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, expiresAt: true, revokedAt: true },
+      })
+    : [];
+  const byId = new Map(rows.map((r) => [r.id, { expiresAt: r.expiresAt, revokedAt: r.revokedAt }]));
+  return devices.map((d) => ({ ...d, pat: d.patId ? (byId.get(d.patId) ?? null) : null }));
+}
 
 type CurrentRelease = { packageName: string; versionCode: number } | null;
 
@@ -227,21 +247,21 @@ export class MediaSyncService {
         config: defaultConfig(targetCircleId) as Prisma.InputJsonObject,
       },
       update: fields,
-      include: WITH_PAT,
     });
-    return { device, created: existing === null, repaired };
+    const [withPat] = await attachPats(tx, [device]);
+    return { device: withPat, created: existing === null, repaired };
   }
 
   /** The caller's devices, most recently seen first (revoked ones included). */
   async list(userId: string): Promise<DeviceView[]> {
-    const [devices, release] = await Promise.all([
+    const [rows, release] = await Promise.all([
       this.prisma.mediaSyncDevice.findMany({
         where: { userId },
-        include: WITH_PAT,
         orderBy: [{ lastSeenAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }],
       }),
       this.currentRelease(),
     ]);
+    const devices = await attachPats(this.prisma, rows);
     return devices.map((device) => this.toDeviceView(device, release));
   }
 
@@ -548,9 +568,10 @@ export class MediaSyncService {
   }
 
   private async findOwned(userId: string, deviceId: string): Promise<DeviceWithPat> {
-    const device = await this.prisma.mediaSyncDevice.findFirst({ where: { id: deviceId, userId }, include: WITH_PAT });
+    const device = await this.prisma.mediaSyncDevice.findFirst({ where: { id: deviceId, userId } });
     if (!device) throw this.notFound();
-    return device;
+    const [withPat] = await attachPats(this.prisma, [device]);
+    return withPat;
   }
 
   /**
@@ -680,7 +701,7 @@ export class MediaSyncService {
   /** The server's current Android release, read directly (one indexed row). */
   private async currentRelease(): Promise<CurrentRelease> {
     return (
-      (await this.prisma.androidAppRelease.findFirst({
+      (await this.prisma.mhLegacyAndroidAppRelease.findFirst({
         where: { isCurrent: true },
         select: { packageName: true, versionCode: true },
       })) ?? null

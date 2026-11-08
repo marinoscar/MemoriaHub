@@ -20,10 +20,7 @@ import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequestUser, JwtAuthGuard, RolesGuard, PermissionsGuard } from '@marinoscar/platform-api/identity';
 
 const allowAllGuard = { canActivate: () => true };
 

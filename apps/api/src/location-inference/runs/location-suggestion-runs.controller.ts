@@ -16,10 +16,9 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
 import { ReviewRunService } from '../../review-runs/review-run.service';
 import { ListLocationSuggestionRunItemsQueryDto } from '../dto/list-location-suggestion-run-items-query.dto';
 

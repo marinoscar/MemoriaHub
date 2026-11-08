@@ -126,17 +126,17 @@ describe('NotificationsService', () => {
 
   describe('list() — status filter semantics', () => {
     beforeEach(() => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
     });
 
     it('status=unread → { dismissedAt: null, readAt: null }', async () => {
       await service.list(USER_ID, { status: 'unread' });
 
-      const where = (mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].where;
+      const where = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].where;
       expect(where).toMatchObject({ userId: USER_ID, dismissedAt: null, readAt: null });
       // count() must use the identical predicate as findMany()
-      expect((mockPrisma.notification.count as jest.Mock).mock.calls[0][0].where).toMatchObject({
+      expect((mockPrisma.mhLegacyNotification.count as jest.Mock).mock.calls[0][0].where).toMatchObject({
         dismissedAt: null,
         readAt: null,
       });
@@ -145,14 +145,14 @@ describe('NotificationsService', () => {
     it('status=read → { dismissedAt: null, readAt: { not: null } }', async () => {
       await service.list(USER_ID, { status: 'read' });
 
-      const where = (mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].where;
+      const where = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].where;
       expect(where).toMatchObject({ dismissedAt: null, readAt: { not: null } });
     });
 
     it('status=dismissed → ONLY dismissed rows: { dismissedAt: { not: null } }', async () => {
       await service.list(USER_ID, { status: 'dismissed' });
 
-      const where = (mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].where;
+      const where = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].where;
       expect(where).toMatchObject({ dismissedAt: { not: null } });
       // Must NOT also filter by readAt — dismissed rows are returned
       // regardless of read state.
@@ -162,7 +162,7 @@ describe('NotificationsService', () => {
     it('status=all → dismissed rows EXCLUDED: { dismissedAt: null } only (no readAt filter)', async () => {
       await service.list(USER_ID, { status: 'all' });
 
-      const where = (mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].where;
+      const where = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].where;
       expect(where).toMatchObject({ dismissedAt: null });
       expect(where.readAt).toBeUndefined();
     });
@@ -170,7 +170,7 @@ describe('NotificationsService', () => {
     it('omitted status defaults to "all" semantics (dismissed rows excluded)', async () => {
       await service.list(USER_ID, {});
 
-      const where = (mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].where;
+      const where = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].where;
       expect(where).toMatchObject({ dismissedAt: null });
       expect(where.readAt).toBeUndefined();
     });
@@ -182,31 +182,31 @@ describe('NotificationsService', () => {
 
   describe('list() — ordering, pagination meta, scoping', () => {
     it('orders newest-first with an id tiebreak', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
 
       await service.list(USER_ID, {});
 
-      expect((mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].orderBy).toEqual([
+      expect((mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].orderBy).toEqual([
         { createdAt: 'desc' },
         { id: 'desc' },
       ]);
     });
 
     it('computes pagination meta from totalItems/pageSize', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(45);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([makeRow()]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(45);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([makeRow()]);
 
       const result = await service.list(USER_ID, { page: 2, pageSize: 20 });
 
       expect(result.meta).toEqual({ page: 2, pageSize: 20, totalItems: 45, totalPages: 3 });
-      expect((mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].skip).toBe(20);
-      expect((mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].take).toBe(20);
+      expect((mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].skip).toBe(20);
+      expect((mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].take).toBe(20);
     });
 
     it('totalPages is at least 1 even when there are zero items', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
 
       const result = await service.list(USER_ID, {});
 
@@ -214,18 +214,18 @@ describe('NotificationsService', () => {
     });
 
     it('caps pageSize at 100 even if a caller passes a larger value directly to the service', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
 
       const result = await service.list(USER_ID, { pageSize: 500 });
 
       expect(result.meta.pageSize).toBe(100);
-      expect((mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].take).toBe(100);
+      expect((mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].take).toBe(100);
     });
 
     it('floors pageSize at 1 and page at 1', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
 
       const result = await service.list(USER_ID, { page: 0, pageSize: 0 });
 
@@ -234,34 +234,34 @@ describe('NotificationsService', () => {
     });
 
     it('scopes to circleId when provided, and omits it when not', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
 
       await service.list(USER_ID, { circleId: CIRCLE_ID });
-      expect((mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].where).toMatchObject({
+      expect((mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].where).toMatchObject({
         circleId: CIRCLE_ID,
       });
 
       await service.list(USER_ID, {});
       expect(
-        (mockPrisma.notification.findMany as jest.Mock).mock.calls[1][0].where,
+        (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[1][0].where,
       ).not.toHaveProperty('circleId');
     });
 
     it('always scopes to the caller userId', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([]);
 
       await service.list(USER_ID, {});
 
-      expect((mockPrisma.notification.findMany as jest.Mock).mock.calls[0][0].where).toMatchObject({
+      expect((mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls[0][0].where).toMatchObject({
         userId: USER_ID,
       });
     });
 
     it('maps rows to DTOs with ISO-string timestamps', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(1);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([makeRow()]);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([makeRow()]);
 
       const result = await service.list(USER_ID, {});
 
@@ -281,29 +281,29 @@ describe('NotificationsService', () => {
 
   describe('getUnreadCount() — per-user cache', () => {
     it('queries Prisma with { readAt: null, dismissedAt: null } scoped to the user', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(7);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(7);
 
       const result = await service.getUnreadCount(USER_ID);
 
       expect(result).toEqual({ count: 7 });
-      expect(mockPrisma.notification.count).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledWith({
         where: { userId: USER_ID, readAt: null, dismissedAt: null },
       });
     });
 
     it('a second call within the TTL does NOT re-query Prisma', async () => {
-      (mockPrisma.notification.count as jest.Mock).mockResolvedValue(3);
+      (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(3);
 
       await service.getUnreadCount(USER_ID);
       const result2 = await service.getUnreadCount(USER_ID);
 
       expect(result2).toEqual({ count: 3 });
-      expect(mockPrisma.notification.count).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(1);
     });
 
     it('re-queries after the TTL expires', async () => {
       const nowSpy = jest.spyOn(Date, 'now');
-      (mockPrisma.notification.count as jest.Mock)
+      (mockPrisma.mhLegacyNotification.count as jest.Mock)
         .mockResolvedValueOnce(3)
         .mockResolvedValueOnce(9);
 
@@ -315,12 +315,12 @@ describe('NotificationsService', () => {
       const result = await service.getUnreadCount(USER_ID);
 
       expect(result).toEqual({ count: 9 });
-      expect(mockPrisma.notification.count).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(2);
       nowSpy.mockRestore();
     });
 
     it('SECURITY: a cached value for user A is never returned for user B', async () => {
-      (mockPrisma.notification.count as jest.Mock)
+      (mockPrisma.mhLegacyNotification.count as jest.Mock)
         .mockResolvedValueOnce(5) // userA
         .mockResolvedValueOnce(9); // userB
 
@@ -329,13 +329,13 @@ describe('NotificationsService', () => {
 
       expect(a).toEqual({ count: 5 });
       expect(b).toEqual({ count: 9 });
-      expect(mockPrisma.notification.count).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(2);
 
       // Re-fetch userA within the TTL — must still see userA's own cached
       // value, not userB's, and must not issue a third query.
       const aAgain = await service.getUnreadCount(USER_ID);
       expect(aAgain).toEqual({ count: 5 });
-      expect(mockPrisma.notification.count).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(2);
     });
 
     describe('cache invalidation on every mutation path', () => {
@@ -346,7 +346,7 @@ describe('NotificationsService', () => {
        * per-user entry.
        */
       async function expectInvalidates(mutate: () => Promise<unknown>): Promise<void> {
-        (mockPrisma.notification.count as jest.Mock)
+        (mockPrisma.mhLegacyNotification.count as jest.Mock)
           .mockResolvedValueOnce(1)
           .mockResolvedValueOnce(2);
 
@@ -355,7 +355,7 @@ describe('NotificationsService', () => {
         const after = await service.getUnreadCount(USER_ID);
 
         expect(after).toEqual({ count: 2 });
-        expect(mockPrisma.notification.count).toHaveBeenCalledTimes(2);
+        expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(2);
       }
 
       it('markRead() invalidates', async () => {
@@ -369,14 +369,14 @@ describe('NotificationsService', () => {
       });
 
       it('remove() invalidates', async () => {
-        (mockPrisma.notification.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.mhLegacyNotification.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
         await expectInvalidates(() => service.remove(USER_ID, NOTIF_ID));
       });
 
       it('markAllRead() invalidates', async () => {
         wireTransactionPassthrough(mockPrisma);
         (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(0);
-        (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
         await expectInvalidates(() => service.markAllRead(USER_ID));
       });
 
@@ -386,14 +386,14 @@ describe('NotificationsService', () => {
       });
 
       it('emit() invalidates', async () => {
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
         await expectInvalidates(() =>
           service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' }),
         );
       });
 
       it('upsertState() invalidates', async () => {
-        (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
         await expectInvalidates(() =>
           service.upsertState({
             userId: USER_ID,
@@ -482,17 +482,17 @@ describe('NotificationsService', () => {
 
   describe('remove()', () => {
     it('deletes scoped by id AND userId', async () => {
-      (mockPrisma.notification.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.mhLegacyNotification.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.remove(USER_ID, NOTIF_ID);
 
-      expect(mockPrisma.notification.deleteMany).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.deleteMany).toHaveBeenCalledWith({
         where: { id: NOTIF_ID, userId: USER_ID },
       });
     });
 
     it('SECURITY: a row belonging to another user yields 404, not 403 (count=0)', async () => {
-      (mockPrisma.notification.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       await expect(service.remove(OTHER_USER_ID, NOTIF_ID)).rejects.toBeInstanceOf(
         NotFoundException,
@@ -509,7 +509,7 @@ describe('NotificationsService', () => {
 
     it('runs the raw jsonb_set statement and the plain updateMany inside one transaction and sums their counts', async () => {
       (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(4); // rows WITH data.count
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 6 }); // the remainder
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 6 }); // the remainder
 
       const result = await service.markAllRead(USER_ID);
 
@@ -519,7 +519,7 @@ describe('NotificationsService', () => {
 
     it('the raw statement targets unread, non-dismissed, data.count rows and stamps updated_at explicitly', async () => {
       (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       await service.markAllRead(USER_ID);
 
@@ -534,11 +534,11 @@ describe('NotificationsService', () => {
 
     it('the plain updateMany covers the remainder: userId + readAt:null + dismissedAt:null', async () => {
       (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       await service.markAllRead(USER_ID);
 
-      expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.updateMany).toHaveBeenCalledWith({
         where: { userId: USER_ID, readAt: null, dismissedAt: null },
         data: { readAt: expect.any(Date) },
       });
@@ -546,7 +546,7 @@ describe('NotificationsService', () => {
 
     it('scopes both statements to circleId when provided', async () => {
       (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       await service.markAllRead(USER_ID, CIRCLE_ID);
 
@@ -554,7 +554,7 @@ describe('NotificationsService', () => {
       expect(sqlArg.values).toEqual([USER_ID, CIRCLE_ID]);
       expect(sqlArg.text).toContain('circle_id');
 
-      expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.updateMany).toHaveBeenCalledWith({
         where: { userId: USER_ID, readAt: null, dismissedAt: null, circleId: CIRCLE_ID },
         data: { readAt: expect.any(Date) },
       });
@@ -562,7 +562,7 @@ describe('NotificationsService', () => {
 
     it('omits circle_id from both statements when circleId is not provided', async () => {
       (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(0);
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
       await service.markAllRead(USER_ID);
 
@@ -570,7 +570,7 @@ describe('NotificationsService', () => {
       expect(sqlArg.values).toEqual([USER_ID]);
       expect(sqlArg.text).not.toContain('circle_id');
       expect(
-        (mockPrisma.notification.updateMany as jest.Mock).mock.calls[0][0].where,
+        (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mock.calls[0][0].where,
       ).not.toHaveProperty('circleId');
     });
   });
@@ -628,7 +628,7 @@ describe('NotificationsService', () => {
 
   describe('emit()', () => {
     it('creates a new row for the given event type', async () => {
-      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
       await service.emit({
         userId: USER_ID,
@@ -640,7 +640,7 @@ describe('NotificationsService', () => {
         data: { mediaItemId: 'm1' },
       });
 
-      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledWith({
         data: {
           userId: USER_ID,
           circleId: CIRCLE_ID,
@@ -654,11 +654,11 @@ describe('NotificationsService', () => {
     });
 
     it('writes SQL NULL (Prisma.JsonNull) — not a JSON null literal — when no data payload is given', async () => {
-      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
       await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
 
-      const callArg = (mockPrisma.notification.create as jest.Mock).mock.calls[0][0];
+      const callArg = (mockPrisma.mhLegacyNotification.create as jest.Mock).mock.calls[0][0];
       expect(callArg.data.data).toBe(Prisma.JsonNull);
       expect(callArg.data.circleId).toBeNull();
       expect(callArg.data.body).toBeNull();
@@ -667,7 +667,7 @@ describe('NotificationsService', () => {
 
     it('BEST-EFFORT: never throws when the underlying Prisma call rejects', async () => {
       const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-      (mockPrisma.notification.create as jest.Mock).mockRejectedValue(new Error('db down'));
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockRejectedValue(new Error('db down'));
 
       await expect(
         service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' }),
@@ -692,11 +692,11 @@ describe('NotificationsService', () => {
     };
 
     it('refreshes an existing LIVE row in place (updateMany matches → no create)', async () => {
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.upsertState(stateInput);
 
-      expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.updateMany).toHaveBeenCalledWith({
         where: {
           userId: USER_ID,
           circleId: CIRCLE_ID,
@@ -705,16 +705,16 @@ describe('NotificationsService', () => {
         },
         data: { title: stateInput.title, body: null, link: null, data: stateInput.data },
       });
-      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.create).not.toHaveBeenCalled();
     });
 
     it('creates when no LIVE row exists (updateMany matches zero rows)', async () => {
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
       await service.upsertState(stateInput);
 
-      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledWith({
         data: {
           userId: USER_ID,
           circleId: CIRCLE_ID,
@@ -728,21 +728,21 @@ describe('NotificationsService', () => {
     });
 
     it('P2002 concurrent-create race: retries as an update rather than throwing', async () => {
-      (mockPrisma.notification.updateMany as jest.Mock)
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock)
         .mockResolvedValueOnce({ count: 0 }) // no live row found initially
         .mockResolvedValueOnce({ count: 1 }); // retry after losing the create race
-      (mockPrisma.notification.create as jest.Mock).mockRejectedValue(makeP2002Error());
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockRejectedValue(makeP2002Error());
 
       await service.upsertState(stateInput);
 
-      expect(mockPrisma.notification.updateMany).toHaveBeenCalledTimes(2);
-      expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mhLegacyNotification.updateMany).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledTimes(1);
     });
 
     it('BEST-EFFORT: a non-P2002 create failure never throws to the caller', async () => {
       const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-      (mockPrisma.notification.create as jest.Mock).mockRejectedValue(new Error('constraint violation'));
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockRejectedValue(new Error('constraint violation'));
 
       await expect(service.upsertState(stateInput)).resolves.toBeUndefined();
 
@@ -751,18 +751,18 @@ describe('NotificationsService', () => {
 
     it('BEST-EFFORT: never throws when the underlying updateMany rejects outright', async () => {
       const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-      (mockPrisma.notification.updateMany as jest.Mock).mockRejectedValue(new Error('db down'));
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockRejectedValue(new Error('db down'));
 
       await expect(service.upsertState(stateInput)).resolves.toBeUndefined();
       expect(warnSpy).toHaveBeenCalled();
     });
 
     it('does not touch readAt on refresh — left to the caller to decide re-marking-unread semantics', async () => {
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.upsertState(stateInput);
 
-      const data = (mockPrisma.notification.updateMany as jest.Mock).mock.calls[0][0].data;
+      const data = (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mock.calls[0][0].data;
       expect(data).not.toHaveProperty('readAt');
     });
   });
@@ -812,7 +812,7 @@ describe('NotificationsService', () => {
     describe('advisory lock', () => {
       it('takes pg_advisory_xact_lock(hashtext(key)) as the FIRST statement of the transaction', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent(baseInput);
 
@@ -823,7 +823,7 @@ describe('NotificationsService', () => {
 
       it('the lock key incorporates matchData (JSON-stringified) so different job types never share a lock', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({
           ...baseInput,
@@ -845,7 +845,7 @@ describe('NotificationsService', () => {
     describe('rolling window clause', () => {
       it('when windowMs is set, the lookup filters on updated_at (NOT created_at) with a strict ">" against now() minus the interval', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({ ...baseInput, windowMs: 15 * 60 * 1000 });
 
@@ -857,7 +857,7 @@ describe('NotificationsService', () => {
 
       it('converts windowMs to seconds (divides by 1000) for make_interval', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({ ...baseInput, windowMs: 15 * 60 * 1000 });
 
@@ -867,7 +867,7 @@ describe('NotificationsService', () => {
 
       it('omits the window clause entirely when windowMs is null (accumulate until dismissed)', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({ ...baseInput, windowMs: null });
 
@@ -878,7 +878,7 @@ describe('NotificationsService', () => {
 
       it('omits the window clause when windowMs is undefined (same as null)', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         const { windowMs, ...withoutWindow } = { ...baseInput, windowMs: undefined as unknown };
         await service.upsertCountedEvent(withoutWindow as typeof baseInput);
@@ -889,7 +889,7 @@ describe('NotificationsService', () => {
 
       it('omits the window clause when windowMs is 0 (falsy, treated as "no window" per the > 0 guard)', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({ ...baseInput, windowMs: 0 });
 
@@ -905,7 +905,7 @@ describe('NotificationsService', () => {
     describe('matchData partition', () => {
       it('adds a jsonb containment predicate when matchData is supplied', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({
           ...baseInput,
@@ -919,7 +919,7 @@ describe('NotificationsService', () => {
 
       it('omits the containment predicate entirely when matchData is not supplied', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent(baseInput);
 
@@ -935,7 +935,7 @@ describe('NotificationsService', () => {
     describe('circleId null-safety', () => {
       it('uses IS NOT DISTINCT FROM (not plain "=") so a global row (circle_id IS NULL) can be found again', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({ ...baseInput, circleId: null });
 
@@ -952,11 +952,11 @@ describe('NotificationsService', () => {
     describe('create-vs-increment branching', () => {
       it('creates a new row with count = increment (default 1) when no live row is found', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent(baseInput);
 
-        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledWith({
           data: expect.objectContaining({
             userId: USER_ID,
             circleId: CIRCLE_ID,
@@ -973,7 +973,7 @@ describe('NotificationsService', () => {
 
         await service.upsertCountedEvent({ ...baseInput, increment: 3 });
 
-        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.create).not.toHaveBeenCalled();
         // Two $executeRaw calls: the advisory lock, then the increment UPDATE.
         expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(2);
         const updateSql = (mockPrisma.$executeRaw as jest.Mock).mock.calls[1][0] as Prisma.Sql;
@@ -984,25 +984,25 @@ describe('NotificationsService', () => {
 
       it('a custom increment other than 1 is honored on the CREATE path too', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({ ...baseInput, increment: 5 });
 
-        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledWith({
           data: expect.objectContaining({ data: { count: 5 } }),
         });
       });
 
       it('merges extra `data` payload fields alongside `count`', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent({
           ...baseInput,
           data: { jobType: 'geocode', lastError: null },
         });
 
-        expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledWith({
           data: expect.objectContaining({
             data: { jobType: 'geocode', lastError: null, count: 1 },
           }),
@@ -1058,7 +1058,7 @@ describe('NotificationsService', () => {
       it('never throws when notification.create rejects', async () => {
         const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockRejectedValue(new Error('constraint'));
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockRejectedValue(new Error('constraint'));
 
         await expect(service.upsertCountedEvent(baseInput)).resolves.toBeUndefined();
         expect(warnSpy).toHaveBeenCalled();
@@ -1066,8 +1066,8 @@ describe('NotificationsService', () => {
 
       it('invalidates the caller unread-count cache on success', async () => {
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
-        (mockPrisma.notification.count as jest.Mock)
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.count as jest.Mock)
           .mockResolvedValueOnce(1)
           .mockResolvedValueOnce(2);
 
@@ -1101,12 +1101,12 @@ describe('NotificationsService', () => {
         await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
 
         expect(mockPreferences.isEnabled).toHaveBeenCalledWith(USER_ID, 'upload_completed');
-        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.create).not.toHaveBeenCalled();
       });
 
       it('does not touch the unread-count cache when suppressed (nothing was written)', async () => {
         mockPreferences.isEnabled.mockResolvedValue(false);
-        (mockPrisma.notification.count as jest.Mock).mockResolvedValue(3);
+        (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(3);
 
         await service.getUnreadCount(USER_ID); // primes cache with 3
         await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
@@ -1115,16 +1115,16 @@ describe('NotificationsService', () => {
         // Still served from cache (never invalidated) — proves emit() returned
         // before reaching the create()+invalidate step.
         expect(after).toEqual({ count: 3 });
-        expect(mockPrisma.notification.count).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(1);
       });
 
       it('an enabled type is unaffected — the gate is per-call, not global', async () => {
         mockPreferences.isEnabled.mockResolvedValue(true);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.emit({ userId: USER_ID, type: 'upload_completed', title: 'x' });
 
-        expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -1143,19 +1143,19 @@ describe('NotificationsService', () => {
         await service.upsertState(stateInput);
 
         expect(mockPreferences.isEnabled).toHaveBeenCalledWith(USER_ID, 'review_queue_bursts');
-        expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
-        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.create).not.toHaveBeenCalled();
       });
 
       it('does not resurrect an existing live row for a now-suppressed type — no update, no create', async () => {
         mockPreferences.isEnabled.mockResolvedValue(false);
         // Even if a live row happened to exist, the gate must short-circuit
         // before the updateMany is ever issued.
-        (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
         await service.upsertState(stateInput);
 
-        expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.updateMany).not.toHaveBeenCalled();
       });
     });
 
@@ -1174,7 +1174,7 @@ describe('NotificationsService', () => {
 
         expect(mockPreferences.isEnabled).toHaveBeenCalledWith(USER_ID, 'upload_completed');
         expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.create).not.toHaveBeenCalled();
       });
 
       it('enrichment_failed (the other counted-event type) is gated identically', async () => {
@@ -1195,12 +1195,12 @@ describe('NotificationsService', () => {
         mockPreferences.isEnabled.mockResolvedValue(true);
         wireTransactionPassthrough(mockPrisma);
         (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-        (mockPrisma.notification.create as jest.Mock).mockResolvedValue(makeRow());
+        (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(makeRow());
 
         await service.upsertCountedEvent(countedInput);
 
         expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-        expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.mhLegacyNotification.create).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -1228,8 +1228,8 @@ describe('NotificationsService', () => {
           buildTitle: (c) => `${c}`,
         });
 
-        expect(mockPrisma.notification.create).not.toHaveBeenCalled();
-        expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.create).not.toHaveBeenCalled();
+        expect(mockPrisma.mhLegacyNotification.updateMany).not.toHaveBeenCalled();
         expect(mockPrisma.$transaction).not.toHaveBeenCalled();
       });
     });
@@ -1251,14 +1251,14 @@ describe('NotificationsService', () => {
 
     it('emit() dispatches the created row after the write', async () => {
       const created = makeRow({ type: 'share_expiring' });
-      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(created);
       await service.emit({ userId: USER_ID, type: 'share_expiring' as NotificationType, title: 't' });
       expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created');
     });
 
     it('emit() forwards skipPush to the dispatcher (issue #488)', async () => {
       const created = makeRow({ type: 'admin_broadcast' });
-      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(created);
       await service.emit({
         userId: USER_ID,
         type: 'admin_broadcast' as NotificationType,
@@ -1271,12 +1271,12 @@ describe('NotificationsService', () => {
     it('emit() writes nothing and dispatches nothing when the admin disabled the type', async () => {
       mockPolicy.isInboxAllowed.mockResolvedValue(false);
       await service.emit({ userId: USER_ID, type: 'share_expiring' as NotificationType, title: 't' });
-      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.create).not.toHaveBeenCalled();
       expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
     });
 
     it('emit() does not dispatch when the write fails', async () => {
-      (mockPrisma.notification.create as jest.Mock).mockRejectedValue(new Error('db'));
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockRejectedValue(new Error('db'));
       await service.emit({ userId: USER_ID, type: 'share_expiring' as NotificationType, title: 't' });
       expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
     });
@@ -1288,22 +1288,22 @@ describe('NotificationsService', () => {
         type: 'review_queue_bursts' as NotificationType,
         title: '2 bursts',
       };
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
       await service.upsertState(input);
       expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
 
       const created = makeRow();
-      (mockPrisma.notification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(created);
       await service.upsertState(input);
       expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created');
     });
 
     it('upsertState() race loser (P2002 → fold into winner) does not dispatch', async () => {
-      (mockPrisma.notification.updateMany as jest.Mock)
+      (mockPrisma.mhLegacyNotification.updateMany as jest.Mock)
         .mockResolvedValueOnce({ count: 0 })
         .mockResolvedValueOnce({ count: 1 });
-      (mockPrisma.notification.create as jest.Mock).mockRejectedValue(makeP2002Error());
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockRejectedValue(makeP2002Error());
       await service.upsertState({
         userId: USER_ID,
         circleId: CIRCLE_ID,
@@ -1316,7 +1316,7 @@ describe('NotificationsService', () => {
     it('upsertCountedEvent() dispatches a created row after the transaction resolves', async () => {
       const created = makeRow({ type: 'upload_completed' });
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-      (mockPrisma.notification.create as jest.Mock).mockResolvedValue(created);
+      (mockPrisma.mhLegacyNotification.create as jest.Mock).mockResolvedValue(created);
       await service.upsertCountedEvent(counted);
       expect(mockDispatcher.dispatch).toHaveBeenCalledWith(created, 'created');
       // After commit: the dispatch happens after $transaction has resolved.
@@ -1327,7 +1327,7 @@ describe('NotificationsService', () => {
     it('upsertCountedEvent() dispatches an increment only when it re-unreads', async () => {
       const existing = makeRow({ id: 'row-existing', type: 'upload_completed' });
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'row-existing', count: 3 }]);
-      (mockPrisma.notification.findUnique as jest.Mock).mockResolvedValue(existing);
+      (mockPrisma.mhLegacyNotification.findUnique as jest.Mock).mockResolvedValue(existing);
 
       await service.upsertCountedEvent(counted);
       expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
@@ -1345,11 +1345,11 @@ describe('NotificationsService', () => {
     it('markStatesUnreadByIds() dispatches the re-unread rows', async () => {
       const r = makeRow({ readAt: null });
       (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(1);
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([r]);
+      (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mockResolvedValue([r]);
       await expect(
         service.markStatesUnreadByIds([{ id: NOTIF_ID, userId: USER_ID }]),
       ).resolves.toBe(1);
-      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith({
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalledWith({
         where: { id: { in: [NOTIF_ID] }, readAt: null, dismissedAt: null },
       });
       expect(mockDispatcher.dispatch).toHaveBeenCalledWith(r, 'reunread');
@@ -1358,7 +1358,7 @@ describe('NotificationsService', () => {
     it('markStatesUnreadByIds() dispatches nothing when nothing changed', async () => {
       (mockPrisma.$executeRaw as jest.Mock).mockResolvedValue(0);
       await service.markStatesUnreadByIds([{ id: NOTIF_ID, userId: USER_ID }]);
-      expect(mockPrisma.notification.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.findMany).not.toHaveBeenCalled();
       expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
     });
   });

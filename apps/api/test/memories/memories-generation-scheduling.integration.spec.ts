@@ -20,7 +20,7 @@
 //   4. THE ZERO-COST CONTRACT: with `features.memories` off (the default) and
 //      with `MEMORIES_ENABLED=false`, a tick writes NO rows at all.
 
-import { PrismaClient, JobStatus } from '@prisma/client';
+import { PrismaClient, MhLegacyJobStatus } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
@@ -136,7 +136,7 @@ describeMaybeDb(
         where: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: ourCircles,
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
         },
         select: { circleId: true },
       });
@@ -156,7 +156,7 @@ describeMaybeDb(
         [circleAId, circleBId].sort(),
       );
       for (const job of jobs) {
-        expect(job.status).toBe(JobStatus.pending);
+        expect(job.status).toBe(MhLegacyJobStatus.pending);
         expect(job.mediaItemId).toBeNull();
         // Background priority — never starves upload enrichment.
         expect(job.priority).toBe(100);
@@ -182,7 +182,7 @@ describeMaybeDb(
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: circleAId,
-          status: JobStatus.succeeded,
+          status: MhLegacyJobStatus.succeeded,
           reason: 'backfill',
           finishedAt: new Date(Date.now() - 60 * 60 * 1000), // 1h ago < 24h
         },
@@ -201,7 +201,7 @@ describeMaybeDb(
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: circleAId,
-          status: JobStatus.succeeded,
+          status: MhLegacyJobStatus.succeeded,
           reason: 'backfill',
           finishedAt: new Date(Date.now() - 25 * 60 * 60 * 1000), // 25h ago
         },
@@ -218,14 +218,14 @@ describeMaybeDb(
           {
             type: MEMORY_GENERATION_JOB_TYPE,
             circleId: circleAId,
-            status: JobStatus.succeeded,
+            status: MhLegacyJobStatus.succeeded,
             reason: 'backfill',
             finishedAt: new Date(Date.now() - 100 * 60 * 60 * 1000),
           },
           {
             type: MEMORY_GENERATION_JOB_TYPE,
             circleId: circleAId,
-            status: JobStatus.succeeded,
+            status: MhLegacyJobStatus.succeeded,
             reason: 'backfill',
             finishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
           },
@@ -243,7 +243,7 @@ describeMaybeDb(
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: circleAId,
-          status: JobStatus.failed,
+          status: MhLegacyJobStatus.failed,
           reason: 'backfill',
           finishedAt: new Date(),
         },
@@ -260,14 +260,14 @@ describeMaybeDb(
           {
             type: MEMORY_GENERATION_JOB_TYPE,
             circleId: circleAId,
-            status: JobStatus.succeeded,
+            status: MhLegacyJobStatus.succeeded,
             reason: 'backfill',
             finishedAt: new Date(Date.now() - 200 * 60 * 60 * 1000),
           },
           {
             type: MEMORY_GENERATION_JOB_TYPE,
             circleId: circleAId,
-            status: JobStatus.running,
+            status: MhLegacyJobStatus.running,
             reason: 'backfill',
           },
         ],

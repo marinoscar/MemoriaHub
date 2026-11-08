@@ -46,7 +46,7 @@ export class PushSubscriptionService {
     const expirationTime = dto.expirationTime == null ? null : new Date(dto.expirationTime);
     const ua = userAgent ? userAgent.slice(0, 512) : null;
 
-    const row = await this.prisma.pushSubscription.upsert({
+    const row = await this.prisma.mhLegacyPushSubscription.upsert({
       where: { endpoint: dto.endpoint },
       update: {
         userId,
@@ -77,7 +77,7 @@ export class PushSubscriptionService {
    * deliberately indistinguishable (404).
    */
   async unsubscribe(userId: string, endpoint: string): Promise<void> {
-    const { count } = await this.prisma.pushSubscription.deleteMany({
+    const { count } = await this.prisma.mhLegacyPushSubscription.deleteMany({
       where: { userId, endpoint },
     });
     if (count === 0) {
@@ -87,7 +87,7 @@ export class PushSubscriptionService {
 
   /** Does this user have at least one registered push subscription? */
   async hasActivePushSubscription(userId: string): Promise<boolean> {
-    const count = await this.prisma.pushSubscription.count({ where: { userId } });
+    const count = await this.prisma.mhLegacyPushSubscription.count({ where: { userId } });
     return count > 0;
   }
 }

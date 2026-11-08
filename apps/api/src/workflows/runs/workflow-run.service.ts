@@ -22,7 +22,7 @@ import { CircleMembershipService } from '../../circles/circle-membership.service
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { isWorkflowsEnabled } from '../../common/types/settings.types';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { getActionDescriptor } from '../registry/subject-registry';
 import { WorkflowActionDescriptor } from '../registry/field-descriptor.interface';

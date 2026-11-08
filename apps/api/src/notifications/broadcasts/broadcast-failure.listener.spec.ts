@@ -7,7 +7,7 @@ const BID = '11111111-1111-4111-8111-111111111111';
 function build(job: Record<string, unknown> | null) {
   const prisma = {
     enrichmentJob: { findUnique: jest.fn().mockResolvedValue(job) },
-    notificationBroadcast: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    mhLegacyNotificationBroadcast: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
   return { listener: new BroadcastFailureListener(prisma as never), prisma };
 }
@@ -28,7 +28,7 @@ describe('BroadcastFailureListener', () => {
   it('flips a scheduled/sending broadcast to failed with the cause', async () => {
     const t = build(failedChunk);
     await t.listener.handleJobSettled(ev('broadcast_chunk'));
-    expect(t.prisma.notificationBroadcast.updateMany).toHaveBeenCalledWith({
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenCalledWith({
       where: { id: BID, status: { in: ['scheduled', 'sending'] } },
       data: {
         status: 'failed',
@@ -47,13 +47,13 @@ describe('BroadcastFailureListener', () => {
 
   it('never throws', async () => {
     const t = build(failedChunk);
-    t.prisma.notificationBroadcast.updateMany.mockRejectedValue(new Error('db'));
+    t.prisma.mhLegacyNotificationBroadcast.updateMany.mockRejectedValue(new Error('db'));
     await expect(t.listener.handleJobSettled(ev('broadcast_start'))).resolves.toBeUndefined();
   });
 
   it('does nothing for a job without a broadcastId', async () => {
     const t = build({ ...failedChunk, payload: null });
     await t.listener.handleJobSettled(ev('broadcast_chunk'));
-    expect(t.prisma.notificationBroadcast.updateMany).not.toHaveBeenCalled();
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).not.toHaveBeenCalled();
   });
 });

@@ -47,7 +47,7 @@ export class BroadcastFailureListener {
 
       const kind = job.type === BROADCAST_START_TYPE ? 'Start' : 'Chunk';
       const cause = truncate(job.lastError ?? 'no error recorded', MAX_QUOTED_ERROR_LENGTH);
-      const result = await this.prisma.notificationBroadcast.updateMany({
+      const result = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
         // `scheduled` too: a start job that failed BEFORE its claim leaves the
         // broadcast scheduled with nothing left to start it.
         where: { id: broadcastId, status: { in: ['scheduled', 'sending'] } },

@@ -11,7 +11,7 @@ import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { LocationSuggestionController } from './location-suggestion.controller';
 import { LocationSuggestionService } from './location-suggestion.service';
 import { ReviewRunService } from '../review-runs/review-run.service';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
 import { BulkResolveLocationSuggestionsDto } from './dto/bulk-resolve-location-suggestions.dto';

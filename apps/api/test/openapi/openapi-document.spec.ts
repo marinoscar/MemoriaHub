@@ -7,7 +7,7 @@ import {
 import type { DocOperation, MutableDocument } from '@marinoscar/platform-api/host';
 import { createAppOpenApiDocument, SECURITY_SCHEMES } from '../../src/openapi/document';
 import { OPENAPI_TAGS, OPENAPI_TAG_GROUPS } from '../../src/openapi/tags';
-import { RBAC_EXTENSION_KEY } from '../../src/auth/decorators/auth.decorator';
+import { RBAC_EXTENSION_KEY } from '@marinoscar/platform-api/identity';
 
 /**
  * Boots the real AppModule once and asserts the document it produces.

@@ -38,7 +38,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { JobStatus } from '@prisma/client';
+import { MhLegacyJobStatus } from '@prisma/client';
 import { NodesService } from './nodes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
@@ -77,7 +77,7 @@ function makeHeldJob(overrides: Record<string, unknown> = {}) {
     type: 'auto_tagging',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     attempts: 1,
     rateLimitHits: 0,
     claimedByNodeId: NODE_ID,
@@ -149,7 +149,7 @@ describe('NodesService.getJobCredentials', () => {
 
     service = module.get(NodesService);
 
-    (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(makeNode());
+    (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(makeNode());
   });
 
   afterEach(() => {
@@ -175,7 +175,7 @@ describe('NodesService.getJobCredentials', () => {
     });
 
     it('403s when the node belongs to another user', async () => {
-      (mockPrisma.workerNode.findUnique as jest.Mock).mockResolvedValue(
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(
         makeNode({ createdById: 'someone-else' }),
       );
 
@@ -206,7 +206,7 @@ describe('NodesService.getJobCredentials', () => {
 
     it('409s when the job is not running', async () => {
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
-        makeHeldJob({ status: JobStatus.pending }),
+        makeHeldJob({ status: MhLegacyJobStatus.pending }),
       );
 
       await expect(service.getJobCredentials(USER_ID, NODE_ID, JOB_ID)).rejects.toBeInstanceOf(

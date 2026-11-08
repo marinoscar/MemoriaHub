@@ -8,7 +8,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import {
   MediaReprocessController,
   ReprocessBodyDto,
@@ -19,9 +19,7 @@ import { MediaReprocessService } from './media-reprocess.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '@marinoscar/platform-api/identity';
 
 const allowAllGuard = { canActivate: () => true };
 
@@ -39,7 +37,7 @@ describe('MediaReprocessController', () => {
     mockRecoverFailedImageObjects = jest
       .fn()
       .mockResolvedValue({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 });
-    mockEnqueue = jest.fn().mockResolvedValue({ id: 'job-new-1', status: JobStatus.pending, priority: 0 });
+    mockEnqueue = jest.fn().mockResolvedValue({ id: 'job-new-1', status: MhLegacyJobStatus.pending, priority: 0 });
     mockJobUpdate = jest.fn().mockResolvedValue({});
 
     const module: TestingModule = await Test.createTestingModule({
@@ -207,11 +205,11 @@ describe('MediaReprocessController', () => {
     });
 
     it('should return { data: { jobId, status } } for a freshly enqueued job without touching its priority', async () => {
-      mockEnqueue.mockResolvedValue({ id: 'job-fresh-42', status: JobStatus.pending, priority: 0 });
+      mockEnqueue.mockResolvedValue({ id: 'job-fresh-42', status: MhLegacyJobStatus.pending, priority: 0 });
 
       const result = await controller.repairThumbnails();
 
-      expect(result).toEqual({ data: { jobId: 'job-fresh-42', status: JobStatus.pending } });
+      expect(result).toEqual({ data: { jobId: 'job-fresh-42', status: MhLegacyJobStatus.pending } });
       // Already at priority 0 — no promotion write needed
       expect(mockJobUpdate).not.toHaveBeenCalled();
     });
@@ -219,7 +217,7 @@ describe('MediaReprocessController', () => {
     it('should promote an existing PENDING lower-priority job (cron, priority 100) to priority 0 and return its id', async () => {
       // EnrichmentJobService.enqueue dedups (type, mediaItemId IS NULL) jobs and
       // returns the existing pending/running row instead of creating a new one.
-      mockEnqueue.mockResolvedValue({ id: 'job-cron-9', status: JobStatus.pending, priority: 100 });
+      mockEnqueue.mockResolvedValue({ id: 'job-cron-9', status: MhLegacyJobStatus.pending, priority: 100 });
 
       const result = await controller.repairThumbnails();
 
@@ -228,17 +226,17 @@ describe('MediaReprocessController', () => {
         where: { id: 'job-cron-9' },
         data: { priority: 0 },
       });
-      expect(result).toEqual({ data: { jobId: 'job-cron-9', status: JobStatus.pending } });
+      expect(result).toEqual({ data: { jobId: 'job-cron-9', status: MhLegacyJobStatus.pending } });
     });
 
     it("should surface an existing RUNNING job's id without updating its priority", async () => {
-      mockEnqueue.mockResolvedValue({ id: 'job-existing-7', status: JobStatus.running, priority: 100 });
+      mockEnqueue.mockResolvedValue({ id: 'job-existing-7', status: MhLegacyJobStatus.running, priority: 100 });
 
       const result = await controller.repairThumbnails();
 
       // Running jobs are already being worked on — never touched
       expect(mockJobUpdate).not.toHaveBeenCalled();
-      expect(result).toEqual({ data: { jobId: 'job-existing-7', status: JobStatus.running } });
+      expect(result).toEqual({ data: { jobId: 'job-existing-7', status: MhLegacyJobStatus.running } });
     });
 
     it('should propagate enqueue failures', async () => {

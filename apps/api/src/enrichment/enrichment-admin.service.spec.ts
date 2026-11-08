@@ -12,7 +12,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { JobStatus } from '@prisma/client';
+import { MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentAdminService } from './enrichment-admin.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
@@ -41,7 +41,7 @@ function makeJobRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'job-uuid-1',
     type: 'face_detection',
-    status: JobStatus.pending,
+    status: MhLegacyJobStatus.pending,
     reason: 'upload',
     priority: 0,
     mediaItemId: 'media-uuid-1',
@@ -132,14 +132,14 @@ describe('EnrichmentAdminService', () => {
 
     it('aggregates byStatus counts correctly from groupBy results', async () => {
       const statusGroups = [
-        { status: JobStatus.pending, _count: { id: 5 } },
-        { status: JobStatus.running, _count: { id: 2 } },
-        { status: JobStatus.succeeded, _count: { id: 10 } },
-        { status: JobStatus.failed, _count: { id: 3 } },
+        { status: MhLegacyJobStatus.pending, _count: { id: 5 } },
+        { status: MhLegacyJobStatus.running, _count: { id: 2 } },
+        { status: MhLegacyJobStatus.succeeded, _count: { id: 10 } },
+        { status: MhLegacyJobStatus.failed, _count: { id: 3 } },
       ];
       const typeStatusGroups = [
-        { type: 'face_detection', status: JobStatus.succeeded, _count: { id: 10 } },
-        { type: 'face_detection', status: JobStatus.pending, _count: { id: 5 } },
+        { type: 'face_detection', status: MhLegacyJobStatus.succeeded, _count: { id: 10 } },
+        { type: 'face_detection', status: MhLegacyJobStatus.pending, _count: { id: 5 } },
       ];
 
       (mockPrisma.enrichmentJob.groupBy as jest.Mock)
@@ -155,12 +155,12 @@ describe('EnrichmentAdminService', () => {
 
     it('builds byType array sorted alphabetically with per-status counts', async () => {
       const statusGroups = [
-        { status: JobStatus.failed, _count: { id: 4 } },
-        { status: JobStatus.succeeded, _count: { id: 6 } },
+        { status: MhLegacyJobStatus.failed, _count: { id: 4 } },
+        { status: MhLegacyJobStatus.succeeded, _count: { id: 6 } },
       ];
       const typeStatusGroups = [
-        { type: 'ocr', status: JobStatus.failed, _count: { id: 4 } },
-        { type: 'face_detection', status: JobStatus.succeeded, _count: { id: 6 } },
+        { type: 'ocr', status: MhLegacyJobStatus.failed, _count: { id: 4 } },
+        { type: 'face_detection', status: MhLegacyJobStatus.succeeded, _count: { id: 6 } },
       ];
 
       (mockPrisma.enrichmentJob.groupBy as jest.Mock)
@@ -181,10 +181,10 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('attaches a friendly label to each byType entry, including a workflow job type (#143)', async () => {
-      const statusGroups = [{ status: JobStatus.succeeded, _count: { id: 3 } }];
+      const statusGroups = [{ status: MhLegacyJobStatus.succeeded, _count: { id: 3 } }];
       const typeStatusGroups = [
-        { type: 'face_detection', status: JobStatus.succeeded, _count: { id: 2 } },
-        { type: 'workflow_execute_batch', status: JobStatus.succeeded, _count: { id: 1 } },
+        { type: 'face_detection', status: MhLegacyJobStatus.succeeded, _count: { id: 2 } },
+        { type: 'workflow_execute_batch', status: MhLegacyJobStatus.succeeded, _count: { id: 1 } },
       ];
 
       (mockPrisma.enrichmentJob.groupBy as jest.Mock)
@@ -201,14 +201,14 @@ describe('EnrichmentAdminService', () => {
 
     it('accumulates multiple statuses per type into the same byType entry', async () => {
       const statusGroups = [
-        { status: JobStatus.pending, _count: { id: 3 } },
-        { status: JobStatus.running, _count: { id: 1 } },
-        { status: JobStatus.failed, _count: { id: 2 } },
+        { status: MhLegacyJobStatus.pending, _count: { id: 3 } },
+        { status: MhLegacyJobStatus.running, _count: { id: 1 } },
+        { status: MhLegacyJobStatus.failed, _count: { id: 2 } },
       ];
       const typeStatusGroups = [
-        { type: 'face_detection', status: JobStatus.pending, _count: { id: 3 } },
-        { type: 'face_detection', status: JobStatus.running, _count: { id: 1 } },
-        { type: 'face_detection', status: JobStatus.failed, _count: { id: 2 } },
+        { type: 'face_detection', status: MhLegacyJobStatus.pending, _count: { id: 3 } },
+        { type: 'face_detection', status: MhLegacyJobStatus.running, _count: { id: 1 } },
+        { type: 'face_detection', status: MhLegacyJobStatus.failed, _count: { id: 2 } },
       ];
 
       (mockPrisma.enrichmentJob.groupBy as jest.Mock)
@@ -258,11 +258,11 @@ describe('EnrichmentAdminService', () => {
       // Two count() calls happen (stuckRunning + scheduledCount); find the
       // stuck-running one by its status=running filter.
       const countCalls = (mockPrisma.enrichmentJob.count as jest.Mock).mock.calls;
-      const stuckCountCall = countCalls.find((c) => c[0].where?.status === JobStatus.running);
+      const stuckCountCall = countCalls.find((c) => c[0].where?.status === MhLegacyJobStatus.running);
       expect(stuckCountCall).toBeDefined();
 
       const where = stuckCountCall![0].where;
-      expect(where.status).toBe(JobStatus.running);
+      expect(where.status).toBe(MhLegacyJobStatus.running);
       expect(mockSettingsService.getSettings).toHaveBeenCalled();
 
       const threshold: Date = where.OR[0].startedAt.lt;
@@ -278,7 +278,7 @@ describe('EnrichmentAdminService', () => {
       await service.getStats();
 
       const countCalls = (mockPrisma.enrichmentJob.count as jest.Mock).mock.calls;
-      const stuckCountCall = countCalls.find((c) => c[0].where?.status === JobStatus.running);
+      const stuckCountCall = countCalls.find((c) => c[0].where?.status === MhLegacyJobStatus.running);
       const where = stuckCountCall![0].where;
 
       expect(where.OR).toHaveLength(3);
@@ -418,13 +418,13 @@ describe('EnrichmentAdminService', () => {
       (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
-      await service.listJobs({ status: JobStatus.failed, page: 1, pageSize: 20 });
+      await service.listJobs({ status: MhLegacyJobStatus.failed, page: 1, pageSize: 20 });
 
       const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
       const countCall = (mockPrisma.enrichmentJob.count as jest.Mock).mock.calls[0][0];
 
-      expect(findManyCall.where).toMatchObject({ status: JobStatus.failed });
-      expect(countCall.where).toMatchObject({ status: JobStatus.failed });
+      expect(findManyCall.where).toMatchObject({ status: MhLegacyJobStatus.failed });
+      expect(countCall.where).toMatchObject({ status: MhLegacyJobStatus.failed });
     });
 
     it('passes type filter to findMany and count where clause', async () => {
@@ -444,10 +444,10 @@ describe('EnrichmentAdminService', () => {
       (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
-      await service.listJobs({ status: JobStatus.running, type: 'face_detection', page: 1, pageSize: 10 });
+      await service.listJobs({ status: MhLegacyJobStatus.running, type: 'face_detection', page: 1, pageSize: 10 });
 
       const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
-      expect(findManyCall.where).toMatchObject({ status: JobStatus.running, type: 'face_detection' });
+      expect(findManyCall.where).toMatchObject({ status: MhLegacyJobStatus.running, type: 'face_detection' });
     });
 
     it('omits status and type from where when not provided', async () => {
@@ -501,7 +501,7 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('throws BadRequestException when job status is running', async () => {
-      const runningJob = makeJobRow({ status: JobStatus.running });
+      const runningJob = makeJobRow({ status: MhLegacyJobStatus.running });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(runningJob);
 
       await expect(service.retryJob('job-uuid-1')).rejects.toThrow(BadRequestException);
@@ -509,13 +509,13 @@ describe('EnrichmentAdminService', () => {
 
     it('resets job to pending with zeroed attempts and cleared error/timestamps on success', async () => {
       const failedJob = makeJobRow({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         attempts: 3,
         lastError: 'timeout',
         startedAt: new Date(),
         finishedAt: new Date(),
       });
-      const updatedJob = makeJobRow({ status: JobStatus.pending, attempts: 0, lastError: null });
+      const updatedJob = makeJobRow({ status: MhLegacyJobStatus.pending, attempts: 0, lastError: null });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
 
@@ -524,7 +524,7 @@ describe('EnrichmentAdminService', () => {
       const updateCall = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls[0][0];
       expect(updateCall.where).toEqual({ id: 'job-uuid-1' });
       expect(updateCall.data).toMatchObject({
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         attempts: 0,
         lastError: null,
         startedAt: null,
@@ -534,14 +534,14 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('succeeds for a succeeded job (not just failed)', async () => {
-      const succeededJob = makeJobRow({ status: JobStatus.succeeded });
-      const updatedJob = makeJobRow({ status: JobStatus.pending });
+      const succeededJob = makeJobRow({ status: MhLegacyJobStatus.succeeded });
+      const updatedJob = makeJobRow({ status: MhLegacyJobStatus.pending });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(succeededJob);
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
 
       const result = await service.retryJob('job-uuid-1');
 
-      expect(result.status).toBe(JobStatus.pending);
+      expect(result.status).toBe(MhLegacyJobStatus.pending);
     });
   });
 
@@ -564,7 +564,7 @@ describe('EnrichmentAdminService', () => {
       await service.retryAllFailed();
 
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
-      expect(updateManyCall.where).toEqual({ status: JobStatus.failed });
+      expect(updateManyCall.where).toEqual({ status: MhLegacyJobStatus.failed });
       expect(updateManyCall.where).not.toHaveProperty('type');
     });
 
@@ -574,7 +574,7 @@ describe('EnrichmentAdminService', () => {
       await service.retryAllFailed('ocr');
 
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
-      expect(updateManyCall.where).toEqual({ status: JobStatus.failed, type: 'ocr' });
+      expect(updateManyCall.where).toEqual({ status: MhLegacyJobStatus.failed, type: 'ocr' });
     });
 
     it('resets attempts, lastError, startedAt, finishedAt to zero/null in data', async () => {
@@ -584,7 +584,7 @@ describe('EnrichmentAdminService', () => {
 
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
       expect(updateManyCall.data).toMatchObject({
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         attempts: 0,
         lastError: null,
         startedAt: null,
@@ -634,7 +634,7 @@ describe('EnrichmentAdminService', () => {
       const afterCall = Date.now();
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
 
-      expect(updateManyCall.where.status).toBe(JobStatus.running);
+      expect(updateManyCall.where.status).toBe(MhLegacyJobStatus.running);
       expect(updateManyCall.where.OR).toHaveLength(3);
       expect(updateManyCall.where.OR[0]).toMatchObject({ startedAt: { lt: expect.any(Date) } });
       expect(updateManyCall.where.OR[1]).toMatchObject({
@@ -742,7 +742,7 @@ describe('EnrichmentAdminService', () => {
 
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
       expect(updateManyCall.data).toMatchObject({
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         startedAt: null,
       });
     });
@@ -778,7 +778,7 @@ describe('EnrichmentAdminService', () => {
       expect(mockPrisma.enrichmentJob.findMany).toHaveBeenCalledTimes(1);
       const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
 
-      expect(findManyCall.where.status).toBe(JobStatus.running);
+      expect(findManyCall.where.status).toBe(MhLegacyJobStatus.running);
       expect(findManyCall.where.attempts).toEqual({ gte: ENRICHMENT_MAX_ATTEMPTS });
       expect(findManyCall.where.OR).toHaveLength(3);
       expect(findManyCall.where.OR[0]).toMatchObject({ startedAt: { lt: expect.any(Date) } });
@@ -806,9 +806,9 @@ describe('EnrichmentAdminService', () => {
         (c: any[]) => c[0].where.id === 'job-poison',
       );
       expect(perRowCall).toBeDefined();
-      expect(perRowCall![0].where).toEqual({ id: 'job-poison', status: JobStatus.running });
+      expect(perRowCall![0].where).toEqual({ id: 'job-poison', status: MhLegacyJobStatus.running });
       expect(perRowCall![0].data).toEqual({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         lastError: `process terminated during execution (attempt ${ENRICHMENT_MAX_ATTEMPTS}/${ENRICHMENT_MAX_ATTEMPTS})`,
         finishedAt: expect.any(Date),
         scheduledFor: null,
@@ -880,7 +880,7 @@ describe('EnrichmentAdminService', () => {
       expect(bulkResetCall).toBeDefined();
       expect(bulkResetCall![0].where.attempts).toEqual({ lt: ENRICHMENT_MAX_ATTEMPTS });
       expect(bulkResetCall![0].data).toMatchObject({
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         startedAt: null,
         scheduledFor: null,
       });
@@ -899,14 +899,14 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('throws BadRequestException when job is currently running', async () => {
-      const runningJob = makeJobRow({ status: JobStatus.running });
+      const runningJob = makeJobRow({ status: MhLegacyJobStatus.running });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(runningJob);
 
       await expect(service.deleteJob('job-uuid-1')).rejects.toThrow(BadRequestException);
     });
 
     it('deletes the job and returns {deleted: true} for a non-running job', async () => {
-      const failedJob = makeJobRow({ status: JobStatus.failed });
+      const failedJob = makeJobRow({ status: MhLegacyJobStatus.failed });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
       (mockPrisma.enrichmentJob.delete as jest.Mock).mockResolvedValue(failedJob);
 
@@ -917,7 +917,7 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('deletes a pending job successfully', async () => {
-      const pendingJob = makeJobRow({ status: JobStatus.pending });
+      const pendingJob = makeJobRow({ status: MhLegacyJobStatus.pending });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(pendingJob);
       (mockPrisma.enrichmentJob.delete as jest.Mock).mockResolvedValue(pendingJob);
 
@@ -939,7 +939,7 @@ describe('EnrichmentAdminService', () => {
         registry,
       );
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
-        makeJobRow({ status: JobStatus.pending, type: 'guarded_type' }),
+        makeJobRow({ status: MhLegacyJobStatus.pending, type: 'guarded_type' }),
       );
 
       await expect(guarded.deleteJob('job-uuid-1')).rejects.toThrow('Cancel the broadcast instead');
@@ -954,7 +954,7 @@ describe('EnrichmentAdminService', () => {
         mockSettingsService as unknown as SystemSettingsService,
         registry,
       );
-      const job = makeJobRow({ status: JobStatus.pending, type: 'guarded_type' });
+      const job = makeJobRow({ status: MhLegacyJobStatus.pending, type: 'guarded_type' });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.delete as jest.Mock).mockResolvedValue(job);
 
@@ -962,7 +962,7 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('deletes a succeeded job successfully', async () => {
-      const succeededJob = makeJobRow({ status: JobStatus.succeeded });
+      const succeededJob = makeJobRow({ status: MhLegacyJobStatus.succeeded });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(succeededJob);
       (mockPrisma.enrichmentJob.delete as jest.Mock).mockResolvedValue(succeededJob);
 
@@ -987,14 +987,14 @@ describe('EnrichmentAdminService', () => {
   describe('retryJob — resets scheduledFor and rateLimitHits', () => {
     it('sets scheduledFor: null in the update payload', async () => {
       const failedJob = makeJobRow({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         scheduledFor: new Date(Date.now() + 60_000),
         rateLimitHits: 3,
     claimedByNodeId: null,
     leaseExpiresAt: null,
     executor: null,
       });
-      const updatedJob = makeJobRow({ status: JobStatus.pending, scheduledFor: null, rateLimitHits: 0 });
+      const updatedJob = makeJobRow({ status: MhLegacyJobStatus.pending, scheduledFor: null, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
 
@@ -1006,13 +1006,13 @@ describe('EnrichmentAdminService', () => {
 
     it('sets rateLimitHits: 0 in the update payload', async () => {
       const failedJob = makeJobRow({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         rateLimitHits: 7,
     claimedByNodeId: null,
     leaseExpiresAt: null,
     executor: null,
       });
-      const updatedJob = makeJobRow({ status: JobStatus.pending, rateLimitHits: 0 });
+      const updatedJob = makeJobRow({ status: MhLegacyJobStatus.pending, rateLimitHits: 0 });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
 
@@ -1024,7 +1024,7 @@ describe('EnrichmentAdminService', () => {
 
     it('resets all retry-related fields together in a single update call', async () => {
       const failedJob = makeJobRow({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         attempts: 3,
         lastError: 'RL max hits reached',
         scheduledFor: new Date(Date.now() + 120_000),
@@ -1035,7 +1035,7 @@ describe('EnrichmentAdminService', () => {
         startedAt: new Date(),
         finishedAt: new Date(),
       });
-      const updatedJob = makeJobRow({ status: JobStatus.pending });
+      const updatedJob = makeJobRow({ status: MhLegacyJobStatus.pending });
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(failedJob);
       (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue(updatedJob);
 
@@ -1043,7 +1043,7 @@ describe('EnrichmentAdminService', () => {
 
       const updateCall = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls[0][0];
       expect(updateCall.data).toMatchObject({
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         attempts: 0,
         lastError: null,
         startedAt: null,
@@ -1087,7 +1087,7 @@ describe('EnrichmentAdminService', () => {
 
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
       expect(updateManyCall.data).toMatchObject({
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         attempts: 0,
         lastError: null,
         startedAt: null,
@@ -1127,7 +1127,7 @@ describe('EnrichmentAdminService', () => {
 
       const updateManyCall = (mockPrisma.enrichmentJob.updateMany as jest.Mock).mock.calls[0][0];
       expect(updateManyCall.data).toMatchObject({
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         startedAt: null,
         scheduledFor: null,
       });
@@ -1176,12 +1176,12 @@ describe('EnrichmentAdminService', () => {
 
       // Find the scheduled count call — it must filter status=pending and scheduledFor > now
       const scheduledCountCall = countCalls.find(
-        (c) => c[0].where?.status === JobStatus.pending,
+        (c) => c[0].where?.status === MhLegacyJobStatus.pending,
       );
       expect(scheduledCountCall).toBeDefined();
 
       const where = scheduledCountCall![0].where;
-      expect(where.status).toBe(JobStatus.pending);
+      expect(where.status).toBe(MhLegacyJobStatus.pending);
       expect(where.scheduledFor).toBeDefined();
       const gtDate: Date = where.scheduledFor.gt;
       expect(gtDate).toBeInstanceOf(Date);
@@ -1215,7 +1215,7 @@ describe('EnrichmentAdminService', () => {
       const after = Date.now();
 
       const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
-      expect(findManyCall.where.status).toBe(JobStatus.pending);
+      expect(findManyCall.where.status).toBe(MhLegacyJobStatus.pending);
       expect(findManyCall.where.scheduledFor).toBeDefined();
 
       const gtDate: Date = findManyCall.where.scheduledFor.gt;
@@ -1231,7 +1231,7 @@ describe('EnrichmentAdminService', () => {
       await service.listJobs({ scheduled: true, page: 1, pageSize: 20 });
 
       const countCall = (mockPrisma.enrichmentJob.count as jest.Mock).mock.calls[0][0];
-      expect(countCall.where.status).toBe(JobStatus.pending);
+      expect(countCall.where.status).toBe(MhLegacyJobStatus.pending);
       expect(countCall.where.scheduledFor).toHaveProperty('gt');
     });
 
@@ -1242,7 +1242,7 @@ describe('EnrichmentAdminService', () => {
       await service.listJobs({ scheduled: true, type: 'face_detection', page: 1, pageSize: 10 });
 
       const findManyCall = (mockPrisma.enrichmentJob.findMany as jest.Mock).mock.calls[0][0];
-      expect(findManyCall.where.status).toBe(JobStatus.pending);
+      expect(findManyCall.where.status).toBe(MhLegacyJobStatus.pending);
       expect(findManyCall.where.type).toBe('face_detection');
       expect(findManyCall.where.scheduledFor).toHaveProperty('gt');
     });
@@ -1344,13 +1344,13 @@ describe('EnrichmentAdminService', () => {
 
     it('processedWithin: "4h" combined with status: "failed" includes both filters', async () => {
       const before = Date.now();
-      await service.listJobs({ processedWithin: '4h', status: JobStatus.failed, page: 1, pageSize: 20 });
+      await service.listJobs({ processedWithin: '4h', status: MhLegacyJobStatus.failed, page: 1, pageSize: 20 });
       const after = Date.now();
 
       const where = getWhere();
 
       // Status filter must be present
-      expect(where.status).toBe(JobStatus.failed);
+      expect(where.status).toBe(MhLegacyJobStatus.failed);
 
       // OR time clause must also be present
       expect(where).toHaveProperty('OR');
@@ -1374,7 +1374,7 @@ describe('EnrichmentAdminService', () => {
       const where = getWhere();
 
       // scheduled=true forces status=pending
-      expect(where.status).toBe(JobStatus.pending);
+      expect(where.status).toBe(MhLegacyJobStatus.pending);
 
       // scheduled=true forces scheduledFor > now
       expect(where).toHaveProperty('scheduledFor');
@@ -1434,7 +1434,7 @@ describe('EnrichmentAdminService', () => {
 
     it('reuses the cached result on a second call within the TTL window, without re-querying Prisma', async () => {
       (mockPrisma.enrichmentJob.groupBy as jest.Mock)
-        .mockResolvedValueOnce([{ status: JobStatus.pending, _count: { id: 5 } }]) // statusGroups
+        .mockResolvedValueOnce([{ status: MhLegacyJobStatus.pending, _count: { id: 5 } }]) // statusGroups
         .mockResolvedValueOnce([]); // typeStatusGroups
       (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
@@ -1465,8 +1465,8 @@ describe('EnrichmentAdminService', () => {
     it('expires the cache after the TTL elapses and recomputes from a fresh Prisma query', async () => {
       jest.useFakeTimers();
 
-      const firstStatusGroups = [{ status: JobStatus.pending, _count: { id: 1 } }];
-      const secondStatusGroups = [{ status: JobStatus.pending, _count: { id: 9 } }];
+      const firstStatusGroups = [{ status: MhLegacyJobStatus.pending, _count: { id: 1 } }];
+      const secondStatusGroups = [{ status: MhLegacyJobStatus.pending, _count: { id: 9 } }];
 
       (mockPrisma.enrichmentJob.groupBy as jest.Mock)
         .mockResolvedValueOnce(firstStatusGroups) // call 1: statusGroups

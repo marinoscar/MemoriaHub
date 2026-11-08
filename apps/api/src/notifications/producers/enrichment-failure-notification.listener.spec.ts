@@ -19,7 +19,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus, NotificationType } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus, NotificationType } from '@prisma/client';
 
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { EnrichmentJobSettledEvent } from '../../enrichment/events/enrichment-job-settled.event';
@@ -74,7 +74,7 @@ describe('EnrichmentFailureNotificationListener', () => {
     mockNotifications = { upsertCountedEvent: jest.fn().mockResolvedValue(undefined) };
 
     (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue({
-      status: JobStatus.failed,
+      status: MhLegacyJobStatus.failed,
       lastError: 'boom',
     });
     (mockPrisma.user.findMany as jest.Mock).mockResolvedValue([{ id: ADMIN_1 }, { id: ADMIN_2 }]);
@@ -116,7 +116,7 @@ describe('EnrichmentFailureNotificationListener', () => {
         '(e.g. pending, requeued) status, which the listener defensively re-checks and skips',
       async () => {
         (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue({
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           lastError: null,
         });
 
@@ -227,7 +227,7 @@ describe('EnrichmentFailureNotificationListener', () => {
     it('lastError is truncated to 500 chars and carried in data', async () => {
       const longError = 'x'.repeat(1000);
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         lastError: longError,
       });
 
@@ -239,7 +239,7 @@ describe('EnrichmentFailureNotificationListener', () => {
 
     it('a null lastError is passed through as null, not omitted', async () => {
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue({
-        status: JobStatus.failed,
+        status: MhLegacyJobStatus.failed,
         lastError: null,
       });
 

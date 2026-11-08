@@ -9,7 +9,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus, JobReason } from '@prisma/client';
+import { MhLegacyJobStatus, JobReason } from '@prisma/client';
 import { InsightsService } from './insights.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -36,7 +36,7 @@ function makeSnapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeJob(status: JobStatus, lastError: string | null = null) {
+function makeJob(status: MhLegacyJobStatus, lastError: string | null = null) {
   return {
     id: 'job-uuid-1',
     type: 'storage_insights',
@@ -303,7 +303,7 @@ describe('InsightsService', () => {
 
   describe('enqueueRefresh', () => {
     it('calls enrichmentJobService.enqueue with type=storage_insights and null scope', async () => {
-      const job = makeJob(JobStatus.pending);
+      const job = makeJob(MhLegacyJobStatus.pending);
       mockEnrichmentJobService.enqueue.mockResolvedValue(job as any);
 
       await service.enqueueRefresh(JobReason.rerun, 0);
@@ -318,7 +318,7 @@ describe('InsightsService', () => {
     });
 
     it('returns the job returned by enrichmentJobService.enqueue', async () => {
-      const job = makeJob(JobStatus.pending);
+      const job = makeJob(MhLegacyJobStatus.pending);
       mockEnrichmentJobService.enqueue.mockResolvedValue(job as any);
 
       const result = await service.enqueueRefresh(JobReason.backfill, 100);
@@ -341,7 +341,7 @@ describe('InsightsService', () => {
     });
 
     it('returns pending with jobId when latest job is pending', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(JobStatus.pending));
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.pending));
 
       const result = await service.getRefreshState();
 
@@ -349,7 +349,7 @@ describe('InsightsService', () => {
     });
 
     it('returns running with jobId when latest job is running', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(JobStatus.running));
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.running));
 
       const result = await service.getRefreshState();
 
@@ -358,7 +358,7 @@ describe('InsightsService', () => {
 
     it('returns failed with jobId and lastError when latest job failed', async () => {
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(
-        makeJob(JobStatus.failed, 'DB connection lost'),
+        makeJob(MhLegacyJobStatus.failed, 'DB connection lost'),
       );
 
       const result = await service.getRefreshState();
@@ -367,7 +367,7 @@ describe('InsightsService', () => {
     });
 
     it('returns idle when latest job succeeded', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(JobStatus.succeeded));
+      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.succeeded));
 
       const result = await service.getRefreshState();
 

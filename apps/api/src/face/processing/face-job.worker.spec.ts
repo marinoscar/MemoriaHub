@@ -18,7 +18,7 @@ import { EnrichmentClaimService } from '../../enrichment/enrichment-claim.servic
 import { EnrichmentTerminalService } from '../../enrichment/enrichment-terminal.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { ProviderThrottleService } from '../../enrichment/provider-throttle.service';
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ function makeClaimMock(mockPrisma: MockPrismaService): { claim: jest.Mock } {
       const now = new Date();
       const job = await (mockPrisma.enrichmentJob.findFirst as jest.Mock)({
         where: {
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
         },
         orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
@@ -46,7 +46,7 @@ function makeClaimMock(mockPrisma: MockPrismaService): { claim: jest.Mock } {
       const claimed = await (mockPrisma.enrichmentJob.update as jest.Mock)({
         where: { id: job.id },
         data: {
-          status: JobStatus.running,
+          status: MhLegacyJobStatus.running,
           startedAt: new Date(),
           scheduledFor: null,
           attempts: { increment: 1 },
@@ -63,7 +63,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'face_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.pending,
+    status: MhLegacyJobStatus.pending,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,
@@ -243,28 +243,28 @@ describe('EnrichmentJobWorker', () => {
       // findFirst returns pending job; update returns running job (claimed)
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running }) // claim
-        .mockResolvedValueOnce({ ...job, status: JobStatus.succeeded }); // finish
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running }) // claim
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.succeeded }); // finish
 
       mockHandler.process.mockResolvedValue(undefined);
 
       await (worker as any).tick();
 
       expect(mockHandler.process).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'job-1', status: JobStatus.running }),
+        expect.objectContaining({ id: 'job-1', status: MhLegacyJobStatus.running }),
       );
 
       // Second update: succeeded
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const finishUpdate = updateCalls[updateCalls.length - 1][0];
-      expect(finishUpdate.data.status).toBe(JobStatus.succeeded);
+      expect(finishUpdate.data.status).toBe(MhLegacyJobStatus.succeeded);
       expect(finishUpdate.data.finishedAt).toBeInstanceOf(Date);
     });
 
     it('claims through the shared claim service with the pending + scheduledFor OR-filter', async () => {
       const job = makeJob();
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
-      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue({ ...job, status: JobStatus.running });
+      (mockPrisma.enrichmentJob.update as jest.Mock).mockResolvedValue({ ...job, status: MhLegacyJobStatus.running });
       mockHandler.process.mockResolvedValue(undefined);
 
       await (worker as any).tick();
@@ -276,7 +276,7 @@ describe('EnrichmentJobWorker', () => {
       expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            status: JobStatus.pending,
+            status: MhLegacyJobStatus.pending,
             OR: expect.arrayContaining([
               { scheduledFor: null },
               { scheduledFor: { lte: expect.any(Date) } },
@@ -298,7 +298,7 @@ describe('EnrichmentJobWorker', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('Detection failed'));
@@ -307,7 +307,7 @@ describe('EnrichmentJobWorker', () => {
 
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const retryUpdate = updateCalls[updateCalls.length - 1][0];
-      expect(retryUpdate.data.status).toBe(JobStatus.pending);
+      expect(retryUpdate.data.status).toBe(MhLegacyJobStatus.pending);
       // attempts already charged at claim time — the failure write must not
       // touch it (no double-charge).
       expect(retryUpdate.data.attempts).toBeUndefined();
@@ -328,7 +328,7 @@ describe('EnrichmentJobWorker', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running, attempts: job.attempts + 1 })
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running, attempts: job.attempts + 1 })
         .mockResolvedValueOnce({});
 
       mockHandler.process.mockRejectedValue(new Error('Fatal error'));
@@ -337,7 +337,7 @@ describe('EnrichmentJobWorker', () => {
 
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const failUpdate = updateCalls[updateCalls.length - 1][0];
-      expect(failUpdate.data.status).toBe(JobStatus.failed);
+      expect(failUpdate.data.status).toBe(MhLegacyJobStatus.failed);
       // attempts is not written on the failure path (claim already charged it)
       expect(failUpdate.data.attempts).toBeUndefined();
       expect(failUpdate.data.lastError).toBe('Fatal error');
@@ -358,7 +358,7 @@ describe('EnrichmentJobWorker', () => {
 
       (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(job);
       (mockPrisma.enrichmentJob.update as jest.Mock)
-        .mockResolvedValueOnce({ ...job, status: JobStatus.running }) // claim
+        .mockResolvedValueOnce({ ...job, status: MhLegacyJobStatus.running }) // claim
         .mockResolvedValueOnce({}); // fail update
 
       await (worker as any).tick();
@@ -366,7 +366,7 @@ describe('EnrichmentJobWorker', () => {
       // Should have updated to failed with a descriptive error message
       const updateCalls = (mockPrisma.enrichmentJob.update as jest.Mock).mock.calls;
       const failUpdate = updateCalls[updateCalls.length - 1][0];
-      expect(failUpdate.data.status).toBe(JobStatus.failed);
+      expect(failUpdate.data.status).toBe(MhLegacyJobStatus.failed);
       expect(failUpdate.data.lastError).toContain('unknown_type');
       expect(failUpdate.data.finishedAt).toBeInstanceOf(Date);
 

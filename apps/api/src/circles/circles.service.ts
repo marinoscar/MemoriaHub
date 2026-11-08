@@ -8,11 +8,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
-import { AllowlistService } from '../allowlist/allowlist.service';
 import { EmailService } from '../email/email.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { CircleRole } from '@prisma/client';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { CreateCircleDto } from './dto/create-circle.dto';
 import { UpdateCircleDto } from './dto/update-circle.dto';
 import { AddMemberDto } from './dto/add-member.dto';
@@ -32,7 +31,6 @@ export class CirclesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly membership: CircleMembershipService,
-    private readonly allowlist: AllowlistService,
     private readonly email: EmailService,
   ) {}
 

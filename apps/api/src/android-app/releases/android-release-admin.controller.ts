@@ -13,8 +13,8 @@ import {
 import { ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
 import { ErrorDto } from '../../common/dto/error.dto';
 import { AdminReleaseDto, type AdminRelease } from '../dto/android-release.dto';

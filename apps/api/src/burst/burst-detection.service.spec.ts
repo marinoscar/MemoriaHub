@@ -36,7 +36,7 @@ import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interfac
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { BurstGroupStatus, EnrichmentJob, JobReason, JobStatus, MediaType } from '@prisma/client';
+import { BurstGroupStatus, EnrichmentJob, JobReason, MhLegacyJobStatus, MediaType } from '@prisma/client';
 import { computeVisualHash } from '../storage/processing/visual-hash.util';
 import { Readable } from 'stream';
 
@@ -50,7 +50,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'burst_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 10,
     providerKey: null,

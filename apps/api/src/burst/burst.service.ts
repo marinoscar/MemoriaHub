@@ -10,7 +10,7 @@ import {
   BurstGroupStatus,
   CircleRole,
   JobReason,
-  JobStatus,
+  MhLegacyJobStatus,
   MediaType,
   Prisma,
   ReviewRunAction,
@@ -706,7 +706,7 @@ export class BurstService {
         where: {
           type: 'burst_detection',
           circleId,
-          status: JobStatus.succeeded,
+          status: MhLegacyJobStatus.succeeded,
         },
         select: { mediaItemId: true },
       });

@@ -18,7 +18,7 @@
 // =============================================================================
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, JobStatus, Prisma } from '@prisma/client';
+import { EnrichmentJob, MhLegacyJobStatus, Prisma } from '@prisma/client';
 import { EnrichmentHandler } from './enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
@@ -63,7 +63,7 @@ export class JobHistoryPurgeHandler implements EnrichmentHandler, OnModuleInit {
     );
 
     const where: Prisma.EnrichmentJobWhereInput = {
-      status: { in: [JobStatus.succeeded, JobStatus.failed] },
+      status: { in: [MhLegacyJobStatus.succeeded, MhLegacyJobStatus.failed] },
       finishedAt: { not: null, lt: cutoff },
     };
 
@@ -87,7 +87,7 @@ export class JobHistoryPurgeHandler implements EnrichmentHandler, OnModuleInit {
       const ops: Prisma.PrismaPromise<unknown>[] = [];
       for (const d of deltas.values()) {
         ops.push(
-          this.prisma.jobStatsRollup.upsert({
+          this.prisma.mhLegacyJobStatsRollup.upsert({
             where: { type: d.type },
             create: {
               type: d.type,
@@ -127,7 +127,7 @@ export class JobHistoryPurgeHandler implements EnrichmentHandler, OnModuleInit {
   private aggregateBatch(
     rows: Array<{
       type: string;
-      status: JobStatus;
+      status: MhLegacyJobStatus;
       startedAt: Date | null;
       finishedAt: Date | null;
     }>,
@@ -149,7 +149,7 @@ export class JobHistoryPurgeHandler implements EnrichmentHandler, OnModuleInit {
         d = { type: r.type, succeeded: 0, failed: 0, sumDurationMs: 0, durationSamples: 0 };
         map.set(r.type, d);
       }
-      if (r.status === JobStatus.succeeded) {
+      if (r.status === MhLegacyJobStatus.succeeded) {
         d.succeeded += 1;
         if (r.startedAt && r.finishedAt) {
           const ms = r.finishedAt.getTime() - r.startedAt.getTime();
@@ -158,7 +158,7 @@ export class JobHistoryPurgeHandler implements EnrichmentHandler, OnModuleInit {
             d.durationSamples += 1;
           }
         }
-      } else if (r.status === JobStatus.failed) {
+      } else if (r.status === MhLegacyJobStatus.failed) {
         d.failed += 1;
       }
     }

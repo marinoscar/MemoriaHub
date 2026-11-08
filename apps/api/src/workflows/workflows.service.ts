@@ -10,7 +10,7 @@ import { SystemSettingsService } from '../settings/system-settings/system-settin
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { isWorkflowsEnabled } from '../common/types/settings.types';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowDefinition } from './definition/workflow-definition.schema';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';

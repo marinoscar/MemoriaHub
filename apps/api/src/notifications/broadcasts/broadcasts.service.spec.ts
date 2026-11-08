@@ -40,7 +40,7 @@ function row(over: Record<string, unknown> = {}) {
 function build() {
   const order: string[] = [];
   const prisma = {
-    notificationBroadcast: {
+    mhLegacyNotificationBroadcast: {
       create: jest.fn().mockImplementation(async () => {
         order.push('create');
         return row();
@@ -81,7 +81,7 @@ describe('BroadcastsService', () => {
   it('list returns items + pagination meta, newest first', async () => {
     const t = build();
     const res = await t.service.list({ page: 2, pageSize: 10, status: 'sent' });
-    expect(t.prisma.notificationBroadcast.findMany).toHaveBeenCalledWith(
+    expect(t.prisma.mhLegacyNotificationBroadcast.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { status: 'sent' }, skip: 10, take: 10, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
     );
     expect(res.meta).toEqual({ page: 2, pageSize: 10, totalItems: 1, totalPages: 1 });
@@ -96,7 +96,7 @@ describe('BroadcastsService', () => {
       ADMIN,
     );
     expect(t.order).toEqual(['create', 'enqueue']);
-    expect(t.prisma.notificationBroadcast.create.mock.calls[0][0].data).toMatchObject({
+    expect(t.prisma.mhLegacyNotificationBroadcast.create.mock.calls[0][0].data).toMatchObject({
       status: 'scheduled',
       critical: true,
       channels: ['inbox', 'push'],
@@ -119,7 +119,7 @@ describe('BroadcastsService', () => {
   it('cancel is a conditional write and records who cancelled', async () => {
     const t = build();
     await t.service.cancel(BID, ADMIN);
-    expect(t.prisma.notificationBroadcast.updateMany).toHaveBeenCalledWith({
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenCalledWith({
       where: { id: BID, status: { in: ['scheduled', 'sending', 'failed'] } },
       data: { status: 'canceled', canceledAt: expect.any(Date), canceledById: ADMIN },
     });
@@ -127,20 +127,20 @@ describe('BroadcastsService', () => {
 
   it('cancel distinguishes 404 from 409', async () => {
     const t = build();
-    t.prisma.notificationBroadcast.updateMany.mockResolvedValue({ count: 0 });
-    t.prisma.notificationBroadcast.findUnique.mockResolvedValueOnce(row({ status: 'sent' }));
+    t.prisma.mhLegacyNotificationBroadcast.updateMany.mockResolvedValue({ count: 0 });
+    t.prisma.mhLegacyNotificationBroadcast.findUnique.mockResolvedValueOnce(row({ status: 'sent' }));
     await expect(t.service.cancel(BID, ADMIN)).rejects.toBeInstanceOf(ConflictException);
-    t.prisma.notificationBroadcast.findUnique.mockResolvedValueOnce(null);
+    t.prisma.mhLegacyNotificationBroadcast.findUnique.mockResolvedValueOnce(null);
     await expect(t.service.cancel(BID, ADMIN)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('resume of a claimed failed broadcast flips to sending and queues a chunk from the cursor', async () => {
     const t = build();
-    t.prisma.notificationBroadcast.findUnique.mockResolvedValue(
+    t.prisma.mhLegacyNotificationBroadcast.findUnique.mockResolvedValue(
       row({ status: 'failed', audienceCutoff: new Date(), cursorUserId: 'u-9' }),
     );
     await t.service.resume(BID, ADMIN);
-    expect(t.prisma.notificationBroadcast.updateMany).toHaveBeenCalledWith({
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenCalledWith({
       where: { id: BID, status: 'failed' },
       data: { status: 'sending', finishedAt: null, lastError: null },
     });
@@ -151,22 +151,22 @@ describe('BroadcastsService', () => {
 
   it('resume of a never-claimed failed broadcast goes back to scheduled and re-queues the start', async () => {
     const t = build();
-    t.prisma.notificationBroadcast.findUnique.mockResolvedValue(row({ status: 'failed', audienceCutoff: null }));
+    t.prisma.mhLegacyNotificationBroadcast.findUnique.mockResolvedValue(row({ status: 'failed', audienceCutoff: null }));
     await t.service.resume(BID, ADMIN);
-    expect(t.prisma.notificationBroadcast.updateMany.mock.calls[0][0].data.status).toBe('scheduled');
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany.mock.calls[0][0].data.status).toBe('scheduled');
     expect(t.jobs.enqueue.mock.calls[0][0].type).toBe(BROADCAST_START_TYPE);
   });
 
   it('resume refuses a non-failed broadcast and compensates an enqueue failure', async () => {
     const t = build();
-    t.prisma.notificationBroadcast.findUnique.mockResolvedValue(row({ status: 'sent' }));
+    t.prisma.mhLegacyNotificationBroadcast.findUnique.mockResolvedValue(row({ status: 'sent' }));
     await expect(t.service.resume(BID, ADMIN)).rejects.toBeInstanceOf(ConflictException);
 
     const u = build();
-    u.prisma.notificationBroadcast.findUnique.mockResolvedValue(row({ status: 'failed', audienceCutoff: new Date() }));
+    u.prisma.mhLegacyNotificationBroadcast.findUnique.mockResolvedValue(row({ status: 'failed', audienceCutoff: new Date() }));
     u.jobs.enqueue.mockRejectedValue(new Error('queue down'));
     await expect(u.service.resume(BID, ADMIN)).rejects.toThrow('queue down');
-    expect(u.prisma.notificationBroadcast.updateMany).toHaveBeenLastCalledWith({
+    expect(u.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenLastCalledWith({
       where: { id: BID, status: 'sending' },
       data: expect.objectContaining({ status: 'failed', lastError: expect.stringMatching(/queue down/) }),
     });
@@ -174,12 +174,12 @@ describe('BroadcastsService', () => {
 
   it('remove refuses a sending broadcast and deletes otherwise', async () => {
     const t = build();
-    t.prisma.notificationBroadcast.findUnique.mockResolvedValueOnce(row({ status: 'sending' }));
+    t.prisma.mhLegacyNotificationBroadcast.findUnique.mockResolvedValueOnce(row({ status: 'sending' }));
     await expect(t.service.remove(BID, ADMIN)).rejects.toBeInstanceOf(ConflictException);
-    expect(t.prisma.notificationBroadcast.delete).not.toHaveBeenCalled();
+    expect(t.prisma.mhLegacyNotificationBroadcast.delete).not.toHaveBeenCalled();
 
     await t.service.remove(BID, ADMIN);
-    expect(t.prisma.notificationBroadcast.delete).toHaveBeenCalledWith({ where: { id: BID } });
+    expect(t.prisma.mhLegacyNotificationBroadcast.delete).toHaveBeenCalledWith({ where: { id: BID } });
   });
 
   it('sendTest delivers to the CALLER only, writes no broadcast and queues no job', async () => {
@@ -193,7 +193,7 @@ describe('BroadcastsService', () => {
       expect.objectContaining({ id: null, critical: true, channels: ['inbox', 'email'] }),
       { id: ADMIN, email: 'a@x.test' },
     );
-    expect(t.prisma.notificationBroadcast.create).not.toHaveBeenCalled();
+    expect(t.prisma.mhLegacyNotificationBroadcast.create).not.toHaveBeenCalled();
     expect(t.jobs.enqueue).not.toHaveBeenCalled();
     expect(res).toEqual({
       notificationType: 'admin_broadcast_critical',

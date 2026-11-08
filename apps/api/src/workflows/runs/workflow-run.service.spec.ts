@@ -35,7 +35,7 @@ import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import {
   createMockPrismaService,

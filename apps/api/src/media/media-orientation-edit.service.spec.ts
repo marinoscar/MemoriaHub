@@ -46,7 +46,7 @@ import {
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
 import { createMockStorageProvider } from '../../test/mocks/storage-provider.mock';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { applyOrientationTransform } from '../storage/processing/image-orientation.util';
 
 jest.mock('../storage/processing/image-orientation.util', () => ({

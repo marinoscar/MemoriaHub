@@ -13,7 +13,7 @@
  *    the service
  */
 
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { duplicateDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { DuplicateDetectionHandler } from './duplicate-detection.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
@@ -25,7 +25,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'duplicate_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 50,
     providerKey: null,

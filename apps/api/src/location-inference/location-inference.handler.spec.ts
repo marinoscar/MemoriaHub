@@ -11,7 +11,7 @@
  *  - job.mediaItemId null + circleId null -> warns and does NOT call sweepCircle
  */
 
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { LocationInferenceHandler } from './location-inference.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { LocationInferenceService } from './location-inference.service';
@@ -22,7 +22,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'location_inference',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,

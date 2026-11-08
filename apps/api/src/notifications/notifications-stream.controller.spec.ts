@@ -21,7 +21,7 @@ import { NotificationPolicyService } from './notification-policy.service';
 import { NotificationStreamService } from './notification-stream.service';
 import { PushConfigService } from './push/push-config.service';
 import { PushSubscriptionService } from './push/push-subscription.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '@marinoscar/platform-api/identity';
 import { TransformInterceptor } from '@marinoscar/platform-api/host';
 import { LoggingInterceptor } from '@marinoscar/platform-api/host';
 

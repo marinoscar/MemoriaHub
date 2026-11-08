@@ -10,12 +10,11 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus } from '@prisma/client';
+import { MhLegacyJobStatus } from '@prisma/client';
 import { InsightsController } from './insights.controller';
 import { InsightsService } from './insights.service';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { ROLES_KEY } from '../auth/decorators/roles.decorator';
-import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
+import { ROLES_KEY, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
 
 // ---------------------------------------------------------------------------
 // Mock InsightsService
@@ -72,7 +71,7 @@ describe('InsightsController', () => {
         { provide: InsightsService, useValue: mockInsightsService },
       ],
     })
-      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
+      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
       .useValue({ canActivate: () => true })
       .compile();
 
@@ -157,7 +156,7 @@ describe('InsightsController', () => {
 
   describe('refresh', () => {
     it('delegates to insightsService.enqueueRefresh() with priority 0', async () => {
-      const job = { id: 'job-uuid', status: JobStatus.pending };
+      const job = { id: 'job-uuid', status: MhLegacyJobStatus.pending };
       mockInsightsService.enqueueRefresh.mockResolvedValue(job);
 
       await controller.refresh();
@@ -169,21 +168,21 @@ describe('InsightsController', () => {
     });
 
     it('returns jobId and state from the enqueued job', async () => {
-      const job = { id: 'job-uuid-123', status: JobStatus.pending };
+      const job = { id: 'job-uuid-123', status: MhLegacyJobStatus.pending };
       mockInsightsService.enqueueRefresh.mockResolvedValue(job);
 
       const result = await controller.refresh();
 
-      expect(result).toEqual({ jobId: 'job-uuid-123', state: JobStatus.pending });
+      expect(result).toEqual({ jobId: 'job-uuid-123', state: MhLegacyJobStatus.pending });
     });
 
     it('returns running state when dedup returns an already-running job', async () => {
-      const job = { id: 'job-running', status: JobStatus.running };
+      const job = { id: 'job-running', status: MhLegacyJobStatus.running };
       mockInsightsService.enqueueRefresh.mockResolvedValue(job);
 
       const result = await controller.refresh();
 
-      expect(result.state).toBe(JobStatus.running);
+      expect(result.state).toBe(MhLegacyJobStatus.running);
     });
 
     it('propagates errors thrown by insightsService.enqueueRefresh()', async () => {

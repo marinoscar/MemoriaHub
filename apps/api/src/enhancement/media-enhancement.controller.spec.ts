@@ -25,8 +25,7 @@ import request from 'supertest';
 import { randomUUID } from 'crypto';
 import { MediaEnhancementController } from './media-enhancement.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
+import { JwtAuthGuard, AuthenticatedUser } from '@marinoscar/platform-api/identity';
 
 const MEDIA_ID = randomUUID();
 const ENH_ID = randomUUID();

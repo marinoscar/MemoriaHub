@@ -176,7 +176,7 @@ describe('Notification Center — migration schema-drift guard (issue #244)', ()
   describe('Notification model (schema.prisma) — documented indexes', () => {
     const schema = readSchemaPrisma();
     const modelMatch = schema.match(
-      /model\s+Notification\s*\{([\s\S]*?)\n\}/,
+      /model\s+MhLegacyNotification\s*\{([\s\S]*?)\n\}/,
     );
 
     it('model block is present', () => {

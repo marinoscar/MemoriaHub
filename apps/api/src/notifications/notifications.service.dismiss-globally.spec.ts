@@ -98,17 +98,17 @@ describe('NotificationsService.dismissTypesGlobally (#489)', () => {
   });
 
   it('invalidateAllUnreadCounts() drops every cached badge count', async () => {
-    (mockPrisma.notification.count as jest.Mock).mockResolvedValue(4);
+    (mockPrisma.mhLegacyNotification.count as jest.Mock).mockResolvedValue(4);
     await service.getUnreadCount('u1');
     await service.getUnreadCount('u2');
-    expect(mockPrisma.notification.count).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(2);
 
     await service.getUnreadCount('u1');
-    expect(mockPrisma.notification.count).toHaveBeenCalledTimes(2); // cached
+    expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(2); // cached
 
     service.invalidateAllUnreadCounts();
     await service.getUnreadCount('u1');
     await service.getUnreadCount('u2');
-    expect(mockPrisma.notification.count).toHaveBeenCalledTimes(4);
+    expect(mockPrisma.mhLegacyNotification.count).toHaveBeenCalledTimes(4);
   });
 });

@@ -14,7 +14,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus, JobReason } from '@prisma/client';
+import { MhLegacyJobStatus, JobReason } from '@prisma/client';
 import { NotificationPurgeTask } from './notification-purge.task';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -122,7 +122,7 @@ describe('NotificationPurgeTask', () => {
       mockPrisma.enrichmentJob.findFirst.mockResolvedValue({
         id: 'existing-job',
         type: 'notification_purge',
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       } as any);
 
       await task.handleScheduledPurge();
@@ -134,7 +134,7 @@ describe('NotificationPurgeTask', () => {
       mockPrisma.enrichmentJob.findFirst.mockResolvedValue({
         id: 'existing-job',
         type: 'notification_purge',
-        status: JobStatus.running,
+        status: MhLegacyJobStatus.running,
       } as any);
 
       await task.handleScheduledPurge();
@@ -146,7 +146,7 @@ describe('NotificationPurgeTask', () => {
       mockPrisma.enrichmentJob.findFirst.mockResolvedValue({
         id: 'existing-job',
         type: 'notification_purge',
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       } as any);
 
       await expect(task.handleScheduledPurge()).resolves.toBeUndefined();
@@ -161,7 +161,7 @@ describe('NotificationPurgeTask', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             type: 'notification_purge',
-            status: { in: [JobStatus.pending, JobStatus.running] },
+            status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
           }),
         }),
       );

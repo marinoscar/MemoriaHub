@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { Injectable, BadRequestException, NotFoundException, Logger, Optional } from '@nestjs/common';
-import { Prisma, JobStatus } from '@prisma/client';
+import { Prisma, MhLegacyJobStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
@@ -66,7 +66,7 @@ export interface JobStats {
 export interface JobListItem {
   id: string;
   type: string;
-  status: JobStatus;
+  status: MhLegacyJobStatus;
   reason: string;
   priority: number;
   mediaItemId: string | null;
@@ -159,7 +159,7 @@ export interface JobLifetimeStats {
 export type ProcessedWithinWindow = '4h' | '24h' | '7d' | '30d' | 'all';
 
 export interface ListJobsFilter {
-  status?: JobStatus;
+  status?: MhLegacyJobStatus;
   type?: string;
   page: number;
   pageSize: number;
@@ -223,7 +223,7 @@ export class EnrichmentAdminService {
    */
   private stuckRunningWhere(threshold: Date, now: Date): Prisma.EnrichmentJobWhereInput {
     return {
-      status: JobStatus.running,
+      status: MhLegacyJobStatus.running,
       OR: [
         { startedAt: { lt: threshold } },
         { startedAt: null, createdAt: { lt: threshold } },
@@ -282,7 +282,7 @@ export class EnrichmentAdminService {
       // Count pending jobs that are backed off (scheduledFor in the future)
       this.prisma.enrichmentJob.count({
         where: {
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           scheduledFor: { gt: now },
         },
       }),
@@ -300,10 +300,10 @@ export class EnrichmentAdminService {
     for (const row of statusGroups) {
       const count = row._count.id;
       total += count;
-      if (row.status === JobStatus.pending) byStatus.pending = count;
-      else if (row.status === JobStatus.running) byStatus.running = count;
-      else if (row.status === JobStatus.succeeded) byStatus.succeeded = count;
-      else if (row.status === JobStatus.failed) byStatus.failed = count;
+      if (row.status === MhLegacyJobStatus.pending) byStatus.pending = count;
+      else if (row.status === MhLegacyJobStatus.running) byStatus.running = count;
+      else if (row.status === MhLegacyJobStatus.succeeded) byStatus.succeeded = count;
+      else if (row.status === MhLegacyJobStatus.failed) byStatus.failed = count;
     }
 
     // Build byType array — collect all types first
@@ -326,10 +326,10 @@ export class EnrichmentAdminService {
 
       const entry = typeMap.get(type)!;
       entry.total += count;
-      if (status === JobStatus.pending) entry.pending = count;
-      else if (status === JobStatus.running) entry.running = count;
-      else if (status === JobStatus.succeeded) entry.succeeded = count;
-      else if (status === JobStatus.failed) entry.failed = count;
+      if (status === MhLegacyJobStatus.pending) entry.pending = count;
+      else if (status === MhLegacyJobStatus.running) entry.running = count;
+      else if (status === MhLegacyJobStatus.succeeded) entry.succeeded = count;
+      else if (status === MhLegacyJobStatus.failed) entry.failed = count;
     }
 
     const byType = Array.from(typeMap.values()).sort((a, b) => a.type.localeCompare(b.type));
@@ -379,7 +379,7 @@ export class EnrichmentAdminService {
         this.prisma.enrichmentJob.count({
           where: {
             rateLimitHits: { gt: 0 },
-            status: { in: [JobStatus.pending, JobStatus.running] },
+            status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
           },
         }),
         this.prisma.enrichmentJob.count({ where: { attempts: { gt: 1 } } }),
@@ -410,11 +410,11 @@ export class EnrichmentAdminService {
         `),
         this.prisma.enrichmentJob.groupBy({
           by: ['type'],
-          where: { status: JobStatus.succeeded, finishedAt: { gte: throughputSince } },
+          where: { status: MhLegacyJobStatus.succeeded, finishedAt: { gte: throughputSince } },
           _count: { id: true },
         }),
         // Lifetime rollup of already-purged rows
-        this.prisma.jobStatsRollup.findMany(),
+        this.prisma.mhLegacyJobStatsRollup.findMany(),
         // All-time (un-windowed) duration sum + sample count over LIVE rows, so
         // lifetime avg = (rollup + live) sum / (rollup + live) samples
         this.prisma.$queryRaw<
@@ -592,7 +592,7 @@ export class EnrichmentAdminService {
   // -------------------------------------------------------------------------
 
   async resetHistory(): Promise<{ reset: number }> {
-    const result = await this.prisma.jobStatsRollup.deleteMany({});
+    const result = await this.prisma.mhLegacyJobStatsRollup.deleteMany({});
     this.logger.log(`Admin reset job history rollup (${result.count} type rows cleared)`);
     return { reset: result.count };
   }
@@ -642,7 +642,7 @@ export class EnrichmentAdminService {
     // In both branches, spread timeFilter to AND with the base where clause.
     const where: Prisma.EnrichmentJobWhereInput = scheduled === true
       ? {
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           scheduledFor: { gt: new Date() },
           ...(type !== undefined ? { type } : {}),
           ...timeFilter,
@@ -708,7 +708,7 @@ export class EnrichmentAdminService {
       throw new NotFoundException(`EnrichmentJob ${id} not found`);
     }
 
-    if (job.status === JobStatus.running) {
+    if (job.status === MhLegacyJobStatus.running) {
       throw new BadRequestException(
         `EnrichmentJob ${id} is currently running and cannot be retried`,
       );
@@ -717,7 +717,7 @@ export class EnrichmentAdminService {
     const updated = await this.prisma.enrichmentJob.update({
       where: { id },
       data: {
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         attempts: 0,
         lastError: null,
         startedAt: null,
@@ -764,14 +764,14 @@ export class EnrichmentAdminService {
 
   async retryAllFailed(type?: string): Promise<{ retried: number }> {
     const where = {
-      status: JobStatus.failed,
+      status: MhLegacyJobStatus.failed,
       ...(type !== undefined ? { type } : {}),
     };
 
     const result = await this.prisma.enrichmentJob.updateMany({
       where,
       data: {
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         attempts: 0,
         lastError: null,
         startedAt: null,
@@ -817,9 +817,9 @@ export class EnrichmentAdminService {
     let failed = 0;
     for (const job of exhausted) {
       const result = await this.prisma.enrichmentJob.updateMany({
-        where: { id: job.id, status: JobStatus.running },
+        where: { id: job.id, status: MhLegacyJobStatus.running },
         data: {
-          status: JobStatus.failed,
+          status: MhLegacyJobStatus.failed,
           lastError: `process terminated during execution (attempt ${job.attempts}/${ENRICHMENT_MAX_ATTEMPTS})`,
           finishedAt: new Date(),
           scheduledFor: null,
@@ -837,7 +837,7 @@ export class EnrichmentAdminService {
     const result = await this.prisma.enrichmentJob.updateMany({
       where: { ...stuckWhere, attempts: { lt: ENRICHMENT_MAX_ATTEMPTS } },
       data: {
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         startedAt: null,
         scheduledFor: null,
         // Release the (dead) claim so the job is unowned and re-claimable.
@@ -866,7 +866,7 @@ export class EnrichmentAdminService {
       throw new NotFoundException(`EnrichmentJob ${id} not found`);
     }
 
-    if (job.status === JobStatus.running) {
+    if (job.status === MhLegacyJobStatus.running) {
       throw new BadRequestException(
         `EnrichmentJob ${id} is currently running and cannot be deleted`,
       );
@@ -876,7 +876,7 @@ export class EnrichmentAdminService {
     // some other record (issue #488: a scheduled/sending broadcast's start or
     // chunk job). Only consulted for non-terminal rows — history is always
     // deletable.
-    if (job.status === JobStatus.pending) {
+    if (job.status === MhLegacyJobStatus.pending) {
       const refusal = await this.registry?.get(job.type)?.canDelete?.(job);
       if (refusal) {
         throw new BadRequestException(refusal);

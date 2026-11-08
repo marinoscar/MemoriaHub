@@ -55,7 +55,7 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { JobStatus, MemoryType, Prisma } from '@prisma/client';
+import { MhLegacyJobStatus, MemoryType, Prisma } from '@prisma/client';
 
 import { EmailService } from '../../email/email.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
@@ -256,7 +256,7 @@ export class MemoryDigestService {
       where: {
         type: MEMORY_DIGEST_JOB_TYPE,
         circleId,
-        status: JobStatus.succeeded,
+        status: MhLegacyJobStatus.succeeded,
       },
       orderBy: { finishedAt: 'desc' },
       select: { finishedAt: true },

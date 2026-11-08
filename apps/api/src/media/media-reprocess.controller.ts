@@ -2,7 +2,7 @@ import { Controller, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { MediaReprocessService } from './media-reprocess.service';
 import {
   StorageProcessingRecoveryService,
@@ -10,7 +10,7 @@ import {
 } from '../storage/tasks/storage-processing-recovery.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
 // .default({}) on all three so a bodyless POST parses as {} — see issue #289
@@ -134,7 +134,7 @@ export class MediaReprocessController {
     // priority (e.g. the hourly cron enqueues at 100), promote it to 0 — an
     // explicit admin request should pre-empt the queue. Running jobs are left
     // untouched (they are already being worked on).
-    if (job.status === JobStatus.pending && job.priority > 0) {
+    if (job.status === MhLegacyJobStatus.pending && job.priority > 0) {
       await this.prisma.enrichmentJob.update({
         where: { id: job.id },
         data: { priority: 0 },

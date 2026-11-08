@@ -42,7 +42,7 @@
 
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { CircleRole, JobStatus, MediaEnhancementStatus } from '@prisma/client';
+import { CircleRole, MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/client';
 import { EnhancementBatchesController } from './enhancement-batches.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -56,7 +56,7 @@ import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
 
 const USER: RequestUser = {
@@ -431,7 +431,7 @@ describe('EnhancementBatchesController', () => {
       expect(mockPrisma.enrichmentJob.deleteMany).toHaveBeenCalledWith({
         where: {
           type: 'picture_enhancement',
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           OR: [
             { payload: { path: ['enhancementId'], equals: 'enh-p1' } },
             { payload: { path: ['enhancementId'], equals: 'enh-p2' } },

@@ -84,7 +84,7 @@ import { promises as fsPromises } from 'fs';
 import {
   EnrichmentJob,
   JobReason,
-  JobStatus,
+  MhLegacyJobStatus,
   MediaSocialStatusType,
   MediaTagSource,
   MediaType,
@@ -117,7 +117,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'social_media_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 10,
     providerKey: null,

@@ -28,7 +28,7 @@ import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';
 import { DEFAULT_SYSTEM_SETTINGS } from '../common/types/settings.types';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CIRCLE_ID = randomUUID();

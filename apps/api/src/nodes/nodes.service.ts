@@ -20,10 +20,10 @@ import {
 import { randomUUID } from 'node:crypto';
 import {
   EnrichmentJob,
-  JobStatus,
+  MhLegacyJobStatus,
   NodeBackupRunStatus,
-  NodeStatus,
-  WorkerNode,
+  MhLegacyNodeStatus,
+  MhLegacyWorkerNode,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
@@ -60,7 +60,7 @@ export interface RegisterNodeInput {
 }
 
 export interface HeartbeatInput {
-  status?: NodeStatus;
+  status?: MhLegacyNodeStatus;
   capabilities?: unknown;
   concurrency?: number;
 }
@@ -133,8 +133,8 @@ export class NodesService {
    * node backup control plane (NodeBackupService/NodeBackupController), which
    * is why it is public.
    */
-  async assertOwnership(userId: string, nodeId: string): Promise<WorkerNode> {
-    const node = await this.prisma.workerNode.findUnique({ where: { id: nodeId } });
+  async assertOwnership(userId: string, nodeId: string): Promise<MhLegacyWorkerNode> {
+    const node = await this.prisma.mhLegacyWorkerNode.findUnique({ where: { id: nodeId } });
     if (!node) {
       throw new NotFoundException(`WorkerNode ${nodeId} not found`);
     }
@@ -161,7 +161,7 @@ export class NodesService {
   ): Promise<{ nodeId: string; reattached: boolean }> {
     const now = new Date();
 
-    const existing = await this.prisma.workerNode.findUnique({
+    const existing = await this.prisma.mhLegacyWorkerNode.findUnique({
       where: { createdById_name: { createdById: userId, name: dto.name } },
     });
     if (existing) {
@@ -169,7 +169,7 @@ export class NodesService {
     }
 
     try {
-      const node = await this.prisma.workerNode.create({
+      const node = await this.prisma.mhLegacyWorkerNode.create({
         data: {
           name: dto.name,
           hostname: dto.hostname,
@@ -177,7 +177,7 @@ export class NodesService {
           cliVersion: dto.cliVersion,
           eligibleTypes: dto.eligibleTypes,
           concurrency: dto.concurrency ?? 1,
-          status: NodeStatus.online,
+          status: MhLegacyNodeStatus.online,
           registeredAt: now,
           lastHeartbeatAt: now,
           createdById: userId,
@@ -188,7 +188,7 @@ export class NodesService {
       // A concurrent replica won the find-then-create race (P2002 on the
       // (created_by_id, name) unique) — re-read its row and reattach to it.
       if (e.code === 'P2002') {
-        const raced = await this.prisma.workerNode.findUnique({
+        const raced = await this.prisma.mhLegacyWorkerNode.findUnique({
           where: { createdById_name: { createdById: userId, name: dto.name } },
         });
         if (raced) {
@@ -207,7 +207,7 @@ export class NodesService {
    * documented conflict policy for replica restarts.
    */
   private async reattach(
-    existing: WorkerNode,
+    existing: MhLegacyWorkerNode,
     dto: RegisterNodeInput,
     now: Date,
   ): Promise<{ nodeId: string; reattached: true }> {
@@ -221,7 +221,7 @@ export class NodesService {
       );
     }
 
-    const node = await this.prisma.workerNode.update({
+    const node = await this.prisma.mhLegacyWorkerNode.update({
       where: { id: existing.id },
       data: {
         hostname: dto.hostname,
@@ -229,7 +229,7 @@ export class NodesService {
         cliVersion: dto.cliVersion,
         eligibleTypes: dto.eligibleTypes,
         concurrency: dto.concurrency ?? 1,
-        status: NodeStatus.online,
+        status: MhLegacyNodeStatus.online,
         lastHeartbeatAt: now,
       },
     });
@@ -240,11 +240,11 @@ export class NodesService {
   // deregister
   // -------------------------------------------------------------------------
 
-  async deregister(userId: string, nodeId: string): Promise<{ status: NodeStatus }> {
+  async deregister(userId: string, nodeId: string): Promise<{ status: MhLegacyNodeStatus }> {
     await this.assertOwnership(userId, nodeId);
-    const updated = await this.prisma.workerNode.update({
+    const updated = await this.prisma.mhLegacyWorkerNode.update({
       where: { id: nodeId },
-      data: { status: NodeStatus.offline },
+      data: { status: MhLegacyNodeStatus.offline },
     });
     return { status: updated.status };
   }
@@ -286,16 +286,16 @@ export class NodesService {
   async markStaleNodesOffline(): Promise<number> {
     const cutoff = new Date(Date.now() - offlineThresholdMs());
 
-    const { count } = await this.prisma.workerNode.updateMany({
+    const { count } = await this.prisma.mhLegacyWorkerNode.updateMany({
       where: {
-        status: { in: [NodeStatus.online, NodeStatus.draining] },
+        status: { in: [MhLegacyNodeStatus.online, MhLegacyNodeStatus.draining] },
         OR: [
           { lastHeartbeatAt: { lt: cutoff } },
           // Never heartbeated at all — age by registration time instead.
           { lastHeartbeatAt: null, registeredAt: { lt: cutoff } },
         ],
       },
-      data: { status: NodeStatus.offline },
+      data: { status: MhLegacyNodeStatus.offline },
     });
 
     return count;
@@ -311,7 +311,7 @@ export class NodesService {
     dto: HeartbeatInput,
   ): Promise<{ ok: true }> {
     await this.assertOwnership(userId, nodeId);
-    await this.prisma.workerNode.update({
+    await this.prisma.mhLegacyWorkerNode.update({
       where: { id: nodeId },
       data: {
         lastHeartbeatAt: new Date(),
@@ -338,7 +338,7 @@ export class NodesService {
   ): Promise<{ jobs: Array<{ job: EnrichmentJob; inputUrl: string | null; params: unknown }> }> {
     const node = await this.assertOwnership(userId, nodeId);
 
-    if (node.status === NodeStatus.disabled) {
+    if (node.status === MhLegacyNodeStatus.disabled) {
       throw new ForbiddenException('This worker node is disabled and cannot claim jobs');
     }
 
@@ -526,7 +526,7 @@ export class NodesService {
     const result = await this.prisma.enrichmentJob.updateMany({
       where: {
         id: jobId,
-        status: JobStatus.running,
+        status: MhLegacyJobStatus.running,
         claimedByNodeId: nodeId,
       },
       data: { leaseExpiresAt },
@@ -568,7 +568,7 @@ export class NodesService {
 
     if (
       job.claimedByNodeId !== nodeId ||
-      job.status !== JobStatus.running ||
+      job.status !== MhLegacyJobStatus.running ||
       !job.leaseExpiresAt ||
       job.leaseExpiresAt <= new Date()
     ) {
@@ -1017,8 +1017,8 @@ export class NodesService {
    * Shared between `listNodes` (bulk) and `getNode` (single-node detail) so
    * the two surfaces can never silently drift apart.
    */
-  private deriveNodeHealth(node: WorkerNode): 'healthy' | 'stale' | 'offline' {
-    if (node.status === NodeStatus.offline || node.status === NodeStatus.disabled) {
+  private deriveNodeHealth(node: MhLegacyWorkerNode): 'healthy' | 'stale' | 'offline' {
+    if (node.status === MhLegacyNodeStatus.offline || node.status === MhLegacyNodeStatus.disabled) {
       return 'offline';
     }
     const now = Date.now();
@@ -1055,11 +1055,11 @@ export class NodesService {
       const bucket =
         countsByNode.get(row.claimedByNodeId) ??
         { running: 0, succeeded: 0, failed: 0 };
-      if (row.status === JobStatus.running) {
+      if (row.status === MhLegacyJobStatus.running) {
         bucket.running += row._count._all;
-      } else if (row.status === JobStatus.succeeded) {
+      } else if (row.status === MhLegacyJobStatus.succeeded) {
         bucket.succeeded += row._count._all;
-      } else if (row.status === JobStatus.failed) {
+      } else if (row.status === MhLegacyJobStatus.failed) {
         bucket.failed += row._count._all;
       }
       countsByNode.set(row.claimedByNodeId, bucket);
@@ -1105,7 +1105,7 @@ export class NodesService {
   }
 
   async listNodes(userId?: string) {
-    const nodes = await this.prisma.workerNode.findMany({
+    const nodes = await this.prisma.mhLegacyWorkerNode.findMany({
       where: userId ? { createdById: userId } : undefined,
       orderBy: { registeredAt: 'desc' },
       // Single joined query for the fleet backup summary — the narrow select
@@ -1194,7 +1194,7 @@ export class NodesService {
 
   async deleteNode(nodeId: string): Promise<{ deleted: true }> {
     // claimedJobs FK is SetNull, so deleting a node is safe and orphans nothing.
-    await this.prisma.workerNode.delete({ where: { id: nodeId } });
+    await this.prisma.mhLegacyWorkerNode.delete({ where: { id: nodeId } });
     return { deleted: true };
   }
 

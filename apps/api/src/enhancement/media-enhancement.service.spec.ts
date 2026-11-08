@@ -48,7 +48,7 @@ import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';

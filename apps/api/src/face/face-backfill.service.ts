@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, JobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { whereDateRange } from '../search/media-where.builder';
@@ -150,7 +150,7 @@ export class FaceBackfillService {
         where: {
           type: 'face_auto_archive_sweep',
           circleId: group.circleId,
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
 

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, JobStatus, MediaType } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus, MediaType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
@@ -63,7 +63,7 @@ export class LocationInferenceBackfillService {
         where: {
           type: 'location_inference',
           circleId: group.circleId,
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
 

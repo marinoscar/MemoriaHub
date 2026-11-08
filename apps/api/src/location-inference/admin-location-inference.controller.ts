@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, HttpCode, HttpStatus, Logger, Po
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FEATURE_KEYS } from '../common/types/settings.types';

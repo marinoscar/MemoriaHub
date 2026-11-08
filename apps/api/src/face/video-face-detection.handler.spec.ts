@@ -112,7 +112,7 @@ jest.mock('fs', () => {
 import { Readable } from 'stream';
 import { promises as fsPromises } from 'fs';
 import { tmpdir } from 'os';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { VideoFaceDetectionService } from './video-face-detection.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
@@ -127,7 +127,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'video_face_detection',
     mediaItemId: 'media-video-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,

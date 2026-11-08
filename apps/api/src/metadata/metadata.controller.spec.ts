@@ -21,8 +21,8 @@ import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
-import { JobReason, JobStatus, MediaMetadataStatusType } from '@prisma/client';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 
 // ---------------------------------------------------------------------------
 // Shared mock services
@@ -82,7 +82,7 @@ describe('MetadataController', () => {
     // Default: enqueue returns a minimal pending job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
       id: 'job-1',
-      status: JobStatus.pending,
+      status: MhLegacyJobStatus.pending,
     });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -94,7 +94,7 @@ describe('MetadataController', () => {
       ],
     })
       .overrideGuard(
-        require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object,
+        require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object,
       )
       .useValue({ canActivate: () => true })
       .compile();
@@ -114,7 +114,7 @@ describe('MetadataController', () => {
       const result = await controller.rerunMetadata('media-1', makeUser());
 
       expect(result.data.jobId).toBe('job-1');
-      expect(result.data.status).toBe(JobStatus.pending);
+      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
     });
 
     it('enqueues with type metadata_extraction, reason rerun, and priority 0', async () => {

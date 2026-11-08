@@ -29,7 +29,7 @@ import {
 import { MergePeopleDto } from './dto/merge-people.dto';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { MediaTouchService } from '../media/media-touch.service';
-import { UserAvatarService } from '../users/user-avatar.service';
+import { UserAvatarService } from '../profile/user-avatar.service';
 
 @Injectable()
 export class PeopleService {
@@ -46,8 +46,8 @@ export class PeopleService {
     private readonly mediaTouch: MediaTouchService,
     // Profile picture management (issue #354): an account can be linked to a
     // Person and display that person's picture, so a change to the person's
-    // chosen picture must propagate. FaceModule -> UsersModule is the only edge
-    // between the two; UsersModule must never import FaceModule back.
+    // chosen picture must propagate. FaceModule -> ProfileModule is the only edge
+    // between the two; ProfileModule must never import FaceModule back.
     private readonly userAvatarService: UserAvatarService,
   ) {}
 

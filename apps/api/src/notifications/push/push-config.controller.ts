@@ -1,8 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Post, Put } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
 import {
   GeneratePushConfigDto,

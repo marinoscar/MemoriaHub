@@ -15,7 +15,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { MediaTouchService } from '../media/media-touch.service';
-import { UserAvatarService } from '../users/user-avatar.service';
+import { UserAvatarService } from '../profile/user-avatar.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------

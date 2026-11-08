@@ -26,9 +26,7 @@ import { NodeCredentialsController } from './node-credentials.controller';
 import { NodesAdminController } from './nodes-admin.controller';
 import { NodeCredentialService } from './node-credential.service';
 import { NodesService } from './nodes.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '@marinoscar/platform-api/identity';
 
 const FAKE_USER = { id: 'user-1', email: 'user-1@example.com', roles: [], permissions: [] };
 

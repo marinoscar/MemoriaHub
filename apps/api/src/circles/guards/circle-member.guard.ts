@@ -8,7 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { CircleRole } from '@prisma/client';
 import { CircleMembershipService } from '../circle-membership.service';
 import { CIRCLE_ROLE_KEY } from '../decorators/circle-role.decorator';
-import { AuthenticatedUser, toRequestUser } from '../../auth/interfaces/authenticated-user.interface';
+import { AuthenticatedUser, toRequestUser } from '@marinoscar/platform-api/identity';
 
 @Injectable()
 export class CircleMemberGuard implements CanActivate {

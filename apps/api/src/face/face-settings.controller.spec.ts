@@ -35,7 +35,7 @@ describe('FaceSettingsController', () => {
       ],
     })
       // Override guards to allow testing without auth infrastructure
-      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
+      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
       .useValue({ canActivate: () => true })
       .compile();
 

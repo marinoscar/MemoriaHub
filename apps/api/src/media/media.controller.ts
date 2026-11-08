@@ -23,10 +23,9 @@ import {
 import { FastifyReply } from 'fastify';
 
 import { MediaService } from './media.service';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { MediaQueryDto } from './dto/media-query.dto';

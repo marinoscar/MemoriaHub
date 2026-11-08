@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJob, JobStatus, JobReason } from '@prisma/client';
+import { EnrichmentJob, MhLegacyJobStatus, JobReason } from '@prisma/client';
 
 export interface EnqueueInput {
   type: string;
@@ -55,7 +55,7 @@ export class EnrichmentJobService {
         where: {
           type,
           mediaItemId,
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
 
@@ -70,7 +70,7 @@ export class EnrichmentJobService {
         type,
         mediaItemId,
         circleId,
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
         reason,
         priority,
         providerKey,

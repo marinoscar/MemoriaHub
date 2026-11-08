@@ -11,7 +11,7 @@
  *  - No-op (warn + return) when the job payload has no mediaItemIds
  */
 
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { DuplicateDetectionBatchHandler } from './duplicate-detection-batch.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { DuplicateDetectionService } from './duplicate-detection.service';
@@ -22,7 +22,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'duplicate_detection_batch',
     mediaItemId: null,
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.backfill,
     priority: 100,
     providerKey: null,

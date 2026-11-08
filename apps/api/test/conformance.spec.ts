@@ -10,6 +10,15 @@
 // `doctor-read-only` (`@marinoscar/platform-api/doctor/testing`): every Doctor
 // check writes no row, job or object and holds no side-effecting test service.
 //
+// `identity` (`@marinoscar/platform-api/identity/testing`, RETRO-B2): every route
+// declares `@Auth(...)` or `@Public()`, every permission a route names is
+// registered with a scope, no seeded grant crosses a scope, and `nod_` tokens are
+// refused outside `/api/nodes` while `pat_` tokens resolve everywhere.
+//
+// `user-owned-data` (`@marinoscar/platform-api/testing`, RETRO-B2): every foreign
+// key to `User` has a registry entry whose purge policy matches the relation's
+// `onDelete`, and only allowlisted files issue raw SQL.
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -18,18 +27,45 @@
 
 import { join } from 'node:path';
 
+import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
+
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/host/testing';
+import '@marinoscar/platform-api/identity/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
 
 import { AppModule } from '../src/app.module';
+// Fills the role, permission and ownership registries the suites read.
+import '../src/app-registrations/permission-manifest';
+import '../src/app-registrations/ownership-manifest';
+import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 
 runPlatformConformance({
   sourceRoots: [join(__dirname, '..', 'src')],
   suites: {
+    // Identity (RETRO-B2, #611). The walk reads Nest metadata from AppModule; the
+    // registries are the ones `permission-manifest.ts` filled.
+    identity: {
+      rootModule: AppModule,
+      permissions: permissionRegistry.list(),
+      roles: roleRegistry.list(),
+      grants: permissionRegistry
+        .list()
+        .flatMap((permission) => permission.defaultGrants.map((role) => ({ role, permission: permission.id }))),
+      minRoutes: 100,
+    },
+
+    // Every foreign key to User is classified; raw SQL only where listed.
+    userOwnedData: {
+      schemaPath: join(__dirname, '..', 'prisma', 'schema'),
+      policies: userOwnedModelRegistry.list(),
+      rawSqlAllowlist: RAW_SQL_ALLOWLIST,
+      registerIn: 'apps/api/src/app-registrations/user-owned-models.ts',
+    },
+
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no
     // global throttler. If one is ever added, list it here with a reason.

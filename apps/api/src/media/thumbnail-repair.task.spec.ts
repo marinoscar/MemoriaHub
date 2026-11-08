@@ -9,7 +9,7 @@
  * are fully mocked.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { ThumbnailRepairTask } from './thumbnail-repair.task';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -60,7 +60,7 @@ describe('ThumbnailRepairTask', () => {
     delete process.env['THUMBNAIL_REPAIR_ENABLED'];
 
     mockEnrichmentJobService = {
-      enqueue: jest.fn().mockResolvedValue({ id: 'job-new', status: JobStatus.pending }),
+      enqueue: jest.fn().mockResolvedValue({ id: 'job-new', status: MhLegacyJobStatus.pending }),
     };
 
     mockPrisma = createMockPrismaService();
@@ -130,7 +130,7 @@ describe('ThumbnailRepairTask', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             type: 'thumbnail_repair',
-            status: { in: expect.arrayContaining([JobStatus.pending, JobStatus.running]) },
+            status: { in: expect.arrayContaining([MhLegacyJobStatus.pending, MhLegacyJobStatus.running]) },
           }),
         }),
       );

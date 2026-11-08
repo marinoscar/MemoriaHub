@@ -37,7 +37,7 @@
 // =============================================================================
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_GENERATION_JOB_TYPE } from '../memories-generation.task';
@@ -128,7 +128,7 @@ export class MemoryBackfillService {
       where: {
         type: MEMORY_GENERATION_JOB_TYPE,
         circleId: { in: circleIds },
-        status: { in: [JobStatus.pending, JobStatus.running] },
+        status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
       },
       select: { circleId: true },
     });

@@ -5,7 +5,7 @@ const BID = '11111111-1111-4111-8111-111111111111';
 
 function prisma(status: string | null) {
   return {
-    notificationBroadcast: {
+    mhLegacyNotificationBroadcast: {
       findUnique: jest.fn().mockResolvedValue(status ? { id: BID, status } : null),
     },
   } as never;

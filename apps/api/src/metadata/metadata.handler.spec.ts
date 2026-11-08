@@ -9,7 +9,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MetadataExtractionHandler } from './metadata.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { MetadataExtractionService } from './metadata.service';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,7 +21,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'metadata_extraction',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.rerun,
     priority: 0,
     providerKey: null,
