@@ -1081,6 +1081,8 @@ Content-hash dedup is `(circle_id, content_hash)` (was `(owner_id, content_hash)
 
 ### 7.3 RBAC Model (Two-Layer Authorization)
 
+> **Roles and permissions after RETRO-B2 (issue #611).** The identity slice owns the tables and the guards. `admin` is a system role; `org_admin`, `contributor` and `viewer` are org roles on the default-organization membership. The permission strings are unchanged. System-scope (admin only): `users:*`, `allowlist:*`, `rbac:manage`, `system_settings:*`, `jobs:*`, `ai_settings:*`, `face_settings:*`, `geo_settings:*`, `email_settings:*`, `storage_settings:*`, `push:*`, `broadcasts:*`, `db_backup:*`, `media:{read,write,delete}_any`, `storage:delete_any`, `circles:manage_any`, `shares:manage_any`. Org-scope: `user_settings:*`, `storage:{read,write}`, `media:{read,write,delete}`, `circles:{read,write}`, `search:use`, `shares:manage`, granted to `org_admin`, `contributor` and `viewer` exactly as the old matrix gave them to admin, contributor and viewer (`contributor` additionally holds `storage:write` and `shares:manage`; `viewer` has no `storage:write` or `shares:manage`). New platform capabilities (`organizations:*`, `org_members:*`, `org_invites:*`, `org_settings:*`) are held by administrators and hidden in single-organization mode. The source of truth is `apps/api/src/app-registrations/` (declarations) and `apps/api/prisma/catalog/permissions.json` (rendered); `apps/api/test/rbac/permission-matrix.spec.ts` pins the result against the pre-adoption matrix.
+
 The system uses two independent authorization layers that work together.
 
 **Layer 1: Global system RBAC** (unchanged from the foundation)

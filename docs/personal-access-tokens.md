@@ -1,5 +1,7 @@
 # Personal Access Tokens
 
+> **Implementation (RETRO-B2, issue #611).** Personal access tokens are the identity slice's (`PatModule`, `GET|POST /api/pat`, `DELETE /api/pat/:id`); the app's `pat` module is gone. Tokens, hashes and expiries are unchanged rows of `personal_access_tokens` (platform migrations `0001`/`0002`, plus the nullable `org_id` of `0023`): every existing CLI token and Android pairing keeps working. A PAT is bound to the default organization and resolves with that membership's permissions, which equal the permissions its owner had before (`apps/api/scripts/verify-identity-transform.mjs`). The web page is the packaged `PersonalAccessTokens` (`@marinoscar/platform-web/identity/ui`) in the account settings. `pat_` tokens are accepted on every authenticated route; `nod_` worker credentials only under `/api/nodes/*` (checked by the `identity` conformance suite). Media Sync routes that must be called with a device's own PAT read the credential with the identity slice's `@AuthCredential()` (`{ kind: 'jwt' | 'pat' | 'node' }`).
+
 This guide covers Personal Access Tokens (PATs) in the Enterprise Application Foundation.
 
 ## Table of Contents

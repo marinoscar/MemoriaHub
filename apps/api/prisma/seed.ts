@@ -1,201 +1,44 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { seedPlatform, type PlatformSeedInput, type SeedNamedEntry } from '@marinoscar/platform-db/seed';
 
-const adapter = new PrismaPg(process.env.DATABASE_URL as string);
+// =============================================================================
+// Seed (RETRO-B2, issue #611)
+// =============================================================================
+//
+// The roles, permissions and their default grants are no longer written here.
+// Each is declared once (`src/app-registrations/`, the identity and settings
+// slices of @marinoscar/platform-api), registered, and rendered into the
+// committed catalog `prisma/catalog/permissions.json`
+// (`npm run catalog:permissions --workspace=api`); `seedPlatform` of
+// `@marinoscar/platform-db/seed` writes it. UPSERTS ONLY: it never deletes a
+// grant and never overwrites an administrator's edit, so this script runs on
+// every install AND every update (`infra/deploy/update.sh`), which is how a new
+// permission reaches an existing database now that the boot-time RBAC reconcile
+// is gone.
+//
+// This file stays standalone: it runs under `ts-node --transpile-only` in an
+// image that carries `prisma/` but not `src/`. Import nothing from `src/`.
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error(
+    'DATABASE_URL is not set. Run this script via `npm run prisma:seed` ' +
+      '(or export DATABASE_URL) so Prisma can connect to the database.',
+  );
+}
+
+const adapter = new PrismaPg(databaseUrl);
 const prisma = new PrismaClient({ adapter });
 
-// =============================================================================
-// Seed Data Definitions
-// =============================================================================
-
-const ROLES = [
-  {
-    name: 'admin',
-    description: 'Full system access - manage users, roles, and all settings',
-  },
-  {
-    name: 'contributor',
-    description: 'Standard user - can manage own settings and future features',
-  },
-  {
-    name: 'viewer',
-    description: 'Read-only access - can view content and manage own settings',
-  },
-] as const;
-
-const PERMISSIONS = [
-  // System settings
-  { name: 'system_settings:read', description: 'Read system settings' },
-  { name: 'system_settings:write', description: 'Modify system settings' },
-
-  // User settings
-  { name: 'user_settings:read', description: 'Read own user settings' },
-  { name: 'user_settings:write', description: 'Modify own user settings' },
-
-  // Users management
-  { name: 'users:read', description: 'View user list and details' },
-  { name: 'users:write', description: 'Modify user accounts' },
-
-  // RBAC management
-  { name: 'rbac:manage', description: 'Manage roles and permissions' },
-
-  // Allowlist management
-  { name: 'allowlist:read', description: 'View allowlisted emails' },
-  { name: 'allowlist:write', description: 'Manage allowlisted emails' },
-
-  // Storage management
-  { name: 'storage:read', description: 'Read object metadata, get download URLs' },
-  { name: 'storage:write', description: 'Upload, update metadata' },
-  { name: 'storage:delete_any', description: 'Admin: delete any object' },
-
-  // Media management
-  { name: 'media:read', description: 'Read own media items' },
-  { name: 'media:write', description: 'Create and update own media items' },
-  { name: 'media:delete', description: 'Soft-delete own media items' },
-  { name: 'media:read_any', description: 'Admin: read any user media items' },
-  { name: 'media:write_any', description: 'Admin: update any user media items' },
-  { name: 'media:delete_any', description: 'Admin: delete any user media items' },
-
-  // Circles (per-circle role still gates which circle; these grant API access)
-  { name: 'circles:read', description: 'Read circles and memberships' },
-  { name: 'circles:write', description: 'Create and manage own circles' },
-  { name: 'circles:manage_any', description: 'Admin: manage any circle' },
-
-
-  // AI Settings
-  { name: 'ai_settings:read', description: 'Read AI provider settings and status' },
-  { name: 'ai_settings:write', description: 'Configure AI provider credentials and settings' },
-
-  // Face Recognition Settings (Admin only)
-  { name: 'face_settings:read', description: 'Read face recognition provider settings and status' },
-  { name: 'face_settings:write', description: 'Configure face recognition provider credentials and settings' },
-
-  // Storage Provider Settings (Admin only)
-  { name: 'storage_settings:read', description: 'View storage provider configuration and test connectivity' },
-  { name: 'storage_settings:write', description: 'Configure storage provider credentials, set active provider, run migrations' },
-
-  // Search feature usage
-  { name: 'search:use', description: 'Use the AI-powered search feature' },
-
-  // Job queue dashboard (Admin only)
-  { name: 'jobs:read', description: 'Admin: read enrichment job queue stats and list' },
-  { name: 'jobs:write', description: 'Admin: retry, reset, or delete enrichment jobs' },
-
-  // Geo Provider Settings (Admin only)
-  { name: 'geo_settings:read', description: 'Read geo provider settings and status' },
-  { name: 'geo_settings:write', description: 'Configure geo provider credentials and active reverse-geocoding provider' },
-
-  // Sharing (Admin + Contributor; manage_any = Admin only)
-  { name: 'shares:manage', description: 'Create, list, update, and revoke own shares' },
-  { name: 'shares:manage_any', description: 'Admin: manage any user\'s shares' },
-
-  // Email Provider Settings (Admin only)
-  { name: 'email_settings:read', description: 'View email provider configuration and test connectivity' },
-  { name: 'email_settings:write', description: 'Configure email provider credentials, set active provider, and send test emails' },
-
-  // Web Push (VAPID) configuration (Admin only, epic #481)
-  { name: 'push:read', description: 'Admin: view Web Push (VAPID) configuration' },
-  { name: 'push:write', description: 'Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys' },
-
-  // Admin notification broadcasts (Admin only, epic #481, issue #488)
-  { name: 'broadcasts:read', description: 'Admin: view notification broadcasts and audience size' },
-  { name: 'broadcasts:write', description: 'Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts' },
-
-  // PostgreSQL Database Backup & Restore (Admin only, epic #339)
-  { name: 'db_backup:read', description: 'Admin: read database backup run history and status' },
-  { name: 'db_backup:write', description: 'Admin: configure and trigger database backups' },
-  { name: 'db_backup:restore', description: 'Admin: restore the database from a backup' },
-] as const;
-
-// Role to permissions mapping
-const ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: [
-    'system_settings:read',
-    'system_settings:write',
-    'user_settings:read',
-    'user_settings:write',
-    'users:read',
-    'users:write',
-    'rbac:manage',
-    'allowlist:read',
-    'allowlist:write',
-    'storage:read',
-    'storage:write',
-    'storage:delete_any',
-    'media:read',
-    'media:write',
-    'media:delete',
-    'media:read_any',
-    'media:write_any',
-    'media:delete_any',
-    // Circles: full access including super-admin operations
-    'circles:read',
-    'circles:write',
-    'circles:manage_any',
-    // AI: admin-only credential management
-    'ai_settings:read',
-    'ai_settings:write',
-    // Face Recognition: admin-only credential management
-    'face_settings:read',
-    'face_settings:write',
-    // Storage Provider Settings: admin-only configuration
-    'storage_settings:read',
-    'storage_settings:write',
-    // Search: all authenticated users
-    'search:use',
-    // Job queue dashboard: admin-only
-    'jobs:read',
-    'jobs:write',
-    // Geo Provider Settings: admin-only
-    'geo_settings:read',
-    'geo_settings:write',
-    // Sharing: admin can manage any share
-    'shares:manage',
-    'shares:manage_any',
-    // Email Provider Settings: admin-only
-    'email_settings:read',
-    'email_settings:write',
-    // Web Push (VAPID) configuration: admin-only
-    'push:read',
-    'push:write',
-    // Admin notification broadcasts: admin-only
-    'broadcasts:read',
-    'broadcasts:write',
-    // PostgreSQL Database Backup & Restore: admin-only
-    'db_backup:read',
-    'db_backup:write',
-    'db_backup:restore',
-  ],
-  contributor: [
-    'user_settings:read',
-    'user_settings:write',
-    'storage:read',
-    'storage:write',
-    'media:read',
-    'media:write',
-    'media:delete',
-    // Circles: any user can use circles; per-circle role gates which circle
-    'circles:read',
-    'circles:write',
-    // Search: contributors can use AI search
-    'search:use',
-    // Sharing: contributors can manage their own shares
-    'shares:manage',
-  ],
-  viewer: [
-    'user_settings:read',
-    'user_settings:write',
-    'storage:read',
-    'media:read',
-    'media:write',
-    'media:delete',
-    // Circles: any user can use circles; per-circle role gates which circle
-    'circles:read',
-    'circles:write',
-    // Search: viewers can use AI search
-    'search:use',
-  ],
-};
+interface PermissionCatalogFile {
+  roles: SeedNamedEntry[];
+  permissions: SeedNamedEntry[];
+  rolePermissions: Record<string, string[]>;
+}
 
 // Default system settings
 const DEFAULT_SYSTEM_SETTINGS = {
@@ -220,87 +63,20 @@ const DEFAULT_SYSTEM_SETTINGS = {
   },
 };
 
-// =============================================================================
-// Seed Functions
-// =============================================================================
 
-async function seedRoles() {
-  console.log('Seeding roles...');
-
-  for (const role of ROLES) {
-    await prisma.role.upsert({
-      where: { name: role.name },
-      update: { description: role.description },
-      create: role,
-    });
-  }
-
-  console.log(`✓ Seeded ${ROLES.length} roles`);
-}
-
-async function seedPermissions() {
-  console.log('Seeding permissions...');
-
-  for (const permission of PERMISSIONS) {
-    await prisma.permission.upsert({
-      where: { name: permission.name },
-      update: { description: permission.description },
-      create: permission,
-    });
-  }
-
-  console.log(`✓ Seeded ${PERMISSIONS.length} permissions`);
-}
-
-async function seedRolePermissions() {
-  console.log('Seeding role-permission mappings...');
-
-  let count = 0;
-
-  for (const [roleName, permissionNames] of Object.entries(ROLE_PERMISSIONS)) {
-    const role = await prisma.role.findUnique({ where: { name: roleName } });
-    if (!role) continue;
-
-    for (const permissionName of permissionNames) {
-      const permission = await prisma.permission.findUnique({
-        where: { name: permissionName },
-      });
-      if (!permission) continue;
-
-      await prisma.rolePermission.upsert({
-        where: {
-          roleId_permissionId: {
-            roleId: role.id,
-            permissionId: permission.id,
-          },
-        },
-        update: {},
-        create: {
-          roleId: role.id,
-          permissionId: permission.id,
-        },
-      });
-      count++;
-    }
-  }
-
-  console.log(`✓ Seeded ${count} role-permission mappings`);
-}
-
-async function seedSystemSettings() {
-  console.log('Seeding system settings...');
-
-  await prisma.systemSettings.upsert({
-    where: { key: 'global' },
-    update: {}, // Don't overwrite existing settings
-    create: {
-      key: 'global',
-      value: DEFAULT_SYSTEM_SETTINGS,
-      version: 1,
-    },
-  });
-
-  console.log('✓ Seeded default system settings');
+function seedInput(): PlatformSeedInput {
+  const catalog = JSON.parse(
+    readFileSync(join(__dirname, 'catalog', 'permissions.json'), 'utf8'),
+  ) as PermissionCatalogFile;
+  return {
+    roles: catalog.roles,
+    permissions: catalog.permissions,
+    roleGrants: catalog.rolePermissions,
+    systemSettingsDefaults: DEFAULT_SYSTEM_SETTINGS,
+    // The initial administrator is allowlisted so the first sign-in is admitted;
+    // INITIAL_ADMIN_EMAIL also bypasses the allowlist at sign-in.
+    ...(process.env.INITIAL_ADMIN_EMAIL ? { initialAdminEmail: process.env.INITIAL_ADMIN_EMAIL } : {}),
+  };
 }
 
 // Starter vocabulary for AI auto-tagging (global, no circleId)
@@ -352,25 +128,6 @@ async function seedTagLabels() {
   console.log(`✓ Seeded ${TAG_LABELS.length} tag labels`);
 }
 
-async function seedInitialAdminAllowlist() {
-  console.log('Seeding initial admin allowlist...');
-
-  const initialAdminEmail = process.env.INITIAL_ADMIN_EMAIL;
-  if (initialAdminEmail) {
-    await prisma.allowedEmail.upsert({
-      where: { email: initialAdminEmail.toLowerCase() },
-      update: {},
-      create: {
-        email: initialAdminEmail.toLowerCase(),
-        notes: 'Initial admin (auto-seeded)',
-      },
-    });
-    console.log(`✓ Added ${initialAdminEmail} to allowlist`);
-  } else {
-    console.log('⊘ INITIAL_ADMIN_EMAIL not set, skipping allowlist seed');
-  }
-}
-
 // =============================================================================
 // Main Seed Function
 // =============================================================================
@@ -378,11 +135,7 @@ async function seedInitialAdminAllowlist() {
 async function main() {
   console.log('Starting database seed...\n');
 
-  await seedRoles();
-  await seedPermissions();
-  await seedRolePermissions();
-  await seedSystemSettings();
-  await seedInitialAdminAllowlist();
+  await seedPlatform(prisma, seedInput(), { info: (msg: string) => console.log(msg) });
   await seedTagLabels();
 
   console.log('\n✓ Database seeding completed successfully');

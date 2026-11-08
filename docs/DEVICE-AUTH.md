@@ -1,5 +1,14 @@
 # Device Authorization Flow (RFC 8628)
 
+> **Implementation (RETRO-B2, issue #611).** The device flow is the identity slice's (`@marinoscar/platform-api/identity`, `IdentityModule.forRoot` in `apps/api/src/platform/identity/identity.config.ts`); the app's own `device-auth` module is gone. The wire contract this page describes is unchanged: `POST /api/auth/device/code` (answers 200), `POST /api/auth/device/token`, `GET /api/auth/device/activate`, `POST /api/auth/device/authorize`, `GET|DELETE /api/auth/device/sessions`. MemoriaHub's configuration:
+>
+> - `deviceFlow: { returnUriSchemes: ['memoriahub'] }`: `clientInfo.returnUri` accepts `memoriahub:` deep links and `https:` only (anything else is `400 INVALID_RETURN_URI`); the activation page (`ActivateDevicePage returnUriSchemes={['memoriahub']}`) redirects to it after approval. This needed platform `0.1.0-next.22` (EnterpriseAppBase#1081), so no local shim remains.
+> - `clientInfo.name` is accepted as the deprecated alias of `clientInfo.deviceName` (bounded to 100 characters; `userAgent` to 1024) and becomes the minted PAT's name.
+> - `clientInfo.tokenType: 'pat'` returns `credentialType: 'pat'` with `tokenId`, `tokenName` and `expiresAt`; the lifetime is `DEVICE_PAT_TTL_DAYS` (default 90), which `config/configuration.ts` maps onto the platform's `deviceAuth.patExpiryDays` (`DEVICE_PAT_EXPIRY_DAYS` wins when both are set).
+> - Error bodies of the token endpoint keep the RFC 8628 `error` / `error_description` fields.
+> - The cleanup of expired codes is the `auth.device-code.cleanup` queue job (an `enrichment_jobs` row enqueued by the slice's cron through `IdentityJobsAdapter`), not an inline `@Cron`.
+> - Proof: `apps/api/test/identity/device-flow.integration.spec.ts`.
+
 This guide covers the Device Authorization Flow implementation in the Enterprise Application Foundation.
 
 ## Table of Contents

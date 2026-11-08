@@ -60,7 +60,7 @@ model Circle {
   // supersedes the former LocationSuggestionRun-only relation, issue #190)
   reviewRuns              ReviewRun[]
   // Notification Center relations (epic #240, issue #244; schema-only)
-  notifications           Notification[]          @relation("CircleNotifications")
+  notifications           MhLegacyNotification[]          @relation("CircleNotifications")
   // Memories relations (epic #300, issue #301)
   memories                Memory[]
 

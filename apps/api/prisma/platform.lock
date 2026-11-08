@@ -79,18 +79,10 @@
     "20260815010000_add_admin_broadcast_notification_types",
     "20260816000000_add_android_app_and_media_sync",
     "20260816010000_add_android_release_storage_location",
-    "20260817000000_rename_legacy_platform_tables"
+    "20260817000000_rename_legacy_platform_tables",
+    "20261108030000_move_user_avatar_off_users"
   ],
   "deviations": [
-    {
-      "expectDiff": [
-        "ALTER TABLE \"users\" ADD COLUMN \"avatar_source\" \"UserAvatarSource\" NOT NULL DEFAULT 'oauth', ADD COLUMN \"avatar_storage_key\" TEXT, ADD COLUMN \"avatar_version\" TEXT, ADD COLUMN \"linked_person_id\" UUID;",
-        "CREATE INDEX \"users_linked_person_id_idx\" ON \"users\"(\"linked_person_id\" ASC);",
-        "ALTER TABLE \"users\" ADD CONSTRAINT \"users_linked_person_id_fkey\" FOREIGN KEY (\"linked_person_id\") REFERENCES \"people\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;"
-      ],
-      "id": "memoriahub:users-avatar",
-      "reason": "MemoriaHub-only columns users.avatar_source, avatar_storage_key, avatar_version, linked_person_id, their index and users_linked_person_id_fkey (migration 20260810010000_add_user_avatar_source_and_person_link). Temporary: RETRO-B2 moves them off users and removes this entry."
-    },
     {
       "expectDiff": [
         "CREATE TYPE \"MhLegacyDatabaseBackupStatus\" AS ENUM ('pending', 'running', 'completed', 'failed', 'stale');",

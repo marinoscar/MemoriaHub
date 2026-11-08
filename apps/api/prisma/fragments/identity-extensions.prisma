@@ -1,0 +1,53 @@
+// =============================================================================
+// Back-relations on the platform's `User` and `StorageObject` (RETRO-B2, #611)
+// =============================================================================
+//
+// Both models are `@extensible`: an app adds back-relations only. Fields whose
+// natural name the platform already uses on `User` (notifications, nodeCredentials,
+// workerNodes, pushSubscriptions, notificationDeliveries) carry the `mhLegacy`
+// prefix, like the models they point at (see the platform-*.legacy fragments).
+
+extend model User {
+  profile                        UserProfile?                    @relation("UserProfileOwner")
+  mediaItems                     MediaItem[]                     @relation("MediaAddedBy")
+  albums                         Album[]                         @relation("AlbumAddedBy")
+  tags                           Tag[]                           @relation("TagAddedBy")
+  ownedCircles                   Circle[]                        @relation("CircleOwner")
+  circleMemberships              CircleMember[]
+  circleInvitesAdded             CircleInvite[]                  @relation("CircleInviteAddedBy")
+  circleInvitesClaimed           CircleInvite[]                  @relation("CircleInviteClaimedBy")
+  aiCredentialsUpdated           AiProviderCredential[]          @relation("AiCredentialUpdater")
+  faceCredentialsUpdated         FaceProviderCredential[]        @relation("FaceCredentialUpdater")
+  storageCredentialsUpdated      StorageProviderCredential[]     @relation("StorageCredentialUpdater")
+  peopleAdded                    Person[]                        @relation("PersonAddedBy")
+  resolvedBursts                 BurstGroup[]                    @relation("BurstGroupResolvedBy")
+  resolvedDuplicates             DuplicateGroup[]                @relation("DuplicateGroupResolvedBy")
+  geoCredentialsUpdated          GeoProviderCredential[]         @relation("GeoCredentialUpdater")
+  mediaShares                    MediaShare[]                    @relation("MediaShareCreatedBy")
+  resolvedLocationSuggestions    LocationSuggestion[]            @relation("LocationSuggestionResolvedBy")
+  mhLegacyWorkerNodes            MhLegacyWorkerNode[]
+  mhLegacyNodeCredentials        MhLegacyNodeCredential[]        @relation("UserNodeCredentials")
+  mediaEnhancementsCreated       MediaEnhancement[]              @relation("MediaEnhancementCreatedBy")
+  mediaEnhancementBatchesCreated MediaEnhancementBatch[]         @relation("MediaEnhancementBatchCreatedBy")
+  workflowsCreated               Workflow[]                      @relation("WorkflowCreatedBy")
+  workflowRunsStarted            WorkflowRun[]                   @relation("WorkflowRunStartedBy")
+  workflowRunsApproved           WorkflowRun[]                   @relation("WorkflowRunApprovedBy")
+  trashEmptyRunsStarted          TrashEmptyRun[]                 @relation("TrashEmptyRunStartedBy")
+  reviewRunsStarted              ReviewRun[]                     @relation("ReviewRunStartedBy")
+  mhLegacyNotifications          MhLegacyNotification[]          @relation("UserNotifications")
+  mhLegacyPushSubscriptions      MhLegacyPushSubscription[]      @relation("UserPushSubscriptions")
+  mhLegacyNotificationDeliveries MhLegacyNotificationDelivery[]  @relation("UserNotificationDeliveries")
+  androidAppReleasesUploaded     MhLegacyAndroidAppRelease[]     @relation("AndroidAppReleaseUploader")
+  mediaSyncDevices               MediaSyncDevice[]
+  notificationBroadcastsCreated  MhLegacyNotificationBroadcast[] @relation("NotificationBroadcastCreatedBy")
+  notificationBroadcastsCanceled MhLegacyNotificationBroadcast[] @relation("NotificationBroadcastCanceledBy")
+  memoryUserStates               MemoryUserState[]
+  databaseBackupsCreated         MhLegacyDatabaseBackupRun[]     @relation("DatabaseBackupCreatedBy")
+  databaseBackupsRestored        MhLegacyDatabaseBackupRun[]     @relation("DatabaseBackupRestoredBy")
+  locationGroups                 LocationGroup[]
+}
+
+extend model StorageObject {
+  mediaItem      MediaItem?
+  migrationItems StorageMigrationItem[]
+}
