@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import {
   JobHandlerRegistry,
   type Job,
@@ -16,6 +16,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { WorkflowRunNotificationService } from '../../notification-producers/workflow-run-notification.service';
+import { MemoriaHubWebhooks } from '../../platform/webhooks/memoriahub-webhooks.service';
 import { WorkflowRunService } from './workflow-run.service';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 import {
@@ -73,6 +74,8 @@ export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
     private readonly compiler: WorkflowConditionCompiler,
     private readonly runService: WorkflowRunService,
     private readonly runNotifications: WorkflowRunNotificationService,
+    // Webhooks (RETRO-H4, #603). Optional so unit tests that build the handler by hand need no stub.
+    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
   ) {}
 
   onModuleInit(): void {
@@ -247,6 +250,8 @@ export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
         // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome=completed})
         // Terminal (0 matches) — fire-and-forget notification (issue #247).
         this.runNotifications.notifyRunFinishedAsync(runId);
+        // Webhook `workflows.run.completed` (RETRO-H4): after the terminal write; never throws.
+        await this.webhookEvents?.workflowRunFinished(runId);
         return;
       }
 
@@ -268,6 +273,8 @@ export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
         matchedCount: accepted,
         truncated,
       });
+      // Webhook `workflows.run.awaiting_approval` (RETRO-H4): after the write; never throws.
+      await this.webhookEvents?.workflowRunAwaitingApproval(runId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Mark the run terminally failed only once the job has exhausted its normal
@@ -290,6 +297,8 @@ export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
         // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome=failed})
         // Terminal failure (retries exhausted) — notify (issue #247).
         this.runNotifications.notifyRunFinishedAsync(runId);
+        // Webhook `workflows.run.completed` (RETRO-H4): after the terminal write; never throws.
+        await this.webhookEvents?.workflowRunFinished(runId);
       }
       throw err;
     }

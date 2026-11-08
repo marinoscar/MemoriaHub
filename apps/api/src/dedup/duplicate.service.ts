@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import {
   CircleRole,
@@ -15,6 +16,7 @@ import {
   ReviewRunAction,
   ReviewRunSubject,
 } from '@prisma/client';
+import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -79,6 +81,8 @@ export class DuplicateService {
     // resolve/dismiss primitives, while these threshold endpoints start runs.
     @Inject(forwardRef(() => ReviewRunService))
     private readonly reviewRuns: ReviewRunService,
+    // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
+    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -554,6 +558,9 @@ export class DuplicateService {
         },
       }),
     ]);
+
+    // Webhook `media.item.trashed` (RETRO-H4) once the transaction committed; batched, never throws.
+    if (action === 'trash') this.webhookEvents?.mediaTrashed(group.circleId, removeIds);
 
     await this.createAuditEvent(userId, 'duplicate_group:resolved', group.id, {
       keepIds,

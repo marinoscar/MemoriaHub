@@ -75,6 +75,8 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/alerts': 'alerts:read',
   // RETRO-H1 (#591): platform user-data slice, factory reset controller (USER_DATA_PERMISSIONS).
   '/admin/settings/factory-reset': 'system:factory_reset',
+  // RETRO-H4 (#603): platform webhooks admin controller (SYSTEM_WEBHOOKS_PERMISSIONS).
+  '/admin/settings/webhooks': 'system_webhooks:read', // admin-webhooks.controller (GET admin/webhooks)
   // RETRO-H2 (#596): platform exports service (ORG_DATA_EXPORT_PERMISSION for `org-data`).
   '/admin/settings/data-export': 'org_members:read',
 };

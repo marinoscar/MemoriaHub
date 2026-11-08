@@ -59,12 +59,19 @@ describe('MemoriaHub notification registry', () => {
     expect(LEGACY_NOTIFICATION_TYPE_TO_EVENT_KEY.admin_broadcast_critical).toBe('admin.broadcast_critical');
   });
 
-  it('declares browser and push, default on, none mandatory, and a renderer for each', () => {
+  it('declares browser and push (plus webhook on the forwardable four), default on, none mandatory, and a renderer for each', () => {
+    // RETRO-H4 (#603): the manifest puts the `webhook` channel on the events a member may forward.
+    const forwardable = new Set<string>([
+      MEMORIAHUB_EVENT_KEYS.uploadCompleted,
+      MEMORIAHUB_EVENT_KEYS.memoriesReady,
+      MEMORIAHUB_EVENT_KEYS.workflowRunCompleted,
+      MEMORIAHUB_EVENT_KEYS.shareExpiring,
+    ]);
     for (const key of Object.values(MEMORIAHUB_EVENT_KEYS)) {
       const event = findEvent(key);
       expect(event?.defaultEnabled).toBe(true);
       expect(isMandatory(key)).toBe(false);
-      expect([...channelsFor(key)].sort()).toEqual(['browser', 'push']);
+      expect([...channelsFor(key)].sort()).toEqual(forwardable.has(key) ? ['browser', 'push', 'webhook'] : ['browser', 'push']);
       expect(eventBrowserTemplateRegistry.has(key)).toBe(true);
       expect(MEMORIAHUB_NOTIFICATION_FOLDS[key]).toBeDefined();
     }

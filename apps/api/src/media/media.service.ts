@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaEnhancementStatus, MediaTagSource } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
@@ -55,6 +56,7 @@ import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { UploadNotificationService } from '../notification-producers/upload-notification.service';
 import { MediaTouchService } from './media-touch.service';
+import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source';
 
 /**
@@ -104,6 +106,8 @@ export class MediaService {
     private readonly uploadNotificationService: UploadNotificationService,
     private readonly mediaTouch: MediaTouchService,
     private readonly locationGroupResolver: LocationGroupResolverService,
+    // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
+    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -322,6 +326,17 @@ export class MediaService {
     this.uploadNotificationService.recordUploadAsync({
       circleId: mediaItem.circleId,
       uploaderId: userId,
+    });
+
+    // Webhooks `media.item.created` and `media.upload.completed` (RETRO-H4, #603): the row is
+    // committed (the create above is its own statement), the call does no I/O and never throws,
+    // and the events go out in batches of up to 100 items (see MemoriaHubWebhooks).
+    this.webhookEvents?.mediaCreated({
+      id: mediaItem.id,
+      circleId: mediaItem.circleId,
+      type: mediaItem.type,
+      capturedAt: mediaItem.capturedAt,
+      addedById: mediaItem.addedById,
     });
 
     return { ...mediaItem, deduplicated: false as const, mediaItemId: mediaItem.id };
@@ -1001,6 +1016,8 @@ export class MediaService {
     });
 
     this.logger.log(`MediaItem soft-deleted: ${id} by user ${userId}`);
+    // Webhook `media.item.trashed` (RETRO-H4), after the write committed; batched, never throws.
+    this.webhookEvents?.mediaTrashed(item.circleId, [item.id]);
   }
 
   // ---------------------------------------------------------------------------
@@ -2131,6 +2148,13 @@ export class MediaService {
   ): Promise<{ deleted: number }> {
     await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
 
+    // The ids actually moved (already-trashed ones are not reported again), read before the write.
+    const trashable = this.webhookEvents
+      ? await this.prisma.mediaItem.findMany({
+          where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+          select: { id: true },
+        })
+      : [];
     const { count } = await this.prisma.mediaItem.updateMany({
       where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
       data: { deletedAt: new Date() },
@@ -2139,6 +2163,8 @@ export class MediaService {
     this.logger.log(
       `bulkDelete: soft-deleted ${count} items in circle ${dto.circleId} by user ${userId}`,
     );
+    // Webhook `media.item.trashed` (RETRO-H4), after the write committed; batched, never throws.
+    if (count > 0) this.webhookEvents?.mediaTrashed(dto.circleId, trashable.map((row) => row.id));
 
     return { deleted: count };
   }
@@ -2385,15 +2411,18 @@ export class MediaService {
       where: { id: { in: ids } },
       select: {
         id: true,
+        circleId: true,
         storageObjectId: true,
         storageObject: { select: { id: true, storageKey: true } },
       },
     });
 
     let purged = 0;
+    const deletedRows: { id: string; circleId: string }[] = [];
     for (const item of items) {
       try {
         await this.prisma.mediaItem.delete({ where: { id: item.id } });
+        deletedRows.push({ id: item.id, circleId: item.circleId });
 
         if (item.storageObject?.storageKey) {
           try {
@@ -2420,6 +2449,8 @@ export class MediaService {
       }
     }
 
+    // Webhook `media.item.deleted` (RETRO-H4) for the rows actually removed; batched, never throws.
+    if (deletedRows.length > 0) this.webhookEvents?.mediaDeleted(deletedRows);
     return purged;
   }
 
@@ -2452,6 +2483,7 @@ export class MediaService {
       where: { id: { in: ids } },
       select: {
         id: true,
+        circleId: true,
         storageObjectId: true,
         storageObject: {
           select: { id: true, storageKey: true, storageProvider: true, bucket: true },
@@ -2491,6 +2523,10 @@ export class MediaService {
     //    provider's native batched delete is used. Skip rows whose MediaItem
     //    delete failed (their StorageObject must survive — the FK still points at it).
     const failedSet = new Set(failedIds);
+    // Webhook `media.item.deleted` (RETRO-H4) for the rows actually removed (each delete above is its
+    // own committed statement); batched per circle, never throws.
+    const removed = items.filter((item) => !failedSet.has(item.id));
+    if (removed.length > 0) this.webhookEvents?.mediaDeleted(removed.map((item) => ({ id: item.id, circleId: item.circleId })));
     const groups = new Map<
       string,
       { provider: string; bucket: string | null; keys: string[] }

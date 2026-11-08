@@ -91,14 +91,16 @@ describe('adminSections', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
       // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry
-      // cards, RETRO-H5 (#609) the Alerts card, RETRO-H2 (#596) the organization data export card.
-      expect(operations.cards.slice(-7).map((card) => card.title)).toEqual([
+      // cards, RETRO-H5 (#609) the Alerts card, RETRO-H4 (#603) the Webhooks card, RETRO-H2 (#596)
+      // the organization data export card.
+      expect(operations.cards.slice(-8).map((card) => card.title)).toEqual([
         'Maintenance',
         'About',
         'Telemetry',
         'Telemetry Explorer',
         'Telemetry Dashboard',
         'Alerts',
+        'Webhooks',
         'Organization data export',
       ]);
       expect(broadcasts).toMatchObject({
@@ -126,6 +128,21 @@ describe('adminSections', () => {
         // The onboarding slice's adminPermission: the admin block and the metrics.
         permission: 'system_settings:read',
       });
+    });
+  });
+
+  describe('Webhooks card (RETRO-H4, #603)', () => {
+    it('appends the packaged system card to Operations (before the data export card), gated on system_webhooks:read', () => {
+      const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
+      // Followed only by the organization data export card (RETRO-H2, #596).
+      expect(operations.cards.at(-2)).toMatchObject({
+        path: '/admin/settings/webhooks',
+        permission: 'system_webhooks:read',
+      });
+      // The organization card (feature `orgs`) is not spread in single-organization mode.
+      expect(ADMIN_SECTIONS.flatMap((s) => s.cards).map((c) => c.path)).not.toContain(
+        '/admin/settings/organization-webhooks',
+      );
     });
   });
 
@@ -280,10 +297,10 @@ describe('adminSections', () => {
   });
 
   describe('organization data export card (RETRO-H2, #596)', () => {
-    it('is appended to Operations after Alerts, on org_members:read, with no feature gate', () => {
+    it('is appended last to Operations, after Webhooks, on org_members:read, with no feature gate', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const index = operations.cards.findIndex((card) => card.path === '/admin/settings/data-export');
-      expect(operations.cards[index - 1]?.path).toBe('/admin/settings/alerts');
+      expect(operations.cards[index - 1]?.path).toBe('/admin/settings/webhooks');
       const card = operations.cards[index]!;
       expect([card.permission, card.feature]).toEqual(['org_members:read', undefined]);
     });
@@ -299,9 +316,11 @@ describe('adminSections', () => {
   describe('alerts card (RETRO-H5, #609)', () => {
     it('appends the packaged card in Operations, on alerts:read, with no feature gate', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
-      // Appended after the telemetry cards; later slices (RETRO-H2) append after it.
+      // Appended after the telemetry cards; Webhooks (RETRO-H4) then the organization data
+      // export card (RETRO-H2) follow it.
       const index = operations.cards.findIndex((card) => card.path === '/admin/settings/alerts');
       expect(operations.cards[index - 1]?.path).toBe('/admin/settings/telemetry/dashboard');
+      expect(operations.cards[index + 1]?.path).toBe('/admin/settings/webhooks');
       const last = operations.cards[index];
       expect([last.title, last.path, last.permission, last.feature]).toEqual([
         'Alerts',
