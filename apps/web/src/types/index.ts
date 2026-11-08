@@ -51,14 +51,16 @@ export interface UserSettings {
   /**
    * @deprecated Superseded by `GET`/`PATCH /api/users/me/profile` and the
    * `/profile` page (issue #354). The API still returns this namespace, but
-   * `useProviderImage` and `customImageUrl` are inert: the avatar's source is
-   * first-class user state (`avatarSource`) now, not a settings blob. Nothing
-   * in the web app writes these keys — do not reintroduce a UI that does.
+   * The picture fields are inert: the avatar's source is first-class user state
+   * (`avatarSource`) now, not a settings blob. Nothing in the web app writes them
+   * — do not reintroduce a UI that does. Since RETRO-B3 the API returns the
+   * platform's profile shape (`imageSource`, `imageObjectId`); the pre-B3
+   * `useProviderImage` / `customImageUrl` pair is gone from responses.
    */
   profile: {
     displayName?: string;
-    useProviderImage: boolean;
-    customImageUrl?: string | null;
+    imageSource?: 'none' | 'provider' | 'upload';
+    imageObjectId?: string | null;
   };
   search?: {
     visibleFields: string[];
