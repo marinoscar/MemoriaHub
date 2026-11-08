@@ -68,7 +68,7 @@ const REASONS = {
   [AVATAR_ID]:
     'MemoriaHub-only columns users.avatar_source, avatar_storage_key, avatar_version, linked_person_id, their index and users_linked_person_id_fkey (migration 20260810010000_add_user_avatar_source_and_person_link). Temporary: RETRO-B2 moves them off users and removes this entry.',
   [LEGACY_ID]:
-    'MemoriaHub tables and enums that collide with platform migrations 0003-0040, renamed to mh_legacy_* / MhLegacy* by 20260817000000_rename_legacy_platform_tables. Removed piecewise by C2 (worker nodes), D3 (notifications), D4 (database backups), D5 (android releases) as each slice moves its data and drops its legacy table. RETRO-C1 (jobs) dropped mh_legacy_job_stats_rollup and renamed enrichment_jobs to enrichment_jobs_legacy (its follow-up migration drops it).',
+    'MemoriaHub tables and enums that collide with platform migrations 0003-0040, renamed to mh_legacy_* / MhLegacy* by 20260817000000_rename_legacy_platform_tables. Removed piecewise by C2 (worker nodes), D3 (notifications), D4 (database backups), D5 (android releases) as each slice moves its data and drops its legacy table. RETRO-C1 (jobs) dropped mh_legacy_job_stats_rollup and renamed enrichment_jobs to enrichment_jobs_legacy (its follow-up migration drops it). RETRO-A5b renamed storage_migration_runs / storage_migration_items and their enums (colliding with platform 0042) by 20261108160000_rename_legacy_storage_migration_tables; RETRO-D1 drops them.',
   [DOMAIN_ID]:
     'MemoriaHub domain tables and enums created by app-only migrations; not a change to a platform table. A permanent record of what the app owns.',
 };
