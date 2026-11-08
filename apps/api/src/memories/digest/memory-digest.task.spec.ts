@@ -24,7 +24,7 @@ import {
 } from './memory-digest.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EmailService } from '../../email/email.service';
+import { AppEmailSender, isEmailConfigured } from '../../platform/email/app-email.sender';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
@@ -97,8 +97,15 @@ describe('MemoryDigestTask', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EnrichmentJobService, useValue: enrichment },
         { provide: AppSystemSettingsService, useValue: settings },
-        // Never reached by these tests; present so the real service constructs.
-        { provide: EmailService, useValue: { sendEmail: jest.fn() } },
+        // `sendEmail` is never reached by these tests. Readiness is derived from the
+        // fixture's `email` key, which stands in for the platform `email` row (RETRO-D2).
+        {
+          provide: AppEmailSender,
+          useValue: {
+            sendEmail: jest.fn(),
+            isConfigured: jest.fn(async () => isEmailConfigured((await settings.getSettings()).email ?? {})),
+          },
+        },
         { provide: MediaThumbnailService, useValue: { extractThumbKey: jest.fn() } },
       ],
     }).compile();
