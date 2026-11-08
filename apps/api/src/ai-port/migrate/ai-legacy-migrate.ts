@@ -105,32 +105,32 @@ async function readAiNamespace(prisma: PrismaService): Promise<Record<string, un
 }
 
 /**
- * Mutates the stored `ai` namespace of the `global` row under a row lock. The
- * platform's `ai` read salvages every field it is not given, so writing one
- * slot or one policy field leaves the rest of the namespace (and MemoriaHub's
- * `features`) exactly as stored.
+ * Mutates the stored `ai` namespace of the `global` row with a compare-and-swap on `version` (the
+ * same optimistic check the settings slice uses), retried on a concurrent write. The platform's
+ * `ai` read salvages every field it is not given, so writing one slot or one policy field leaves the
+ * rest of the namespace (and MemoriaHub's `features`) exactly as stored.
  */
 async function updateAiNamespace(
   prisma: PrismaService,
   mutate: (ai: Record<string, unknown>) => void,
   actorUserId: string | null,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ value: unknown }>>`
-      SELECT value FROM system_settings WHERE key = ${SYSTEM_SETTINGS_ROW_KEY} FOR UPDATE`;
-    if (rows.length === 0) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = await prisma.systemSettings.findUnique({ where: { key: SYSTEM_SETTINGS_ROW_KEY } });
+    if (!row) {
       throw new Error('The system_settings "global" row does not exist yet; start the API once, then re-run.');
     }
-    const doc: Record<string, unknown> = isRecord(rows[0]!.value) ? structuredClone(rows[0]!.value) : {};
+    const doc: Record<string, unknown> = isRecord(row.value) ? structuredClone(row.value) : {};
     const ai: Record<string, unknown> = isRecord(doc['ai']) ? (doc['ai'] as Record<string, unknown>) : {};
     mutate(ai);
     doc['ai'] = ai;
-    await tx.$executeRaw`
-      UPDATE system_settings
-         SET value = ${JSON.stringify(doc)}::jsonb, version = version + 1, updated_at = now(),
-             updated_by_user_id = ${actorUserId}::uuid
-       WHERE key = ${SYSTEM_SETTINGS_ROW_KEY}`;
-  });
+    const { count } = await prisma.systemSettings.updateMany({
+      where: { key: SYSTEM_SETTINGS_ROW_KEY, version: row.version },
+      data: { value: doc as never, version: { increment: 1 }, updatedByUserId: actorUserId },
+    });
+    if (count === 1) return;
+  }
+  throw new Error('The system_settings "global" row kept changing during the import; re-run the command.');
 }
 
 /** Runs the import. `apply: false` writes nothing. Never returns or logs key material. */
