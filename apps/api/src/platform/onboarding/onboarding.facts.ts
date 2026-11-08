@@ -2,6 +2,7 @@ import type { OnboardingFactDef } from '@marinoscar/platform-api/onboarding';
 import { CircleRole, MediaSyncDeviceStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { AiDeploymentKeySource } from '../../ai-port/ai-deployment-key-source';
 import { AppSystemSettingsService } from '../settings/app-system-settings.service';
 import { isMemoriesEnabled } from '../../settings/feature-gates';
 import { resolveActiveStorageProvider } from '../../doctor/checks/storage/active-provider.doctor-check';
@@ -174,8 +175,8 @@ export const DEVICES_FACT: OnboardingFactDef<DevicesFact> = {
 
 /**
  * The deployment's readiness. The flags come from the CACHED settings document
- * (`AppSystemSettingsService.getSettings`, the same read every feature gate makes), and the two
- * credential reads are `findFirst` with a `select` of the id only: no key material is ever read.
+ * (`AppSystemSettingsService.getSettings`, the same read every feature gate makes), and the storage
+ * credential read is a `findFirst` with a `select` of the id only and the AI one a key status: no key material is ever read.
  */
 export const FEATURE_READINESS_FACT: OnboardingFactDef<FeatureReadinessFact> = {
   id: MEMORIAHUB_ONBOARDING_FACTS.FEATURE_READINESS,
@@ -196,11 +197,10 @@ export const FEATURE_READINESS_FACT: OnboardingFactDef<FeatureReadinessFact> = {
             where: { provider: storageProvider, enabled: true },
             select: { id: true },
           }),
+      // The platform deployment key first, then the legacy row (RETRO-E3, #605); a status read,
+      // never a decryption.
       tagging?.provider && tagging.model
-        ? prisma.aiProviderCredential.findFirst({
-            where: { provider: tagging.provider, enabled: true },
-            select: { id: true },
-          })
+        ? ctx.get(AiDeploymentKeySource).status(tagging.provider)
         : Promise.resolve(null),
     ]);
 
@@ -208,7 +208,7 @@ export const FEATURE_READINESS_FACT: OnboardingFactDef<FeatureReadinessFact> = {
       storageReady: storageProvider === 'local' || storageCredential !== null,
       faceRecognition: settings.features?.['faceRecognition'] === true,
       autoTagging: settings.features?.['autoTagging'] === true,
-      taggingProviderReady: taggingCredential !== null,
+      taggingProviderReady: taggingCredential !== null && taggingCredential.configured && taggingCredential.enabled,
       memories: isMemoriesEnabled(settings),
     };
   },

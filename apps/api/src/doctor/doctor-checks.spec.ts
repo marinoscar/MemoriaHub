@@ -289,7 +289,16 @@ describe('MemoriaHub Doctor checks', () => {
   beforeEach(() => {
     mockPrisma = createMockPrismaService();
     mockSystemSettings = { readKnownValue: jest.fn() };
-    mockAiSettings = { testProvider: jest.fn(), testEmbedding: jest.fn() };
+    // `credentialStatus` (RETRO-E3, #605) answers from the legacy row mock, i.e. a deployment that
+    // holds no platform key yet; `AiDeploymentKeySource`'s own spec covers the platform-first order.
+    mockAiSettings = {
+      testProvider: jest.fn(),
+      testEmbedding: jest.fn(),
+      credentialStatus: jest.fn(async (provider: string) => {
+        const row = await mockPrisma.aiProviderCredential.findUnique({ where: { provider } });
+        return { configured: !!row, enabled: !!row && row.enabled === true };
+      }),
+    } as any;
     mockFaceSettings = { testProvider: jest.fn() };
     mockGeoSettings = { testProvider: jest.fn() };
     // Read-only storage probe: `exists()` on a key that is never written.

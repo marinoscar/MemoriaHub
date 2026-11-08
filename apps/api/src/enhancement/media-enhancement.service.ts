@@ -36,6 +36,7 @@ import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 
 const SYSTEM_TAG = 'AI Enhanced';
 
@@ -78,6 +79,7 @@ export class MediaEnhancementService {
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly defaultOrgId: DefaultOrgId,
+    private readonly aiKeys: AiDeploymentKeySource,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -93,10 +95,9 @@ export class MediaEnhancementService {
 
     let credentialConfigured = false;
     if (provider) {
-      const cred = await this.prisma.aiProviderCredential.findUnique({
-        where: { provider },
-      });
-      credentialConfigured = !!cred && cred.enabled;
+      // Platform deployment key first, then the legacy row (RETRO-E3, #605); never decrypts.
+      const cred = await this.aiKeys.status(provider);
+      credentialConfigured = cred.configured && cred.enabled;
     }
 
     return {
