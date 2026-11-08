@@ -4,6 +4,8 @@ A **backup node** is a machine you own — a home server, a NAS, a spare laptop 
 
 This guide gets you from zero to a scheduled, self-healing backup in about ten minutes. For the architecture, data model, and API contract behind everything here, see the [Local Media Backup specification](specs/local-backup.md); for compute-node setup (a different feature that shares the same node registration), see [Worker Node Setup & Troubleshooting](worker-node-setup.md).
 
+> **Backup or export?** "Download your data" (`/settings/data-export`, see [Data export](specs/memoriahub-exports.md)) gives you a JSON, CSV or Excel list of your photos' details, albums, memories and people, but **never the original files**. To keep a copy of the originals themselves, use this guide.
+
 ---
 
 ## Table of Contents
