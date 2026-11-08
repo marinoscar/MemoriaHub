@@ -1243,8 +1243,8 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `DEVICE_PAT_TTL_DAYS` - Lifetime in days of a personal access token minted through the device flow (`clientInfo.tokenType: 'pat'`: the CLI's login and the Android app's pairing token); default 90
 
 **Observability:**
-- `OTEL_ENABLED` - Enable OpenTelemetry (default: true)
-- `OTEL_EXPORTER_OTLP_ENDPOINT` - OTEL Collector endpoint
+- `OTEL_ENABLED` - Export OpenTelemetry traces, metrics and logs (default: false); the SDK is the platform's `initializeOtel`, service name `memoriahub-api` (override with `OTEL_SERVICE_NAME`)
+- `OTEL_EXPORTER_OTLP_ENDPOINT` - OTEL Collector endpoint (the generated `otel-collector` from `telemetry.compose.yml`; host port 4328)
 
 **Android app (epic #498):** no environment variable is added. The pairing token lifetime is `DEVICE_PAT_TTL_DAYS` (above), the release download-link signing key is derived from `SECRETS_ENCRYPTION_KEY`, and the trusted-signer list is the `android_app` system-settings row edited at `/admin/settings/android`. Build inputs are `apps/android/identity.properties`, `apps/android/version.properties`, the Gradle properties `-Papp.serverUrl` / `-Papp.versionName` / `-Papp.versionCode`, and the four signing variables `ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` (CI also uses `ANDROID_KEYSTORE_BASE64`); the CLI reads `MEMORIAHUB_REPO_ROOT` (checkout) and `MEMORIAHUB_GRADLE_ARGS`. Never add an environment variable for storage, which stays runtime-configured. See [apps/android/README.md](apps/android/README.md).
 

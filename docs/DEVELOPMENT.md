@@ -710,6 +710,20 @@ Follow the same pattern as existing circle endpoints in `apps/api/src/circles/`:
 
 ---
 
+## Observability (telemetry)
+
+The API boots OpenTelemetry through the platform's `initializeOtel` (`apps/api/src/instrumentation.ts`, imported first by `main.ts`). The service name is `memoriahub-api` (`OTEL_SERVICE_NAME` overrides it; see `apps/api/src/common/otel/telemetry-identity.ts`). Nothing is exported unless `OTEL_ENABLED=true`. HTTP server spans carry `http.route` and `app.route.matched` (`registerRequestSpanAttributes`), `@Trace` comes from `@marinoscar/platform-api/otel-core`, and `OtelMetricsModule` hosts metrics.
+
+Telemetry is stored in GreptimeDB through the generated collector; the Uptrace/ClickHouse stack is retired and historical data was not migrated (operators who need it export it, then remove the old `uptrace-data`, `clickhouse-data` and `uptrace-pg-data` volumes by hand).
+
+```bash
+cd infra/compose
+docker compose -f base.compose.yml -f dev.compose.yml -f devdb.compose.yml -f telemetry.compose.yml up
+# GreptimeDB explorer: http://localhost:14000/dashboard
+```
+
+Set the `GREPTIME_*` writer and reader passwords in `.env` (never commit them). Details: the platform telemetry runbook and `docs/specs/telemetry.md` in EnterpriseAppBase.
+
 ## Resources
 
 - [NestJS Documentation](https://docs.nestjs.com/)
