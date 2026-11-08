@@ -1,271 +1,149 @@
 // =============================================================================
-// OpenAPI document construction (epic #414)
+// OpenAPI document (RETRO-B1, #597)
 // =============================================================================
 //
-// Everything that shapes `/api/openapi.json` lives here rather than in
-// `main.ts`, for one concrete reason: the spec is now asserted by tests and
-// dumped by a CI script, and neither of those can boot a listening server. A
-// pure `buildOpenApiConfig()` / `createOpenApiDocument(app)` pair can be called
-// from a test harness, from `scripts/dump-openapi.ts`, and from `main.ts`
-// alike, so the document CI lints is the document users get.
+// The document is built by the platform host slice (`createOpenApiDocument`:
+// DocumentBuilder, nestjs-zod cleanup, the RBAC "Requires" line, the `{ data }`
+// envelope, the default error response, the OpenAPI 3.1 nullable rewrite) and
+// served by `registerPlatformDocs`-style routes at `/api/docs` and
+// `/api/openapi.json` (`main.ts`). What stays here is what the platform has no
+// option for:
+//
+//   * the Node-credential security scheme (`nod_`, accepted only on
+//     `/api/nodes/*`) and its per-path alternative-auth entries;
+//   * the tag taxonomy and `x-tagGroups` sidebar (`./tags`). The platform tag
+//     registry rejects ':' in a tag name, and renaming the `Admin: X` tags would
+//     change every client generated from the document, so the taxonomy is applied
+//     as a pass over the finished document (PLATFORM-ADOPTION-SHIM(#597));
+//   * the per-circle role clause of the "Requires" line (`@Auth({ circleRole })`),
+//     which the platform's RBAC pass does not know about.
+//
+// `scripts/dump-openapi.ts` and `main.ts` both call `createAppOpenApiDocument`,
+// so the document CI lints is the one users get.
 // =============================================================================
 
 import type { INestApplication } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { OpenAPIObject } from '@nestjs/swagger';
-import { cleanupOpenApiDoc } from 'nestjs-zod';
-import { ErrorDto } from '../common/dto/error.dto';
+import {
+  REQUIREMENTS_MARKER,
+  SECURITY_SCHEMES as PLATFORM_SECURITY_SCHEMES,
+  createOpenApiDocument,
+  forEachOperation,
+} from '@marinoscar/platform-api/host';
+import type { MutableDocument, PlatformOpenApiOptions } from '@marinoscar/platform-api/host';
 import { RBAC_EXTENSION_KEY } from '../auth/decorators/auth.decorator';
-import { applyDataEnvelope } from './data-envelope';
+import type { RbacExtension } from '../auth/decorators/auth.decorator';
 import { buildApiDescription } from './description';
-import { applyNullableFor31 } from './nullable';
-import { applyRbacDocs } from './rbac-docs';
 import { OPENAPI_TAGS, OPENAPI_TAG_GROUPS } from './tags';
-import { DocOperation, MutableDocument, forEachOperation } from './types';
 import { resolveApiVersion } from './version';
 
-/** Security scheme names. `JWT_AUTH` is referenced by name from `@Auth()`. */
 export const SECURITY_SCHEMES = {
-  JWT_AUTH: 'JWT-auth',
-  PAT_AUTH: 'PAT-auth',
+  ...PLATFORM_SECURITY_SCHEMES,
   NODE_CREDENTIAL: 'Node-credential',
 } as const;
 
-/**
- * Routes a `nod_` credential is accepted on.
- *
- * Deliberately narrow, and it must stay in step with the credential guard: a
- * node credential is rejected everywhere else, so advertising it on another
- * path would document an authentication that cannot work.
- */
+export const APP_NAME = 'MemoriaHub';
+export const REPO_URL = 'https://github.com/marinoscar/MemoriaHub';
+
+/** What the platform needs to build the document: identity and version. */
+export const APP_OPENAPI: PlatformOpenApiOptions = {
+  appName: APP_NAME,
+  repoUrl: REPO_URL,
+  version: resolveApiVersion,
+  description: (version: string) => buildApiDescription(version),
+};
+
 const NODE_CREDENTIAL_PATH = /^(?:\/api)?\/nodes(?:\/|$)/;
 
 /**
- * The `DocumentBuilder` configuration.
- *
- * @param version resolved application version; injectable so a test can assert
- *   the shape without depending on what the build happens to be stamped with.
+ * The finished OpenAPI document: the platform's, plus the app passes above.
  */
-export function buildOpenApiConfig(version: string = resolveApiVersion()) {
-  const builder = new DocumentBuilder()
-    .setTitle('MemoriaHub API')
-    .setDescription(buildApiDescription(version))
-    .setVersion(version)
-    // OpenAPI 3.1, not the 3.0 default. zod v4 emits JSON Schema 2020-12, which
-    // 3.1 adopts wholesale and 3.0 rejects — under 3.0 the zod-derived DTOs
-    // published numeric `exclusiveMinimum` and `propertyNames` keywords that are
-    // invalid there, so a schema-validating consumer (or Spectral) rightly
-    // failed on them. Scalar renders 3.1 natively.
-    .setOpenAPIVersion('3.1.0')
-    .setContact('MemoriaHub', 'https://github.com/marinoscar/MemoriaHub', '')
-    .setExternalDoc(
-      'Architecture and feature specifications',
-      'https://github.com/marinoscar/MemoriaHub/tree/main/docs',
-    )
-    // Same-origin: the UI is served at `/`, this API under `/api`, so a
-    // relative server URL is correct for every deployment without templating.
-    .addServer('/', 'This deployment (same-origin)')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description:
-          'Short-lived session access token from `POST /api/auth/refresh` or the OAuth callback. ' +
-          'On this page, use "Authorize with my session" to load one automatically.',
-      },
-      SECURITY_SCHEMES.JWT_AUTH,
-    )
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        description:
-          'Personal access token (`pat_…`) from `POST /api/pat`. Long-lived, carries the full ' +
-          'permission set of the user that minted it, and is accepted on every authenticated route.',
-      },
-      SECURITY_SCHEMES.PAT_AUTH,
-    )
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        description:
-          'Worker-node credential (`nod_…`) from `POST /api/node-credentials`. Accepted **only** on ' +
-          '`/api/nodes/*` — it cannot reach media, settings, or admin routes even when its owner is ' +
-          'an Admin.',
-      },
-      SECURITY_SCHEMES.NODE_CREDENTIAL,
-    );
-
-  for (const tag of OPENAPI_TAGS) {
-    builder.addTag(tag.name, tag.description);
-  }
-
-  const config = builder.build();
-
-  // `setContact` takes all three fields positionally, so an omitted email is an
-  // empty string — which is not a valid `email`, and a schema-validating
-  // consumer rejects the whole document over it. A contact with a name and a URL
-  // is perfectly valid; fabricating an address to satisfy the field would be
-  // worse than not having one.
-  if (config.info.contact && !config.info.contact.email) {
-    delete (config.info.contact as { email?: string }).email;
-  }
-
-  return config;
+export function createAppOpenApiDocument(app: INestApplication): OpenAPIObject {
+  const document = createOpenApiDocument(app, APP_OPENAPI);
+  return enrichAppDocument(document);
 }
 
-/**
- * Builds the finished document: Nest's introspection, then the five passes that
- * turn it into something worth reading.
- */
-export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
-  const document = SwaggerModule.createDocument(app, buildOpenApiConfig(), {
-    // Namespaced but readable: `media_listMedia`, not `MediaController_listMedia`.
-    // Stable across refactors that do not rename the controller or handler, which
-    // is what makes generated SDK method names survive a release.
-    operationIdFactory: buildOperationId,
-    // ErrorDto is only ever referenced from a `$ref` this file writes, so it
-    // would otherwise never be emitted into `components.schemas`.
-    extraModels: [ErrorDto],
-  });
-
-  // nestjs-zod's recommended post-processing for zod-derived DTOs: resolves the
-  // placeholder schemas `createZodDto` leaves behind into real JSON Schema.
-  const cleaned = cleanupOpenApiDoc(document);
-
-  // `OpenAPIObject` has no index signature, so it is not structurally a
-  // `MutableDocument` even though every field the passes touch is present.
-  // Widening here is the one place that conversion happens.
-  enrichOpenApiDocument(cleaned as unknown as MutableDocument);
-
-  return cleaned;
-}
-
-/**
- * The post-processing passes, split out from `createOpenApiDocument` so they can
- * be exercised against a hand-built document without booting an application.
- */
-export function enrichOpenApiDocument<T extends MutableDocument>(document: T): T {
-  applyRbacDocs(document);
-  applyAlternativeAuthSchemes(document);
-  // Order matters: the envelope pass targets 2xx JSON responses only, and the
-  // error pass writes a `default` response — running the envelope first keeps
-  // the two from ever meeting, but relying on that would be fragile, so the
-  // envelope pass filters on the status code explicitly as well.
-  applyDataEnvelope(document);
-  applyDefaultErrorResponse(document);
-  applyTagGroups(document);
-  // Last: every earlier pass may introduce schemas of its own, and this one has
-  // to see all of them.
-  applyNullableFor31(document);
+/** Applies the app passes in place (exported for tests). */
+export function enrichAppDocument(document: OpenAPIObject): OpenAPIObject {
+  const mutable = document as unknown as MutableDocument;
+  applyNodeCredentialScheme(document, mutable);
+  applyCircleRoleRequirements(mutable);
+  applyAppTags(mutable);
   return document;
 }
 
-/**
- * `AdminMemoriesController.backfill` → `adminMemories_backfill`.
- *
- * Keeps the controller as a namespace (so two `list` handlers cannot collide)
- * while dropping the noise a generator would otherwise bake into every method
- * name. Uniqueness is asserted in `openapi.spec.ts`.
- */
-export function buildOperationId(controllerKey: string, methodKey: string): string {
-  const namespace = controllerKey.replace(/Controller$/, '');
-  const lowerFirst = namespace.charAt(0).toLowerCase() + namespace.slice(1);
-  return `${lowerFirst}_${methodKey}`;
-}
+function applyNodeCredentialScheme(document: OpenAPIObject, mutable: MutableDocument): void {
+  document.components ??= {};
+  document.components.securitySchemes ??= {};
+  document.components.securitySchemes[SECURITY_SCHEMES.NODE_CREDENTIAL] = {
+    type: 'http',
+    scheme: 'bearer',
+    description:
+      'Worker-node credential (`nod_…`) from `POST /api/node-credentials`. Accepted **only** on ' +
+      '`/api/nodes/*` — it cannot reach media, settings, or admin routes even when its owner is ' +
+      'an Admin.',
+  };
 
-/**
- * Whether an operation requires a bearer token.
- *
- * Two signals, because two things put one there. `@Auth()` stamps `x-rbac`,
- * which is the richer marker. A handful of routes instead compose
- * `@UseGuards(JwtAuthGuard)` with a bare `@ApiBearerAuth('JWT-auth')` — mostly
- * on the auth controller itself, where the RBAC guards would have nothing to
- * check — and those are just as authenticated.
- */
-export function isAuthenticatedOperation(operation: DocOperation): boolean {
-  if (operation[RBAC_EXTENSION_KEY] !== undefined) return true;
-  return (operation.security ?? []).some(
-    (entry) => SECURITY_SCHEMES.JWT_AUTH in entry,
-  );
-}
-
-/**
- * Adds the PAT and node-credential schemes to operations they actually work on.
- *
- * `@Auth()` can only declare the session scheme, because that is the one it
- * names. But a PAT authenticates every authenticated route, and a `nod_`
- * credential authenticates `/api/nodes/*` — both facts the docs should state.
- * Deriving them here from the path and the `x-rbac` marker keeps the claim
- * accurate as routes are added, where a hand-applied `@ApiSecurity()` would
- * quietly go stale.
- *
- * Multiple entries in an operation's `security` array are alternatives (OR), so
- * appending never tightens a requirement.
- */
-function applyAlternativeAuthSchemes(document: MutableDocument): void {
-  forEachOperation(document, (operation, path) => {
-    if (!isAuthenticatedOperation(operation)) return;
-
+  forEachOperation(mutable, (operation, path) => {
+    const authenticated =
+      operation[RBAC_EXTENSION_KEY] !== undefined ||
+      (operation.security ?? []).some((entry) => SECURITY_SCHEMES.JWT_AUTH in entry);
+    if (!authenticated || !NODE_CREDENTIAL_PATH.test(path)) return;
     const security = (operation.security ??= []);
-    const has = (name: string) => security.some((entry) => name in entry);
-
-    if (!has(SECURITY_SCHEMES.PAT_AUTH)) {
-      security.push({ [SECURITY_SCHEMES.PAT_AUTH]: [] });
-    }
-    if (NODE_CREDENTIAL_PATH.test(path) && !has(SECURITY_SCHEMES.NODE_CREDENTIAL)) {
+    if (!security.some((entry) => SECURITY_SCHEMES.NODE_CREDENTIAL in entry)) {
       security.push({ [SECURITY_SCHEMES.NODE_CREDENTIAL]: [] });
     }
   });
 }
 
 /**
- * Attaches the shared error envelope as each operation's `default` response.
- *
- * A `default` rather than an enumerated 400/404/409 list per operation: every
- * error from every route passes through one `HttpExceptionFilter` and comes
- * back in one shape, so `default` states exactly that — without asserting on
- * each route's behalf which statuses it can produce, which nobody could keep
- * true across 70 controllers.
- *
- * Operations that document a specific status keep it; this only fills the gap.
+ * The platform's "Requires" sentence names roles and permissions; an operation
+ * that also declares a per-circle role gets the app's fuller sentence instead
+ * (`..., plus permission \`x\` and per-circle role \`y\` or higher.`), exactly
+ * as the document read before the platform took the RBAC pass over.
  */
-function applyDefaultErrorResponse(document: MutableDocument): void {
+function applyCircleRoleRequirements(document: MutableDocument): void {
   forEachOperation(document, (operation) => {
-    const responses = (operation.responses ??= {});
-    if (responses.default) return;
-
-    responses.default = {
-      description:
-        'Error. Every failure is rendered by the shared exception filter into this envelope; ' +
-        'endpoint-specific data appears under `details`.',
-      content: {
-        'application/json': { schema: { $ref: '#/components/schemas/ErrorDto' } },
-      },
-    };
+    const rbac = operation[RBAC_EXTENSION_KEY] as RbacExtension | undefined;
+    if (!rbac?.circleRole || typeof operation.description !== 'string') return;
+    const at = operation.description.indexOf(REQUIREMENTS_MARKER);
+    if (at < 0) return;
+    operation.description = `${operation.description.slice(0, at)}${describeRequirements(rbac)}`;
   });
 }
 
-/**
- * Emits `x-tagGroups`, the vendor extension Scalar and Redoc read to render a
- * sectioned sidebar. Renderers without support fall back to the flat `tags`
- * array, which `buildOpenApiConfig` emits in the same order.
- *
- * Tags no operation uses are pruned from both. The taxonomy is declared for the
- * whole application, but not every module is registered in every environment —
- * `Test Authentication` exists only outside production — and a declared-but-
- * unused tag renders as an empty sidebar section. Pruning is what makes one
- * static taxonomy correct in both environments.
- */
-function applyTagGroups(document: MutableDocument): void {
+function describeRequirements(rbac: RbacExtension): string {
+  const code = (value: string) => `\`${value}\``;
+  const clauses: string[] = [];
+  const roles = rbac.roles ?? [];
+  const permissions = rbac.permissions ?? [];
+
+  if (roles.length === 1) clauses.push(`system role ${code(roles[0])}`);
+  else if (roles.length > 1) clauses.push(`any of the system roles ${roles.map(code).join(', ')}`);
+
+  if (permissions.length === 1) clauses.push(`permission ${code(permissions[0])}`);
+  else if (permissions.length > 1) {
+    clauses.push(`permissions ${permissions.map(code).join(' and ')}`);
+  }
+
+  if (rbac.circleRole) clauses.push(`per-circle role ${code(rbac.circleRole)} or higher`);
+
+  const joined =
+    clauses.length === 1
+      ? clauses[0]
+      : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
+  return `${REQUIREMENTS_MARKER} authentication, plus ${joined}.`;
+}
+
+function applyAppTags(document: MutableDocument): void {
   const used = new Set<string>();
   forEachOperation(document, (operation) => {
     for (const tag of operation.tags ?? []) used.add(tag);
   });
 
-  document.tags = OPENAPI_TAGS.filter((tag) => used.has(tag.name));
+  document.tags = OPENAPI_TAGS.filter((tag) => used.has(tag.name)).map(
+    ({ name, description }) => ({ name, description }),
+  );
   document['x-tagGroups'] = OPENAPI_TAG_GROUPS.map((group) => ({
     name: group.name,
     tags: group.tags.filter((tag) => used.has(tag)),

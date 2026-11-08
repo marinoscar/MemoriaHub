@@ -1,13 +1,13 @@
 import { createTestApp, closeTestApp, TestContext } from '../helpers/test-app.helper';
 import {
-  createOpenApiDocument,
+  REQUIREMENTS_MARKER,
+  forEachOperation,
   isAuthenticatedOperation,
-  SECURITY_SCHEMES,
-} from '../../src/openapi/document';
+} from '@marinoscar/platform-api/host';
+import type { DocOperation, MutableDocument } from '@marinoscar/platform-api/host';
+import { createAppOpenApiDocument, SECURITY_SCHEMES } from '../../src/openapi/document';
 import { OPENAPI_TAGS, OPENAPI_TAG_GROUPS } from '../../src/openapi/tags';
-import { REQUIREMENTS_MARKER } from '../../src/openapi/rbac-docs';
 import { RBAC_EXTENSION_KEY } from '../../src/auth/decorators/auth.decorator';
-import { DocOperation, forEachOperation, MutableDocument } from '../../src/openapi/types';
 
 /**
  * Boots the real AppModule once and asserts the document it produces.
@@ -25,7 +25,7 @@ describe('OpenAPI document', () => {
 
   beforeAll(async () => {
     context = await createTestApp();
-    document = createOpenApiDocument(context.app) as unknown as MutableDocument;
+    document = createAppOpenApiDocument(context.app) as unknown as MutableDocument;
 
     operations = [];
     forEachOperation(document, (operation, path, method) => {

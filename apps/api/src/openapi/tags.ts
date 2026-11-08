@@ -383,6 +383,12 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           '`MAINTENANCE_MODE` environment override is the break-glass in both directions.',
       },
       {
+        name: 'About',
+        description:
+          'Deployment facts for administrators: the version and install record the deploy CLI wrote, ' +
+          'live runtime facts, a database probe and the app-contributed groups.',
+      },
+      {
         name: 'Admin: Job Queue',
         description:
           'The shared enrichment job queue: stats, listing, retry, stuck-job recovery, and the ' +

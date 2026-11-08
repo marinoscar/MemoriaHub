@@ -16,12 +16,14 @@ import {
   MULTIPART_PLUGIN_OPTIONS,
   registerRawPartBodyParser,
 } from './common/fastify-setup';
-import { createOpenApiDocument } from './openapi/document';
 import {
   DOCS_PATH,
   OPENAPI_JSON_PATH,
-  registerDocsRoutes,
-} from './openapi/register-docs-routes';
+  buildCorsOptions,
+  registerDocsRoutesOrDegrade,
+} from '@marinoscar/platform-api/host';
+import { APP_NAME, createAppOpenApiDocument } from './openapi/document';
+import { resolveApiVersion } from './openapi/version';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -66,21 +68,34 @@ async function bootstrap() {
   // Global prefix for all routes
   app.setGlobalPrefix('api');
 
-  // Enable CORS (same-origin by default, configurable)
-  app.enableCors({
-    origin: process.env.CORS_ORIGIN || true,
-    credentials: true,
-  });
+  // CORS: same-origin only unless CORS_ORIGIN lists exact origins
+  // (comma-separated; a wildcard is refused because the refresh-token cookie is
+  // credentialed). A bad value fails the boot.
+  app.enableCors(buildCorsOptions(process.env.CORS_ORIGIN));
 
-  // OpenAPI: the spec at /api/openapi.json, the Scalar reference at /api/docs.
-  // See openapi/register-docs-routes.ts for why these are raw Fastify routes.
-  registerDocsRoutes(app, createOpenApiDocument(app));
+  // OpenAPI: the spec at /api/openapi.json, the Scalar reference at /api/docs,
+  // both served by the platform host slice from the document built in
+  // openapi/document.ts. Registered AFTER setGlobalPrefix('api') because the
+  // introspection reads the prefix off the application. It degrades instead of
+  // throwing: a documentation defect must not be a total outage, so a document
+  // that cannot be generated logs an error and the two paths answer 503
+  // (`openapi:dump` in CI still fails on it).
+  const docsReady = registerDocsRoutesOrDegrade(
+    app,
+    () => createAppOpenApiDocument(app),
+    { appName: APP_NAME, version: resolveApiVersion() },
+    logger,
+  );
 
   const port = process.env.PORT || 3000;
   await app.listen(port, '0.0.0.0');
 
   logger.log(`Application running on port ${port}`);
-  logger.log(`API reference available at ${DOCS_PATH} (spec: ${OPENAPI_JSON_PATH})`);
+  logger.log(
+    docsReady
+      ? `API reference available at ${DOCS_PATH} (spec: ${OPENAPI_JSON_PATH})`
+      : `API reference DEGRADED: ${DOCS_PATH} and ${OPENAPI_JSON_PATH} return 503 (see error above)`,
+  );
 }
 
 bootstrap();

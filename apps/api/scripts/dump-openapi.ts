@@ -30,7 +30,7 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from '../src/app.module';
 import { fastifyAdapterOptions } from '../src/common/fastify-setup';
-import { createOpenApiDocument } from '../src/openapi/document';
+import { createAppOpenApiDocument } from '../src/openapi/document';
 
 async function main(): Promise<void> {
   const outfile = resolve(process.argv[2] ?? 'openapi.json');
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     { preview: true, logger: false },
   );
 
-  const document = createOpenApiDocument(app);
+  const document = createAppOpenApiDocument(app);
   await app.close();
 
   mkdirSync(dirname(outfile), { recursive: true });
