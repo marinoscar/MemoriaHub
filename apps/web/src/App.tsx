@@ -34,7 +34,12 @@ import { Suspense, lazy } from 'react';
 import { LoadingSpinner } from './components/common/LoadingSpinner';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
-const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
+const UserSettingsHubPage = lazy(() => import('./pages/UserSettingsHubPage'));
+const AppearanceSettingsPage = lazy(() => import('./pages/settings/AppearanceSettingsPage'));
+const TimeZoneSettingsPage = lazy(() => import('./pages/settings/TimeZoneSettingsPage'));
+const NotificationPreferencesPage = lazy(() => import('./pages/settings/NotificationPreferencesPage'));
+const MemoriesPreferencesPage = lazy(() => import('./pages/settings/MemoriesPreferencesPage'));
+const SearchPreferencesPage = lazy(() => import('./pages/settings/SearchPreferencesPage'));
 const AndroidAppDownloadPage = lazy(() => import('./pages/AndroidAppDownloadPage'));
 const MediaSyncPage = lazy(() => import('./pages/MediaSyncPage'));
 const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
@@ -152,10 +157,17 @@ function AppRoutes() {
 
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
-                <Route path="/settings" element={<UserSettingsPage />} />
-                {/* Android app + Media Sync (issue #515). Sub-routes of the
-                    stacked /settings page, which links to both from its
-                    "Android app" section. */}
+                {/* The per-user hub (RETRO-B5, #621): a binding over the packaged
+                    SettingsHub. Every card of USER_SETTINGS_SECTIONS routes
+                    to a page under /settings/<card>. */}
+                <Route path="/settings" element={<UserSettingsHubPage />} />
+                <Route path="/settings/profile" element={<ProfilePage />} />
+                <Route path="/settings/appearance" element={<AppearanceSettingsPage />} />
+                <Route path="/settings/time-zone" element={<TimeZoneSettingsPage />} />
+                <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
+                <Route path="/settings/memories" element={<MemoriesPreferencesPage />} />
+                <Route path="/settings/search" element={<SearchPreferencesPage />} />
+                {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
                   path="/settings/media-sync"
@@ -165,13 +177,22 @@ function AppRoutes() {
                     </RequirePermission>
                   }
                 />
-                <Route path="/profile" element={<ProfilePage />} />
+                {/* The Profile page moved under the user hub (RETRO-B5); the old URL
+                    still resolves. */}
+                <Route path="/profile" element={<Navigate to="/settings/profile" replace />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
                 <Route path="/circles" element={<CircleListPage />} />
                 <Route path="/circles/:id" element={<CircleDetailPage />} />
                 {/* Settings Hub */}
                 <Route path="/admin/settings" element={<SettingsHubPage />} />
-                <Route path="/admin/settings/general" element={<SystemSettingsPage />} />
+                <Route
+                  path="/admin/settings/general"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <SystemSettingsPage />
+                    </RequirePermission>
+                  }
+                />
                 <Route
                   path="/admin/settings/users"
                   element={
@@ -181,27 +202,174 @@ function AppRoutes() {
                   }
                 />
                 <Route path="/settings/tokens" element={<UserTokensPage />} />
-                <Route path="/admin/settings/ai" element={<AiSettingsPage />} />
-                <Route path="/admin/settings/tagging" element={<TaggingSettingsPage />} />
-                <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
-                <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
-                <Route path="/admin/settings/duplicates" element={<DuplicatesSettingsPage />} />
-                <Route path="/admin/settings/social-media" element={<SocialMediaSettingsPage />} />
-                <Route path="/admin/settings/enhancer" element={<EnhancerSettingsPage />} />
-                <Route path="/admin/settings/memories" element={<MemoriesSettingsPage />} />
-                <Route path="/admin/settings/location-inference" element={<LocationInferenceSettingsPage />} />
-                <Route path="/admin/settings/location-groups" element={<LocationGroupsSettingsPage />} />
-                <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
-                <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
-                <Route path="/admin/settings/email" element={<EmailSettingsPage />} />
-                <Route path="/admin/settings/push" element={<PushConfigPage />} />
-                <Route path="/admin/settings/notifications" element={<NotificationPolicyPage />} />
-                <Route path="/admin/settings/android" element={<AndroidAppPage />} />
-                <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
-                <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
-                <Route path="/admin/settings/jobs" element={<JobsPage />} />
-                <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
-                <Route path="/admin/settings/nodes" element={<WorkersPage />} />
+                <Route
+                  path="/admin/settings/ai"
+                  element={
+                    <RequirePermission permission="ai_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AiSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/tagging"
+                  element={
+                    <RequirePermission permission="ai_settings:read" fallback={<Navigate to="/" replace />}>
+                      <TaggingSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/face"
+                  element={
+                    <RequirePermission permission="face_settings:read" fallback={<Navigate to="/" replace />}>
+                      <FaceSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/bursts"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <BurstsSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/duplicates"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <DuplicatesSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/social-media"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <SocialMediaSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/enhancer"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <EnhancerSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/memories"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <MemoriesSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/location-inference"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <LocationInferenceSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/location-groups"
+                  element={
+                    <RequirePermission permission="geo_settings:read" fallback={<Navigate to="/" replace />}>
+                      <LocationGroupsSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/archiving"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <ArchivingSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/geo"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <GeoSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/email"
+                  element={
+                    <RequirePermission permission="email_settings:read" fallback={<Navigate to="/" replace />}>
+                      <EmailSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/push"
+                  element={
+                    <RequirePermission permission="push:read" fallback={<Navigate to="/" replace />}>
+                      <PushConfigPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/notifications"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <NotificationPolicyPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/android"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AndroidAppPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/storage/providers"
+                  element={
+                    <RequirePermission permission="storage_settings:read" fallback={<Navigate to="/" replace />}>
+                      <StorageProvidersPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/storage/insights"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <StorageInsightsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/jobs"
+                  element={
+                    <RequirePermission permission="jobs:read" fallback={<Navigate to="/" replace />}>
+                      <JobsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/jobs/insights"
+                  element={
+                    <RequirePermission permission="jobs:read" fallback={<Navigate to="/" replace />}>
+                      <JobInsightsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/nodes"
+                  element={
+                    <RequirePermission permission="jobs:read" fallback={<Navigate to="/" replace />}>
+                      <WorkersPage />
+                    </RequirePermission>
+                  }
+                />
                 <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
                 {/* RETRO-B1b (#602): the packaged Doctor, behind the permission
                     `GET /api/admin/doctor` enforces. */}
@@ -238,16 +406,44 @@ function AppRoutes() {
                     </RequirePermission>
                   }
                 />
-                <Route path="/admin/settings/broadcasts" element={<BroadcastsPage />} />
-                <Route path="/admin/settings/workflows" element={<WorkflowsSettingsPage />} />
+                <Route
+                  path="/admin/settings/broadcasts"
+                  element={
+                    <RequirePermission permission="broadcasts:read" fallback={<Navigate to="/" replace />}>
+                      <BroadcastsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/workflows"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <WorkflowsSettingsPage />
+                    </RequirePermission>
+                  }
+                />
                 {/* v0 server-side backup retired (#367) — superseded by the node-based
                     Local Media Backup reachable from the Worker Nodes page. */}
                 <Route
                   path="/admin/settings/backup"
                   element={<Navigate to="/admin/settings/nodes" replace />}
                 />
-                <Route path="/admin/settings/db-backup" element={<DbBackupPage />} />
-                <Route path="/admin/settings/sharing" element={<PublicSharesPage />} />
+                <Route
+                  path="/admin/settings/db-backup"
+                  element={
+                    <RequirePermission permission="db_backup:read" fallback={<Navigate to="/" replace />}>
+                      <DbBackupPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/sharing"
+                  element={
+                    <RequirePermission permission="shares:manage_any" fallback={<Navigate to="/" replace />}>
+                      <PublicSharesPage />
+                    </RequirePermission>
+                  }
+                />
                 {/* Legacy admin route redirects */}
                 <Route path="/admin/users" element={<Navigate to="/admin/settings/users" replace />} />
                 <Route path="/admin/ai-settings" element={<Navigate to="/admin/settings/ai" replace />} />

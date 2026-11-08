@@ -51,6 +51,11 @@ function extractRoutePaths(source: string): string[] {
   return Array.from(matches, (m) => m[1]);
 }
 
+/** A `<Route path="...">` opening tag, on one line or (a guarded route) spread over several. */
+function routeTag(path: string): RegExp {
+  return new RegExp(`<Route\\s+path="${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`);
+}
+
 const appSource = readFileSync(APP_TSX_PATH, 'utf-8');
 const routePaths = extractRoutePaths(appSource);
 const routePathSet = new Set(routePaths);
@@ -136,7 +141,7 @@ describe('navigation reachability (issue #389)', () => {
 
     const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
     REQUIRED_REACHABLE_PATHS.forEach((path) => {
-      expect(layoutBlock).toContain(`<Route path="${path}"`);
+      expect(layoutBlock).toMatch(routeTag(path));
     });
   });
 });
@@ -190,7 +195,7 @@ describe('navigation reachability — the Review hub (issue #390)', () => {
     const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
 
     [...REVIEW_HUB_PATHS, ...REVIEW_WRAPPED_STANDALONE_PATHS].forEach((path) => {
-      expect(layoutBlock).toContain(`<Route path="${path}"`);
+      expect(layoutBlock).toMatch(routeTag(path));
     });
   });
 });
@@ -261,7 +266,7 @@ describe('navigation reachability — the Collections hub (issue #391)', () => {
     // whole viewport) rather than the shared standard Layout tree.
     const standardPaths = [COLLECTIONS_HUB_PATH, ...COLLECTIONS_STANDALONE_PATHS.filter((p) => p !== '/map')];
     standardPaths.forEach((path) => {
-      expect(layoutBlock).toContain(`<Route path="${path}"`);
+      expect(layoutBlock).toMatch(routeTag(path));
     });
     expect(fullBleedBlock).toContain('<Route path="/map"');
   });

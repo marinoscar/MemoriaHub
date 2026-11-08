@@ -20,7 +20,7 @@
  * Dismissal lasts for the browser session only, and only for the state that
  * was dismissed — the owner wants this prominent, so it returns on the next
  * visit, and a dismissed `default` that becomes `denied` shows again.
- * Suppressed on `/settings`, whose Notifications card carries the fuller
+ * Suppressed on `/settings/notifications`, whose page carries the fuller
  * version of the same message and controls.
  */
 
@@ -31,8 +31,8 @@ import { Link as RouterLink, useLocation } from 'react-router-dom';
 import type { NotificationCapability } from '../../hooks/useNotificationCapability';
 import type { NotificationClientConfig } from '../../types/notifications';
 
-/** The user settings page, which hosts the Notifications card. */
-export const NOTIFICATION_SETTINGS_PATH = '/settings';
+/** The per-user Notifications settings page (RETRO-B5: a card of the /settings hub). */
+export const NOTIFICATION_SETTINGS_PATH = '/settings/notifications';
 /** Deep link to the Notifications card (`<Card id="notifications">`). */
 export const NOTIFICATION_SETTINGS_LINK = `${NOTIFICATION_SETTINGS_PATH}#notifications`;
 export const BANNER_DISMISSED_STORAGE_KEY = 'notificationPermissionBanner.dismissed';
