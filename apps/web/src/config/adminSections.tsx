@@ -35,7 +35,6 @@ import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import QueryStatsIcon from '@mui/icons-material/QueryStats';
 import PublicIcon from '@mui/icons-material/Public';
-import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import MovieIcon from '@mui/icons-material/Movie';
 import HubIcon from '@mui/icons-material/Hub';
 import EmailIcon from '@mui/icons-material/Email';
@@ -48,6 +47,7 @@ import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 import AndroidIcon from '@mui/icons-material/Android';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
 
 export interface AdminCardDef {
   title: string;
@@ -279,13 +279,9 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/workflows',
         permission: 'system_settings:read',
       },
-      {
-        title: 'Doctor',
-        description: 'Run configuration health diagnostics and see required action items',
-        Icon: MonitorHeartIcon,
-        path: '/admin/settings/doctor',
-        permission: 'system_settings:read',
-      },
+      // RETRO-B1b (#602): the packaged Doctor card. `system_settings:read` is the
+      // string `GET /api/admin/doctor` enforces (`DEFAULT_DOCTOR_PERMISSION`).
+      { ...doctorSettingsPage.card, Icon: doctorSettingsPage.Icon },
       {
         title: 'Broadcasts',
         description:

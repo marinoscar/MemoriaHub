@@ -1,0 +1,127 @@
+// =============================================================================
+// MemoriaHub's Doctor checks (RETRO-B1b, #602)
+// =============================================================================
+//
+// Each check registers itself with the platform `DoctorCheckRegistry` in its
+// own `onModuleInit` (the registry is global, provided by
+// `DoctorModule.forRoot`, see `./doctor.config.ts`), so being in the module
+// graph IS the registration. The checks are READ-ONLY (`docs/specs/doctor.md`),
+// with the live provider probes listed in
+// `docs/platform-adoption/local-exceptions.md`.
+//
+// This module imports the domain modules whose services the checks read. Android
+// checks read `media_sync_devices` through the global PrismaModule;
+// `MediaSyncModule` is deliberately NOT imported. Nothing imports this module
+// except `AppModule`, so it closes no cycle.
+//
+// The platform ships `db.connection`, `db.migrations`, `secrets.encryption-key`
+// (retiring `core.database`, `core.migrations`, `core.secretsKey`) and more with
+// `PlatformHostCoreModule`.
+// =============================================================================
+
+import { Module } from '@nestjs/common';
+
+import { AiModule } from '../ai/ai.module';
+import { AndroidAppModule } from '../android-app/android-app.module';
+import { DedupModule } from '../dedup/dedup.module';
+import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { FaceModule } from '../face/face.module';
+import { GeoModule } from '../geo/geo.module';
+import { SettingsModule } from '../settings/settings.module';
+import { SocialMediaModule } from '../social-media/social-media.module';
+import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+
+import { AdminBootstrapDoctorCheck } from './checks/auth/admin-bootstrap.doctor-check';
+import { GoogleOauthDoctorCheck } from './checks/auth/google-oauth.doctor-check';
+import { JwtDoctorCheck } from './checks/auth/jwt.doctor-check';
+import { AiEmbeddingDoctorCheck } from './checks/ai/embedding.doctor-check';
+import { AiFlagConsistencyDoctorCheck } from './checks/ai/flag-consistency.doctor-check';
+import { AiSearchDoctorCheck } from './checks/ai/search.doctor-check';
+import { AiTaggingDoctorCheck } from './checks/ai/tagging.doctor-check';
+import { DuplicateDetectionDoctorCheck } from './checks/ai/duplicate-detection.doctor-check';
+import { PictureEnhancerDoctorCheck } from './checks/ai/picture-enhancer.doctor-check';
+import { SocialMediaDoctorCheck } from './checks/ai/social-media.doctor-check';
+import { VideoTaggingDoctorCheck } from './checks/ai/video-tagging.doctor-check';
+import { AndroidAssetLinksDoctorCheck } from './checks/android/assetlinks.doctor-check';
+import { AndroidMediaSyncDoctorCheck } from './checks/android/media-sync.doctor-check';
+import { AndroidReleasesDoctorCheck } from './checks/android/releases.doctor-check';
+import { AndroidUploadPathDoctorCheck } from './checks/android/upload-path.doctor-check';
+import { AppUrlDoctorCheck } from './checks/core/app-url.doctor-check';
+import { PgClientVersionDoctorCheck } from './checks/core/pg-client-version.doctor-check';
+import { PgvectorDoctorCheck } from './checks/core/pgvector.doctor-check';
+import { FaceDetectionDoctorCheck } from './checks/face/detection.doctor-check';
+import { FaceFlagConsistencyDoctorCheck } from './checks/face/flag-consistency.doctor-check';
+import { FacePgvectorDoctorCheck } from './checks/face/pgvector.doctor-check';
+import { GeoReverseProviderDoctorCheck } from './checks/geo/reverse-provider.doctor-check';
+import { BurstConfigDoctorCheck } from './checks/jobs/burst-config.doctor-check';
+import { QueueHealthDoctorCheck } from './checks/jobs/queue-health.doctor-check';
+import { WorkerEnabledDoctorCheck } from './checks/jobs/worker-enabled.doctor-check';
+import { NodesCapabilityHealthDoctorCheck } from './checks/nodes/capability-health.doctor-check';
+import { NodesHeartbeatDoctorCheck } from './checks/nodes/heartbeat-freshness.doctor-check';
+import { NodesRegisteredDoctorCheck } from './checks/nodes/registered-count.doctor-check';
+import { NodesStaleLeasesDoctorCheck } from './checks/nodes/stale-leases.doctor-check';
+import { ActiveStorageProviderDoctorCheck } from './checks/storage/active-provider.doctor-check';
+import { StorageLiveTestDoctorCheck } from './checks/storage/live-test.doctor-check';
+import { WorkflowsStateDoctorCheck } from './checks/workflows/state.doctor-check';
+
+/** The 32 `memoriahub.*` checks (35 minus the 3 the host core retired). */
+export const MEMORIAHUB_DOCTOR_CHECKS = [
+  // core
+  PgvectorDoctorCheck,
+  PgClientVersionDoctorCheck,
+  AppUrlDoctorCheck,
+  // auth
+  JwtDoctorCheck,
+  GoogleOauthDoctorCheck,
+  AdminBootstrapDoctorCheck,
+  // storage
+  ActiveStorageProviderDoctorCheck,
+  StorageLiveTestDoctorCheck,
+  // ai
+  AiSearchDoctorCheck,
+  AiTaggingDoctorCheck,
+  AiEmbeddingDoctorCheck,
+  AiFlagConsistencyDoctorCheck,
+  SocialMediaDoctorCheck,
+  DuplicateDetectionDoctorCheck,
+  PictureEnhancerDoctorCheck,
+  VideoTaggingDoctorCheck,
+  // face
+  FaceDetectionDoctorCheck,
+  FaceFlagConsistencyDoctorCheck,
+  FacePgvectorDoctorCheck,
+  // geo
+  GeoReverseProviderDoctorCheck,
+  // jobs
+  WorkerEnabledDoctorCheck,
+  QueueHealthDoctorCheck,
+  BurstConfigDoctorCheck,
+  // nodes
+  NodesRegisteredDoctorCheck,
+  NodesHeartbeatDoctorCheck,
+  NodesStaleLeasesDoctorCheck,
+  NodesCapabilityHealthDoctorCheck,
+  // workflows
+  WorkflowsStateDoctorCheck,
+  // android
+  AndroidAssetLinksDoctorCheck,
+  AndroidReleasesDoctorCheck,
+  AndroidMediaSyncDoctorCheck,
+  AndroidUploadPathDoctorCheck,
+];
+
+@Module({
+  imports: [
+    SettingsModule,
+    AiModule,
+    FaceModule,
+    GeoModule,
+    StorageProvidersModule,
+    EnrichmentModule,
+    SocialMediaModule,
+    DedupModule,
+    AndroidAppModule,
+  ],
+  providers: MEMORIAHUB_DOCTOR_CHECKS,
+})
+export class DoctorChecksModule {}

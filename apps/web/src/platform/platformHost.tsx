@@ -29,6 +29,7 @@ import { PlatformHostProvider, postSse } from '@marinoscar/platform-web/core';
 import { readMaintenanceBlock, reportMaintenanceBlock } from '@marinoscar/platform-web/host/headless';
 import type {
   PlatformApiClient,
+  PlatformBlobResponse,
   PlatformRequestOptions,
   PlatformSseOptions,
   PlatformViewer,
@@ -36,7 +37,7 @@ import type {
 } from '@marinoscar/platform-web/core';
 import { useAuth } from '../contexts/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
-import { API_BASE_URL, api } from '../services/api';
+import { API_BASE_URL, ApiError, api } from '../services/api';
 
 /** Maps the platform's request options onto this app's `fetch` options. */
 function toRequestInit(options: PlatformRequestOptions | undefined): RequestInit {
@@ -72,6 +73,37 @@ export function appPostSse(path: string, body: unknown, options: PlatformSseOpti
   });
 }
 
+/**
+ * `GET` a binary body (the Doctor's support bundle). `ApiService` only reads
+ * JSON, so this is the same `fetch` with the same bearer token and the same
+ * one refresh-and-retry on a 401, returning the body and the headers (the
+ * filename is in `Content-Disposition`).
+ *
+ * PLATFORM-ADOPTION-SHIM(#602): removed with `appPlatformApi` (RETRO-F1/B2).
+ */
+export async function appGetBlob(
+  path: string,
+  options?: PlatformRequestOptions,
+): Promise<PlatformBlobResponse> {
+  const send = () => {
+    const token = api.getAccessToken();
+    return fetch(`${API_BASE_URL}${path}`, {
+      credentials: 'include',
+      signal: options?.signal,
+      headers: { ...(options?.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+  };
+  let response = await send();
+  if (response.status === 401 && (await api.refreshToken())) response = await send();
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const block = readMaintenanceBlock(response.status, body);
+    if (block) reportMaintenanceBlock(block);
+    throw new ApiError(body.message || 'Request failed', response.status, body.code, body.details);
+  }
+  return { blob: await response.blob(), headers: response.headers };
+}
+
 /** The `PlatformApiClient` over this app's HTTP client. Built ONCE, at module scope. */
 export const appPlatformApi: PlatformApiClient = {
   get: (path, options) => api.get(path, toRequestInit(options)),
@@ -80,6 +112,7 @@ export const appPlatformApi: PlatformApiClient = {
   patch: (path, body, options) => api.patch(path, body, toRequestInit(options)),
   delete: (path, options) => api.delete(path, toRequestInit(options)),
   postSse: appPostSse,
+  getBlob: appGetBlob,
 };
 
 /** This app's {@link PlatformWebHost}, memoised. Must run inside the auth provider. */

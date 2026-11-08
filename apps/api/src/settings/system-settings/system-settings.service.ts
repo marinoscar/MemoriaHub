@@ -185,8 +185,13 @@ export class SystemSettingsService {
    * The cache is invalidated immediately on any write (replaceSettings /
    * patchSettings) so flag changes take effect on the very next read.
    * Creates default if not found (should exist from seed).
+   *
+   * `{ readOnly: true }` never writes (RETRO-B1b, #602): a missing row answers
+   * the built-in defaults (not cached, nothing persisted). The Doctor and the
+   * host core's checks read this way, because a Doctor run must be safe to
+   * repeat against any deployment and "read" must not seed a row.
    */
-  async getSettings() {
+  async getSettings(options: { readOnly?: boolean } = {}) {
     const now = Date.now();
     if (this.settingsCache && now - this.settingsCache.cachedAt < SETTINGS_CACHE_TTL_MS) {
       return this.settingsCache.value;
@@ -201,7 +206,16 @@ export class SystemSettingsService {
       },
     });
 
-    if (!settings) {
+    const missing = !settings;
+    if (!settings && options.readOnly) {
+      settings = {
+        key: SETTINGS_KEY,
+        value: DEFAULT_SYSTEM_SETTINGS as any,
+        updatedAt: new Date(0),
+        updatedByUser: null,
+        version: 0,
+      } as unknown as NonNullable<typeof settings>;
+    } else if (!settings) {
       // Should have been seeded, but create if missing
       settings = await this.prisma.systemSettings.create({
         data: {
@@ -247,8 +261,11 @@ export class SystemSettingsService {
       version: settings.version,
     };
 
-    // Store in cache for fast subsequent reads within the TTL window.
-    this.settingsCache = { value: result, cachedAt: Date.now() };
+    // Store in cache for fast subsequent reads within the TTL window (never the
+    // synthesized defaults of a read-only read of a missing row).
+    if (!(missing && options.readOnly)) {
+      this.settingsCache = { value: result, cachedAt: Date.now() };
+    }
 
     return result;
   }
