@@ -1,5 +1,6 @@
 import { Module, MiddlewareConsumer, NestModule, DynamicModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { OtelMetricsModule } from '@marinoscar/platform-api/otel-core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
@@ -81,6 +82,15 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     ConfigModule.forRoot({
       isGlobal: true,
       load: [configuration],
+    }),
+
+    // Platform metrics host (observable gauges only while OTEL is enabled).
+    // Superseded by PlatformHostCoreModule.forRoot() once that is adopted.
+    OtelMetricsModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        gauges: config.get('otel.enabled') === true,
+      }),
     }),
 
     // Scheduling (must be at root level for NestJS 11)

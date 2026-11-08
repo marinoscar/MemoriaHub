@@ -9,6 +9,7 @@ import {
 import { Logger } from '@nestjs/common';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
+import { registerRequestSpanAttributes } from '@marinoscar/platform-api/otel-core';
 import { AppModule } from './app.module';
 import {
   fastifyAdapterOptions,
@@ -42,6 +43,12 @@ async function bootstrap() {
     // documented HTTP/2 DDoS advisory (GHSA-c96f-x56v-gq3h) that is only
     // inert because HTTP/2 is off. Enabling HTTP/2 reactivates it.
     adapter,
+  );
+
+  // http.route + app.route.matched on server spans (no-op when OTEL is off)
+  registerRequestSpanAttributes(
+    app.getHttpAdapter().getInstance(),
+    process.env.OTEL_ENABLED === 'true',
   );
 
   // Register cookie plugin
