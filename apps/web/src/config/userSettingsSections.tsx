@@ -27,6 +27,9 @@ import ManageSearchIcon from '@mui/icons-material/ManageSearch';
 import AndroidIcon from '@mui/icons-material/Android';
 import PhonelinkRingIcon from '@mui/icons-material/PhonelinkRing';
 import { identityUserSettingsSections } from '@marinoscar/platform-web/identity/ui';
+// RETRO-H1 (#591): the user-data slice's Danger Zone card, in its pinned-last group.
+import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
+import { dangerZoneSettingsPage } from '@marinoscar/platform-web/user-data/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
 import { ANDROID_APP_SETTINGS_PATH, MEDIA_SYNC_SETTINGS_PATH } from '../services/androidApp';
 
@@ -107,5 +110,17 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
     // the identity slice's card, as data.
     label: 'Security',
     cards: [...identityUserSettingsSections.security],
+  },
+  {
+    // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to
+    // append-only (a group added later goes BEFORE this one; the registry test
+    // asserts it with `dangerZoneLastViolations`). The card, its icon and its page
+    // are the platform's (`dangerZoneSettingsPage`, route `/settings/danger-zone`);
+    // which scopes it offers comes from the API's user-data registries
+    // (`apps/api/src/platform/user-data/user-data.manifest.ts`). No `permission`:
+    // the API gates the routes on `user_settings:write`, which every role holds,
+    // and each request is scoped to the caller's own data.
+    label: DANGER_ZONE_GROUP_LABEL,
+    cards: [{ ...dangerZoneSettingsPage.card, Icon: dangerZoneSettingsPage.Icon }],
   },
 ];

@@ -32,6 +32,7 @@ To be filled in by the slice issues as each workaround lands.
 | Workaround | What it is | Used by |
 |---|---|---|
 | (none yet) | | |
+| User-data decisions (RETRO-H1, #591) | `apps/api/src/platform/user-data/`: the keep-or-delete hints for every owner model, the `StorageObject` hint delegated to `memoriahub.circle.purge` (personal circle only, files routed per row), the user removal hook (reassign shared content, refuse while owning a shared circle with members), four factory reset steps. See [specs/user-data-deletion.md](../specs/user-data-deletion.md) | platform `user-data` slice (mounted), `circles`, `media`, `storage` |
 
 
 ## API: apps/api/src

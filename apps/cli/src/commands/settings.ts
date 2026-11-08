@@ -144,7 +144,10 @@ function setCmd(): Command {
 function resetCmd(): Command {
   const cmd = new Command('reset');
   cmd
-    .description('Factory-reset the CLI: removes config, database, and all local state (irreversible)')
+    .description(
+      'Factory-reset the CLI: removes config, database, and all local state (irreversible). ' +
+        'Nothing on the server is deleted: delete server data from the web app (Settings > Danger Zone).',
+    )
     .option('--yes', 'Confirm the reset without an interactive prompt');
 
   cmd.action((opts: { yes?: boolean }) => {
@@ -156,6 +159,7 @@ function resetCmd(): Command {
       ui.line('    - All managed-folder manifests (manifests/)');
       ui.blank();
       ui.warn('This action is irreversible. You will need to log in again.');
+      ui.line('    Nothing on the server is deleted. To delete your server data, use Settings > Danger Zone in the web app.');
       ui.blank();
       ui.info('Re-run with --yes to confirm:  memoriahub settings reset --yes');
       ui.blank();

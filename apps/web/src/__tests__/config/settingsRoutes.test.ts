@@ -72,6 +72,8 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/telemetry/dashboard': 'telemetry:query', // telemetry dashboard controller
   // RETRO-H5 (#609): platform alerts controller (ALERTS_PERMISSIONS; GET admin/alerts/*).
   '/admin/settings/alerts': 'alerts:read',
+  // RETRO-H1 (#591): platform user-data slice, factory reset controller (USER_DATA_PERMISSIONS).
+  '/admin/settings/factory-reset': 'system:factory_reset',
 };
 
 describe('settings routes against the registries', () => {

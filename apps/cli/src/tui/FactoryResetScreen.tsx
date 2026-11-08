@@ -64,6 +64,10 @@ export function FactoryResetScreen({
         <Text bold color="red">This action is irreversible. You will need to log in again.</Text>
       </Box>
 
+      <Box marginTop={1}>
+        <Text dimColor>Nothing on the server is deleted. To delete your server data, use Settings &gt; Danger Zone in the web app.</Text>
+      </Box>
+
       <Box flexDirection="row" gap={1} marginTop={1}>
         <Text dimColor>Type y then Enter to confirm, or Esc to cancel:</Text>
         <TextInput

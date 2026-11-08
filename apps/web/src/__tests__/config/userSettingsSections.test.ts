@@ -26,6 +26,8 @@ describe('USER_SETTINGS_SECTIONS', () => {
       '/settings/android-app',
       '/settings/media-sync',
       '/settings/tokens',
+      // RETRO-H1 (#591): the pinned-last Danger Zone group.
+      '/settings/danger-zone',
     ]);
   });
 
