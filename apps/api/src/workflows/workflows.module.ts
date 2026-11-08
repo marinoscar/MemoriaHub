@@ -17,8 +17,7 @@ import { WorkflowRunsController } from './runs/workflow-runs.controller';
 import { WorkflowRunService } from './runs/workflow-run.service';
 import { WorkflowEvaluateHandler } from './runs/workflow-evaluate.handler';
 import { WorkflowExecuteBatchHandler } from './runs/workflow-execute-batch.handler';
-import { WorkflowHistoryPurgeHandler } from './runs/workflow-history-purge.handler';
-import { WorkflowHistoryPurgeTask } from './runs/workflow-history-purge.task';
+import { WorkflowRunsRetentionHandler } from './runs/workflow-runs-retention.handler';
 import { WorkflowScheduleTask } from './runs/workflow-schedule.task';
 import { WorkflowEvaluateItemHandler } from './runs/workflow-evaluate-item.handler';
 import { WorkflowMicroRunFinalizeTask } from './runs/workflow-micro-run-finalize.task';
@@ -73,8 +72,7 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
     WorkflowRunService,
     WorkflowEvaluateHandler,
     WorkflowExecuteBatchHandler,
-    WorkflowHistoryPurgeHandler,
-    WorkflowHistoryPurgeTask,
+    WorkflowRunsRetentionHandler,
     WorkflowScheduleTask,
     WorkflowEvaluateItemHandler,
     WorkflowMicroRunFinalizeTask,
