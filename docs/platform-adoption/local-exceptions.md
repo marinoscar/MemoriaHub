@@ -2,7 +2,7 @@
 
 Every place where MemoriaHub deviates from `@marinoscar/platform-*` on purpose, and the issue that removes it. Introduced by RETRO-A1 (#568, epic [#555](https://github.com/marinoscar/MemoriaHub/issues/555)). An exception without a row here is a bug.
 
-A4 (#579) adds the first shim row; A5 (#587) adds the first database deviation.
+A4 (#579) added the first shim row; A5 (#587) added the database deviations and the `DefaultOrgId` shim.
 
 ## How to use this page
 
@@ -18,7 +18,10 @@ How the baseline treats the deviations: `docs/runbooks/database-baseline.md` in 
 
 | Deviation id | What differs from the platform | Where | Why | Removed by |
 |---|---|---|---|---|
-| (none yet) | | | | |
+| `memoriahub:domain-schema` | 340 statements (in the A5 rehearsal): MemoriaHub domain tables, enums, foreign keys and indexes that platform `0001`/`0002` do not create. Not a change to a platform table. | The app-only migrations | The baseline diff prints them; the lock must declare them for `--through 2` to run clean. Also the record of the raw-SQL drift the Prisma diff cannot print: the `faces_sync_embedding_vec` trigger, the CHECK constraints (`media_shares` XOR, `review_run_items` exclusive arc, `media_sync_runs_counts_chk`, `media_sync_devices` name length) and the composite FK `review_run_items(run_id, subject_type)` | Not removed. A permanent record of what the app owns |
+| `memoriahub:legacy-platform-tables` | 53 statements: the nine renamed tables (`mh_legacy_notifications`, `mh_legacy_push_subscriptions`, `mh_legacy_notification_deliveries`, `mh_legacy_notification_broadcasts`, `mh_legacy_job_stats_rollup`, `mh_legacy_worker_nodes`, `mh_legacy_node_credentials`, `mh_legacy_database_backup_runs`, `mh_legacy_android_app_releases`), the seven `MhLegacy*` enums and the foreign keys to `users` | Migration `20260817000000_rename_legacy_platform_tables`; `apps/api/prisma/fragments/platform-*.legacy.prisma` (`@@map`) | The platform migrations `0003`-`0040` create tables, types and indexes with the same names; the old ones were renamed so they apply onto an empty namespace. Platform tables exist empty beside the legacy tables until each slice moves its data | Piecewise, each slice dropping its legacy table and its statements: RETRO-C1 (`job_stats_rollup`), C2 (`worker_nodes`, `node_credentials`), D3 (`notifications`, `push_subscriptions`, `notification_deliveries`, `notification_broadcasts`), D4 (`database_backup_runs`), D5 (`android_app_releases`) |
+| `memoriahub:users-avatar` | `users.avatar_source`, `avatar_storage_key`, `avatar_version`, `linked_person_id`, `users_linked_person_id_idx` and `users_linked_person_id_fkey` (3 statements) | Migration `20260810010000_add_user_avatar_source_and_person_link` | Profile-picture feature (issue #354) added columns to a platform table | RETRO-B2 (moves them to an app-owned side table) |
+| Raw-SQL index list in `platform.lock` (`rawSqlIndexes`, 20 entries) | Partial, expression and HNSW indexes Prisma cannot declare | `apps/api/prisma/platform.lock` | B4 asserts them by name and definition; the list is the single source (CLAUDE.md invariant). The three `mh_legacy_*` entries leave with their slice (D3, D4, D5); `enrichment_jobs_*` entries with C1 | Per slice, as above |
 
 ## Code shims (`PLATFORM-ADOPTION-SHIM`)
 
@@ -29,6 +32,9 @@ How the baseline treats the deviations: `docs/runbooks/database-baseline.md` in 
 | `node` command intercept and `node list` (RETRO-F3) | `legacy-flags.ts` (`node-group`), `apps/cli/src/run.ts` (`runLegacyNodeGroup`) | The platform `node` is a reserved built-in; `memoriahub node ...` runs the 1.3 command (which has `node list`, the platform lacks it) | RETRO-C10 (executors on the platform engine; `node list` upstream via seam request) |
 | Legacy TUI bridge (RETRO-F3) | `apps/cli/src/extensions/legacy-tui*.ts(x)`, `apps/cli/src/commands/menu.ts` | "MemoriaHub menu" platform TUI screen and `memoriahub menu` open the 1.3 ink TUI | RETRO-F4 |
 | Config shape bridge (RETRO-F3) | `apps/cli/src/extensions/config-compat.ts`, `apps/cli/src/config.ts` | `pat`/`patExpiresAt` migrated to `token`/`expiresAt`; app fields restored after the platform `login`; credentials copied to `MEMORIAHUB_STATE_DIR` | Platform honours `MEMORIAHUB_STATE_DIR` for `login`/`config`/`api` (seam request) |
+| `DefaultOrgId` + `orgId` on the legacy storage models (RETRO-A5) | `apps/api/src/common/tenancy/default-org-id.ts`; `StorageObject.orgId` / `StorageObjectChunk.orgId` in `apps/api/prisma/fragments/platform-storage.legacy.prisma`; every `storageObject` / `storageObjectChunk` create or upsert in `src/` (marked `PLATFORM-ADOPTION-SHIM(RETRO-D1)`) | Platform migration `0025` made `storage_objects.org_id` and `storage_object_chunks.org_id` NOT NULL with forced row-level security. The legacy storage code stamps the default organization's id on every row it writes | RETRO-D1 (storage slice) |
+| API connects as the bootstrap superuser (RETRO-A5) | `apps/api/src/config`, `infra/compose/postgres-init/10-app-role.sh`, [application-role.md](../runbooks/application-role.md) | Row-level security is inert for a superuser. The `memoriahub_app` role exists and is documented, but the API does not use it: the legacy storage service reads `storage_objects` without `app.org_id`, which returns 0 rows under RLS. Doctor `db.rls_role` fails until the switch | RETRO-D1 (brings `forOrg`/`runInOrg` for storage), then the switch in the A6/B-series release |
+| Hidden `push_subscriptions` directory during the baseline (RETRO-A5) | [database-baseline.md](../runbooks/database-baseline.md) section 5 | `20260814000000_add_push_subscriptions` matches platform `0007` after comment stripping; the tool then refuses (`PLACEMENT_IMPOSSIBLE`) and would never create the platform table. The baseline is run against a temporary copy of `apps/api` without that directory | Not removed (a one-off procedure); the owner should file a `seam_request.yml` for a "leave this directory unmatched" `--map` entry |
 
 ## Infra deviations (RETRO-F2, #566)
 

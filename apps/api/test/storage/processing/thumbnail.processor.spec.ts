@@ -48,6 +48,7 @@ import { PrismaService } from '../../../src/prisma/prisma.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getPlainJpegBuffer, makeGetStream } from '../../fixtures/media/image-fixtures';
 import { Readable } from 'stream';
+import { defaultOrgIdProvider } from '../../mocks/default-org.mock';
 
 // ---------------------------------------------------------------------------
 // ffmpeg runner mock (the shared package's spawn() wrapper)
@@ -227,6 +228,7 @@ describe('ThumbnailProcessor', () => {
             getBucket: mockGetBucket,
           },
         },
+        defaultOrgIdProvider,
         {
           provide: PrismaService,
           useValue: {
@@ -516,6 +518,7 @@ describe('ThumbnailProcessor', () => {
               getBucket: jest.fn().mockReturnValue(BUCKET_NAME),
             },
           },
+          defaultOrgIdProvider,
           {
             provide: PrismaService,
             useValue: {
@@ -562,6 +565,7 @@ describe('ThumbnailProcessor', () => {
               getBucket: jest.fn().mockReturnValue(BUCKET_NAME),
             },
           },
+          defaultOrgIdProvider,
           {
             provide: PrismaService,
             useValue: {

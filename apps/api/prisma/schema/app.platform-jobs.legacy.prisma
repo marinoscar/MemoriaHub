@@ -12,12 +12,16 @@ enum JobStatus {
   running
   succeeded
   failed
+
+  @@map("MhLegacyJobStatus")
 }
 
 enum JobReason {
   upload
   rerun
   backfill
+
+  @@map("MhLegacyJobReason")
 }
 
 model EnrichmentJob {
@@ -110,5 +114,5 @@ model JobStatsRollup {
   durationSamples Int      @default(0) @map("duration_samples")
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  @@map("job_stats_rollup")
+  @@map("mh_legacy_job_stats_rollup")
 }

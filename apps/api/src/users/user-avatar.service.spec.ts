@@ -61,6 +61,7 @@ import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { UserAvatarService } from './user-avatar.service';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -202,6 +203,7 @@ describe('UserAvatarService', () => {
       providers: [
         UserAvatarService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } },
         { provide: StorageProviderResolver, useValue: resolver },
         { provide: CircleMembershipService, useValue: circleMembership },
         { provide: UserSettingsService, useValue: userSettings },

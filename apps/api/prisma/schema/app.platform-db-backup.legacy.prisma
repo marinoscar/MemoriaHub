@@ -27,12 +27,16 @@ enum DatabaseBackupStatus {
   completed
   failed
   stale
+
+  @@map("MhLegacyDatabaseBackupStatus")
 }
 
 enum DatabaseBackupTrigger {
   manual
   scheduled
   pre_restore
+
+  @@map("MhLegacyDatabaseBackupTrigger")
 }
 
 // SINGLE-ACTIVE-RUN GUARD — raw SQL, not representable in Prisma's schema
@@ -94,5 +98,5 @@ model DatabaseBackupRun {
 
   @@index([status])
   @@index([startedAt(sort: Desc)])
-  @@map("database_backup_runs")
+  @@map("mh_legacy_database_backup_runs")
 }

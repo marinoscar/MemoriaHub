@@ -57,6 +57,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { defaultOrgId } from '../helpers/default-org';
 
 // ---------------------------------------------------------------------------
 // Connection string. `.env.test` sets DATABASE_URL to
@@ -120,6 +121,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
     });
     await prisma.storageObject.create({
       data: {
+        orgId: await defaultOrgId(prisma),
         id: storageObjectId,
         name: 'test.jpg',
         size: BigInt(1024),
@@ -340,6 +342,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
         const localMediaId = randomUUID();
         await prisma.storageObject.create({
           data: {
+            orgId: await defaultOrgId(prisma),
             id: localStorageId,
             name: 'loc-test.jpg',
             size: BigInt(512),

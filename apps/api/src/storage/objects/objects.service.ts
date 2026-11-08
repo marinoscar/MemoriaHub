@@ -59,6 +59,7 @@ import {
   OBJECT_UPLOADED_EVENT,
   ObjectUploadedEvent,
 } from '../processing/events/object-uploaded.event';
+import { DefaultOrgId } from '../../common/tenancy/default-org-id';
 
 export interface MultipartFile {
   filename: string;
@@ -114,6 +115,7 @@ export class ObjectsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly circleMembershipService: CircleMembershipService,
     private readonly resolver: StorageProviderResolver,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   /**
@@ -168,6 +170,7 @@ export class ObjectsService {
     // per-object resolution works correctly for all subsequent operations.
     const storageObject = await this.prisma.storageObject.create({
       data: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         name,
         size: BigInt(size),
         mimeType,
@@ -364,6 +367,7 @@ export class ObjectsService {
     await this.prisma.storageObjectChunk.upsert({
       where: { objectId_partNumber: { objectId, partNumber } },
       create: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         objectId,
         partNumber,
         eTag: written.eTag,
@@ -548,6 +552,7 @@ export class ObjectsService {
     } else {
       // Record chunks in database. S3/R2 parts never pass through the API, so
       // this is the first time the server learns about them.
+      const chunkOrgId = await this.defaultOrgId.get(); // PLATFORM-ADOPTION-SHIM(RETRO-D1)
       await Promise.all(
         parts.map((part) =>
           this.prisma.storageObjectChunk.upsert({
@@ -558,6 +563,7 @@ export class ObjectsService {
               },
             },
             create: {
+              orgId: chunkOrgId,
               objectId,
               partNumber: part.partNumber,
               eTag: part.eTag,
@@ -743,6 +749,7 @@ export class ObjectsService {
     // Use a default size of 0, should be updated in post-processing
     const storageObject = await this.prisma.storageObject.create({
       data: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         name: filename,
         size: BigInt(0), // Will be updated by post-processing
         mimeType: mimetype,

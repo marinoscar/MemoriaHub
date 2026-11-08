@@ -242,6 +242,13 @@ If the diff feels “big,” you waited too long. **Split the work and commit so
 3. **Security by Default**: All API endpoints require authentication unless explicitly public
 4. **API-First**: All business logic resides in the API layer
 
+## MANDATORY: Platform migration history (RETRO-A5)
+
+- `apps/api/prisma/platform.lock` records the platform baseline (`--through 2`), the three declared deviations and the **raw-SQL index list** (`rawSqlIndexes`, 20 entries: partial, expression and HNSW indexes Prisma cannot declare). Add a new one there and in the migration; never turn one into `@@unique`/`@@index`.
+- Installed platform migrations (`apps/api/prisma/migrations/20261108*`) and every applied migration are **never edited or renamed**; comments inside `migration.sql` count toward the hash. `npm run db:check` fails on any change.
+- Nine legacy tables and seven enums were renamed to `mh_legacy_*` / `MhLegacy*` (migration `20260817000000_rename_legacy_platform_tables`) so platform migrations `0003`-`0040` apply cleanly; raw SQL names the new names. Index names in the notes below that say `notifications_review_queue_live_uniq_idx`, `database_backup_runs_active_uniq_idx`, `android_app_releases_one_current_uniq_idx` are now `mh_legacy_`-prefixed until their slice (D3, D4, D5) moves to the platform table.
+- Storage rows carry `org_id` through the `DefaultOrgId` shim (`PLATFORM-ADOPTION-SHIM(RETRO-D1)`). Procedure and rehearsal: [docs/runbooks/database-baseline.md](docs/runbooks/database-baseline.md); role: [docs/runbooks/application-role.md](docs/runbooks/application-role.md); exceptions: [docs/platform-adoption/local-exceptions.md](docs/platform-adoption/local-exceptions.md).
+
 ## MANDATORY: Android App Rules
 
 The Android app (`apps/android/`, epic #498) is a Trusted Web Activity around the PWA plus a small native Kotlin **Media Sync** module. The contract is [docs/specs/android-media-sync.md](docs/specs/android-media-sync.md) (its Decisions section D1-D27 wins over any issue body); the pattern is [docs/specs/native-companion-architecture.md](docs/specs/native-companion-architecture.md). Operators: [Android app runbook](docs/runbooks/android-app.md), [Android release runbook](docs/runbooks/android-release.md). Read the spec before touching any of it.

@@ -32,6 +32,7 @@ import { YearInReviewCurator } from '../../src/memories/curators/year-in-review.
 import { MemoryCuratorContext } from '../../src/memories/curators/memory-curator.interface';
 import { resolveMemoriesSettings } from '../../src/memories/memories-settings.util';
 import { MemoriesSettingsValue } from '../../src/common/types/settings.types';
+import { defaultOrgId } from '../helpers/default-org';
 
 function resolveDatabaseUrl(): string {
   if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
@@ -102,6 +103,7 @@ describeMaybeDb('Memories — theme / seasonal / year-in-review (DB_GATED: real 
     createdStorageObjectIds.push(storageObjectId);
     await prisma.storageObject.create({
       data: {
+        orgId: await defaultOrgId(prisma),
         id: storageObjectId,
         name: `${storageObjectId}.jpg`,
         size: BigInt(2048),

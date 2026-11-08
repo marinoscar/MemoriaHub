@@ -24,6 +24,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
+import { defaultOrgId } from '../helpers/default-org';
 
 // ---------------------------------------------------------------------------
 // Build a Postgres connection string from environment variables, mirroring
@@ -293,9 +294,11 @@ async function seedTestData(prisma: PrismaClient): Promise<void> {
   });
 
   // Create storage objects
+  const orgId = await defaultOrgId(prisma);
   await prisma.storageObject.createMany({
     data: [
       {
+        orgId,
         id: STORAGE_1_ID,
         name: `migration-test-${RUN_ID}-1.jpg`,
         size: BigInt(1024),
@@ -307,6 +310,7 @@ async function seedTestData(prisma: PrismaClient): Promise<void> {
         uploadedById: USER_1_ID,
       },
       {
+        orgId,
         id: STORAGE_2_ID,
         name: `migration-test-${RUN_ID}-2.jpg`,
         size: BigInt(2048),

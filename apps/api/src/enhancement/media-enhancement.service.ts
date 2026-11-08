@@ -46,6 +46,7 @@ import {
 } from './enhance-prompt.builder';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 const SYSTEM_TAG = 'AI Enhanced';
 
@@ -87,6 +88,7 @@ export class MediaEnhancementService {
     private readonly thumbnails: MediaThumbnailService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: SystemSettingsService,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -1382,6 +1384,7 @@ export class MediaEnhancementService {
 
     const newObject = await this.prisma.storageObject.create({
       data: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         name: enhancedFilename,
         size: BigInt(bytes.length),
         mimeType: 'image/jpeg',

@@ -103,7 +103,7 @@ model Notification {
   // See this model's header comment: notifications_review_queue_live_uniq_idx,
   // a raw-SQL-only partial unique index, is added in migration
   // 20260805000000_add_notifications and is NOT representable here.
-  @@map("notifications")
+  @@map("mh_legacy_notifications")
 }
 
 // =============================================================================
@@ -136,7 +136,7 @@ model PushSubscription {
   user User @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("push_subscriptions")
+  @@map("mh_legacy_push_subscriptions")
 }
 
 // =============================================================================
@@ -157,6 +157,8 @@ enum NotificationDeliveryStatus {
   queued
   sent
   failed
+
+  @@map("MhLegacyNotificationDeliveryStatus")
 }
 
 model NotificationDelivery {
@@ -177,7 +179,7 @@ model NotificationDelivery {
   @@index([userId, type])
   @@index([status, createdAt])
   @@index([createdAt])
-  @@map("notification_deliveries")
+  @@map("mh_legacy_notification_deliveries")
 }
 
 // =============================================================================
@@ -203,6 +205,8 @@ enum NotificationBroadcastStatus {
   sent
   canceled
   failed
+
+  @@map("MhLegacyNotificationBroadcastStatus")
 }
 
 model NotificationBroadcast {
@@ -233,5 +237,5 @@ model NotificationBroadcast {
 
   @@index([status, scheduledFor])
   @@index([createdAt(sort: Desc)])
-  @@map("notification_broadcasts")
+  @@map("mh_legacy_notification_broadcasts")
 }

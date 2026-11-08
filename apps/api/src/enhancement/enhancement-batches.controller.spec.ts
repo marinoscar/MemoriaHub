@@ -57,6 +57,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
 
 const USER: RequestUser = {
   id: 'user-1',
@@ -134,6 +135,7 @@ describe('EnhancementBatchesController', () => {
       providers: [
         MediaEnhancementService,
         { provide: PrismaService, useValue: mockPrisma },
+        defaultOrgIdProvider,
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: {} },
         { provide: StorageProcessingRecoveryService, useValue: {} },

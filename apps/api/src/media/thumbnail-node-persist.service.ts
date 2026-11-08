@@ -34,6 +34,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
 import { thumbnailKeyPrefixFor } from '../storage/processing/thumbnail-key.util';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 @Injectable()
 export class ThumbnailNodePersistService {
@@ -44,6 +45,7 @@ export class ThumbnailNodePersistService {
     private readonly resolver: StorageProviderResolver,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
     private readonly thumbnailPrune: ThumbnailPruneService,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   async persistThumbnail(job: EnrichmentJob, result: ThumbnailResult): Promise<void> {
@@ -123,6 +125,7 @@ export class ThumbnailNodePersistService {
         updatedAt: new Date(),
       },
       create: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         name: `thumb-${originalObject.name}`,
         size: BigInt(result.bytes),
         mimeType: 'image/jpeg',

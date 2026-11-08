@@ -43,5 +43,5 @@ model AndroidAppRelease {
   @@unique([packageName, versionCode])
   @@index([createdAt])
   @@index([uploadedById])
-  @@map("android_app_releases")
+  @@map("mh_legacy_android_app_releases")
 }
