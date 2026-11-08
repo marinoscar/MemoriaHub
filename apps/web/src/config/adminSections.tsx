@@ -220,12 +220,13 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
     label: 'Storage',
     cards: [
       {
-        title: 'Storage Providers',
+        title: 'Object Storage',
         description:
-          'Manage S3, R2, and local storage credentials, set the active provider, and run migrations.',
+          'Choose the storage driver (S3, R2, S3-compatible or local disk), test it, and copy objects between providers.',
         Icon: StorageIcon,
-        path: '/admin/settings/storage/providers',
-        permission: 'storage_settings:read',
+        path: '/admin/settings/storage',
+        // The platform's `GET /api/admin/storage-config` (RETRO-D1); writes need `storage_config:write`.
+        permission: 'storage_config:read',
       },
       {
         title: 'Storage Insights',
