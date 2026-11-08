@@ -179,7 +179,11 @@ export class FaceDetectionService {
   // matching, and upserts MediaFaceStatus from an already-computed DTO.
   // ---------------------------------------------------------------------------
 
-  async persistFaces(job: MediaJobContext, result: FaceDetectionResult): Promise<void> {
+  async persistFaces(
+    job: MediaJobContext,
+    result: FaceDetectionResult,
+    executor: 'server' | 'node' = 'server',
+  ): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('face_detection job missing mediaItemId');
     }
@@ -220,6 +224,7 @@ export class FaceDetectionService {
         modelVersion: result.modelVersion,
         faces: normalized,
         isVideo: false,
+        executor,
       });
     }
 
