@@ -1,4 +1,4 @@
-import { AiToolDef } from '../../ai/providers/ai-provider.interface';
+import { AiToolDef } from '../../ai-port/legacy-ai-provider.types';
 import { SEARCHABLE_FIELDS } from '../searchable-fields.registry';
 
 type JsonSchemaProperty =

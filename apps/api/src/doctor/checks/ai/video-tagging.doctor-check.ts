@@ -6,7 +6,7 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { PrismaService } from '../../../prisma/prisma.service';
-import { AiProviderRegistry } from '../../../ai/providers/ai-provider.registry';
+import { AiProviderRegistry } from '../../../ai-port/legacy-ai-provider.registry';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
 import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 

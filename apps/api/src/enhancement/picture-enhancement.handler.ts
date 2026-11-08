@@ -12,7 +12,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
+import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import {
