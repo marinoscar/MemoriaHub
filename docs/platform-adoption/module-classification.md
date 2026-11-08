@@ -85,6 +85,8 @@ Drift for mapped modules comes from the slice view; `n/a (no slice)` means the m
 | `workflows` | 52 | n/a (no slice) | domain | `@marinoscar/memoriahub-api` (workflows) | J9 (#622) (jobs: C7 (#604)) | - | Rule-based media automation. |
 | `(root files)` | 4 | 0% / +195/-106 | divergence | host bindings (`app.module.ts`), `app-registrations` | B1 (#597), C1 (#575) | - | Wiring file; becomes a thin binding of the platform modules. |
 
+Slices adopted with no prior MemoriaHub module (no row above, nothing deleted): **alerts** (RETRO-H5, #609) is mounted in `src/platform/alerts/` with MemoriaHub's two rule kinds and five default rules; `NodeStaleOfflineTask` (app, until C2) still produces the offline state of legacy nodes, and `EnrichmentFailureNotificationListener` stays (the in-app inbox; alerts are the operator channel). Runbook: [alerts.md](../runbooks/alerts.md).
+
 ## Web: apps/web/src
 
 `components` and `pages` are split into one row per sub-directory (and `pages (root files)`); every other top-level directory has one row.
