@@ -8,10 +8,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NodeBackupController } from './node-backup.controller';
 import { NodeBackupService } from './node-backup.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { JwtAuthGuard, RolesGuard, PermissionsGuard, RequestUser } from '@marinoscar/platform-api/identity';
 
 const USER = { id: 'user-1' } as RequestUser;
 const NODE_ID = 'node-1';

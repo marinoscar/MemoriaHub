@@ -18,7 +18,8 @@
 import { Prisma } from '@prisma/client';
 import { MemoryCurationService } from '../curation/memory-curation.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DEFAULT_SYSTEM_SETTINGS, MemoriesSettingsValue } from '../../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
+import { MemoriesSettingsValue } from '../../settings/registry/namespaces/system/memories';
 import { OnThisDayCurator } from './on-this-day.curator';
 import { MemoryCuratorContext } from './memory-curator.interface';
 

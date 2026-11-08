@@ -1,0 +1,22 @@
+// =============================================================================
+// The platform host: how packaged controllers authenticate
+// =============================================================================
+//
+// Every packaged slice takes its route decorators from the app instead of
+// shipping its own, so a packaged route is never public by accident. Since
+// RETRO-B2 (#611) these are the identity slice's `@Auth` and `@Public`.
+// =============================================================================
+
+import { definePlatformHost } from '@marinoscar/platform-api/core';
+import { Auth, Public } from '@marinoscar/platform-api/identity';
+
+import type { PermissionName } from '../common/constants/roles.constants';
+
+export const platformHost = definePlatformHost({
+  access: {
+    requirePermissions: (permissions) =>
+      Auth({ permissions: [...permissions] as PermissionName[] }) as MethodDecorator & ClassDecorator,
+    requireAuthenticated: () => Auth() as MethodDecorator & ClassDecorator,
+    allowPublic: () => Public() as MethodDecorator & ClassDecorator,
+  },
+});

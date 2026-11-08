@@ -22,14 +22,14 @@ import { BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { WorkflowsService } from './workflows.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';
-import { DEFAULT_SYSTEM_SETTINGS } from '../common/types/settings.types';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { DEFAULT_SYSTEM_SETTINGS } from '../settings/registry/default-system-settings';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const CIRCLE_ID = randomUUID();
 const USER_ID = randomUUID();
@@ -81,7 +81,7 @@ describe('WorkflowsService — hard_delete trigger-compat guard', () => {
   beforeEach(async () => {
     prisma = createMockPrismaService();
 
-    const systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>> = {
+    const systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>> = {
       getSettings: jest.fn().mockResolvedValue({
         ...DEFAULT_SYSTEM_SETTINGS,
         features: { ...DEFAULT_SYSTEM_SETTINGS.features, workflows: true },
@@ -102,7 +102,7 @@ describe('WorkflowsService — hard_delete trigger-compat guard', () => {
         WorkflowDefinitionValidator,
         WorkflowConditionCompiler,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
         { provide: CircleMembershipService, useValue: circleMembership },
         { provide: MediaThumbnailService, useValue: thumbnails },
       ],
@@ -266,7 +266,7 @@ describe('WorkflowsService — hard_delete trigger-compat guard', () => {
 describe('WorkflowsService — scheduling (cron min-interval + next_run_at)', () => {
   let service: WorkflowsService;
   let prisma: MockPrismaService;
-  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
 
   beforeEach(async () => {
     prisma = createMockPrismaService();
@@ -292,7 +292,7 @@ describe('WorkflowsService — scheduling (cron min-interval + next_run_at)', ()
         WorkflowDefinitionValidator,
         WorkflowConditionCompiler,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
         { provide: CircleMembershipService, useValue: circleMembership },
         { provide: MediaThumbnailService, useValue: thumbnails },
       ],

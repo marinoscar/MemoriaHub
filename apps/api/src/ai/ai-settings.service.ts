@@ -6,8 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderRegistry } from './providers/ai-provider.registry';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
 import {
   UpsertAiCredentialsDto,
   TestAiProviderDto,
@@ -19,6 +18,7 @@ import {
   SetTranscriptionFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class AiSettingsService {
@@ -27,7 +27,7 @@ export class AiSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: AiProviderRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   /** Return the AI settings summary (no plaintext keys, no ciphertext) */

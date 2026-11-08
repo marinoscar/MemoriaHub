@@ -38,7 +38,7 @@ export class BroadcastFailureListener {
     if (event.outcome !== 'failed' || !BROADCAST_JOB_TYPES.has(event.type)) return;
 
     try {
-      const job = await this.prisma.enrichmentJob.findUnique({
+      const job = await this.prisma.job.findUnique({
         where: { id: event.jobId },
         select: { id: true, type: true, payload: true, attempts: true, lastError: true, finishedAt: true },
       });
@@ -47,7 +47,7 @@ export class BroadcastFailureListener {
 
       const kind = job.type === BROADCAST_START_TYPE ? 'Start' : 'Chunk';
       const cause = truncate(job.lastError ?? 'no error recorded', MAX_QUOTED_ERROR_LENGTH);
-      const result = await this.prisma.notificationBroadcast.updateMany({
+      const result = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
         // `scheduled` too: a start job that failed BEFORE its claim leaves the
         // broadcast scheduled with nothing left to start it.
         where: { id: broadcastId, status: { in: ['scheduled', 'sending'] } },

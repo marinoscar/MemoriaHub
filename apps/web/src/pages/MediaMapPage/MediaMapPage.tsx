@@ -30,6 +30,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import MapIcon from '@mui/icons-material/Map';
 import '../../lib/leaflet-setup';
+import { useShellMainVariant } from '@marinoscar/platform-web/shell/headless';
 import {
   aggregateLocations,
   listMediaLocations,
@@ -52,13 +53,17 @@ import type { MapCluster, MediaItem, MediaLocation, LocationExtent } from '../..
 
 /**
  * MUI default toolbar (AppBar) heights: 56px below the sm breakpoint, 64px at
- * sm and up. The map fills the remaining viewport height below it. `100dvh`
+ * sm and up. The map fills the remaining viewport height below it, less the
+ * shell's bottom padding. `100dvh`
  * (dynamic viewport height) accounts for mobile browser chrome that `100vh`
  * ignores.
  */
 const MAP_HEIGHT = {
-  xs: 'calc(100dvh - 56px)',
-  sm: 'calc(100dvh - 64px)',
+  // The shell's full-bleed <main> keeps its bottom padding (80px below `sm`,
+  // where it clears the fixed bottom bar; 24px at `sm` and up), so the map
+  // subtracts it too or the page scrolls by that much.
+  xs: 'calc(100dvh - 56px - 80px)',
+  sm: 'calc(100dvh - 64px - 24px)',
 } as const;
 
 /** Default map view used before locations load (world overview). */
@@ -227,6 +232,9 @@ function AlbumTile({ point, onClick }: AlbumTileProps) {
 // ---------------------------------------------------------------------------
 
 export default function MediaMapPage() {
+  // The map owns the whole content area: no padding, no banners, and the
+  // shell is not remounted on the way in or out (RETRO-F1, #571).
+  useShellMainVariant('full-bleed');
   const theme = useTheme();
   const { activeCircle } = useCircle();
   const { isLoading: authIsLoading } = useAuth();

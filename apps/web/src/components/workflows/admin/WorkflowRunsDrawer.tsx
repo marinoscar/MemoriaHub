@@ -40,7 +40,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import StopIcon from '@mui/icons-material/Stop';
 import type { AdminWorkflowRun } from '../../../services/adminWorkflows';
 import { isTerminalRunStatus } from '../../../utils/workflowFormat';
-import { DataTable, type DataTableRowAction } from '../../datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   WORKFLOW_RUNS_TABLE_ID,
   buildWorkflowRunColumns,

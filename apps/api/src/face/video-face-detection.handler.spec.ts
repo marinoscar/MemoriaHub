@@ -112,7 +112,7 @@ jest.mock('fs', () => {
 import { Readable } from 'stream';
 import { promises as fsPromises } from 'fs';
 import { tmpdir } from 'os';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { VideoFaceDetectionService } from './video-face-detection.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
@@ -127,7 +127,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'video_face_detection',
     mediaItemId: 'media-video-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 0,
     providerKey: null,
@@ -366,6 +366,7 @@ describe('VideoFaceDetectionHandler', () => {
       mockResolver as any,
       mockEnrichmentJobService as any,
       { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,
+      { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } as any,
     );
 
     handler = new VideoFaceDetectionHandler(
@@ -783,7 +784,7 @@ describe('VideoFaceDetectionHandler', () => {
       // The path handed to extractFrames is the same one the handler must clean up.
       const tmpVideoPath = mockFrameExtractor.extractFrames.mock.calls[0][0] as string;
       expect(typeof tmpVideoPath).toBe('string');
-      expect(tmpVideoPath).toMatch(/memoriaHub-vface-dl-.*\.mp4$/);
+      expect(tmpVideoPath).toMatch(/memoriahub-job-vface-dl-.*\.mp4$/);
 
       expect(mockUnlink).toHaveBeenCalledTimes(1);
       expect(mockUnlink).toHaveBeenCalledWith(tmpVideoPath);

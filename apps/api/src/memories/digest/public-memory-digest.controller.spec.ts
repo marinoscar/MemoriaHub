@@ -18,7 +18,7 @@ import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
 import { STORAGE_PROVIDER } from '../../storage/providers/storage-provider.interface';
-import { UserSettingsService } from '../../settings/user-settings/user-settings.service';
+import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import {
   signDigestImageToken,
   signDigestUnsubscribeToken,

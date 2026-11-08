@@ -2,9 +2,8 @@ import { Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Res 
 import { ApiOperation, ApiParam, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply } from 'fastify';
 
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
-import { Public } from '../../auth/decorators/public.decorator';
+import { Auth, Public } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ErrorDto } from '../../common/dto/error.dto';
 import {
   DownloadLinkDto,

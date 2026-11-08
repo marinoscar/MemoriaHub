@@ -19,7 +19,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -104,7 +104,7 @@ describe('FaceDetectionController — video face fields', () => {
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
       ],
     })
-      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
+      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
       .useValue({ canActivate: () => true })
       .compile();
 

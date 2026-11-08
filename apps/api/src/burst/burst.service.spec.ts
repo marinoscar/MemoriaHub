@@ -21,7 +21,6 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { ReviewRunService } from '../review-runs/review-run.service';
@@ -39,6 +38,7 @@ import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -258,7 +258,7 @@ describe('BurstService', () => {
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: DuplicateDetectionService, useValue: mockDuplicateDetectionService },
         { provide: ReviewRunService, useValue: mockReviewRuns },
       ],
@@ -1234,7 +1234,7 @@ describe('BurstService', () => {
       // force=false path (default opts): no succeeded jobs, no eligible items —
       // keeps the per-circle enqueue loop a no-op so these tests isolate the
       // eviction remediation step.
-      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.job.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
     }
 

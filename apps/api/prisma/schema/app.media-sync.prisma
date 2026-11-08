@@ -62,7 +62,9 @@ model MediaSyncDevice {
   updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz
 
   user    User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  pat     PersonalAccessToken?        @relation(fields: [patId], references: [id], onDelete: SetNull)
+  // PLATFORM-ADOPTION-SHIM(RETRO-B2): the FK media_sync_devices.pat_id -> personal_access_tokens(id) ON DELETE SET NULL
+  // exists in the database but is not modelled: PersonalAccessToken is not @extensible, so a back-relation cannot be
+  // added. Read the token with a separate query (MediaSyncService.attachPats).
   runs    MediaSyncRun[]
   reports MediaSyncDiagnosticReport[]
 

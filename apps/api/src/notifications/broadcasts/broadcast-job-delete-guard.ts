@@ -1,4 +1,4 @@
-import { EnrichmentJob, JobStatus } from '@prisma/client';
+import { EnrichmentJob, MhLegacyJobStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { broadcastIdOf } from './broadcast-constants';
@@ -17,11 +17,11 @@ export async function broadcastJobDeleteRefusal(
   prisma: PrismaService,
   job: Pick<EnrichmentJob, 'status' | 'payload'>,
 ): Promise<string | null> {
-  if (job.status !== JobStatus.pending) return null;
+  if (job.status !== MhLegacyJobStatus.pending) return null;
   const broadcastId = broadcastIdOf(job.payload);
   if (!broadcastId) return null;
 
-  const broadcast = await prisma.notificationBroadcast.findUnique({
+  const broadcast = await prisma.mhLegacyNotificationBroadcast.findUnique({
     where: { id: broadcastId },
     select: { id: true, status: true },
   });

@@ -49,68 +49,14 @@
  */
 
 import { randomUUID } from 'crypto';
-import { ResetStuckDto, RetryAllFailedDto } from '../../enrichment/enrichment-admin.controller';
 import { updateWorkflowSchema, UpdateWorkflowDto } from '../../workflows/dto/update-workflow.dto';
 import { updatePersonSchema, UpdatePersonDto } from '../../face/dto/people.dto';
 import { ReprocessFailedBodyDto } from '../../media/media-reprocess.controller';
-import { patchUserSettingsSchema, PatchUserSettingsDto } from '../../settings/dto/update-user-settings.dto';
+import { composePatchUserSettingsSchema } from '@marinoscar/platform-api/settings';
+import '../../settings/registry';
 import { AcceptLocationSuggestionDto } from '../../location-inference/dto/accept-location-suggestion.dto';
 
 describe('issue #289 — top-level .default({}) contract on all-optional Zod body schemas', () => {
-  // ===========================================================================
-  // ResetStuckDto — the DTO named explicitly in the issue.
-  // POST /api/admin/jobs/reset-stuck body { olderThanMinutes? }
-  // `resetStuckSchema` itself is not exported from enrichment-admin.controller.ts,
-  // so we reach it via the ZodDto's static `.schema` — createZodDto attaches the
-  // real schema instance there regardless of whether the local const is exported.
-  // ===========================================================================
-  describe('ResetStuckDto (apps/api/src/enrichment/enrichment-admin.controller.ts)', () => {
-    const schema = ResetStuckDto.schema;
-
-    it('parse(undefined) -> {} — THE #289 REGRESSION ASSERTION: this threw ZodError before commit 3f5d88f', () => {
-      expect(schema.parse(undefined)).toEqual({});
-    });
-
-    it('parse({}) -> {} (unchanged pre-existing behavior)', () => {
-      expect(schema.parse({})).toEqual({});
-    });
-
-    it('a valid populated body round-trips', () => {
-      expect(schema.parse({ olderThanMinutes: 15 })).toEqual({ olderThanMinutes: 15 });
-    });
-
-    it('an invalid field value still throws — the fix must not have loosened validation', () => {
-      expect(() => schema.parse({ olderThanMinutes: 0 })).toThrow();
-      expect(() => schema.parse({ olderThanMinutes: -5 })).toThrow();
-      expect(() => schema.parse({ olderThanMinutes: 15.5 })).toThrow();
-      expect(() => schema.parse({ olderThanMinutes: 'soon' })).toThrow();
-    });
-  });
-
-  // ===========================================================================
-  // RetryAllFailedDto — ResetStuckDto's sibling in the same controller/commit hunk.
-  // POST /api/admin/jobs/retry-failed body { type? }
-  // ===========================================================================
-  describe('RetryAllFailedDto (apps/api/src/enrichment/enrichment-admin.controller.ts)', () => {
-    const schema = RetryAllFailedDto.schema;
-
-    it('parse(undefined) -> {} — would have thrown before commit 3f5d88f', () => {
-      expect(schema.parse(undefined)).toEqual({});
-    });
-
-    it('parse({}) -> {} (unchanged)', () => {
-      expect(schema.parse({})).toEqual({});
-    });
-
-    it('a valid populated body round-trips', () => {
-      expect(schema.parse({ type: 'auto_tagging' })).toEqual({ type: 'auto_tagging' });
-    });
-
-    it('an invalid field value still throws', () => {
-      expect(() => schema.parse({ type: '' })).toThrow(); // min(1)
-      expect(() => schema.parse({ type: 123 })).toThrow(); // wrong type
-    });
-  });
 
   // ===========================================================================
   // UpdateWorkflowDto — the .strict() case. `.default({})` is placed LAST,
@@ -238,32 +184,31 @@ describe('issue #289 — top-level .default({}) contract on all-optional Zod bod
   // PatchUserSettingsDto — nested/complex settings-patch case (JSON Merge
   // Patch style, multiple optional nested objects).
   // ===========================================================================
-  describe('PatchUserSettingsDto (apps/api/src/settings/dto/update-user-settings.dto.ts)', () => {
-    it('parse(undefined) -> {} — would have thrown before commit 3f5d88f', () => {
-      expect(patchUserSettingsSchema.parse(undefined)).toEqual({});
+  describe('PatchUserSettingsDto (the platform settings slice, composed from the registry)', () => {
+    const patchUserSettingsSchema = composePatchUserSettingsSchema();
+
+    // RETRO-B3: the body is the platform's, composed from the namespace registry. It does NOT carry a
+    // top-level `.default({})`, so a bodyless PATCH is a 400 here (it was an accepted no-op). The web
+    // app always sends a body; recorded in docs/platform-adoption/local-exceptions.md.
+    it('parse(undefined) throws (a bodyless PATCH is refused)', () => {
+      expect(() => patchUserSettingsSchema.parse(undefined)).toThrow();
     });
 
-    it('parse({}) -> {} (unchanged)', () => {
+    it('parse({}) -> {} (an empty body is a no-op)', () => {
       expect(patchUserSettingsSchema.parse({})).toEqual({});
     });
 
     it('a valid populated body round-trips', () => {
       const result = patchUserSettingsSchema.parse({
         theme: 'dark',
-        profile: { displayName: 'Oscar' },
+        profile: { displayName: 'Person A' },
       });
-      expect(result).toEqual({ theme: 'dark', profile: { displayName: 'Oscar' } });
+      expect(result).toEqual({ theme: 'dark', profile: { displayName: 'Person A' } });
     });
 
     it('an invalid field value still throws', () => {
       expect(() => patchUserSettingsSchema.parse({ theme: 'purple' })).toThrow();
-      expect(() =>
-        patchUserSettingsSchema.parse({ profile: { customImageUrl: 'not-a-url' } }),
-      ).toThrow();
-    });
-
-    it('PatchUserSettingsDto.schema is the same schema instance exercised above', () => {
-      expect(PatchUserSettingsDto.schema).toBe(patchUserSettingsSchema);
+      expect(() => patchUserSettingsSchema.parse({ timezone: 'Mars/Olympus' })).toThrow();
     });
   });
 

@@ -41,8 +41,8 @@ import {
   createMockViewerUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
+import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
 
 const CIRCLE_ID = '5c1c1e00-0000-4000-8000-000000000001';

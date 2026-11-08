@@ -33,7 +33,7 @@ function sub(id: string, failureCount = 0) {
 
 function build(subs: any[], active: any = VAPID) {
   const prisma = {
-    pushSubscription: {
+    mhLegacyPushSubscription: {
       findMany: jest.fn().mockResolvedValue(subs),
       update: jest.fn(async ({ where, data }: any) => {
         const s = subs.find((x) => x.id === where.id);
@@ -100,7 +100,7 @@ describe('PushNotificationChannel.deliver', () => {
       TTL: PUSH_TTL_SECONDS,
       vapidDetails: { publicKey: 'PUB', privateKey: 'PRIV', subject: 'mailto:ops@example.com' },
     });
-    expect(prisma.pushSubscription.update).toHaveBeenCalledWith({
+    expect(prisma.mhLegacyPushSubscription.update).toHaveBeenCalledWith({
       where: { id: 's1' },
       data: expect.objectContaining({ failureCount: 0 }),
     });
@@ -116,13 +116,13 @@ describe('PushNotificationChannel.deliver', () => {
     const { channel, prisma } = build(subs);
     const r = await channel.deliver(ROW, VAPID);
     expect(r).toMatchObject({ success: true, attempted: 4, sent: 1, failed: 2, pruned: 2 });
-    const deleted = prisma.pushSubscription.delete.mock.calls.map((c: any) => c[0].where.id).sort();
+    const deleted = prisma.mhLegacyPushSubscription.delete.mock.calls.map((c: any) => c[0].where.id).sort();
     expect(deleted).toEqual(['dying', 'gone']);
   });
 
   it('never throws — an unexpected error becomes a failed result', async () => {
     const { channel, prisma } = build([sub('s1')]);
-    prisma.pushSubscription.findMany.mockRejectedValueOnce(new Error('db down'));
+    prisma.mhLegacyPushSubscription.findMany.mockRejectedValueOnce(new Error('db down'));
     const r = await channel.deliver(ROW, VAPID);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/db down/);

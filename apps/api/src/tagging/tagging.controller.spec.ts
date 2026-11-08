@@ -22,11 +22,11 @@ import {
 } from '../../test/mocks/prisma.mock';
 import {
   JobReason,
-  JobStatus,
+  MhLegacyJobStatus,
   MediaTagStatusType,
   MediaType,
 } from '@prisma/client';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 
 // ---------------------------------------------------------------------------
 // Shared mock services
@@ -88,7 +88,7 @@ describe('TaggingController', () => {
     // Default: enqueue returns a minimal pending job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
       id: 'job-1',
-      status: JobStatus.pending,
+      status: MhLegacyJobStatus.pending,
     });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -103,7 +103,7 @@ describe('TaggingController', () => {
       ],
     })
       .overrideGuard(
-        require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object,
+        require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object,
       )
       .useValue({ canActivate: () => true })
       .compile();
@@ -125,7 +125,7 @@ describe('TaggingController', () => {
       const result = await controller.rerunTagging('media-1', makeUser());
 
       expect(result.data.jobId).toBe('job-1');
-      expect(result.data.status).toBe(JobStatus.pending);
+      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
     });
 
     // -----------------------------------------------------------------------

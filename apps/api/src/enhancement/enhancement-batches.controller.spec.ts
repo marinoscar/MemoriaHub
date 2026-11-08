@@ -42,7 +42,7 @@
 
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { CircleRole, JobStatus, MediaEnhancementStatus } from '@prisma/client';
+import { CircleRole, MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/client';
 import { EnhancementBatchesController } from './enhancement-batches.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -54,9 +54,10 @@ import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.serv
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
+import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const USER: RequestUser = {
   id: 'user-1',
@@ -134,6 +135,7 @@ describe('EnhancementBatchesController', () => {
       providers: [
         MediaEnhancementService,
         { provide: PrismaService, useValue: mockPrisma },
+        defaultOrgIdProvider,
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: {} },
         { provide: StorageProcessingRecoveryService, useValue: {} },
@@ -142,7 +144,7 @@ describe('EnhancementBatchesController', () => {
         { provide: MediaEnrichmentService, useValue: {} },
         { provide: MediaThumbnailService, useValue: {} },
         { provide: EnrichmentJobService, useValue: {} },
-        { provide: SystemSettingsService, useValue: {} },
+        { provide: AppSystemSettingsService, useValue: {} },
       ],
     }).compile();
 
@@ -380,7 +382,7 @@ describe('EnhancementBatchesController', () => {
     beforeEach(() => {
       (mockPrisma.mediaEnhancementBatch.findUnique as jest.Mock).mockResolvedValue(makeBatch());
       (mockPrisma.mediaEnhancementBatch.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.mediaEnhancement.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
     });
 
@@ -426,10 +428,10 @@ describe('EnhancementBatchesController', () => {
 
       // Their job rows are deleted, scoped to status=pending — a running job
       // for the still-processing row can never match this filter.
-      expect(mockPrisma.enrichmentJob.deleteMany).toHaveBeenCalledWith({
+      expect(mockPrisma.job.deleteMany).toHaveBeenCalledWith({
         where: {
           type: 'picture_enhancement',
-          status: JobStatus.pending,
+          status: MhLegacyJobStatus.pending,
           OR: [
             { payload: { path: ['enhancementId'], equals: 'enh-p1' } },
             { payload: { path: ['enhancementId'], equals: 'enh-p2' } },
@@ -456,7 +458,7 @@ describe('EnhancementBatchesController', () => {
 
       const result = await controller.cancel(BATCH_ID, USER);
 
-      expect(mockPrisma.enrichmentJob.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.job.deleteMany).not.toHaveBeenCalled();
       expect(mockPrisma.mediaEnhancement.updateMany).not.toHaveBeenCalled();
       expect(result).toEqual({ batchId: BATCH_ID, status: 'cancelled', cancelled: 0 });
     });

@@ -7,9 +7,10 @@
 // on ENRICHMENT_WORKER_ENABLED so only worker instances schedule the sweep.
 // =============================================================================
 
+import { configuredWorkerMode } from '../platform/jobs/legacy-env';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -25,15 +26,15 @@ export class PictureEnhancementPurgeTask {
   @Cron(CronExpression.EVERY_HOUR)
   async handleScheduledPurge(): Promise<void> {
     // Only worker instances create/sweep staging objects.
-    if ((process.env['ENRICHMENT_WORKER_ENABLED'] ?? 'true') === 'false') {
+    if (configuredWorkerMode() === 'off') {
       return;
     }
 
     try {
-      const existing = await this.prisma.enrichmentJob.findFirst({
+      const existing = await this.prisma.job.findFirst({
         where: {
           type: 'picture_enhancement_purge',
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: ['pending', 'running'] },
         },
       });
 

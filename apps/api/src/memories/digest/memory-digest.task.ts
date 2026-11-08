@@ -28,16 +28,16 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason } from '@prisma/client';
 
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import {
   MEMORY_DIGEST_JOB_TYPE,
   MEMORY_DIGEST_PRIORITY,
   MemoryDigestService,
 } from './memory-digest.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** Circles fetched per keyset page — the sweep never loads them all at once. */
 const CIRCLE_PAGE_SIZE = 100;
@@ -67,7 +67,7 @@ export class MemoryDigestTask {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly digest: MemoryDigestService,
   ) {}
 
@@ -149,31 +149,33 @@ export class MemoryDigestTask {
 
       // Two batched reads per page instead of two per circle.
       const [inFlight, lastSucceeded] = await Promise.all([
-        this.prisma.enrichmentJob.findMany({
+        this.prisma.job.findMany({
           where: {
             type: MEMORY_DIGEST_JOB_TYPE,
-            circleId: { in: circleIds },
-            status: { in: [JobStatus.pending, JobStatus.running] },
+            subjectType: 'circle',
+            subjectId: { in: circleIds },
+            status: { in: ['pending', 'running'] },
           },
-          select: { circleId: true },
+          select: { subjectId: true },
         }),
-        this.prisma.enrichmentJob.groupBy({
-          by: ['circleId'],
+        this.prisma.job.groupBy({
+          by: ['subjectId'],
           where: {
             type: MEMORY_DIGEST_JOB_TYPE,
-            circleId: { in: circleIds },
-            status: JobStatus.succeeded,
+            subjectType: 'circle',
+            subjectId: { in: circleIds },
+            status: 'succeeded',
           },
           _max: { finishedAt: true },
         }),
       ]);
 
       const busy = new Set(
-        inFlight.map((j) => j.circleId).filter((id): id is string => !!id),
+        inFlight.map((j) => j.subjectId).filter((id): id is string => !!id),
       );
       const lastSuccessAt = new Map<string, Date | null>();
       for (const row of lastSucceeded) {
-        if (row.circleId) lastSuccessAt.set(row.circleId, row._max.finishedAt);
+        if (row.subjectId) lastSuccessAt.set(row.subjectId, row._max.finishedAt);
       }
 
       for (const circleId of circleIds) {

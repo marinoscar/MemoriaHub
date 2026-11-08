@@ -10,7 +10,7 @@
  *   - bypass-eligible -> run transitions straight to running and batches enqueue.
  *   - otherwise -> awaiting_approval.
  *
- * No database required -- PrismaService, SystemSettingsService,
+ * No database required -- PrismaService, AppSystemSettingsService,
  * WorkflowConditionCompiler, WorkflowRunService, and the handler registry are
  * all mocked. The handler is constructed directly (plain class, no other Nest
  * wiring needed) mirroring the pure-constructor style used by the Phase 1
@@ -22,13 +22,13 @@ import { randomUUID } from 'crypto';
 import { WorkflowEvaluateHandler } from './workflow-evaluate.handler';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowRunService } from './workflow-run.service';
 import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const RUN_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
@@ -105,7 +105,7 @@ describe('WorkflowEvaluateHandler', () => {
   let handler: WorkflowEvaluateHandler;
   let prisma: MockPrismaService;
   let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
-  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let compiler: jest.Mocked<Pick<WorkflowConditionCompiler, 'compile'>>;
   let runService: jest.Mocked<Pick<WorkflowRunService, 'shouldBypassApproval' | 'enqueueExecuteBatches'>>;
 
@@ -122,7 +122,7 @@ describe('WorkflowEvaluateHandler', () => {
     handler = new WorkflowEvaluateHandler(
       registry as unknown as EnrichmentHandlerRegistry,
       prisma as unknown as PrismaService,
-      systemSettings as unknown as SystemSettingsService,
+      systemSettings as unknown as AppSystemSettingsService,
       compiler as unknown as WorkflowConditionCompiler,
       runService as unknown as WorkflowRunService,
       // #247 producer — fire-and-forget, asserted nowhere here.

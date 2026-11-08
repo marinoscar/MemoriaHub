@@ -36,8 +36,8 @@ import {
 import { resetPrismaMock } from '../mocks/prisma.mock';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 import { createMockContributorUser, authHeader } from '../helpers/auth-mock.helper';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
+import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { WorkflowTriggerListener } from '../../src/workflows/runs/workflow-trigger.listener';
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowMicroRunFinalizeTask } from '../../src/workflows/runs/workflow-micro-run-finalize.task';
@@ -151,8 +151,8 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
     setupBaseMocks();
     jest.clearAllMocks();
     setupWorkflowsSettings(context);
-    context.prismaMock.enrichmentJob.findFirst.mockResolvedValue(null);
-    context.prismaMock.enrichmentJob.create.mockImplementation(
+    context.prismaMock.job.findFirst.mockResolvedValue(null);
+    context.prismaMock.job.create.mockImplementation(
       async ({ data }: any) => ({ id: randomUUID(), ...data }) as any,
     );
     context.prismaMock.auditEvent.create.mockResolvedValue({} as any);
@@ -234,16 +234,17 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       context.prismaMock.mediaTagStatus.findUnique.mockResolvedValue(null);
       context.prismaMock.mediaFaceStatus.findUnique.mockResolvedValue(null);
       context.prismaMock.locationSuggestion.findUnique.mockResolvedValue(null);
-      context.prismaMock.enrichmentJob.findMany.mockResolvedValue([] as any);
+      context.prismaMock.job.findMany.mockResolvedValue([] as any);
 
       const listener = context.module.get(WorkflowTriggerListener);
       await listener.handleObjectProcessed(new ObjectProcessedEvent(storageObjectId));
 
-      const evalItemCall = (context.prismaMock.enrichmentJob.create as jest.Mock).mock.calls.find(
+      const evalItemCall = (context.prismaMock.job.create as jest.Mock).mock.calls.find(
         (c) => c[0].data.type === 'workflow_evaluate_item',
       );
       expect(evalItemCall).toBeDefined();
-      expect(evalItemCall[0].data.payload).toEqual({ workflowId, mediaItemId });
+      // the circle of a media-item job rides in the payload (EnrichmentJobService; the platform job has no circle column)
+      expect(evalItemCall[0].data.payload).toEqual({ workflowId, mediaItemId, circleId: CIRCLE_ID });
 
       // -----------------------------------------------------------------------
       // 2. Drive WorkflowEvaluateItemHandler directly against the synthesized
@@ -313,7 +314,7 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       const finalizeTask = context.module.get(WorkflowMicroRunFinalizeTask);
       await finalizeTask.handleTick();
 
-      const executeCall = (context.prismaMock.enrichmentJob.create as jest.Mock).mock.calls.find(
+      const executeCall = (context.prismaMock.job.create as jest.Mock).mock.calls.find(
         (c) => c[0].data.type === 'workflow_execute_batch',
       );
       expect(executeCall).toBeDefined();
@@ -386,7 +387,7 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
 
       expect(context.prismaMock.workflow.findMany).not.toHaveBeenCalled();
       expect(
-        (context.prismaMock.enrichmentJob.create as jest.Mock).mock.calls.some(
+        (context.prismaMock.job.create as jest.Mock).mock.calls.some(
           (c) => c[0].data.type === 'workflow_evaluate_item',
         ),
       ).toBe(false);
@@ -412,7 +413,7 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       // Master switch short-circuits before the workflow lookup even runs.
       expect(context.prismaMock.workflow.findMany).not.toHaveBeenCalled();
       expect(
-        (context.prismaMock.enrichmentJob.create as jest.Mock).mock.calls.some(
+        (context.prismaMock.job.create as jest.Mock).mock.calls.some(
           (c) => c[0].data.type === 'workflow_evaluate_item',
         ),
       ).toBe(false);
@@ -503,7 +504,7 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       // -- the unattended-vs-manual distinction only affects the LATER
       // approval-bypass decision inside WorkflowEvaluateHandler, not evaluate
       // enqueueing itself.
-      const evalCall = (context.prismaMock.enrichmentJob.create as jest.Mock).mock.calls.find(
+      const evalCall = (context.prismaMock.job.create as jest.Mock).mock.calls.find(
         (c) => c[0].data.type === 'workflow_evaluate',
       );
       expect(evalCall).toBeDefined();

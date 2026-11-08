@@ -12,12 +12,10 @@ import {
   createMockViewerUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
-import {
-  DEFAULT_SYSTEM_SETTINGS,
-  SystemSettingsValue,
-} from '../../src/common/types/settings.types';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
-import { encryptSecret } from '../../src/common/crypto/secret-cipher';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
+import type { AppSystemSettingsDocument as SystemSettingsValue } from '../../src/settings/app-settings.types';
+import { SystemSettingsService } from '@marinoscar/platform-api/settings';
+import { encryptSecret } from '../../src/legacy/legacy-secret-cipher';
 
 describe('System Settings Integration', () => {
   let context: TestContext;

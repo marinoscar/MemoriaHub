@@ -1,12 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma, DatabaseBackupTrigger } from '@prisma/client';
+import { Prisma, MhLegacyDatabaseBackupTrigger } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import type { StorageProvider } from '../storage/providers/storage-provider.interface';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
@@ -22,6 +21,7 @@ import {
   readPgClientMajor,
   readServerMajor,
 } from './pg-version.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * How often the run's `lastHeartbeatAt` / `bytesWritten` are refreshed while
@@ -48,7 +48,7 @@ const DEFAULT_PG_RESTORE_LIST_TIMEOUT_MS = 30 * 60 * 1000; // 30m
 const MAX_LAST_ERROR_CHARS = 4000;
 
 export interface StartBackupOptions {
-  trigger: DatabaseBackupTrigger;
+  trigger: MhLegacyDatabaseBackupTrigger;
   /** User who triggered a manual run; null for scheduled/system runs. */
   createdById?: string | null;
 }
@@ -96,7 +96,7 @@ export class DatabaseBackupRunnerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
   ) {}
 
@@ -201,7 +201,7 @@ export class DatabaseBackupRunnerService {
   private async claimRun(opts: StartBackupOptions): Promise<string> {
     const now = new Date();
     try {
-      const run = await this.prisma.databaseBackupRun.create({
+      const run = await this.prisma.mhLegacyDatabaseBackupRun.create({
         data: {
           status: 'running',
           trigger: opts.trigger,
@@ -217,7 +217,7 @@ export class DatabaseBackupRunnerService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        const active = await this.prisma.databaseBackupRun.findFirst({
+        const active = await this.prisma.mhLegacyDatabaseBackupRun.findFirst({
           where: { status: { in: ['pending', 'running'] } },
           select: { id: true },
           orderBy: { startedAt: 'desc' },
@@ -247,7 +247,7 @@ export class DatabaseBackupRunnerService {
     const storageKey = buildStorageKey(runId, new Date());
     const bucket = safeGetBucket(provider);
 
-    await this.prisma.databaseBackupRun.update({
+    await this.prisma.mhLegacyDatabaseBackupRun.update({
       where: { id: runId },
       data: {
         storageProvider: providerId,
@@ -285,7 +285,7 @@ export class DatabaseBackupRunnerService {
       this.readLatestMigrationName(),
     ]);
 
-    await this.prisma.databaseBackupRun.update({
+    await this.prisma.mhLegacyDatabaseBackupRun.update({
       where: { id: runId },
       data: {
         status: 'completed',
@@ -509,7 +509,7 @@ export class DatabaseBackupRunnerService {
 
   private async safeUpdateProgress(runId: string, bytes: bigint): Promise<void> {
     try {
-      await this.prisma.databaseBackupRun.update({
+      await this.prisma.mhLegacyDatabaseBackupRun.update({
         where: { id: runId },
         data: { lastHeartbeatAt: new Date(), bytesWritten: bytes },
       });
@@ -538,7 +538,7 @@ export class DatabaseBackupRunnerService {
     let run: { storageProvider: string | null; storageKey: string | null; bucket: string | null } | null =
       null;
     try {
-      run = await this.prisma.databaseBackupRun.findUnique({
+      run = await this.prisma.mhLegacyDatabaseBackupRun.findUnique({
         where: { id: runId },
         select: { storageProvider: true, storageKey: true, bucket: true },
       });
@@ -566,7 +566,7 @@ export class DatabaseBackupRunnerService {
     }
 
     try {
-      await this.prisma.databaseBackupRun.update({
+      await this.prisma.mhLegacyDatabaseBackupRun.update({
         where: { id: runId },
         data: {
           status: 'failed',

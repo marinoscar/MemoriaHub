@@ -16,10 +16,9 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
 import { TrashEmptyRunService } from './trash-empty-run.service';
 import { ListTrashEmptyRunItemsQueryDto } from './dto/list-trash-empty-run-items-query.dto';
 

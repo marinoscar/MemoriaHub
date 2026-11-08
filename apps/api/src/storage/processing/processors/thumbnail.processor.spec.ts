@@ -7,6 +7,7 @@ import { StorageProviderResolver } from '../../providers/storage-provider.resolv
 import { createMockPrismaService, MockPrismaService } from '../../../../test/mocks/prisma.mock';
 import { createMockStorageProvider } from '../../../../test/mocks/storage-provider.mock';
 import { buildThumbnailKey, thumbnailVersionFromBytes } from '../thumbnail-key.util';
+import { defaultOrgIdProvider } from '../../../../test/mocks/default-org.mock';
 
 // The mocked sharp below always renders these exact bytes, so the versioned,
 // content-addressed thumbnail key (issue #434) is fully determined here.
@@ -72,6 +73,7 @@ describe('ThumbnailProcessor', () => {
       providers: [
         ThumbnailProcessor,
         { provide: PrismaService, useValue: mockPrisma },
+        defaultOrgIdProvider,
         { provide: STORAGE_PROVIDER, useValue: mockStaticProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
       ],

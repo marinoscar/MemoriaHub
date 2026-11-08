@@ -3,9 +3,17 @@
 // =============================================================================
 //
 // Control-plane service for the distributed worker-node data plane. Handles node
-// registration/lifecycle, heartbeats, atomic job claiming (delegated to the
-// shared EnrichmentClaimService), lease renewal, admin listing with health, and
-// the static parity model manifest that nodes download to match server output.
+// registration/lifecycle, heartbeats, lease renewal, admin listing with health,
+// and the static parity model manifest that nodes download to match server output.
+//
+// JOB EXECUTION IS PAUSED UNTIL RETRO-C2 (#575). The queue is the platform
+// `jobs` table since RETRO-C1; a legacy worker node is registered in
+// `mh_legacy_worker_nodes`, which `jobs.claimed_by_node_id` cannot reference, so
+// a legacy node cannot hold a platform job. Until the nodes slice replaces this
+// service (C2), `POST /api/nodes/:id/claim` answers an empty list and the
+// job-scoped endpoints (result, failure) answer 409. The server's own worker
+// runs every job (`JOBS_WORKER_MODE=all`). Registration, heartbeats, listing,
+// credentials and the Local Media Backup feed are untouched.
 // =============================================================================
 
 import {
@@ -20,15 +28,13 @@ import {
 import { randomUUID } from 'node:crypto';
 import {
   EnrichmentJob,
-  JobStatus,
+  MhLegacyJobStatus,
   NodeBackupRunStatus,
-  NodeStatus,
-  WorkerNode,
+  MhLegacyNodeStatus,
+  MhLegacyWorkerNode,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -37,14 +43,14 @@ import {
   randomThumbnailVersion,
 } from '../storage/processing/thumbnail-key.util';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
-import { decryptSecret } from '../common/crypto/secret-cipher';
+import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
 import type {
   JobCredentialsResult,
   VideoAutoTaggingJobCredentials,
 } from './dto/job-credentials.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Input shapes
@@ -60,7 +66,7 @@ export interface RegisterNodeInput {
 }
 
 export interface HeartbeatInput {
-  status?: NodeStatus;
+  status?: MhLegacyNodeStatus;
   capabilities?: unknown;
   concurrency?: number;
 }
@@ -69,9 +75,9 @@ export interface HeartbeatInput {
 // Defaults resolved from env
 // ---------------------------------------------------------------------------
 
-/** Default lease duration (ms) for claimed jobs. */
+/** Default lease duration (ms) a renewal extends a legacy claim by (30 minutes). */
 function defaultLeaseMs(): number {
-  return Number(process.env.ENRICHMENT_LEASE_MS) || 1_800_000;
+  return 1_800_000;
 }
 
 /** Freshness window (ms) beyond which a heartbeat is considered stale. */
@@ -110,16 +116,15 @@ export class NodesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly enrichmentClaimService: EnrichmentClaimService,
     private readonly registry: EnrichmentHandlerRegistry,
-    private readonly terminal: EnrichmentTerminalService,
     private readonly objectsService: ObjectsService,
     private readonly storageProviderResolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly aiSettingsService: AiSettingsService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly autoTaggingService: AutoTaggingService,
     private readonly videoAutoTaggingService: VideoAutoTaggingService,
+    private readonly geoGoogleCredential: GeoGoogleCredentialResolver,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -133,8 +138,8 @@ export class NodesService {
    * node backup control plane (NodeBackupService/NodeBackupController), which
    * is why it is public.
    */
-  async assertOwnership(userId: string, nodeId: string): Promise<WorkerNode> {
-    const node = await this.prisma.workerNode.findUnique({ where: { id: nodeId } });
+  async assertOwnership(userId: string, nodeId: string): Promise<MhLegacyWorkerNode> {
+    const node = await this.prisma.mhLegacyWorkerNode.findUnique({ where: { id: nodeId } });
     if (!node) {
       throw new NotFoundException(`WorkerNode ${nodeId} not found`);
     }
@@ -161,7 +166,7 @@ export class NodesService {
   ): Promise<{ nodeId: string; reattached: boolean }> {
     const now = new Date();
 
-    const existing = await this.prisma.workerNode.findUnique({
+    const existing = await this.prisma.mhLegacyWorkerNode.findUnique({
       where: { createdById_name: { createdById: userId, name: dto.name } },
     });
     if (existing) {
@@ -169,7 +174,7 @@ export class NodesService {
     }
 
     try {
-      const node = await this.prisma.workerNode.create({
+      const node = await this.prisma.mhLegacyWorkerNode.create({
         data: {
           name: dto.name,
           hostname: dto.hostname,
@@ -177,7 +182,7 @@ export class NodesService {
           cliVersion: dto.cliVersion,
           eligibleTypes: dto.eligibleTypes,
           concurrency: dto.concurrency ?? 1,
-          status: NodeStatus.online,
+          status: MhLegacyNodeStatus.online,
           registeredAt: now,
           lastHeartbeatAt: now,
           createdById: userId,
@@ -188,7 +193,7 @@ export class NodesService {
       // A concurrent replica won the find-then-create race (P2002 on the
       // (created_by_id, name) unique) — re-read its row and reattach to it.
       if (e.code === 'P2002') {
-        const raced = await this.prisma.workerNode.findUnique({
+        const raced = await this.prisma.mhLegacyWorkerNode.findUnique({
           where: { createdById_name: { createdById: userId, name: dto.name } },
         });
         if (raced) {
@@ -207,7 +212,7 @@ export class NodesService {
    * documented conflict policy for replica restarts.
    */
   private async reattach(
-    existing: WorkerNode,
+    existing: MhLegacyWorkerNode,
     dto: RegisterNodeInput,
     now: Date,
   ): Promise<{ nodeId: string; reattached: true }> {
@@ -221,7 +226,7 @@ export class NodesService {
       );
     }
 
-    const node = await this.prisma.workerNode.update({
+    const node = await this.prisma.mhLegacyWorkerNode.update({
       where: { id: existing.id },
       data: {
         hostname: dto.hostname,
@@ -229,7 +234,7 @@ export class NodesService {
         cliVersion: dto.cliVersion,
         eligibleTypes: dto.eligibleTypes,
         concurrency: dto.concurrency ?? 1,
-        status: NodeStatus.online,
+        status: MhLegacyNodeStatus.online,
         lastHeartbeatAt: now,
       },
     });
@@ -240,11 +245,11 @@ export class NodesService {
   // deregister
   // -------------------------------------------------------------------------
 
-  async deregister(userId: string, nodeId: string): Promise<{ status: NodeStatus }> {
+  async deregister(userId: string, nodeId: string): Promise<{ status: MhLegacyNodeStatus }> {
     await this.assertOwnership(userId, nodeId);
-    const updated = await this.prisma.workerNode.update({
+    const updated = await this.prisma.mhLegacyWorkerNode.update({
       where: { id: nodeId },
-      data: { status: NodeStatus.offline },
+      data: { status: MhLegacyNodeStatus.offline },
     });
     return { status: updated.status };
   }
@@ -286,16 +291,16 @@ export class NodesService {
   async markStaleNodesOffline(): Promise<number> {
     const cutoff = new Date(Date.now() - offlineThresholdMs());
 
-    const { count } = await this.prisma.workerNode.updateMany({
+    const { count } = await this.prisma.mhLegacyWorkerNode.updateMany({
       where: {
-        status: { in: [NodeStatus.online, NodeStatus.draining] },
+        status: { in: [MhLegacyNodeStatus.online, MhLegacyNodeStatus.draining] },
         OR: [
           { lastHeartbeatAt: { lt: cutoff } },
           // Never heartbeated at all — age by registration time instead.
           { lastHeartbeatAt: null, registeredAt: { lt: cutoff } },
         ],
       },
-      data: { status: NodeStatus.offline },
+      data: { status: MhLegacyNodeStatus.offline },
     });
 
     return count;
@@ -311,7 +316,7 @@ export class NodesService {
     dto: HeartbeatInput,
   ): Promise<{ ok: true }> {
     await this.assertOwnership(userId, nodeId);
-    await this.prisma.workerNode.update({
+    await this.prisma.mhLegacyWorkerNode.update({
       where: { id: nodeId },
       data: {
         lastHeartbeatAt: new Date(),
@@ -338,7 +343,7 @@ export class NodesService {
   ): Promise<{ jobs: Array<{ job: EnrichmentJob; inputUrl: string | null; params: unknown }> }> {
     const node = await this.assertOwnership(userId, nodeId);
 
-    if (node.status === NodeStatus.disabled) {
+    if (node.status === MhLegacyNodeStatus.disabled) {
       throw new ForbiddenException('This worker node is disabled and cannot claim jobs');
     }
 
@@ -353,13 +358,7 @@ export class NodesService {
     const limit = Math.min(max ?? node.concurrency, node.concurrency);
     const leaseMs = defaultLeaseMs();
 
-    const claimed = await this.enrichmentClaimService.claim({
-      nodeId,
-      executor: 'node',
-      eligibleTypes,
-      limit,
-      leaseMs,
-    });
+    const claimed = await this.claimLegacyJobs({ nodeId, eligibleTypes, limit, leaseMs });
 
     const jobs = await Promise.all(
       claimed.map(async (job) => ({
@@ -370,6 +369,25 @@ export class NodesService {
     );
 
     return { jobs };
+  }
+
+  /**
+   * PLATFORM-ADOPTION-SHIM(RETRO-C2): the claim of the old queue. The queue is the
+   * platform `jobs` table and a legacy node cannot hold a platform job (see the
+   * header), so nothing is claimable by a legacy node and this answers an empty list.
+   * RETRO-C2 replaces the service; the input-URL and params logic below is what the
+   * platform's `NODE_JOB_INPUTS` port takes over.
+   */
+  protected async claimLegacyJobs(request: {
+    nodeId: string;
+    eligibleTypes: string[];
+    limit: number;
+    leaseMs: number;
+  }): Promise<EnrichmentJob[]> {
+    this.logger.debug(
+      `Node ${request.nodeId} asked to claim up to ${request.limit} job(s): node execution is paused until RETRO-C2; answering an empty list`,
+    );
+    return [];
   }
 
   /**
@@ -526,7 +544,7 @@ export class NodesService {
     const result = await this.prisma.enrichmentJob.updateMany({
       where: {
         id: jobId,
-        status: JobStatus.running,
+        status: MhLegacyJobStatus.running,
         claimedByNodeId: nodeId,
       },
       data: { leaseExpiresAt },
@@ -568,7 +586,7 @@ export class NodesService {
 
     if (
       job.claimedByNodeId !== nodeId ||
-      job.status !== JobStatus.running ||
+      job.status !== MhLegacyJobStatus.running ||
       !job.leaseExpiresAt ||
       job.leaseExpiresAt <= new Date()
     ) {
@@ -898,13 +916,12 @@ export class NodesService {
       'offline';
 
     if (activeProvider === 'google') {
-      const cred = await this.prisma.geoProviderCredential.findUnique({ where: { provider: 'google' } });
-      if (!cred || !cred.enabled) {
+      const apiKey = await this.geoGoogleCredential.resolveApiKey();
+      if (!apiKey) {
         // Mirrors GeoLocationService's own fallback-to-offline behavior when
         // google is configured active but the credential is missing/disabled.
         return { type: 'geocode', provider: 'offline', lat, lng };
       }
-      const apiKey = decryptSecret(cred.encryptedKey);
       return { type: 'geocode', provider: 'google', apiKey, lat, lng };
     }
 
@@ -924,11 +941,40 @@ export class NodesService {
   }
 
   /**
+   * PLATFORM-ADOPTION-SHIM(RETRO-C2): a legacy node's result or failure cannot be
+   * settled on the platform queue (see the header), so the report is refused. It is
+   * unreachable in practice: the cutover released every legacy claim, so
+   * `assertJobHeldByNode` answers 409 first.
+   */
+  protected legacyPlanePaused(): never {
+    throw new ConflictException(
+      'node job execution is paused until the worker-node slice moves to the platform queue (RETRO-C2); the server runs every job',
+    );
+  }
+
+  /** PLATFORM-ADOPTION-SHIM(RETRO-C2): settles a legacy node's success. Refused; see the header. */
+  protected async settleLegacySucceeded(job: EnrichmentJob): Promise<void> {
+    void job;
+    this.legacyPlanePaused();
+  }
+
+  /** PLATFORM-ADOPTION-SHIM(RETRO-C2): settles a legacy node's failure. Refused; see the header. */
+  protected async settleLegacyFailed(
+    job: EnrichmentJob,
+    error: unknown,
+    opts?: { rateLimited?: boolean; retryAfterMs?: number | null },
+  ): Promise<void> {
+    void job;
+    void error;
+    void opts;
+    this.legacyPlanePaused();
+  }
+
+  /**
    * Ingest a node-computed result for a claimed job: validate it against the
-   * handler's nodeResultSchema, persist via the handler's persistNodeResult
-   * (the persist half of the compute/persist split), then complete the job
-   * through the shared terminal service (same succeeded semantics as the
-   * in-process worker).
+   * handler's nodeResultSchema, persist via the handler's persistNodeResult (the
+   * persist half of the compute/persist split), then settle the job. Settling is
+   * refused until RETRO-C2: see the header.
    */
   async submitJobResult(
     userId: string,
@@ -975,22 +1021,20 @@ export class NodesService {
       this.logger.error(
         `Node ${nodeId} result persist failed for EnrichmentJob ${jobId} (type="${job.type}"): ${msg}`,
       );
-      await this.terminal.completeFailed(job, err);
+      await this.settleLegacyFailed(job, err);
       throw new InternalServerErrorException(
         'failed to persist node result; job routed through the failure/retry path',
       );
     }
 
-    await this.terminal.completeSucceeded(job);
+    await this.settleLegacySucceeded(job);
     return { ok: true };
   }
 
   /**
-   * Ingest a node-reported failure for a claimed job. Routed through the same
-   * terminal failure state machine as the in-process worker: rate-limited
-   * reports enter the deferral path (and trip the shared provider-throttle
-   * gate); everything else enters the exponential-retry path. The node's
-   * `willRetry` flag is advisory only — the server's attempts budget decides.
+   * Ingest a node-reported failure for a claimed job. Paused until RETRO-C2 (see
+   * the header); the platform nodes slice routes it through the platform terminal
+   * state machine.
    */
   async reportJobFailure(
     userId: string,
@@ -1000,7 +1044,7 @@ export class NodesService {
   ): Promise<{ ok: true }> {
     const job = await this.assertJobHeldByNode(userId, nodeId, jobId);
 
-    await this.terminal.completeFailed(job, body.error, {
+    await this.settleLegacyFailed(job, body.error, {
       rateLimited: body.rateLimited,
       retryAfterMs: body.retryAfterMs ?? null,
     });
@@ -1017,8 +1061,8 @@ export class NodesService {
    * Shared between `listNodes` (bulk) and `getNode` (single-node detail) so
    * the two surfaces can never silently drift apart.
    */
-  private deriveNodeHealth(node: WorkerNode): 'healthy' | 'stale' | 'offline' {
-    if (node.status === NodeStatus.offline || node.status === NodeStatus.disabled) {
+  private deriveNodeHealth(node: MhLegacyWorkerNode): 'healthy' | 'stale' | 'offline' {
+    if (node.status === MhLegacyNodeStatus.offline || node.status === MhLegacyNodeStatus.disabled) {
       return 'offline';
     }
     const now = Date.now();
@@ -1055,11 +1099,11 @@ export class NodesService {
       const bucket =
         countsByNode.get(row.claimedByNodeId) ??
         { running: 0, succeeded: 0, failed: 0 };
-      if (row.status === JobStatus.running) {
+      if (row.status === MhLegacyJobStatus.running) {
         bucket.running += row._count._all;
-      } else if (row.status === JobStatus.succeeded) {
+      } else if (row.status === MhLegacyJobStatus.succeeded) {
         bucket.succeeded += row._count._all;
-      } else if (row.status === JobStatus.failed) {
+      } else if (row.status === MhLegacyJobStatus.failed) {
         bucket.failed += row._count._all;
       }
       countsByNode.set(row.claimedByNodeId, bucket);
@@ -1105,7 +1149,7 @@ export class NodesService {
   }
 
   async listNodes(userId?: string) {
-    const nodes = await this.prisma.workerNode.findMany({
+    const nodes = await this.prisma.mhLegacyWorkerNode.findMany({
       where: userId ? { createdById: userId } : undefined,
       orderBy: { registeredAt: 'desc' },
       // Single joined query for the fleet backup summary — the narrow select
@@ -1194,7 +1238,7 @@ export class NodesService {
 
   async deleteNode(nodeId: string): Promise<{ deleted: true }> {
     // claimedJobs FK is SetNull, so deleting a node is safe and orphans nothing.
-    await this.prisma.workerNode.delete({ where: { id: nodeId } });
+    await this.prisma.mhLegacyWorkerNode.delete({ where: { id: nodeId } });
     return { deleted: true };
   }
 

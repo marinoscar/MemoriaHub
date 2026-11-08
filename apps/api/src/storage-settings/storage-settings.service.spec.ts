@@ -21,11 +21,11 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { StorageSettingsService } from './storage-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { encryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret } from '../legacy/legacy-secret-cipher';
 import { Readable } from 'stream';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -130,7 +130,7 @@ describe('StorageSettingsService', () => {
         StorageSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();

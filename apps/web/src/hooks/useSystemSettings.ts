@@ -1,105 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
-import { api, ApiError } from '../services/api';
-import { SystemSettings } from '../types';
-import { useIsMounted } from './useIsMounted';
+import { useSystemSettings as usePlatformSystemSettings } from '@marinoscar/platform-web/settings/headless';
 
-interface UseSystemSettingsReturn {
-  settings: SystemSettings | null;
-  isLoading: boolean;
-  error: string | null;
-  isSaving: boolean;
-  updateSettings: (updates: Partial<SystemSettings>) => Promise<void>;
-  replaceSettings: (settings: Omit<SystemSettings, 'updatedAt' | 'updatedBy' | 'version'>) => Promise<void>;
-  refresh: () => Promise<void>;
-}
+import { appPlatformApi } from '../platform/platformHost';
+import type { SystemSettings } from '../types';
 
-export function useSystemSettings(): UseSystemSettingsReturn {
-  const [settings, setSettings] = useState<SystemSettings | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const isMounted = useIsMounted();
-
-  const fetchSettings = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const data = await api.get<SystemSettings>('/system-settings');
-      if (!isMounted()) return;
-      setSettings(data);
-    } catch (err) {
-      if (!isMounted()) return;
-      if (err instanceof ApiError && err.status === 403) {
-        setError('You do not have permission to view system settings');
-      } else {
-        const message = err instanceof ApiError ? err.message : 'Failed to load settings';
-        setError(message);
-      }
-    } finally {
-      if (isMounted()) setIsLoading(false);
-    }
-  }, [isMounted]);
-
-  useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
-
-  const updateSettings = useCallback(
-    async (updates: Partial<SystemSettings>) => {
-      if (!settings) return;
-
-      try {
-        setIsSaving(true);
-        setError(null);
-
-        const data = await api.patch<SystemSettings>('/system-settings', updates, {
-          headers: {
-            'If-Match': settings.version.toString(),
-          },
-        });
-
-        if (isMounted()) setSettings(data);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 409) {
-          await fetchSettings();
-          throw new Error('Settings were updated elsewhere. Please review and try again.');
-        }
-        const message = err instanceof ApiError ? err.message : 'Failed to save settings';
-        if (isMounted()) setError(message);
-        throw err;
-      } finally {
-        if (isMounted()) setIsSaving(false);
-      }
-    },
-    [settings, fetchSettings, isMounted],
-  );
-
-  const replaceSettings = useCallback(
-    async (newSettings: Omit<SystemSettings, 'updatedAt' | 'updatedBy' | 'version'>) => {
-      try {
-        setIsSaving(true);
-        setError(null);
-
-        const data = await api.put<SystemSettings>('/system-settings', newSettings);
-        if (isMounted()) setSettings(data);
-      } catch (err) {
-        const message = err instanceof ApiError ? err.message : 'Failed to save settings';
-        if (isMounted()) setError(message);
-        throw err;
-      } finally {
-        if (isMounted()) setIsSaving(false);
-      }
-    },
-    [isMounted],
-  );
-
-  return {
-    settings,
-    isLoading,
-    error,
-    isSaving,
-    updateSettings,
-    replaceSettings,
-    refresh: fetchSettings,
-  };
+/**
+ * The deployment-wide settings document (`/api/system-settings`): load, PATCH with `If-Match` from the
+ * loaded version, PUT, refresh. The fetch contract (a mounted guard, 403 named, a 409 refetches and
+ * throws) is the platform settings slice's (RETRO-B3, #614); this binds it to this app's document
+ * type and HTTP client, so the admin pages read and write through the packaged hook unchanged.
+ */
+export function useSystemSettings() {
+  return usePlatformSystemSettings<SystemSettings>({ api: appPlatformApi });
 }

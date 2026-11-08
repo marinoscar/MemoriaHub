@@ -13,7 +13,7 @@
 /// BigInt: serialize it as a string in API responses. APKs are NOT
 /// `storage_objects` rows; `storage_provider`/`bucket` record where the bytes
 /// live (#504).
-model AndroidAppRelease {
+model MhLegacyAndroidAppRelease {
   id              String   @id @default(uuid()) @db.Uuid
   packageName     String   @map("package_name")
   versionName     String   @map("version_name") @db.VarChar(50)
@@ -40,5 +40,5 @@ model AndroidAppRelease {
   @@unique([packageName, versionCode])
   @@index([createdAt])
   @@index([uploadedById])
-  @@map("android_app_releases")
+  @@map("mh_legacy_android_app_releases")
 }

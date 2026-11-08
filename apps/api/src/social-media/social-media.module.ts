@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { SettingsModule } from '../settings/settings.module';
 import { FaceModule } from '../face/face.module';
 import { MediaModule } from '../media/media.module';
 import { CirclesModule } from '../circles/circles.module';
@@ -11,6 +10,7 @@ import { SocialMediaDetectionHandler } from './social-media-detection.handler';
 import { SocialMediaBackfillService } from './social-media-backfill.service';
 import { SocialMediaMediaController } from './social-media-media.controller';
 import { AdminSocialMediaController } from './admin-social-media.controller';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * SocialMediaModule
@@ -21,7 +21,7 @@ import { AdminSocialMediaController } from './admin-social-media.controller';
  *
  * Imports:
  *   - EnrichmentModule       → EnrichmentHandlerRegistry / EnrichmentJobService
- *   - SettingsModule         → SystemSettingsService (feature flags + socialMedia.*)
+ *   - SettingsModule         → AppSystemSettingsService (feature flags + socialMedia.*)
  *   - FaceModule             → VideoFrameExtractionService (now exported)
  *   - MediaModule            → MediaEnrichmentService (clean-path fan-out)
  *   - StorageProvidersModule → StorageProviderResolver (legacy re-probe + OCR download)
@@ -32,7 +32,7 @@ import { AdminSocialMediaController } from './admin-social-media.controller';
 @Module({
   imports: [
     EnrichmentModule,
-    SettingsModule,
+    
     FaceModule,
     MediaModule,
     CirclesModule,

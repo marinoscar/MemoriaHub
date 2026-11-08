@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import { createZodDto } from 'nestjs-zod';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /**
  * Body schema for `PUT /api/admin/db-backup/config` (issue #343, epic #339).
  *
- * Mirrors the `databaseBackup` block of `systemSettingsPatchSchema`
- * (`apps/api/src/common/schemas/settings.schema.ts`) field-for-field: every key
+ * Mirrors the `databaseBackup` block of the registered `databaseBackup` namespace
+ * (`apps/api/src/settings/registry/namespaces/system/database-backup.ts`) field-for-field: every key
  * is optional, so a caller can flip `enabled` without re-sending the whole
- * namespace, and the write is applied through `SystemSettingsService.patchSettings`
+ * namespace, and the write is applied through `AppSystemSettingsService.patchSettings`
  * so the canonical schema validates it a second time.
  *
  * Two validations live in `DatabaseBackupAdminService` rather than here, because

@@ -30,9 +30,8 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { Readable } from 'stream';
 import { ZodValidationPipe } from 'nestjs-zod';
 
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ObjectsService } from './objects.service';
 import {
   InitUploadDto,

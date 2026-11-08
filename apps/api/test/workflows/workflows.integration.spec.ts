@@ -33,8 +33,8 @@ import {
   createMockViewerUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
+import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { MEDIA_ITEM_ACTIONS, MEDIA_ITEM_FIELDS } from '../../src/workflows/registry/media-item-fields';
 
 // ---------------------------------------------------------------------------
@@ -690,11 +690,12 @@ describe('Workflows Integration (DB-gated)', () => {
     it('caps matchedCount and sets capped:true when rows exceed workflows.maxItemsPerRun', async () => {
       const viewer = await createMockViewerUser(context);
       setupCircleMocks(context, viewer.id, CIRCLE_ID, 'viewer');
-      // Lower the cap so the test doesn't need to fabricate 10001 rows.
-      setupWorkflowsSettings(context, { maxItemsPerRun: 5 });
+      // Lower the cap so the test doesn't need to fabricate 10001 rows. 100 is the schema's floor:
+      // a stored value below it is damaged and reads as the default.
+      setupWorkflowsSettings(context, { maxItemsPerRun: 100 });
 
       // cap + 1 rows returned by the probe query.
-      const rows = Array.from({ length: 6 }, () => makePreviewRow());
+      const rows = Array.from({ length: 101 }, () => makePreviewRow());
       context.prismaMock.mediaItem.findMany.mockResolvedValue(rows);
 
       const response = await request(context.app.getHttpServer())
@@ -703,12 +704,12 @@ describe('Workflows Integration (DB-gated)', () => {
         .send({ circleId: CIRCLE_ID, definition: screenshotHeuristicDefinition })
         .expect(200);
 
-      expect(response.body.data.matchedCount).toBe(5);
+      expect(response.body.data.matchedCount).toBe(100);
       expect(response.body.data.capped).toBe(true);
 
       // LIMIT (cap + 1) — the probe query's `take` argument.
       const probeCall = (context.prismaMock.mediaItem.findMany as jest.Mock).mock.calls[0][0];
-      expect(probeCall.take).toBe(6);
+      expect(probeCall.take).toBe(101);
 
       // Never a full COUNT(*) — the service uses only findMany, never .count(), for preview.
       expect(context.prismaMock.mediaItem.count).not.toHaveBeenCalled();

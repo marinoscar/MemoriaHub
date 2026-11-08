@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/commo
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { buildBaseDatabaseUrl, resolvePoolConfig } from '../config/database-url.util';
+// Fills core's ownership registries before bootstrap (they freeze with the app).
+import '../app-registrations/ownership-manifest';
 
 /**
  * Builds the BASE PostgreSQL connection string (no Prisma pool query params),

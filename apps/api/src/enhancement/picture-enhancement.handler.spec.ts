@@ -7,7 +7,7 @@
  *     `prepareImageForProcessing` never touches sharp/libvips — it returns a
  *     deterministic "prepared" buffer + dimensions.
  *   - PrismaService, StorageProviderResolver, AiSettingsService,
- *     AiProviderRegistry, and SystemSettingsService are plain jest mocks
+ *     AiProviderRegistry, and AppSystemSettingsService are plain jest mocks
  *     (constructed directly, no NestJS TestingModule needed since the handler
  *     has no other DI surface besides EnrichmentHandlerRegistry.register()).
  *
@@ -35,7 +35,7 @@ jest.mock('../storage/processing/image-orientation.util', () => ({
 
 import { Readable } from 'stream';
 import sharp from 'sharp';
-import { EnrichmentJob, JobReason, JobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
@@ -43,7 +43,8 @@ import { RateLimitError } from '../enrichment/rate-limit.error';
 import {
   ENRICHMENT_MAX_ATTEMPTS,
   ENRICHMENT_RATELIMIT_MAX_HITS,
-} from '../enrichment/enrichment-terminal.service';
+} from '../platform/jobs/queue-limits';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const mockPrepareImageForProcessing = prepareImageForProcessing as jest.Mock;
 
@@ -53,7 +54,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'picture_enhancement',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.rerun,
     priority: 0,
     providerKey: 'openai',

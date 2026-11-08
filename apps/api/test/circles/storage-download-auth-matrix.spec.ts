@@ -12,6 +12,7 @@ import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock
 import { createMockStorageProvider } from '../mocks/storage-provider.mock';
 import { CircleMembershipService } from '../../src/circles/circle-membership.service';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
+import { defaultOrgIdProvider } from '../mocks/default-org.mock';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -110,6 +111,7 @@ describe('Storage Download Auth Matrix (ObjectsService unit)', () => {
       providers: [
         ObjectsService,
         { provide: PrismaService, useValue: mockPrisma },
+        defaultOrgIdProvider,
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: ConfigService, useValue: mockConfig },
         { provide: EventEmitter2, useValue: mockEventEmitter },

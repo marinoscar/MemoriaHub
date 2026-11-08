@@ -15,7 +15,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -51,7 +51,7 @@ describe('LocationInferenceBackfillService', () => {
         { circleId: 'circle-a', _count: 5 },
         { circleId: 'circle-b', _count: 0 },
       ]);
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(null);
 
       const result = await service.backfillAllCircles({});
 
@@ -79,8 +79,8 @@ describe('LocationInferenceBackfillService', () => {
         { circleId: 'circle-a', _count: 10 },
         { circleId: 'circle-b', _count: 20 },
       ]);
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock)
-        .mockResolvedValueOnce({ id: 'existing-job', status: JobStatus.running }) // circle-a: guarded
+      (mockPrisma.job.findFirst as jest.Mock)
+        .mockResolvedValueOnce({ id: 'existing-job', status: MhLegacyJobStatus.running }) // circle-a: guarded
         .mockResolvedValueOnce(null); // circle-b: eligible
 
       const result = await service.backfillAllCircles({});
@@ -94,17 +94,18 @@ describe('LocationInferenceBackfillService', () => {
       );
     });
 
-    it('the guard query filters by type:location_inference, circleId, and status in [pending, running]', async () => {
+    it('the guard query filters by type:location_inference, the circle subject, and status in [pending, running]', async () => {
       (mockPrisma.mediaItem.groupBy as jest.Mock).mockResolvedValue([{ circleId: 'circle-a', _count: 1 }]);
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(null);
 
       await service.backfillAllCircles({});
 
-      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith({
+      expect(mockPrisma.job.findFirst).toHaveBeenCalledWith({
         where: {
           type: 'location_inference',
-          circleId: 'circle-a',
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          subjectType: 'circle',
+          subjectId: 'circle-a',
+          status: { in: ['pending', 'running'] },
         },
       });
     });
@@ -113,7 +114,7 @@ describe('LocationInferenceBackfillService', () => {
   describe('enqueue call shape', () => {
     it('enqueues with type, mediaItemId:null, circleId, reason:backfill, priority:100, skipDedup:true, payload{mode:sweep,from,to,force}', async () => {
       (mockPrisma.mediaItem.groupBy as jest.Mock).mockResolvedValue([{ circleId: 'circle-a', _count: 3 }]);
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(null);
 
       await service.backfillAllCircles({
         from: '2026-01-01T00:00:00.000Z',
@@ -139,7 +140,7 @@ describe('LocationInferenceBackfillService', () => {
 
     it('force defaults to false in the payload when omitted', async () => {
       (mockPrisma.mediaItem.groupBy as jest.Mock).mockResolvedValue([{ circleId: 'circle-a', _count: 1 }]);
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(null);
 
       await service.backfillAllCircles({});
 
@@ -170,7 +171,7 @@ describe('LocationInferenceBackfillService', () => {
         { circleId: 'circle-a', _count: 7 },
         { circleId: 'circle-b', _count: 3 },
       ]);
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(null);
 
       const result = await service.backfillAllCircles({});
 

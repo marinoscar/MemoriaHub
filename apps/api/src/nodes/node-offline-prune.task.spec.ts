@@ -13,7 +13,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus, NodeStatus } from '@prisma/client';
+import { MhLegacyJobStatus, MhLegacyNodeStatus } from '@prisma/client';
 import { NodeOfflinePruneTask } from './node-offline-prune.task';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -37,9 +37,9 @@ describe('NodeOfflinePruneTask', () => {
     task = module.get(NodeOfflinePruneTask);
 
     // Defaults: no candidates, no busy nodes, delete removes nothing.
-    (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue([]);
+    (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.workerNode.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+    (mockPrisma.mhLegacyWorkerNode.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
   });
 
   afterEach(() => {
@@ -48,26 +48,26 @@ describe('NodeOfflinePruneTask', () => {
   });
 
   it('prunes a stale offline node with no running claimed jobs', async () => {
-    (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue([{ id: 'dead-1' }]);
-    (mockPrisma.workerNode.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+    (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue([{ id: 'dead-1' }]);
+    (mockPrisma.mhLegacyWorkerNode.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
     const pruned = await task.prune();
 
     expect(pruned).toBe(1);
-    expect(mockPrisma.workerNode.deleteMany).toHaveBeenCalledWith({
+    expect(mockPrisma.mhLegacyWorkerNode.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ['dead-1'] } },
     });
   });
 
   it('skips a node that still has a job running under its claim', async () => {
-    (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue([
+    (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue([
       { id: 'dead-1' },
       { id: 'busy-1' },
     ]);
     (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([
       { claimedByNodeId: 'busy-1' },
     ]);
-    (mockPrisma.workerNode.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+    (mockPrisma.mhLegacyWorkerNode.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
 
     const pruned = await task.prune();
 
@@ -77,18 +77,18 @@ describe('NodeOfflinePruneTask', () => {
       expect.objectContaining({
         where: {
           claimedByNodeId: { in: ['dead-1', 'busy-1'] },
-          status: JobStatus.running,
+          status: MhLegacyJobStatus.running,
         },
       }),
     );
     // Only the idle dead node is deleted — never the one with a running claim.
-    expect(mockPrisma.workerNode.deleteMany).toHaveBeenCalledWith({
+    expect(mockPrisma.mhLegacyWorkerNode.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ['dead-1'] } },
     });
   });
 
   it('no-ops entirely when every candidate has a running claimed job', async () => {
-    (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue([{ id: 'busy-1' }]);
+    (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue([{ id: 'busy-1' }]);
     (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([
       { claimedByNodeId: 'busy-1' },
     ]);
@@ -96,7 +96,7 @@ describe('NodeOfflinePruneTask', () => {
     const pruned = await task.prune();
 
     expect(pruned).toBe(0);
-    expect(mockPrisma.workerNode.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.mhLegacyWorkerNode.deleteMany).not.toHaveBeenCalled();
   });
 
   it('respects the retention window: candidates are offline nodes past the cutoff (default 14 days)', async () => {
@@ -104,8 +104,8 @@ describe('NodeOfflinePruneTask', () => {
     await task.prune();
     const after = Date.now();
 
-    const where = (mockPrisma.workerNode.findMany as jest.Mock).mock.calls[0][0].where;
-    expect(where.status).toBe(NodeStatus.offline);
+    const where = (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.status).toBe(MhLegacyNodeStatus.offline);
 
     // Cutoff must be ~14 days before "now" (allowing for the call's own runtime).
     const heartbeatCutoff: Date = where.OR[0].lastHeartbeatAt.lt;
@@ -125,7 +125,7 @@ describe('NodeOfflinePruneTask', () => {
 
     await task.prune();
 
-    const where = (mockPrisma.workerNode.findMany as jest.Mock).mock.calls[0][0].where;
+    const where = (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mock.calls[0][0].where;
     const cutoff: Date = where.OR[0].lastHeartbeatAt.lt;
     expect(cutoff.getTime()).toBeLessThanOrEqual(Date.now() - 30 * DAY_MS);
     expect(cutoff.getTime()).toBeGreaterThanOrEqual(before - 30 * DAY_MS);
@@ -136,14 +136,14 @@ describe('NodeOfflinePruneTask', () => {
 
     expect(pruned).toBe(0);
     expect(mockPrisma.enrichmentJob.findMany).not.toHaveBeenCalled();
-    expect(mockPrisma.workerNode.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.mhLegacyWorkerNode.deleteMany).not.toHaveBeenCalled();
   });
 
   it('handleCron swallows and logs errors instead of throwing into the scheduler', async () => {
     const errorSpy = jest
       .spyOn(task['logger'], 'error')
       .mockImplementation(() => undefined);
-    (mockPrisma.workerNode.findMany as jest.Mock).mockRejectedValue(
+    (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockRejectedValue(
       new Error('db unreachable'),
     );
 

@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaModule } from '../media/media.module';
-import { SettingsModule } from '../settings/settings.module';
 import { NotificationsModule } from './notifications.module';
 import { NotificationPurgeHandler } from './notification-purge.handler';
 import { NotificationPurgeTask } from './notification-purge.task';
@@ -11,6 +10,7 @@ import { EnrichmentFailureNotificationListener } from './producers/enrichment-fa
 import { ShareExpiringService } from './producers/share-expiring.service';
 import { ShareExpiringTask } from './producers/share-expiring.task';
 import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * SELF-DRIVEN notification crons, event listeners and sweeps — things nobody
@@ -47,13 +47,13 @@ import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
  * job service), and NotificationsModule IMPORTS NOTHING by design — every
  * producer edge points into it, so any import there risks closing a cycle. The
  * EnrichmentModule edge added here is safe and stays acyclic: EnrichmentModule
- * imports only PrismaModule + SettingsModule, so it can never reach back into
+ * imports only PrismaModule + so it can never reach back into
  * MediaModule, WorkflowsModule or this module. The handler itself touches only
- * PrismaService + SystemSettingsService (it is a raw retention sweep, not a
+ * PrismaService + AppSystemSettingsService (it is a raw retention sweep, not a
  * notification producer), so it does not need NotificationsService at all —
  * placing it in the notifications domain is about ownership, not dependency.
  *
- * SettingsModule supplies SystemSettingsService for #246's once-per-sweep
+ * SettingsModule supplies AppSystemSettingsService for #246's once-per-sweep
  * cached feature-flag read and #248's retention/enabled reads. PrismaModule is
  * not imported — PrismaService is @Global. EventEmitterModule.forRoot() in
  * AppModule is what makes @OnEvent work here, exactly as it does for
@@ -63,7 +63,7 @@ import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
  * TrashPurgeTask and ThumbnailRepairTask.
  */
 @Module({
-  imports: [NotificationsModule, MediaModule, SettingsModule, EnrichmentModule],
+  imports: [NotificationsModule, MediaModule, EnrichmentModule],
   providers: [
     ReviewQueueReconcileService,
     NotificationReconcileTask,

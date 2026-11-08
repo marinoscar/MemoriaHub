@@ -10,8 +10,7 @@ import { RequestMethod } from '@nestjs/common';
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { PeopleController } from './people.controller';
 import { PeopleService } from './people.service';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
-import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
+import { RequestUser, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 
 // ---------------------------------------------------------------------------
@@ -69,7 +68,7 @@ describe('PeopleController — bulk hide/unhide/purge', () => {
         { provide: PeopleService, useValue: mockPeopleService },
       ],
     })
-      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
+      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
       .useValue({ canActivate: () => true })
       .compile();
 

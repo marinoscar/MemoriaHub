@@ -6,7 +6,6 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import {
   DatabaseBackupRunnerService,
@@ -15,6 +14,7 @@ import {
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
 import { __setSpawnForTests, spawnPgDump, spawnPgRestoreList } from './pg-dump.util';
 import { __resetPgVersionCacheForTests } from './pg-version.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // The two spawn entry points are mocked; everything else in the util (argv
 // builders, env builder) stays real so the runner is wired against the true
@@ -119,7 +119,7 @@ function makeFakeRestoreProc(opts: { emitToc?: boolean } = {}): FakeProc {
 describe('DatabaseBackupRunnerService', () => {
   let service: DatabaseBackupRunnerService;
   let prisma: {
-    databaseBackupRun: {
+    mhLegacyDatabaseBackupRun: {
       create: jest.Mock;
       update: jest.Mock;
       findFirst: jest.Mock;
@@ -149,7 +149,7 @@ describe('DatabaseBackupRunnerService', () => {
     uploadCalledWhileSourceStillOpen = null;
 
     prisma = {
-      databaseBackupRun: {
+      mhLegacyDatabaseBackupRun: {
         create: jest.fn().mockResolvedValue({ id: RUN_ID }),
         update: jest.fn().mockResolvedValue({}),
         findFirst: jest.fn().mockResolvedValue(null),
@@ -203,7 +203,7 @@ describe('DatabaseBackupRunnerService', () => {
         DatabaseBackupRunnerService,
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: config },
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
         { provide: StorageProviderResolver, useValue: resolver },
       ],
     }).compile();
@@ -235,14 +235,14 @@ describe('DatabaseBackupRunnerService', () => {
   }
 
   function lastUpdateData(): Record<string, unknown> {
-    const calls = prisma.databaseBackupRun.update.mock.calls;
+    const calls = prisma.mhLegacyDatabaseBackupRun.update.mock.calls;
     return calls[calls.length - 1][0].data;
   }
 
   function updateDataMatching(
     predicate: (data: Record<string, unknown>) => boolean,
   ): Record<string, unknown> | undefined {
-    return prisma.databaseBackupRun.update.mock.calls
+    return prisma.mhLegacyDatabaseBackupRun.update.mock.calls
       .map((c) => c[0].data as Record<string, unknown>)
       .find(predicate);
   }
@@ -274,7 +274,7 @@ describe('DatabaseBackupRunnerService', () => {
       mockSuccessfulDump();
       await service.runBackup({ trigger: 'scheduled' });
 
-      expect(prisma.databaseBackupRun.create).toHaveBeenCalledWith(
+      expect(prisma.mhLegacyDatabaseBackupRun.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'running', trigger: 'scheduled' }),
         }),
@@ -484,7 +484,7 @@ describe('DatabaseBackupRunnerService', () => {
       await expect(service.runBackup({ trigger: 'manual' })).rejects.toThrow();
 
       expect(spawnPgDumpMock).toHaveBeenCalledTimes(1);
-      expect(prisma.databaseBackupRun.create).toHaveBeenCalledTimes(1);
+      expect(prisma.mhLegacyDatabaseBackupRun.create).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -494,14 +494,14 @@ describe('DatabaseBackupRunnerService', () => {
 
   describe('single-active-run guard', () => {
     it('surfaces a P2002 on claim as DatabaseBackupAlreadyRunningError with the active runId', async () => {
-      prisma.databaseBackupRun.create.mockRejectedValue(
+      prisma.mhLegacyDatabaseBackupRun.create.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
           code: 'P2002',
           clientVersion: '0.0.0',
           meta: { target: ['status'] },
         }),
       );
-      prisma.databaseBackupRun.findFirst.mockResolvedValue({ id: 'active-run-id' });
+      prisma.mhLegacyDatabaseBackupRun.findFirst.mockResolvedValue({ id: 'active-run-id' });
 
       const err = await service
         .runBackup({ trigger: 'manual' })
@@ -516,13 +516,13 @@ describe('DatabaseBackupRunnerService', () => {
     });
 
     it('tolerates the winning run finishing between the failed INSERT and the lookup', async () => {
-      prisma.databaseBackupRun.create.mockRejectedValue(
+      prisma.mhLegacyDatabaseBackupRun.create.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
           code: 'P2002',
           clientVersion: '0.0.0',
         }),
       );
-      prisma.databaseBackupRun.findFirst.mockResolvedValue(null);
+      prisma.mhLegacyDatabaseBackupRun.findFirst.mockResolvedValue(null);
 
       const err = await service
         .runBackup({ trigger: 'manual' })
@@ -533,12 +533,12 @@ describe('DatabaseBackupRunnerService', () => {
     });
 
     it('rethrows a non-P2002 claim failure untouched', async () => {
-      prisma.databaseBackupRun.create.mockRejectedValue(new Error('db down'));
+      prisma.mhLegacyDatabaseBackupRun.create.mockRejectedValue(new Error('db down'));
 
       await expect(service.runBackup({ trigger: 'manual' })).rejects.toThrow(
         /db down/,
       );
-      expect(prisma.databaseBackupRun.findFirst).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.findFirst).not.toHaveBeenCalled();
     });
   });
 
@@ -562,7 +562,7 @@ describe('DatabaseBackupRunnerService', () => {
       proc.stdout.write(ARCHIVE);
 
       const heartbeatsAt = () =>
-        prisma.databaseBackupRun.update.mock.calls.filter(
+        prisma.mhLegacyDatabaseBackupRun.update.mock.calls.filter(
           (c) => c[0].data.lastHeartbeatAt !== undefined && c[0].data.status === undefined,
         ).length;
 
@@ -574,7 +574,7 @@ describe('DatabaseBackupRunnerService', () => {
       await jest.advanceTimersByTimeAsync(1000);
       expect(heartbeatsAt()).toBe(2);
 
-      const progress = prisma.databaseBackupRun.update.mock.calls
+      const progress = prisma.mhLegacyDatabaseBackupRun.update.mock.calls
         .map((c) => c[0].data)
         .find((d) => d.bytesWritten !== undefined && d.status === undefined);
       expect(progress.bytesWritten).toBe(BigInt(ARCHIVE.length));
@@ -603,7 +603,7 @@ describe('DatabaseBackupRunnerService', () => {
       const promise = service.runBackup({ trigger: 'scheduled' });
       await jest.advanceTimersByTimeAsync(0);
 
-      prisma.databaseBackupRun.update.mockRejectedValueOnce(
+      prisma.mhLegacyDatabaseBackupRun.update.mockRejectedValueOnce(
         new Error('transient write error'),
       );
       await jest.advanceTimersByTimeAsync(1000);

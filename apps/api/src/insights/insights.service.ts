@@ -8,7 +8,7 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, InsightsSnapshot, JobReason, JobStatus } from '@prisma/client';
+import { Prisma, InsightsSnapshot, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { EnrichmentJob } from '@prisma/client';
@@ -172,7 +172,7 @@ export class InsightsService {
   // ---------------------------------------------------------------------------
 
   async getRefreshState(): Promise<RefreshState> {
-    const job = await this.prisma.enrichmentJob.findFirst({
+    const job = await this.prisma.job.findFirst({
       where: { type: 'storage_insights' },
       orderBy: { createdAt: 'desc' },
     });
@@ -182,13 +182,13 @@ export class InsightsService {
     }
 
     switch (job.status) {
-      case JobStatus.pending:
+      case MhLegacyJobStatus.pending:
         return { state: 'pending', jobId: job.id, lastError: null };
-      case JobStatus.running:
+      case MhLegacyJobStatus.running:
         return { state: 'running', jobId: job.id, lastError: null };
-      case JobStatus.failed:
+      case MhLegacyJobStatus.failed:
         return { state: 'failed', jobId: job.id, lastError: job.lastError };
-      case JobStatus.succeeded:
+      case MhLegacyJobStatus.succeeded:
       default:
         return { state: 'idle', jobId: null, lastError: null };
     }

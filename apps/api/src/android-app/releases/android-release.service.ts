@@ -13,9 +13,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Multipart, MultipartFile } from '@fastify/multipart';
-import { Prisma, type AndroidAppRelease } from '@prisma/client';
+import { Prisma, type MhLegacyAndroidAppRelease } from '@prisma/client';
 
-import { deriveSubKey } from '../../common/crypto/secret-cipher';
+import { deriveSubKey } from '../../legacy/legacy-secret-cipher';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { StorageProvider } from '../../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
@@ -79,7 +79,7 @@ import { signDownloadToken, verifyDownloadToken } from './download-token';
 
 const UPLOADER = { uploadedBy: { select: { id: true, email: true, displayName: true } } } as const;
 
-type ReleaseWithUploader = AndroidAppRelease & {
+type ReleaseWithUploader = MhLegacyAndroidAppRelease & {
   uploadedBy: { id: string; email: string; displayName: string | null } | null;
 };
 
@@ -102,7 +102,7 @@ interface StoredApk {
   bucket: string | null;
 }
 
-export function toPublicRelease(release: AndroidAppRelease): PublicRelease {
+export function toPublicRelease(release: MhLegacyAndroidAppRelease): PublicRelease {
   return {
     id: release.id,
     packageName: release.packageName,
@@ -322,7 +322,7 @@ export class AndroidReleaseService {
 
   /** `GET /api/admin/android-app/releases` — newest first. */
   async list(): Promise<AdminRelease[]> {
-    const releases = await this.prisma.androidAppRelease.findMany({
+    const releases = await this.prisma.mhLegacyAndroidAppRelease.findMany({
       include: UPLOADER,
       orderBy: [{ createdAt: 'desc' }, { versionCode: 'desc' }],
     });
@@ -331,7 +331,7 @@ export class AndroidReleaseService {
 
   /** `POST /api/admin/android-app/releases/:id/make-current` — also the rollback. Idempotent. */
   async makeCurrent(id: string, userId: string): Promise<AdminRelease> {
-    const existing = await this.prisma.androidAppRelease.findUnique({ where: { id }, include: UPLOADER });
+    const existing = await this.prisma.mhLegacyAndroidAppRelease.findUnique({ where: { id }, include: UPLOADER });
     if (!existing) throw notFound();
 
     let release: ReleaseWithUploader = existing;
@@ -339,10 +339,10 @@ export class AndroidReleaseService {
     if (!existing.isCurrent) {
       try {
         release = await this.prisma.$transaction(async (tx) => {
-          const previous = await tx.androidAppRelease.findFirst({ where: { isCurrent: true }, select: { id: true } });
+          const previous = await tx.mhLegacyAndroidAppRelease.findFirst({ where: { isCurrent: true }, select: { id: true } });
           previousId = previous?.id ?? null;
-          await tx.androidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
-          return tx.androidAppRelease.update({ where: { id }, data: { isCurrent: true }, include: UPLOADER });
+          await tx.mhLegacyAndroidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+          return tx.mhLegacyAndroidAppRelease.update({ where: { id }, data: { isCurrent: true }, include: UPLOADER });
         });
       } catch (error) {
         if (isUniqueViolationOn(error, ONE_CURRENT_RELEASE_INDEX)) throw currentConflict();
@@ -367,7 +367,7 @@ export class AndroidReleaseService {
 
   /** `DELETE /api/admin/android-app/releases/:id` — the stored APK first, then the row. */
   async remove(id: string, userId: string): Promise<void> {
-    const release = await this.prisma.androidAppRelease.findUnique({ where: { id } });
+    const release = await this.prisma.mhLegacyAndroidAppRelease.findUnique({ where: { id } });
     if (!release) throw notFound();
     if (release.isCurrent) {
       throw new ConflictException({
@@ -383,7 +383,7 @@ export class AndroidReleaseService {
     await provider.delete(release.storageKey);
     // `isCurrent: false` in the WHERE: a concurrent make-current of this very
     // release between the read above and here must not delete the current row.
-    await this.prisma.androidAppRelease.deleteMany({ where: { id, isCurrent: false } });
+    await this.prisma.mhLegacyAndroidAppRelease.deleteMany({ where: { id, isCurrent: false } });
 
     await this.audit(userId, ANDROID_RELEASE_AUDIT.DELETED, release.id, {
       packageName: release.packageName,
@@ -397,8 +397,8 @@ export class AndroidReleaseService {
   // ---------------------------------------------------------------------------
 
   /** The current release, or null. */
-  async current(): Promise<AndroidAppRelease | null> {
-    return this.prisma.androidAppRelease.findFirst({ where: { isCurrent: true } });
+  async current(): Promise<MhLegacyAndroidAppRelease | null> {
+    return this.prisma.mhLegacyAndroidAppRelease.findFirst({ where: { isCurrent: true } });
   }
 
   /** `GET /api/android-app/releases/latest`. */
@@ -415,7 +415,7 @@ export class AndroidReleaseService {
 
   /** `POST /api/android-app/releases/:id/download-link`. */
   async createDownloadLink(id: string, userId: string, now: Date = new Date()): Promise<DownloadLink> {
-    const release = await this.prisma.androidAppRelease.findUnique({ where: { id }, select: { id: true } });
+    const release = await this.prisma.mhLegacyAndroidAppRelease.findUnique({ where: { id }, select: { id: true } });
     if (!release) throw notFound();
 
     const expiresAt = Math.floor(now.getTime() / 1000) + DOWNLOAD_LINK_TTL_SECONDS;
@@ -453,7 +453,7 @@ export class AndroidReleaseService {
     if (!verdict.ok) throw invalid;
 
     const [release, user] = await Promise.all([
-      this.prisma.androidAppRelease.findUnique({ where: { id: verdict.claims.releaseId } }),
+      this.prisma.mhLegacyAndroidAppRelease.findUnique({ where: { id: verdict.claims.releaseId } }),
       this.prisma.user.findUnique({ where: { id: verdict.claims.userId }, select: { isActive: true } }),
     ]);
     if (!release || !user?.isActive) throw invalid;
@@ -468,7 +468,7 @@ export class AndroidReleaseService {
   // ---------------------------------------------------------------------------
 
   /** The provider a release's bytes live on: the recorded one, else (legacy null) the active one. */
-  private async providerFor(release: AndroidAppRelease): Promise<StorageProvider> {
+  private async providerFor(release: MhLegacyAndroidAppRelease): Promise<StorageProvider> {
     if (release.storageProvider) {
       return this.storage.getProviderFor(release.storageProvider, release.bucket);
     }
@@ -490,7 +490,7 @@ export class AndroidReleaseService {
    * the unique indexes `createRelease` relies on.
    */
   private async assertUploadAllowed(fields: ReleaseUploadFields): Promise<void> {
-    const existing = await this.prisma.androidAppRelease.findUnique({
+    const existing = await this.prisma.mhLegacyAndroidAppRelease.findUnique({
       where: { packageName_versionCode: { packageName: fields.packageName, versionCode: fields.versionCode } },
       select: { id: true },
     });
@@ -502,7 +502,7 @@ export class AndroidReleaseService {
     }
   }
 
-  private assertNewer(current: AndroidAppRelease | null, fields: ReleaseUploadFields): void {
+  private assertNewer(current: MhLegacyAndroidAppRelease | null, fields: ReleaseUploadFields): void {
     if (versionRuleRefusal(current, fields, fields.force) && current) {
       throw new ConflictException({
         message:
@@ -556,10 +556,10 @@ export class AndroidReleaseService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         if (fields.makeCurrent) {
-          this.assertNewer(await tx.androidAppRelease.findFirst({ where: { isCurrent: true } }), fields);
-          await tx.androidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+          this.assertNewer(await tx.mhLegacyAndroidAppRelease.findFirst({ where: { isCurrent: true } }), fields);
+          await tx.mhLegacyAndroidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
         }
-        return tx.androidAppRelease.create({
+        return tx.mhLegacyAndroidAppRelease.create({
           data: {
             id,
             packageName: fields.packageName,
@@ -585,7 +585,7 @@ export class AndroidReleaseService {
     }
   }
 
-  private async trust(release: AndroidAppRelease, userId: string): Promise<boolean> {
+  private async trust(release: MhLegacyAndroidAppRelease, userId: string): Promise<boolean> {
     // `ensureTrusted` never throws by contract; the guard only protects the
     // already-saved release from a future regression of that contract.
     try {

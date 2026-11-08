@@ -12,13 +12,13 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { JobReason } from '@prisma/client';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { FEATURE_KEYS } from '../common/types/settings.types';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { DuplicateBackfillService } from './duplicate-backfill.service';
 import { VisualEmbeddingService, VISUAL_EMBEDDING_MODEL_TAG } from './visual-embedding.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // Both schemas below accept a bodyless POST — see issue #289 (app.module.ts).
 // This one uses .prefault({}) rather than .default({}) so the empty body is fed
@@ -46,7 +46,7 @@ export class AdminDuplicateController {
 
   constructor(
     private readonly duplicateBackfillService: DuplicateBackfillService,
-    private readonly systemSettingsService: SystemSettingsService,
+    private readonly systemSettingsService: AppSystemSettingsService,
     private readonly visualEmbeddingService: VisualEmbeddingService,
     private readonly enrichmentJobService: EnrichmentJobService,
   ) {}

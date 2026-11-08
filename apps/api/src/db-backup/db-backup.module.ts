@@ -1,7 +1,5 @@
 import { Module } from '@nestjs/common';
-import { MaintenanceModule } from '../common/maintenance/maintenance.module';
 import { PrismaModule } from '../prisma/prisma.module';
-import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { DatabaseBackupRetentionService } from './database-backup-retention.service';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
@@ -9,6 +7,7 @@ import { DatabaseBackupAdminService } from './db-backup-admin.service';
 import { DatabaseRestoreService } from './database-restore.service';
 import { DatabaseBackupScheduleTask } from './db-backup-schedule.task';
 import { DatabaseBackupController } from './db-backup.controller';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * DbBackupModule — PostgreSQL Database Backup & Restore (epic #339, issue #341).
@@ -24,7 +23,7 @@ import { DatabaseBackupController } from './db-backup.controller';
  *
  * Imports:
  *   - PrismaModule: the `DatabaseBackupRun` state machine (#340).
- *   - SettingsModule: SystemSettingsService, for the `databaseBackup.*`
+ *   - SettingsModule: AppSystemSettingsService, for the `databaseBackup.*`
  *     namespace (`compressionLevel`, `storageProvider`).
  *   - StorageProvidersModule: StorageProviderResolver, so the dump lands on the
  *     configured/active provider instead of a hardcoded local path.
@@ -44,14 +43,12 @@ import { DatabaseBackupController } from './db-backup.controller';
 @Module({
   imports: [
     PrismaModule,
-    SettingsModule,
+    
     StorageProvidersModule,
-    // #344's swap consumes #348's maintenance mode rather than building a
-    // second mechanism — specifically its IN-MEMORY override, the only layer
-    // that still works while the database holding the persisted flag is being
-    // renamed. The edge points OUT of MaintenanceModule and nothing there
-    // imports this module, so no cycle.
-    MaintenanceModule,
+    // #344's swap consumes maintenance mode's IN-MEMORY override (the only
+    // layer that still works while the database holding the persisted flag is
+    // being renamed) from the platform host core: `MaintenanceModeService` is
+    // exported by the global `PlatformHostCoreModule`, so nothing is imported.
   ],
   controllers: [DatabaseBackupController],
   providers: [

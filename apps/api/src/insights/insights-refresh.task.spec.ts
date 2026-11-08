@@ -6,15 +6,15 @@
  * Tests the configurable interval, the default of 4 hours, and the early-exit
  * when a pending/running job already exists.
  *
- * No database required — both InsightsService and SystemSettingsService
+ * No database required — both InsightsService and AppSystemSettingsService
  * are fully mocked.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus, JobReason } from '@prisma/client';
+import { MhLegacyJobStatus, JobReason } from '@prisma/client';
 import { InsightsRefreshTask } from './insights-refresh.task';
 import { InsightsService } from './insights.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,12 +44,12 @@ function makeRefreshState(state: 'idle' | 'pending' | 'running' | 'failed') {
 describe('InsightsRefreshTask', () => {
   let task: InsightsRefreshTask;
   let mockInsights: jest.Mocked<Pick<InsightsService, 'getLatest' | 'enqueueRefresh' | 'getRefreshState'>>;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
 
   beforeEach(async () => {
     mockInsights = {
       getLatest: jest.fn(),
-      enqueueRefresh: jest.fn().mockResolvedValue({ id: 'job-new', status: JobStatus.pending }),
+      enqueueRefresh: jest.fn().mockResolvedValue({ id: 'job-new', status: MhLegacyJobStatus.pending }),
       getRefreshState: jest.fn().mockResolvedValue(makeRefreshState('idle')),
     };
 
@@ -61,7 +61,7 @@ describe('InsightsRefreshTask', () => {
       providers: [
         InsightsRefreshTask,
         { provide: InsightsService, useValue: mockInsights },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
       ],
     }).compile();
 

@@ -2,10 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Workflow, WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
-import { isWorkflowsEnabled } from '../../common/types/settings.types';
+import { isWorkflowsEnabled } from '../../settings/feature-gates';
 import { nextCronDate } from '../util/cron.util';
 import { WorkflowRunService } from './workflow-run.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** Statuses that count a run as still in flight (overlap / concurrency gate). */
 const ACTIVE_RUN_STATUSES: WorkflowRunStatus[] = [
@@ -34,7 +34,7 @@ export class WorkflowScheduleTask {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly runService: WorkflowRunService,
   ) {}
 

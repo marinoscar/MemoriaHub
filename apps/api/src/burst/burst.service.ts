@@ -6,16 +6,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
-import {
-  BurstGroupStatus,
-  CircleRole,
-  JobReason,
-  JobStatus,
-  MediaType,
-  Prisma,
-  ReviewRunAction,
-  ReviewRunSubject,
-} from '@prisma/client';
+import { BurstGroupStatus, CircleRole, JobReason, MediaType, Prisma, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -25,8 +16,7 @@ import {
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { FEATURE_KEYS } from '../common/types/settings.types';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -35,6 +25,7 @@ import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 import { ReviewRunService } from '../review-runs/review-run.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class BurstService {
@@ -48,7 +39,7 @@ export class BurstService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaThumbnailService: MediaThumbnailService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
     // Circular by nature: the review-run strategies wrap this service's
     // resolve/dismiss primitives, while these threshold endpoints start runs.
@@ -702,16 +693,17 @@ export class BurstService {
       return enqueued;
     } else {
       // Only enqueue items without an existing burstGroupId and without a succeeded burst_detection job
-      const succeededJobMediaIds = await this.prisma.enrichmentJob.findMany({
+      const succeededJobMediaIds = await this.prisma.job.findMany({
         where: {
           type: 'burst_detection',
-          circleId,
-          status: JobStatus.succeeded,
+          subjectType: 'media_item',
+          payload: { path: ['circleId'], equals: circleId },
+          status: 'succeeded',
         },
-        select: { mediaItemId: true },
+        select: { subjectId: true },
       });
       const excludeIds = new Set(
-        succeededJobMediaIds.map((j) => j.mediaItemId).filter((id): id is string => id !== null),
+        succeededJobMediaIds.map((j) => j.subjectId).filter((id): id is string => id !== null),
       );
 
       const items = await this.prisma.mediaItem.findMany({

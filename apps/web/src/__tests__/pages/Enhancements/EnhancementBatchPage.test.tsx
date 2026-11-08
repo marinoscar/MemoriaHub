@@ -25,7 +25,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
-import { installLayoutStubs, resetContainerWidth } from '../../../components/datatable/__tests__/testUtils/layoutStubs';
+import { installLayoutStubs, resetContainerWidth } from '@marinoscar/platform-web/datatable/testing';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks

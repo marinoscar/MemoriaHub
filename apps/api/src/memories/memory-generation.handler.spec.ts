@@ -22,7 +22,6 @@ import { EnrichmentJob } from '@prisma/client';
 import { MemoryGenerationHandler } from './memory-generation.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import {
   MEMORY_CURATORS,
   MemoryCurator,
@@ -31,6 +30,7 @@ import {
 } from './curators/memory-curator.interface';
 import { MemoryTitleService } from './titles/memory-title.service';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   return {
@@ -74,7 +74,7 @@ describe('MemoryGenerationHandler', () => {
       providers: [
         MemoryGenerationHandler,
         EnrichmentHandlerRegistry,
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
         { provide: MemoryTitleService, useValue: titles },
         { provide: MemoriesNotificationService, useValue: memoriesNotifications },
         { provide: MEMORY_CURATORS, useValue: curators },

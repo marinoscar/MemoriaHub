@@ -23,10 +23,9 @@ import {
 } from '@nestjs/swagger';
 import { IsString, IsOptional, IsUUID } from 'class-validator';
 import { CircleRole, MediaType } from '@prisma/client';
-import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import {
@@ -289,8 +288,15 @@ export class FaceDetectionController {
       await tx.person.deleteMany({ where: { circleId } });
 
       // 3. Delete EnrichmentJob rows for face_detection type in this circle
-      await tx.enrichmentJob.deleteMany({
-        where: { circleId, type: 'face_detection' },
+      // (the circle of a media-item job lives in `payload.circleId`; see EnrichmentJobService)
+      await tx.job.deleteMany({
+        where: {
+          type: 'face_detection',
+          OR: [
+            { subjectType: 'circle', subjectId: circleId },
+            { payload: { path: ['circleId'], equals: circleId } },
+          ],
+        },
       });
 
       // 4. Delete all MediaFaceStatus rows (via mediaItem.circleId join)

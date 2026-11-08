@@ -8,12 +8,11 @@ import { RateLimitError, classifyRateLimit } from '../enrichment/rate-limit.erro
 import {
   ENRICHMENT_MAX_ATTEMPTS,
   ENRICHMENT_RATELIMIT_MAX_HITS,
-} from '../enrichment/enrichment-terminal.service';
+} from '../platform/jobs/queue-limits';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import {
@@ -23,6 +22,7 @@ import {
 import { StorageProvider } from '../storage/providers/storage-provider.interface';
 import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder';
 import { ExifCarryoverService } from './exif-carryover.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 interface PictureEnhancementPayload {
   enhancementId?: string;
@@ -51,7 +51,7 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
     private readonly resolver: StorageProviderResolver,
     private readonly aiSettings: AiSettingsService,
     private readonly aiProviderRegistry: AiProviderRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     // Optional by TYPE only — Nest always injects it (EnhancementModule provides
     // it). Marked `?` so the metadata stamp is structurally non-essential: a
     // handler constructed without it still produces a valid enhancement, just

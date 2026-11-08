@@ -217,18 +217,13 @@ Pure predicates (`isInboxAllowed`, `isPushAllowed`, `isToastAllowed`, `policyCha
 
 - **Cached 5 s** (`NOTIFICATION_POLICY_CACHE_TTL_MS`), because the gate runs per recipient in hot producer loops. `SystemSettingsService.invalidateSettingsCache()` also invalidates this cache, so an admin policy change applies immediately on the writing process (other API processes still wait out the TTL).
 - **Fails open**: an unreadable policy resolves to "everything on". A transient database fault must never silently mute notifications.
-- `disabledTypes` gates **new** writes, and adding a type also **dismisses its live rows app-wide** (mandatory types excepted) through `NotificationsService.dismissTypesGlobally`, in the same transaction as the settings write (batched, 5 000 rows per statement; the unread-count caches are dropped after commit). Only newly disabled types are swept, so an ordinary save opens no transaction. Re-enabling a type does not restore dismissed rows; `review_queue_*` rows are recreated by the next reconcile, event rows are not. See also [notifications.md section 8.4](notifications.md#84-dismiss-on-disable-is-transactional-with-the-settings-write).
+- `disabledTypes` gates **new** writes, and adding a type also **dismisses its live rows app-wide** (mandatory types excepted) through `NotificationsService.dismissTypesGlobally`, right after the settings write commits (the platform write has no transaction hook; a failed dismissal is logged and the next save repairs it) (batched, 5 000 rows per statement; the unread-count caches are dropped after commit). Only newly disabled types are swept, so an ordinary save opens no transaction. Re-enabling a type does not restore dismissed rows; `review_queue_*` rows are recreated by the next reconcile, event rows are not. See also [notifications.md section 8.4](notifications.md#84-dismiss-on-disable-is-transactional-with-the-settings-write).
 
-### 7.1 Four hand-maintained copies
+### 7.1 One declaration (RETRO-B3)
 
-`notifications.{browserEnabled, pushEnabled, disabledTypes}` must be edited in four places, or a `PATCH /api/system-settings` validates in unit tests and silently no-ops (or the value is stored but never returned):
+`notifications.{browserEnabled, pushEnabled, disabledTypes}` (with the retention keys) is declared once, in `apps/api/src/settings/registry/namespaces/system/notifications.ts`, and registered in `app-registrations/settings.ts`; the bodies, the merge and the salvage are derived from it. Before RETRO-B3 the same keys had to be edited in four hand-maintained places. The admin page (`/admin/settings/notifications`) PATCHes only these three keys; the API merges the namespace field by field (the `disabledTypes` array replaces), so the retention knobs edited on the Storage page are untouched.
 
-1. `systemSettingsSchema` (validation + defaults), `common/schemas/settings.schema.ts`
-2. `systemSettingsPatchSchema` (the all-optional twin), same file
-3. `patchSystemSettingsSchema`, the **wire DTO** in `settings/dto/update-system-settings.dto.ts`, which strips unknown keys
-4. the hand-written merge in `SystemSettingsService.patchSettings`
-
-(`common/types/settings.types.ts` carries the TypeScript type and `DEFAULT_SYSTEM_SETTINGS` as a fifth touch point.) The admin page (`/admin/settings/notifications`) PATCHes only these three keys; the API merges the namespace field by field, so the retention knobs edited on the Storage page are untouched.
+PLATFORM-ADOPTION-SHIM(RETRO-D3): the namespace is MemoriaHub's own shape under the key the platform notifications slice also uses. The notifications slice swaps the declaration.
 
 ## 8. Per-User Push Preferences
 
@@ -352,7 +347,7 @@ Permission arms: `denied` and `default` are reported **regardless of the worker*
 
 Every environment probe (`readIsSecureContext`, `readHasNotificationApi`, `readHasServiceWorkerApi`, `readIsIos`, `readIsStandalone`) is non-throwing and feature-detects by access inside `try`, because hardened browsers define these objects and throw on touching them.
 
-**Where it is used.** `usePushSubscriptionSync` (mounted in the app shell, `Layout.tsx`) consumes it and drives the one **auto-prompt**: when push is enabled, the browser toast switch is not off and the capability is `default`, the shell asks for permission once per page load (`claimAutoPermissionPrompt()` returns true once per load, so StrictMode double effects and remounts cannot prompt twice). `NotificationPermissionBanner` (app-wide, for `default`, `denied` and `ios-needs-install`; dismissal kept per capability in `sessionStorage`) and the Notifications card on `/settings` offer the same action by button, plus the Add-to-Home-Screen walkthrough (`AddToHomeScreenPanel`). The buttons still matter: Firefox ignores a request with no user gesture, Safari may throw, and a denial is effectively permanent, so nothing may prompt in a loop.
+**Where it is used.** `usePushSubscriptionSync` (mounted in the app shell, `Layout.tsx`) consumes it and drives the one **auto-prompt**: when push is enabled, the browser toast switch is not off and the capability is `default`, the shell asks for permission once per page load (`claimAutoPermissionPrompt()` returns true once per load, so StrictMode double effects and remounts cannot prompt twice). `NotificationPermissionBanner` (app-wide, for `default`, `denied` and `ios-needs-install`; dismissal kept per capability in `sessionStorage`) and the Notifications page (`/settings/notifications`, a card of the `/settings` hub since RETRO-B5) offer the same action by button, plus the Add-to-Home-Screen walkthrough (`AddToHomeScreenPanel`). The buttons still matter: Firefox ignores a request with no user gesture, Safari may throw, and a denial is effectively permanent, so nothing may prompt in a loop.
 
 ## 13. Subscription Sync, Rotation and Logout
 

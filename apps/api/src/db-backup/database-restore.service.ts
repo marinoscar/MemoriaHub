@@ -75,7 +75,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DatabaseBackupTrigger } from '@prisma/client';
+import { MhLegacyDatabaseBackupTrigger } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import * as fsp from 'node:fs/promises';
@@ -83,9 +83,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { MaintenanceModeService } from '../common/maintenance/maintenance-mode.service';
+import { MaintenanceModeService } from '@marinoscar/platform-api/host';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
 import {
@@ -120,6 +119,7 @@ import {
   readPgClientMajor,
   readServerMajor,
 } from './pg-version.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -147,7 +147,7 @@ const REQUIRED_TABLES = [
   'users',
   'circles',
   'media_items',
-  'database_backup_runs',
+  'mh_legacy_database_backup_runs',
   '_prisma_migrations',
 ];
 
@@ -284,7 +284,7 @@ export class DatabaseRestoreService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
     private readonly maintenance: MaintenanceModeService,
     private readonly backupRunner: DatabaseBackupRunnerService,
@@ -307,7 +307,7 @@ export class DatabaseRestoreService {
     runId: string,
     opts: StartRestoreOptions,
   ): Promise<StartRestoreResult> {
-    const run = await this.prisma.databaseBackupRun.findUnique({
+    const run = await this.prisma.mhLegacyDatabaseBackupRun.findUnique({
       where: { id: runId },
     });
     if (!run) throw new DatabaseRestoreNotFoundError(runId);
@@ -409,7 +409,7 @@ export class DatabaseRestoreService {
    * so both paths are one API call.
    */
   async rollback(runId: string, opts: { userId: string }): Promise<RollbackResult> {
-    const run = await this.prisma.databaseBackupRun.findUnique({
+    const run = await this.prisma.mhLegacyDatabaseBackupRun.findUnique({
       where: { id: runId },
     });
     if (!run) throw new DatabaseRestoreNotFoundError(runId);
@@ -455,11 +455,11 @@ export class DatabaseRestoreService {
         );
       }
 
-      await this.maintenance.enable(
-        'Rolling back a database restore. The application will be back in a moment.',
-        opts.userId,
-        { allowAdmins: false },
-      );
+      this.maintenance.setInMemoryOverride({
+        enabled: true,
+        message: 'Rolling back a database restore. The application will be back in a moment.',
+        allowAdmins: false,
+      });
 
       const supersededName = buildScratchDatabaseName(
         pg.database,
@@ -942,8 +942,8 @@ export class DatabaseRestoreService {
   ): Promise<void> {
     const tmpPath = path.join(
       os.tmpdir(),
-      // `memoriaHub-` prefix so TempFileJanitorTask reaps it if we are SIGKILLed.
-      `memoriaHub-dbrestore-${runId}.dump`,
+      // `memoriahub-job-` prefix so TempFileJanitorTask reaps it if we are SIGKILLed.
+      `memoriahub-job-dbrestore-${runId}.dump`,
     );
     let scratchCreated = false;
 
@@ -1004,7 +1004,7 @@ export class DatabaseRestoreService {
     tmpPath: string,
     pg: PgConnectionConfig,
   ): Promise<void> {
-    const run = await this.prisma.databaseBackupRun.findUniqueOrThrow({
+    const run = await this.prisma.mhLegacyDatabaseBackupRun.findUniqueOrThrow({
       where: { id: runId },
       select: {
         storageProvider: true,
@@ -1065,7 +1065,7 @@ export class DatabaseRestoreService {
       `Taking a pre-restore safety backup before restoring ${runId} (rollbackMode=pre_restore_dump)`,
     );
     const result = await this.backupRunner.runBackup({
-      trigger: DatabaseBackupTrigger.pre_restore,
+      trigger: MhLegacyDatabaseBackupTrigger.pre_restore,
       createdById: userId,
     });
     await this.writeRestoreState(runId, { preRestoreBackupId: result.runId });
@@ -1209,12 +1209,12 @@ export class DatabaseRestoreService {
       swappedAt,
     });
 
-    await this.maintenance.enable(
-      'Restoring the database. The application will be back in a moment.',
-      ctx.userId,
-      // Even an admin request would hit a database that is momentarily gone.
-      { allowAdmins: false },
-    );
+    // Even an admin request would hit a database that is momentarily gone.
+    this.maintenance.setInMemoryOverride({
+      enabled: true,
+      message: 'Restoring the database. The application will be back in a moment.',
+      allowAdmins: false,
+    });
 
     await withAdminConnection(ctx.pg, async (client) => {
       await this.prisma.$disconnect().catch(() => {});
@@ -1276,7 +1276,7 @@ export class DatabaseRestoreService {
     runId: string,
     overrides: Record<string, unknown>,
   ): Promise<Record<string, unknown>[]> {
-    const rows = await this.prisma.databaseBackupRun.findMany({
+    const rows = await this.prisma.mhLegacyDatabaseBackupRun.findMany({
       orderBy: { startedAt: 'asc' },
     });
     return rows.map((row) =>
@@ -1318,7 +1318,7 @@ export class DatabaseRestoreService {
         for (const row of rows) {
           try {
             await live.query(
-              `INSERT INTO database_backup_runs (
+              `INSERT INTO mh_legacy_database_backup_runs (
                  id, status, trigger, started_at, finished_at, last_heartbeat_at,
                  bytes_written, size_bytes, storage_provider, storage_key, bucket,
                  format, checksum_sha256, db_version, app_version, migration_name,
@@ -1326,7 +1326,7 @@ export class DatabaseRestoreService {
                  restore_status, restore_error, restored_at, restored_by_id,
                  restore_scratch_db, restore_old_db, swapped_at
                ) VALUES (
-                 $1::uuid, $2::"DatabaseBackupStatus", $3::"DatabaseBackupTrigger",
+                 $1::uuid, $2::"MhLegacyDatabaseBackupStatus", $3::"MhLegacyDatabaseBackupTrigger",
                  $4, $5, $6, $7::bigint, $8::bigint, $9, $10, $11,
                  $12, $13, $14, $15, $16, $17, $18,
                  (SELECT id FROM users WHERE id = $19::uuid),
@@ -1393,10 +1393,10 @@ export class DatabaseRestoreService {
           if (!row.preRestoreBackupId) continue;
           await live
             .query(
-              `UPDATE database_backup_runs
+              `UPDATE mh_legacy_database_backup_runs
                   SET pre_restore_backup_id = $2::uuid
                 WHERE id = $1::uuid
-                  AND EXISTS (SELECT 1 FROM database_backup_runs r WHERE r.id = $2::uuid)`,
+                  AND EXISTS (SELECT 1 FROM mh_legacy_database_backup_runs r WHERE r.id = $2::uuid)`,
               [row.id, row.preRestoreBackupId],
             )
             .catch(() => {});
@@ -1411,7 +1411,7 @@ export class DatabaseRestoreService {
   // -------------------------------------------------------------------------
 
   private async assertNoRestoreInProgress(): Promise<void> {
-    const active = await this.prisma.databaseBackupRun.findFirst({
+    const active = await this.prisma.mhLegacyDatabaseBackupRun.findFirst({
       where: { restoreStatus: { in: ACTIVE_RESTORE_STATUSES } },
       select: { id: true },
     });
@@ -1423,7 +1423,7 @@ export class DatabaseRestoreService {
     data: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await this.prisma.databaseBackupRun.update({
+      await this.prisma.mhLegacyDatabaseBackupRun.update({
         where: { id: runId },
         data: data as never,
       });

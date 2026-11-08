@@ -24,7 +24,7 @@ import {
   FaceProviderCredentials,
 } from './providers/face-provider.interface';
 import { FaceMatchingService } from './face-matching.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,7 +78,7 @@ export class FaceDetectionCore {
     private readonly faceSettingsService: FaceSettingsService,
     private readonly registry: FaceProviderRegistry,
     private readonly matchingService: FaceMatchingService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   // ---------------------------------------------------------------------------

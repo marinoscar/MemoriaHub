@@ -22,12 +22,12 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { Auth } from '../../auth/decorators/auth.decorator';
+import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
-import { isMemoriesEnabled } from '../../common/types/settings.types';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
+import { isMemoriesEnabled } from '../../settings/feature-gates';
 import { MemoryBackfillService } from './memory-backfill.service';
 import { MEMORY_BACKFILL_SHARDS } from './memory-backfill.shards';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const adminMemoriesBackfillSchema = z
   .object({
@@ -45,7 +45,7 @@ class AdminMemoriesBackfillDto extends createZodDto(adminMemoriesBackfillSchema)
 export class AdminMemoriesController {
   constructor(
     private readonly backfillService: MemoryBackfillService,
-    private readonly systemSettingsService: SystemSettingsService,
+    private readonly systemSettingsService: AppSystemSettingsService,
   ) {}
 
   @Post('backfill')

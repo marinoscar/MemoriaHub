@@ -31,6 +31,7 @@ import {
   MemoryTitleRun,
 } from '../../src/memories/titles/memory-title.types';
 import { stubTitleService } from './memory-title.stub';
+import { defaultOrgId } from '../helpers/default-org';
 
 function resolveDatabaseUrl(): string {
   if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
@@ -80,6 +81,7 @@ describeMaybeDb('Memories — AI titles persistence (DB_GATED: real PostgreSQL)'
     createdStorageObjectIds.push(storageObjectId);
     await prisma.storageObject.create({
       data: {
+        orgId: await defaultOrgId(prisma),
         id: storageObjectId,
         name: `${storageObjectId}.jpg`,
         size: BigInt(2048),

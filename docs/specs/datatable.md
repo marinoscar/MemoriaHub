@@ -14,8 +14,14 @@ migrated — the FINAL migration, proving the container-driven layout switch
 against the drawer case and the no-remount-under-poll rule against three polling
 pages (issue #261, §13.2) — all of epic #238. **No raw page-level table
 implementation remains** (§13).
-**Location:** `apps/web/src/components/datatable/`,
-`apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
+**Location:** `@marinoscar/platform-web/datatable` (`/ui`, `/headless`,
+`/testing`; see its README in the platform repository,
+`packages/platform-web/src/datatable/README.md`), `apps/api/src/settings/registry/`
+(persistence schema). The app copy at `apps/web/src/components/datatable/` was
+harvested into the platform and deleted in RETRO-F1 (#571), after a parity diff
+found the platform ahead (nothing to backport). This document is kept as the
+design record of epic #238; where it names `components/datatable/*` files, read
+the platform module of the same name.
 **Spec owner:** frontend
 
 ---
@@ -1518,7 +1524,7 @@ from `DataTableColumn` (§4), which is already the DataGrid field, the server
 sort key, and the visibility-model key.
 
 The canonical Zod definition is `dataTablesSchema` in
-`apps/api/src/common/schemas/settings.schema.ts`, imported by the PUT, PATCH and
+`apps/api/src/settings/registry/`, imported by the PUT, PATCH and
 response DTOs rather than copied into each — the bounds in §14.4 are a security
 control and four hand-maintained copies of them would drift.
 

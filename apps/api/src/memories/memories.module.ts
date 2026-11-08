@@ -20,7 +20,6 @@
 
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { AiModule } from '../ai/ai.module';
 import { CirclesModule } from '../circles/circles.module';
@@ -76,7 +75,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   // imported above.
   imports: [
     PrismaModule,
-    SettingsModule,
+    
     EnrichmentModule,
     AiModule,
     CirclesModule,

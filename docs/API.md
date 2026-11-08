@@ -3036,7 +3036,11 @@ GET  /admin/insights         → refresh.state === "idle"     (done; metrics upd
 A [Scalar](https://scalar.com) API reference is served same-origin at `/api/docs`
 (development: http://localhost:3535/api/docs), with the machine-readable OpenAPI
 3.1 document at `/api/openapi.json`. See the
-[API Documentation spec](specs/api-documentation.md) for how it is built.
+[API Documentation spec](specs/api-documentation.md) for how it is built. The document, the envelope, the error filter, the
+maintenance 503 (`details.reason: "MAINTENANCE_MODE"`, `Retry-After: 30`) and the health
+probes are the platform host slice's since RETRO-B1
+([#597](https://github.com/marinoscar/MemoriaHub/issues/597); the
+[maintenance runbook](runbooks/maintenance-mode.md) has the wire shapes).
 
 The reference gives you:
 - A sidebar grouped into product sections (`x-tagGroups`), each tag described

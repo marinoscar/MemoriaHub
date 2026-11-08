@@ -5,8 +5,8 @@ import { VISUAL_EMBEDDING_MODEL_TAG } from '@memoriahub/enrichment-compute/clip'
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { VisualEmbeddingService } from './visual-embedding.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const DEFAULT_DEDUP_CONFIG = {
   similarityThreshold: 0.96,
@@ -77,7 +77,7 @@ export class DuplicateDetectionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly visualEmbeddingService: VisualEmbeddingService,
   ) {}
 

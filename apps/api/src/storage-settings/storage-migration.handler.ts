@@ -37,6 +37,7 @@
 //
 // =============================================================================
 
+import { ENRICHMENT_MAX_ATTEMPTS } from '../platform/jobs/queue-limits';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob, StorageMigrationItemStatus, StorageMigrationStatus, StorageObjectStatus } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
@@ -45,14 +46,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 
 // Mirror the env-var default from the worker so we can detect the final attempt.
-function getEnvInt(key: string, defaultValue: number): number {
-  const raw = process.env[key];
-  if (!raw) return defaultValue;
-  const parsed = parseInt(raw, 10);
-  return isNaN(parsed) ? defaultValue : parsed;
-}
-
-const MAX_ATTEMPTS = getEnvInt('ENRICHMENT_MAX_ATTEMPTS', 3);
+const MAX_ATTEMPTS = ENRICHMENT_MAX_ATTEMPTS;
 
 // Statuses considered "active" — used to gate concurrent migration checks
 const ACTIVE_RUN_STATUSES = [

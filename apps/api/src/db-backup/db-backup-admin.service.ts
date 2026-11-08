@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { DatabaseBackupRun, DatabaseBackupStatus } from '@prisma/client';
+import type { MhLegacyDatabaseBackupRun, MhLegacyDatabaseBackupStatus } from '@prisma/client';
 
 import {
   assertSupportedTimeZone,
@@ -14,7 +14,6 @@ import {
   wallClockToUtc,
 } from '../common/time/zone.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { getStorageProviderDescriptor } from '../storage-settings/providers/storage-provider.registry';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
@@ -24,12 +23,13 @@ import type {
   DownloadDatabaseBackupDto,
   ListDatabaseBackupRunsDto,
 } from './dto/db-backup-runs.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Fallback signed-URL lifetime, matching `ObjectsService.getDownloadUrl`. */
 const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 3600;
 
 /** Statuses that still hold the single-active-run slot. */
-const ACTIVE_STATUSES: DatabaseBackupStatus[] = ['pending', 'running'];
+const ACTIVE_STATUSES: MhLegacyDatabaseBackupStatus[] = ['pending', 'running'];
 
 /**
  * Shape returned for a single run. Every BigInt column is a STRING here —
@@ -39,7 +39,7 @@ const ACTIVE_STATUSES: DatabaseBackupStatus[] = ['pending', 'running'];
  */
 export interface DatabaseBackupRunDto {
   id: string;
-  status: DatabaseBackupStatus;
+  status: MhLegacyDatabaseBackupStatus;
   trigger: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -95,7 +95,7 @@ export interface DatabaseBackupConfigDto {
  * feature (issue #343, epic #339).
  *
  * Holds everything the controller needs that is NOT the dump engine itself:
- * config read/write (delegated to `SystemSettingsService` so there is exactly
+ * config read/write (delegated to `AppSystemSettingsService` so there is exactly
  * one settings writer), run listing/detail, signed downloads, deletion, and
  * cancellation. The engine (`DatabaseBackupRunnerService`, #341) is injected,
  * never reimplemented.
@@ -110,7 +110,7 @@ export class DatabaseBackupAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
     private readonly runner: DatabaseBackupRunnerService,
   ) {}
@@ -123,7 +123,7 @@ export class DatabaseBackupAdminService {
     const settings = (await this.systemSettings.getSettings()) as any;
     const config = settings.databaseBackup as DatabaseBackupConfigDto['config'];
 
-    const active = await this.prisma.databaseBackupRun.findFirst({
+    const active = await this.prisma.mhLegacyDatabaseBackupRun.findFirst({
       where: { status: { in: ACTIVE_STATUSES } },
       select: { id: true },
       orderBy: { startedAt: 'desc' },
@@ -255,13 +255,13 @@ export class DatabaseBackupAdminService {
     const where = query.status ? { status: query.status } : {};
 
     const [rows, totalItems] = await Promise.all([
-      this.prisma.databaseBackupRun.findMany({
+      this.prisma.mhLegacyDatabaseBackupRun.findMany({
         where,
         orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      this.prisma.databaseBackupRun.count({ where }),
+      this.prisma.mhLegacyDatabaseBackupRun.count({ where }),
     ]);
 
     return {
@@ -362,7 +362,7 @@ export class DatabaseBackupAdminService {
       }
     }
 
-    await this.prisma.databaseBackupRun.delete({ where: { id } });
+    await this.prisma.mhLegacyDatabaseBackupRun.delete({ where: { id } });
 
     return { deleted: true, objectDeleted };
   }
@@ -384,8 +384,8 @@ export class DatabaseBackupAdminService {
     return { runId: id, signalled };
   }
 
-  private async loadRun(id: string): Promise<DatabaseBackupRun> {
-    const run = await this.prisma.databaseBackupRun.findUnique({
+  private async loadRun(id: string): Promise<MhLegacyDatabaseBackupRun> {
+    const run = await this.prisma.mhLegacyDatabaseBackupRun.findUnique({
       where: { id },
     });
     if (!run) {
@@ -407,7 +407,7 @@ export class DatabaseBackupAdminService {
  * "Do not know how to serialize a BigInt" on a raw one — a runtime-only failure
  * that object-comparing unit tests happily miss.
  */
-export function toRunDto(run: DatabaseBackupRun): DatabaseBackupRunDto {
+export function toRunDto(run: MhLegacyDatabaseBackupRun): DatabaseBackupRunDto {
   const startedMs = run.startedAt?.getTime() ?? null;
   const endMs = run.finishedAt?.getTime() ?? Date.now();
 

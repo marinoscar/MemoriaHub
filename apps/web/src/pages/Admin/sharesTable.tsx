@@ -43,10 +43,7 @@ import { Avatar, Box, Chip, IconButton, Stack, Tooltip, Typography } from '@mui/
 import CopyIcon from '@mui/icons-material/ContentCopy';
 import ImageIcon from '@mui/icons-material/Image';
 import AlbumIcon from '@mui/icons-material/PhotoLibrary';
-import type {
-  DataTableColumn,
-  DataTableFilterModel,
-} from '../../components/datatable';
+import type { DataTableColumn, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import type { MediaShare, ShareStatus, ShareTargetType } from '../../types/sharing';
 
 // ---------------------------------------------------------------------------

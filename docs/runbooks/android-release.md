@@ -222,7 +222,7 @@ Run through this after publishing:
 - [ ] `curl -s https://<your-deployment>/.well-known/assetlinks.json` lists `memoriahub.marin.cr` and the signing fingerprint from `memoriahub android keystore show`.
 - [ ] `/settings/android-app` shows the new version, its size and SHA-256, and **Download APK** downloads a file whose `sha256sum` matches.
 - [ ] On a phone: the self-test checks `app.update` (shows the update, then passes after installing it) and `twa.verification` pass; the app opens full screen.
-- [ ] Admin, then Settings, then Doctor: the **Android app** section is green (`android.assetlinks`, `android.releases`, `android.mediaSync`, `android.uploadPath`).
+- [ ] Admin, then Settings, then Doctor: the **Android app** category is green (`memoriahub.android.assetlinks`, `memoriahub.android.releases`, `memoriahub.android.media-sync`, `memoriahub.android.upload-path`).
 
 ## 12. Troubleshooting
 
@@ -247,7 +247,7 @@ Run through this after publishing:
 | Phones say "App not installed" when updating | The update is signed with a different key, or its `versionCode` is lower | Same key and a higher code. If the key changed, uninstall the old app first |
 | The app opens with an address bar | The signer is not in `assetlinks.json` | Trust it ([section 13](#13-debug-builds-and-trust)); check the `curl` output; reopen the app |
 | Trusting a build answers 400 `TOO_MANY_TRUSTED_APPS` | The trusted list holds 10 entries | Remove unused entries at `/admin/settings/android` |
-| The Doctor warns `android.releases` | Phones are paired but no release is current | Publish one, or make an existing one current |
+| The Doctor warns `memoriahub.android.releases` | Phones are paired but no release is current | Publish one, or make an existing one current |
 
 ## 13. Debug builds and trust
 

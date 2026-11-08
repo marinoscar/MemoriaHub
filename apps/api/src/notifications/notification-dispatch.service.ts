@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Notification, Prisma } from '@prisma/client';
+import { MhLegacyNotification, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationItemDto } from './dto/notification-response.dto';
@@ -91,7 +91,7 @@ export class NotificationDispatchService implements OnModuleDestroy {
    * Fire-and-forget: returns immediately, never throws, never rejects.
    */
   dispatch(
-    row: Notification,
+    row: MhLegacyNotification,
     reason: NotificationDispatchReason = 'created',
     options: NotificationDispatchOptions = {},
   ): void {
@@ -112,7 +112,7 @@ export class NotificationDispatchService implements OnModuleDestroy {
   /** Does this user have at least one registered push subscription? */
   async hasActivePushSubscription(userId: string): Promise<boolean> {
     try {
-      return (await this.prisma.pushSubscription.count({ where: { userId } })) > 0;
+      return (await this.prisma.mhLegacyPushSubscription.count({ where: { userId } })) > 0;
     } catch {
       return false;
     }
@@ -141,7 +141,7 @@ export class NotificationDispatchService implements OnModuleDestroy {
   // ---------------------------------------------------------------------------
 
   private async run(
-    row: Notification,
+    row: MhLegacyNotification,
     reason: NotificationDispatchReason,
     options: NotificationDispatchOptions,
   ): Promise<void> {
@@ -161,7 +161,7 @@ export class NotificationDispatchService implements OnModuleDestroy {
   }
 
   /** Throttle → VAPID → subscriptions → send → delivery row. Returns `pushed`. */
-  private async push(row: Notification): Promise<boolean> {
+  private async push(row: MhLegacyNotification): Promise<boolean> {
     const now = Date.now();
     const last = this.lastPushAt.get(row.id);
     if (last !== undefined && now - last < PUSH_THROTTLE_MS) return false;
@@ -180,7 +180,7 @@ export class NotificationDispatchService implements OnModuleDestroy {
       return false;
     }
 
-    const delivery = await this.prisma.notificationDelivery
+    const delivery = await this.prisma.mhLegacyNotificationDelivery
       .create({
         data: {
           notificationId: row.id,
@@ -200,14 +200,14 @@ export class NotificationDispatchService implements OnModuleDestroy {
 
     if (delivery) {
       const summary = `${result.sent}/${result.attempted} sent, ${result.failed} failed, ${result.pruned} pruned`;
-      await this.prisma.notificationDelivery
+      await this.prisma.mhLegacyNotificationDelivery
         .update({
           where: { id: delivery.id },
           data: {
             status: result.success ? 'sent' : 'failed',
             providerMessageId: result.success ? summary : null,
             error: result.success ? null : (result.error ?? summary).slice(0, 1000),
-          } satisfies Prisma.NotificationDeliveryUpdateInput,
+          } satisfies Prisma.MhLegacyNotificationDeliveryUpdateInput,
         })
         .catch((err) =>
           this.logger.warn(`Could not finalize push delivery ${delivery.id}: ${describeThrown(err)}`),
@@ -236,7 +236,7 @@ export class NotificationDispatchService implements OnModuleDestroy {
   }
 }
 
-function toItem(row: Notification): NotificationItemDto {
+function toItem(row: MhLegacyNotification): NotificationItemDto {
   return {
     id: row.id,
     circleId: row.circleId,

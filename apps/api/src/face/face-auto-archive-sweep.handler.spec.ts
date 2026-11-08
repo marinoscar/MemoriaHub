@@ -13,13 +13,13 @@
  *    id of the first page as the cursor.
  */
 
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceMatchingService } from './face-matching.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,7 +31,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'face_auto_archive_sweep',
     mediaItemId: null,
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.backfill,
     priority: 100,
     providerKey: null,
@@ -84,7 +84,7 @@ describe('FaceAutoArchiveSweepHandler', () => {
       mockRegistry as unknown as EnrichmentHandlerRegistry,
       mockPrisma as unknown as PrismaService,
       mockMatchingService as unknown as FaceMatchingService,
-      mockSystemSettings as unknown as SystemSettingsService,
+      mockSystemSettings as unknown as AppSystemSettingsService,
       { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,
     );
   });

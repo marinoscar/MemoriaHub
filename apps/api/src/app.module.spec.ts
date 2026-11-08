@@ -1,28 +1,33 @@
-import { testOnlyModules } from './app.module';
-import { TestAuthModule } from './test-auth/test-auth.module';
+import { IdentityModule } from '@marinoscar/platform-api/identity';
+
+import { testAuthEnabled } from './platform/identity/identity.config';
 
 /**
- * `TestAuthModule` mints tokens with no OAuth round-trip. A controller that is
- * not registered is invisible to `SwaggerModule.createDocument`, so this gate is
- * what keeps those routes out of a production API document as well as out of a
- * production process — worth asserting directly rather than inferring from the
- * absence of a tag in a test-environment document.
+ * The test login (`POST /api/auth/test/login`) mints tokens with no OAuth
+ * round-trip. It is mounted by `IdentityModule.forRoot({ enableTestAuth })`;
+ * this gate is what keeps it out of a production process, and a controller that
+ * is not registered is invisible to `SwaggerModule.createDocument`, so it also
+ * keeps the route out of the published API document. `main.ts` additionally
+ * refuses to boot when `TEST_AUTH_ENABLED=true` in production.
  */
-describe('testOnlyModules', () => {
-  const saved = process.env.NODE_ENV;
-
-  afterEach(() => {
-    if (saved === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = saved;
+describe('test login gate', () => {
+  it('is enabled outside production', () => {
+    expect(testAuthEnabled('development')).toBe(true);
+    expect(testAuthEnabled('test')).toBe(true);
+    expect(testAuthEnabled(undefined)).toBe(true);
   });
 
-  it('registers the test auth module outside production', () => {
-    process.env.NODE_ENV = 'development';
-    expect(testOnlyModules()).toEqual([TestAuthModule]);
+  it('is disabled in production', () => {
+    expect(testAuthEnabled('production')).toBe(false);
   });
 
-  it('registers nothing in production', () => {
+  it('is refused by the identity package when requested in production', () => {
+    const saved = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
-    expect(testOnlyModules()).toEqual([]);
+    try {
+      expect(() => IdentityModule.forRoot({ enableTestAuth: true })).toThrow(/production/);
+    } finally {
+      process.env.NODE_ENV = saved;
+    }
   });
 });

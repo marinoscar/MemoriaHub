@@ -23,7 +23,7 @@
  */
 
 import { Chip, Typography } from '@mui/material';
-import type { DataTableColumn, DataTableFilterModel } from '../datatable';
+import type { DataTableColumn, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import type { AllowedEmailEntry } from '../../types';
 
 // ---------------------------------------------------------------------------

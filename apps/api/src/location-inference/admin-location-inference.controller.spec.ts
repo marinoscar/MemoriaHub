@@ -9,8 +9,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { AdminLocationInferenceController } from './admin-location-inference.controller';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { FEATURE_KEYS } from '../common/types/settings.types';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 
 describe('AdminLocationInferenceController', () => {
   let controller: AdminLocationInferenceController;
@@ -23,7 +23,7 @@ describe('AdminLocationInferenceController', () => {
 
     controller = new AdminLocationInferenceController(
       mockBackfillService as unknown as LocationInferenceBackfillService,
-      mockSystemSettingsService as unknown as SystemSettingsService,
+      mockSystemSettingsService as unknown as AppSystemSettingsService,
     );
   });
 

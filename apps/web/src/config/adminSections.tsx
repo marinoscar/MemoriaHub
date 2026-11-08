@@ -7,7 +7,8 @@
  * Epic #388 / issue #389 promotes it from a destination into navigation, so the
  * array now lives here and is consumed by:
  *
- *   1. `SettingsHubPage`      — the card grid (and the phone drill-down hub)
+ *   1. `SettingsHubPage`      — a binding over the packaged `SettingsHub`
+ *                               (card grid; phone drill-down list)
  *   2. `Sidebar` Console mode — the rail's contents at any `/admin/*` route
  *   3. `AppBar`               — resolving an admin route to its page title
  *
@@ -19,9 +20,8 @@
  * 40px and the rail at ~20px, so the size cannot be baked into the declaration.
  */
 
-import type { SvgIconComponent } from '@mui/icons-material';
+import './settingsFeatures';
 import AdminIcon from '@mui/icons-material/AdminPanelSettings';
-import PeopleIcon from '@mui/icons-material/People';
 import AiIcon from '@mui/icons-material/SmartToy';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import FaceIcon from '@mui/icons-material/Face';
@@ -31,11 +31,8 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import MapIcon from '@mui/icons-material/Map';
 import StorageIcon from '@mui/icons-material/Storage';
 import InsightsIcon from '@mui/icons-material/Insights';
-import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import ArchiveIcon from '@mui/icons-material/Archive';
-import QueryStatsIcon from '@mui/icons-material/QueryStats';
 import PublicIcon from '@mui/icons-material/Public';
-import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import MovieIcon from '@mui/icons-material/Movie';
 import HubIcon from '@mui/icons-material/Hub';
 import EmailIcon from '@mui/icons-material/Email';
@@ -46,21 +43,28 @@ import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 import AndroidIcon from '@mui/icons-material/Android';
+import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
+import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
+import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
+import {
+  settingsPageTitle,
+  visibleSettingsSections,
+  type SettingsCardDef,
+  type SettingsSectionDef,
+} from '@marinoscar/platform-web/settings/ui';
+import type { SettingsFeatures } from '@marinoscar/platform-web/settings/headless';
 
-export interface AdminCardDef {
-  title: string;
-  description: string;
-  Icon: SvgIconComponent;
-  path?: string;
-  disabled?: boolean;
-  permission?: string;
-  alwaysShow?: boolean;
-}
-
-export interface AdminSectionDef {
-  label: string;
-  cards: AdminCardDef[];
-}
+/**
+ * The card and section shapes are the platform's (`SettingsCardDef`,
+ * `SettingsSectionDef` of `@marinoscar/platform-web/settings/ui`, RETRO-B5
+ * #621): the packaged `SettingsHub` draws this registry, so it cannot keep a
+ * type of its own. The old names stay as aliases for the consumers that still
+ * import them.
+ */
+export type AdminCardDef = SettingsCardDef;
+export type AdminSectionDef = SettingsSectionDef;
 
 export const ADMIN_SECTIONS: AdminSectionDef[] = [
   {
@@ -73,13 +77,9 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/general',
         permission: 'system_settings:read',
       },
-      {
-        title: 'Users & Allowlist',
-        description: 'Manage user accounts, roles, and control who can access the application.',
-        Icon: PeopleIcon,
-        path: '/admin/settings/users',
-        permission: 'users:read',
-      },
+      // Users & Allowlist: the identity slice's card, as data (RETRO-B2). The
+      // Organization cards are not spread: single-organization mode hides them.
+      ...identityAdminSections.access,
       {
         title: 'Archiving & Deletion',
         description: 'Manage the Trash retention period and review how archiving and deletion work.',
@@ -92,7 +92,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         description: 'Configure the outbound email provider (AWS SES or SMTP) and test delivery.',
         Icon: EmailIcon,
         path: '/admin/settings/email',
-        permission: 'system_settings:read',
+        // RETRO-B5 (#621): the page reads only `GET /api/email-settings`, which
+        // `email-settings.controller.ts` gates on `email_settings:read`. The
+        // card used to declare `system_settings:read`, a string that controller
+        // never checks.
+        permission: 'email_settings:read',
       },
       {
         title: 'Web Push',
@@ -234,20 +238,10 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
   {
     label: 'Operations',
     cards: [
-      {
-        title: 'Job Queue',
-        description: 'Monitor enrichment jobs, retry failed items, and reset stuck workers.',
-        Icon: WorkHistoryIcon,
-        path: '/admin/settings/jobs',
-        permission: 'jobs:read',
-      },
-      {
-        title: 'Job Queue Insights',
-        description: 'Live queue stats, per-type durations, and an ETA for the backlog.',
-        Icon: QueryStatsIcon,
-        path: '/admin/settings/jobs/insights',
-        permission: 'jobs:read',
-      },
+      // RETRO-C1 (#575): the packaged Jobs and Job Insights cards (`jobs:read`, the string
+      // `GET /api/admin/jobs*` enforces). The nodes slice's own Worker Nodes card in the same
+      // array is NOT spread: the app keeps its `WorkersPage` until RETRO-C2.
+      ...jobsAdminSections.operations.filter((card) => card.path.startsWith('/admin/settings/jobs')),
       {
         title: 'Worker Nodes',
         description: 'Distributed CLI worker nodes: fleet health, heartbeats, and per-node job stats.',
@@ -277,13 +271,9 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/workflows',
         permission: 'system_settings:read',
       },
-      {
-        title: 'Doctor',
-        description: 'Run configuration health diagnostics and see required action items',
-        Icon: MonitorHeartIcon,
-        path: '/admin/settings/doctor',
-        permission: 'system_settings:read',
-      },
+      // RETRO-B1b (#602): the packaged Doctor card. `system_settings:read` is the
+      // string `GET /api/admin/doctor` enforces (`DEFAULT_DOCTOR_PERMISSION`).
+      { ...doctorSettingsPage.card, Icon: doctorSettingsPage.Icon },
       {
         title: 'Broadcasts',
         description:
@@ -291,6 +281,33 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         Icon: CampaignOutlinedIcon,
         path: '/admin/settings/broadcasts',
         permission: 'broadcasts:read',
+      },
+      {
+        // RETRO-B1 (#597). `system_settings:read` is the string the platform
+        // host's maintenance controller enforces on `GET /api/admin/maintenance`
+        // (`PlatformHostCoreModule.forRoot`'s `permissions.maintenanceRead`
+        // default). Opening and closing a window needs `system_settings:write`,
+        // which the PAGE gates by disabling its controls. This used to be a tab
+        // of the System page; a settings page is never a tab (Settings UI
+        // Pattern), so it is a card, and the route keeps the packaged
+        // `MAINTENANCE_ADMIN_PATH`.
+        title: 'Maintenance',
+        description:
+          'Take the application out of service for planned work, with a message for anyone who tries to use it.',
+        Icon: BuildCircleOutlinedIcon,
+        path: '/admin/settings/maintenance',
+        permission: 'system_settings:read',
+      },
+      {
+        // RETRO-B1 (#597). `system_settings:read` is the string the platform
+        // host's About controller enforces on `GET /api/admin/about`. Read-only
+        // by nature: there is no `:write` gate to mention.
+        title: 'About',
+        description:
+          'What is running here: version, revision, when it was installed and last updated, and the server it runs on.',
+        Icon: InfoOutlinedIcon,
+        path: '/admin/settings/about',
+        permission: 'system_settings:read',
       },
     ],
   },
@@ -301,53 +318,34 @@ export const ADMIN_HUB_PATH = '/admin/settings';
 export const ADMIN_HUB_TITLE = 'Settings';
 
 /**
- * Filter the sections to what `hasPermission` allows, dropping sections that end
- * up empty. Every consumer runs the SAME gate, so a card an admin cannot open
- * can never appear in one surface and not another.
+ * Filter the sections to what `hasPermission` (and `features`) allow, dropping
+ * sections that end up empty, optionally applying the hub's title search.
  *
- * `query` (optional) additionally applies the client-side "Search settings"
- * filter — a case-insensitive substring match on the card title (spec §4.4
- * requirement 4). Matching on title only, not description, keeps the result set
- * predictable: a two-letter query should not surface eight cards because their
- * prose happens to share a word.
+ * Since RETRO-B5 (#621) this is the packaged gate (`visibleSettingsSections`),
+ * the same function the packaged `SettingsHub` runs over `ADMIN_SECTIONS`, so
+ * the hub and the Console rail cannot disagree about what an admin may see.
  */
 export function visibleAdminSections(
   hasPermission: (permission: string) => boolean,
   query = '',
+  features: SettingsFeatures = {},
 ): AdminSectionDef[] {
-  const needle = query.trim().toLowerCase();
-  return ADMIN_SECTIONS.map((section) => ({
-    label: section.label,
-    cards: section.cards.filter((card) => {
-      if (needle && !card.title.toLowerCase().includes(needle)) return false;
-      if (card.alwaysShow) return true;
-      if (!card.permission) return true;
-      return hasPermission(card.permission);
-    }),
-  })).filter((section) => section.cards.length > 0);
+  return visibleSettingsSections(ADMIN_SECTIONS, hasPermission, query, features);
 }
 
 /**
  * Resolve an `/admin/*` pathname to the human title of the page it renders.
  *
- * Longest-match wins so `/admin/settings/jobs/insights` resolves to "Job Queue
- * Insights" rather than "Job Queue", and `/admin/settings/nodes/:id/backup`
- * still resolves to its parent's "Worker Nodes" rather than falling back to the
- * hub title. Returns `null` for a path that is not under `/admin`.
+ * Longest-match wins (on segment boundaries) so `/admin/settings/jobs/insights`
+ * resolves to "Job Queue Insights" rather than "Job Queue", and
+ * `/admin/settings/nodes/:id/backup` still resolves to its parent's "Worker
+ * Nodes". Returns `null` for a path that is not under `/admin`; any other
+ * `/admin` path falls back to the hub title.
  */
-export function adminPageTitle(pathname: string): string | null {
+export function adminPageTitle(pathname: string, features: SettingsFeatures = {}): string | null {
   if (pathname !== '/admin' && !pathname.startsWith('/admin/')) return null;
-
-  let best: { title: string; length: number } | null = null;
-  for (const section of ADMIN_SECTIONS) {
-    for (const card of section.cards) {
-      if (!card.path) continue;
-      const matches = pathname === card.path || pathname.startsWith(`${card.path}/`);
-      if (matches && (!best || card.path.length > best.length)) {
-        best = { title: card.title, length: card.path.length };
-      }
-    }
-  }
-
-  return best?.title ?? ADMIN_HUB_TITLE;
+  return (
+    settingsPageTitle(ADMIN_SECTIONS, ADMIN_HUB_PATH, ADMIN_HUB_TITLE, pathname, features) ??
+    ADMIN_HUB_TITLE
+  );
 }

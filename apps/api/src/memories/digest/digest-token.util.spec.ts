@@ -144,7 +144,7 @@ describe('cross-purpose replay', () => {
     const { createHmac } = require('crypto') as typeof import('crypto');
     const {
       deriveSubKey,
-    } = require('../../common/crypto/secret-cipher') as typeof import('../../common/crypto/secret-cipher');
+    } = require('../../legacy/legacy-secret-cipher') as typeof import('../../legacy/legacy-secret-cipher');
     const reSigned =
       payload +
       '.' +

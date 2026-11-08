@@ -70,7 +70,7 @@ enum NotificationType {
 //   the same hand-authored-raw-SQL precedent as media_items_gallery_idx,
 //   media_items_map_locations_idx, people_circle_id_hidden_at_idx, and the
 //   review_run_items partial uniques above.
-model Notification {
+model MhLegacyNotification {
   id          String           @id @default(uuid()) @db.Uuid
   userId      String           @map("user_id") @db.Uuid
   circleId    String?          @map("circle_id") @db.Uuid
@@ -88,7 +88,7 @@ model Notification {
   user   User    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
   circle Circle? @relation("CircleNotifications", fields: [circleId], references: [id], onDelete: Cascade)
   // Channel delivery audit (epic #481, issue #484)
-  deliveries NotificationDelivery[] @relation("NotificationDeliveries")
+  deliveries MhLegacyNotificationDelivery[] @relation("NotificationDeliveries")
 
   // unread-count query and unread filter
   @@index([userId, readAt])
@@ -103,7 +103,7 @@ model Notification {
   // See this model's header comment: notifications_review_queue_live_uniq_idx,
   // a raw-SQL-only partial unique index, is added in migration
   // 20260805000000_add_notifications and is NOT representable here.
-  @@map("notifications")
+  @@map("mh_legacy_notifications")
 }
 
 // =============================================================================
@@ -120,7 +120,7 @@ model Notification {
 // needed to encrypt a payload for this endpoint, never returned by any route.
 // `failureCount` counts consecutive non-404/410 send failures; the sender
 // prunes the row at 5. A 404/410 from the push service prunes immediately.
-model PushSubscription {
+model MhLegacyPushSubscription {
   id             String    @id @default(uuid()) @db.Uuid
   userId         String    @map("user_id") @db.Uuid
   endpoint       String    @unique
@@ -136,7 +136,7 @@ model PushSubscription {
   user User @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("push_subscriptions")
+  @@map("mh_legacy_push_subscriptions")
 }
 
 // =============================================================================
@@ -153,31 +153,33 @@ model PushSubscription {
 // denormalized for the same reason — it must still be readable once the
 // notification is gone. `channel` is a plain string ('inbox' | 'push') so a
 // future channel needs no enum migration.
-enum NotificationDeliveryStatus {
+enum MhLegacyNotificationDeliveryStatus {
   queued
   sent
   failed
+
+  @@map("MhLegacyNotificationDeliveryStatus")
 }
 
-model NotificationDelivery {
+model MhLegacyNotificationDelivery {
   id                String                     @id @default(uuid()) @db.Uuid
   notificationId    String?                    @map("notification_id") @db.Uuid
   userId            String?                    @map("user_id") @db.Uuid
   type              NotificationType
   channel           String
-  status            NotificationDeliveryStatus
+  status            MhLegacyNotificationDeliveryStatus
   providerMessageId String?                    @map("provider_message_id")
   error             String?
   createdAt         DateTime                   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime                   @updatedAt @map("updated_at") @db.Timestamptz
 
-  notification Notification? @relation("NotificationDeliveries", fields: [notificationId], references: [id], onDelete: SetNull)
+  notification MhLegacyNotification? @relation("NotificationDeliveries", fields: [notificationId], references: [id], onDelete: SetNull)
   user         User?         @relation("UserNotificationDeliveries", fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId, type])
   @@index([status, createdAt])
   @@index([createdAt])
-  @@map("notification_deliveries")
+  @@map("mh_legacy_notification_deliveries")
 }
 
 // =============================================================================
@@ -196,16 +198,18 @@ model NotificationDelivery {
 // ['inbox','push','email']; a critical broadcast always includes 'inbox'.
 // `recipientCount` is the audience size at the cutoff (a snapshot: users
 // deactivated mid-fan-out are skipped, so `processedCount` may finish below it).
-enum NotificationBroadcastStatus {
+enum MhLegacyNotificationBroadcastStatus {
   draft
   scheduled
   sending
   sent
   canceled
   failed
+
+  @@map("MhLegacyNotificationBroadcastStatus")
 }
 
-model NotificationBroadcast {
+model MhLegacyNotificationBroadcast {
   id             String                      @id @default(uuid()) @db.Uuid
   title          String
   body           String
@@ -213,7 +217,7 @@ model NotificationBroadcast {
   ctaLabel       String?                     @map("cta_label")
   critical       Boolean                     @default(false)
   channels       String[]
-  status         NotificationBroadcastStatus @default(scheduled)
+  status         MhLegacyNotificationBroadcastStatus @default(scheduled)
   scheduledFor   DateTime?                   @map("scheduled_for") @db.Timestamptz
   audienceCutoff DateTime?                   @map("audience_cutoff") @db.Timestamptz
   recipientCount Int?                        @map("recipient_count")
@@ -233,5 +237,5 @@ model NotificationBroadcast {
 
   @@index([status, scheduledFor])
   @@index([createdAt(sort: Desc)])
-  @@map("notification_broadcasts")
+  @@map("mh_legacy_notification_broadcasts")
 }

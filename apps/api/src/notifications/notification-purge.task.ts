@@ -18,10 +18,10 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class NotificationPurgeTask {
@@ -30,7 +30,7 @@ export class NotificationPurgeTask {
   constructor(
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -45,10 +45,10 @@ export class NotificationPurgeTask {
       }
 
       // Skip if a notification_purge job is already pending or running
-      const existing = await this.prisma.enrichmentJob.findFirst({
+      const existing = await this.prisma.job.findFirst({
         where: {
           type: 'notification_purge',
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: ['pending', 'running'] },
         },
       });
 

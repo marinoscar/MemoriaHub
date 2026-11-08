@@ -2,6 +2,8 @@
 
 This spec covers how MemoriaHub handles large photo imports — thousands of files from OneDrive or Google Photos onto a constrained VPS running OpenAI auto-tagging, Google reverse-geocoding, face recognition, and S3/R2 storage — without losing work to OOM kills, process restarts, provider rate limits, or CLI crashes.
 
+> **Since RETRO-C1 (issue #575) the queue is the platform's `jobs` slice: the tuning variables are the `JOBS_*` names below. The old `ENRICHMENT_*` names are read for one release with a deprecation warning (a `JOBS_*` value wins); `ENRICHMENT_LEASE_MS` and `ENRICHMENT_STUCK_MINUTES` are no longer read. Details and the wire changes: [Jobs cutover runbook](../runbooks/jobs-cutover.md).**
+
 Cross-references: [Enrichment Queue](enrichment-queue.md) | [Geocoding](geocoding.md) | [Bulk Uploads on a Cheap VPS — Memory Tuning](bulk-upload-vps-tuning.md) (memory sizing / OOM runbook)
 
 ---
@@ -58,29 +60,29 @@ When the API process is OOM-killed or restarted, any job that was `running` at t
 
 The task is deliberately **NOT** gated on the enrichment worker switches (`ENRICHMENT_WORKER_MODE` / `ENRICHMENT_WORKER_ENABLED`): `resetStuck()` is also the lease-expiry reaper that requeues jobs claimed by distributed worker nodes that died without renewing, so a control-plane API tier running with its in-process worker off or in `system` mode still runs it. The only opt-out is the dedicated `ENRICHMENT_REAPER_ENABLED=false` flag, for instances that must never touch the queue while another instance runs the reaper. It delegates to `EnrichmentAdminService.resetStuck()` with no argument — the same implementation used by `POST /api/admin/jobs/reset-stuck` when its `olderThanMinutes` body field is omitted — so the cron, the stats `stuckRunning` count, and the manual reset endpoint always agree on one threshold.
 
-The threshold is the `jobs.stuckThresholdMinutes` **system setting** (integer, 1–120, default **3** minutes), runtime-editable in Admin Settings without a restart. It falls back to the legacy `ENRICHMENT_STUCK_MINUTES` env var (clamped to 120) only to compute the setting's default the first time it is resolved; once an explicit value exists in the database, the env var has no further effect. Whatever value is in force must exceed the longest expected single-job runtime — set too low, a legitimately-still-running job is reset to `pending` and can be re-claimed and run a second time concurrently with the original.
+The threshold is the `jobs.stuckThresholdMinutes` **system setting** (integer, 1–10080, default **30** minutes since RETRO-C1 (it was 3; a stored value is kept)), runtime-editable in Admin Settings without a restart. It falls back to the legacy `ENRICHMENT_STUCK_MINUTES` env var (clamped to 120) only to compute the setting's default the first time it is resolved; once an explicit value exists in the database, the env var has no further effect. Whatever value is in force must exceed the longest expected single-job runtime — set too low, a legitimately-still-running job is reset to `pending` and can be re-claimed and run a second time concurrently with the original.
 
 ### Enrichment environment variable reference
 
 | Variable | Default | Description |
 |---|---|---|
-| `ENRICHMENT_WORKER_MODE` | `all` | Worker mode: `all` \| `system` (server-only job types; media compute left for worker nodes) \| `off`. Wins over the legacy boolean below. |
-| `ENRICHMENT_WORKER_ENABLED` | `true` | Legacy fallback (mode var unset): set `false` to disable the worker (mode `off`). Does NOT disable the stuck/lease reaper — that has its own `ENRICHMENT_REAPER_ENABLED` flag |
-| `ENRICHMENT_REAPER_ENABLED` | `true` | Set `false` to disable the stuck-reset/lease-expiry reaper cron on this instance (control-plane duty; runs in every worker mode otherwise) |
-| `ENRICHMENT_JOB_POLL_MS` | `5000` | Worker poll interval in ms |
-| `ENRICHMENT_WORKER_CONCURRENCY` | `1` | Worker-pool size — number of long-lived claim→process→repeat loops, fixed at startup (no batch barrier). Memory scales with it. |
-| `ENRICHMENT_MAX_ATTEMPTS` | `3` | Max normal-failure retries before permanent failure |
-| `ENRICHMENT_RETRY_BASE_MS` | `2000` | Base backoff for normal-failure retries |
-| `ENRICHMENT_RETRY_MAX_MS` | `60000` | Max backoff cap for normal-failure retries |
-| `ENRICHMENT_RATELIMIT_BASE_MS` | `30000` | Base backoff for rate-limit deferrals |
-| `ENRICHMENT_RATELIMIT_MAX_MS` | `900000` | Max backoff cap for rate-limit deferrals (15 min) |
-| `ENRICHMENT_RATELIMIT_MAX_HITS` | `10` | Max rate-limit deferrals before permanent failure |
-| `ENRICHMENT_JOB_TIMEOUT_MS` | `600000` | Active per-job execution timeout (ms) for all job types except the two video types below; `0` disables. Handler running longer is aborted and routed through the normal-failure retry path. |
-| `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` | `1200000` | Per-type execution-timeout override (20 min) for `video_face_detection` and `social_media_detection` — video download + ffmpeg + per-frame provider calls legitimately exceed the 10-min global default on a low-compute VPS. `0` disables the timeout for these two types. |
+| `JOBS_WORKER_MODE` (was `ENRICHMENT_WORKER_MODE`) | `all` | Worker mode: `all` \| `system` (server-only job types; media compute left for worker nodes) \| `off`. Wins over the legacy boolean below. |
+| `ENRICHMENT_WORKER_ENABLED` | `true` | Legacy, read for one release (mode var unset): set `false` to disable the worker (mode `off`). Does NOT disable the stuck/lease reaper — that has its own `ENRICHMENT_REAPER_ENABLED` flag |
+| `JOBS_REAPER_ENABLED` (was `ENRICHMENT_REAPER_ENABLED`) | `true` | Set `false` to disable the stuck-reset/lease-expiry reaper cron on this instance (control-plane duty; runs in every worker mode otherwise) |
+| `JOBS_POLL_MS` (was `ENRICHMENT_JOB_POLL_MS`) | `5000` | Worker poll interval in ms |
+| `JOBS_WORKER_CONCURRENCY` (was `ENRICHMENT_WORKER_CONCURRENCY`) | `1` | Worker-pool size — number of long-lived claim→process→repeat loops, fixed at startup (no batch barrier). Memory scales with it. |
+| `JOBS_MAX_ATTEMPTS` (was `ENRICHMENT_MAX_ATTEMPTS`) | `3` | Max normal-failure retries before permanent failure |
+| `JOBS_RETRY_BASE_MS` (was `ENRICHMENT_RETRY_BASE_MS`) | `2000` | Base backoff for normal-failure retries |
+| `JOBS_RETRY_MAX_MS` (was `ENRICHMENT_RETRY_MAX_MS`) | `60000` | Max backoff cap for normal-failure retries |
+| `JOBS_RATELIMIT_BASE_MS` (was `ENRICHMENT_RATELIMIT_BASE_MS`) | `30000` | Base backoff for rate-limit deferrals |
+| `JOBS_RATELIMIT_MAX_MS` (was `ENRICHMENT_RATELIMIT_MAX_MS`) | `900000` | Max backoff cap for rate-limit deferrals (15 min) |
+| `JOBS_RATELIMIT_MAX_HITS` (was `ENRICHMENT_RATELIMIT_MAX_HITS`) | `10` | Max rate-limit deferrals before permanent failure |
+| `JOBS_JOB_TIMEOUT_MS` (was `ENRICHMENT_JOB_TIMEOUT_MS`) | `600000` | Active per-job execution timeout (ms) for all job types except the two video types below; `0` disables. Handler running longer is aborted and routed through the normal-failure retry path. |
+| `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` (read for one release: the `maxRuntimeMs` of the three video types' execution profile) | `1200000` | Per-type execution-timeout override (20 min) for `video_face_detection` and `social_media_detection` — video download + ffmpeg + per-frame provider calls legitimately exceed the 10-min global default on a low-compute VPS. `0` disables the timeout for these two types. |
 | `VIDEO_ENRICHMENT_MAX_BYTES` | `0` | Optional hard cap (bytes) on videos processed by BOTH video handlers; over-cap videos are skipped without downloading (video face → `no_faces`; social-media → clean, `skip-size-cap`). `0` disables. The single biggest disk/memory offender in a bulk import is a multi-GB video download — cap it to protect the temp filesystem. |
-| `ENRICHMENT_STUCK_MINUTES` | _(unset)_ | **Legacy fallback only.** The stuck-job threshold is now the runtime `jobs.stuckThresholdMinutes` system setting (1–120, default 3 min), editable in Admin Settings; this env var seeds that setting's default (clamped to 120) only until an explicit value is saved. Must exceed the longest expected single-job runtime. |
+| `ENRICHMENT_STUCK_MINUTES` | _(unset)_ | **No longer read (RETRO-C1; warns at boot).** It used to seed the setting default. The stuck-job threshold is now the runtime `jobs.stuckThresholdMinutes` system setting (1–120, default 3 min), editable in Admin Settings; this env var seeds that setting's default (clamped to 120) only until an explicit value is saved. Must exceed the longest expected single-job runtime. |
 
-**Video download disk/temp resilience.** The video-enrichment handlers stream downloads to `memoriaHub-*` temp files in `os.tmpdir()`. Two guards keep this safe under bulk-import pressure: (1) a **disk-space pre-flight** (`assertDiskSpaceForDownload`) requires free space `>= object size × 1.2` before a download and otherwise fails fast through the normal retry path — no half-written temp file left behind; (2) the **`TempFileJanitorTask`** sweeps `memoriaHub-*` files older than 6h from `os.tmpdir()` on startup and hourly, reclaiming orphans left by a job SIGKILLed (OOM) before its `finally`-block cleanup ran. The janitor skips only when the worker mode resolves to `off` (`ENRICHMENT_WORKER_MODE=off`, or the legacy `ENRICHMENT_WORKER_ENABLED=false` fallback) — only worker instances create these files; `system` mode still sweeps, since server-only jobs (e.g. a `thumbnail_repair` full reprocess) also write temp files. Neither has a tunable env var; combine them with `VIDEO_ENRICHMENT_MAX_BYTES` to bound worst-case disk use.
+**Video download disk/temp resilience.** The video-enrichment handlers stream downloads to `memoriahub-job-*` temp files in `os.tmpdir()` (the platform janitor's prefix since RETRO-C1). Two guards keep this safe under bulk-import pressure: (1) a **disk-space pre-flight** (`assertDiskSpaceForDownload`) requires free space `>= object size × 1.2` before a download and otherwise fails fast through the normal retry path — no half-written temp file left behind; (2) the **`TempFileJanitorTask`** sweeps `memoriaHub-*` files older than 6h from `os.tmpdir()` on startup and hourly, reclaiming orphans left by a job SIGKILLed (OOM) before its `finally`-block cleanup ran. The janitor skips only when the worker mode resolves to `off` (`ENRICHMENT_WORKER_MODE=off`, or the legacy `ENRICHMENT_WORKER_ENABLED=false` fallback) — only worker instances create these files; `system` mode still sweeps, since server-only jobs (e.g. a `thumbnail_repair` full reprocess) also write temp files. Neither has a tunable env var; combine them with `VIDEO_ENRICHMENT_MAX_BYTES` to bound worst-case disk use.
 
 ### Stuck StorageObject auto-reset cron (new — `StorageProcessingRecoveryTask`)
 

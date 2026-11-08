@@ -20,8 +20,8 @@ import { MemoryDigestService } from './memory-digest.service';
 import { EmailService } from '../../email/email.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { verifyDigestImageToken, verifyDigestUnsubscribeToken } from './digest-token.util';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const VALID_KEY = Buffer.alloc(32, 3).toString('base64');
 
@@ -82,7 +82,7 @@ describe('MemoryDigestService', () => {
     prisma = {
       circle: { findUnique: jest.fn().mockResolvedValue(circleRow()) },
       memory: { findMany: jest.fn().mockResolvedValue([memoryRow()]) },
-      enrichmentJob: { findFirst: jest.fn().mockResolvedValue(null) },
+      job: { findFirst: jest.fn().mockResolvedValue(null) },
       userSettings: { findMany: jest.fn().mockResolvedValue([]) },
     };
     email = { sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'x' }) };
@@ -92,7 +92,7 @@ describe('MemoryDigestService', () => {
       providers: [
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
         { provide: EmailService, useValue: email },
         {
           provide: MediaThumbnailService,
@@ -372,7 +372,7 @@ describe('MemoryDigestService', () => {
 
   it('reads new content strictly after the previous succeeded digest', async () => {
     const watermark = new Date('2026-08-02T08:00:00.000Z');
-    prisma.enrichmentJob.findFirst.mockResolvedValue({ finishedAt: watermark });
+    prisma.job.findFirst.mockResolvedValue({ finishedAt: watermark });
 
     await service.sendForCircle(CIRCLE_ID);
 

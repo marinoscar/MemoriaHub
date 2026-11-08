@@ -16,10 +16,9 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
 import { WorkflowsAdminService } from './workflows-admin.service';
 import { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows-query.dto';
 import { ListAdminWorkflowRunsQueryDto } from './dto/list-admin-workflow-runs-query.dto';

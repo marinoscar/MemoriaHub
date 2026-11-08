@@ -1,5 +1,16 @@
+import { identityConfiguration } from '@marinoscar/platform-api/identity';
+import { jobsConfiguration } from '@marinoscar/platform-api/jobs';
+
 import { buildDatabaseUrl } from './database-url.util';
 import { resolveServiceName } from '../common/otel/telemetry-identity';
+import { legacyJobsEnv } from '../platform/jobs/legacy-env';
+
+function identityKeys() {
+  return identityConfiguration({
+    ...process.env,
+    DEVICE_PAT_EXPIRY_DAYS: process.env.DEVICE_PAT_EXPIRY_DAYS ?? process.env.DEVICE_PAT_TTL_DAYS,
+  });
+}
 
 export default () => {
   // Individual PostgreSQL variables (kept for the `database` config object shape)
@@ -33,30 +44,18 @@ export default () => {
       url: databaseUrl,
     },
 
-  // JWT
-  jwt: {
-    secret: process.env.JWT_SECRET,
-    accessTtlMinutes: parseInt(process.env.JWT_ACCESS_TTL_MINUTES || '15', 10),
-    refreshTtlDays: parseInt(process.env.JWT_REFRESH_TTL_DAYS || '14', 10),
-  },
+  // The identity slice's keys (RETRO-B2, #611): `jwt`, `auth`, `google`,
+  // `initialAdminEmail`, `deviceAuth` and `tenancy`, built from the same
+  // variables by `@marinoscar/platform-api/identity`. The device-flow PAT
+  // lifetime is MemoriaHub's `DEVICE_PAT_TTL_DAYS` (the Android pairing and the
+  // CLI's login contract); the platform names it `DEVICE_PAT_EXPIRY_DAYS`, which
+  // wins when both are set.
+  ...identityKeys(),
 
-  // OAuth - Google
-  google: {
-    clientId: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackUrl: process.env.GOOGLE_CALLBACK_URL,
-  },
-
-  // Admin bootstrap
-  initialAdminEmail: process.env.INITIAL_ADMIN_EMAIL,
-
-  // Device Authorization Flow (RFC 8628)
-  deviceAuth: {
-    expiryMinutes: parseInt(process.env.DEVICE_CODE_EXPIRY_MINUTES || '15', 10),
-    pollInterval: parseInt(process.env.DEVICE_CODE_POLL_INTERVAL || '5', 10),
-    tokenExpiryDays: parseInt(process.env.DEVICE_TOKEN_EXPIRY_DAYS || '7', 10),
-    patTtlDays: parseInt(process.env.DEVICE_PAT_TTL_DAYS || '90', 10),
-  },
+  // The jobs slice's keys (RETRO-C1, #575): `jobs.*` (retry, rate-limit, worker pool, reaper) and
+  // `nodes.*` (the fleet's crons), built from the `JOBS_*` variables. The old `ENRICHMENT_*` names are
+  // translated for one release by `legacyJobsEnv` (deprecation warning per variable; JOBS_* wins).
+  ...jobsConfiguration(legacyJobsEnv()),
 
   // Observability
   otel: {

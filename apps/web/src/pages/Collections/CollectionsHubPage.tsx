@@ -35,7 +35,8 @@
  * with a single length sizes BOTH axes.
  */
 
-import { Box, Divider, Skeleton, Stack, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Box, Divider, Skeleton, Stack, Typography } from '@mui/material';
+import { useContextPaneVisible } from '../../hooks/useContextPaneVisible';
 import { Link as RouterLink, Navigate } from 'react-router-dom';
 import type { CollectionDef } from '../../config/collections';
 // The count, its visible label and its accessible name all come from
@@ -305,8 +306,8 @@ function SecondaryLink({ entry }: { entry: CollectionDef }) {
 // ---------------------------------------------------------------------------
 
 export default function CollectionsHubPage() {
-  const theme = useTheme();
-  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
+  // The context pane is showing (expanded rail): this hub is redundant there.
+  const isDesktop = useContextPaneVisible();
 
   // Hooks run unconditionally, above the redirect branch. Restoration is a
   // no-op on desktop, where this page never paints a scrollable grid.

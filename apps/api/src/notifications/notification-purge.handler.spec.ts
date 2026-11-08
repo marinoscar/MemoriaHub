@@ -34,8 +34,8 @@ import type { EnrichmentJob } from '@prisma/client';
 import { NotificationPurgeHandler } from './notification-purge.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,7 +77,7 @@ const DAY_MS = 86_400_000;
 describe('NotificationPurgeHandler', () => {
   let handler: NotificationPurgeHandler;
   let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -88,16 +88,16 @@ describe('NotificationPurgeHandler', () => {
     };
 
     mockPrisma = createMockPrismaService();
-    mockPrisma.notification.findMany.mockResolvedValue([]);
-    mockPrisma.notification.deleteMany.mockResolvedValue({ count: 0 });
-    mockPrisma.notificationDelivery.findMany.mockResolvedValue([]);
-    mockPrisma.notificationDelivery.deleteMany.mockResolvedValue({ count: 0 });
+    mockPrisma.mhLegacyNotification.findMany.mockResolvedValue([]);
+    mockPrisma.mhLegacyNotification.deleteMany.mockResolvedValue({ count: 0 });
+    mockPrisma.mhLegacyNotificationDelivery.findMany.mockResolvedValue([]);
+    mockPrisma.mhLegacyNotificationDelivery.deleteMany.mockResolvedValue({ count: 0 });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationPurgeHandler,
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
         { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
@@ -146,7 +146,7 @@ describe('NotificationPurgeHandler', () => {
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.findMany).not.toHaveBeenCalled();
     });
 
     it('does NOT call deleteMany when purgeEnabled=false', async () => {
@@ -154,7 +154,7 @@ describe('NotificationPurgeHandler', () => {
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.deleteMany).not.toHaveBeenCalled();
     });
 
     it('resolves without throwing when disabled', async () => {
@@ -178,7 +178,7 @@ describe('NotificationPurgeHandler', () => {
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.findMany).toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalled();
     });
 
     it('treats undefined purgeEnabled as true (default enabled) and proceeds', async () => {
@@ -188,7 +188,7 @@ describe('NotificationPurgeHandler', () => {
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.findMany).toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalled();
     });
   });
 
@@ -207,13 +207,13 @@ describe('NotificationPurgeHandler', () => {
       await handler.process(makeJob());
 
       // Two purgeInBatches() calls, each terminating on an empty first batch.
-      expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalledTimes(2);
     });
 
     it('the dismissed pass selects dismissedAt not null AND lt cutoff', async () => {
       await handler.process(makeJob());
 
-      const [firstCall] = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const [firstCall] = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const where = firstCall[0].where;
 
       expect(where.dismissedAt).toEqual(
@@ -225,7 +225,7 @@ describe('NotificationPurgeHandler', () => {
     it('the read pass selects dismissedAt: null AND readAt not null AND lt cutoff', async () => {
       await handler.process(makeJob());
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const readPassWhere = calls[1][0].where;
 
       expect(readPassWhere.dismissedAt).toBeNull();
@@ -236,7 +236,7 @@ describe('NotificationPurgeHandler', () => {
     it('neither pass includes a createdAt-based (age-only) predicate', async () => {
       await handler.process(makeJob());
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       for (const call of calls) {
         expect(call[0].where.createdAt).toBeUndefined();
       }
@@ -247,7 +247,7 @@ describe('NotificationPurgeHandler', () => {
       await handler.process(makeJob());
       const after = Date.now();
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const dismissedCutoff: Date = calls[0][0].where.dismissedAt.lt;
       const readCutoff: Date = calls[1][0].where.readAt.lt;
 
@@ -268,7 +268,7 @@ describe('NotificationPurgeHandler', () => {
       await handler.process(makeJob());
       const after = Date.now();
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const dismissedCutoff: Date = calls[0][0].where.dismissedAt.lt;
       const readCutoff: Date = calls[1][0].where.readAt.lt;
 
@@ -289,7 +289,7 @@ describe('NotificationPurgeHandler', () => {
       await handler.process(makeJob());
       const after = Date.now();
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const dismissedCutoff: Date = calls[0][0].where.dismissedAt.lt;
 
       const thirtyDaysMs = 30 * DAY_MS;
@@ -318,7 +318,7 @@ describe('NotificationPurgeHandler', () => {
     it('neither the dismissed pass nor the read pass can match an unread, undismissed row — proven by simulating the where clause against representative rows', async () => {
       await handler.process(makeJob());
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const dismissedWhere = calls[0][0].where;
       const readWhere = calls[1][0].where;
 
@@ -352,20 +352,20 @@ describe('NotificationPurgeHandler', () => {
     it('an old UNREAD row is not deleted even when both passes return other eligible rows', async () => {
       // First pass (dismissed) returns one genuinely-dismissed row; the
       // unread row must never appear here because it has dismissedAt=null.
-      mockPrisma.notification.findMany
+      mockPrisma.mhLegacyNotification.findMany
         .mockResolvedValueOnce([{ id: 'dismissed-old' }] as any)
         .mockResolvedValueOnce([]); // read pass: nothing eligible
-      mockPrisma.notification.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.mhLegacyNotification.deleteMany.mockResolvedValue({ count: 1 });
 
       await handler.process(makeJob());
 
       // Only the dismissed row's id was ever passed to deleteMany — the
       // handler never had an "unread-old" id to delete because it never
       // asked for one via createdAt.
-      expect(mockPrisma.notification.deleteMany).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyNotification.deleteMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: { in: ['dismissed-old'] } } }),
       );
-      expect(mockPrisma.notification.deleteMany).not.toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyNotification.deleteMany).not.toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: { in: expect.arrayContaining(['unread-old']) } } }),
       );
     });
@@ -383,14 +383,14 @@ describe('NotificationPurgeHandler', () => {
     });
 
     it('a dismissed row older than retentionDays is included in the dismissed-pass batch and deleted', async () => {
-      mockPrisma.notification.findMany
+      mockPrisma.mhLegacyNotification.findMany
         .mockResolvedValueOnce([{ id: 'dismissed-old' }] as any)
         .mockResolvedValueOnce([]);
-      mockPrisma.notification.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.mhLegacyNotification.deleteMany.mockResolvedValue({ count: 1 });
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.deleteMany).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyNotification.deleteMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: { in: ['dismissed-old'] } } }),
       );
     });
@@ -398,7 +398,7 @@ describe('NotificationPurgeHandler', () => {
     it('the dismissed-pass where clause uses lt (strictly less than) the cutoff, so a row dismissed exactly at the cutoff or newer is excluded by construction', async () => {
       await handler.process(makeJob());
 
-      const [firstCall] = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const [firstCall] = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const where = firstCall[0].where;
 
       // `lt`, not `lte` — a dismissal exactly at the cutoff moment is retained,
@@ -416,14 +416,14 @@ describe('NotificationPurgeHandler', () => {
     });
 
     it('a read (undismissed) row older than retentionDays is included in the read-pass batch and deleted', async () => {
-      mockPrisma.notification.findMany
+      mockPrisma.mhLegacyNotification.findMany
         .mockResolvedValueOnce([]) // dismissed pass: nothing
         .mockResolvedValueOnce([{ id: 'read-old' }] as any);
-      mockPrisma.notification.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.mhLegacyNotification.deleteMany.mockResolvedValue({ count: 1 });
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.deleteMany).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyNotification.deleteMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: { in: ['read-old'] } } }),
       );
     });
@@ -431,7 +431,7 @@ describe('NotificationPurgeHandler', () => {
     it('the read-pass where clause uses lt (strictly less than) the cutoff', async () => {
       await handler.process(makeJob());
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const where = calls[1][0].where;
 
       expect(Object.keys(where.readAt)).toEqual(expect.arrayContaining(['not', 'lt']));
@@ -446,7 +446,7 @@ describe('NotificationPurgeHandler', () => {
 
       await handler.process(makeJob());
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const readPassWhere = calls[1][0].where;
       const dismissedPassWhere = calls[0][0].where;
 
@@ -482,7 +482,7 @@ describe('NotificationPurgeHandler', () => {
     it('a dismissed row newer than the cutoff fails the dismissed-pass lt bound', async () => {
       await handler.process(makeJob());
 
-      const [firstCall] = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const [firstCall] = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const cutoff: Date = firstCall[0].where.dismissedAt.lt;
 
       const recentDismissal = new Date(Date.now() - 1 * DAY_MS); // 1 day ago, well within 30-day retention
@@ -492,7 +492,7 @@ describe('NotificationPurgeHandler', () => {
     it('a read row newer than the cutoff fails the read-pass lt bound', async () => {
       await handler.process(makeJob());
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       const cutoff: Date = calls[1][0].where.readAt.lt;
 
       const recentRead = new Date(Date.now() - 1 * DAY_MS);
@@ -513,66 +513,66 @@ describe('NotificationPurgeHandler', () => {
 
     it('each pass stops after a short batch (< 5000 items)', async () => {
       const dismissedBatch = [{ id: 'd-a' }, { id: 'd-b' }];
-      mockPrisma.notification.findMany
+      mockPrisma.mhLegacyNotification.findMany
         .mockResolvedValueOnce(dismissedBatch as any)
         .mockResolvedValueOnce([]); // read pass empty
-      mockPrisma.notification.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrisma.mhLegacyNotification.deleteMany.mockResolvedValue({ count: 2 });
 
       await handler.process(makeJob());
 
       // dismissed pass: 1 findMany (short batch) + 1 deleteMany;
       // read pass: 1 findMany (empty) + 0 deleteMany
-      expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(2);
-      expect(mockPrisma.notification.deleteMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mhLegacyNotification.deleteMany).toHaveBeenCalledTimes(1);
     });
 
     it('continues batching within a pass until a short batch is received, and terminates (does not loop forever)', async () => {
       const fullBatch = Array.from({ length: 5000 }, (_, i) => ({ id: `dismissed-${i}` }));
       const shortBatch = [{ id: 'dismissed-last-a' }, { id: 'dismissed-last-b' }];
 
-      mockPrisma.notification.findMany
+      mockPrisma.mhLegacyNotification.findMany
         .mockResolvedValueOnce(fullBatch as any) // dismissed pass round 1: full
         .mockResolvedValueOnce(shortBatch as any) // dismissed pass round 2: short → stop
         .mockResolvedValueOnce([]); // read pass: empty → stop
-      mockPrisma.notification.deleteMany.mockResolvedValue({ count: 5000 });
+      mockPrisma.mhLegacyNotification.deleteMany.mockResolvedValue({ count: 5000 });
 
       await handler.process(makeJob());
 
       // dismissed pass makes exactly 2 findMany calls (bounded, terminates),
       // read pass makes exactly 1. Total 3 — not unbounded / infinite.
-      expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(3);
-      expect(mockPrisma.notification.deleteMany).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalledTimes(3);
+      expect(mockPrisma.mhLegacyNotification.deleteMany).toHaveBeenCalledTimes(2);
     });
 
     it('a batch of exactly BATCH_SIZE (5000) triggers one more round-trip that returns empty, and still terminates', async () => {
       const exactBatch = Array.from({ length: 5000 }, (_, i) => ({ id: `d-${i}` }));
 
-      mockPrisma.notification.findMany
+      mockPrisma.mhLegacyNotification.findMany
         .mockResolvedValueOnce(exactBatch as any) // dismissed round 1: exactly 5000 → ambiguous, must re-poll
         .mockResolvedValueOnce([]) // dismissed round 2: empty → stop
         .mockResolvedValueOnce([]); // read pass: empty → stop
-      mockPrisma.notification.deleteMany.mockResolvedValue({ count: 5000 });
+      mockPrisma.mhLegacyNotification.deleteMany.mockResolvedValue({ count: 5000 });
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(3);
-      expect(mockPrisma.notification.deleteMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalledTimes(3);
+      expect(mockPrisma.mhLegacyNotification.deleteMany).toHaveBeenCalledTimes(1);
     });
 
     it('stops immediately when the first batch of a pass is empty (no deleteMany call for that pass)', async () => {
-      mockPrisma.notification.findMany.mockResolvedValue([]);
+      mockPrisma.mhLegacyNotification.findMany.mockResolvedValue([]);
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notification.findMany).toHaveBeenCalledTimes(2); // one empty round per pass
-      expect(mockPrisma.notification.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotification.findMany).toHaveBeenCalledTimes(2); // one empty round per pass
+      expect(mockPrisma.mhLegacyNotification.deleteMany).not.toHaveBeenCalled();
     });
 
     it('the logged/returned total reflects the sum of both passes deleteMany counts', async () => {
-      mockPrisma.notification.findMany
+      mockPrisma.mhLegacyNotification.findMany
         .mockResolvedValueOnce([{ id: 'd-1' }, { id: 'd-2' }] as any)
         .mockResolvedValueOnce([{ id: 'r-1' }] as any);
-      mockPrisma.notification.deleteMany
+      mockPrisma.mhLegacyNotification.deleteMany
         .mockResolvedValueOnce({ count: 2 }) // dismissed pass
         .mockResolvedValueOnce({ count: 1 }); // read pass
 
@@ -590,7 +590,7 @@ describe('NotificationPurgeHandler', () => {
     it('takes each findMany call with take: BATCH_SIZE (5000)', async () => {
       await handler.process(makeJob());
 
-      const calls = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const calls = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       for (const call of calls) {
         expect(call[0].take).toBe(5000);
       }
@@ -599,7 +599,7 @@ describe('NotificationPurgeHandler', () => {
     it('passes only { id: true } as the select to keep batches lightweight', async () => {
       await handler.process(makeJob());
 
-      const [firstCall] = (mockPrisma.notification.findMany as jest.Mock).mock.calls;
+      const [firstCall] = (mockPrisma.mhLegacyNotification.findMany as jest.Mock).mock.calls;
       expect(firstCall[0].select).toEqual({ id: true });
     });
   });
@@ -616,14 +616,14 @@ describe('NotificationPurgeHandler', () => {
     });
 
     it('propagates errors thrown by findMany', async () => {
-      mockPrisma.notification.findMany.mockRejectedValue(new Error('Connection lost'));
+      mockPrisma.mhLegacyNotification.findMany.mockRejectedValue(new Error('Connection lost'));
 
       await expect(handler.process(makeJob())).rejects.toThrow('Connection lost');
     });
 
     it('propagates errors thrown by deleteMany', async () => {
-      mockPrisma.notification.findMany.mockResolvedValueOnce([{ id: 'd-1' }] as any);
-      mockPrisma.notification.deleteMany.mockRejectedValue(new Error('DB locked'));
+      mockPrisma.mhLegacyNotification.findMany.mockResolvedValueOnce([{ id: 'd-1' }] as any);
+      mockPrisma.mhLegacyNotification.deleteMany.mockRejectedValue(new Error('DB locked'));
 
       await expect(handler.process(makeJob())).rejects.toThrow('DB locked');
     });
@@ -647,22 +647,22 @@ describe('NotificationPurgeHandler', () => {
 
     it('deletes delivery rows by createdAt < cutoff (age only), in batches of 5000', async () => {
       const before = Date.now();
-      mockPrisma.notificationDelivery.findMany
+      mockPrisma.mhLegacyNotificationDelivery.findMany
         .mockResolvedValueOnce(Array.from({ length: 5000 }, (_, i) => ({ id: `d${i}` })) as any)
         .mockResolvedValueOnce([{ id: 'last' }] as any);
-      mockPrisma.notificationDelivery.deleteMany
+      mockPrisma.mhLegacyNotificationDelivery.deleteMany
         .mockResolvedValueOnce({ count: 5000 })
         .mockResolvedValueOnce({ count: 1 });
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.notificationDelivery.findMany).toHaveBeenCalledTimes(2);
-      const arg = mockPrisma.notificationDelivery.findMany.mock.calls[0][0] as any;
+      expect(mockPrisma.mhLegacyNotificationDelivery.findMany).toHaveBeenCalledTimes(2);
+      const arg = mockPrisma.mhLegacyNotificationDelivery.findMany.mock.calls[0][0] as any;
       expect(arg.take).toBe(5000);
       expect(arg.select).toEqual({ id: true });
       const cutoff: Date = arg.where.createdAt.lt;
       expect(Math.abs(before - 7 * 86_400_000 - cutoff.getTime())).toBeLessThan(5000);
-      expect(mockPrisma.notificationDelivery.deleteMany).toHaveBeenLastCalledWith({
+      expect(mockPrisma.mhLegacyNotificationDelivery.deleteMany).toHaveBeenLastCalledWith({
         where: { id: { in: ['last'] } },
       });
     });
@@ -671,7 +671,7 @@ describe('NotificationPurgeHandler', () => {
       mockSettings.getSettingValue.mockReset();
       mockSettings.getSettingValue.mockResolvedValue(false);
       await handler.process(makeJob());
-      expect(mockPrisma.notificationDelivery.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.mhLegacyNotificationDelivery.findMany).not.toHaveBeenCalled();
     });
   });
 });

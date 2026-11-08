@@ -1,799 +1,279 @@
 /**
- * Unit tests for FaceSettingsService.
+ * Unit tests for FaceSettingsService (credential store edition, RETRO-B4 #617).
  *
- * IMPORTANT: SECRETS_ENCRYPTION_KEY must be set for encrypt/decrypt to work.
- * We set it in beforeAll and clean up in afterAll.
- *
- * CompreFace is the only registered face provider (keyless — no credentials
- * required by default; an optional DB row may still store a custom baseUrl).
+ * A face provider's secret (none today: CompreFace is keyless) is the platform credential
+ * `face_provider/<provider>`; `baseUrl` and `enabled` are the `face.providers.<provider>` settings.
+ * The legacy `face_provider_credentials` table is never read or written.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { CredentialsService } from '@marinoscar/platform-api/credentials';
 import { FaceSettingsService } from './face-settings.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { encryptSecret } from '../common/crypto/secret-cipher';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { FakeCredentials } from '../../test/helpers/fake-credentials';
 
-const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
+const PURPOSE = 'face_provider';
+const CAPS = { detect: true, embed: true };
 
 describe('FaceSettingsService', () => {
   let service: FaceSettingsService;
-  let mockPrisma: MockPrismaService;
+  let creds: FakeCredentials;
+  let face: Record<string, unknown> | null;
   let mockRegistry: { get: jest.Mock; keys: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock; patchSettings: jest.Mock };
-  let originalKey: string | undefined;
-
-  beforeAll(() => {
-    originalKey = process.env.SECRETS_ENCRYPTION_KEY;
-    process.env.SECRETS_ENCRYPTION_KEY = VALID_KEY;
-  });
-
-  afterAll(() => {
-    if (originalKey === undefined) {
-      delete process.env.SECRETS_ENCRYPTION_KEY;
-    } else {
-      process.env.SECRETS_ENCRYPTION_KEY = originalKey;
-    }
-  });
+  const keyless = { capabilities: CAPS, requiresCredentials: false };
+  const keyed = { capabilities: CAPS, requiresCredentials: true };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    creds = new FakeCredentials();
+    face = null;
     mockRegistry = {
-      get: jest.fn(),
+      get: jest.fn().mockReturnValue(keyless),
       keys: jest.fn().mockReturnValue(['compreface']),
     };
     mockSystemSettings = {
-      getSettings: jest.fn(),
-      patchSettings: jest.fn(),
+      getSettings: jest.fn(async () => ({ face })),
+      patchSettings: jest.fn().mockResolvedValue(undefined),
     };
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceSettingsService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: CredentialsService, useValue: creds },
         { provide: FaceProviderRegistry, useValue: mockRegistry },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
-
-    service = module.get<FaceSettingsService>(FaceSettingsService);
+    service = module.get(FaceSettingsService);
   });
 
-  // ---------------------------------------------------------------------------
-  // upsertCredential
-  // ---------------------------------------------------------------------------
-  describe('upsertCredential', () => {
-    it('encrypts the apiKey and stores last4 correctly', async () => {
-      const upsertedRecord = {
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: 'somebase64ciphertext',
-        last4: '1234',
-        baseUrl: 'http://cf:8000',
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue(upsertedRecord as any);
-
-      const result = await service.upsertCredential(
-        'compreface',
-        { apiKey: 'cf-test-1234' },
-        'user-1',
-      );
-
-      // Verify upsert was called with correct last4
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.last4).toBe('1234');
-
-      // Verify the key is encrypted (not plaintext)
-      expect(upsertCall.create.encryptedKey).not.toBe('cf-test-1234');
-      expect(typeof upsertCall.create.encryptedKey).toBe('string');
-      expect(upsertCall.create.encryptedKey.length).toBeGreaterThan(0);
-
-      // Verify returned object does NOT expose the encrypted key
-      expect(result).not.toHaveProperty('encryptedKey');
-      expect(result).toMatchObject({
-        provider: 'compreface',
-        configured: true,
-        enabled: true,
-        last4: '1234',
-        baseUrl: 'http://cf:8000',
-      });
-    });
-
-    it('extracts last4 from the end of the apiKey', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: 'somebase64',
-        last4: 'abcd',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-2',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await service.upsertCredential('compreface', { apiKey: 'mykey-abcd' }, 'user-2');
-
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.last4).toBe('abcd');
-    });
-
-    it('passes baseUrl through to the upsert', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: 'cipher',
-        last4: '9999',
-        baseUrl: 'http://compreface:8000',
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await service.upsertCredential(
-        'compreface',
-        { apiKey: 'key-9999', baseUrl: 'http://compreface:8000' },
-        'user-1',
-      );
-
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.baseUrl).toBe('http://compreface:8000');
-    });
-
-    it('works with baseUrl only and no apiKey (compreface keyless case)', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: 'cipher',
-        last4: '',
-        baseUrl: 'http://compreface-core:3000',
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const result = await service.upsertCredential(
-        'compreface',
-        { baseUrl: 'http://compreface-core:3000' },
-        'user-1',
-      );
-
-      const upsertCall = mockPrisma.faceProviderCredential.upsert.mock.calls[0][0];
-      // No apiKey → last4 empty, encryptedKey is encrypted empty string
-      expect(upsertCall.create.last4).toBe('');
-      expect(upsertCall.create.baseUrl).toBe('http://compreface-core:3000');
-      expect(result.provider).toBe('compreface');
-      expect(result.configured).toBe(true);
-      expect(result.baseUrl).toBe('http://compreface-core:3000');
-    });
-
-    it('returns object WITHOUT encryptedKey property', async () => {
-      mockPrisma.faceProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: 'should-not-appear',
-        last4: 'zzzz',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const result = await service.upsertCredential('compreface', { apiKey: 'key-zzzz' }, 'user-1');
-
-      expect(result).not.toHaveProperty('encryptedKey');
-      expect(result).not.toHaveProperty('apiKey');
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // getSettings
-  // ---------------------------------------------------------------------------
   describe('getSettings', () => {
-    it('never exposes encryptedKey or apiKey in the response', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([
+    it('lists keyless compreface as configured with the env/default base URL when nothing is stored', async () => {
+      delete process.env.FACE_COMPREFACE_URL;
+      const r = await service.getSettings();
+      expect(r.providers).toEqual([
         {
           provider: 'compreface',
-          last4: 'abcd',
-          baseUrl: 'http://cf:8000',
+          configured: true,
           enabled: true,
-          updatedAt: new Date(),
+          requiresCredentials: false,
+          last4: null,
+          baseUrl: 'http://compreface-core:3000',
+          capabilities: CAPS,
         },
-      ] as any);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true },
-      });
-
-      const result = await service.getSettings();
-
-      const str = JSON.stringify(result);
-      expect(str).not.toContain('encryptedKey');
-      expect(str).not.toContain('apiKey');
+      ]);
+      expect(r.knownProviders).toEqual([]);
     });
 
-    it('returns providers with configured:true for stored credentials', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([
-        { provider: 'compreface', last4: 'efgh', baseUrl: 'http://cf:8000', enabled: true, updatedAt: new Date() },
-      ] as any);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true },
-      });
+    it('reads the stored override and enabled flag from the face settings', async () => {
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: false } } };
+      const cf = (await service.getSettings()).providers[0];
+      expect(cf).toMatchObject({ enabled: false, baseUrl: 'http://cf:8000', last4: null });
+    });
+
+    it('returns last4 from the credential hint when a key is stored, never the key', async () => {
+      creds.seed(PURPOSE, 'compreface', 'cf-test-secret-1234');
+      const r = await service.getSettings();
+      expect(r.providers[0].last4).toBe('1234');
+      const json = JSON.stringify(r);
+      expect(json).not.toContain('cf-test-secret');
+      expect(json).not.toMatch(/encryptedKey|apiKey/);
+    });
+
+    it('lists an unconfigured credentialed provider in knownProviders', async () => {
       mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
-
-      const result = await service.getSettings();
-
-      const cfProvider = result.providers.find((p) => p.provider === 'compreface');
-      expect(cfProvider).toBeDefined();
-      expect(cfProvider!.configured).toBe(true);
-      expect(cfProvider!.last4).toBe('efgh');
+      mockRegistry.get.mockImplementation((k: string) => (k === 'other-provider' ? keyed : keyless));
+      const r = await service.getSettings();
+      expect(r.knownProviders.map((p) => p.provider)).toEqual(['other-provider']);
+      expect(r.knownProviders[0]).toMatchObject({ configured: false, requiresCredentials: true });
+      expect(r.providers.map((p) => p.provider)).toEqual(['compreface']);
     });
 
-    it('returns knownProviders listing unconfigured providers', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
-      mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true },
-        requiresCredentials: true,
-      });
-
-      const result = await service.getSettings();
-
-      expect(result.knownProviders.length).toBe(2);
-      for (const kp of result.knownProviders) {
-        expect(kp.configured).toBe(false);
-        expect(kp.enabled).toBe(false);
-      }
-    });
-
-    it('returns default feature settings when face system settings are null', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue([]);
-
-      const result = await service.getSettings();
-
-      expect(result.features).toEqual({ detection: { provider: null, model: null } });
-    });
-
-    it('returns stored feature settings from system settings', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({
-        face: {
-          features: { detection: { provider: 'compreface', model: 'arcface-r100-v1' } },
-        },
-      });
-      mockRegistry.keys.mockReturnValue([]);
-
-      const result = await service.getSettings();
-
-      expect(result.features).toEqual({ detection: { provider: 'compreface', model: 'arcface-r100-v1' } });
-    });
-
-    it('includes capabilities from registry for configured providers', async () => {
-      const expectedCaps = { detect: true, embed: true };
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([
-        { provider: 'compreface', last4: 'abcd', baseUrl: null, enabled: true, updatedAt: new Date() },
-      ] as any);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface']);
-      mockRegistry.get.mockReturnValue({ capabilities: expectedCaps });
-
-      const result = await service.getSettings();
-
-      const cf = result.providers.find((p) => p.provider === 'compreface');
-      expect(cf?.capabilities).toEqual(expectedCaps);
-    });
-
-    it('includes a second registered provider in knownProviders with requiresCredentials:true when not configured', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
-      mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'other-provider') {
-          return { capabilities: { detect: true, embed: true }, requiresCredentials: true };
-        }
-        return { capabilities: { detect: true, embed: true }, requiresCredentials: false };
-      });
-
-      const result = await service.getSettings();
-
-      expect(result.knownProviders.map((p) => p.provider)).toContain('other-provider');
-      expect(result.knownProviders.map((p) => p.provider)).not.toContain('compreface');
-    });
-
-    // ---- compreface (keyless) provider tests --------------------------------
-
-    it('includes compreface in providers (not knownProviders) with configured:true, requiresCredentials:false when keyless', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
-      mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'other-provider') {
-          return { capabilities: { detect: true, embed: true }, requiresCredentials: true };
-        }
-        // compreface is keyless
-        return { capabilities: { detect: true, embed: true }, requiresCredentials: false };
-      });
-
-      const result = await service.getSettings();
-
-      const cfProvider = result.providers.find((p) => p.provider === 'compreface');
-      expect(cfProvider).toBeDefined();
-      expect(cfProvider!.configured).toBe(true);
-      expect(cfProvider!.enabled).toBe(true);
-      expect(cfProvider!.requiresCredentials).toBe(false);
-    });
-
-    it('does NOT include compreface in knownProviders when it is keyless', async () => {
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface', 'other-provider']);
-      mockRegistry.get.mockImplementation((key: string) => {
-        if (key === 'other-provider') {
-          return { capabilities: { detect: true, embed: true }, requiresCredentials: true };
-        }
-        return { capabilities: { detect: true, embed: true }, requiresCredentials: false };
-      });
-
-      const result = await service.getSettings();
-
-      const cfInKnown = result.knownProviders.find((p) => p.provider === 'compreface');
-      expect(cfInKnown).toBeUndefined();
-    });
-
-    it('exposes effective baseUrl for compreface from env when keyless and no DB row', async () => {
-      const savedEnv = process.env.FACE_COMPREFACE_URL;
-      process.env.FACE_COMPREFACE_URL = 'http://env-compreface:9090';
-
-      mockPrisma.faceProviderCredential.findMany.mockResolvedValue([]);
-      mockSystemSettings.getSettings.mockResolvedValue({ face: null });
-      mockRegistry.keys.mockReturnValue(['compreface']);
-      mockRegistry.get.mockReturnValue({
-        capabilities: { detect: true, embed: true },
-        requiresCredentials: false,
-      });
-
-      const result = await service.getSettings();
-
-      const cfProvider = result.providers.find((p) => p.provider === 'compreface');
-      expect(cfProvider!.baseUrl).toBe('http://env-compreface:9090');
-
-      // Restore
-      if (savedEnv === undefined) {
-        delete process.env.FACE_COMPREFACE_URL;
-      } else {
-        process.env.FACE_COMPREFACE_URL = savedEnv;
-      }
+    it('returns default and stored feature settings', async () => {
+      expect((await service.getSettings()).features).toEqual({ detection: { provider: null, model: null } });
+      face = { features: { detection: { provider: 'compreface', model: 'm1' } } };
+      expect((await service.getSettings()).features.detection).toEqual({ provider: 'compreface', model: 'm1' });
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // deleteCredential
-  // ---------------------------------------------------------------------------
-  describe('deleteCredential', () => {
-    it('throws NotFoundException when credential not found', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      await expect(service.deleteCredential('compreface', 'user-1')).rejects.toThrow(NotFoundException);
-    });
-
-    it('calls prisma.faceProviderCredential.delete when found', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: 'cipher',
-        last4: 'abcd',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-      mockPrisma.faceProviderCredential.delete.mockResolvedValue({} as any);
-
-      await service.deleteCredential('compreface', 'user-1');
-
-      expect(mockPrisma.faceProviderCredential.delete).toHaveBeenCalledWith({
-        where: { provider: 'compreface' },
-      });
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // testProvider
-  // ---------------------------------------------------------------------------
-  describe('testProvider', () => {
-    it('calls resolveCredentials then registry.get(provider).testConnection(creds)', async () => {
-      const realKey = 'cf-real-key-0000';
-      const encryptedValue = encryptSecret(realKey);
-
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: '0000',
-        baseUrl: 'http://cf:8000',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection, requiresCredentials: true });
-
-      const result = await service.testProvider({ provider: 'compreface' });
-
-      expect(mockRegistry.get).toHaveBeenCalledWith('compreface');
-      expect(mockTestConnection).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: realKey }),
+  describe('upsertCredential', () => {
+    it('writes a key to the credential store and the non-secret half to the face settings', async () => {
+      const r = await service.upsertCredential(
+        'compreface',
+        { apiKey: 'cf-test-1234abcd', baseUrl: 'http://cf:8000', enabled: false },
+        'user-1',
       );
-      expect(result).toEqual({ ok: true });
-    });
-
-    it('propagates ok:true result', async () => {
-      const encryptedValue = encryptSecret('some-key');
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: 'aaaa',
-        baseUrl: 'http://cf:8000',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection, requiresCredentials: true });
-
-      const result = await service.testProvider({ provider: 'compreface' });
-      expect(result).toEqual({ ok: true });
-    });
-
-    it('propagates ok:false result', async () => {
-      const encryptedValue = encryptSecret('some-key');
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: 'aaaa',
-        baseUrl: 'http://cf:8000',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const mockTestConnection = jest.fn().mockResolvedValue({ ok: false, error: 'Unauthorized' });
-      mockRegistry.get.mockReturnValue({ testConnection: mockTestConnection, requiresCredentials: true });
-
-      const result = await service.testProvider({ provider: 'compreface' });
-      expect(result).toEqual({ ok: false, error: 'Unauthorized' });
-    });
-
-    it('throws when resolveCredentials throws (unconfigured provider)', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-      mockRegistry.get.mockReturnValue({ requiresCredentials: true, testConnection: jest.fn() });
-
-      await expect(
-        service.testProvider({ provider: 'compreface' }),
-      ).rejects.toThrow(BadRequestException);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // setDetectionFeature
-  // ---------------------------------------------------------------------------
-  describe('setDetectionFeature', () => {
-    it('calls systemSettings.patchSettings with the correct nested structure', async () => {
-      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
-
-      await service.setDetectionFeature({ provider: 'compreface', model: 'arcface-r100-v1' }, 'user-1');
-
+      expect(creds.setSecret).toHaveBeenCalledWith(PURPOSE, 'compreface', 'cf-test-1234abcd', { updatedByUserId: 'user-1' });
       expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        expect.objectContaining({
-          face: {
-            features: {
-              detection: { provider: 'compreface', model: 'arcface-r100-v1' },
-            },
-          },
-        }),
+        { face: { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: false } } } },
         'user-1',
+      );
+      expect(JSON.stringify(mockSystemSettings.patchSettings.mock.calls)).not.toContain('cf-test-1234abcd');
+      expect(r).toMatchObject({ provider: 'compreface', configured: true, last4: 'abcd' });
+      expect(JSON.stringify(r)).not.toContain('cf-test-1234abcd');
+    });
+
+    it('works with baseUrl only (keyless): no secret is written', async () => {
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
+      const r = await service.upsertCredential('compreface', { baseUrl: 'http://cf:8000' }, 'user-1');
+      expect(creds.setSecret).not.toHaveBeenCalled();
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        { face: { providers: { compreface: { baseUrl: 'http://cf:8000' } } } },
+        'user-1',
+      );
+      expect(r).toEqual({ provider: 'compreface', configured: true, enabled: true, last4: null, baseUrl: 'http://cf:8000' });
+    });
+
+    it('a blank key preserves a stored one', async () => {
+      creds.seed(PURPOSE, 'compreface', 'cf-test-1234abcd');
+      await service.upsertCredential('compreface', { apiKey: '' }, 'u');
+      expect(creds.rows.get(`${PURPOSE}/compreface`)?.secret).toBe('cf-test-1234abcd');
+    });
+
+    it('clears baseUrl when none is sent (the legacy overwrite rule)', async () => {
+      await service.upsertCredential('compreface', {}, 'u');
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        { face: { providers: { compreface: { baseUrl: null } } } },
+        'u',
       );
     });
 
-    it('returns {provider, model}', async () => {
-      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
+    it('rejects a provider that has no settings slot', async () => {
+      mockRegistry.keys.mockReturnValue(['compreface', 'other']);
+      await expect(service.upsertCredential('other', {}, 'u')).rejects.toBeInstanceOf(BadRequestException);
+    });
 
-      const result = await service.setDetectionFeature(
-        { provider: 'compreface', model: 'arcface-r100-v1' },
-        'user-1',
+    it('rethrows the registry error for an unknown provider', async () => {
+      mockRegistry.get.mockImplementation(() => {
+        throw new Error('Unknown face provider: x');
+      });
+      await expect(service.upsertCredential('x', {}, 'u')).rejects.toThrow(/Unknown face provider/);
+    });
+  });
+
+  describe('deleteCredential', () => {
+    it('throws NotFoundException when neither a secret nor an override exists', async () => {
+      await expect(service.deleteCredential('compreface', 'u')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('removes the secret and resets the override', async () => {
+      creds.seed(PURPOSE, 'compreface', 'cf-test-1234abcd');
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
+      await service.deleteCredential('compreface', 'u');
+      expect(creds.deleteSecret).toHaveBeenCalledWith(PURPOSE, 'compreface');
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        { face: { providers: { compreface: { baseUrl: null, enabled: true } } } },
+        'u',
       );
+    });
 
-      expect(result).toEqual({ provider: 'compreface', model: 'arcface-r100-v1' });
+    it('resets an override with no secret without touching the store', async () => {
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
+      await service.deleteCredential('compreface', 'u');
+      expect(creds.deleteSecret).not.toHaveBeenCalled();
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveCredentials', () => {
+    it('keyless: {} with no override', async () => {
+      expect(await service.resolveCredentials('compreface')).toEqual({});
+    });
+
+    it('keyless: {baseUrl} with an enabled override', async () => {
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
+      expect(await service.resolveCredentials('compreface')).toEqual({ baseUrl: 'http://cf:8000' });
+    });
+
+    it('keyless: ignores a disabled override', async () => {
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: false } } };
+      expect(await service.resolveCredentials('compreface')).toEqual({});
+    });
+
+    it('credentialed: returns the stored key round-trip and baseUrl', async () => {
+      mockRegistry.get.mockReturnValue(keyed);
+      creds.seed(PURPOSE, 'compreface', 'cf-real-key-0000');
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
+      expect(await service.resolveCredentials('compreface')).toEqual({ apiKey: 'cf-real-key-0000', baseUrl: 'http://cf:8000' });
+    });
+
+    it('credentialed: not configured / disabled are 400s naming the provider', async () => {
+      mockRegistry.get.mockReturnValue(keyed);
+      await expect(service.resolveCredentials('compreface')).rejects.toThrow(/"compreface" is not configured/);
+      creds.seed(PURPOSE, 'compreface', 'cf-real-key-0000');
+      face = { providers: { compreface: { baseUrl: null, enabled: false } } };
+      await expect(service.resolveCredentials('compreface')).rejects.toThrow(/disabled/);
+    });
+  });
+
+  describe('testProvider', () => {
+    it('passes resolved credentials to testConnection', async () => {
+      const testConnection = jest.fn().mockResolvedValue({ ok: true });
+      mockRegistry.get.mockReturnValue({ ...keyless, testConnection });
+      face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
+      expect(await service.testProvider({ provider: 'compreface' })).toEqual({ ok: true });
+      expect(testConnection).toHaveBeenCalledWith({ baseUrl: 'http://cf:8000' });
+    });
+
+    it('credentialed provider: passes the stored key', async () => {
+      const testConnection = jest.fn().mockResolvedValue({ ok: true });
+      mockRegistry.get.mockReturnValue({ ...keyed, testConnection });
+      creds.seed(PURPOSE, 'compreface', 'cf-real-key-0000');
+      await service.testProvider({ provider: 'compreface' });
+      expect(testConnection).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'cf-real-key-0000' }));
+    });
+
+    it('propagates an unconfigured credentialed provider error', async () => {
+      mockRegistry.get.mockReturnValue(keyed);
+      await expect(service.testProvider({ provider: 'compreface' })).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('setDetectionFeature', () => {
+    it('patches the nested detection feature and returns it', async () => {
+      const r = await service.setDetectionFeature({ provider: 'compreface', model: 'm1' } as never, 'u');
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
+        { face: { features: { detection: { provider: 'compreface', model: 'm1' } } } },
+        'u',
+      );
+      expect(r).toEqual({ provider: 'compreface', model: 'm1' });
     });
 
     it('supports null provider and model (clearing the feature)', async () => {
-      mockSystemSettings.patchSettings.mockResolvedValue(undefined);
-
-      const result = await service.setDetectionFeature(
-        { provider: null, model: null },
-        'user-1',
-      );
-
-      expect(result).toEqual({ provider: null, model: null });
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // resolveCredentials
-  // ---------------------------------------------------------------------------
-  describe('resolveCredentials', () => {
-    beforeEach(() => {
-      // All credentialed-provider tests need requiresCredentials:true so the
-      // service proceeds to the DB lookup path instead of returning {} immediately.
-      mockRegistry.get.mockReturnValue({ requiresCredentials: true });
-    });
-
-    it('decrypts the stored key correctly (round-trip)', async () => {
-      const realPlaintext = 'real-face-api-key-for-test';
-      const encryptedValue = encryptSecret(realPlaintext);
-
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: 'test',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const creds = await service.resolveCredentials('compreface');
-
-      expect(creds.apiKey).toBe(realPlaintext);
-    });
-
-    it('returns baseUrl when configured', async () => {
-      const encryptedValue = encryptSecret('any-key');
-
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: 'test',
-        baseUrl: 'http://compreface:8000',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const creds = await service.resolveCredentials('compreface');
-
-      expect(creds.baseUrl).toBe('http://compreface:8000');
-    });
-
-    it('throws BadRequestException when provider is not configured', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(BadRequestException);
-    });
-
-    it('throws BadRequestException with provider name in message when not configured', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(/compreface/i);
-    });
-
-    it('throws BadRequestException when provider is disabled', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptSecret('some-key'),
-        last4: 'test',
-        baseUrl: null,
-        enabled: false,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(BadRequestException);
-    });
-
-    it('throws BadRequestException mentioning disabled when provider is disabled', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptSecret('some-key'),
-        last4: 'test',
-        baseUrl: null,
-        enabled: false,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await expect(service.resolveCredentials('compreface')).rejects.toThrow(/disabled/i);
-    });
-
-    it('returns {} for keyless provider (compreface) when no DB row exists', async () => {
-      mockRegistry.get.mockReturnValue({ requiresCredentials: false });
-      // The service checks for an optional baseUrl override row even for keyless providers.
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      const result = await service.resolveCredentials('compreface');
-
-      expect(result).toEqual({});
-    });
-
-    it('returns {baseUrl} for keyless provider (compreface) when DB row has a custom baseUrl', async () => {
-      mockRegistry.get.mockReturnValue({ requiresCredentials: false });
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: '',
-        last4: '',
-        baseUrl: 'http://custom-compreface:9999',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const result = await service.resolveCredentials('compreface');
-
-      expect(result).toEqual({ baseUrl: 'http://custom-compreface:9999' });
-    });
-
-    it('returns {} for compreface when DB row exists but has no baseUrl (uses provider env/default)', async () => {
-      mockRegistry.get.mockReturnValue({ requiresCredentials: false });
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: '',
-        last4: '',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const result = await service.resolveCredentials('compreface');
-
-      // No custom baseUrl stored — provider falls back to env/default
-      expect(result).toEqual({});
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // testProvider (compreface — keyless)
-  // ---------------------------------------------------------------------------
-  describe('testProvider — compreface (keyless)', () => {
-    it('calls testConnection with {} when no credential row exists', async () => {
-      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ requiresCredentials: false, testConnection: mockTestConnection });
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      const result = await service.testProvider({ provider: 'compreface' });
-
-      expect(mockTestConnection).toHaveBeenCalledWith({});
-      expect(result).toEqual({ ok: true });
-    });
-
-    it('calls testConnection with {baseUrl} when credential row has a custom baseUrl', async () => {
-      const mockTestConnection = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ requiresCredentials: false, testConnection: mockTestConnection });
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: '',
-        last4: '',
-        baseUrl: 'http://compreface-custom:3000',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await service.testProvider({ provider: 'compreface' });
-
-      expect(mockTestConnection).toHaveBeenCalledWith({ baseUrl: 'http://compreface-custom:3000' });
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // listModels
-  // ---------------------------------------------------------------------------
-  describe('listModels', () => {
-    it('decrypts key and calls provider.listModels when credential found and enabled', async () => {
-      const realKey = 'cf-secret-key';
-      const encryptedValue = encryptSecret(realKey);
-
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: 'xkey',
-        baseUrl: 'http://cf:8000',
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const mockListModels = jest.fn().mockResolvedValue(['arcface-r100-v1']);
-      mockRegistry.get.mockReturnValue({ listModels: mockListModels });
-
-      const result = await service.listModels('compreface');
-
-      expect(mockListModels).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: realKey }),
-      );
-      expect(result).toEqual(['arcface-r100-v1']);
-    });
-
-    it('calls provider.listModels with empty apiKey when credential exists but is disabled', async () => {
-      const encryptedValue = encryptSecret('some-key');
-
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'compreface',
-        encryptedKey: encryptedValue,
-        last4: 'abcd',
-        baseUrl: 'http://cf:8000',
-        enabled: false,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const mockListModels = jest.fn().mockResolvedValue(['arcface-r100-v1']);
-      mockRegistry.get.mockReturnValue({ listModels: mockListModels });
-
-      await service.listModels('compreface');
-
-      expect(mockListModels).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: '' }),
-      );
-    });
-
-    it('calls provider.listModels with empty apiKey when no credential exists', async () => {
-      mockPrisma.faceProviderCredential.findUnique.mockResolvedValue(null);
-
-      const mockListModels = jest.fn().mockResolvedValue(['arcface-r100-v1']);
-      mockRegistry.get.mockReturnValue({ listModels: mockListModels });
-
-      await service.listModels('compreface');
-
-      expect(mockListModels).toHaveBeenCalledWith({ apiKey: '' });
-    });
-
-    it('throws for unknown provider (registry re-throws)', async () => {
-      mockRegistry.get.mockImplementation(() => {
-        throw new Error('Unknown face provider: unknown-face-prov');
+      await expect(service.setDetectionFeature({ provider: null, model: null } as never, 'u')).resolves.toEqual({
+        provider: null,
+        model: null,
       });
+    });
+  });
 
-      await expect(service.listModels('unknown-face-prov')).rejects.toThrow(/Unknown face provider/i);
+  describe('listModels', () => {
+    it('passes the stored key when configured and enabled', async () => {
+      const listModels = jest.fn().mockResolvedValue(['arcface']);
+      mockRegistry.get.mockReturnValue({ ...keyed, listModels });
+      creds.seed(PURPOSE, 'compreface', 'cf-secret-key');
+      expect(await service.listModels('compreface')).toEqual(['arcface']);
+      expect(listModels).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'cf-secret-key' }));
+    });
+
+    it('passes an empty key when nothing is configured or the provider is disabled', async () => {
+      const listModels = jest.fn().mockResolvedValue([]);
+      mockRegistry.get.mockReturnValue({ ...keyed, listModels });
+      await service.listModels('compreface');
+      expect(listModels).toHaveBeenLastCalledWith({ apiKey: '' });
+
+      creds.seed(PURPOSE, 'compreface', 'cf-secret-key');
+      face = { providers: { compreface: { baseUrl: null, enabled: false } } };
+      await service.listModels('compreface');
+      expect(listModels).toHaveBeenLastCalledWith({ apiKey: '' });
+    });
+
+    it('throws for an unknown provider', async () => {
+      mockRegistry.get.mockImplementation(() => {
+        throw new Error('Unknown face provider: x');
+      });
+      await expect(service.listModels('x')).rejects.toThrow(/Unknown face provider/);
     });
   });
 });

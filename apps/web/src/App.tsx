@@ -1,31 +1,54 @@
-import { ThemeProvider } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { CircleProvider } from './contexts/CircleContext';
-import { ThemeContextProvider, useThemeContext } from './contexts/ThemeContext';
-import { ProtectedRoute } from './components/common/ProtectedRoute';
+// The packaged shell theme (RETRO-F1, #571): `ShellRoot` is the theme-mode
+// provider plus MUI's ThemeProvider and CssBaseline, under the same
+// `theme_mode` key.
+import { ShellRoot } from '@marinoscar/platform-web/shell/ui';
+import { THEME_STORAGE_KEY } from './contexts/ThemeContext';
+import { APP_THEMES } from './theme';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { MaintenanceGate } from './components/common/MaintenanceGate';
 import { RequirePermission } from './components/common/RequirePermission';
-import { UpdatePrompt } from './components/pwa/UpdatePrompt';
-import { InstallPrompt } from './components/pwa/InstallPrompt';
+// The packaged host UI (RETRO-B1, #597): the maintenance gate that takes the
+// application over while the API is refusing, and the PWA prompts. The two
+// admin pages (About, Maintenance) are bound in pages/Admin.
+import { InstallPrompt, MaintenanceGate, UpdatePrompt } from '@marinoscar/platform-web/host/ui';
+// `virtual:pwa-register/react` exists only in this app's bundler (vite-plugin-pwa),
+// so the packaged `UpdatePrompt` takes the hook as a prop.
+import { useRegisterSW } from 'virtual:pwa-register/react';
+import { AppPlatformHostProvider } from './platform/platformHost';
+// The packaged identity UI (RETRO-B2, #611): sign-in, callback, device
+// activation, access tokens, users and allowlist, behind the identity guards.
+import { RequireAuth } from '@marinoscar/platform-web/identity/headless';
+import {
+  ActivateDevicePage,
+  AuthCallbackPage,
+  LoginPage,
+  UserTokensPage,
+  UsersPage,
+} from '@marinoscar/platform-web/identity/ui';
+import { IdentityWebAdaptersProvider } from '@marinoscar/platform-web/identity/headless';
+import { appIdentityAdapters } from './platform/identityAdapters';
+import { JobsWebAdaptersProvider } from '@marinoscar/platform-web/jobs/headless';
+import { appJobsAdapters } from './platform/jobsAdapters';
+import { APP_NAME } from './constants/app';
 
 // Pages (lazy loaded)
 import { Suspense, lazy } from 'react';
 import { LoadingSpinner } from './components/common/LoadingSpinner';
 
-const LoginPage = lazy(() => import('./pages/LoginPage'));
-const AuthCallbackPage = lazy(() => import('./pages/AuthCallbackPage'));
-const ActivateDevicePage = lazy(() => import('./pages/ActivateDevicePage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
-const UserSettingsPage = lazy(() => import('./pages/UserSettingsPage'));
+const UserSettingsHubPage = lazy(() => import('./pages/UserSettingsHubPage'));
+const AppearanceSettingsPage = lazy(() => import('./pages/settings/AppearanceSettingsPage'));
+const TimeZoneSettingsPage = lazy(() => import('./pages/settings/TimeZoneSettingsPage'));
+const NotificationPreferencesPage = lazy(() => import('./pages/settings/NotificationPreferencesPage'));
+const MemoriesPreferencesPage = lazy(() => import('./pages/settings/MemoriesPreferencesPage'));
+const SearchPreferencesPage = lazy(() => import('./pages/settings/SearchPreferencesPage'));
 const AndroidAppDownloadPage = lazy(() => import('./pages/AndroidAppDownloadPage'));
 const MediaSyncPage = lazy(() => import('./pages/MediaSyncPage'));
 const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
-const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
 const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
@@ -39,11 +62,20 @@ const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
 const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
 const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
 const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
+// The platform's Jobs and Job Insights pages (RETRO-C1, #575); the Jobs one is a thin binding that adds
+// the app's "Repair missing thumbnails" action to the page toolbar.
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
-const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
+const JobInsightsPage = lazy(() =>
+  import('@marinoscar/platform-web/jobs/ui').then((m) => ({ default: m.JobInsightsPage })),
+);
 const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
 const NodeBackupPage = lazy(() => import('./pages/Admin/NodeBackupPage'));
 const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
+// RETRO-B1 (#597): the platform host's two admin pages, packaged. Lazy like
+// every other admin page: nobody who never opens the Console needs them in the
+// entry chunk.
+const AdminMaintenancePage = lazy(() => import('./pages/Admin/MaintenancePage'));
+const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
 const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettingsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
@@ -96,23 +128,20 @@ const TestLoginPage = import.meta.env.PROD
   : lazy(() => import('./pages/TestLoginPage'));
 
 function AppRoutes() {
-  const { theme } = useThemeContext();
-
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
+    <>
       {/* PWA (issue #482): outside <Routes>, <ErrorBoundary> and the
           maintenance gate, so the service worker registers — and a waiting
           update can be offered — on every route, including /login, public
           share pages and the maintenance takeover (which is exactly when a
           fixed build is about to land). Both render null by default. */}
-      <UpdatePrompt />
-      <InstallPrompt />
+      <UpdatePrompt useRegisterSW={useRegisterSW} />
+      <InstallPrompt appName={APP_NAME} />
       <ErrorBoundary>
         {/* Maintenance mode (issue #348): sits outside <Routes> so the takeover
             is global — every route, authenticated or not — instead of each
             page having to handle a maintenance 503 itself. */}
-        <MaintenanceGate>
+        <MaintenanceGate appName={APP_NAME}>
         <Suspense fallback={<LoadingSpinner fullScreen />}>
           <Routes>
             {/* Public routes */}
@@ -126,16 +155,25 @@ function AppRoutes() {
             )}
 
             {/* Protected routes */}
-            <Route element={<ProtectedRoute />}>
+            <Route element={<RequireAuth loading={<LoadingSpinner fullScreen />} />}>
               {/* Device activation page - without layout for full-screen experience */}
-              <Route path="/activate" element={<ActivateDevicePage />} />
+              {/* The Android pairing returns to the app with `clientInfo.returnUri`
+                  (`memoriahub:` deep links; `https:` is always accepted). */}
+              <Route path="/activate" element={<ActivateDevicePage returnUriSchemes={['memoriahub']} />} />
 
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
-                <Route path="/settings" element={<UserSettingsPage />} />
-                {/* Android app + Media Sync (issue #515). Sub-routes of the
-                    stacked /settings page, which links to both from its
-                    "Android app" section. */}
+                {/* The per-user hub (RETRO-B5, #621): a binding over the packaged
+                    SettingsHub. Every card of USER_SETTINGS_SECTIONS routes
+                    to a page under /settings/<card>. */}
+                <Route path="/settings" element={<UserSettingsHubPage />} />
+                <Route path="/settings/profile" element={<ProfilePage />} />
+                <Route path="/settings/appearance" element={<AppearanceSettingsPage />} />
+                <Route path="/settings/time-zone" element={<TimeZoneSettingsPage />} />
+                <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
+                <Route path="/settings/memories" element={<MemoriesPreferencesPage />} />
+                <Route path="/settings/search" element={<SearchPreferencesPage />} />
+                {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
                   path="/settings/media-sync"
@@ -145,47 +183,273 @@ function AppRoutes() {
                     </RequirePermission>
                   }
                 />
-                <Route path="/profile" element={<ProfilePage />} />
+                {/* The Profile page moved under the user hub (RETRO-B5); the old URL
+                    still resolves. */}
+                <Route path="/profile" element={<Navigate to="/settings/profile" replace />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
                 <Route path="/circles" element={<CircleListPage />} />
                 <Route path="/circles/:id" element={<CircleDetailPage />} />
                 {/* Settings Hub */}
                 <Route path="/admin/settings" element={<SettingsHubPage />} />
-                <Route path="/admin/settings/general" element={<SystemSettingsPage />} />
-                <Route path="/admin/settings/users" element={<UserManagementPage />} />
-                <Route path="/admin/settings/ai" element={<AiSettingsPage />} />
-                <Route path="/admin/settings/tagging" element={<TaggingSettingsPage />} />
-                <Route path="/admin/settings/face" element={<FaceSettingsPage />} />
-                <Route path="/admin/settings/bursts" element={<BurstsSettingsPage />} />
-                <Route path="/admin/settings/duplicates" element={<DuplicatesSettingsPage />} />
-                <Route path="/admin/settings/social-media" element={<SocialMediaSettingsPage />} />
-                <Route path="/admin/settings/enhancer" element={<EnhancerSettingsPage />} />
-                <Route path="/admin/settings/memories" element={<MemoriesSettingsPage />} />
-                <Route path="/admin/settings/location-inference" element={<LocationInferenceSettingsPage />} />
-                <Route path="/admin/settings/location-groups" element={<LocationGroupsSettingsPage />} />
-                <Route path="/admin/settings/archiving" element={<ArchivingSettingsPage />} />
-                <Route path="/admin/settings/geo" element={<GeoSettingsPage />} />
-                <Route path="/admin/settings/email" element={<EmailSettingsPage />} />
-                <Route path="/admin/settings/push" element={<PushConfigPage />} />
-                <Route path="/admin/settings/notifications" element={<NotificationPolicyPage />} />
-                <Route path="/admin/settings/android" element={<AndroidAppPage />} />
-                <Route path="/admin/settings/storage/providers" element={<StorageProvidersPage />} />
-                <Route path="/admin/settings/storage/insights" element={<StorageInsightsPage />} />
-                <Route path="/admin/settings/jobs" element={<JobsPage />} />
-                <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
-                <Route path="/admin/settings/nodes" element={<WorkersPage />} />
+                <Route
+                  path="/admin/settings/general"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <SystemSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/users"
+                  element={
+                    <RequirePermission permission="users:read" fallback={<Navigate to="/" replace />}>
+                      <UsersPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route path="/settings/tokens" element={<UserTokensPage />} />
+                <Route
+                  path="/admin/settings/ai"
+                  element={
+                    <RequirePermission permission="ai_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AiSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/tagging"
+                  element={
+                    <RequirePermission permission="ai_settings:read" fallback={<Navigate to="/" replace />}>
+                      <TaggingSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/face"
+                  element={
+                    <RequirePermission permission="face_settings:read" fallback={<Navigate to="/" replace />}>
+                      <FaceSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/bursts"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <BurstsSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/duplicates"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <DuplicatesSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/social-media"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <SocialMediaSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/enhancer"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <EnhancerSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/memories"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <MemoriesSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/location-inference"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <LocationInferenceSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/location-groups"
+                  element={
+                    <RequirePermission permission="geo_settings:read" fallback={<Navigate to="/" replace />}>
+                      <LocationGroupsSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/archiving"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <ArchivingSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/geo"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <GeoSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/email"
+                  element={
+                    <RequirePermission permission="email_settings:read" fallback={<Navigate to="/" replace />}>
+                      <EmailSettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/push"
+                  element={
+                    <RequirePermission permission="push:read" fallback={<Navigate to="/" replace />}>
+                      <PushConfigPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/notifications"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <NotificationPolicyPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/android"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AndroidAppPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/storage/providers"
+                  element={
+                    <RequirePermission permission="storage_settings:read" fallback={<Navigate to="/" replace />}>
+                      <StorageProvidersPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/storage/insights"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <StorageInsightsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/jobs"
+                  element={
+                    <RequirePermission permission="jobs:read" fallback={<Navigate to="/" replace />}>
+                      <JobsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/jobs/insights"
+                  element={
+                    <RequirePermission permission="jobs:read" fallback={<Navigate to="/" replace />}>
+                      <JobInsightsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/nodes"
+                  element={
+                    <RequirePermission permission="jobs:read" fallback={<Navigate to="/" replace />}>
+                      <WorkersPage />
+                    </RequirePermission>
+                  }
+                />
                 <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
-                <Route path="/admin/settings/doctor" element={<DoctorPage />} />
-                <Route path="/admin/settings/broadcasts" element={<BroadcastsPage />} />
-                <Route path="/admin/settings/workflows" element={<WorkflowsSettingsPage />} />
+                {/* RETRO-B1b (#602): the packaged Doctor, behind the permission
+                    `GET /api/admin/doctor` enforces. */}
+                <Route
+                  path="/admin/settings/doctor"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <DoctorPage />
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-B1 (#597). Same permission string the `Maintenance` and
+                    `About` cards declare and the platform host's controllers
+                    enforce on their GETs. Opening and closing a window needs
+                    `system_settings:write`, which the page gates by disabling its
+                    controls. The maintenance route is the one the packaged
+                    `MaintenanceGate` never covers (`MAINTENANCE_ADMIN_PATH`),
+                    mirroring `@AllowDuringMaintenance()` on the controller behind
+                    it: the switch that ends a window has to be reachable while the
+                    window is open. */}
+                <Route
+                  path="/admin/settings/maintenance"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AdminMaintenancePage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/about"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AboutPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/broadcasts"
+                  element={
+                    <RequirePermission permission="broadcasts:read" fallback={<Navigate to="/" replace />}>
+                      <BroadcastsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/workflows"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <WorkflowsSettingsPage />
+                    </RequirePermission>
+                  }
+                />
                 {/* v0 server-side backup retired (#367) — superseded by the node-based
                     Local Media Backup reachable from the Worker Nodes page. */}
                 <Route
                   path="/admin/settings/backup"
                   element={<Navigate to="/admin/settings/nodes" replace />}
                 />
-                <Route path="/admin/settings/db-backup" element={<DbBackupPage />} />
-                <Route path="/admin/settings/sharing" element={<PublicSharesPage />} />
+                <Route
+                  path="/admin/settings/db-backup"
+                  element={
+                    <RequirePermission permission="db_backup:read" fallback={<Navigate to="/" replace />}>
+                      <DbBackupPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/sharing"
+                  element={
+                    <RequirePermission permission="shares:manage_any" fallback={<Navigate to="/" replace />}>
+                      <PublicSharesPage />
+                    </RequirePermission>
+                  }
+                />
                 {/* Legacy admin route redirects */}
                 <Route path="/admin/users" element={<Navigate to="/admin/settings/users" replace />} />
                 <Route path="/admin/ai-settings" element={<Navigate to="/admin/settings/ai" replace />} />
@@ -243,10 +507,9 @@ function AppRoutes() {
                 <Route path="/archive" element={<ArchivePage />} />
                 <Route path="/trash" element={<TrashPage />} />
                 <Route path="/trash/runs/:runId" element={<TrashEmptyRunPage />} />
-              </Route>
-
-              {/* Full-bleed layout — map owns the entire content area (no padding) */}
-              <Route element={<Layout fullBleed />}>
+                {/* The map owns the whole content area: it asks the shell for the
+                    full-bleed <main> itself (useShellMainVariant), so the shell is
+                    not remounted on the way in or out. */}
                 <Route path="/map" element={<MediaMapPage />} />
               </Route>
             </Route>
@@ -257,18 +520,27 @@ function AppRoutes() {
         </Suspense>
         </MaintenanceGate>
       </ErrorBoundary>
-    </ThemeProvider>
+    </>
   );
 }
 
 export default function App() {
   return (
-    <ThemeContextProvider>
+    <ShellRoot themes={APP_THEMES} storageKey={THEME_STORAGE_KEY}>
       <AuthProvider>
-        <CircleProvider>
-          <AppRoutes />
-        </CircleProvider>
+        {/* The platform host (RETRO-B1, #597): the transport and viewer every
+            packaged page and hook reads. Inside the auth provider (it reads the
+            signed-in user's permissions), above the router outlet. */}
+        <AppPlatformHostProvider>
+          <IdentityWebAdaptersProvider adapters={appIdentityAdapters}>
+            <JobsWebAdaptersProvider adapters={appJobsAdapters}>
+              <CircleProvider>
+                <AppRoutes />
+              </CircleProvider>
+            </JobsWebAdaptersProvider>
+          </IdentityWebAdaptersProvider>
+        </AppPlatformHostProvider>
       </AuthProvider>
-    </ThemeContextProvider>
+    </ShellRoot>
   );
 }

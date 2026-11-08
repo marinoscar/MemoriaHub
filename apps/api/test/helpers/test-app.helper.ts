@@ -13,6 +13,7 @@ import {
 } from '../../src/common/fastify-setup';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { prismaMock } from '../mocks/prisma.mock';
+import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
 import { OfflineGeoLocationProvider } from '../../src/media/geo/offline-geo-location.provider';
 
 /**
@@ -95,6 +96,13 @@ export interface TestAppOptions {
    * the same ordering the server uses.
    */
   registerRoutes?: (app: NestFastifyApplication) => void;
+
+  /**
+   * Providers to replace after the defaults (applied last, so they win over the
+   * mocked `PrismaService`). The `doctor-read-only` conformance suite uses it to
+   * install its recording Prisma client and write-failing storage double.
+   */
+  overrideProviders?: Array<{ provide: unknown; useValue: unknown }>;
 }
 
 /**
@@ -111,7 +119,7 @@ export async function createTestApp(
 
   // The geo stub applies to BOTH branches: the ESM/network problem it works
   // around is a property of running under Jest, not of how Prisma is wired.
-  const builder = Test.createTestingModule({ imports: [AppModule] })
+  let builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(OfflineGeoLocationProvider)
     .useValue(inertGeoProvider);
 
@@ -119,10 +127,16 @@ export async function createTestApp(
     stubRbacReconcileQueries();
 
     // Mocked PrismaService — no real database connection is opened.
-    moduleFixture = await builder
+    builder = builder
       .overrideProvider(PrismaService)
       .useValue(prismaMock)
-      .compile();
+      // PLATFORM-ADOPTION-SHIM(RETRO-D1): no organizations table behind the mock.
+      .overrideProvider(DefaultOrgId)
+      .useValue({ get: async () => '00000000-0000-4000-8000-0000000000d0' });
+    for (const { provide, useValue } of options.overrideProviders ?? []) {
+      builder = builder.overrideProvider(provide).useValue(useValue);
+    }
+    moduleFixture = await builder.compile();
   } else {
     // Real database (for true E2E tests).
     moduleFixture = await builder.compile();

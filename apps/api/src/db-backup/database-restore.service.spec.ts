@@ -70,8 +70,8 @@ function label(sql: string): string {
   if (s.startsWith('DROP DATABASE')) return 'drop-database';
   if (s.startsWith('ALTER DATABASE')) return 'rename-database';
   if (s.includes('pg_terminate_backend')) return 'terminate';
-  if (s.startsWith('INSERT INTO database_backup_runs')) return 'catalog-insert';
-  if (s.startsWith('UPDATE database_backup_runs')) return 'catalog-update';
+  if (s.startsWith('INSERT INTO mh_legacy_database_backup_runs')) return 'catalog-insert';
+  if (s.startsWith('UPDATE mh_legacy_database_backup_runs')) return 'catalog-update';
   return 'query';
 }
 
@@ -250,7 +250,7 @@ function build(overrides: {
   const run = { ...COMPLETED_RUN, ...(overrides.run ?? {}) };
 
   const prisma = {
-    databaseBackupRun: {
+    mhLegacyDatabaseBackupRun: {
       findUnique: jest.fn().mockResolvedValue(run),
       findUniqueOrThrow: jest.fn().mockResolvedValue(run),
       findMany: jest
@@ -297,13 +297,13 @@ function build(overrides: {
     }),
   };
 
+  // The platform MaintenanceModeService: the swap only ever uses the IN-MEMORY
+  // layer (`setInMemoryOverride`), never `setMaintenance` (the persisted write).
   const maintenance = {
-    enable: jest.fn(async (...args: unknown[]) => {
-      h.events.push(`maintenance:${JSON.stringify(args[2] ?? {})}`);
-      return {} as any;
+    setInMemoryOverride: jest.fn((override: unknown) => {
+      h.events.push(`maintenance:${JSON.stringify(override ?? {})}`);
     }),
-    setState: jest.fn(),
-    disable: jest.fn(),
+    setMaintenance: jest.fn(),
   };
 
   const backupRunner = {
@@ -385,7 +385,7 @@ describe('pre-flight gates', () => {
     expect(result.guided.runbook).toContain('database-restore.md');
     // A capability failure must not create anything.
     expect(h.events).not.toContain('create-database');
-    expect(prisma.databaseBackupRun.update).toHaveBeenCalledWith(
+    expect(prisma.mhLegacyDatabaseBackupRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ restoreStatus: 'guided' }),
       }),
@@ -542,14 +542,12 @@ describe('restore execution and swap', () => {
     const harness = build();
     await execute(harness);
 
-    expect(harness.maintenance.enable).toHaveBeenCalledWith(
-      expect.any(String),
-      'admin-1',
-      { allowAdmins: false },
+    expect(harness.maintenance.setInMemoryOverride).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, allowAdmins: false }),
     );
     // The persisted flag lives inside the database being renamed; writing it
     // here would be a write to a database that is about to disappear.
-    expect(harness.maintenance.setState).not.toHaveBeenCalled();
+    expect(harness.maintenance.setMaintenance).not.toHaveBeenCalled();
   });
 
   it('exits the process after a successful swap so the pool is rebuilt', async () => {
@@ -585,7 +583,7 @@ describe('restore execution and swap', () => {
     await execute(harness);
 
     const inserts = harness.h.queries.filter((q) =>
-      q.text.startsWith('INSERT INTO database_backup_runs'),
+      q.text.startsWith('INSERT INTO mh_legacy_database_backup_runs'),
     );
     expect(inserts).toHaveLength(2);
     // Re-inserted into the NEWLY-renamed live database, not the scratch name.
@@ -650,7 +648,7 @@ describe('mid-restore failure', () => {
     // database never knew a restore was happening.
     expect(harness.h.events).not.toContain('rename-database');
     expect(harness.h.events).not.toContain('terminate');
-    expect(harness.maintenance.enable).not.toHaveBeenCalled();
+    expect(harness.maintenance.setInMemoryOverride).not.toHaveBeenCalled();
 
     // And no several-hundred-GB scratch database left behind.
     const drops = harness.h.queries.filter((q) =>
@@ -658,7 +656,7 @@ describe('mid-restore failure', () => {
     );
     expect(drops.some((d) => d.text.includes(CTX.scratchDatabase))).toBe(true);
 
-    expect(harness.prisma.databaseBackupRun.update).toHaveBeenCalledWith(
+    expect(harness.prisma.mhLegacyDatabaseBackupRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ restoreStatus: 'failed' }),
       }),
@@ -702,10 +700,8 @@ describe('rollback', () => {
     expect(renames[1].text).toContain(
       `"${LIVE_DB}_old_20260810000000" RENAME TO "${LIVE_DB}"`,
     );
-    expect(harness.maintenance.enable).toHaveBeenCalledWith(
-      expect.any(String),
-      'admin-1',
-      { allowAdmins: false },
+    expect(harness.maintenance.setInMemoryOverride).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, allowAdmins: false }),
     );
     expect(harness.exit).toHaveBeenCalledWith(0);
   });

@@ -39,11 +39,7 @@
  */
 
 import { Box, Chip, Link as MuiLink, Tooltip, Typography } from '@mui/material';
-import type {
-  DataTableColumn,
-  DataTableEnumValue,
-  DataTableFilterModel,
-} from '../../components/datatable';
+import type { DataTableColumn, DataTableEnumValue, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import { notificationMeta } from '../../components/notifications/notificationMeta';
 import { relativeTime } from '../../utils/formatBytes';
 import type { NotificationItem } from '../../types/notifications';

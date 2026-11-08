@@ -21,9 +21,9 @@ import { NotificationPolicyService } from './notification-policy.service';
 import { NotificationStreamService } from './notification-stream.service';
 import { PushConfigService } from './push/push-config.service';
 import { PushSubscriptionService } from './push/push-subscription.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { TransformInterceptor } from '../common/interceptors/transform.interceptor';
-import { LoggingInterceptor } from '../common/interceptors/logging.interceptor';
+import { JwtAuthGuard } from '@marinoscar/platform-api/identity';
+import { TransformInterceptor } from '@marinoscar/platform-api/host';
+import { LoggingInterceptor } from '@marinoscar/platform-api/host';
 
 const USER_ID = 'user-stream-1';
 

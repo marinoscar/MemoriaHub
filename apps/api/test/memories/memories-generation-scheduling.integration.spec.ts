@@ -12,9 +12,14 @@
 //      the flag on, exactly ONE pending `memory_generation` row exists per
 //      circle — the thing the (type, mediaItemId IS NULL) global dedup would
 //      otherwise collapse into a single row for the whole deployment.
-//   2. The `enrichmentJob.groupBy({ by: ['circleId'], _max: { finishedAt } })`
+//   2. The `job.groupBy({ by: ['subjectId'], _max: { finishedAt } })`
 //      interval gate is valid SQL and returns what the task expects, including
 //      for a nullable aggregate column.
+//
+// Since the jobs cutover (RETRO-C1, #575) the rows live in the platform `jobs`
+// table, which has no `circle_id` / `media_item_id` columns: the enqueue facade
+// stores a circle-scoped job as the subject ('circle', circleId), so every read
+// and every seeded row here goes through `subjectType` / `subjectId`.
 //   3. The three gates end to end against real rows: an in-flight job blocks a
 //      circle; a recent success blocks a circle; an old success does not.
 //   4. THE ZERO-COST CONTRACT: with `features.memories` off (the default) and
@@ -22,6 +27,7 @@
 
 import { PrismaClient, JobStatus } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { JobsService } from '@marinoscar/platform-api/jobs';
 import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import {
@@ -30,7 +36,8 @@ import {
 } from '../../src/memories/memories-generation.task';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
+import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 
 function resolveDatabaseUrl(): string {
   if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
@@ -63,6 +70,8 @@ describeMaybeDb(
      * to these ids.
      */
     const ourCircles = { in: [circleAId, circleBId] };
+    /** The platform job subject the enqueue facade writes for a circle-scoped job. */
+    const ourCircleJobs = { subjectType: 'circle', subjectId: ourCircles };
 
     beforeAll(async () => {
       const adapter = new PrismaPg({ connectionString: DATABASE_URL });
@@ -82,8 +91,8 @@ describeMaybeDb(
 
     afterAll(async () => {
       if (!prisma) return;
-      await prisma.enrichmentJob
-        .deleteMany({ where: { circleId: ourCircles } })
+      await prisma.job
+        .deleteMany({ where: ourCircleJobs })
         .catch(() => undefined);
       await prisma.circle.deleteMany({ where: { id: ourCircles } });
       await prisma.user.deleteMany({ where: { id: userId } });
@@ -95,7 +104,7 @@ describeMaybeDb(
 
     beforeEach(async () => {
       delete process.env['MEMORIES_ENABLED'];
-      await prisma.enrichmentJob.deleteMany({ where: { circleId: ourCircles } });
+      await prisma.job.deleteMany({ where: ourCircleJobs });
 
       // Real PrismaService/EnrichmentJobService; only the settings read is
       // stubbed, so every query in the path is genuine SQL.
@@ -107,16 +116,19 @@ describeMaybeDb(
       };
       task = new MemoriesGenerationTask(
         prisma as unknown as PrismaService,
-        new EnrichmentJobService(prisma as unknown as PrismaService),
-        settings as unknown as SystemSettingsService,
+        new EnrichmentJobService(
+          new JobsService(prisma as never),
+          new DefaultOrgId(prisma as unknown as PrismaService),
+        ),
+        settings as unknown as AppSystemSettingsService,
       );
     });
 
     /** memory_generation rows belonging to this suite's circles. */
     async function ourJobs() {
-      return prisma.enrichmentJob.findMany({
-        where: { type: MEMORY_GENERATION_JOB_TYPE, circleId: ourCircles },
-        orderBy: { circleId: 'asc' },
+      return prisma.job.findMany({
+        where: { type: MEMORY_GENERATION_JOB_TYPE, ...ourCircleJobs },
+        orderBy: { subjectId: 'asc' },
       });
     }
 
@@ -132,15 +144,15 @@ describeMaybeDb(
      * A having no pending job than by a global counter having incremented once.
      */
     async function ourPendingCircleIds(): Promise<string[]> {
-      const rows = await prisma.enrichmentJob.findMany({
+      const rows = await prisma.job.findMany({
         where: {
           type: MEMORY_GENERATION_JOB_TYPE,
-          circleId: ourCircles,
+          ...ourCircleJobs,
           status: JobStatus.pending,
         },
-        select: { circleId: true },
+        select: { subjectId: true },
       });
-      return rows.map((r) => r.circleId!).sort();
+      return rows.map((r) => r.subjectId!).sort();
     }
 
     // -----------------------------------------------------------------------
@@ -152,12 +164,13 @@ describeMaybeDb(
 
       const jobs = await ourJobs();
       expect(jobs).toHaveLength(2);
-      expect(jobs.map((j) => j.circleId).sort()).toEqual(
+      expect(jobs.map((j) => j.subjectId).sort()).toEqual(
         [circleAId, circleBId].sort(),
       );
       for (const job of jobs) {
         expect(job.status).toBe(JobStatus.pending);
-        expect(job.mediaItemId).toBeNull();
+        // A circle-scoped job: the circle is the subject, no media item.
+        expect(job.subjectType).toBe('circle');
         // Background priority — never starves upload enrichment.
         expect(job.priority).toBe(100);
       }
@@ -178,10 +191,11 @@ describeMaybeDb(
     // -----------------------------------------------------------------------
 
     it('skips a circle whose last SUCCEEDED job is inside the interval, enqueues the other', async () => {
-      await prisma.enrichmentJob.create({
+      await prisma.job.create({
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
-          circleId: circleAId,
+          subjectType: 'circle',
+          subjectId: circleAId,
           status: JobStatus.succeeded,
           reason: 'backfill',
           finishedAt: new Date(Date.now() - 60 * 60 * 1000), // 1h ago < 24h
@@ -197,10 +211,11 @@ describeMaybeDb(
     });
 
     it('enqueues again once the last success falls outside the interval', async () => {
-      await prisma.enrichmentJob.create({
+      await prisma.job.create({
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
-          circleId: circleAId,
+          subjectType: 'circle',
+          subjectId: circleAId,
           status: JobStatus.succeeded,
           reason: 'backfill',
           finishedAt: new Date(Date.now() - 25 * 60 * 60 * 1000), // 25h ago
@@ -213,18 +228,20 @@ describeMaybeDb(
     });
 
     it('uses the MOST RECENT success when a circle has several (the _max aggregate)', async () => {
-      await prisma.enrichmentJob.createMany({
+      await prisma.job.createMany({
         data: [
           {
             type: MEMORY_GENERATION_JOB_TYPE,
-            circleId: circleAId,
+            subjectType: 'circle',
+            subjectId: circleAId,
             status: JobStatus.succeeded,
             reason: 'backfill',
             finishedAt: new Date(Date.now() - 100 * 60 * 60 * 1000),
           },
           {
             type: MEMORY_GENERATION_JOB_TYPE,
-            circleId: circleAId,
+            subjectType: 'circle',
+            subjectId: circleAId,
             status: JobStatus.succeeded,
             reason: 'backfill',
             finishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
@@ -239,10 +256,11 @@ describeMaybeDb(
     });
 
     it('ignores FAILED history — only succeeded jobs gate the interval', async () => {
-      await prisma.enrichmentJob.create({
+      await prisma.job.create({
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
-          circleId: circleAId,
+          subjectType: 'circle',
+          subjectId: circleAId,
           status: JobStatus.failed,
           reason: 'backfill',
           finishedAt: new Date(),
@@ -255,18 +273,20 @@ describeMaybeDb(
     });
 
     it('skips a circle with a RUNNING job even when its last success is old', async () => {
-      await prisma.enrichmentJob.createMany({
+      await prisma.job.createMany({
         data: [
           {
             type: MEMORY_GENERATION_JOB_TYPE,
-            circleId: circleAId,
+            subjectType: 'circle',
+            subjectId: circleAId,
             status: JobStatus.succeeded,
             reason: 'backfill',
             finishedAt: new Date(Date.now() - 200 * 60 * 60 * 1000),
           },
           {
             type: MEMORY_GENERATION_JOB_TYPE,
-            circleId: circleAId,
+            subjectType: 'circle',
+            subjectId: circleAId,
             status: JobStatus.running,
             reason: 'backfill',
           },

@@ -15,6 +15,7 @@ import {
   type TrustedAndroidApp,
 } from './android-app.schema';
 import type { AndroidAppResponse, ReportedAndroidApp, UpdateAndroidAppInput } from './dto/android-app.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // =============================================================================
 // AndroidAppService (issue #503, epic #498)
@@ -27,7 +28,7 @@ import type { AndroidAppResponse, ReportedAndroidApp, UpdateAndroidAppInput } fr
 // that table directly with one grouped SELECT rather than importing the module
 // that owns its writes.
 //
-// Reads go straight through PrismaService, never SystemSettingsService (which
+// Reads go straight through PrismaService, never AppSystemSettingsService (which
 // only ever reads the `global` row) — the `webPush` row precedent.
 //
 // A MALFORMED STORED VALUE READS AS "NOTHING TRUSTED" rather than throwing:

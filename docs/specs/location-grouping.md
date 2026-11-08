@@ -478,13 +478,7 @@ Non-admin users are unaffected: they see canonical names on every browse surface
 | `locationGrouping.maxRadiusKm` | number, 0.5–200 | `50` | ceiling enforced when a group's radius is set |
 | `locationGrouping.suggestionMinItems` | int, 1–1000 | `1` | minimum item count for a raw value to appear in suggestions |
 
-> **The namespace has four hand-maintained copies and all four are mandatory:**
-> 1. `common/schemas/settings.schema.ts` → `systemSettingsSchema`
-> 2. `common/schemas/settings.schema.ts` → `systemSettingsPatchSchema`
-> 3. `settings/dto/update-system-settings.dto.ts` → `patchSystemSettingsSchema` — **the wire DTO**, which strips unknown keys; a namespace missing *here* validates and merges perfectly in unit tests while every real `PATCH` silently no-ops
-> 4. `settings/system-settings/system-settings.service.ts` → the manual `patchSettings` merge **and** both `getSettings()` projections
->
-> `FEATURE_KEYS` and `DEFAULT_SYSTEM_SETTINGS.features` in `common/types/settings.types.ts` also need the new flag.
+> **One declaration (RETRO-B3):** `settings/registry/namespaces/system/location-grouping.ts` holds the zod shape and the defaults; `app-registrations/settings.ts` registers it. The bodies, merge and salvage are derived. The flag itself, `FEATURE_KEYS.LOCATION_GROUPING`, is in `settings/registry/namespaces/system/features.ts` (the default flag map) and `isLocationGroupingEnabled` in `settings/feature-gates.ts`.
 
 ---
 

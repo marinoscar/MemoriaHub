@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CredentialsModule } from '../platform/credentials/credentials.config';
 import { GeoSettingsController } from './geo-settings.controller';
 import { GeoSettingsService } from './geo-settings.service';
 import { GeocodeAdminController } from './geocode-admin.controller';
@@ -6,13 +7,12 @@ import { GeocodeMediaController } from './geocode-media.controller';
 import { GeocodeBackfillService } from './geocode-backfill.service';
 import { GeocodeHandler } from './geocode.handler';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
-import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { CirclesModule } from '../circles/circles.module';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
 
 @Module({
-  imports: [GeoLocationModule, SettingsModule, EnrichmentModule, CirclesModule, LocationGroupsModule],
+  imports: [CredentialsModule, GeoLocationModule, EnrichmentModule, CirclesModule, LocationGroupsModule],
   controllers: [GeoSettingsController, GeocodeAdminController, GeocodeMediaController],
   providers: [GeoSettingsService, GeocodeBackfillService, GeocodeHandler],
   exports: [GeocodeBackfillService, GeoSettingsService],

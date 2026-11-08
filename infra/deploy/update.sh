@@ -230,6 +230,14 @@ docker compose -f "${COMPOSE_FILE}" run --rm -T api npm run prisma:migrate \
   | while IFS= read -r line; do dim "${line}"; done
 ok "Migrations complete"
 
+# The seed is idempotent (upserts only, never a delete) and is how the role and
+# permission catalog reaches an existing database since the identity slice
+# replaced the boot-time RBAC reconcile (RETRO-B2, #611).
+info "Running Prisma seed..."
+docker compose -f "${COMPOSE_FILE}" run --rm -T api npm run prisma:seed \
+  | while IFS= read -r line; do dim "${line}"; done
+ok "Seed complete"
+
 # ---------------------------------------------------------------------------
 # Step 4: Restart services
 # ---------------------------------------------------------------------------

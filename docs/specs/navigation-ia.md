@@ -604,13 +604,7 @@ a field set to `null` is deleted, and `navigation: null` clears the namespace.
 are dropped on read rather than rejected** — a pin referencing a destination removed in a
 later release must degrade to "not pinned", never to a 500 on every settings read.
 
-> **Three hand-maintained copies.** Per the pitfall documented in `CLAUDE.md`, this namespace
-> must be added to **all three** of `systemSettingsSchema`'s user-settings equivalents:
-> `userSettingsSchema` and its patch twin in
-> `apps/api/src/common/schemas/settings.schema.ts`, **and** the wire DTO in
-> `apps/api/src/settings/dto/`. A namespace present only in the first two validates
-> perfectly in unit tests while every real PATCH silently no-ops, because `nestjs-zod`
-> strips unknown keys.
+> **One declaration (RETRO-B3).** `navigation` is the platform's namespace (`railCollapsed`) extended with MemoriaHub's `pinned` list in `apps/api/src/settings/registry/namespaces/user/navigation.ts`; the extension also drops, on every read and merge, a stored pin this release no longer knows. There is no longer a wire DTO to keep in step.
 
 ---
 

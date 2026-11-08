@@ -31,10 +31,10 @@ import { WorkflowEvaluateItemHandler } from './workflow-evaluate-item.handler';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const WORKFLOW_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
@@ -89,7 +89,7 @@ function makeJob(payload: unknown): EnrichmentJob {
 describe('WorkflowEvaluateItemHandler', () => {
   let handler: WorkflowEvaluateItemHandler;
   let prisma: MockPrismaService;
-  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
 
   beforeEach(async () => {
@@ -105,7 +105,7 @@ describe('WorkflowEvaluateItemHandler', () => {
         WorkflowConditionCompiler,
         { provide: EnrichmentHandlerRegistry, useValue: registry },
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
       ],
     }).compile();
 

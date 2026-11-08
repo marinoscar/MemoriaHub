@@ -1,3 +1,4 @@
+import { GeoLocationModule } from '../media/geo/geo-location.module';
 import { Module } from '@nestjs/common';
 import { NodesService } from './nodes.service';
 import { NodeBackupQueryService } from './node-backup-query.service';
@@ -15,8 +16,8 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageModule } from '../storage/storage.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { AiModule } from '../ai/ai.module';
-import { SettingsModule } from '../settings/settings.module';
 import { TaggingModule } from '../tagging/tagging.module';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * Imports StorageProvidersModule (exports StorageProviderResolver) so
@@ -27,7 +28,7 @@ import { TaggingModule } from '../tagging/tagging.module';
  * ThumbnailProcessor.uploadThumbnail's provider resolution.
  *
  * Also imports AiModule (AiSettingsService — resolveCredentials),
- * SettingsModule (SystemSettingsService — active tagging/geo provider config),
+ * SettingsModule (AppSystemSettingsService — active tagging/geo provider config),
  * and TaggingModule (AutoTaggingService — shared prompt builder) so
  * `POST /nodes/:id/jobs/:jobId/credentials` can resolve TRANSIENT, per-job
  * provider credentials for the auto_tagging/geocode job types without a node
@@ -40,8 +41,10 @@ import { TaggingModule } from '../tagging/tagging.module';
     StorageModule,
     StorageProvidersModule,
     AiModule,
-    SettingsModule,
+    
     TaggingModule,
+    // Google key for the transient geocode credential (RETRO-B4)
+    GeoLocationModule,
     // Global module providing NodeCredentialService (nod_ bearer tokens) —
     // kept separate + @Global so JwtAuthGuard can inject it in every module
     // context, mirroring the PatModule wiring.

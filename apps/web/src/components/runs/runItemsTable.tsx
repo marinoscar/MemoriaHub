@@ -48,7 +48,7 @@
 import type { ReactNode } from 'react';
 import { Avatar, Box, Chip, Stack, Typography } from '@mui/material';
 import BrokenImageIcon from '@mui/icons-material/BrokenImage';
-import type { DataTableColumn } from '../datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 import type { BaseRunItem, RunItemStatus } from '../../types/runs';
 import { formatCaptureDate } from '../../utils/runFormat';
 

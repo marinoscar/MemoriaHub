@@ -2,7 +2,7 @@
  * Reachability regression (issue #389, epic #388, spec §9).
  *
  * The single most important test in this epic: issue #389 deletes eight
- * drawer rows (Circles, Notifications, User Settings, Settings, Job Queue,
+ * drawer rows (Circles, Notifications, User Settings, Settings, Jobs,
  * Worker Nodes, Storage Insights, Public Sharing) because each duplicates
  * chrome that is already on screen elsewhere. Deleting a NAV ROW must never
  * delete the ROUTE it pointed at — every one of those destinations remains
@@ -51,6 +51,11 @@ function extractRoutePaths(source: string): string[] {
   return Array.from(matches, (m) => m[1]);
 }
 
+/** A `<Route path="...">` opening tag, on one line or (a guarded route) spread over several. */
+function routeTag(path: string): RegExp {
+  return new RegExp(`<Route\\s+path="${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`);
+}
+
 const appSource = readFileSync(APP_TSX_PATH, 'utf-8');
 const routePaths = extractRoutePaths(appSource);
 const routePathSet = new Set(routePaths);
@@ -62,7 +67,7 @@ const REQUIRED_REACHABLE_PATHS = [
   '/notifications', // was: drawer "Notifications" row -> now: AppBar bell -> "See all notifications"
   '/settings', // was: drawer "User Settings" row -> now: UserMenu "Settings"
   '/admin/settings', // was: implicit via the old drawer's admin shortcuts -> now: Sidebar "Console"
-  '/admin/settings/jobs', // was: drawer "Job Queue" row -> now: Console > Operations > Job Queue
+  '/admin/settings/jobs', // was: drawer "Jobs" row -> now: Console > Operations > Jobs
   '/admin/settings/nodes', // was: drawer "Worker Nodes" row -> now: Console > Operations > Worker Nodes
   '/admin/settings/storage/insights', // was: drawer "Storage Insights" row -> now: Console > Storage > Storage Insights
   '/admin/settings/sharing', // was: drawer "Public Sharing" row -> now: Console > Operations > Public Sharing
@@ -126,17 +131,19 @@ describe('navigation reachability (issue #389)', () => {
     // All eight are legitimately behind auth (admin console pages and
     // personal pages like /circles, /settings, /notifications) — pin that
     // they appear after the `<Route element={<Layout />}>` opening tag and
-    // before its matching closing `</Route>` that precedes the full-bleed
-    // Layout block, so a future refactor can't silently move one of them out
-    // to a public, unauthenticated route without this test noticing.
+    // before the catch-all, so a future refactor can't silently move one of
+    // them out to a public, unauthenticated route without this test noticing.
+    // Since RETRO-F1 (#571) there is ONE Layout route: the map asks the shell
+    // for the full-bleed variant itself (useShellMainVariant).
     const layoutStart = appSource.indexOf('<Route element={<Layout />}>');
-    const fullBleedStart = appSource.indexOf('<Route element={<Layout fullBleed />}>');
+    const fallbackStart = appSource.indexOf('<Route path="*"');
     expect(layoutStart).toBeGreaterThan(-1);
-    expect(fullBleedStart).toBeGreaterThan(layoutStart);
+    expect(fallbackStart).toBeGreaterThan(layoutStart);
+    expect(appSource).not.toContain('<Layout fullBleed');
 
-    const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
+    const layoutBlock = appSource.slice(layoutStart, fallbackStart);
     REQUIRED_REACHABLE_PATHS.forEach((path) => {
-      expect(layoutBlock).toContain(`<Route path="${path}"`);
+      expect(layoutBlock).toMatch(routeTag(path));
     });
   });
 });
@@ -186,11 +193,11 @@ describe('navigation reachability — the Review hub (issue #390)', () => {
 
   it('every Review-related required path sits inside the authenticated <Layout> route tree', () => {
     const layoutStart = appSource.indexOf('<Route element={<Layout />}>');
-    const fullBleedStart = appSource.indexOf('<Route element={<Layout fullBleed />}>');
-    const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
+    const layoutEnd = appSource.indexOf('<Route path="*"');
+    const layoutBlock = appSource.slice(layoutStart, layoutEnd);
 
     [...REVIEW_HUB_PATHS, ...REVIEW_WRAPPED_STANDALONE_PATHS].forEach((path) => {
-      expect(layoutBlock).toContain(`<Route path="${path}"`);
+      expect(layoutBlock).toMatch(routeTag(path));
     });
   });
 });
@@ -250,19 +257,15 @@ describe('navigation reachability — the Collections hub (issue #391)', () => {
     });
   });
 
-  it('every Collections-related required path sits inside an authenticated Layout route tree (standard or full-bleed)', () => {
+  it('every Collections-related required path sits inside the authenticated Layout route tree', () => {
     const layoutStart = appSource.indexOf('<Route element={<Layout />}>');
-    const fullBleedStart = appSource.indexOf('<Route element={<Layout fullBleed />}>');
-    const layoutBlock = appSource.slice(layoutStart, fullBleedStart);
-    const fullBleedBlock = appSource.slice(fullBleedStart);
+    const fallbackStart = appSource.indexOf('<Route path="*"');
+    const layoutBlock = appSource.slice(layoutStart, fallbackStart);
 
-    // /map is the one Collections destination that lives in its OWN
-    // full-bleed Layout wrapper (no content padding, so the map can own the
-    // whole viewport) rather than the shared standard Layout tree.
-    const standardPaths = [COLLECTIONS_HUB_PATH, ...COLLECTIONS_STANDALONE_PATHS.filter((p) => p !== '/map')];
-    standardPaths.forEach((path) => {
-      expect(layoutBlock).toContain(`<Route path="${path}"`);
+    // /map included: since RETRO-F1 (#571) it is in the one Layout tree and
+    // asks the shell for a full-bleed <main> itself.
+    [COLLECTIONS_HUB_PATH, ...COLLECTIONS_STANDALONE_PATHS].forEach((path) => {
+      expect(layoutBlock).toMatch(routeTag(path));
     });
-    expect(fullBleedBlock).toContain('<Route path="/map"');
   });
 });

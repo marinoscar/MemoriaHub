@@ -342,7 +342,7 @@ The full shared schema — `review_runs`, the exclusive-arc `review_run_items` (
 | `locationInference.maxImpliedSpeedKmh` | number | 10–1000 | `150` | Ceiling on the implied travel speed between anchors; exceeding it caps confidence at `0.4` and blocks auto-apply |
 | `locationInference.bulkAcceptThreshold` | integer | 0–100 | `80` | Confidence floor, as a percent, for the review page's bulk actions (issue #126): "Accept all ≥ N%" starts an async run (§9) accepting every `pending` suggestion with `confidence >= N/100`; "Reject all < N%" starts an async run rejecting every `pending` suggestion with `confidence < N/100`. One setting, one number, partitions the pending queue for both buttons — there is no separate reject-side threshold |
 
-All seven are validated by the shared Zod schema in `apps/api/src/settings/dto/update-system-settings.dto.ts` and round-tripped through `PATCH`/`PUT /api/system-settings` like every other setting group.
+All seven are validated by the shared Zod schema in `apps/api/src/settings/registry/namespaces/system/` and round-tripped through `PATCH`/`PUT /api/system-settings` like every other setting group.
 
 ### 7.2 Environment Variable
 

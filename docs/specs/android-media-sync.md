@@ -1007,7 +1007,7 @@ memoriahub android release --bump patch --notes "…"
 
 | Route | Component | Gate | Notes |
 |---|---|---|---|
-| `/settings` | `AndroidAppPanel` section, `id="android-app"` (after Notifications) | signed in | No device: "Get the MemoriaHub Android app" with the version and **Download** (to `/settings/android-app`). Devices: compact list (name, Synced N / Missing N, last seen, status chip) and **Manage** (to `/settings/media-sync`). Inside the TWA: **Open Media sync on this phone**, **Diagnostics on this phone** |
+| `/settings` | The hub's `Android` section (RETRO-B5): the `Android app` card (to `/settings/android-app`) and the `Media sync` card (to `/settings/media-sync`, `media:read`); `/settings#android-app` redirects to `/settings/android-app`. The stacked page's `AndroidAppPanel` summary is gone | signed in | The two cards; the device list and the in-TWA shortcuts live on the two pages |
 | `/settings/android-app` | `AndroidAppDownloadPage` | signed in | Latest release (version name and code, size, notes, copyable SHA-256, date); `DownloadApkButton` calls `POST …/download-link` then `window.location.assign(url)` (it **navigates**, never fetches a blob, so Android hands the file to the installer); install steps (allow installs from your browser; open the file; **uninstall the older v1 app `cr.marin.memoriahub`**, which keeps syncing on its own otherwise; open the app and enter this server's address, shown with a copy button from `window.location.origin`); inside the TWA, "You're up to date (2.0.0)" or "Update available"; on 404 `NO_RELEASE`, "No Android release has been published yet." with an admin link to `/admin/settings/android` |
 | `/settings/media-sync` | `MediaSyncPage` | `RequirePermission('media:read')`; write controls disabled without `media:write` | One `DeviceCard` per device (below). Refetch every 30 s while visible |
 | `/admin/settings/android` | `AndroidAppPage` | `ADMIN_SECTIONS` entry `{ title: 'Android app', permission: 'system_settings:read', path: '/admin/settings/android' }` in the General group; writes gated inside the page by `system_settings:write` | Releases section (current card, upload form with progress, table with Make current and Delete, rollback confirm, force flow on `RELEASE_VERSION_NOT_NEWER`) and Trusted signing keys section (trusted list with add and remove, reported apps with one-click **Trust**, the live `assetlinks.json` preview). Uses the shared `AdminPageHeader`. The "N devices behind" count is omitted in v1 (no admin device aggregate exists) |
@@ -1016,7 +1016,7 @@ memoriahub android release --bump patch --notes "…"
 
 `AndroidUpdateBanner` is mounted in `Layout.tsx` and shown **only inside the TWA** when `getInstalledAppVersion().code` is lower than `latest.versionCode`: "A new version of the MemoriaHub app is available" with **Update** (to `/settings/android-app`). Dismissal is stored per `versionCode` in `localStorage['memoriahub.androidUpdate.dismissedVersionCode']`.
 
-Services and hooks: `services/mediaSync.ts`, `services/androidApp.ts` (types mirror the API DTOs), `useMediaSyncDevices`, `useDeviceRuns`, `useDeviceDiagnostics`, `useLatestRelease` (null on 404). Tab bars spread `scrollableTabsProps`; layouts work at 360 px with no horizontal scroll. Routes register their titles in the AppBar title resolver. MemoriaHub's user settings is a stacked page, so this feature follows that pattern and adds sub-routes rather than migrating it to a registry hub.
+Services and hooks: `services/mediaSync.ts`, `services/androidApp.ts` (types mirror the API DTOs), `useMediaSyncDevices`, `useDeviceRuns`, `useDeviceDiagnostics`, `useLatestRelease` (null on 404). Tab bars spread `scrollableTabsProps`; layouts work at 360 px with no horizontal scroll. Routes register their titles in the AppBar title resolver. Since RETRO-B5 (#621) `/settings` is a registry hub ([settings-ui.md](settings-ui.md)); `Android app` and `Media sync` are two of its cards, at the same routes.
 
 ## 16. RBAC and security
 
@@ -1122,14 +1122,14 @@ Phone-originated values for `run.errorCode` (≤64 chars) and `sync_runs.errorCo
 
 ## 20. Doctor
 
-A new section in `apps/api/src/doctor/doctor.service.ts` (#507): `SectionDef { key: 'android', label: 'Android app', checkKeys: [...] }` with four checks, each keeping the 10 s `runCheck` timeout and exception normalisation. The section status is the worst of its checks. `docs/specs/doctor.md` and the CLAUDE.md Doctor paragraph counts are updated (#507 or #519).
+Four checks in the `android` category of the platform Doctor (#507; ported to `DoctorCheckRegistry` by RETRO-B1b, #602): `apps/api/src/doctor/checks/android/*.doctor-check.ts`, ids `memoriahub.android.*`, each keeping the 10 s check timeout (a throw is a `fail`). Statuses are the platform's: skipped is `skip`, warning `warn`, error `fail`, ok `pass`. `docs/specs/doctor.md` is the contract for the check inventory; this section is the contract for these four.
 
 | Key | Label | Logic |
 |---|---|---|
-| `android.assetlinks` | Digital Asset Links | **skipped:** no active device has reported a signer. **warning:** some reported `(packageName, signingSha256)` is not in `trustedApps` (up to 3 listed); action item "Trust it in Admin → Settings → Android app". **ok:** every reported pair is trusted. **error:** the settings read failed |
-| `android.releases` | Android release | **skipped:** no active device. **warning:** devices exist but no release is current. **ok:** a release is current; the message includes `devicesBehind` (active devices with `appVersionCode` below the current one) |
-| `android.mediaSync` | Media sync devices | **skipped:** no active device. **warning:** any active device with `lastSeenAt` older than 48 h, or `stats.blocked > 0`, or `permission != 'full'` (devices and counts named). **ok:** otherwise |
-| `android.uploadPath` | Phone upload path | **ok:** the active provider supports presigned parts (S3/R2) or the local provider's API part route is available. **error:** the provider is unconfigured. The message includes the provider key |
+| `memoriahub.android.assetlinks` | Digital Asset Links | **skipped:** no active device has reported a signer. **warning:** some reported `(packageName, signingSha256)` is not in `trustedApps` (up to 3 listed); action item "Trust it in Admin → Settings → Android app". **ok:** every reported pair is trusted. **error:** the settings read failed |
+| `memoriahub.android.releases` | Android release | **skipped:** no active device. **warning:** devices exist but no release is current. **ok:** a release is current; the message includes `devicesBehind` (active devices with `appVersionCode` below the current one) |
+| `memoriahub.android.media-sync` | Media sync devices | **skipped:** no active device. **warning:** any active device with `lastSeenAt` older than 48 h, or `stats.blocked > 0`, or `permission != 'full'` (devices and counts named). **ok:** otherwise |
+| `memoriahub.android.upload-path` | Phone upload path | **ok:** the active provider supports presigned parts (S3/R2) or the local provider's API part route is available. **error:** the provider is unconfigured. The message includes the provider key |
 
 ## 21. Guardrails and issue map
 
@@ -1190,7 +1190,7 @@ Where the issue bodies disagree with each other or with the code as it stands, t
 | D16 | Resume uses the server's `uploadedParts`, but for S3/R2 the server records parts only at `complete`, so `uploadedParts` can be empty while the parts exist | The phone's `completedPartsJson` (ETag per part, written after every part) is authoritative; `status` is used to confirm the session still exists and to detect `processing`/`ready` (crash between `complete` and registration, which jumps straight to registration) |
 | D17 | #506 validates "object status is `uploading`", but `upload/init` creates the object as `pending` and nothing moves it to `uploading` on the S3 path | The local part route accepts `pending` or `uploading` and sets `uploading` on the first part. #511's "no longer `uploading`" check becomes "not `pending`/`uploading`" |
 | D18 | `complete` stale-session conflict has no `details.reason` today | #506 adds `UPLOAD_SESSION_INVALID` to it. Until then the phone treats any 409 on `complete` that is not `UPLOAD_PARTS_MISSING` as session-gone: abort and re-init |
-| D19 | #516 expects an admin "N devices behind" count from `GET /api/media-sync/devices` | That route is owner-scoped; no admin aggregate exists in v1. The admin page omits the count; the Doctor `android.releases` message carries `devicesBehind` |
+| D19 | #516 expects an admin "N devices behind" count from `GET /api/media-sync/devices` | That route is owner-scoped; no admin aggregate exists in v1. The admin page omits the count; the Doctor `memoriahub.android.releases` message carries `devicesBehind` |
 | D20 | #513: tapping a synced file opens `$server/media/<mediaItemId>` "if that route exists" | It does not (the web has `/media` only). The Files screen opens `$server/media` |
 | D21 | Android 13 has no partial state in #510 | Exactly one of `READ_MEDIA_IMAGES`/`READ_MEDIA_VIDEO` granted is `partial` (and disables vanished detection) |
 | D22 | Storage-not-configured reason naming (evopath used lowercase) | `STORAGE_NOT_CONFIGURED`, uppercase like every other reason |

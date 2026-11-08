@@ -146,7 +146,7 @@ The TWA has no `addJavascriptInterface`, no `postMessage` channel and no custom 
 
 - **Mechanism.** Chrome opens the TWA without a URL bar only if `/.well-known/assetlinks.json` lists the app's package and signing SHA-256. The system setting `android_app` holds the trusted list; `GET /api/well-known/assetlinks.json` serves it as a bare array, public and exempt from the maintenance window, and nginx maps `/.well-known/assetlinks.json` to it. Each phone reports its package and fingerprint at registration; an admin trusts it at `/admin/settings/android`, and making a release current trusts its key automatically.
 - **Failure mode.** An untrusted or mistyped fingerprint, or a key that changed, leaves the app working but with a URL bar. Chrome caches a failed verification, which is why the document survives maintenance windows. Package names are case-sensitive: `memoriahub.marin.cr` is all lowercase everywhere.
-- **Diagnostics.** The phone's `twa.verification` check (fetches the document and compares; only ever warns) and the server's Doctor check `android.assetlinks` ([doctor.md](doctor.md)).
+- **Diagnostics.** The phone's `twa.verification` check (fetches the document and compares; only ever warns) and the server's Doctor check `memoriahub.android.assetlinks` ([doctor.md](doctor.md)).
 
 ### 2.5 Identity and security model
 
@@ -255,7 +255,7 @@ Work through the layers in this order. Each step names where Media Sync does the
    - Extend the user-data purge if a new table references a user ([user-data-reset.md](user-data-reset.md)).
 6. **Desired config and web surfaces.** Add the fields to the config schema (additive, with a default), expose them in the web editor, reuse `isRunningInTwa()` to offer the deep link, and extend the existing `/settings/media-sync` page rather than adding a page. Register any new user-settings card and route in the registries ([settings-ui.md](settings-ui.md)).
 7. **Diagnostics checks.** Add one pure check function per failure you can name to `diagnostics/Checks.kt`, register it in `SelfTest`, and list it in the spec's check table. Each check: `{ id, label, status, detail, remedy?, data? }`, own timeout, never throws.
-8. **Trust and release.** A new capability ships in a new APK: bump `version.properties`, release it (`memoriahub android release`), and confirm the signing key is still the trusted one (`twa.verification`, Doctor `android.assetlinks`).
+8. **Trust and release.** A new capability ships in a new APK: bump `version.properties`, release it (`memoriahub android release`), and confirm the signing key is still the trusted one (`twa.verification`, Doctor `memoriahub.android.assetlinks`).
 9. **Docs.** Write a feature spec, add the check rows and the runbook troubleshooting entries, and link both from [CLAUDE.md](../../CLAUDE.md).
 10. **Tests.**
     - Android JVM unit tests: mapping, scheduling constraints, payload building, check verdicts, redaction (`./gradlew testDebugUnitTest` in `apps/android`).

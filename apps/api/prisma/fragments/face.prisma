@@ -33,7 +33,7 @@ model Person {
   // Memories relations (epic #300, issue #301)
   memories         Memory[]
   // Profile picture management relations (issue #354)
-  linkedUsers      User[]     @relation("UserLinkedPerson")
+  linkedProfiles   UserProfile[] @relation("UserLinkedPerson")
 
   @@index([circleId])
   @@index([circleId, favorite])

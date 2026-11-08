@@ -15,6 +15,15 @@ This document provides a comprehensive overview of the security architecture for
 
 **Security Posture**: Production-grade security suitable for enterprise applications handling sensitive user data.
 
+> **Identity is the platform's (RETRO-B2, issue #611).** Sign-in, sessions, the guards (`JwtAuthGuard`, `RolesGuard`, `PermissionsGuard`), users, the allowlist, personal access tokens and the device flow are `@marinoscar/platform-api/identity`, mounted once in `apps/api/src/platform/identity/` (single-organization mode: `TENANCY_MODE` unset). Section references below to `src/auth`, `src/users`, `src/allowlist`, `src/pat` and `src/device-auth` now name that package; the behaviour they describe is unchanged. What differs in the security model:
+>
+> - **RBAC is two-scoped** (platform migration `0024`). `admin` is the SYSTEM role (held in `user_roles`); `org_admin`, `contributor` and `viewer` are ORG roles held on the membership of the default organization. A user's effective permissions are the grants of their system roles united with the grants of their membership role, and every administrator also holds `org_admin`, so nobody's permission set changed (proved per user by `apps/api/scripts/verify-identity-transform.mjs`). The matrix is declared once, in `apps/api/src/app-registrations/memoriahub-permissions.ts` plus the platform slices, rendered to `apps/api/prisma/catalog/permissions.json` and written by the idempotent seed (`prisma/seed.ts`, run on every install and update). `rbac.catalog.ts` and the boot-time RBAC reconcile are gone.
+> - **`nod_` worker credentials** are accepted only under `/api/nodes/*` and `pat_` tokens on every authenticated route (the `identity` conformance suite checks both against the real guard). `IDENTITY_NODE_CREDENTIALS` is bound to the app's `NodeCredentialService` until RETRO-C2.
+> - **`@CurrentUser()`** is the app's wrapper (`src/common/decorators/current-user.decorator.ts`), because the packaged decorator hands a bare `@Auth()` route the raw user graph (no `permissions`), the defect of issue #406.
+> - **Sign-in side effects** (the personal circle, claiming circle invites) run on the `identity.user.created` and `identity.login.succeeded` events after the user's transaction commits (`src/circles/identity-listeners.ts`).
+> - Every foreign key to `User` is classified in `app-registrations/user-owned-models.ts` and enforced by the `user-owned-data` conformance suite.
+> - The API still connects as the bootstrap superuser (RETRO-A5/D1), so row-level security is inert; the Doctor `db.rls_role` failure is a documented exception.
+
 ---
 
 ## 1. Authentication Architecture
@@ -549,6 +558,28 @@ If `GEO_FORWARD_PROVIDER=google` but `GOOGLE_MAPS_API_KEY` is not set, the servi
 | `GEO_PROVIDER` | `offline` | Reverse geocoding provider: `offline` or `nominatim` |
 
 ---
+
+## 3c. Credential store (runtime-configured secrets)
+
+Provider secrets an admin enters at run time live in the platform `credentials` table (RETRO-B4, issue #617),
+addressed by `(purpose, name)` and encrypted with AES-256-GCM under a **per-purpose sub-key** derived from
+`SECRETS_ENCRYPTION_KEY`. A purpose is permanent once rows exist. Purposes are declared in
+`apps/api/src/platform/credentials/credential-purposes.manifest.ts`: `storage`, `smtp`, `email_ses`,
+`push_vapid` (platform), `face_provider` (name = provider key) and `geo_provider` (`google`) (this app). Reads and writes go through
+`CredentialsService`; a module that needs a plaintext secret imports `CredentialsModule` explicitly (it is not global).
+
+- **No plaintext egress.** `getSecret` is the only call that returns plaintext, server-side, at the moment of use
+  (`GeoGoogleCredentialResolver`, `FaceSettingsService.resolveCredentials`). `describe` and `list` return a type
+  that cannot hold a secret. The admin responses keep their `last4` field, derived from the stored hint
+  (`••••1234`; a secret under eight characters reveals nothing, so `last4` is `null`).
+- **Blank preserves.** Saving without retyping a key keeps the stored one; removal is the delete route.
+- **Non-secret half is a setting.** `enabled` and `baseUrl` of a provider are `face.providers.*` / `geo.google` in
+  the settings document (the settings registry forbids secret-named fields), so no secret ever shares a document with config.
+- **The node transient credential is unchanged.** A worker node still receives the Google key per job from
+  `POST /api/nodes/:id/jobs/:jobId/credentials`, held in memory only, until RETRO-C6 moves it to a `nodeSecretBroker`.
+- **Legacy cipher.** `apps/api/src/legacy/legacy-secret-cipher.ts` (the pre-platform envelope, no purpose binding)
+  is read-only legacy: the migration command and the slices not yet migrated use it. RETRO-E3 removes it.
+  Moving rows: [credentials-migration runbook](runbooks/credentials-migration.md).
 
 ## 4. Email Allowlist Access Control
 

@@ -18,8 +18,8 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { JobReason, JobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { JobReason, MhLegacyJobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -90,7 +90,7 @@ describe('FaceDetectionController', () => {
     // Default: enqueue returns a minimal job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
       id: 'job-1',
-      status: JobStatus.pending,
+      status: MhLegacyJobStatus.pending,
     });
 
     // Default: no representative frame thumbnail (not exercised by existing fixtures)
@@ -106,7 +106,7 @@ describe('FaceDetectionController', () => {
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
       ],
     })
-      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard ?? Object)
+      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
       .useValue({ canActivate: () => true })
       .compile();
 
@@ -284,7 +284,7 @@ describe('FaceDetectionController', () => {
     it('enqueues a job and returns { data: { jobId, status } }', async () => {
       const mockJob = {
         id: 'job-1',
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       };
 
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
@@ -294,14 +294,14 @@ describe('FaceDetectionController', () => {
       const result = await controller.rerunFaceDetection('media-1', makeUser());
 
       expect(result.data.jobId).toBe('job-1');
-      expect(result.data.status).toBe(JobStatus.pending);
+      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
     });
 
     it('calls enrichmentJobService.enqueue with reason: rerun and type: face_detection', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ type: MediaType.photo }),
       );
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: JobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: MhLegacyJobStatus.pending });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       await controller.rerunFaceDetection('media-1', makeUser());
@@ -319,7 +319,7 @@ describe('FaceDetectionController', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ type: MediaType.video }),
       );
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-vid-1', status: JobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-vid-1', status: MhLegacyJobStatus.pending });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       const result = await controller.rerunFaceDetection('media-1', makeUser());
@@ -334,7 +334,7 @@ describe('FaceDetectionController', () => {
         }),
       );
       expect(result.data.jobId).toBe('job-vid-1');
-      expect(result.data.status).toBe(JobStatus.pending);
+      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
       expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { mediaItemId: 'media-1' },
@@ -348,7 +348,7 @@ describe('FaceDetectionController', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ type: MediaType.photo }),
       );
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-photo-1', status: JobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-photo-1', status: MhLegacyJobStatus.pending });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       const result = await controller.rerunFaceDetection('media-1', makeUser());
@@ -363,7 +363,7 @@ describe('FaceDetectionController', () => {
         }),
       );
       expect(result.data.jobId).toBe('job-photo-1');
-      expect(result.data.status).toBe(JobStatus.pending);
+      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
       expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { mediaItemId: 'media-1' },
@@ -375,7 +375,7 @@ describe('FaceDetectionController', () => {
 
     it('calls circleMembershipService.assertCircleAccess with collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: JobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: MhLegacyJobStatus.pending });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       const user = makeUser();
@@ -399,7 +399,7 @@ describe('FaceDetectionController', () => {
 
     it('upserts MediaFaceStatus to pending on rerun', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: JobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: MhLegacyJobStatus.pending });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       await controller.rerunFaceDetection('media-1', makeUser());
@@ -431,7 +431,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(2);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 2 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -450,7 +450,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(2);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 2 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -459,8 +459,14 @@ describe('FaceDetectionController', () => {
       await controller.deleteAllBiometrics('circle-1', user);
       expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({ where: { circleId: 'circle-1' } });
       expect(mockPrisma.person.deleteMany).toHaveBeenCalledWith({ where: { circleId: 'circle-1' } });
-      expect(mockPrisma.enrichmentJob.deleteMany).toHaveBeenCalledWith({
-        where: { circleId: 'circle-1', type: 'face_detection' },
+      expect(mockPrisma.job.deleteMany).toHaveBeenCalledWith({
+        where: {
+          type: 'face_detection',
+          OR: [
+            { subjectType: 'circle', subjectId: 'circle-1' },
+            { payload: { path: ['circleId'], equals: 'circle-1' } },
+          ],
+        },
       });
     });
 
@@ -471,7 +477,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -492,7 +498,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(3);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 7 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 7 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});

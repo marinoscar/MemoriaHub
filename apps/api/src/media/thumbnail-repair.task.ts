@@ -8,7 +8,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -30,10 +30,10 @@ export class ThumbnailRepairTask {
 
     try {
       // Skip if a thumbnail_repair job is already pending or running
-      const existing = await this.prisma.enrichmentJob.findFirst({
+      const existing = await this.prisma.job.findFirst({
         where: {
           type: 'thumbnail_repair',
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          status: { in: ['pending', 'running'] },
         },
       });
 

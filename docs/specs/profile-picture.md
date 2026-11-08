@@ -1,5 +1,7 @@
 # Profile Picture Management — Feature Spec
 
+> **Storage moved (RETRO-B2, issue #611).** The four avatar columns (`avatar_source`, `avatar_storage_key`, `avatar_version`, `linked_person_id`) no longer live on `users`, which is the identity slice's table. They are the app-owned side table `user_profiles` (`apps/api/prisma/fragments/user-profile.prisma`; migration `20261108030000_move_user_avatar_off_users`, which copies every non-default state and drops the columns in one transaction). A user with no row has the defaults (`oauth`, no key, no link). `users.profile_image_url` (a platform column) is unchanged: it stays the materialised resolved avatar URL, written only by `UserAvatarService` (now `apps/api/src/profile/`) in the same transaction as the `user_profiles` row. The six routes (`GET|PATCH /api/users/me/profile`, `POST|DELETE /api/users/me/avatar`, `POST /api/users/me/avatar/from-person`, `GET /api/users/:id/avatar`) and their behaviour are unchanged. `ON DELETE SET NULL` on `linked_person_id` and `ON DELETE CASCADE` from the user are kept. Where this page says `User.avatarSource` and the like, read `UserProfile`.
+
 | Field | Value |
 |-------|-------|
 | **Issue** | #354 |
@@ -189,7 +191,7 @@ Anywhere `user_settings` is described elsewhere in this codebase's documentation
   3. **People exist** — the actual `Autocomplete` picker, grouped by circle (active circle first), each option rendering a `PersonAvatar` + face count.
   A fourth, un-numbered case — zero circle memberships — is handled the same way rather than left to spin forever; see §10.
 - **The authenticated-image constraint.** `GET /api/users/:id/avatar` is a bearer-guarded byte proxy, so a bare `<img src="/api/users/…/avatar">` renders broken — the browser sends no `Authorization` header on an `<img>` fetch. `useAuthedImage` (`apps/web/src/hooks/useAuthedImage.ts`) is the general-purpose fix: it fetches the URL with the token attached (single-retry-on-401 refresh, mirroring `ApiService.request`), hands back a revocable `URL.createObjectURL` blob URL, and passes non-API URLs (the OAuth provider's absolute `https://` picture, a `blob:`/`data:` URI) straight through untouched. Every avatar-rendering surface in the app — `ProfilePage`, the reduced `ProfileSettings` summary card — goes through this hook rather than a plain `src`.
-- **`ProfileSettings`** (`apps/web/src/components/settings/ProfileSettings.tsx`) is now a *read-only* summary card on `/settings`: avatar, name, email, and a single "Manage profile picture" button linking to `/profile`. It deliberately renders neither `useProviderImage` nor `customImageUrl` — those keys are dead (§8), and the avatar's source is first-class `User` state now, not a settings blob this card would need to interpret.
+- **`ProfileSettings`**, the read-only summary card the stacked `/settings` page carried, was removed in RETRO-B5 (#621): `/settings` is a hub whose `Profile` card opens the profile page itself, now at `/settings/profile` (`/profile` redirects there). Nothing renders `useProviderImage` or `customImageUrl` — those keys are dead (§8).
 
 ## 10. First Installation / Empty Database
 

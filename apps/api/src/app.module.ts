@@ -1,21 +1,14 @@
-import { Module, MiddlewareConsumer, NestModule, DynamicModule } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { OtelMetricsModule } from '@marinoscar/platform-api/otel-core';
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { PrismaModule } from './prisma/prisma.module';
-import { CommonModule } from './common/common.module';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { SettingsModule } from './settings/settings.module';
-import { HealthModule } from './health/health.module';
-import { AllowlistModule } from './allowlist/allowlist.module';
-import { DeviceAuthModule } from './device-auth/device-auth.module';
+import './settings/registry';
+import { FeaturesModule } from './settings/features.module';
 import { StorageModule } from './storage/storage.module';
-import { PatModule } from './pat/pat.module';
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
 import { AiModule } from './ai/ai.module';
@@ -43,38 +36,25 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
 import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
 import { MemoriesModule } from './memories/memories.module';
-import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { DbBackupModule } from './db-backup/db-backup.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
-import { DoctorModule } from './doctor/doctor.module';
+import { doctorModule } from './doctor/doctor.config';
+import { DoctorChecksModule } from './doctor/doctor-checks.module';
 import { LoggerModule } from './common/logger/logger.module';
-import { TestAuthModule } from './test-auth/test-auth.module';
 
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
-import { MaintenanceGuard } from './common/maintenance/maintenance.guard';
+import { platformHostModule } from './platform/platform-host.module';
+import { identityModule } from './platform/identity/identity.config';
+import { ProfileModule } from './profile/profile.module';
+// The jobs slice registers the `jobs` and `retention` namespaces; it must be composed before the settings.
+import { jobsModule } from './platform/jobs/jobs.config';
+import { settingsModule } from './platform/settings/settings.config';
+import { credentialsModules } from './platform/credentials/credentials.config';
+import { hostCoreModule } from './platform/host-core.config';
+import { aboutModule } from './platform/about/about.config';
 
 import configuration from './config/configuration';
-
-/**
- * Modules registered only outside production.
- *
- * `TestAuthModule` mints tokens without a real OAuth round-trip, so it must
- * never exist in a production process — and, because a controller that is not
- * registered is invisible to `SwaggerModule.createDocument`, keeping it out of
- * the module list is also what keeps its routes out of the published API
- * document.
- *
- * Extracted from the inline conditional so that fact is directly testable.
- * `main.ts` additionally refuses to boot when `TEST_AUTH_ENABLED=true` in
- * production, but nothing asserted the module gate itself.
- */
-export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
-  return process.env.NODE_ENV !== 'production' ? [TestAuthModule] : [];
-}
+import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
 
 @Module({
   imports: [
@@ -82,15 +62,6 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     ConfigModule.forRoot({
       isGlobal: true,
       load: [configuration],
-    }),
-
-    // Platform metrics host (observable gauges only while OTEL is enabled).
-    // Superseded by PlatformHostCoreModule.forRoot() once that is adopted.
-    OtelMetricsModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        gauges: config.get('otel.enabled') === true,
-      }),
     }),
 
     // Scheduling (must be at root level for NestJS 11)
@@ -102,19 +73,46 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     // Database
     PrismaModule,
 
+    // The platform's DI-time host ports (audit sink, Prisma). Global.
+    platformHostModule,
+
     // Logger
     LoggerModule,
 
+    // Identity (RETRO-B2, #611): sign-in, sessions, users, allowlist, PATs, the
+    // device flow and RBAC, from @marinoscar/platform-api/identity, in
+    // single-organization mode. Provides the `@Auth` guards every module's
+    // controllers use. `POST /api/auth/test/login` is mounted by it outside
+    // production only (`enableTestAuth`).
+    identityModule,
+    // The app-owned half of the user: profile picture and person link.
+    ProfileModule,
+
     // Feature modules
-    CommonModule,
-    AuthModule,
-    UsersModule,
-    SettingsModule,
-    HealthModule,
-    AllowlistModule,
-    DeviceAuthModule,
+    // Settings (RETRO-B3, #614): `/api/system-settings`, `/api/user-settings` and `/api/org-settings`
+    // from @marinoscar/platform-api/settings, with every MemoriaHub namespace registered in
+    // `settings/registry`. Global: provides AppSystemSettingsService and UserSettingsService.
+    // Before the host core on purpose: the host reads the `maintenance` namespace through it.
+    settingsModule,
+    // Jobs (RETRO-C1, #575): the background queue, the in-process worker pool, the reaper and
+    // `/api/admin/jobs/*` from @marinoscar/platform-api/jobs. Global. The 38 handlers are still the
+    // app's, behind the legacy adapter (EnrichmentModule).
+    jobsModule,
+    // Credentials (RETRO-B4, #617): the encrypted (purpose, name) store; purposes in
+    // platform/credentials/credential-purposes.manifest.ts.
+    ...credentialsModules,
+    FeaturesModule,
+    // The platform host core (RETRO-B1, #597): the event bus, the app metrics,
+    // maintenance mode (and its ONLY global guard, `MaintenanceGuard`),
+    // `/api/health/*`, the `{ data }` envelope, the request log line, the
+    // exception filter and request ids. Replaces the old HealthModule,
+    // MaintenanceModule and this file's own APP_FILTER / APP_INTERCEPTOR /
+    // APP_GUARD providers and request-id middleware. Placed here because the
+    // generated OpenAPI document lists paths in module order.
+    hostCoreModule,
+    // `GET /api/admin/about` (`system_settings:read`).
+    aboutModule,
     StorageModule,
-    PatModule,
     MediaModule,
     CirclesModule,
     AiModule,
@@ -123,7 +121,10 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     SearchModule,
     TaggingModule,
     InsightsModule,
-    DoctorModule,
+    // The platform Doctor (RETRO-B1b, #602): `GET /api/admin/doctor` and the
+    // support bundle. Global; provides the check registry.
+    doctorModule,
+    DoctorChecksModule,
     BurstModule,
     DedupModule,
     LocationGroupsModule,
@@ -143,13 +144,9 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     NotificationsReconcileModule,
     BroadcastsModule,
     MemoriesModule,
-    MaintenanceModule,
     DbBackupModule,
     MediaSyncModule,
     AndroidAppModule,
-
-    // Test modules (non-production only)
-    ...testOnlyModules(),
   ],
   providers: [
     // Global validation pipe (Zod)
@@ -191,42 +188,11 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
       provide: APP_PIPE,
       useClass: ZodValidationPipe,
     },
-    // Global exception filter
-    {
-      provide: APP_FILTER,
-      useClass: HttpExceptionFilter,
-    },
-    // Global logging interceptor
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: LoggingInterceptor,
-    },
-    // Global response transform interceptor
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: TransformInterceptor,
-    },
-    // Global maintenance-mode guard (issue #348).
-    //
-    // This is the application's ONLY global guard — authentication is still
-    // applied per-route via @Auth()/JwtAuthGuard. That ordering matters: a
-    // global guard runs BEFORE route guards, so `request.user` is not yet
-    // populated when MaintenanceGuard runs, which is why it resolves the
-    // admin role from the bearer JWT itself. See maintenance.guard.ts.
-    //
-    // Routes carrying @AllowDuringMaintenance() are exempt — including the
-    // maintenance toggle endpoints themselves, without which enabling
-    // maintenance would lock the admin out of disabling it again.
-    {
-      provide: APP_GUARD,
-      useClass: MaintenanceGuard,
-    },
+    // The exception filter, the logging and envelope interceptors and
+    // `MaintenanceGuard` (the application's ONLY global guard, and the first)
+    // are the platform host core's (`hostCoreModule` above). If another global
+    // guard is ever added, list it with a reason under `allowedAppGuards` of the
+    // `host` conformance suite (`test/conformance.spec.ts`).
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(RequestIdMiddleware)
-      .forRoutes('*');
-  }
-}
+export class AppModule {}

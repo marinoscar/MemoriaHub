@@ -406,7 +406,7 @@ export class MetadataExtractionService {
     mimeType: string,
   ): Promise<MetadataComputeResult> {
     if (mimeType.startsWith('video/')) {
-      const tmpPath = join(tmpdir(), `memoriaHub-metadata-${randomUUID()}`);
+      const tmpPath = join(tmpdir(), `memoriahub-job-metadata-${randomUUID()}`);
       try {
         const stream = await this.storageProvider.download(storageKey);
         await streamToTempFile(stream, tmpPath);

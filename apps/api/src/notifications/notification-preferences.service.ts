@@ -28,13 +28,13 @@
 //   out to every circle member for every file, and #246's hourly reconcile
 //   calls `upsertState` once per (member x queue). An uncached read would add a
 //   `user_settings` round-trip to each of those. The TTL mirrors
-//   SystemSettingsService.getSettings() (5 s) — long enough to collapse a burst
+//   AppSystemSettingsService.getSettings() (5 s) — long enough to collapse a burst
 //   of fan-out, short enough that a toggle takes effect essentially
 //   immediately — and the entry is invalidated OUTRIGHT on the settings write
 //   (UserSettingsService -> NotificationsService.invalidatePreferences), so the
 //   user's own change is never subject to the TTL at all.
 //
-//   Unlike SystemSettingsService's single un-keyed slot, this is a Map keyed by
+//   Unlike AppSystemSettingsService's single un-keyed slot, this is a Map keyed by
 //   userId — preferences are per user, and a single slot would serve one user's
 //   preferences to another. Same divergence, and the same reason, as
 //   NotificationsService's per-user unread-count cache.
@@ -53,9 +53,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 
-import { NotificationPreferencesValue } from '../common/types/settings.types';
+import { NotificationPreferencesValue } from '../settings/registry/namespaces/user/notifications';
 import { PrismaService } from '../prisma/prisma.service';
 import { isMandatoryType } from './notification-channels';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** TTL for the per-user preferences cache. Mirrors SETTINGS_CACHE_TTL_MS. */
 export const NOTIFICATION_PREFERENCES_CACHE_TTL_MS = 5000;
@@ -272,7 +273,7 @@ export class NotificationPreferencesService {
   /**
    * Drop a user's cached preferences. Called on the settings write so a toggle
    * takes effect on the very next notification rather than up to one TTL later
-   * — the same contract SystemSettingsService gives its feature flags.
+   * — the same contract AppSystemSettingsService gives its feature flags.
    */
   invalidate(userId: string): void {
     this.cache.delete(userId);

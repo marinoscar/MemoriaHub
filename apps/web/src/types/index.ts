@@ -1,4 +1,4 @@
-import type { DataTableStoredLayout } from '../components/datatable/layout/layoutModel';
+import type { DataTableStoredLayout } from '@marinoscar/platform-web/datatable/headless';
 import type {
   NotificationPreferences,
   NotificationPreferencesPatch,
@@ -51,14 +51,16 @@ export interface UserSettings {
   /**
    * @deprecated Superseded by `GET`/`PATCH /api/users/me/profile` and the
    * `/profile` page (issue #354). The API still returns this namespace, but
-   * `useProviderImage` and `customImageUrl` are inert: the avatar's source is
-   * first-class user state (`avatarSource`) now, not a settings blob. Nothing
-   * in the web app writes these keys — do not reintroduce a UI that does.
+   * The picture fields are inert: the avatar's source is first-class user state
+   * (`avatarSource`) now, not a settings blob. Nothing in the web app writes them
+   * — do not reintroduce a UI that does. Since RETRO-B3 the API returns the
+   * platform's profile shape (`imageSource`, `imageObjectId`); the pre-B3
+   * `useProviderImage` / `customImageUrl` pair is gone from responses.
    */
   profile: {
     displayName?: string;
-    useProviderImage: boolean;
-    customImageUrl?: string | null;
+    imageSource?: 'none' | 'provider' | 'upload';
+    imageObjectId?: string | null;
   };
   search?: {
     visibleFields: string[];
@@ -99,9 +101,9 @@ export interface UserSettings {
    *
    * `pinned` is typed as `string[]` rather than the narrower `PinnableKey[]` ON
    * PURPOSE: this is the WIRE shape, and a blob written by an older release may
-   * legitimately contain a key this build no longer knows. Unknown keys are
-   * dropped on read by `useNavigationPrefs`' `sanitizePinned`; typing them out
-   * of existence here would only push that lie into the compiler.
+   * legitimately contain a key this build no longer knows. Since RETRO-F1
+   * (#571) the web reads only `railCollapsed`, through the packaged shell's
+   * `useShellRailPreference`; `pinned` is kept on the wire untouched.
    */
   navigation?: NavigationPreferences;
   /**

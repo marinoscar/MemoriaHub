@@ -23,7 +23,8 @@
  */
 
 import { useEffect, useMemo } from 'react';
-import { Box, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Box, Typography } from '@mui/material';
+import { useContextPaneVisible } from '../../hooks/useContextPaneVisible';
 import { Navigate } from 'react-router-dom';
 import {
   ReviewQueueList,
@@ -34,8 +35,8 @@ import { useReviewQueues } from '../../hooks/useReviewQueues';
 import { useScrollRestoration } from '../../hooks/useScrollRestoration';
 
 export default function ReviewHubPage() {
-  const theme = useTheme();
-  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
+  // The context pane is showing (expanded rail): this hub is redundant there.
+  const isDesktop = useContextPaneVisible();
 
   // Hooks run unconditionally, above the redirect branch. Restoration is a
   // no-op on desktop, where this page never paints a scrollable list.

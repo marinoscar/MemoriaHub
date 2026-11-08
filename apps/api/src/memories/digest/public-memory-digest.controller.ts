@@ -69,7 +69,7 @@ import { ApiExcludeEndpoint, ApiOperation, ApiParam, ApiResponse, ApiTags } from
 import { FastifyReply } from 'fastify';
 import { Readable } from 'stream';
 
-import { Public } from '../../auth/decorators/public.decorator';
+import { Public } from '@marinoscar/platform-api/identity';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
@@ -77,8 +77,8 @@ import {
   STORAGE_PROVIDER,
   StorageProvider,
 } from '../../storage/providers/storage-provider.interface';
-import { UserSettingsService } from '../../settings/user-settings/user-settings.service';
-import { PatchUserSettingsDto } from '../../settings/dto/update-user-settings.dto';
+import { UserSettingsService } from '@marinoscar/platform-api/settings';
+import type { PatchUserSettingsDto } from '@marinoscar/platform-api/settings';
 import {
   verifyDigestImageToken,
   verifyDigestUnsubscribeToken,

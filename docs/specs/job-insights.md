@@ -2,9 +2,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.1 |
-| **Last Updated** | July 2026 |
+| **Version** | 1.2 |
+| **Last Updated** | November 2026 |
 | **Status** | Implemented |
+
+> **Status since RETRO-C1 (issue #575): served by the platform.** `GET /api/admin/jobs/insights` and `POST /api/admin/jobs/insights/reset-history` are the jobs slice's (`JobInsightsService`, `@marinoscar/platform-api/jobs`), and the page is `JobInsightsPage` of `@marinoscar/platform-web/jobs/ui`. The model below (on-demand aggregate, lock safety, ETA basis, the lifetime rollup folded in by the nightly purge) is unchanged in meaning. What changed on the wire: `generatedAt` replaces `computedAt`; the status counts are under `live.byStatus` only; `eta` is an array with one entry per type that has work outstanding (`remaining`, `avgMs`, `basis`, `estimatedMs`) and `lifetime` an array per type, instead of the `{ totalRemaining, etaMs, basis, perType }` and `{ overall, byType }` objects. The rollup table is the platform's `job_stats_rollup` (the old rows were merged in; `mh_legacy_job_stats_rollup` is gone). The CLI (`memoriahub jobs insights`, the TUI) maps the new shape back (`normalizeJobInsights`). See the [Jobs cutover runbook](../runbooks/jobs-cutover.md).
 
 ---
 

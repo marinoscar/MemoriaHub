@@ -187,10 +187,10 @@ export class ExifCarryoverService implements OnModuleDestroy {
 
     const id = randomUUID();
     const originalExt = normalizeExtension(opts.originalExtension);
-    // `memoriaHub-` prefix is REQUIRED: TempFileJanitorTask sweeps orphans of
+    // `memoriahub-job-` prefix is REQUIRED: TempFileJanitorTask sweeps orphans of
     // that shape out of os.tmpdir() when a job is SIGKILLed before cleanup.
-    const originalPath = join(tmpdir(), `memoriaHub-enhance-src-${id}${originalExt}`);
-    const enhancedPath = join(tmpdir(), `memoriaHub-enhance-out-${id}.jpg`);
+    const originalPath = join(tmpdir(), `memoriahub-job-enhance-src-${id}${originalExt}`);
+    const enhancedPath = join(tmpdir(), `memoriahub-job-enhance-out-${id}.jpg`);
 
     try {
       await writeFile(originalPath, originalBuffer);

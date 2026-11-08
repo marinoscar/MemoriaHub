@@ -3,16 +3,16 @@ import { StorageSettingsController } from './storage-settings.controller';
 import { StorageSettingsService } from './storage-settings.service';
 import { StorageMigrationHandler } from './storage-migration.handler';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
-import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Module({
   imports: [
-    // Provides StorageProviderResolver (+ S3/LocalDisk providers + SystemSettingsService)
+    // Provides StorageProviderResolver (+ S3/LocalDisk providers + AppSystemSettingsService)
     StorageProvidersModule,
-    // Provides SystemSettingsService (also re-exported by StorageProvidersModule,
+    // Provides AppSystemSettingsService (also re-exported by StorageProvidersModule,
     // but importing directly makes the dependency explicit)
-    SettingsModule,
+    
     // Provides EnrichmentJobService + EnrichmentHandlerRegistry
     // (registry is exported by EnrichmentModule; handler self-registers in onModuleInit)
     EnrichmentModule,

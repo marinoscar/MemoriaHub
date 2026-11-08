@@ -29,7 +29,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { join } from 'path';
 import { createOcrEngine, OcrEngine } from '@memoriahub/enrichment-compute/ocr';
 import { VideoFrameExtractionService } from '../face/video-frame-extraction.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 export interface RecognizeVideoOpts {
   durationMs?: number;
@@ -65,8 +65,8 @@ export class SocialMediaOcrService implements OnModuleDestroy {
     private readonly frameExtractor: VideoFrameExtractionService,
     // Injected so the service participates in the settings-aware DI graph and so
     // future per-call setting reads have a handle; recognizeVideo receives its
-    // knobs via opts (resolved by the caller from SystemSettingsService).
-    private readonly systemSettings: SystemSettingsService,
+    // knobs via opts (resolved by the caller from AppSystemSettingsService).
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   async onModuleDestroy(): Promise<void> {

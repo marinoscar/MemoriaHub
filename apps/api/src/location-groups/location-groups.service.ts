@@ -8,7 +8,6 @@ import {
 import { LocationGroupLevel, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { LocationGroupResolverService } from './location-group-resolver.service';
 import { LocationGroupRebuildService } from './location-group-rebuild.service';
@@ -21,6 +20,7 @@ import type {
   MergeLocationGroupsDto,
   UpdateLocationGroupDto,
 } from './dto/location-group.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * Per-level column mapping, identical to the rebuild handler's — `raw` is the
@@ -100,7 +100,7 @@ export class LocationGroupsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly resolver: LocationGroupResolverService,
     private readonly rebuild: LocationGroupRebuildService,
     private readonly thumbnails: MediaThumbnailService,

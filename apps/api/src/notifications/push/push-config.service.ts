@@ -2,7 +2,7 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as webpush from 'web-push';
 
-import { decryptSecret, encryptSecret } from '../../common/crypto/secret-cipher';
+import { decryptSecret, encryptSecret } from '../../legacy/legacy-secret-cipher';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   DEFAULT_VAPID_SUBJECT,
@@ -18,6 +18,7 @@ import type {
   RotatePushConfigInput,
   UpdatePushConfigInput,
 } from './dto/push-config.dto';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // =============================================================================
 // PushConfigService — runtime-configured Web Push VAPID keys (epic #481, #483)
@@ -39,7 +40,7 @@ import type {
 //   5. otherwise                       -> { publicKey, privateKey, subject }
 //
 // Reads go straight through PrismaService (NotificationsModule imports nothing
-// — see notifications.module.ts), never through SystemSettingsService, which
+// — see notifications.module.ts), never through AppSystemSettingsService, which
 // only ever reads the `global` row anyway.
 // =============================================================================
 

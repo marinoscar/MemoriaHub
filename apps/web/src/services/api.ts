@@ -1,9 +1,9 @@
 import {
-  isMaintenancePayload,
-  reportMaintenance,
-} from './maintenanceState';
+  readMaintenanceBlock,
+  reportMaintenanceBlock,
+} from '@marinoscar/platform-web/host/headless';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
@@ -12,6 +12,30 @@ interface RequestOptions extends RequestInit {
 class ApiService {
   private accessToken: string | null = null;
   private refreshPromise: Promise<boolean> | null = null;
+  private sessionExpiredListeners = new Set<() => void>();
+
+  /**
+   * Subscribe to a refused refresh of a LIVE session (the request carried a
+   * token and the refresh cookie no longer works). The identity `AuthProvider`
+   * (`AuthSessionClient.onSessionExpired`) uses it to sign the user out with the
+   * "session expired" notice. Returns the unsubscribe.
+   */
+  onSessionExpired(listener: () => void): () => void {
+    this.sessionExpiredListeners.add(listener);
+    return () => {
+      this.sessionExpiredListeners.delete(listener);
+    };
+  }
+
+  private notifySessionExpired() {
+    for (const listener of [...this.sessionExpiredListeners]) {
+      try {
+        listener();
+      } catch {
+        // A listener must never break the request that discovered the expiry.
+      }
+    }
+  }
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
@@ -48,6 +72,7 @@ class ApiService {
 
     if (response.status === 401 && !skipAuth) {
       // Try to refresh token (only once, avoid infinite loops)
+      const hadSession = this.accessToken !== null;
       const refreshed = await this.refreshToken();
       if (refreshed) {
         // Update authorization header with new token and retry ONCE
@@ -74,6 +99,7 @@ class ApiService {
         const data = await retryResponse.json();
         return (data && typeof data === 'object' && 'data' in data) ? data.data : data;
       }
+      if (hadSession) this.notifySessionExpired();
       throw new ApiError('Unauthorized', 401);
     }
 
@@ -93,10 +119,12 @@ class ApiService {
   /**
    * Single exit for every non-OK response. Always throws.
    *
-   * Maintenance mode (issue #348): a 503 carrying the API's stable
-   * `{ error: 'maintenance', message, startedAt }` marker is published to the
-   * global maintenance store BEFORE throwing, so the app can take over with a
-   * single maintenance screen instead of every page rendering its own error.
+   * Maintenance mode (issue #348, RETRO-B1 #597): a 503 carrying the platform
+   * host's stable marker (`details.reason === 'MAINTENANCE_MODE'`, recognised by
+   * the packaged `readMaintenanceBlock`) is published to the packaged
+   * maintenance-block store BEFORE throwing, so the packaged `MaintenanceGate`
+   * can take over with a single maintenance screen instead of every page
+   * rendering its own error.
    * It still throws (as `MaintenanceError`, an `ApiError` subclass) so any
    * in-flight caller's `catch`/`finally` runs exactly as it does today — the
    * screen is a takeover, not a replacement for normal error propagation.
@@ -107,11 +135,10 @@ class ApiService {
   private async throwForResponse(response: Response): Promise<never> {
     const error = await response.json().catch(() => ({}));
 
-    if (isMaintenancePayload(response.status, error)) {
-      const message =
-        error.message || 'The application is temporarily down for maintenance.';
-      reportMaintenance({ message, startedAt: error.startedAt ?? null });
-      throw new MaintenanceError(message, error.startedAt ?? null);
+    const block = readMaintenanceBlock(response.status, error);
+    if (block) {
+      reportMaintenanceBlock(block);
+      throw new MaintenanceError(block.message);
     }
 
     throw new ApiError(

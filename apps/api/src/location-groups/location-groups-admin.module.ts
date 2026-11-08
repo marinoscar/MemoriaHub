@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { SettingsModule } from '../settings/settings.module';
 import { MediaModule } from '../media/media.module';
 import { LocationGroupsModule } from './location-groups.module';
 import { LocationGroupsService } from './location-groups.service';
@@ -25,7 +24,7 @@ import { LocationGroupsAdminController } from './location-groups-admin.controlle
  * No forwardRef anywhere.
  */
 @Module({
-  imports: [PrismaModule, SettingsModule, MediaModule, LocationGroupsModule],
+  imports: [PrismaModule, MediaModule, LocationGroupsModule],
   controllers: [LocationGroupsController, LocationGroupsAdminController],
   providers: [LocationGroupsService],
   exports: [LocationGroupsService],

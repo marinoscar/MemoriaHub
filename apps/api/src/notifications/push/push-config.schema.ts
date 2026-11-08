@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // =============================================================================
 // Web Push (VAPID) configuration — stored shape (epic #481, issue #483)
@@ -6,7 +7,7 @@ import { z } from 'zod';
 //
 // Persisted as the `system_settings` row with key `webPush` — a SEPARATE row
 // from the main `global` settings document. That separation is load-bearing:
-// `GET /api/system-settings` and every `SystemSettingsService` read touch only
+// `GET /api/system-settings` and every `AppSystemSettingsService` read touch only
 // key `global`, so the encrypted private key below can never ride out on the
 // generic settings response. The only reader of this row is PushConfigService
 // (plus PushTestService's source diagnostics).

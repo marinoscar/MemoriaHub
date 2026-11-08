@@ -35,11 +35,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CircleRole, NotificationType, Prisma } from '@prisma/client';
 
-import { FEATURE_KEYS, isPictureEnhancementEnabled } from '../common/types/settings.types';
+import { FEATURE_KEYS, isPictureEnhancementEnabled } from '../settings/feature-gates';
 import { MediaService } from '../media/media.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { NotificationsService } from './notifications.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Circles fetched per keyset page — the sweep never loads them all at once. */
 const CIRCLE_PAGE_SIZE = 100;
@@ -134,13 +134,13 @@ export class ReviewQueueReconcileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaService: MediaService,
   ) {}
 
   /**
    * Reconcile every circle. Feature flags are read ONCE for the whole sweep
-   * (not per circle) through the cached SystemSettingsService.getSettings(),
+   * (not per circle) through the cached AppSystemSettingsService.getSettings(),
    * so a 500-circle deployment costs one settings read, not 500.
    *
    * A per-circle failure is logged and counted, never fatal — one circle with a
@@ -242,7 +242,7 @@ export class ReviewQueueReconcileService {
     // deliberately accepted: a member DEMOTED to viewer (or removed from the
     // circle) is outside this set, so their now-unactionable row is not
     // resolved here — they can dismiss it, and #248's retention sweep reaps it.
-    const liveRows = (await this.prisma.notification.findMany({
+    const liveRows = (await this.prisma.mhLegacyNotification.findMany({
       where: {
         userId: { in: userIds },
         circleId: circle.id,

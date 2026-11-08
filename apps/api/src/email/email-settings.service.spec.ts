@@ -15,14 +15,16 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EmailSettingsService } from './email-settings.service';
 import { EmailService } from './email.service';
 import { SesEmailProvider } from './providers/ses-email.provider';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
+import { EmailSmtpSecretStore } from './email-smtp-secret.store';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
 describe('EmailSettingsService', () => {
   let service: EmailSettingsService;
   let mockSystemSettings: { getSettings: jest.Mock; patchSettings: jest.Mock };
+  let mockSmtpSecret: { getCiphertext: jest.Mock; setCiphertext: jest.Mock };
   let mockEmailService: { sendEmail: jest.Mock };
   let mockSesProvider: { sesCredentialAvailable: jest.Mock };
   let originalKey: string | undefined;
@@ -45,15 +47,20 @@ describe('EmailSettingsService', () => {
       getSettings: jest.fn().mockResolvedValue({}),
       patchSettings: jest.fn().mockResolvedValue(undefined),
     };
+    mockSmtpSecret = {
+      getCiphertext: jest.fn().mockResolvedValue(null),
+      setCiphertext: jest.fn().mockResolvedValue(undefined),
+    };
     mockEmailService = { sendEmail: jest.fn() };
     mockSesProvider = { sesCredentialAvailable: jest.fn().mockResolvedValue(false) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EmailSettingsService,
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: EmailService, useValue: mockEmailService },
         { provide: SesEmailProvider, useValue: mockSesProvider },
+        { provide: EmailSmtpSecretStore, useValue: mockSmtpSecret },
       ],
     }).compile();
 
@@ -71,6 +78,7 @@ describe('EmailSettingsService', () => {
   describe('getMaskedSettings', () => {
     it('never exposes smtpPassword in the response', async () => {
       const ciphertext = encryptSecret('super-secret-app-password');
+      mockSmtpSecret.getCiphertext.mockResolvedValue(ciphertext);
       mockSystemSettings.getSettings.mockResolvedValue({
         email: {
           provider: 'smtp',
@@ -81,7 +89,6 @@ describe('EmailSettingsService', () => {
           smtpPort: 587,
           smtpUseTls: true,
           smtpUsername: 'user',
-          smtpPassword: ciphertext,
         },
       });
 
@@ -95,13 +102,13 @@ describe('EmailSettingsService', () => {
 
     it('returns passwordConfigured:true and the correct last4 when a password is stored', async () => {
       const ciphertext = encryptSecret('my-app-password-9999');
+      mockSmtpSecret.getCiphertext.mockResolvedValue(ciphertext);
       mockSystemSettings.getSettings.mockResolvedValue({
         email: {
           provider: 'smtp',
           enabled: true,
           fromAddress: 'noreply@example.com',
           smtpHost: 'smtp.example.com',
-          smtpPassword: ciphertext,
         },
       });
 
@@ -127,12 +134,12 @@ describe('EmailSettingsService', () => {
     });
 
     it('returns passwordLast4:null (not throw) when the stored ciphertext is malformed', async () => {
+      mockSmtpSecret.getCiphertext.mockResolvedValue('not-valid-ciphertext');
       mockSystemSettings.getSettings.mockResolvedValue({
         email: {
           provider: 'smtp',
           enabled: true,
           fromAddress: 'noreply@example.com',
-          smtpPassword: 'not-valid-ciphertext',
         },
       });
 
@@ -203,8 +210,12 @@ describe('EmailSettingsService', () => {
       );
 
       expect(mockSystemSettings.patchSettings).toHaveBeenCalledTimes(1);
+      // The ciphertext never travels through the settings namespace: it goes to the secret store.
       const [patch] = mockSystemSettings.patchSettings.mock.calls[0];
-      const persisted = patch.email.smtpPassword;
+      expect(patch.email).not.toHaveProperty('smtpPassword');
+      expect(mockSmtpSecret.setCiphertext).toHaveBeenCalledTimes(1);
+      const [persisted, actor] = mockSmtpSecret.setCiphertext.mock.calls[0];
+      expect(actor).toBe('user-1');
 
       expect(persisted).toBeDefined();
       expect(persisted).not.toBe('brand-new-plaintext-password');
@@ -226,6 +237,7 @@ describe('EmailSettingsService', () => {
 
       const [patch] = mockSystemSettings.patchSettings.mock.calls[0];
       expect(patch.email).not.toHaveProperty('smtpPassword');
+      expect(mockSmtpSecret.setCiphertext).not.toHaveBeenCalled();
     });
 
     it('omits smtpPassword from the patch when omitted entirely', async () => {
@@ -242,6 +254,7 @@ describe('EmailSettingsService', () => {
 
       const [patch] = mockSystemSettings.patchSettings.mock.calls[0];
       expect(patch.email).not.toHaveProperty('smtpPassword');
+      expect(mockSmtpSecret.setCiphertext).not.toHaveBeenCalled();
     });
 
     it('returns the masked settings after persisting', async () => {

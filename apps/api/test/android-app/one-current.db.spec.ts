@@ -1,6 +1,6 @@
 /**
  * Real-Postgres tier (issue #502): proves the raw-SQL partial unique index
- * `android_app_releases_one_current_uniq_idx` (intentional schema drift, see
+ * `mh_legacy_android_app_releases_one_current_uniq_idx` (intentional schema drift, see
  * the AndroidAppRelease model comment) allows at most ONE current release
  * deployment-wide, and that the CHECK constraints on media_sync_runs hold.
  *
@@ -49,7 +49,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
       return;
     }
     prisma = candidate;
-    await prisma.androidAppRelease.deleteMany({ where: { packageName: PKG } });
+    await prisma.mhLegacyAndroidAppRelease.deleteMany({ where: { packageName: PKG } });
     const user = await prisma.user.create({
       data: { email: `one-current-${Date.now()}@example.test` },
     });
@@ -58,14 +58,14 @@ describe('android_app_releases one-current partial unique index (db)', () => {
 
   afterAll(async () => {
     if (!prisma) return;
-    await prisma.androidAppRelease.deleteMany({ where: { packageName: PKG } });
+    await prisma.mhLegacyAndroidAppRelease.deleteMany({ where: { packageName: PKG } });
     await prisma.auditEvent.deleteMany({ where: { actorUserId: userId } }).catch(() => undefined);
     await prisma.user.delete({ where: { id: userId } }).catch(() => undefined);
     await prisma.$disconnect();
   });
 
   beforeEach(async () => {
-    if (prisma) await prisma.androidAppRelease.deleteMany({ where: { packageName: PKG } });
+    if (prisma) await prisma.mhLegacyAndroidAppRelease.deleteMany({ where: { packageName: PKG } });
   });
 
   it('rejects a second is_current=true row with P2002', async () => {
@@ -84,7 +84,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
     await release(1, true);
     await release(2, false);
     await release(3, false);
-    expect(await prisma.androidAppRelease.count({ where: { packageName: PKG } })).toBe(3);
+    expect(await prisma.mhLegacyAndroidAppRelease.count({ where: { packageName: PKG } })).toBe(3);
   });
 
   it('allows make-current as clear-then-set in one transaction', async () => {
@@ -92,10 +92,10 @@ describe('android_app_releases one-current partial unique index (db)', () => {
     const a = await release(1, true);
     const b = await release(2, false);
     await prisma.$transaction([
-      prisma.androidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } }),
-      prisma.androidAppRelease.update({ where: { id: b.id }, data: { isCurrent: true } }),
+      prisma.mhLegacyAndroidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } }),
+      prisma.mhLegacyAndroidAppRelease.update({ where: { id: b.id }, data: { isCurrent: true } }),
     ]);
-    const current = await prisma.androidAppRelease.findMany({ where: { isCurrent: true } });
+    const current = await prisma.mhLegacyAndroidAppRelease.findMany({ where: { isCurrent: true } });
     expect(current.map((r) => r.id)).toEqual([b.id]);
     expect(a.id).not.toBe(b.id);
   });
@@ -162,9 +162,9 @@ describe('android_app_releases one-current partial unique index (db)', () => {
     const view = await service().makeCurrent(one.id, userId);
 
     expect(view).toMatchObject({ id: one.id, isCurrent: true, sizeBytes: '5000000000' });
-    const current = await prisma.androidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
+    const current = await prisma.mhLegacyAndroidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
     expect(current.map((row) => row.id)).toEqual([one.id]);
-    expect((await prisma.androidAppRelease.findUnique({ where: { id: two.id } }))?.isCurrent).toBe(false);
+    expect((await prisma.mhLegacyAndroidAppRelease.findUnique({ where: { id: two.id } }))?.isCurrent).toBe(false);
   });
 
   it('two concurrent makeCurrent calls leave exactly one current release; a loser gets RELEASE_CURRENT_CONFLICT', async () => {
@@ -173,7 +173,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
 
     const results = await Promise.allSettled(rows.map((row) => service().makeCurrent(row.id, userId)));
 
-    const current = await prisma.androidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
+    const current = await prisma.mhLegacyAndroidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
     expect(current).toHaveLength(1);
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
     for (const result of results) {

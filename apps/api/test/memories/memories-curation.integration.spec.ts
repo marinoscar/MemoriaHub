@@ -34,6 +34,7 @@ import {
 } from '../../src/memories/curators/on-this-day.curator';
 import { MemoryCuratorContext } from '../../src/memories/curators/memory-curator.interface';
 import { resolveMemoriesSettings } from '../../src/memories/memories-settings.util';
+import { defaultOrgId } from '../helpers/default-org';
 
 function resolveDatabaseUrl(): string {
   if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
@@ -97,6 +98,7 @@ describeMaybeDb('Memories — curation engine & On This Day (DB_GATED: real Post
     createdStorageObjectIds.push(storageObjectId);
     await prisma.storageObject.create({
       data: {
+        orgId: await defaultOrgId(prisma),
         id: storageObjectId,
         name: `${storageObjectId}.jpg`,
         size: BigInt(2048),

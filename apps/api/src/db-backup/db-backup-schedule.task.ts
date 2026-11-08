@@ -37,13 +37,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { isValidCron, nextCronDate } from '../workflows/util/cron.util';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
 import { DatabaseBackupRetentionService } from './database-backup-retention.service';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
 import { buildCronExpression, DatabaseBackupFrequency } from './schedule.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * How far back `previousFireBoundary` searches for the last fire time. Must
@@ -85,7 +85,7 @@ export class DatabaseBackupScheduleTask {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly runner: DatabaseBackupRunnerService,
     private readonly retention: DatabaseBackupRetentionService,
     private readonly providerResolver: StorageProviderResolver,
@@ -140,7 +140,7 @@ export class DatabaseBackupScheduleTask {
   private async releaseStaleRuns(runStaleMinutes: number): Promise<number> {
     const cutoff = new Date(Date.now() - runStaleMinutes * 60 * 1000);
 
-    const candidates = await this.prisma.databaseBackupRun.findMany({
+    const candidates = await this.prisma.mhLegacyDatabaseBackupRun.findMany({
       where: {
         status: 'running',
         OR: [
@@ -155,7 +155,7 @@ export class DatabaseBackupScheduleTask {
     for (const run of candidates) {
       // Conditional update: if the run completed between the read and here, it
       // is no longer `running` and must not be stomped into `stale`.
-      const { count } = await this.prisma.databaseBackupRun.updateMany({
+      const { count } = await this.prisma.mhLegacyDatabaseBackupRun.updateMany({
         where: { id: run.id, status: 'running' },
         data: {
           status: 'stale',
@@ -231,7 +231,7 @@ export class DatabaseBackupScheduleTask {
     // against the boundary — rather than against "did we fire recently" — is
     // what makes exactly one run happen per boundary, statelessly, with no
     // `lastRunAt` column to keep in sync and no drift after a restart.
-    const latest = await this.prisma.databaseBackupRun.findFirst({
+    const latest = await this.prisma.mhLegacyDatabaseBackupRun.findFirst({
       where: { startedAt: { not: null } },
       orderBy: { startedAt: 'desc' },
       select: { id: true, startedAt: true },

@@ -37,7 +37,7 @@
 // =============================================================================
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_GENERATION_JOB_TYPE } from '../memories-generation.task';
@@ -124,16 +124,17 @@ export class MemoryBackfillService {
     // ONE batched read per page rather than one per circle. This is the same
     // guard the cron uses, and it is what makes the endpoint safe to double-
     // click: a circle already being generated is left alone.
-    const inFlight = await this.prisma.enrichmentJob.findMany({
+    const inFlight = await this.prisma.job.findMany({
       where: {
         type: MEMORY_GENERATION_JOB_TYPE,
-        circleId: { in: circleIds },
-        status: { in: [JobStatus.pending, JobStatus.running] },
+        subjectType: 'circle',
+        subjectId: { in: circleIds },
+        status: { in: ['pending', 'running'] },
       },
-      select: { circleId: true },
+      select: { subjectId: true },
     });
     const busy = new Set(
-      inFlight.map((job) => job.circleId).filter((id): id is string => !!id),
+      inFlight.map((job) => job.subjectId).filter((id): id is string => !!id),
     );
 
     for (const circleId of circleIds) {

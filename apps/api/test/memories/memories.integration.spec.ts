@@ -46,6 +46,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
+import { defaultOrgId } from '../helpers/default-org';
 
 function resolveDatabaseUrl(): string {
   if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
@@ -82,6 +83,7 @@ describeMaybeDb('Memories — DB constraints and cascades (DB_GATED: real Postgr
     });
     await prisma.storageObject.create({
       data: {
+        orgId: await defaultOrgId(prisma),
         id: storageObjectId,
         name: 'memories-test.jpg',
         size: BigInt(1024),
@@ -263,6 +265,7 @@ describeMaybeDb('Memories — DB constraints and cascades (DB_GATED: real Postgr
       const localMediaId = randomUUID();
       await prisma.storageObject.create({
         data: {
+          orgId: await defaultOrgId(prisma),
           id: localStorageId,
           name: 'memories-cascade-test.jpg',
           size: BigInt(512),

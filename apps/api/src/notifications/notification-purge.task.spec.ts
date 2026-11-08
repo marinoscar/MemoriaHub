@@ -14,12 +14,12 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobStatus, JobReason } from '@prisma/client';
+import { MhLegacyJobStatus, JobReason } from '@prisma/client';
 import { NotificationPurgeTask } from './notification-purge.task';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -27,7 +27,7 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 
 describe('NotificationPurgeTask', () => {
   let task: NotificationPurgeTask;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
   let mockEnqueue: jest.Mock;
   let mockPrisma: MockPrismaService;
 
@@ -40,7 +40,7 @@ describe('NotificationPurgeTask', () => {
 
     mockPrisma = createMockPrismaService();
     // Default: no existing pending/running notification_purge
-    mockPrisma.enrichmentJob.findFirst.mockResolvedValue(null);
+    mockPrisma.job.findFirst.mockResolvedValue(null);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,7 +50,7 @@ describe('NotificationPurgeTask', () => {
           useValue: { enqueue: mockEnqueue },
         },
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
       ],
     }).compile();
 
@@ -71,7 +71,7 @@ describe('NotificationPurgeTask', () => {
 
       await task.handleScheduledPurge();
 
-      expect(mockPrisma.enrichmentJob.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.job.findFirst).not.toHaveBeenCalled();
     });
 
     it('does NOT enqueue anything when disabled', async () => {
@@ -101,7 +101,7 @@ describe('NotificationPurgeTask', () => {
 
       await task.handleScheduledPurge();
 
-      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalled();
+      expect(mockPrisma.job.findFirst).toHaveBeenCalled();
     });
 
     it('treats null purgeEnabled as true (default) and proceeds', async () => {
@@ -109,7 +109,7 @@ describe('NotificationPurgeTask', () => {
 
       await task.handleScheduledPurge();
 
-      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalled();
+      expect(mockPrisma.job.findFirst).toHaveBeenCalled();
     });
   });
 
@@ -119,10 +119,10 @@ describe('NotificationPurgeTask', () => {
 
   describe('existing job present (dedup)', () => {
     it('does NOT enqueue when a pending notification_purge job already exists', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue({
+      mockPrisma.job.findFirst.mockResolvedValue({
         id: 'existing-job',
         type: 'notification_purge',
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       } as any);
 
       await task.handleScheduledPurge();
@@ -131,10 +131,10 @@ describe('NotificationPurgeTask', () => {
     });
 
     it('does NOT enqueue when a running notification_purge job already exists', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue({
+      mockPrisma.job.findFirst.mockResolvedValue({
         id: 'existing-job',
         type: 'notification_purge',
-        status: JobStatus.running,
+        status: MhLegacyJobStatus.running,
       } as any);
 
       await task.handleScheduledPurge();
@@ -143,25 +143,25 @@ describe('NotificationPurgeTask', () => {
     });
 
     it('resolves without throwing when an existing job is present', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue({
+      mockPrisma.job.findFirst.mockResolvedValue({
         id: 'existing-job',
         type: 'notification_purge',
-        status: JobStatus.pending,
+        status: MhLegacyJobStatus.pending,
       } as any);
 
       await expect(task.handleScheduledPurge()).resolves.toBeUndefined();
     });
 
     it('queries findFirst with type=notification_purge and status in pending/running', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue(null);
+      mockPrisma.job.findFirst.mockResolvedValue(null);
 
       await task.handleScheduledPurge();
 
-      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith(
+      expect(mockPrisma.job.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             type: 'notification_purge',
-            status: { in: [JobStatus.pending, JobStatus.running] },
+            status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
           }),
         }),
       );
@@ -230,7 +230,7 @@ describe('NotificationPurgeTask', () => {
     });
 
     it('does not throw when findFirst rejects', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockRejectedValue(new Error('DB error'));
+      mockPrisma.job.findFirst.mockRejectedValue(new Error('DB error'));
 
       await expect(task.handleScheduledPurge()).resolves.toBeUndefined();
     });
@@ -254,12 +254,12 @@ describe('NotificationPurgeTask', () => {
     });
 
     it('a throwing findFirst on one tick does not wedge the task — a LATER tick still checks and enqueues normally', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockRejectedValueOnce(new Error('DB blip'));
+      mockPrisma.job.findFirst.mockRejectedValueOnce(new Error('DB blip'));
 
       await task.handleScheduledPurge(); // first tick: findFirst rejects, caught internally
       expect(mockEnqueue).not.toHaveBeenCalled();
 
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValueOnce(null);
+      mockPrisma.job.findFirst.mockResolvedValueOnce(null);
       await task.handleScheduledPurge(); // second tick: runs normally
 
       expect(mockEnqueue).toHaveBeenCalledTimes(1);

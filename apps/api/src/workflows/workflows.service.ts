@@ -6,11 +6,10 @@ import {
 } from '@nestjs/common';
 import { Prisma, Workflow, WorkflowSubject, WorkflowTrigger } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
-import { isWorkflowsEnabled } from '../common/types/settings.types';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { isWorkflowsEnabled } from '../settings/feature-gates';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowDefinition } from './definition/workflow-definition.schema';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';
@@ -20,6 +19,7 @@ import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { ListWorkflowsQueryDto } from './dto/list-workflows-query.dto';
 import { PreviewWorkflowDto } from './dto/preview-workflow.dto';
 import { cronMinIntervalMinutes, isValidCron, nextCronDate } from './util/cron.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Fallback minimum schedule interval (minutes) when the setting is absent. */
 const DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES = 60;
@@ -33,7 +33,7 @@ export class WorkflowsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly circleMembership: CircleMembershipService,
     private readonly thumbnails: MediaThumbnailService,
     private readonly validator: WorkflowDefinitionValidator,

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, JobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
+import { JobReason, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { whereDateRange } from '../search/media-where.builder';
@@ -146,11 +146,12 @@ export class FaceBackfillService {
 
     for (const group of eligibleCircles) {
       // Per-circle guard: skip if a sweep is already pending/running for this circle.
-      const existing = await this.prisma.enrichmentJob.findFirst({
+      const existing = await this.prisma.job.findFirst({
         where: {
           type: 'face_auto_archive_sweep',
-          circleId: group.circleId,
-          status: { in: [JobStatus.pending, JobStatus.running] },
+          subjectType: 'circle',
+          subjectId: group.circleId,
+          status: { in: ['pending', 'running'] },
         },
       });
 

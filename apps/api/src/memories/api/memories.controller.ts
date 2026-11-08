@@ -45,9 +45,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
-import { Auth } from '../../auth/decorators/auth.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
-import { RequestUser } from '../../auth/interfaces/authenticated-user.interface';
+import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
 import { MemoryFeedQueryDto, MemoryListQueryDto } from './dto/memory-query.dto';
 import {

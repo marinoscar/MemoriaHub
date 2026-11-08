@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { ConflictException, HttpException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-import { deriveSubKey } from '../../common/crypto/secret-cipher';
+import { deriveSubKey } from '../../legacy/legacy-secret-cipher';
 import { DOWNLOAD_TOKEN_KEY_PURPOSE } from './android-release.constants';
 import { AndroidReleaseService, isUniqueViolationOn, toPublicRelease } from './android-release.service';
 import { signDownloadToken } from './download-token';
@@ -98,7 +98,7 @@ function setup() {
     getProviderFor: jest.fn(async () => provider),
   };
   const prisma: any = {
-    androidAppRelease: {
+    mhLegacyAndroidAppRelease: {
       findUnique: jest.fn(async () => null),
       findFirst: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
@@ -171,7 +171,7 @@ describe('AndroidReleaseService', () => {
 
       const view = await service.upload(multipart(fields(6), bytes), USER);
 
-      const data = prisma.androidAppRelease.create.mock.calls[0][0].data;
+      const data = prisma.mhLegacyAndroidAppRelease.create.mock.calls[0][0].data;
       expect(data).toMatchObject({
         packageName: PKG,
         versionCode: 6,
@@ -189,7 +189,7 @@ describe('AndroidReleaseService', () => {
         expect.anything(),
         expect.objectContaining({ mimeType: 'application/vnd.android.package-archive' }),
       );
-      expect(prisma.androidAppRelease.updateMany).toHaveBeenCalledWith({
+      expect(prisma.mhLegacyAndroidAppRelease.updateMany).toHaveBeenCalledWith({
         where: { isCurrent: true },
         data: { isCurrent: false },
       });
@@ -202,7 +202,7 @@ describe('AndroidReleaseService', () => {
 
     it('refuses an existing (packageName, versionCode) with 409 RELEASE_VERSION_EXISTS before storing a byte', async () => {
       const { service, prisma, provider } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue({ id: 'existing' });
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue({ id: 'existing' });
 
       const error = await rejection(service.upload(multipart(fields(5)), USER));
 
@@ -213,7 +213,7 @@ describe('AndroidReleaseService', () => {
 
     it('maps a racing duplicate (P2002 on the version index) to RELEASE_VERSION_EXISTS and deletes the bytes', async () => {
       const { service, prisma, provider, stored } = setup();
-      prisma.androidAppRelease.create.mockRejectedValue(p2002('android_app_releases_package_name_version_code_key'));
+      prisma.mhLegacyAndroidAppRelease.create.mockRejectedValue(p2002('android_app_releases_package_name_version_code_key'));
 
       expect(reasonOf(await rejection(service.upload(multipart(fields(5)), USER)))).toBe('RELEASE_VERSION_EXISTS');
       expect(provider.delete).toHaveBeenCalled();
@@ -225,7 +225,7 @@ describe('AndroidReleaseService', () => {
       ['lower', 4],
     ])('refuses a current upload with an %s versionCode (409 RELEASE_VERSION_NOT_NEWER)', async (_label, code) => {
       const { service, prisma, provider } = setup();
-      prisma.androidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 5 }));
+      prisma.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 5 }));
 
       const error = await rejection(service.upload(multipart(fields(code)), USER));
 
@@ -238,28 +238,28 @@ describe('AndroidReleaseService', () => {
 
     it('allows a lower versionCode with force=true, and makes it current', async () => {
       const { service, prisma } = setup();
-      prisma.androidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 5 }));
+      prisma.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 5 }));
 
       await service.upload(multipart(fields(3, { force: 'true' })), USER);
 
-      expect(prisma.androidAppRelease.create.mock.calls[0][0].data.isCurrent).toBe(true);
+      expect(prisma.mhLegacyAndroidAppRelease.create.mock.calls[0][0].data.isCurrent).toBe(true);
     });
 
     it('allows a lower versionCode when not made current, without trusting it', async () => {
       const { service, prisma, androidApp } = setup();
-      prisma.androidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 5 }));
-      prisma.androidAppRelease.create.mockImplementation(async ({ data }: any) => row({ ...data }));
+      prisma.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 5 }));
+      prisma.mhLegacyAndroidAppRelease.create.mockImplementation(async ({ data }: any) => row({ ...data }));
 
       const view = await service.upload(multipart(fields(3, { makeCurrent: 'false' })), USER);
 
       expect(view.isCurrent).toBe(false);
-      expect(prisma.androidAppRelease.updateMany).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyAndroidAppRelease.updateMany).not.toHaveBeenCalled();
       expect(androidApp.ensureTrusted).not.toHaveBeenCalled();
     });
 
     it('does not compare against the current release of another package', async () => {
       const { service, prisma } = setup();
-      prisma.androidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 50, packageName: 'other.app' }));
+      prisma.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue(row({ isCurrent: true, versionCode: 50, packageName: 'other.app' }));
 
       await expect(service.upload(multipart(fields(1)), USER)).resolves.toBeDefined();
     });
@@ -272,7 +272,7 @@ describe('AndroidReleaseService', () => {
       expect(error.getStatus()).toBe(400);
       expect(reasonOf(error)).toBe('RELEASE_NOT_AN_APK');
       expect(provider.delete).toHaveBeenCalled();
-      expect(prisma.androidAppRelease.create).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyAndroidAppRelease.create).not.toHaveBeenCalled();
     });
 
     it('refuses a body without the apk file (400 RELEASE_INVALID_UPLOAD)', async () => {
@@ -306,16 +306,16 @@ describe('AndroidReleaseService', () => {
   describe('makeCurrent', () => {
     it('clears the old current and sets the new one in one transaction, then trusts the signer and audits', async () => {
       const { service, prisma, androidApp } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row({ versionCode: 2 }));
-      prisma.androidAppRelease.findFirst.mockResolvedValue({ id: 'previous' });
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row({ versionCode: 2 }));
+      prisma.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue({ id: 'previous' });
 
       const view = await service.makeCurrent(RELEASE_ID, USER);
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      const clear = prisma.androidAppRelease.updateMany.mock.invocationCallOrder[0];
-      const set = prisma.androidAppRelease.update.mock.invocationCallOrder[0];
+      const clear = prisma.mhLegacyAndroidAppRelease.updateMany.mock.invocationCallOrder[0];
+      const set = prisma.mhLegacyAndroidAppRelease.update.mock.invocationCallOrder[0];
       expect(clear).toBeLessThan(set);
-      expect(prisma.androidAppRelease.update).toHaveBeenCalledWith(
+      expect(prisma.mhLegacyAndroidAppRelease.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: RELEASE_ID }, data: { isCurrent: true } }),
       );
       expect(androidApp.ensureTrusted).toHaveBeenCalledWith({ packageName: PKG, sha256: SHA }, USER);
@@ -330,16 +330,16 @@ describe('AndroidReleaseService', () => {
 
     it('allows a rollback to a lower versionCode (no version rule)', async () => {
       const { service, prisma } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row({ versionCode: 1 }));
-      prisma.androidAppRelease.findFirst.mockResolvedValue(row({ id: 'newer', versionCode: 9, isCurrent: true }));
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row({ versionCode: 1 }));
+      prisma.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue(row({ id: 'newer', versionCode: 9, isCurrent: true }));
 
       await expect(service.makeCurrent(RELEASE_ID, USER)).resolves.toMatchObject({ isCurrent: true });
     });
 
     it('maps a P2002 on the one-current index to 409 RELEASE_CURRENT_CONFLICT', async () => {
       const { service, prisma } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row());
-      prisma.$transaction.mockRejectedValue(p2002('android_app_releases_one_current_uniq_idx'));
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row());
+      prisma.$transaction.mockRejectedValue(p2002('mh_legacy_android_app_releases_one_current_uniq_idx'));
 
       const error = await rejection(service.makeCurrent(RELEASE_ID, USER));
       expect(error).toBeInstanceOf(ConflictException);
@@ -348,7 +348,7 @@ describe('AndroidReleaseService', () => {
 
     it('is idempotent for the current release: no transaction, no audit, trust still ensured', async () => {
       const { service, prisma, androidApp } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row({ isCurrent: true }));
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row({ isCurrent: true }));
 
       await service.makeCurrent(RELEASE_ID, USER);
 
@@ -359,7 +359,7 @@ describe('AndroidReleaseService', () => {
 
     it('still succeeds when the trusted list is full (ensureTrusted returns false)', async () => {
       const { service, prisma, androidApp } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row());
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row());
       androidApp.ensureTrusted.mockResolvedValue(false);
 
       await expect(service.makeCurrent(RELEASE_ID, USER)).resolves.toMatchObject({ isCurrent: true });
@@ -376,28 +376,28 @@ describe('AndroidReleaseService', () => {
   describe('remove', () => {
     it('refuses the current release with 409 RELEASE_IS_CURRENT and touches no bytes', async () => {
       const { service, prisma, provider } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row({ isCurrent: true }));
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row({ isCurrent: true }));
 
       const error = await rejection(service.remove(RELEASE_ID, USER));
 
       expect(error.getStatus()).toBe(409);
       expect(reasonOf(error)).toBe('RELEASE_IS_CURRENT');
       expect(provider.delete).not.toHaveBeenCalled();
-      expect(prisma.androidAppRelease.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyAndroidAppRelease.deleteMany).not.toHaveBeenCalled();
     });
 
     it('deletes the bytes through the RECORDED provider first, then the row', async () => {
       const { service, prisma, provider, resolver } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row({ storageProvider: 's3', bucket: 'old-bucket' }));
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row({ storageProvider: 's3', bucket: 'old-bucket' }));
 
       await service.remove(RELEASE_ID, USER);
 
       expect(resolver.getProviderFor).toHaveBeenCalledWith('s3', 'old-bucket');
       expect(provider.delete).toHaveBeenCalledWith(`android-releases/${RELEASE_ID}.apk`);
       expect(provider.delete.mock.invocationCallOrder[0]).toBeLessThan(
-        prisma.androidAppRelease.deleteMany.mock.invocationCallOrder[0],
+        prisma.mhLegacyAndroidAppRelease.deleteMany.mock.invocationCallOrder[0],
       );
-      expect(prisma.androidAppRelease.deleteMany).toHaveBeenCalledWith({ where: { id: RELEASE_ID, isCurrent: false } });
+      expect(prisma.mhLegacyAndroidAppRelease.deleteMany).toHaveBeenCalledWith({ where: { id: RELEASE_ID, isCurrent: false } });
       expect(prisma.auditEvent.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ action: 'android_app.release.deleted' }),
       });
@@ -405,16 +405,16 @@ describe('AndroidReleaseService', () => {
 
     it('keeps the row when the storage delete fails, so it can be retried', async () => {
       const { service, prisma, provider } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row());
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row());
       provider.delete.mockRejectedValue(new Error('S3 down'));
 
       await expect(service.remove(RELEASE_ID, USER)).rejects.toThrow('S3 down');
-      expect(prisma.androidAppRelease.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyAndroidAppRelease.deleteMany).not.toHaveBeenCalled();
     });
 
     it('falls back to the active provider for a row with no recorded provider', async () => {
       const { service, prisma, resolver } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row({ storageProvider: null, bucket: null }));
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row({ storageProvider: null, bucket: null }));
 
       await service.remove(RELEASE_ID, USER);
 
@@ -433,7 +433,7 @@ describe('AndroidReleaseService', () => {
 
     it('creates a ten-minute link that openDownload accepts, streaming from the recorded provider', async () => {
       const { service, prisma, resolver } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row());
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row());
       const now = new Date('2026-10-02T12:00:00Z');
 
       const link = await service.createDownloadLink(RELEASE_ID, USER, now);
@@ -448,7 +448,7 @@ describe('AndroidReleaseService', () => {
 
     it('is 410 DOWNLOAD_LINK_EXPIRED once the link has expired', async () => {
       const { service, prisma } = setup();
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row());
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row());
       const now = new Date('2026-10-02T12:00:00Z');
       const token = (await service.createDownloadLink(RELEASE_ID, USER, now)).url.split('/').pop()!;
 
@@ -482,7 +482,7 @@ describe('AndroidReleaseService', () => {
 
       expect((await rejection(service.openDownload(token))).getStatus()).toBe(404);
 
-      prisma.androidAppRelease.findUnique.mockResolvedValue(row());
+      prisma.mhLegacyAndroidAppRelease.findUnique.mockResolvedValue(row());
       prisma.user.findUnique.mockResolvedValue({ isActive: false });
       expect((await rejection(service.openDownload(token))).getStatus()).toBe(404);
     });
@@ -490,9 +490,9 @@ describe('AndroidReleaseService', () => {
 
   describe('isUniqueViolationOn', () => {
     it('recognises the index by name and nothing else', () => {
-      expect(isUniqueViolationOn(p2002('android_app_releases_one_current_uniq_idx'), 'android_app_releases_one_current_uniq_idx')).toBe(true);
-      expect(isUniqueViolationOn(p2002('android_app_releases_package_name_version_code_key'), 'android_app_releases_one_current_uniq_idx')).toBe(false);
-      expect(isUniqueViolationOn(new Error('x'), 'android_app_releases_one_current_uniq_idx')).toBe(false);
+      expect(isUniqueViolationOn(p2002('mh_legacy_android_app_releases_one_current_uniq_idx'), 'mh_legacy_android_app_releases_one_current_uniq_idx')).toBe(true);
+      expect(isUniqueViolationOn(p2002('android_app_releases_package_name_version_code_key'), 'mh_legacy_android_app_releases_one_current_uniq_idx')).toBe(false);
+      expect(isUniqueViolationOn(new Error('x'), 'mh_legacy_android_app_releases_one_current_uniq_idx')).toBe(false);
     });
   });
 });

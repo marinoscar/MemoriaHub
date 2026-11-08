@@ -31,7 +31,7 @@ import {
   NodeBackupRunKind,
   NodeBackupRunStatus,
   Prisma,
-  WorkerNode,
+  MhLegacyWorkerNode,
 } from '@prisma/client';
 import { isSupportedTimeZone } from '../common/time/zone.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -41,7 +41,6 @@ import {
   NodeBackupQueryService,
 } from './node-backup-query.service';
 import { ObjectsService } from '../storage/objects/objects.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isValidCron, nextCronDate } from '../workflows/util/cron.util';
 import {
   BackupRunStats,
@@ -52,6 +51,7 @@ import {
   StartBackupRunDto,
   UpdateBackupConfigDto,
 } from './dto/node-backup.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const DEFAULT_RUN_STALE_MINUTES = 15;
 const DEFAULT_MAX_PAGE_SIZE = 200;
@@ -80,7 +80,7 @@ export class NodeBackupService {
     private readonly nodesService: NodesService,
     private readonly queryService: NodeBackupQueryService,
     private readonly objectsService: ObjectsService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -177,7 +177,7 @@ export class NodeBackupService {
   // Config serialization
   // ---------------------------------------------------------------------------
 
-  private async serializeConfig(node: WorkerNode, config: NodeBackupConfig) {
+  private async serializeConfig(node: MhLegacyWorkerNode, config: NodeBackupConfig) {
     const { runStaleMinutes } = await this.getBackupSettings();
 
     const scope = await this.queryService.resolveScope(

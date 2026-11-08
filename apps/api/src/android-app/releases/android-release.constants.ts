@@ -52,7 +52,7 @@ export const DOWNLOAD_TOKEN_KEY_PURPOSE = 'android-app-download';
 export const DOWNLOAD_ROUTE_PREFIX = '/api/android-app/download/';
 
 /** The raw-SQL partial unique index: at most one current release. */
-export const ONE_CURRENT_RELEASE_INDEX = 'android_app_releases_one_current_uniq_idx';
+export const ONE_CURRENT_RELEASE_INDEX = 'mh_legacy_android_app_releases_one_current_uniq_idx';
 
 /** The file-name stem of a downloaded APK (spec §2: `memoriahub-android-<versionName>.apk`). */
 export const ANDROID_APK_STEM = 'memoriahub-android';

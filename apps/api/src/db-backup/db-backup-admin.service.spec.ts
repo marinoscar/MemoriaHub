@@ -11,7 +11,7 @@ import {
   toRunDto,
 } from './db-backup-admin.service';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
-import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 
 /**
  * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
@@ -103,7 +103,7 @@ describe('DatabaseBackupAdminService', () => {
     };
 
     prisma = {
-      databaseBackupRun: {
+      mhLegacyDatabaseBackupRun: {
         findUnique: jest.fn(),
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
@@ -145,7 +145,7 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('surfaces the active run id when one holds the slot', async () => {
-      prisma.databaseBackupRun.findFirst.mockResolvedValue({ id: 'run-live' });
+      prisma.mhLegacyDatabaseBackupRun.findFirst.mockResolvedValue({ id: 'run-live' });
       await expect(service.getConfig()).resolves.toMatchObject({
         activeRunId: 'run-live',
       });
@@ -306,12 +306,12 @@ describe('DatabaseBackupAdminService', () => {
 
   describe('listRuns / getRun', () => {
     it('lists newest first with pagination meta', async () => {
-      prisma.databaseBackupRun.findMany.mockResolvedValue([makeRun()]);
-      prisma.databaseBackupRun.count.mockResolvedValue(3);
+      prisma.mhLegacyDatabaseBackupRun.findMany.mockResolvedValue([makeRun()]);
+      prisma.mhLegacyDatabaseBackupRun.count.mockResolvedValue(3);
 
       const res = await service.listRuns({ page: 1, pageSize: 2 } as any);
 
-      expect(prisma.databaseBackupRun.findMany).toHaveBeenCalledWith(
+      expect(prisma.mhLegacyDatabaseBackupRun.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
           skip: 0,
@@ -328,20 +328,20 @@ describe('DatabaseBackupAdminService', () => {
 
     it('filters by status when given', async () => {
       await service.listRuns({ page: 1, pageSize: 20, status: 'failed' } as any);
-      expect(prisma.databaseBackupRun.findMany).toHaveBeenCalledWith(
+      expect(prisma.mhLegacyDatabaseBackupRun.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { status: 'failed' } }),
       );
     });
 
     it('404s an unknown run', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(null);
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(null);
       await expect(service.getRun('nope')).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
 
     it('reports elapsed time against now while still running', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({
           status: 'running',
           startedAt: new Date(Date.now() - 60_000),
@@ -359,7 +359,7 @@ describe('DatabaseBackupAdminService', () => {
 
   describe('getDownloadUrl', () => {
     it('rejects a run that is not completed', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ status: 'running' }),
       );
       await expect(
@@ -369,7 +369,7 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('rejects a failed run', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ status: 'failed' }),
       );
       await expect(
@@ -378,7 +378,7 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('resolves the provider RECORDED ON THE RUN, not the active one', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ storageProvider: 'r2', bucket: 'archive-bucket' }),
       );
 
@@ -398,7 +398,7 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('honours an explicit expiresIn', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(makeRun());
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(makeRun());
       const res = await service.getDownloadUrl('run-1', {
         expiresIn: 900,
       } as any);
@@ -410,7 +410,7 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('rejects a completed run with no recorded storage location', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ storageKey: null }),
       );
       await expect(
@@ -425,18 +425,18 @@ describe('DatabaseBackupAdminService', () => {
 
   describe('deleteRun', () => {
     it('refuses to delete a running row', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ status: 'running' }),
       );
       await expect(service.deleteRun('run-1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(prisma.databaseBackupRun.delete).not.toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.delete).not.toHaveBeenCalled();
       expect(provider.delete).not.toHaveBeenCalled();
     });
 
     it('refuses to delete a pending row (it holds the active slot too)', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ status: 'pending' }),
       );
       await expect(service.deleteRun('run-1')).rejects.toBeInstanceOf(
@@ -445,7 +445,7 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('deletes the object via the recorded provider, then the row', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(makeRun());
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(makeRun());
 
       const res = await service.deleteRun('run-1');
 
@@ -456,19 +456,19 @@ describe('DatabaseBackupAdminService', () => {
       expect(provider.delete).toHaveBeenCalledWith(
         'db-backups/2026-08-09-run-1.dump',
       );
-      expect(prisma.databaseBackupRun.delete).toHaveBeenCalledWith({
+      expect(prisma.mhLegacyDatabaseBackupRun.delete).toHaveBeenCalledWith({
         where: { id: 'run-1' },
       });
       expect(res).toEqual({ deleted: true, objectDeleted: true });
     });
 
     it('still deletes the row when the object is already gone', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(makeRun());
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(makeRun());
       provider.delete.mockRejectedValue(new Error('NoSuchKey'));
 
       const res = await service.deleteRun('run-1');
 
-      expect(prisma.databaseBackupRun.delete).toHaveBeenCalled();
+      expect(prisma.mhLegacyDatabaseBackupRun.delete).toHaveBeenCalled();
       expect(res.objectDeleted).toBe(false);
     });
   });
@@ -479,7 +479,7 @@ describe('DatabaseBackupAdminService', () => {
 
   describe('cancelRun', () => {
     it('delegates to the runner for a running row', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ status: 'running' }),
       );
       runner.cancelRun.mockResolvedValue({ signalled: true });
@@ -492,7 +492,7 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('refuses to cancel a terminal run', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(
         makeRun({ status: 'completed' }),
       );
       await expect(service.cancelRun('run-1')).rejects.toBeInstanceOf(
@@ -508,7 +508,7 @@ describe('DatabaseBackupAdminService', () => {
 
   describe('BigInt serialization', () => {
     it('JSON-serializes a run detail response without throwing', async () => {
-      prisma.databaseBackupRun.findUnique.mockResolvedValue(makeRun());
+      prisma.mhLegacyDatabaseBackupRun.findUnique.mockResolvedValue(makeRun());
       const run = await service.getRun('run-1');
 
       // A raw Prisma row here would throw
@@ -520,11 +520,11 @@ describe('DatabaseBackupAdminService', () => {
     });
 
     it('JSON-serializes a list response without throwing', async () => {
-      prisma.databaseBackupRun.findMany.mockResolvedValue([
+      prisma.mhLegacyDatabaseBackupRun.findMany.mockResolvedValue([
         makeRun(),
         makeRun({ id: 'run-2', sizeBytes: null, bytesWritten: 0n }),
       ]);
-      prisma.databaseBackupRun.count.mockResolvedValue(2);
+      prisma.mhLegacyDatabaseBackupRun.count.mockResolvedValue(2);
 
       const res = await service.listRuns({ page: 1, pageSize: 20 } as any);
       const json = JSON.parse(JSON.stringify(res));

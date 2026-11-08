@@ -4,18 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  CircleRole,
-  JobStatus,
-  MediaType,
-  MediaEnhancementBatch,
-  MediaEnhancementStatus,
-  MediaEnhancementDecision,
-  MediaTagSource,
-  JobReason,
-  MediaFaceStatusType,
-  Prisma,
-} from '@prisma/client';
+import { CircleRole, MediaType, MediaEnhancementBatch, MediaEnhancementStatus, MediaEnhancementDecision, MediaTagSource, JobReason, MediaFaceStatusType, Prisma } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
@@ -26,10 +15,9 @@ import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.serv
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { isPictureEnhancementEnabled } from '../common/types/settings.types';
+import { isPictureEnhancementEnabled } from '../settings/feature-gates';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
+import { RequestUser } from '@marinoscar/platform-api/identity';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
@@ -46,6 +34,8 @@ import {
 } from './enhance-prompt.builder';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const SYSTEM_TAG = 'AI Enhanced';
 
@@ -86,7 +76,8 @@ export class MediaEnhancementService {
     private readonly mediaEnrichment: MediaEnrichmentService,
     private readonly thumbnails: MediaThumbnailService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -768,10 +759,10 @@ export class MediaEnhancementService {
       // Delete only the still-PENDING job rows, matched precisely on the
       // enhancement id in their payload (never by mediaItemId, which could
       // catch an unrelated job for the same item).
-      await this.prisma.enrichmentJob.deleteMany({
+      await this.prisma.job.deleteMany({
         where: {
           type: 'picture_enhancement',
-          status: JobStatus.pending,
+          status: 'pending',
           OR: pendingRows.map((r) => ({
             payload: { path: ['enhancementId'], equals: r.id },
           })),
@@ -1382,6 +1373,7 @@ export class MediaEnhancementService {
 
     const newObject = await this.prisma.storageObject.create({
       data: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         name: enhancedFilename,
         size: BigInt(bytes.length),
         mimeType: 'image/jpeg',

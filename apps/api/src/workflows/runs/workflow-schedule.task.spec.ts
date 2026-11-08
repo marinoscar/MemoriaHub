@@ -24,9 +24,9 @@ import { randomUUID } from 'crypto';
 import { WorkflowScheduleTask } from './workflow-schedule.task';
 import { WorkflowRunService } from './workflow-run.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const WORKFLOW_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
@@ -65,7 +65,7 @@ function makeDueWorkflow(overrides: Record<string, unknown> = {}) {
 describe('WorkflowScheduleTask', () => {
   let task: WorkflowScheduleTask;
   let prisma: MockPrismaService;
-  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let runService: jest.Mocked<Pick<WorkflowRunService, 'startUnattendedRun'>>;
 
   beforeEach(async () => {
@@ -81,7 +81,7 @@ describe('WorkflowScheduleTask', () => {
       providers: [
         WorkflowScheduleTask,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
         { provide: WorkflowRunService, useValue: runService },
       ],
     }).compile();

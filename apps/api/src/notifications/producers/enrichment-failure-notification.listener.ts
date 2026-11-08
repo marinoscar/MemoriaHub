@@ -41,7 +41,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { JobStatus, NotificationType } from '@prisma/client';
+import { NotificationType } from '@prisma/client';
 
 import { ROLES } from '../../common/constants/roles.constants';
 import {
@@ -85,11 +85,11 @@ export class EnrichmentFailureNotificationListener {
       // Re-read for `lastError`, and re-assert `failed` defensively: the event
       // is only emitted from terminal branches, but a row that has since been
       // retried by an admin is no longer a permanent failure worth reporting.
-      const job = await this.prisma.enrichmentJob.findUnique({
+      const job = await this.prisma.job.findUnique({
         where: { id: event.jobId },
         select: { status: true, lastError: true },
       });
-      if (!job || job.status !== JobStatus.failed) return;
+      if (!job || job.status !== 'failed') return;
 
       const adminIds = await this.loadAdminUserIds();
       if (adminIds.length === 0) return;

@@ -2,7 +2,7 @@
  * Unit tests for SocialMediaDetectionHandler.
  *
  * The real (pure) SocialMediaDetectorService is used directly wherever
- * convenient to reduce mock surface — only PrismaService, SystemSettingsService,
+ * convenient to reduce mock surface — only PrismaService, AppSystemSettingsService,
  * SocialMediaOcrService, StorageProviderResolver, and MediaEnrichmentService are
  * mocked.
  *
@@ -84,7 +84,7 @@ import { promises as fsPromises } from 'fs';
 import {
   EnrichmentJob,
   JobReason,
-  JobStatus,
+  MhLegacyJobStatus,
   MediaSocialStatusType,
   MediaTagSource,
   MediaType,
@@ -98,7 +98,6 @@ import { SocialMediaDetectorService, type VideoDetectionInput } from './social-m
 import { SocialMediaOcrService } from './social-media-ocr.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import {
@@ -106,6 +105,7 @@ import {
   MockPrismaService,
   mockPrismaTransaction,
 } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,7 +117,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'social_media_detection',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 10,
     providerKey: null,
@@ -239,7 +239,7 @@ describe('SocialMediaDetectionHandler', () => {
         EnrichmentHandlerRegistry,
         SocialMediaDetectorService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: SocialMediaOcrService, useValue: mockOcr },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichment },
@@ -775,7 +775,7 @@ describe('SocialMediaDetectionHandler', () => {
 
       expect(mockUnlink).toHaveBeenCalledTimes(1);
       const [tmpPath] = mockUnlink.mock.calls[0];
-      expect(tmpPath).toMatch(/memoriaHub-social-dl-.*\.mp4$/);
+      expect(tmpPath).toMatch(/memoriahub-job-social-dl-.*\.mp4$/);
 
       // The OCR call received the very same memoized path.
       const [ocrPathArg] = mockOcr.recognizeVideo.mock.calls[0];

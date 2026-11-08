@@ -9,10 +9,10 @@ import {
 import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
-import { isWorkflowsEnabled } from '../../common/types/settings.types';
+import { isWorkflowsEnabled } from '../../settings/feature-gates';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /**
  * Length of the rolling micro-run collection window, in minutes. A CODE
@@ -69,7 +69,7 @@ export class WorkflowEvaluateItemHandler implements EnrichmentHandler, OnModuleI
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly compiler: WorkflowConditionCompiler,
   ) {}
 

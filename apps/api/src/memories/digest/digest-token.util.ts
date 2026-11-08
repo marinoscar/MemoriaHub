@@ -40,7 +40,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 
-import { deriveSubKey } from '../../common/crypto/secret-cipher';
+import { deriveSubKey } from '../../legacy/legacy-secret-cipher';
 
 /** Signing purposes. Each maps to an independent derived key. */
 export const DIGEST_IMAGE_PURPOSE = 'memory-digest-image';

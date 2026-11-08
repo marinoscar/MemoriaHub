@@ -25,13 +25,12 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import request from 'supertest';
 
-import { PERMISSIONS_KEY } from '../../src/auth/decorators/permissions.decorator';
-import { IS_PUBLIC_KEY } from '../../src/auth/decorators/public.decorator';
-import { ALLOW_DURING_MAINTENANCE_KEY } from '../../src/common/maintenance/allow-during-maintenance.decorator';
+import { PERMISSIONS_KEY, IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
+import { ALLOW_DURING_MAINTENANCE_KEY } from '@marinoscar/platform-api/core';
 import { ANDROID_APP_SETTINGS_KEY } from '../../src/android-app/android-app.schema';
 import { AndroidReleaseAdminController } from '../../src/android-app/releases/android-release-admin.controller';
 import { AndroidReleaseController } from '../../src/android-app/releases/android-release.controller';
-import { deriveSubKey } from '../../src/common/crypto/secret-cipher';
+import { deriveSubKey } from '../../src/legacy/legacy-secret-cipher';
 import {
   ANDROID_APK_STEM,
   DEFAULT_ANDROID_PACKAGE_NAME,
@@ -114,41 +113,41 @@ function installReleaseTable(prisma: any, users: () => Map<string, Row>) {
     });
   };
 
-  prisma.androidAppRelease.findUnique.mockImplementation(async ({ where, include }: any) => {
+  prisma.mhLegacyAndroidAppRelease.findUnique.mockImplementation(async ({ where, include }: any) => {
     const row = rows.find((r) => matches(r, where));
     return row ? withUploader(row, include) : null;
   });
-  prisma.androidAppRelease.findFirst.mockImplementation(async ({ where, include }: any = {}) => {
+  prisma.mhLegacyAndroidAppRelease.findFirst.mockImplementation(async ({ where, include }: any = {}) => {
     const row = rows.find((r) => matches(r, where));
     return row ? withUploader(row, include) : null;
   });
-  prisma.androidAppRelease.findMany.mockImplementation(async ({ include }: any = {}) =>
+  prisma.mhLegacyAndroidAppRelease.findMany.mockImplementation(async ({ include }: any = {}) =>
     [...rows].sort((a, b) => b.createdAt - a.createdAt).map((row) => withUploader(row, include)),
   );
-  prisma.androidAppRelease.create.mockImplementation(async ({ data, include }: any) => {
+  prisma.mhLegacyAndroidAppRelease.create.mockImplementation(async ({ data, include }: any) => {
     if (rows.some((r) => r.packageName === data.packageName && r.versionCode === data.versionCode)) {
       throw unique('android_app_releases_package_name_version_code_key');
     }
-    if (data.isCurrent && rows.some((r) => r.isCurrent)) throw unique('android_app_releases_one_current_uniq_idx');
+    if (data.isCurrent && rows.some((r) => r.isCurrent)) throw unique('mh_legacy_android_app_releases_one_current_uniq_idx');
     const row = { notes: null, createdAt: new Date(Date.now() + rows.length), ...data };
     rows.push(row);
     return withUploader(row, include);
   });
-  prisma.androidAppRelease.updateMany.mockImplementation(async ({ where, data }: any) => {
+  prisma.mhLegacyAndroidAppRelease.updateMany.mockImplementation(async ({ where, data }: any) => {
     const hit = rows.filter((r) => matches(r, where));
     hit.forEach((r) => Object.assign(r, data));
     return { count: hit.length };
   });
-  prisma.androidAppRelease.update.mockImplementation(async ({ where, data, include }: any) => {
+  prisma.mhLegacyAndroidAppRelease.update.mockImplementation(async ({ where, data, include }: any) => {
     const row = rows.find((r) => matches(r, where));
     if (!row) throw new Error('not found');
     if (data.isCurrent && rows.some((r) => r.isCurrent && r !== row)) {
-      throw unique('android_app_releases_one_current_uniq_idx');
+      throw unique('mh_legacy_android_app_releases_one_current_uniq_idx');
     }
     Object.assign(row, data);
     return withUploader(row, include);
   });
-  prisma.androidAppRelease.deleteMany.mockImplementation(async ({ where }: any) => {
+  prisma.mhLegacyAndroidAppRelease.deleteMany.mockImplementation(async ({ where }: any) => {
     const before = rows.length;
     for (let i = rows.length - 1; i >= 0; i -= 1) if (matches(rows[i], where)) rows.splice(i, 1);
     return { count: before - rows.length };

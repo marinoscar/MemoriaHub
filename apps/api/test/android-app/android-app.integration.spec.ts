@@ -15,16 +15,15 @@
 
 import request from 'supertest';
 
-import { PERMISSIONS_KEY } from '../../src/auth/decorators/permissions.decorator';
-import { IS_PUBLIC_KEY } from '../../src/auth/decorators/public.decorator';
+import { PERMISSIONS_KEY, IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
 import { AndroidAppController } from '../../src/android-app/android-app.controller';
 import { AssetLinksController } from '../../src/android-app/asset-links.controller';
 import {
   ANDROID_APP_SETTINGS_KEY,
   ANDROID_APP_TRUSTED_APPS_UPDATED_ACTION,
 } from '../../src/android-app/android-app.schema';
-import { ALLOW_DURING_MAINTENANCE_KEY } from '../../src/common/maintenance/allow-during-maintenance.decorator';
-import { MaintenanceModeService } from '../../src/common/maintenance/maintenance-mode.service';
+import { ALLOW_DURING_MAINTENANCE_KEY } from '@marinoscar/platform-api/core';
+import { MaintenanceModeService } from '@marinoscar/platform-api/host';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 import {
   authHeader,
@@ -259,13 +258,17 @@ describe('Android app trust API (Integration)', () => {
 
     it('stays reachable while a maintenance window is open, unlike the admin route', async () => {
       const maintenance = context.module.get(MaintenanceModeService);
-      await maintenance.enable('Down for maintenance', null, { allowAdmins: false });
+      maintenance.setInMemoryOverride({
+        enabled: true,
+        message: 'Down for maintenance',
+        allowAdmins: false,
+      });
 
       try {
         await request(server()).get(ASSET_LINKS_ROUTE).expect(200);
         await request(server()).get(ADMIN_ROUTE).set(await adminAuth()).expect(503);
       } finally {
-        maintenance.clearInMemoryOverride();
+        maintenance.setInMemoryOverride(null);
       }
     });
   });

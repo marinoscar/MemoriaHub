@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 
 /**
  * Test data factories for creating mock entities
@@ -487,7 +487,18 @@ export interface MockUserWithRelations {
   }>;
   identities?: any[];
   userSettings?: any;
+  /** The default-organization membership (platform 0024): every user is a member. */
+  memberships?: Array<{
+    orgId: string;
+    userId: string;
+    status: string;
+    org: { id: string; isDefault: boolean };
+    role: { id: string; name: string; rolePermissions: any[] };
+  }>;
 }
+
+/** The default organization every mock user belongs to. */
+export const MOCK_DEFAULT_ORG_ID = '00000000-0000-4000-8000-0000000000d0';
 
 export function createMockUserWithRelations(
   options: CreateMockUserOptions = {},
@@ -525,7 +536,24 @@ export function createMockUserWithRelations(
 
   return {
     ...user,
+    // The mock keeps the old matrix on the user's role grants (the platform unions
+    // system-role and membership-role grants, so the effective set is the same)
+    // and adds the default-organization membership every user has since platform
+    // 0024, carrying the org role NAME (admin -> org_admin).
     userRoles: [{ ...userRole, role: roleWithPermissions }],
+    memberships: [
+      {
+        orgId: MOCK_DEFAULT_ORG_ID,
+        userId: user.id,
+        status: 'active',
+        org: { id: MOCK_DEFAULT_ORG_ID, isDefault: true },
+        role: {
+          id: randomUUID(),
+          name: roleName === 'admin' ? 'org_admin' : roleName,
+          rolePermissions: [],
+        },
+      },
+    ],
     identities: [identity],
     userSettings: settings,
   };

@@ -67,7 +67,7 @@ export class BroadcastStartHandler implements EnrichmentHandler, OnModuleInit {
       return;
     }
 
-    const broadcast = await this.prisma.notificationBroadcast.findUnique({
+    const broadcast = await this.prisma.mhLegacyNotificationBroadcast.findUnique({
       where: { id: broadcastId },
       select: { id: true, status: true, audienceCutoff: true, cursorUserId: true, processedCount: true },
     });
@@ -83,7 +83,7 @@ export class BroadcastStartHandler implements EnrichmentHandler, OnModuleInit {
     }
 
     const now = new Date();
-    const claimed = await this.prisma.notificationBroadcast.updateMany({
+    const claimed = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
       where: { id: broadcastId, status: 'scheduled' },
       data: { status: 'sending', startedAt: now, audienceCutoff: now },
     });
@@ -110,7 +110,7 @@ export class BroadcastStartHandler implements EnrichmentHandler, OnModuleInit {
       this.logger.log(`Broadcast ${broadcast.id} already under way; start job ${job.id} is a no-op`);
       return;
     }
-    const existingChunk = await this.prisma.enrichmentJob.findFirst({
+    const existingChunk = await this.prisma.job.findFirst({
       where: { type: BROADCAST_CHUNK_TYPE, payload: { path: ['broadcastId'], equals: broadcast.id } },
       select: { id: true },
     });
@@ -135,7 +135,7 @@ export class BroadcastStartHandler implements EnrichmentHandler, OnModuleInit {
     cutoff: Date,
   ): Promise<{ recipientCount: number; chunkJobId: string } | null> {
     const recipientCount = await this.prisma.user.count({ where: audienceWhere(cutoff) });
-    const recorded = await this.prisma.notificationBroadcast.updateMany({
+    const recorded = await this.prisma.mhLegacyNotificationBroadcast.updateMany({
       where: { id: broadcastId, status: 'sending' },
       data: { recipientCount },
     });

@@ -4,14 +4,16 @@
 // Distributed Worker Nodes
 // =============================================================================
 
-enum NodeStatus {
+enum MhLegacyNodeStatus {
   online
   draining
   offline
   disabled
+
+  @@map("MhLegacyNodeStatus")
 }
 
-model WorkerNode {
+model MhLegacyWorkerNode {
   id              String     @id @default(uuid()) @db.Uuid
   name            String
   hostname        String
@@ -19,7 +21,7 @@ model WorkerNode {
   cliVersion      String     @map("cli_version")
   eligibleTypes   String[]   @map("eligible_types")
   concurrency     Int        @default(1)
-  status          NodeStatus @default(online)
+  status          MhLegacyNodeStatus @default(online)
   // Latest `node doctor` capability summary reported via heartbeat (per-capability ok/warn/error).
   capabilities    Json?      @db.JsonB
   registeredAt    DateTime   @default(now()) @map("registered_at") @db.Timestamptz
@@ -28,7 +30,6 @@ model WorkerNode {
 
   // Relations
   createdBy    User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  claimedJobs  EnrichmentJob[]
   // Local Media Backup relations (issue #310, epic #308)
   backupConfig NodeBackupConfig?
   backupRuns   NodeBackupRun[]
@@ -39,7 +40,7 @@ model WorkerNode {
   @@unique([createdById, name])
   @@index([status])
   @@index([createdById])
-  @@map("worker_nodes")
+  @@map("mh_legacy_worker_nodes")
 }
 
 // Durable, least-privilege bearer credential for worker nodes (`nod_` prefix).
@@ -47,7 +48,7 @@ model WorkerNode {
 // (enforced by JwtAuthGuard's route allowlist) and may never expire
 // (`expiresAt` NULL = never). Mirrors PersonalAccessToken minus the duration
 // bookkeeping. Migration 20260716020000_add_node_credentials.
-model NodeCredential {
+model MhLegacyNodeCredential {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @map("user_id") @db.Uuid
   name        String
@@ -62,5 +63,5 @@ model NodeCredential {
   user User @relation("UserNodeCredentials", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("node_credentials")
+  @@map("mh_legacy_node_credentials")
 }

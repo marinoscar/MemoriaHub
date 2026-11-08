@@ -32,13 +32,13 @@ import { randomUUID } from 'crypto';
 import { WorkflowTriggerListener } from './workflow-trigger.listener';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { EnrichmentJobSettledEvent } from '../../enrichment/events/enrichment-job-settled.event';
 import { ObjectProcessedEvent } from '../../storage/processing/events/object-processed.event';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const CIRCLE_ID = randomUUID();
 const MEDIA_ITEM_ID = randomUUID();
@@ -81,7 +81,7 @@ const LOCATION_ONLY_DEF = def([
 describe('WorkflowTriggerListener', () => {
   let listener: WorkflowTriggerListener;
   let prisma: MockPrismaService;
-  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
 
   beforeEach(async () => {
@@ -98,7 +98,7 @@ describe('WorkflowTriggerListener', () => {
         WorkflowTriggerListener,
         WorkflowConditionCompiler,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
         { provide: EnrichmentJobService, useValue: enrichmentJobs },
       ],
     }).compile();
@@ -117,7 +117,7 @@ describe('WorkflowTriggerListener', () => {
     prisma.mediaTagStatus.findUnique.mockResolvedValue(null);
     prisma.mediaFaceStatus.findUnique.mockResolvedValue(null);
     prisma.locationSuggestion.findUnique.mockResolvedValue(null);
-    prisma.enrichmentJob.findMany.mockResolvedValue([]);
+    prisma.job.findMany.mockResolvedValue([]);
   });
 
   function mockWorkflows(rows: Array<{ id: string; definition: WorkflowDefinition }>): void {
@@ -322,7 +322,7 @@ describe('WorkflowTriggerListener', () => {
       // in-flight-producer escape hatch applicable -- a photo, not a social video).
       prisma.mediaTagStatus.findUnique.mockResolvedValue({ status: 'processed' } as any);
       prisma.mediaFaceStatus.findUnique.mockResolvedValue({ status: 'pending' } as any);
-      prisma.enrichmentJob.findMany.mockResolvedValue([
+      prisma.job.findMany.mockResolvedValue([
         { type: 'face_detection' },
       ] as any); // face_detection still in flight
 
@@ -355,7 +355,7 @@ describe('WorkflowTriggerListener', () => {
       // Now both are terminal: tags processed, faces processed, nothing in flight.
       prisma.mediaTagStatus.findUnique.mockResolvedValue({ status: 'processed' } as any);
       prisma.mediaFaceStatus.findUnique.mockResolvedValue({ status: 'processed' } as any);
-      prisma.enrichmentJob.findMany.mockResolvedValue([]);
+      prisma.job.findMany.mockResolvedValue([]);
 
       await listener.handleJobSettled(
         new EnrichmentJobSettledEvent(
@@ -411,7 +411,7 @@ describe('WorkflowTriggerListener', () => {
         duplicateGroupId: null,
         socialMediaSource: null,
       } as any);
-      prisma.enrichmentJob.findMany.mockResolvedValue([]); // burst_detection no longer in flight
+      prisma.job.findMany.mockResolvedValue([]); // burst_detection no longer in flight
 
       await listener.handleJobSettled(
         new EnrichmentJobSettledEvent(
@@ -440,7 +440,7 @@ describe('WorkflowTriggerListener', () => {
         socialMediaSource: 'tiktok',
       } as any);
       prisma.mediaFaceStatus.findUnique.mockResolvedValue(null); // never processed -- skipped
-      prisma.enrichmentJob.findMany.mockResolvedValue([]); // no face_detection/video_face_detection in flight
+      prisma.job.findMany.mockResolvedValue([]); // no face_detection/video_face_detection in flight
 
       await listener.handleJobSettled(
         new EnrichmentJobSettledEvent(

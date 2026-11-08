@@ -24,9 +24,10 @@ import {
   createMockViewerUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { EmailService } from '../../src/email/email.service';
-import { encryptSecret, decryptSecret } from '../../src/common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../../src/legacy/legacy-secret-cipher';
+import { EmailSmtpSecretStore } from '../../src/email/email-smtp-secret.store';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -59,6 +60,9 @@ describe('Email Settings Integration', () => {
     // Force a fresh read on every test so each test's mocked DB state is honored.
     const settingsService = context.module.get(SystemSettingsService);
     (settingsService as any).settingsCache = null;
+    // Same for the SMTP secret store (the ciphertext lives outside the settings namespace).
+    (context.module.get(EmailSmtpSecretStore) as any).cache = null;
+    (context.prismaMock.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'settings-1' }]);
   });
 
   /** Seed the mocked systemSettings row with a given `email` block. */
@@ -178,9 +182,21 @@ describe('Email Settings Integration', () => {
       expect(bodyStr).not.toContain('smtpPassword');
       expect(bodyStr).not.toContain('brand-new-plaintext-password');
 
-      // The encrypted value handed to patchSettings must round-trip.
-      const patchCall = context.prismaMock.systemSettings.update.mock.calls.slice(-1)[0][0];
-      const persistedCiphertext = patchCall.data.value.email.smtpPassword;
+      // The ciphertext goes to the secret store (a jsonb_set of the `global` row), never through the
+      // settings namespace; it must round-trip, and the settings PATCH must not carry it.
+      const settingsPatch = context.prismaMock.systemSettings.update.mock.calls.slice(-1)[0][0];
+      expect(settingsPatch.data.value.email).not.toHaveProperty('smtpPassword');
+      const secretCall = (context.prismaMock.$queryRaw as jest.Mock).mock.calls.slice(-1)[0];
+      const persistedCiphertext = (secretCall[0].values as unknown[]).find((v) => {
+        if (typeof v !== 'string') return false;
+        try {
+          decryptSecret(v);
+          return true;
+        } catch {
+          return false;
+        }
+      }) as string;
+      expect(persistedCiphertext).toBeDefined();
       expect(persistedCiphertext).not.toBe('brand-new-plaintext-password');
       expect(decryptSecret(persistedCiphertext)).toBe('brand-new-plaintext-password');
     });
@@ -207,6 +223,9 @@ describe('Email Settings Integration', () => {
         })
         .expect(200);
 
+      // Omitting the password touches neither the secret store nor the settings namespace: the
+      // stored ciphertext is carried forward by the platform write as an unmodelled key.
+      expect(context.prismaMock.$queryRaw).not.toHaveBeenCalled();
       const patchCall = context.prismaMock.systemSettings.update.mock.calls.slice(-1)[0][0];
       expect(patchCall.data.value.email.smtpPassword).toBe(existingCiphertext);
     });

@@ -8,13 +8,13 @@
  * circle rather than one job for the whole deployment.
  *
  * No database and NO EMAIL: PrismaService, EnrichmentJobService and
- * SystemSettingsService are fully mocked, and MemoryDigestService is used for
+ * AppSystemSettingsService are fully mocked, and MemoryDigestService is used for
  * real only for its pure gate/window helpers (its Prisma-touching methods are
  * spied). Nothing here can reach a network.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, JobStatus } from '@prisma/client';
+import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 
 import { MemoryDigestTask } from './memory-digest.task';
 import {
@@ -24,9 +24,9 @@ import {
 } from './memory-digest.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { EmailService } from '../../email/email.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,7 +71,7 @@ describe('MemoryDigestTask', () => {
   let digest: MemoryDigestService;
   let prisma: {
     circle: { findMany: jest.Mock };
-    enrichmentJob: { findMany: jest.Mock; groupBy: jest.Mock };
+    job: { findMany: jest.Mock; groupBy: jest.Mock };
   };
   let enrichment: { enqueue: jest.Mock };
   let settings: { getSettings: jest.Mock };
@@ -82,7 +82,7 @@ describe('MemoryDigestTask', () => {
 
     prisma = {
       circle: { findMany: jest.fn().mockResolvedValue([{ id: 'circle-1' }]) },
-      enrichmentJob: {
+      job: {
         findMany: jest.fn().mockResolvedValue([]),
         groupBy: jest.fn().mockResolvedValue([]),
       },
@@ -96,7 +96,7 @@ describe('MemoryDigestTask', () => {
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
         { provide: EnrichmentJobService, useValue: enrichment },
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
         // Never reached by these tests; present so the real service constructs.
         { provide: EmailService, useValue: { sendEmail: jest.fn() } },
         { provide: MediaThumbnailService, useValue: { extractThumbKey: jest.fn() } },
@@ -208,7 +208,7 @@ describe('MemoryDigestTask', () => {
   // -------------------------------------------------------------------------
 
   it('skips a circle whose digest job is already pending or running', async () => {
-    prisma.enrichmentJob.findMany.mockResolvedValue([{ circleId: 'circle-1' }]);
+    prisma.job.findMany.mockResolvedValue([{ subjectId: 'circle-1' }]);
 
     const result = await task.sweep(AFTER_SEND_HOUR);
 
@@ -218,9 +218,9 @@ describe('MemoryDigestTask', () => {
 
   it('skips a circle inside its frequency window', async () => {
     // Sent an hour ago; a DAILY cadence is nowhere near due.
-    prisma.enrichmentJob.groupBy.mockResolvedValue([
+    prisma.job.groupBy.mockResolvedValue([
       {
-        circleId: 'circle-1',
+        subjectId: 'circle-1',
         _max: { finishedAt: new Date(AFTER_SEND_HOUR.getTime() - 3_600_000) },
       },
     ]);
@@ -232,9 +232,9 @@ describe('MemoryDigestTask', () => {
   });
 
   it('sends again once the window has elapsed', async () => {
-    prisma.enrichmentJob.groupBy.mockResolvedValue([
+    prisma.job.groupBy.mockResolvedValue([
       {
-        circleId: 'circle-1',
+        subjectId: 'circle-1',
         _max: { finishedAt: new Date(AFTER_SEND_HOUR.getTime() - 25 * 3_600_000) },
       },
     ]);
@@ -244,9 +244,9 @@ describe('MemoryDigestTask', () => {
 
   it('a weekly cadence is not due after one day', async () => {
     settings.getSettings.mockResolvedValue(settingsWith({ frequency: 'weekly' }));
-    prisma.enrichmentJob.groupBy.mockResolvedValue([
+    prisma.job.groupBy.mockResolvedValue([
       {
-        circleId: 'circle-1',
+        subjectId: 'circle-1',
         _max: { finishedAt: new Date(AFTER_SEND_HOUR.getTime() - 25 * 3_600_000) },
       },
     ]);
@@ -255,7 +255,7 @@ describe('MemoryDigestTask', () => {
   });
 
   it('a circle that has never had a digest is always past the window', async () => {
-    prisma.enrichmentJob.groupBy.mockResolvedValue([]);
+    prisma.job.groupBy.mockResolvedValue([]);
 
     expect((await task.sweep(AFTER_SEND_HOUR)).enqueued).toBe(1);
   });
@@ -263,9 +263,9 @@ describe('MemoryDigestTask', () => {
   it('the one-tick tolerance keeps a daily digest pinned to its hour', async () => {
     // Yesterday's run finished at 10:00:30; today's tick is at 10:00:00. A
     // strict 24h window would slip the send to 11:00 and drift daily.
-    prisma.enrichmentJob.groupBy.mockResolvedValue([
+    prisma.job.groupBy.mockResolvedValue([
       {
-        circleId: 'circle-1',
+        subjectId: 'circle-1',
         _max: { finishedAt: new Date(AFTER_SEND_HOUR.getTime() - 24 * 3_600_000 + 30_000) },
       },
     ]);
@@ -289,8 +289,8 @@ describe('MemoryDigestTask', () => {
 
   it('measures new content from the previous digest, not from now', async () => {
     const watermark = new Date(AFTER_SEND_HOUR.getTime() - 48 * 3_600_000);
-    prisma.enrichmentJob.groupBy.mockResolvedValue([
-      { circleId: 'circle-1', _max: { finishedAt: watermark } },
+    prisma.job.groupBy.mockResolvedValue([
+      { subjectId: 'circle-1', _max: { finishedAt: watermark } },
     ]);
 
     await task.sweep(AFTER_SEND_HOUR);
@@ -343,16 +343,16 @@ describe('MemoryDigestTask', () => {
     it('reads in-flight and watermark rows with the right statuses', async () => {
       await task.sweep(AFTER_SEND_HOUR);
 
-      expect(prisma.enrichmentJob.findMany).toHaveBeenCalledWith(
+      expect(prisma.job.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            status: { in: [JobStatus.pending, JobStatus.running] },
+            status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
           }),
         }),
       );
-      expect(prisma.enrichmentJob.groupBy).toHaveBeenCalledWith(
+      expect(prisma.job.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ status: JobStatus.succeeded }),
+          where: expect.objectContaining({ status: MhLegacyJobStatus.succeeded }),
         }),
       );
     });

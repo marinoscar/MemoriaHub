@@ -25,8 +25,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Schema defaults (#340), used only when a setting is missing/garbage. */
 const DEFAULT_RETENTION_COUNT = 7;
@@ -54,7 +54,7 @@ export class DatabaseBackupRetentionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
   ) {}
 
@@ -127,7 +127,7 @@ export class DatabaseBackupRetentionService {
   private async pruneByCount(
     retentionCount: number,
   ): Promise<{ pruned: number; errors: number }> {
-    const rows = await this.prisma.databaseBackupRun.findMany({
+    const rows = await this.prisma.mhLegacyDatabaseBackupRun.findMany({
       where: {
         status: 'completed',
         // The exemption. A pre-restore dump is a rollback artifact, not one of
@@ -155,7 +155,7 @@ export class DatabaseBackupRetentionService {
   ): Promise<{ pruned: number; errors: number }> {
     const cutoff = new Date(Date.now() - retentionHours * 60 * 60 * 1000);
 
-    const rows = await this.prisma.databaseBackupRun.findMany({
+    const rows = await this.prisma.mhLegacyDatabaseBackupRun.findMany({
       where: {
         status: 'completed',
         trigger: 'pre_restore',
@@ -199,7 +199,7 @@ export class DatabaseBackupRetentionService {
       }
 
       try {
-        await this.prisma.databaseBackupRun.delete({ where: { id: run.id } });
+        await this.prisma.mhLegacyDatabaseBackupRun.delete({ where: { id: run.id } });
         pruned += 1;
       } catch (err) {
         errors += 1;

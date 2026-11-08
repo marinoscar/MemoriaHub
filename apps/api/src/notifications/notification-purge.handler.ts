@@ -52,7 +52,7 @@ import { EnrichmentJob, Prisma } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Fallback when `notifications.retentionDays` is unset. */
 const DEFAULT_RETENTION_DAYS = 30;
@@ -69,7 +69,7 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -105,7 +105,7 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
     // and `(read_at)` respectively (both added by #244's migration for exactly
     // this sweep). A dismissed row that was also read is caught by the first
     // pass and simply no longer exists for the second; there is no double count.
-    const dismissedWhere: Prisma.NotificationWhereInput = {
+    const dismissedWhere: Prisma.MhLegacyNotificationWhereInput = {
       dismissedAt: { not: null, lt: cutoff },
     };
 
@@ -117,7 +117,7 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
     // dismissal (the user's most recent interaction with it), not deleted on
     // the strength of the older read. Excluding dismissed rows here is
     // therefore the conservative reading of the two rules, never the looser one.
-    const readWhere: Prisma.NotificationWhereInput = {
+    const readWhere: Prisma.MhLegacyNotificationWhereInput = {
       dismissedAt: null,
       readAt: { not: null, lt: cutoff },
     };
@@ -143,7 +143,7 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
     let totalDeleted = 0;
 
     for (;;) {
-      const batch = await this.prisma.notificationDelivery.findMany({
+      const batch = await this.prisma.mhLegacyNotificationDelivery.findMany({
         where: { createdAt: { lt: cutoff } },
         select: { id: true },
         take: BATCH_SIZE,
@@ -151,7 +151,7 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
 
       if (batch.length === 0) break;
 
-      const result = await this.prisma.notificationDelivery.deleteMany({
+      const result = await this.prisma.mhLegacyNotificationDelivery.deleteMany({
         where: { id: { in: batch.map((row) => row.id) } },
       });
       totalDeleted += result.count;
@@ -168,11 +168,11 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
    * JobHistoryPurgeHandler / ReviewRunHistoryPurgeHandler — never loads the full
    * eligible set into memory, and each DELETE touches at most BATCH_SIZE rows.
    */
-  private async purgeInBatches(where: Prisma.NotificationWhereInput): Promise<number> {
+  private async purgeInBatches(where: Prisma.MhLegacyNotificationWhereInput): Promise<number> {
     let totalDeleted = 0;
 
     for (;;) {
-      const batch = await this.prisma.notification.findMany({
+      const batch = await this.prisma.mhLegacyNotification.findMany({
         where,
         select: { id: true },
         take: BATCH_SIZE,
@@ -180,7 +180,7 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
 
       if (batch.length === 0) break;
 
-      const result = await this.prisma.notification.deleteMany({
+      const result = await this.prisma.mhLegacyNotification.deleteMany({
         where: { id: { in: batch.map((row) => row.id) } },
       });
       totalDeleted += result.count;

@@ -8,7 +8,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { EnrichmentJob, JobReason, JobStatus } from '@prisma/client';
+import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { videoAutoTaggingResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { VideoAutoTaggingHandler } from './video-auto-tagging.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
@@ -21,7 +21,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
     type: 'video_auto_tagging',
     mediaItemId: 'media-1',
     circleId: 'circle-1',
-    status: JobStatus.running,
+    status: MhLegacyJobStatus.running,
     reason: JobReason.upload,
     priority: 20,
     providerKey: 'openai',

@@ -57,12 +57,8 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useMediaShares } from '../../hooks/useMediaShares';
 import type { MediaShare } from '../../types/sharing';
-import {
-  DataTable,
-  type DataTableBulkAction,
-  type DataTableFilterModel,
-  type DataTableRowAction,
-} from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableBulkAction, DataTableFilterModel, DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   SHARES_EMPTY_STATE,
   SHARES_TABLE_ID,

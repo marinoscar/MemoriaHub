@@ -18,6 +18,7 @@ import { createMockStorageProvider } from '../../../test/mocks/storage-provider.
 import { OBJECT_UPLOADED_EVENT } from '../processing/events/object-uploaded.event';
 import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { MultipartPartsMissingError } from '../providers/storage-provider.types';
+import { DefaultOrgId } from '../../common/tenancy/default-org-id';
 
 describe('ObjectsService', () => {
   let service: ObjectsService;
@@ -70,6 +71,7 @@ describe('ObjectsService', () => {
       providers: [
         ObjectsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: ConfigService, useValue: mockConfig },
         { provide: EventEmitter2, useValue: mockEventEmitter },

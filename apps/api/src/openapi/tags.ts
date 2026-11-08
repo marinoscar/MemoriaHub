@@ -71,6 +71,19 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'cannot complete OAuth sign-in at all. Admin only.',
       },
       {
+        name: 'Organizations',
+        description:
+          "The identity slice's organization routes: members, invitations and the deployment's organizations. " +
+          'MemoriaHub runs in single-organization mode (`TENANCY_MODE` unset), where the web UI hides them; ' +
+          'the default organization is the only one.',
+      },
+      {
+        name: 'Roles',
+        description:
+          'The roles the deployment knows (`admin`, `org_admin`, `contributor`, `viewer`), with their scope and ' +
+          'whether they can be assigned.',
+      },
+      {
         name: 'Test Authentication',
         description:
           'Token minting for automated tests. Registered only when `NODE_ENV !== "production"`, so ' +
@@ -332,6 +345,12 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     name: 'Configuration',
     tags: [
       {
+        name: 'Organization Settings',
+        description:
+          "An organization's overrides of the deployment settings (`/api/org-settings`). Single-organization " +
+          'mode keeps the layer empty; the page is hidden there.',
+      },
+      {
         name: 'System Settings',
         description: 'The global settings document — every feature flag and tuning parameter. Admin only.',
       },
@@ -383,16 +402,23 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           '`MAINTENANCE_MODE` environment override is the break-glass in both directions.',
       },
       {
-        name: 'Admin: Job Queue',
+        name: 'About',
         description:
-          'The shared enrichment job queue: stats, listing, retry, stuck-job recovery, and the ' +
-          'on-demand insights/ETA aggregate.',
+          'Deployment facts for administrators: the version and install record the deploy CLI wrote, ' +
+          'live runtime facts, a database probe and the app-contributed groups.',
       },
       {
-        name: 'Admin: Doctor',
+        name: 'Admin: Job Queue',
         description:
-          'On-demand configuration health sweep across every subsystem, running live provider ' +
-          'connectivity checks. Nothing is persisted.',
+          'The shared background job queue: stats, listing, retry, stuck-job recovery, and the ' +
+          'on-demand insights/ETA aggregate. Served by the platform jobs slice (RETRO-C1).',
+      },
+      {
+        name: 'Doctor',
+        description:
+          'On-demand configuration health sweep across every subsystem (`GET /api/admin/doctor`) and ' +
+          'the redacted support bundle. Read-only; nothing is persisted. Served by the platform Doctor ' +
+          '(RETRO-B1b).',
       },
       {
         name: 'Admin: Storage Insights',

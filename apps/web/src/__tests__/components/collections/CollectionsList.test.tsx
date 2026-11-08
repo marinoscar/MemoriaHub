@@ -19,6 +19,12 @@ import type { PersonListResponse } from '../../../services/face';
 import type { ExploreLocations } from '../../../services/media';
 import type { MemoryCard, MemoryListResponse } from '../../../types/memories';
 
+// The packaged rail's collapse preference (RETRO-F1, #571), read by the hub
+// page this file also renders.
+vi.mock('@marinoscar/platform-web/shell/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/platform-web/shell/headless')>()),
+  useShellRailPreference: () => ({ railCollapsed: false, isLoading: false, toggleRailCollapsed: () => undefined }),
+}));
 vi.mock('../../../services/media', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../services/media')>()),
   listAlbums: vi.fn(),

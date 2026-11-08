@@ -60,6 +60,7 @@ import { VideoFrameExtractionService } from './video-frame-extraction.service';
 import { FaceMatchingService } from './face-matching.service';
 import type { DetectedFace } from './providers/face-provider.interface';
 import { MediaTouchService } from '../media/media-touch.service';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 // Max long-edge for face detection on video frames (same env var as photo path).
 const FACE_MAX_IMAGE_DIM = (): number =>
@@ -127,6 +128,7 @@ export class VideoFaceDetectionService {
     private readonly resolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly mediaTouch: MediaTouchService,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -266,7 +268,7 @@ export class VideoFaceDetectionService {
             )
             .then((p) => p.download(mediaItem.storageObject!.storageKey)),
         sizeBytes: mediaItem.storageObject.size,
-        prefix: 'memoriaHub-vface-dl-',
+        prefix: 'memoriahub-job-vface-dl-',
         extension: fileExt,
       });
 
@@ -339,6 +341,7 @@ export class VideoFaceDetectionService {
             updatedAt: new Date(),
           },
           create: {
+            orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
             name: `video-face-${frameThumbId}.jpg`,
             size: BigInt(c.thumbnailBuffer.length),
             mimeType: 'image/jpeg',
