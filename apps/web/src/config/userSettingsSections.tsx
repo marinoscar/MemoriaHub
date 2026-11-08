@@ -31,6 +31,7 @@ import { identityUserSettingsSections } from '@marinoscar/platform-web/identity/
 import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
 import { dangerZoneSettingsPage } from '@marinoscar/platform-web/user-data/ui';
 import { gettingStartedSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
+import { dataExportSettingsPage } from '@marinoscar/platform-web/exports/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
 import { ANDROID_APP_SETTINGS_PATH, MEDIA_SYNC_SETTINGS_PATH } from '../services/androidApp';
 
@@ -118,6 +119,14 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
     // the identity slice's card, as data.
     label: 'Security',
     cards: [...identityUserSettingsSections.security],
+  },
+  {
+    // RETRO-H2 (#596): "Download your data", the exports slice's card and page as data
+    // (`dataExportSettingsPage`, route `/settings/data-export`, where `export.ready` links).
+    // Added BEFORE the pinned-last Danger Zone group. No `permission`: the API checks each
+    // source (`user-data` on `user_settings:read`, MemoriaHub's on `media:read`, both every role).
+    label: 'Your data',
+    cards: [{ ...dataExportSettingsPage.card, Icon: dataExportSettingsPage.Icon }],
   },
   {
     // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to
