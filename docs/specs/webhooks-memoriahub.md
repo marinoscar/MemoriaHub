@@ -59,6 +59,8 @@ The workflow-run recipient is resolved like the bell's `workflows.run_completed`
 
 A permanently failed enrichment job is the platform's built-in `jobs.job.failed` (system); MemoriaHub registers no `media.enrichment.failed`. The platform also registers `nodes.node.offline` and `nodes.node.event`.
 
+**Alerts.** The alerts slice's `ALERTS_WEBHOOK_EMITTER` is bound to `WebhooksService.emit` (`AlertsWebhooksHostModule` in `platform/alerts/alerts.config.ts`, adapter `alerts-webhooks.adapter.ts`). A rule with its `webhook` flag on sends `alerts.alert.fired` and `alerts.alert.resolved` (system audience, `system_webhooks:read`, group `Alerts`, payload `{ incidentId, rule: { id, key, name, kind, severity }, labels, value, summary, firedAt, resolvedAt }`) after the incident's write; proven by `apps/api/test/alerts/alerts-webhooks.spec.ts`.
+
 Examples (invented ids):
 
 ```json
