@@ -328,8 +328,8 @@ export class LocalDiskStorageProvider implements StorageProvider {
     }
   }
 
-  /** The object's size in bytes, or `null` when it does not exist. */
-  async getObjectSize(key: string): Promise<number | null> {
+  /** The object's size in bytes, or `null` when it does not exist (the platform's optional `size` probe). */
+  async size(key: string): Promise<number | null> {
     const info = await stat(this.pathOf(key)).catch(() => null);
     return info?.isFile() ? info.size : null;
   }

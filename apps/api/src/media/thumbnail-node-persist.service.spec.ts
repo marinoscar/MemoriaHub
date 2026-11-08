@@ -89,7 +89,7 @@ describe('ThumbnailNodePersistService', () => {
   let mockResolver: { getActiveProvider: jest.Mock };
   let mockActiveProvider: {
     exists: jest.Mock;
-    getObjectSize: jest.Mock;
+    size: jest.Mock;
     getBucket: jest.Mock;
   };
   let mockSync: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
@@ -102,7 +102,7 @@ describe('ThumbnailNodePersistService', () => {
 
     mockActiveProvider = {
       exists: jest.fn().mockResolvedValue(true),
-      getObjectSize: jest.fn().mockResolvedValue(12345),
+      size: jest.fn().mockResolvedValue(12345),
       getBucket: jest.fn().mockReturnValue('test-bucket'),
     };
     mockResolver = {
@@ -148,7 +148,7 @@ describe('ThumbnailNodePersistService', () => {
       await service.persistThumbnail(makeJob(), makeResult());
 
       expect(mockActiveProvider.exists).toHaveBeenCalledWith('thumbnails/so-original.jpg');
-      expect(mockActiveProvider.getObjectSize).toHaveBeenCalledWith('thumbnails/so-original.jpg');
+      expect(mockActiveProvider.size).toHaveBeenCalledWith('thumbnails/so-original.jpg');
 
       const upsertCall = (mockPrisma.storageObject.upsert as jest.Mock).mock.calls[0][0];
       expect(upsertCall.where).toEqual({ storageKey: 'thumbnails/so-original.jpg' });
@@ -196,8 +196,8 @@ describe('ThumbnailNodePersistService', () => {
       expect(processing['thumbnail']).toBeDefined();
     });
 
-    it('skips the size check (but still persists) when getObjectSize returns null', async () => {
-      mockActiveProvider.getObjectSize.mockResolvedValue(null);
+    it('skips the size check (but still persists) when size returns null', async () => {
+      mockActiveProvider.size.mockResolvedValue(null);
 
       await expect(service.persistThumbnail(makeJob(), makeResult())).resolves.toBeUndefined();
       expect(mockPrisma.storageObject.upsert).toHaveBeenCalled();
@@ -221,7 +221,7 @@ describe('ThumbnailNodePersistService', () => {
     });
 
     it('throws on a byte-length mismatch between the reported and actual size', async () => {
-      mockActiveProvider.getObjectSize.mockResolvedValue(999);
+      mockActiveProvider.size.mockResolvedValue(999);
 
       await expect(
         service.persistThumbnail(makeJob(), makeResult({ bytes: 12345 })),

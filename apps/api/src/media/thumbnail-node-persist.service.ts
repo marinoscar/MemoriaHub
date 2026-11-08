@@ -31,7 +31,8 @@ import { Prisma } from '@prisma/client';
 import type { MediaJobContext, OrgWriteScope } from '../platform/jobs/media-item-job';
 import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver, storedObjectSize } from '../platform/storage/storage-provider.resolver';
+import { storageObjectSize } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { thumbnailKeyPrefixFor } from '../media-processing/thumbnail-key.util';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
@@ -108,8 +109,10 @@ export class ThumbnailNodePersistService {
       );
     }
 
-    const actualSize = await storedObjectSize(activeProvider, result.storageKey);
-    if (actualSize !== null && actualSize !== result.bytes) {
+    // The platform size probe (S3 `HeadObject`, the local driver's `stat`); `undefined` when the
+    // provider has none, `null` when absent (already ruled out above): the check is then skipped.
+    const actualSize = await storageObjectSize(activeProvider, result.storageKey);
+    if (typeof actualSize === 'number' && actualSize !== result.bytes) {
       throw new Error(
         `persistThumbnail: byte-length mismatch for "${result.storageKey}": node reported ` +
           `${result.bytes} bytes, storage provider reports ${actualSize} bytes`,

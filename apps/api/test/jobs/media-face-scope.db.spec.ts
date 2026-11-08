@@ -74,7 +74,7 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
         return Reflect.get(target, prop, receiver);
       },
     });
-    const provider = { exists: async () => true, getObjectSize: async () => 2048, getBucket: () => 'bucket' };
+    const provider = { exists: async () => true, size: async () => 2048, getBucket: () => 'bucket' };
     return new ThumbnailNodePersistService(
       prismaWithItem as never,
       { getActiveProvider: async () => ({ id: 's3', provider }) } as never,

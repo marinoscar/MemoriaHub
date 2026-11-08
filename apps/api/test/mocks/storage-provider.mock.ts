@@ -15,7 +15,7 @@ import {
 /** The platform provider plus the two optional extras some MemoriaHub paths use when present. */
 export type MockStorageProvider = jest.Mocked<StorageProvider> & {
   deleteMany: jest.Mock;
-  getObjectSize: jest.Mock;
+  size: jest.Mock;
 };
 
 export const createMockStorageProvider = (): MockStorageProvider => ({
@@ -56,7 +56,7 @@ export const createMockStorageProvider = (): MockStorageProvider => ({
 
   delete: jest.fn().mockResolvedValue(undefined),
 
-  deleteMany: jest.fn().mockResolvedValue({ deleted: 0, errors: [] }),
+  deleteMany: jest.fn().mockResolvedValue({ deleted: [], failed: [] }),
 
   getMetadata: jest
     .fn()
@@ -72,5 +72,5 @@ export const createMockStorageProvider = (): MockStorageProvider => ({
     .fn()
     .mockResolvedValue('https://mock-presigned-url.com/put'),
 
-  getObjectSize: jest.fn().mockResolvedValue(1024),
+  size: jest.fn().mockResolvedValue(1024),
 });

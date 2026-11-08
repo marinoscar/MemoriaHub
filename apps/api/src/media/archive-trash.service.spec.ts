@@ -569,7 +569,7 @@ describe('MediaService — archive & trash methods', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
       mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
       mockResolver.getProviderFor.mockResolvedValue({
-        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+        deleteMany: jest.fn().mockResolvedValue({ deleted: [], failed: [] }),
       });
 
       const result = await service.purgeMediaItemsBatched(['item-1']);
@@ -588,8 +588,8 @@ describe('MediaService — archive & trash methods', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([item1, item2, item3] as any);
       mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 3 } as any);
 
-      const providerA = { deleteMany: jest.fn().mockResolvedValue({ deleted: 2, errors: [] }) };
-      const providerB = { deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }) };
+      const providerA = { deleteMany: jest.fn().mockResolvedValue({ deleted: [], failed: [] }) };
+      const providerB = { deleteMany: jest.fn().mockResolvedValue({ deleted: [], failed: [] }) };
       mockResolver.getProviderFor.mockImplementation(async (provider: string) =>
         provider === 's3' ? providerA : providerB,
       );
@@ -610,7 +610,7 @@ describe('MediaService — archive & trash methods', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
       mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
       mockResolver.getProviderFor.mockResolvedValue({
-        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+        deleteMany: jest.fn().mockResolvedValue({ deleted: [], failed: [] }),
       });
 
       await service.purgeMediaItemsBatched(['item-1']);
@@ -647,7 +647,7 @@ describe('MediaService — archive & trash methods', () => {
         .mockResolvedValueOnce(item1 as any) // item-1 succeeds per-item
         .mockRejectedValueOnce(new Error('item-2 still referenced')); // item-2 fails
       mockResolver.getProviderFor.mockResolvedValue({
-        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+        deleteMany: jest.fn().mockResolvedValue({ deleted: [], failed: [] }),
       });
 
       const result = await service.purgeMediaItemsBatched(['item-1', 'item-2']);
@@ -667,7 +667,7 @@ describe('MediaService — archive & trash methods', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
       mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
       mockResolver.getProviderFor.mockResolvedValue({
-        deleteMany: jest.fn().mockResolvedValue({ deleted: 1, errors: [] }),
+        deleteMany: jest.fn().mockResolvedValue({ deleted: [], failed: [] }),
       });
       mockPrisma.storageObject.deleteMany.mockRejectedValue(new Error('DB unavailable'));
 
