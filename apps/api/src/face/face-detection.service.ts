@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EnrichmentJob, MediaFaceStatusType } from '@prisma/client';
+import { MediaFaceStatusType } from '@prisma/client';
+import type { MediaJobContext } from '../platform/jobs/media-item-job';
 import { Readable } from 'stream';
 import type { FaceDetectionResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -30,7 +31,7 @@ export class FaceDetectionService {
   // calls persistFaces directly — the same persist code path either way.
   // ---------------------------------------------------------------------------
 
-  async processMediaItem(job: EnrichmentJob): Promise<void> {
+  async processMediaItem(job: MediaJobContext): Promise<void> {
     // Guard: face_detection jobs must always have a mediaItemId (global/null jobs are not valid here)
     if (!job.mediaItemId) {
       throw new Error('face_detection job missing mediaItemId');
@@ -178,7 +179,7 @@ export class FaceDetectionService {
   // matching, and upserts MediaFaceStatus from an already-computed DTO.
   // ---------------------------------------------------------------------------
 
-  async persistFaces(job: EnrichmentJob, result: FaceDetectionResult): Promise<void> {
+  async persistFaces(job: MediaJobContext, result: FaceDetectionResult): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('face_detection job missing mediaItemId');
     }

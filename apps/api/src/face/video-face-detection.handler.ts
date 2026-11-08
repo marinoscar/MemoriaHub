@@ -2,37 +2,50 @@
 // VideoFaceDetectionHandler  (type = 'video_face_detection')
 // =============================================================================
 //
-// Thin enrichment-queue entry point. All pipeline logic (compute + persist)
-// lives in VideoFaceDetectionService — this handler only wires the queue's
-// process()/persistNodeResult() contract to that service, mirroring
-// FaceDetectionHandler's relationship to FaceDetectionService exactly.
+// A native platform `JobHandler` (RETRO-C3, #585). Thin queue entry point: all
+// pipeline logic (compute + persist) lives in VideoFaceDetectionService, which
+// also owns the three skips that must happen WITHOUT downloading a byte (the
+// item is flagged social media, `face.video.enabled=false`, or the object is
+// over `VIDEO_ENRICHMENT_MAX_BYTES`).
+//
+// NODE-ELIGIBLE: `persistNodeResult` writes Face rows from the node's clusters
+// and uploads nothing. The frame thumbnails a node produces land under the key
+// the data plane hands it (the platform default `node-outputs/<jobId>/<uuid>`:
+// `deriveOutputKey` is one key per job and a video has a frame per cluster, so
+// this handler deliberately does not implement it); the cluster carries the key
+// back and is recorded as is.
 // =============================================================================
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { videoFaceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
+import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
+import { PrismaService } from '../prisma/prisma.service';
 import { VideoFaceDetectionService } from './video-face-detection.service';
 
 @Injectable()
-export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleInit {
+export class VideoFaceDetectionHandler implements JobHandler, OnModuleInit {
   readonly type = 'video_face_detection';
-
+  readonly label = 'Face detection (video)';
   /**
-   * Node-eligibility (distributed workers): the payload a node submits via
-   * POST /api/nodes/:id/jobs/:jobId/result for this job type — the shared
-   * contract from @memoriahub/enrichment-compute/dto. A node computes with
-   * the keyless CompreFace provider by default, the same provider the
-   * server uses in-process — see VideoFaceDetectionService's module
-   * docstring for the compute/persist split this mirrors.
+   * A multi-GB download, ffmpeg frame extraction and one sidecar call per frame
+   * legitimately run past ten minutes on a small VPS: 20 minutes by default,
+   * still overridable for one release through ENRICHMENT_VIDEO_JOB_TIMEOUT_MS.
    */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: videoJobTimeoutMs(), maxAttempts: 3 };
   readonly nodeResultSchema = videoFaceDetectionResultSchema;
 
   private readonly logger = new Logger(VideoFaceDetectionHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
+    private readonly prisma: PrismaService,
     private readonly videoFaceDetectionService: VideoFaceDetectionService,
   ) {}
 
@@ -40,21 +53,21 @@ export class VideoFaceDetectionHandler implements EnrichmentHandler, OnModuleIni
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    await this.videoFaceDetectionService.processMediaItem(job);
+  async process(job: Job): Promise<void> {
+    const context = await resolveMediaItemJob(this.prisma, job, this.logger);
+    if (!context) return;
+    await withPlatformRateLimits(() => this.videoFaceDetectionService.processMediaItem(context));
   }
 
-  /**
-   * Persist a node-computed video_face_detection result (already validated
-   * against nodeResultSchema by the ingestion endpoint; re-parsed here for
-   * type narrowing, mirroring FaceDetectionHandler/DuplicateDetectionHandler's
-   * precedent).
-   */
-  async persistNodeResult(job: EnrichmentJob, result: unknown): Promise<void> {
+  /** Persist a node-computed result (already validated by the data plane; re-parsed to narrow). */
+  async persistNodeResult(job: Job, result: unknown): Promise<void> {
     const parsed = videoFaceDetectionResultSchema.parse(result);
+    const context = await resolveMediaItemJob(this.prisma, job, this.logger);
+    if (!context) return;
     this.logger.debug(
       `VideoFaceJob ${job.id}: persisting node-computed result (${parsed.clusters.length} cluster(s))`,
     );
-    await this.videoFaceDetectionService.persistVideoFaces(job, parsed);
+    // metrics: RETRO-T3 (app.media.faces.detected)
+    await this.videoFaceDetectionService.persistVideoFaces(context, parsed);
   }
 }

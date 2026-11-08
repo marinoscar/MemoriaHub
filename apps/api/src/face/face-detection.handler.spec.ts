@@ -10,40 +10,20 @@
  * transitive dependencies.
  */
 
+import { RateLimitError } from '@marinoscar/platform-api/jobs';
 import { FaceDetectionHandler } from './face-detection.handler';
-import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { faceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { RateLimitError as LegacyRateLimitError } from '../enrichment/rate-limit.error';
+import { mediaItemJob, subjectPrisma } from '../../test/helpers/platform-job';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'face_detection',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.pending,
-    reason: JobReason.upload,
-    priority: 0,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
-}
+const makeJob = (mediaItemId = 'media-1') => mediaItemJob('face_detection', mediaItemId);
+
+/** What the service receives for the default job. */
+const CONTEXT = { id: 'job-1', mediaItemId: 'media-1', circleId: 'circle-1' };
 
 /** Canned, schema-valid node result payload (Human provider, 4-d toy embedding). */
 function makeNodeResult() {
@@ -68,11 +48,13 @@ function makeNodeResult() {
 
 describe('FaceDetectionHandler', () => {
   let mockRegistry: { register: jest.Mock };
+  let mockThrottle: { registerProviderKey: jest.Mock };
   let mockFaceDetectionService: { processMediaItem: jest.Mock; persistFaces: jest.Mock };
   let handler: FaceDetectionHandler;
 
   beforeEach(() => {
     mockRegistry = { register: jest.fn() };
+    mockThrottle = { registerProviderKey: jest.fn() };
     mockFaceDetectionService = {
       processMediaItem: jest.fn(),
       persistFaces: jest.fn().mockResolvedValue(undefined),
@@ -80,6 +62,8 @@ describe('FaceDetectionHandler', () => {
     // Instantiate directly — no NestJS testing module needed for this pure unit test
     handler = new FaceDetectionHandler(
       mockRegistry as any,
+      mockThrottle as any,
+      subjectPrisma() as any,
       mockFaceDetectionService as any,
     );
   });
@@ -105,6 +89,18 @@ describe('FaceDetectionHandler', () => {
       expect(mockRegistry.register).toHaveBeenCalledTimes(1);
       expect(mockRegistry.register).toHaveBeenCalledWith(handler);
     });
+
+    it('maps the type onto the face provider throttle bucket', () => {
+      handler.onModuleInit();
+      expect(mockThrottle.registerProviderKey).toHaveBeenCalledWith('face_detection', 'face');
+    });
+  });
+
+  describe('platform contract', () => {
+    it('declares a label and the 5-minute, 3-attempt profile', () => {
+      expect(handler.label).toBe('Face detection (photo)');
+      expect(handler.profile).toEqual({ maxRuntimeMs: 300_000, maxAttempts: 3 });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -122,7 +118,24 @@ describe('FaceDetectionHandler', () => {
 
       // Assert
       expect(mockFaceDetectionService.processMediaItem).toHaveBeenCalledTimes(1);
-      expect(mockFaceDetectionService.processMediaItem).toHaveBeenCalledWith(job);
+      expect(mockFaceDetectionService.processMediaItem).toHaveBeenCalledWith(CONTEXT);
+    });
+
+    it('settles as a no-op when the media item no longer exists', async () => {
+      await expect(handler.process(makeJob('gone'))).resolves.toBeUndefined();
+      expect(mockFaceDetectionService.processMediaItem).not.toHaveBeenCalled();
+    });
+
+    it('throws for a job that is not about a media item', async () => {
+      const job = { ...makeJob(), subjectType: 'circle' };
+      await expect(handler.process(job)).rejects.toThrow('not about a media item');
+    });
+
+    it('rethrows a legacy rate limit as the platform RateLimitError', async () => {
+      mockFaceDetectionService.processMediaItem.mockRejectedValue(new LegacyRateLimitError('slow down', 5000));
+      const error = await handler.process(makeJob()).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(RateLimitError);
+      expect((error as RateLimitError).retryAfterMs).toBe(5000);
     });
 
     it('returns undefined (void) on success', async () => {
@@ -182,7 +195,8 @@ describe('FaceDetectionHandler', () => {
 
       expect(mockFaceDetectionService.persistFaces).toHaveBeenCalledTimes(1);
       const [passedJob, passedResult] = mockFaceDetectionService.persistFaces.mock.calls[0];
-      expect(passedJob).toBe(job);
+      expect(passedJob).toEqual(CONTEXT);
+      void job;
       expect(passedResult).toEqual(result);
     });
 

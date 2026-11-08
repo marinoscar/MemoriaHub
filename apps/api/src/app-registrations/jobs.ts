@@ -5,8 +5,9 @@
 // What this app adds to the platform's jobs slice through its registries:
 //
 //   * the display label of each of its job types. A native `JobHandler` declares
-//     its own `label`; the 38 handlers still on the legacy adapter do not, so the
+//     its own `label`; the handlers still on the legacy adapter do not, so the
 //     label lives here (it is the table `enrichment/job-type-labels.ts` held);
+//     a type converted to a native handler leaves this table (RETRO-C3..C8);
 //   * enqueue reasons beyond the built-in `upload`, `rerun` and `backfill`: none;
 //   * retention policies beyond the platform's four: none;
 //   * the labels of RETIRED job types, so an old row still renders with a name in
@@ -27,30 +28,28 @@ import {
   type RetentionPolicyDefinition,
 } from '@marinoscar/platform-api/jobs';
 
-/** The 38 job types the legacy handlers serve, and the label each shows. */
+/**
+ * The job types the legacy handlers serve, and the label each shows. A native
+ * handler declares its own `label` and is not listed (RETRO-C3: the six
+ * media/face types).
+ */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   // Media enrichment (per-item compute)
-  face_detection: 'Face detection',
-  video_face_detection: 'Video face detection',
   auto_tagging: 'Auto-tagging',
   video_auto_tagging: 'Video auto-tagging',
   geocode: 'Geocoding',
   duplicate_detection: 'Duplicate detection',
   duplicate_detection_batch: 'Duplicate detection (batch)',
   duplicate_confidence_backfill: 'Duplicate confidence backfill',
-  metadata_extraction: 'Metadata extraction',
   social_media_detection: 'Social media detection',
   location_inference: 'Location inference',
   // Deprecated aliases kept so already-queued rows still render a friendly label;
   // superseded by review_run_* below (issue #190).
   location_suggestion_run_evaluate: 'Location suggestion run evaluate',
   location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
-  face_auto_archive_sweep: 'Face auto-archive sweep',
   burst_detection: 'Burst detection',
   picture_enhancement: 'AI picture enhancer',
   picture_enhancement_purge: 'AI picture enhancer purge',
-  thumbnail_regen: 'Thumbnail regeneration',
-  thumbnail_repair: 'Thumbnail repair',
   // Storage / system
   storage_insights: 'Storage insights',
   storage_migration: 'Storage migration',

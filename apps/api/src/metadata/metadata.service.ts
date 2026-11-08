@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { EnrichmentJob, MediaMetadataStatusType } from '@prisma/client';
+import { MediaMetadataStatusType } from '@prisma/client';
+import type { MediaJobContext, OrgWriteScope } from '../platform/jobs/media-item-job';
 import { Prisma } from '@prisma/client';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -163,7 +164,11 @@ export class MetadataExtractionService {
    * `processed`. On failure marks the status row `failed` and rethrows so the
    * job routes through the normal retry path.
    */
-  async persistMetadata(job: EnrichmentJob, result: MetadataComputeResult): Promise<void> {
+  async persistMetadata(
+    job: MediaJobContext,
+    result: MetadataComputeResult,
+    scope?: OrgWriteScope,
+  ): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error(`metadata_extraction job ${job.id} is missing mediaItemId`);
     }
@@ -195,38 +200,47 @@ export class MetadataExtractionService {
     const circleId = mediaItem.circleId;
 
     try {
-      const storageObject = await this.prisma.storageObject.findUnique({
-        where: { id: mediaItem.storageObject.id },
-        select: { id: true, mimeType: true, metadata: true },
-      });
+      // Built OUTSIDE the write scope: the geocode entry may call the server's
+      // reverse-geocoding provider, which must never hold a transaction open.
+      const allMetadata = await this.buildProcessingEntries(mediaItem.storageObject.mimeType, result);
 
-      if (!storageObject) {
-        throw new Error(`StorageObject ${mediaItem.storageObject.id} not found`);
-      }
+      // The read-merge-write of `storage_objects.metadata` runs in the job's
+      // organization when a scope is given (`JobScope`, RETRO-C3).
+      const runWrites: OrgWriteScope =
+        scope ?? ((fn) => fn(this.prisma as unknown as Prisma.TransactionClient));
+      const storageObjectId = await runWrites(async (tx) => {
+        const storageObject = await tx.storageObject.findUnique({
+          where: { id: mediaItem.storageObject!.id },
+          select: { id: true, metadata: true },
+        });
 
-      const allMetadata = await this.buildProcessingEntries(storageObject.mimeType, result);
+        if (!storageObject) {
+          throw new Error(`StorageObject ${mediaItem.storageObject!.id} not found`);
+        }
 
-      // Merge into storageObject.metadata._processing, preserving existing keys
-      const existingMeta = (storageObject.metadata as Record<string, unknown> | null) ?? {};
-      const existingProcessing =
-        (existingMeta['_processing'] as Record<string, unknown> | undefined) ?? {};
+        // Merge into storageObject.metadata._processing, preserving existing keys
+        const existingMeta = (storageObject.metadata as Record<string, unknown> | null) ?? {};
+        const existingProcessing =
+          (existingMeta['_processing'] as Record<string, unknown> | undefined) ?? {};
 
-      const mergedMetadata: Record<string, unknown> = {
-        ...existingMeta,
-        _processing: {
-          ...existingProcessing,
-          ...allMetadata,
-        },
-        _processedAt: new Date().toISOString(),
-      };
+        const mergedMetadata: Record<string, unknown> = {
+          ...existingMeta,
+          _processing: {
+            ...existingProcessing,
+            ...allMetadata,
+          },
+          _processedAt: new Date().toISOString(),
+        };
 
-      await this.prisma.storageObject.update({
-        where: { id: storageObject.id },
-        data: { metadata: mergedMetadata as Prisma.InputJsonValue },
+        await tx.storageObject.update({
+          where: { id: storageObject.id },
+          data: { metadata: mergedMetadata as Prisma.InputJsonValue },
+        });
+        return storageObject.id;
       });
 
       // Sync typed columns into MediaItem directly — do NOT emit OBJECT_PROCESSED_EVENT
-      await this.mediaMetadataSyncService.syncFromStorageObject(storageObject.id);
+      await this.mediaMetadataSyncService.syncFromStorageObject(storageObjectId);
 
       await this.prisma.mediaMetadataStatus.upsert({
         where: { mediaItemId },
@@ -337,7 +351,7 @@ export class MetadataExtractionService {
   // In-process path: download → computeMetadata → persistMetadata
   // ---------------------------------------------------------------------------
 
-  async processMediaItem(job: EnrichmentJob): Promise<void> {
+  async processMediaItem(job: MediaJobContext, scope?: OrgWriteScope): Promise<void> {
     // Guard: mediaItemId must be present
     if (!job.mediaItemId) {
       throw new Error(`metadata_extraction job ${job.id} is missing mediaItemId`);
@@ -387,7 +401,7 @@ export class MetadataExtractionService {
     try {
       const { storageKey, mimeType } = mediaItem.storageObject;
       const result = await this.downloadAndCompute(storageKey, mimeType);
-      await this.persistMetadata(job, result);
+      await this.persistMetadata(job, result, scope);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await this.markFailed(mediaItemId, circleId, msg);

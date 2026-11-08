@@ -23,20 +23,31 @@
 // by the existing 10-minute StorageProcessingRecoveryTask cron. This sweep
 // owns the 'ready'/'failed' terminal states that cron never revisits.
 //
-// Runs via the shared enrichment worker queue (type 'thumbnail_repair',
-// mediaItemId: null, circleId: null) so it benefits from retries, visibility
-// in /admin/jobs, and the (type, mediaItemId IS NULL) dedup guarantee.
+// A native platform `JobHandler` (RETRO-C3, #585): a SYSTEM job (no subject,
+// `orgId` null) so it benefits from retries, visibility in /admin/jobs, and the
+// one-in-flight dedup. SERVER-ONLY: a global sweep repairing a batch of items
+// has no single input for a node to download and no single output for a node
+// result, so it carries neither `nodeResultSchema` nor `persistNodeResult` (it
+// carried the schema "for interface parity" before, and was never claimable).
+//
+// Its `storage_objects` writes (the attempt counter) run on the plain client:
+// the sweep crosses organizations and has none to scope to; the platform's
+// answer is the system client with a named reason, which this app does not
+// wire yet (PLATFORM-ADOPTION-SHIM(RETRO-D1), local-exceptions.md).
 // =============================================================================
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, Prisma, StorageObject } from '@prisma/client';
-import { thumbnailResultSchema } from '@memoriahub/enrichment-compute/dto';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { Prisma } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import { withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
-import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -51,54 +62,33 @@ interface ThumbnailRepairCandidate {
 type RepairOutcome = 'resynced' | 'reprocessed' | 'exhausted' | 'failed';
 
 @Injectable()
-export class ThumbnailRepairHandler implements EnrichmentHandler, OnModuleInit {
+export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
   readonly type = 'thumbnail_repair';
-
+  readonly label = 'Thumbnail repair sweep';
   /**
-   * NOTE ON NODE ELIGIBILITY: `thumbnail_repair` is a GLOBAL sweep job
-   * (mediaItemId: null, circleId: null) that batch-repairs many media items
-   * per run (see repairOne() below) — it has no single input object for a
-   * node to download and no single output for persistNodeResult to receive.
-   * nodeResultSchema/persistNodeResult are wired here for interface parity
-   * with ThumbnailRegenHandler (and per the distributed-nodes contract that
-   * every thumbnail-producing handler exposes the same node result shape),
-   * but in the current claim model
-   * (`POST /api/nodes/:id/jobs/:jobId/claim` claims whole job rows, one node
-   * result per job) a node cannot actually claim and complete this job type
-   * end-to-end — that would require per-item claim granularity this global
-   * sweep job doesn't have. Real distributed thumbnail repair, if wanted,
-   * would need the sweep to fan out one `thumbnail_regen`-shaped job per
-   * candidate rather than repairing a batch in one job.
+   * Up to THUMBNAIL_REPAIR_BATCH_SIZE full reprocesses run one after another; two
+   * attempts, because the next hourly sweep is the real retry.
    */
-  readonly nodeResultSchema = thumbnailResultSchema;
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 2 };
 
   private readonly logger = new Logger(ThumbnailRepairHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
     private readonly storageProcessingRecoveryService: StorageProcessingRecoveryService,
-    private readonly thumbnailNodePersistService: ThumbnailNodePersistService,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(this);
   }
 
-  /**
-   * See the nodeResultSchema doc comment above: wired for parity, but this
-   * global sweep job has no single mediaItemId for persistThumbnail to act
-   * on unless a future caller enqueues a per-item-shaped thumbnail_repair job
-   * (mediaItemId set) — persistThumbnail itself already handles that case
-   * correctly (it reads job.mediaItemId), so this passes straight through.
-   */
-  async persistNodeResult(job: EnrichmentJob, result: unknown): Promise<void> {
-    const parsed = thumbnailResultSchema.parse(result);
-    await this.thumbnailNodePersistService.persistThumbnail(job, parsed);
+  async process(_job: Job): Promise<void> {
+    await withPlatformRateLimits(() => this.sweep());
   }
 
-  async process(_job: EnrichmentJob): Promise<void> {
+  private async sweep(): Promise<void> {
     const batchSize = parseInt(
       process.env['THUMBNAIL_REPAIR_BATCH_SIZE'] ?? String(DEFAULT_BATCH_SIZE),
       10,
