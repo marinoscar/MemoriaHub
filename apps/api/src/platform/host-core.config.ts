@@ -27,10 +27,13 @@ import '../app-registrations/host';
 import { PlatformHostCoreModule, registerPlatformHostAppMetrics } from '@marinoscar/platform-api/host';
 import { WEBHOOKS_APP_METRICS } from '@marinoscar/platform-api/webhooks';
 
+import { MEMORIAHUB_APP_METRICS } from '../platform-extensions/telemetry/memoriahub-metrics.manifest';
 import { platformHost } from './platform-host';
 
 // The mounted slices' app metrics, registered after the platform's own (RETRO-H4, #603:
-// `app.webhooks.deliveries`, `app.webhooks.delivery.duration`, `app.webhooks.events`).
-registerPlatformHostAppMetrics(WEBHOOKS_APP_METRICS);
+// `app.webhooks.deliveries`, `app.webhooks.delivery.duration`, `app.webhooks.events`),
+// then MemoriaHub's own catalog last (RETRO-T3, #628: `app.media.*`, `app.enrichment.*`,
+// `app.runs.*`, `app.memories.*`, `app.storage.*`, `app.ai.images|audio.*`, `app.nodes.capability`).
+registerPlatformHostAppMetrics(WEBHOOKS_APP_METRICS, MEMORIAHUB_APP_METRICS);
 
 export const hostCoreModule = PlatformHostCoreModule.forRoot({ host: platformHost });
