@@ -24,11 +24,14 @@ describe('USER_SETTINGS_SECTIONS', () => {
       '/settings/notifications',
       '/settings/memories',
       '/settings/search',
+      '/settings/getting-started',
       '/settings/android-app',
       '/settings/media-sync',
       '/settings/tokens',
       // RETRO-H4 (#603): the Integrations section, appended.
       '/settings/webhooks',
+      // RETRO-H1 (#591): the pinned-last Danger Zone group.
+      '/settings/danger-zone',
     ]);
   });
 

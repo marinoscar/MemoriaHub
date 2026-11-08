@@ -53,6 +53,9 @@ import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
+import { alertsModules } from './platform/alerts/alerts.config';
+import { userDataModule } from './platform/user-data/user-data.config';
+import { onboardingModule } from './platform/onboarding/onboarding.config';
 import { MemoriaHubWebhooksModule } from './platform/webhooks/webhooks.config';
 
 import configuration from './config/configuration';
@@ -166,6 +169,21 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
     // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.
     telemetryModule,
+    // Alerts (RETRO-H5, #609): @marinoscar/platform-api/alerts. Rules over telemetry
+    // metrics, worker-node events and fleet health, incidents and their notifications
+    // (`/api/admin/alerts`, `alerts:read|write`), plus MemoriaHub's default rules
+    // and its two kinds. Binding: `platform/alerts/alerts.config.ts`.
+    ...alertsModules,
+    // User data (RETRO-H1, #591): @marinoscar/platform-api/user-data. The Danger Zone
+    // (`/api/user-data/*`), the admin factory reset and offboarding, with MemoriaHub's
+    // keep-or-delete decisions, delegated purges and reset steps (platform/user-data/).
+    userDataModule,
+    // First-run onboarding (RETRO-H3, #599): @marinoscar/platform-api/onboarding. `GET /api/onboarding`
+    // (the Get started and Setup guide checklists, derived on every read) and
+    // `GET /api/admin/onboarding/metrics`, over the platform's steps plus MemoriaHub's media steps
+    // (`platform/onboarding/`). Last among the feature modules: it reads the Doctor and the settings,
+    // owns no table, and stores only the user's intent in the `onboarding` user-settings namespace.
+    onboardingModule,
     // Webhooks (RETRO-H4, #603): @marinoscar/platform-api/webhooks (endpoints under
     // /api/webhooks, /api/org/webhooks and /api/admin/webhooks, signed deliveries as queue
     // jobs, the SSRF egress guard, the `webhook` notification channel), plus MemoriaHub's

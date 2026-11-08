@@ -43,6 +43,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/push': 'push:read', // notifications/push/push-config.controller
   '/admin/settings/notifications': 'system_settings:read', // system settings (notifications.* policy)
   '/admin/settings/android': 'system_settings:read', // android-app/android-app.controller
+  '/admin/settings/setup': 'system_settings:read', // platform onboarding (admin block, metrics) RETRO-H3
   '/admin/settings/ai': 'ai_settings:read', // ai/ai-settings.controller
   '/admin/settings/tagging': 'ai_settings:read', // tagging/tag-labels.controller
   '/admin/settings/face': 'face_settings:read', // face/face-settings.controller
@@ -70,6 +71,10 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/telemetry': 'telemetry:read', // telemetry-admin.controller (GET admin/telemetry/config)
   '/admin/settings/telemetry/explorer': 'telemetry:query', // telemetry-explorer.controller
   '/admin/settings/telemetry/dashboard': 'telemetry:query', // telemetry dashboard controller
+  // RETRO-H5 (#609): platform alerts controller (ALERTS_PERMISSIONS; GET admin/alerts/*).
+  '/admin/settings/alerts': 'alerts:read',
+  // RETRO-H1 (#591): platform user-data slice, factory reset controller (USER_DATA_PERMISSIONS).
+  '/admin/settings/factory-reset': 'system:factory_reset',
   // RETRO-H4 (#603): platform webhooks admin controller (SYSTEM_WEBHOOKS_PERMISSIONS).
   '/admin/settings/webhooks': 'system_webhooks:read', // admin-webhooks.controller (GET admin/webhooks)
 };

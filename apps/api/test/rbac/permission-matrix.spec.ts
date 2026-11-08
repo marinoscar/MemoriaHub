@@ -96,6 +96,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   'ai:use',
   'ai_config:read',
   'ai_config:write',
+  // The alerts slice (RETRO-H5, #609): system scope, admin only. (The list is sorted.)
+  'alerts:read',
+  'alerts:write',
   'org_ai_config:read',
   'org_ai_config:write',
   // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
@@ -113,6 +116,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   'telemetry:query',
   'telemetry:read',
   'telemetry:write',
+  // The user-data slice (RETRO-H1, #591): system scope, admin only; never implied by system_settings:write.
+  'orgs:offboard',
+  'system:factory_reset',
   // The webhooks slice (RETRO-H4, #603): webhooks:* (every org role), org_webhooks:* (org_admin),
   // system_webhooks:* (admin).
   'org_webhooks:read',

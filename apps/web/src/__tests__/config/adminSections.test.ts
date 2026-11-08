@@ -91,13 +91,14 @@ describe('adminSections', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
       // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry
-      // cards, RETRO-H4 (#603) the Webhooks card.
-      expect(operations.cards.slice(-6).map((card) => card.title)).toEqual([
+      // cards, RETRO-H5 (#609) the Alerts card, RETRO-H4 (#603) the Webhooks card.
+      expect(operations.cards.slice(-7).map((card) => card.title)).toEqual([
         'Maintenance',
         'About',
         'Telemetry',
         'Telemetry Explorer',
         'Telemetry Dashboard',
+        'Alerts',
         'Webhooks',
       ]);
       expect(broadcasts).toMatchObject({
@@ -111,6 +112,20 @@ describe('adminSections', () => {
     it('resolves both routes to their page titles', () => {
       expect(adminPageTitle('/admin/settings/push')).toBe('Web Push');
       expect(adminPageTitle('/admin/settings/notifications')).toBe('Notifications');
+    });
+  });
+
+  describe('Setup guide card (RETRO-H3, #599)', () => {
+    it('is the onboarding slice\'s card, appended to General after Android app', () => {
+      const general = ADMIN_SECTIONS.find((section) => section.label === 'General')!;
+      const titles = general.cards.map((card) => card.title);
+      expect(titles.indexOf('Setup guide')).toBe(titles.indexOf('Android app') + 1);
+      expect(general.cards[general.cards.length - 1]).toMatchObject({
+        title: 'Setup guide',
+        path: '/admin/settings/setup',
+        // The onboarding slice's adminPermission: the admin block and the metrics.
+        permission: 'system_settings:read',
+      });
     });
   });
 
@@ -131,11 +146,11 @@ describe('adminSections', () => {
   describe('Android app card (epic #498, issue #516)', () => {
     it('is appended to General after Notifications, gated on the exact API permission', () => {
       const general = ADMIN_SECTIONS.find((section) => section.label === 'General')!;
-      const last = general.cards[general.cards.length - 1];
       const titles = general.cards.map((card) => card.title);
+      const android = general.cards[titles.indexOf('Android app')];
 
       expect(titles.indexOf('Android app')).toBe(titles.indexOf('Notifications') + 1);
-      expect(last).toMatchObject({
+      expect(android).toMatchObject({
         title: 'Android app',
         path: '/admin/settings/android',
         // `GET /api/admin/android-app` and the release list enforce this string.
@@ -275,6 +290,27 @@ describe('adminSections', () => {
       expect(adminPageTitle('/admin/settings/telemetry')).toBe('Telemetry');
       expect(adminPageTitle('/admin/settings/telemetry/explorer', { telemetry: true })).toBe('Telemetry Explorer');
       expect(adminPageTitle('/admin/settings/telemetry/dashboard', { telemetry: true })).toBe('Telemetry Dashboard');
+    });
+  });
+
+  describe('alerts card (RETRO-H5, #609)', () => {
+    it('appends the packaged card to Operations (followed only by Webhooks, RETRO-H4), on alerts:read, with no feature gate', () => {
+      const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
+      expect(operations.cards[operations.cards.length - 1].path).toBe('/admin/settings/webhooks');
+      const last = operations.cards[operations.cards.length - 2];
+      expect([last.title, last.path, last.permission, last.feature]).toEqual([
+        'Alerts',
+        '/admin/settings/alerts',
+        'alerts:read',
+        undefined,
+      ]);
+    });
+
+    it('is visible to an alerts:read holder and hidden otherwise', () => {
+      const titles = (sections: ReturnType<typeof visibleAdminSections>) =>
+        sections.flatMap((section) => section.cards.map((card) => card.title));
+      expect(titles(visibleAdminSections(allowOnly('alerts:read')))).toEqual(['Alerts']);
+      expect(titles(visibleAdminSections(allowOnly('telemetry:read')))).not.toContain('Alerts');
     });
   });
 

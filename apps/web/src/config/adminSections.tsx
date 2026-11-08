@@ -46,12 +46,18 @@ import AndroidIcon from '@mui/icons-material/Android';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
+import { setupGuideSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
 import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
 // RETRO-T2 (#625): the telemetry slice's three cards (data only; no page reaches the main chunk).
 import { telemetryAdminCards } from '@marinoscar/platform-web/telemetry/ui';
 import { webhooksAdminSections } from '@marinoscar/platform-web/webhooks/ui';
+// RETRO-H5 (#609): the alerts slice's card (data only; the page is lazy in App.tsx).
+import { alertsAdminCards } from '@marinoscar/platform-web/alerts/ui';
+// RETRO-H1 (#591): the user-data slice's factory reset card, in the pinned-last Danger Zone group.
+import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
+import { factoryResetSettingsPage } from '@marinoscar/platform-web/user-data/ui';
 import {
   settingsPageTitle,
   visibleSettingsSections,
@@ -128,6 +134,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/android',
         permission: 'system_settings:read',
       },
+      // RETRO-H3 (#599): the onboarding slice's Setup guide card, appended, as data.
+      // `system_settings:read` is the permission the platform onboarding slice adds the
+      // `admin` block of `GET /api/onboarding` for, and gates `GET /api/admin/onboarding/metrics`
+      // on (its default `adminPermission`; no `onboarding:read` exists).
+      { ...setupGuideSettingsPage.card, Icon: setupGuideSettingsPage.Icon },
     ],
   },
   {
@@ -314,6 +325,10 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // it is where telemetry is switched on), `telemetry:query` plus `feature: 'telemetry'` for the
       // Explorer and the Dashboard (`config/settingsFeatures.ts` resolves the feature).
       ...telemetryAdminCards,
+      // RETRO-H5 (#609): the packaged Alerts card, appended. `alerts:read` is the exact string every
+      // read route of `/api/admin/alerts` enforces; writes (`alerts:write`) are gated inside the page.
+      // No `feature`: node and queue rules work with telemetry switched off.
+      ...alertsAdminCards,
       // RETRO-H4 (#603): the packaged Webhooks card (the deployment's endpoints), appended.
       // `system_webhooks:read` is the string `GET /api/admin/webhooks` enforces; writes need
       // `system_webhooks:write`, gated inside the page. The organization card
@@ -321,6 +336,15 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // organization cards: no organization page is routed in single-organization mode.
       ...webhooksAdminSections.operations,
     ],
+  },
+  // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to
+  // append-only (a group added later goes BEFORE this one; the registry test asserts
+  // it with `dangerZoneLastViolations`). The packaged factory reset page:
+  // `system:factory_reset`, the exact SYSTEM permission the platform controller
+  // enforces (Admin only; never implied by `system_settings:write`). No `feature`.
+  {
+    label: DANGER_ZONE_GROUP_LABEL,
+    cards: [{ ...factoryResetSettingsPage.card, Icon: factoryResetSettingsPage.Icon }],
   },
 ];
 

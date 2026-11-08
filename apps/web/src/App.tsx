@@ -60,6 +60,15 @@ const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
 const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
 const DbBackupPage = lazy(() => import('./platform/db-backup/DbBackupPage'));
+// RETRO-H1 (#591): the platform user-data slice's two pages. The Danger Zone deletes the
+// caller's own data (`/api/user-data/*`, `user_settings:write`, every role); the factory
+// reset wipes the deployment (`system:factory_reset`, Admin only).
+const UserDangerZonePage = lazy(() =>
+  import('@marinoscar/platform-web/user-data/ui').then((m) => ({ default: m.UserDangerZonePage })),
+);
+const FactoryResetPage = lazy(() =>
+  import('@marinoscar/platform-web/user-data/ui').then((m) => ({ default: m.FactoryResetPage })),
+);
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
@@ -78,6 +87,9 @@ const NotificationPolicyPage = lazy(() =>
 const BroadcastsPage = lazy(() =>
   import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.BroadcastsPage })),
 );
+// RETRO-H3 (#599): the onboarding slice's two pages (`@marinoscar/platform-web/onboarding/ui`).
+const SetupGuidePage = lazy(() => import('./platform/onboarding/SetupGuideRoute'));
+const GettingStartedPage = lazy(() => import('./platform/onboarding/GettingStartedRoute'));
 const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
 // The platform's Jobs and Job Insights pages (RETRO-C1, #575); the Jobs one is a thin binding that adds
 // the app's "Repair missing thumbnails" action to the page toolbar.
@@ -144,6 +156,8 @@ const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'))
 const TelemetrySettingsPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/settings-page'));
 const TelemetryExplorerPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/explorer-page'));
 const TelemetryDashboardPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/dashboard-page'));
+// RETRO-H5 (#609): the packaged alerts page, in its own chunk.
+const AlertsAdminPage = lazy(() => import('./platform/alerts/AlertsAdminPage'));
 // RETRO-H4 (#603): the webhooks slice's one page, routed once per scope.
 const WebhooksPage = lazy(() =>
   import('@marinoscar/platform-web/webhooks/ui').then((m) => ({ default: m.WebhooksPage })),
@@ -200,6 +214,14 @@ function AppRoutes() {
                 <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
                 <Route path="/settings/memories" element={<MemoriesPreferencesPage />} />
                 <Route path="/settings/search" element={<SearchPreferencesPage />} />
+                {/* RETRO-H1 (#591). Ungated like every `/settings/*` sibling: the API gates
+                    `/api/user-data/*` on `user_settings:write`, which every role holds, and
+                    scopes each request to the caller's own data. The typed confirmation in
+                    the page's dialog is the deliberate act, not an authorization. */}
+                <Route path="/settings/danger-zone" element={<UserDangerZonePage />} />
+                {/* RETRO-H3 (#599): the user steps of `GET /api/onboarding`, which needs
+                    only `user_settings:read` (every role). */}
+                <Route path="/settings/getting-started" element={<GettingStartedPage />} />
                 {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
@@ -469,6 +491,17 @@ function AppRoutes() {
                     </RequirePermission>
                   }
                 />
+                {/* RETRO-H1 (#591). `system:factory_reset`, the exact SYSTEM permission the
+                    platform factory reset controller enforces (Admin only; never implied by
+                    `system_settings:write`). Declared by the pinned-last Danger Zone card. */}
+                <Route
+                  path="/admin/settings/factory-reset"
+                  element={
+                    <RequirePermission permission="system:factory_reset" fallback={<Navigate to="/" replace />}>
+                      <FactoryResetPage />
+                    </RequirePermission>
+                  }
+                />
                 <Route
                   path="/admin/settings/sharing"
                   element={
@@ -511,6 +544,27 @@ function AppRoutes() {
                       <RequireTelemetryEnabled loading={<LoadingSpinner />}>
                         <TelemetryDashboardPage />
                       </RequireTelemetryEnabled>
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H5 (#609): the alerts page, guarded on the exact string its card
+                    declares and every read route of /api/admin/alerts enforces. Writes
+                    (`alerts:write`) are gated by the PAGE. */}
+                <Route
+                  path="/admin/settings/alerts"
+                  element={
+                    <RequirePermission permission="alerts:read" fallback={<Navigate to="/" replace />}>
+                      <AlertsAdminPage />
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H3 (#599): the Setup guide, behind `system_settings:read`, the
+                    onboarding slice's `adminPermission` (the admin block and the metrics). */}
+                <Route
+                  path="/admin/settings/setup"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <SetupGuidePage />
                     </RequirePermission>
                   }
                 />

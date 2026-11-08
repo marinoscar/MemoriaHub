@@ -28,6 +28,10 @@ import ManageSearchIcon from '@mui/icons-material/ManageSearch';
 import AndroidIcon from '@mui/icons-material/Android';
 import PhonelinkRingIcon from '@mui/icons-material/PhonelinkRing';
 import { identityUserSettingsSections } from '@marinoscar/platform-web/identity/ui';
+// RETRO-H1 (#591): the user-data slice's Danger Zone card, in its pinned-last group.
+import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
+import { dangerZoneSettingsPage } from '@marinoscar/platform-web/user-data/ui';
+import { gettingStartedSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
 import { webhooksUserSettingsSections } from '@marinoscar/platform-web/webhooks/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
 import { ANDROID_APP_SETTINGS_PATH, MEDIA_SYNC_SETTINGS_PATH } from '../services/androidApp';
@@ -82,6 +86,13 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
         Icon: ManageSearchIcon,
         path: '/settings/search',
       },
+      {
+        // RETRO-H3 (#599): the onboarding slice's card, appended, as data. NO permission:
+        // `GET /api/onboarding` needs only `user_settings:read`, which every role holds. It stays
+        // after the checklist is dismissed: this is where the user finds it again.
+        ...gettingStartedSettingsPage.card,
+        Icon: gettingStartedSettingsPage.Icon,
+      },
     ],
   },
   {
@@ -116,5 +127,17 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
     // org role holds it); writes need `webhooks:write`, gated inside the page.
     label: 'Integrations',
     cards: [...webhooksUserSettingsSections.integrations],
+  },
+  {
+    // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to
+    // append-only (a group added later goes BEFORE this one; the registry test
+    // asserts it with `dangerZoneLastViolations`). The card, its icon and its page
+    // are the platform's (`dangerZoneSettingsPage`, route `/settings/danger-zone`);
+    // which scopes it offers comes from the API's user-data registries
+    // (`apps/api/src/platform/user-data/user-data.manifest.ts`). No `permission`:
+    // the API gates the routes on `user_settings:write`, which every role holds,
+    // and each request is scoped to the caller's own data.
+    label: DANGER_ZONE_GROUP_LABEL,
+    cards: [{ ...dangerZoneSettingsPage.card, Icon: dangerZoneSettingsPage.Icon }],
   },
 ];

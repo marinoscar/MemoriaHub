@@ -40,6 +40,8 @@ import {
   withWebhookChannel,
 } from '@marinoscar/platform-api/webhooks';
 
+import { ALERTS_NOTIFICATIONS, registerAlertsEmailTemplates } from '@marinoscar/platform-api/alerts';
+
 import { MEMORIAHUB_EMAIL_NOTIFICATIONS } from '../../notifications-registry/memoriahub-email.notifications';
 import {
   MEMORIAHUB_EVENT_KEYS,
@@ -74,9 +76,15 @@ const GROUPS: readonly (readonly NotificationRegistration[])[] = [
   DB_BACKUP_NOTIFICATIONS,
   MEMORIAHUB_NOTIFICATIONS_WITH_WEBHOOKS,
   MEMORIAHUB_EMAIL_NOTIFICATIONS,
+  // The alerts slice's two events (RETRO-H5, #609): `alerts.alert_fired` /
+  // `alerts.alert_resolved`, to the holders of `alerts:read`.
+  ALERTS_NOTIFICATIONS,
   // The webhooks slice's `webhooks.endpoint_disabled` (email and bell, to the endpoint's owner).
   WEBHOOKS_NOTIFICATIONS,
 ];
+
+// Their email templates (idempotent), bound before the events are registered.
+registerAlertsEmailTemplates();
 
 registerPlatformNotificationChannels();
 if (!isRegisteredNotificationChannel(WEBHOOK_NOTIFICATION_CHANNEL.id)) {
