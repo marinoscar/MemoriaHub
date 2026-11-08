@@ -201,7 +201,7 @@ export class EnrichmentAdminService {
    * in-process (5 s TTL) so this adds no per-call DB round-trip.
    */
   private async getStuckThresholdMinutes(): Promise<number> {
-    const settings = await this.settingsService.getSettings();
+    const settings = await this.settingsService.getSettings({ readOnly: true });
     const configured = settings.jobs?.stuckThresholdMinutes;
     if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
       return configured;

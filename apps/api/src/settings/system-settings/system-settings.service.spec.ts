@@ -103,6 +103,21 @@ describe('SystemSettingsService', () => {
     });
   });
 
+  describe('getSettings({ readOnly: true }) (Doctor, RETRO-B1b)', () => {
+    it('answers the built-in defaults for a missing row without writing or caching', async () => {
+      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
+
+      const result = await service.getSettings({ readOnly: true });
+
+      expect(result).toMatchObject({ ui: DEFAULT_SYSTEM_SETTINGS.ui, features: DEFAULT_SYSTEM_SETTINGS.features });
+      expect(mockPrisma.systemSettings.create).not.toHaveBeenCalled();
+
+      // Not cached: the next read looks at the database again.
+      await service.getSettings({ readOnly: true });
+      expect(mockPrisma.systemSettings.findUnique).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('replaceSettings (PUT)', () => {
     it('should replace entire settings', async () => {
       const newSettings: SystemSettingsValue = {
