@@ -1,5 +1,6 @@
 import type { DataTableStoredLayout } from '@marinoscar/platform-web/datatable/headless';
 import type {
+  MemoriaHubNotificationPreferences,
   NotificationPreferences,
   NotificationPreferencesPatch,
 } from './notifications';
@@ -75,14 +76,16 @@ export interface UserSettings {
    */
   dataTables?: Record<string, DataTableStoredLayout>;
   /**
-   * Per-type notification preferences (issue #251).
-   *
-   * Same absent-key contract as `dataTables`: the API returns this namespace
-   * verbatim and never materializes it, so `undefined` here is the normal
-   * state for a user who has never opened the Notifications section — and it
-   * means EVERYTHING IS ENABLED, not "nothing configured yet".
+   * Per-event, per-channel notification preferences: the platform
+   * notifications slice's `notifications` namespace since RETRO-D3 (#576),
+   * edited by its `UserNotificationsPage`. `undefined` means every default.
    */
   notifications?: NotificationPreferences;
+  /**
+   * MemoriaHub's own notification preference (RETRO-D3, #576): opt into the
+   * `on_media_enriched` workflow micro-run notifications. Absent means OFF.
+   */
+  memoriahubNotifications?: MemoriaHubNotificationPreferences;
   /**
    * Per-user Memories preferences (issue #307's namespace, issue #313's UI):
    * hidden people, sensitive date ranges, email-digest opt-out.
@@ -135,6 +138,7 @@ export type UserSettingsUpdate = Partial<
 > & {
   notifications?: NotificationPreferencesPatch | null;
   memories?: MemoriesPreferencesPatch | null;
+  memoriahubNotifications?: { workflowMicroRuns?: boolean | null } | null;
 };
 
 export interface SystemSettings {
@@ -159,14 +163,12 @@ export interface SystemSettings {
     stuckThresholdMinutes?: number;
   };
   /**
-   * Notification Center retention (issue #248). `retentionDays` ages out only
-   * notifications the user has already read or dismissed — unread rows are
-   * never deleted by age.
+   * The platform `retention` namespace (jobs slice): one `{ enabled, days }` per
+   * purge policy. `notifications` and `notificationDeliveries` are the
+   * notification inbox and delivery-log purges (RETRO-D3); the inbox purge never
+   * deletes an unread STATE or COUNTED row by age.
    */
-  notifications?: {
-    retentionDays?: number;
-    purgeEnabled?: boolean;
-  };
+  retention?: Record<string, { enabled?: boolean; days?: number }>;
   burst?: {
     timeGapSeconds?: number;
     hashDistance?: number;
