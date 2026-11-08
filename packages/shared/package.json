@@ -1,0 +1,14 @@
+{
+  "name": "@app/shared",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Product identity (identity.json) and the constants derived from it.",
+  "type": "commonjs",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "identity.json"
+  ]
+}
