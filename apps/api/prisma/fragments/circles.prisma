@@ -1,0 +1,106 @@
+// =============================================================================
+// Family Circles
+// =============================================================================
+
+enum CircleRole {
+  circle_admin
+  collaborator
+  viewer
+}
+
+model Circle {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  ownerId     String   @map("owner_id") @db.Uuid
+  isPersonal  Boolean  @default(false) @map("is_personal")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  owner                   User                    @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members                 CircleMember[]
+  invites                 CircleInvite[]
+  mediaItems              MediaItem[]
+  albums                  Album[]
+  tags                    Tag[]
+  // Face Recognition relations
+  people                  Person[]
+  faces                   Face[]
+  enrichmentJobs          EnrichmentJob[]
+  // Auto-Tagging relations
+  mediaTagStatuses      MediaTagStatus[]
+  // Video Auto-Tagging relations (epic #452, issue #454)
+  mediaTranscripts      MediaTranscript[]
+  // Metadata Re-run relations
+  mediaMetadataStatuses   MediaMetadataStatus[]
+  // Geocode Status relations
+  mediaGeocodeStatuses    MediaGeocodeStatus[]
+  // Burst Detection relations
+  bursts                  BurstGroup[]
+  // Duplicate Detection relations
+  duplicateGroups         DuplicateGroup[]
+  // Media Sharing relations
+  mediaShares             MediaShare[]
+  // Location Inference relations
+  locationSuggestions     LocationSuggestion[]
+  // AI Picture Enhancer relations
+  mediaEnhancements       MediaEnhancement[]
+  // AI Picture Enhancer — bulk batches (epic #420, issue #421)
+  mediaEnhancementBatches MediaEnhancementBatch[]
+  // Workflow Automation relations
+  workflows               Workflow[]
+  workflowRuns            WorkflowRun[]
+  // Empty Trash at Scale relations
+  trashEmptyRuns          TrashEmptyRun[]
+  // Review Runs relations (bursts / duplicates / location suggestions —
+  // supersedes the former LocationSuggestionRun-only relation, issue #190)
+  reviewRuns              ReviewRun[]
+  // Notification Center relations (epic #240, issue #244; schema-only)
+  notifications           Notification[]          @relation("CircleNotifications")
+  // Memories relations (epic #300, issue #301)
+  memories                Memory[]
+
+  @@index([ownerId])
+  @@map("circles")
+}
+
+model CircleMember {
+  id        String     @id @default(uuid()) @db.Uuid
+  circleId  String     @map("circle_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  role      CircleRole @default(viewer)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  circle Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([circleId, userId])
+  @@index([userId])
+  @@index([circleId])
+  @@map("circle_members")
+}
+
+model CircleInvite {
+  id          String     @id @default(uuid()) @db.Uuid
+  circleId    String     @map("circle_id") @db.Uuid
+  email       String
+  role        CircleRole @default(viewer)
+  addedById   String?    @map("added_by_id") @db.Uuid
+  addedAt     DateTime   @default(now()) @map("added_at") @db.Timestamptz
+  claimedById String?    @map("claimed_by_id") @db.Uuid
+  claimedAt   DateTime?  @map("claimed_at") @db.Timestamptz
+  notes       String?
+
+  // Relations
+  circle    Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  addedBy   User?  @relation("CircleInviteAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  claimedBy User?  @relation("CircleInviteClaimedBy", fields: [claimedById], references: [id], onDelete: SetNull)
+
+  @@unique([circleId, email])
+  @@index([email])
+  @@index([circleId])
+  @@map("circle_invites")
+}

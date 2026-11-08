@@ -1,0 +1,109 @@
+enum MediaFaceStatusType {
+  not_processed
+  pending
+  processing
+  processed
+  failed
+  no_faces
+}
+
+model Person {
+  id                 String    @id @default(uuid()) @db.Uuid
+  circleId           String    @map("circle_id") @db.Uuid
+  name               String?
+  addedById          String    @map("added_by_id") @db.Uuid
+  coverFaceId        String?   @map("cover_face_id") @db.Uuid
+  profileMediaItemId String?   @map("profile_media_item_id") @db.Uuid
+  profileCrop        Json?     @map("profile_crop")
+  favorite           Boolean   @default(false) @map("favorite")
+  mergedIntoId       String?   @map("merged_into_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz
+  hiddenAt           DateTime? @map("hidden_at") @db.Timestamptz
+
+  // Relations
+  circle           Circle     @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  addedBy          User       @relation("PersonAddedBy", fields: [addedById], references: [id])
+  coverFace        Face?      @relation("PersonCoverFace", fields: [coverFaceId], references: [id], onDelete: SetNull)
+  profileMediaItem MediaItem? @relation("PersonProfileMedia", fields: [profileMediaItemId], references: [id], onDelete: SetNull)
+  mergedInto       Person?    @relation("PersonMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom       Person[]   @relation("PersonMerge")
+  faces            Face[]     @relation("PersonFaces")
+  // Memories relations (epic #300, issue #301)
+  memories         Memory[]
+  // Profile picture management relations (issue #354)
+  linkedUsers      User[]     @relation("UserLinkedPerson")
+
+  @@index([circleId])
+  @@index([circleId, favorite])
+  @@index([circleId, hiddenAt], map: "people_circle_id_hidden_at_composite_idx")
+  @@index([mergedIntoId])
+  @@index([profileMediaItemId])
+  @@map("people")
+}
+
+model Face {
+  id                String    @id @default(uuid()) @db.Uuid
+  mediaItemId       String    @map("media_item_id") @db.Uuid
+  circleId          String    @map("circle_id") @db.Uuid
+  personId          String?   @map("person_id") @db.Uuid
+  boundingBox       Json      @map("bounding_box")
+  confidence        Float?
+  landmarks         Json?
+  embedding         Float[]
+  providerKey       String    @map("provider_key")
+  modelVersion      String    @map("model_version")
+  manuallyAssigned  Boolean   @default(false) @map("manually_assigned")
+  videoTimestampMs  Int?      @map("video_timestamp_ms")
+  videoTimestamps   Int[]     @map("video_timestamps")
+  frameThumbnailKey String?   @map("frame_thumbnail_key")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  hiddenAt          DateTime? @map("hidden_at") @db.Timestamptz
+  hiddenReason      String?   @map("hidden_reason")
+
+  // DERIVED column, maintained automatically by the `faces_sync_embedding_vec`
+  // DB trigger (migration 20260715000000_add_face_embedding_vector) — kept in
+  // sync with `embedding` on every INSERT/UPDATE, NULL for non-128-d or empty
+  // embeddings. Never written from application code: Prisma's `Unsupported`
+  // type intentionally makes it unreadable/unwritable through the client, so it
+  // must never appear in any select/create/update/include. Exists in the schema
+  // only so `prisma migrate diff` / `prisma db pull` don't propose dropping it.
+  // Indexed by three HNSW cosine indexes — main (faces_embedding_vec_hnsw_idx)
+  // and partial archive-set (faces_embedding_vec_archive_hnsw_idx), both added
+  // by migration 20260715000000_add_face_embedding_vector, plus partial
+  // assigned-set (faces_embedding_vec_assigned_hnsw_idx) added by migration
+  // 20260718000000_add_face_assigned_embedding_index — none representable here
+  // since Prisma cannot express a `vector_cosine_ops` HNSW index.
+  // Parentheses written as \u0028/\u0029 so the composer field reader accepts the type; Prisma decodes them (vector(128)).
+  embeddingVec Unsupported("vector\u0028128\u0029")? @map("embedding_vec")
+
+  // Relations
+  mediaItem      MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  circle         Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  person         Person?   @relation("PersonFaces", fields: [personId], references: [id], onDelete: SetNull)
+  coverForPeople Person[]  @relation("PersonCoverFace")
+
+  @@index([circleId])
+  @@index([mediaItemId])
+  @@index([personId])
+  @@index([circleId, hiddenAt])
+  @@map("faces")
+}
+
+model MediaFaceStatus {
+  id           String              @id @default(uuid()) @db.Uuid
+  mediaItemId  String              @unique @map("media_item_id") @db.Uuid
+  status       MediaFaceStatusType @default(not_processed)
+  providerKey  String?             @map("provider_key")
+  modelVersion String?             @map("model_version")
+  faceCount    Int                 @default(0) @map("face_count")
+  processedAt  DateTime?           @map("processed_at") @db.Timestamptz
+  lastError    String?             @map("last_error")
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+
+  @@map("media_face_status")
+}
