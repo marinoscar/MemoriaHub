@@ -24,6 +24,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'memories/curators/theme.curator.ts', why: 'Tag aggregates scoped by circle id.' },
   { file: 'notification-producers/share-expiring.service.ts', why: 'Share-expiry idempotency probe: a JSONB containment over the user\'s own notification rows.' },
   { file: 'platform/onboarding/onboarding-data.adapter.ts', why: "The onboarding activation metrics (RETRO-H3, #599): the platform builds ONE aggregate statement over the registered funnel and milestone expressions and this port runs it in a READ ONLY transaction. Counts only, every value a bound parameter, the expressions developer-authored (refused at registration if they contain a semicolon)." },
+  { file: 'platform/sharing/sharing-data.adapter.ts', why: "The first statement of the sharing slice's system transaction: SELECT set_config('app.rls_bypass', 'on', true) for its five named reasons (purge, doctor, retention, link-resolution, invite-claim); no ids (RETRO-I1 shim, replaced by PrismaSystemService.runAsSystem in RETRO-D1)." },
   { file: 'prisma/prisma.service.ts', why: 'Connection bootstrap and health probes.' },
   { file: 'search/semantic-search.service.ts', why: 'pgvector KNN scoped by circle id.' },
   { file: 'tagging/auto-tagging.service.ts', why: 'pgvector embedding upsert keyed by media item id.' },

@@ -209,6 +209,36 @@
       "scope": "system"
     },
     {
+      "name": "groups:read",
+      "description": "View the groups you belong to, answer your group invitations and leave a group",
+      "scope": "org"
+    },
+    {
+      "name": "groups:write",
+      "description": "Create groups and manage the members and invitations of groups you administer",
+      "scope": "org"
+    },
+    {
+      "name": "groups:admin",
+      "description": "View and administer every group of the organization, including groups you do not belong to",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:read",
+      "description": "View what is shared with you and who a record you can share is shared with, and remove your own access",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:write",
+      "description": "Share records you are allowed to share with people and groups of the organization, and change or revoke those shares",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:admin",
+      "description": "Manage the shares of every record of the organization, including records you do not own",
+      "scope": "org"
+    },
+    {
       "name": "org_settings:read",
       "description": "Read the active organization's settings overrides",
       "scope": "org"
@@ -236,6 +266,36 @@
     {
       "name": "orgs:offboard",
       "description": "Offboard an organization: delete it with all its data, members and invitations",
+      "scope": "system"
+    },
+    {
+      "name": "webhooks:read",
+      "description": "View your own webhook endpoints and their deliveries",
+      "scope": "org"
+    },
+    {
+      "name": "webhooks:write",
+      "description": "Create, change, delete, rotate and test your own webhook endpoints",
+      "scope": "org"
+    },
+    {
+      "name": "org_webhooks:read",
+      "description": "View the active organization's webhook endpoints and their deliveries",
+      "scope": "org"
+    },
+    {
+      "name": "org_webhooks:write",
+      "description": "Create, change, delete, rotate and test the active organization's webhook endpoints",
+      "scope": "org"
+    },
+    {
+      "name": "system_webhooks:read",
+      "description": "View the deployment's webhook endpoints and their deliveries",
+      "scope": "system"
+    },
+    {
+      "name": "system_webhooks:write",
+      "description": "Create, change, delete, rotate and test the deployment's webhook endpoints",
       "scope": "system"
     },
     {
@@ -369,6 +429,8 @@
       "organizations:write",
       "system:factory_reset",
       "orgs:offboard",
+      "system_webhooks:read",
+      "system_webhooks:write",
       "alerts:read",
       "alerts:write",
       "media:read_any",
@@ -389,6 +451,12 @@
       "storage:read",
       "storage:write",
       "ai:use",
+      "groups:read",
+      "groups:write",
+      "sharing:read",
+      "sharing:write",
+      "webhooks:read",
+      "webhooks:write",
       "media:read",
       "media:write",
       "media:delete",
@@ -402,6 +470,10 @@
       "user_settings:write",
       "storage:read",
       "storage:write",
+      "groups:read",
+      "sharing:read",
+      "webhooks:read",
+      "webhooks:write",
       "media:read",
       "media:write",
       "media:delete",
@@ -421,10 +493,20 @@
       "org_members:write",
       "org_invites:read",
       "org_invites:write",
+      "groups:read",
+      "groups:write",
+      "groups:admin",
+      "sharing:read",
+      "sharing:write",
+      "sharing:admin",
       "org_settings:read",
       "org_settings:write",
       "org_broadcasts:read",
       "org_broadcasts:write",
+      "webhooks:read",
+      "webhooks:write",
+      "org_webhooks:read",
+      "org_webhooks:write",
       "media:read",
       "media:write",
       "media:delete",

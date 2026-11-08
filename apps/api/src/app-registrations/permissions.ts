@@ -23,14 +23,21 @@
 //   - `storage`   storage:read (org: every member), storage:write (org: org_admin, contributor, and
 //                 `viewer` through `platformGrants`, below), storage:delete_any (system, admin),
 //                 storage_config:read|write (system, admin) (RETRO-D1, #563)
-// Not listed on purpose: `nodes`, `sharing` and `webhooks` are not mounted.
+//   - `webhooks`  webhooks:read|write (org: org_admin, contributor, viewer; a member's own endpoints),
+//                 org_webhooks:read|write (org, org_admin), system_webhooks:read|write (system, admin)
+//                 (RETRO-H4, #603)
+//   - `sharing`   groups:read, sharing:read (org: viewer, contributor, org_admin), groups:write,
+//                 sharing:write (org: contributor, org_admin), groups:admin, sharing:admin (org:
+//                 org_admin; a system `admin` holds them through the `org_admin` role the identity
+//                 slice gives it on the default organization) (RETRO-I1, #562)
+// Not listed on purpose: `nodes` is not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';
 
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'storage'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'webhooks', 'sharing', 'storage'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],

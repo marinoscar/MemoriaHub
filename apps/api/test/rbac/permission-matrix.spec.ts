@@ -99,6 +99,10 @@ const NEW_PLATFORM_PERMISSIONS = [
   // The alerts slice (RETRO-H5, #609): system scope, admin only. (The list is sorted.)
   'alerts:read',
   'alerts:write',
+  // The sharing slice (RETRO-I1, #562): org scope; groups:admin and sharing:admin via org_admin.
+  'groups:admin',
+  'groups:read',
+  'groups:write',
   'org_ai_config:read',
   'org_ai_config:write',
   // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
@@ -119,6 +123,17 @@ const NEW_PLATFORM_PERMISSIONS = [
   // The user-data slice (RETRO-H1, #591): system scope, admin only; never implied by system_settings:write.
   'orgs:offboard',
   'system:factory_reset',
+  // The webhooks slice (RETRO-H4, #603): webhooks:* (every org role), org_webhooks:* (org_admin),
+  // system_webhooks:* (admin).
+  'org_webhooks:read',
+  'org_webhooks:write',
+  'system_webhooks:read',
+  'system_webhooks:write',
+  'webhooks:read',
+  'webhooks:write',
+  'sharing:admin',
+  'sharing:read',
+  'sharing:write',
 ];
 
 /**
@@ -127,7 +142,15 @@ const NEW_PLATFORM_PERMISSIONS = [
  * MemoriaHub checks it yet: the app's AI features run server-side under the deployment key.
  */
 const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
-  contributor: ['ai:use'],
+  // `webhooks:read|write` (RETRO-H4, #603): a member's own webhook endpoints (`/api/webhooks`);
+  // the platform grants them to every org role. What an endpoint receives is still gated by the
+  // event's own permission (`media:read`), re-checked for the owner at every fan-out.
+  // RETRO-I1 (#562): the sharing slice's org grants. Nothing in MemoriaHub checks them yet: the
+  // slice's own routes are mounted but empty until circles become groups (RETRO-I2..I5).
+  contributor: ['ai:use', 'webhooks:read', 'webhooks:write', 'groups:read', 'groups:write', 'sharing:read', 'sharing:write'],
+  // RETRO-D1 (#563): storage:write, widened to `viewer` through platformGrants (the objects API was a
+  // bare @Auth() before, so viewers uploaded).
+  viewer: ['webhooks:read', 'webhooks:write', 'groups:read', 'sharing:read', 'storage:write'],
 };
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */
@@ -158,8 +181,8 @@ describe('role permission matrix', () => {
     expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor, ...(GAINED_BY_SLICE.contributor ?? [])].sort());
   });
 
-  it('viewer is what it was, plus storage:write (RETRO-D1: the objects API was a bare @Auth(), viewers uploaded; widened through platformGrants)', () => {
-    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, 'storage:write'].sort());
+  it('viewer is exactly what it was, plus the slice grants', () => {
+    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, ...(GAINED_BY_SLICE.viewer ?? [])].sort());
   });
 
   it('an administrator (admin + org_admin) keeps every permission and gains only the new platform ones', () => {

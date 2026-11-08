@@ -31,7 +31,7 @@
 // blocks the rest of the feature.
 // =============================================================================
 
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import {
   JobHandlerRegistry,
   type Job,
@@ -40,6 +40,7 @@ import {
 } from '@marinoscar/platform-api/jobs';
 import { resolveCircleJob } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
+import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { isMemoriesEnabled } from '../settings/feature-gates';
 import { resolveMemoriesSettings } from './memories-settings.util';
 import { parseMemoryGenerationPayload } from './memory-generation.payload';
@@ -70,6 +71,8 @@ export class MemoryGenerationHandler implements JobHandler, OnModuleInit {
     private readonly titles: MemoryTitleService,
     private readonly memoriesNotifications: MemoriesNotificationService,
     @Inject(MEMORY_CURATORS) private readonly curators: MemoryCurator[],
+    // Webhooks (RETRO-H4, #603). Optional so unit tests that build the handler by hand need no stub.
+    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
   ) {}
 
   onModuleInit(): void {
@@ -203,6 +206,11 @@ export class MemoryGenerationHandler implements JobHandler, OnModuleInit {
             (err instanceof Error ? err.message : String(err)),
         );
       }
+
+      // Webhook `memories.memory.created` (RETRO-H4, #603): the curators' writes are committed;
+      // the service re-reads this pass's new rows (`generatedAt >= ctx.now`), emits in batches of
+      // up to 100 ids and never throws, so the job's outcome does not depend on it.
+      await this.webhookEvents?.memoriesCreated(ctx.circleId, ctx.now);
     }
 
     this.logger.log({

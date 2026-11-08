@@ -132,6 +132,21 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'every read; aggregate activation metrics (`GET /api/admin/onboarding/metrics`). Served by the ' +
           'platform onboarding slice.',
       },
+      {
+        name: 'Groups',
+        description:
+          'Sharing groups of the platform sharing slice (RETRO-I1): groups, members, roles and invitations ' +
+          '(`groups:read` / `groups:write` / `groups:admin`). Mounted in single-organization mode and empty ' +
+          'until circles become groups (RETRO-I2); circles still decide access until then.',
+      },
+      {
+        name: 'Grants',
+        description:
+          'Shares of a record with a user, a group or a link (`sharing:read` / `sharing:write` / ' +
+          '`sharing:admin`), what is shared with the caller, the registered grantee kinds and group roles, ' +
+          'and the public link resolution `GET /api/public/links/current` (the `X-Link-Token` header is the ' +
+          'credential). Platform sharing slice (RETRO-I1); no resource type is shareable until RETRO-I2.',
+      },
     ],
   },
   {
@@ -323,6 +338,14 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'Admin announcements to every active user over in-app, Web Push and email: compose, ' +
           'test-send to yourself, schedule, cancel, resume and delete. Delivered by a chunked, ' +
           'resumable background fan-out.',
+      },
+      {
+        name: 'Webhooks',
+        description:
+          'Signed (Standard Webhooks) outbound callbacks, from the platform webhooks slice (RETRO-H4): ' +
+          'endpoints per scope (`/api/webhooks` own, `/api/org/webhooks`, `/api/admin/webhooks`), the ' +
+          'event catalog with JSON Schema, secret rotation, test sends and the delivery log with ' +
+          'redelivery. Guarded by `webhooks:*`, `org_webhooks:*` and `system_webhooks:*`.',
       },
     ],
   },

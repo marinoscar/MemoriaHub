@@ -1,3 +1,8 @@
+// PLATFORM-ADOPTION-SHIM(#562): retired by RETRO-I3/I4/I5. Public shares (`MediaShare`,
+// /api/shares, /api/public/shares/:token) stay app-owned while the platform sharing slice
+// is mounted beside them; RETRO-I4 imports them as link grants (importLegacyToken). Mapping:
+// docs/platform-adoption/circles-to-groups.md.
+
 import { Module } from '@nestjs/common';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';

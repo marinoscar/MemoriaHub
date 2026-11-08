@@ -55,6 +55,11 @@
 // `onboarding` (`@marinoscar/platform-api/onboarding/testing`, RETRO-H3): the step and fact
 // registries are consistent, every step's permission is registered, each fact resolves once and no
 // step's `evaluate` reads anything.
+// `webhooks` (`@marinoscar/platform-api/webhooks/testing`, RETRO-H4): every route of the three
+// webhook controllers enforces exactly its tier's permission, deliveries verify with
+// `verifyWebhookSignature`, the SSRF guard refuses non-public targets at create and at send, the
+// signing secret never leaves create/rotate, nothing makes an HTTP request outside the delivery job,
+// and endpoints never cross owners, scopes or organizations. It drives the slice over in-memory ports.
 //
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
@@ -80,8 +85,10 @@ import '@marinoscar/platform-api/notifications/testing';
 import '@marinoscar/platform-api/onboarding/testing';
 import '@marinoscar/platform-api/settings/testing';
 import '@marinoscar/platform-api/storage/testing';
+import '@marinoscar/platform-api/sharing/testing';
 import '@marinoscar/platform-api/user-data/testing';
 import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
+import '@marinoscar/platform-api/webhooks/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
@@ -107,6 +114,9 @@ import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 // Fills the onboarding step and fact registries the `onboarding` suite reads (AppModule imports it too).
 import '../src/platform/onboarding/onboarding.manifest';
+// The sharing slice's registrations (RETRO-I1); AppModule imports them too.
+import '../src/app-registrations/sharing';
+import { IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
@@ -192,6 +202,10 @@ runPlatformConformance({
     // global JWT guard (every route declares its own @Auth()/@Public()) and no
     // global throttler. If one is ever added, list it here with a reason.
     host: { rootModule: AppModule },
+
+    // The webhooks slice (RETRO-H4, #603). No extra blocked ranges: the platform's list
+    // (loopback, private, link-local, metadata, CGNAT, multicast, IPv4-mapped) covers this app.
+    webhooks: {},
 
     // The AI slice (RETRO-E1, #595). The two static suites run.
     //   - ai-no-sdk-leak: no provider SDK is imported anywhere in the app trees (`providerDirs: []`,
@@ -306,6 +320,21 @@ runPlatformConformance({
     // User data (RETRO-H1, #591): the keep-or-delete decision of every owner model,
     // against the composed schema the purge planner reads at bootstrap.
     userData: { datamodel: composedSchemaDatamodel(join(__dirname, '..', 'src', 'platform', 'user-data'))() },
+
+    // The sharing slice (RETRO-I1, #562). No app file touches the sharing tables directly, the
+    // public link route carries the identity slice's `@Public()` marker, and the three partial
+    // unique indexes are in the installed platform migrations. No model has an `owner_group_id`
+    // and no resource type is registered yet: RETRO-I2 adds both (`media_item`, `album`, the
+    // group-owned models) and updates `groupOwnedModels` and `resourceTypeIds` here.
+    sharing: {
+      schemaPath: join(__dirname, '..', 'prisma', 'schema'),
+      migrationsDir: join(__dirname, '..', 'prisma', 'migrations'),
+      rootModule: AppModule,
+      isPublic: (target) => Reflect.getMetadata(IS_PUBLIC_KEY, target) === true,
+      groupOwnedModels: {},
+      resourceTypeIds: [],
+      minRoutes: 100,
+    },
 
     doctorReadOnly: {
       fixture: doctorConformanceFixture,
