@@ -1,11 +1,14 @@
 # PostgreSQL Database Backup & Restore
 
 Epic: [#339](https://github.com/marinoscar/MemoriaHub/issues/339)
-Code: `apps/api/src/db-backup/` (issues #340–#344), `apps/api/src/common/maintenance/` (issue #348)
+Code: **since RETRO-D4 (#580) the platform slice `@marinoscar/platform-api/db-backup`** (mounted in `apps/api/src/platform/db-backup/`) plus MemoriaHub's registrations (`apps/api/src/app-registrations/db-backup.ts`); web: `@marinoscar/platform-web/db-backup/ui` bound in `apps/web/src/platform/db-backup/DbBackupPage.tsx`. The app's own `apps/api/src/db-backup/` (issues #340–#344) is deleted; maintenance mode is the platform host core's (issue #348, RETRO-B1).
 Runbook: [Database Restore](../runbooks/database-restore.md)
+
+> **Read §0 first.** §1–§9 record the design MemoriaHub built (epic #339) and the platform slice inherited (the slice was harvested from it). Where they name an app file, a class's internals, the inline schedule task or the old key convention, §0 says what changed.
 
 ## Table of Contents
 
+0. [Since RETRO-D4: platform slice + MemoriaHub registrations](#0-since-retro-d4-platform-slice--memoriahub-registrations)
 1. [Overview and Goals](#1-overview-and-goals)
 2. [Architecture](#2-architecture)
 3. [Data Model](#3-data-model)
@@ -16,6 +19,44 @@ Runbook: [Database Restore](../runbooks/database-restore.md)
 8. [Settings Reference](#8-settings-reference)
 9. [Gotchas](#9-gotchas)
 10. [Document History](#10-document-history)
+
+---
+
+## 0. Since RETRO-D4: platform slice + MemoriaHub registrations
+
+Issue [#580](https://github.com/marinoscar/MemoriaHub/issues/580) (epic #557) replaced the app's copy with `DbBackupModule.forRoot` of `@marinoscar/platform-api/db-backup`. Platform reference: `node_modules/@marinoscar/platform-api/src/db-backup/README.md`.
+
+**What the platform now owns.** The streaming `pg_dump -Fc` engine, verification (`pg_restore --list` on the stored bytes), retention, the restore (read-only pre-flight with a gate registry, scratch database, double rename, catalog carry-over, `process.exit(0)`), rollback, the routes `/api/admin/db-backup/*` (same paths and permissions; one new route, `GET /node-credential-preflight`), the `database_backup_runs` table (platform migration `0010`/`0012`), and four **job types** (`db.backup.run`, `db.backup.sweep`, `db.restore.run`, `db.restore.old-db-drop`) on the platform queue: the schedule task only decides and enqueues (the old app task ran the staleness sweep and the dump inline, a `cron-enqueue-only` finding). Run history therefore appears in `/admin/settings/jobs` as well. The Doctor checks `backup.schedule`, `backup.pg-client`, `backup.rls-bypass` and `backup.mirrors` are the slice's; `backup.pg-client` replaced `memoriahub.core.pg-client-version`.
+
+**Row-level security.** Every dump and every restore carries BOTH `--enable-row-security` and `PGOPTIONS=-c app.rls_bypass=on` (the option in the environment, never argv). The app's dumps carried neither: once `storage_objects` (and every platform org table) forces RLS, a dump without the pair exits 0 and contains no rows of those tables. Proof: `apps/api/test/db-backup/db-backup-rls.db.spec.ts` (with the negative control).
+
+**Archive keys.** New archives: `database-backups/memoriahub/YYYY/MM/<file>` (prefix `DB_BACKUP_KEY_PREFIX`, deployment scope, survives a factory reset). Archives written before the cutover keep `db-backups/<stamp>-<runId>.dump`: they are never moved, their rows keep the stored key, and the prefix is registered as `legacy-db-backups` (deployment scope, survives a factory reset) so purge and offboarding enumerate it.
+
+**MemoriaHub's bindings** (`apps/api/src/platform/db-backup/`):
+
+| Port / option | Bound to | Note |
+|---|---|---|
+| `target` | `MemoriaHubBackupTarget` | Writes to `databaseBackup.storageProvider` if set, else the active provider of MemoriaHub's own storage stack (`StorageProviderResolver`). Reads, deletes and signed links resolve the provider and bucket RECORDED ON THE RUN (looked up by key), never the active one, which is what keeps pre-cutover archives reachable. Shim until RETRO-D1 (the default target over the platform `STORAGE_PROVIDER` then applies). With an app target the platform withholds node offload |
+| `DB_BACKUP_NOTIFIER` | log and drop | MemoriaHub never notified on a backup or restore; RETRO-D3 binds `NotificationsService` and registers `DB_BACKUP_NOTIFICATION_EVENTS` / `DB_BACKUP_EMAIL_TEMPLATES` |
+| `DB_BACKUP_MAINTENANCE` | `MaintenanceModeService` | the host core's in-memory override, set during the swap |
+| `DB_BACKUP_METRICS` | `AppMetricsService` | `app.backup.*` |
+| `DB_BACKUP_DEPLOYMENT_MODE` | `DeploymentModeService` | `DEPLOYMENT_MODE=saas` turns restore off |
+| `DB_BACKUP_SYSTEM_DATA` | transaction with `set_config('app.rls_bypass','on',true)` | for the `backup.rls-bypass` count; shim until RETRO-D1 brings `PrismaSystemService` |
+
+**MemoriaHub's registrations** (`apps/api/src/app-registrations/db-backup.ts`):
+
+- **Restore gate `memoriahub-extensions`**: pgvector (`vector`) must be in `pg_available_extensions` on the target cluster (the embedding columns and HNSW indexes need it). One read-only `SELECT` over a short-lived connection to the maintenance database; an app gate's `fail` blocks the restore outright (no override).
+- **Restore carry-over `mh_legacy_android_app_releases`** (Open decision 1): the APK releases record files in object storage, so the rows written after the archive survive a restore. Exported `is_current` false first (one current release at a time); uploader re-resolved against `users`. RETRO-D5 retargets it to the android-app slice's table. Media rows (`media_items`, `storage_objects`) are deliberately NOT carried: a restore is a point in time of the library; objects uploaded after the archive are orphaned (the storage purge reclaims them), and rows whose object was deleted after the archive answer 404 for their bytes.
+- **HNSW rebuild.** Nothing to register: a restore rebuilds every index (hours at ~1M vectors) in the scratch database while the live one keeps serving; the swap is seconds.
+
+**Settings.** `databaseBackup` is the platform declaration (`DATABASE_BACKUP_SYSTEM_SETTINGS`). Shape changes: `storageProvider` `null` → `''` (no pin), `restoreRollbackMode` `pre_restore_dump` → `drop_database` (the platform name; the effective mode is still `pre_restore_dump`), new `nodeOffloadEnabled` (false: Open decision 2, until RETRO-C10), optional `cron` frequency and `retention` (`retentionCount` is the alias of `retention.count`). MemoriaHub keeps its own defaults through `APP_SYSTEM_SETTINGS_DEFAULTS` (`compressionLevel` 1, `oldDatabaseRetentionHours` 168, `runStaleMinutes` 30). Environment: only `DB_BACKUP_SCHEDULE_ENABLED` (config key `dbBackup.scheduleEnabled`) is read; `DB_BACKUP_HEARTBEAT_MS`, `DB_BACKUP_PG_DUMP_TIMEOUT_MS`, `DB_BACKUP_PG_RESTORE_LIST_TIMEOUT_MS`, `PG_DUMP_PATH` and `PG_RESTORE_PATH` are no longer read.
+
+**Data transform** (`npm run db-backup:migrate-legacy -- --dry-run|--apply`, `src/legacy/legacy-db-backup-migration.ts`; idempotent):
+
+1. Rewrites `databaseBackup` into the platform shape (timezone and frequency validated, bounds clamped) and keeps the original value once under the top-level key `mhLegacyDatabaseBackup` of the `global` row.
+2. Copies every `mh_legacy_database_backup_runs` row that points at an archive (RETRO-A5 renamed the app's table) into `database_backup_runs` under its ORIGINAL id with `ON CONFLICT (id) DO NOTHING`: history, download, restore, retention and delete then work on pre-cutover archives. Rows with no archive stay in the legacy table only; MemoriaHub's `guided`/`blocked` restore statuses become NULL; users are re-resolved; the pre-restore self-link is set in a second pass. Refuses while a legacy backup or restore is in flight. The legacy table is never modified; a later `migration-lock` PR drops it.
+
+Restoring a **pre-cutover archive**: its `_prisma_migrations` predates the platform migrations, so the schema gate blocks; re-send with `overrideSchemaCheck: true`, then run `npm run prisma:migrate` (and the transform above) after the swap. See the runbook.
 
 ---
 
@@ -72,7 +113,7 @@ This feature gives admins a reliable, schedulable, retained backup of MemoriaHub
 
 Storage: provider.upload(key, stream, opts) — S3 / R2 / local disk,
 resolved via StorageProviderResolver, same abstraction as media objects.
-Key convention: db-backups/<utc-timestamp>-<runId>.dump
+Key convention: database-backups/memoriahub/YYYY/MM/<file> (before RETRO-D4: db-backups/<utc-timestamp>-<runId>.dump)
 ```
 
 ### 2.1 Why NOT an `enrichment_jobs` job type
@@ -100,7 +141,7 @@ Further precedent for self-driven work living outside the queue entirely: `Notif
 
 Resolved via `StorageProviderResolver` — **never** hardcoded to local disk, unlike the older media-backup feature (`apps/api/src/jobs/backup/`, which always writes to `BACKUP_LOCAL_PATH` on the API server's own disk). Database backups default to the **active** storage provider, with an optional explicit override (`databaseBackup.storageProvider`): when the active provider is `local`, an admin can point database backups at S3/R2 instead so the dump doesn't land on the same disk as the database it's protecting.
 
-Key convention: `db-backups/<utc-timestamp>-<runId>.dump` (see `buildStorageKey` in `database-backup-runner.service.ts`). The leading timestamp makes a raw bucket listing chronologically sortable without the database — which matters specifically during disaster recovery, when the app (and its `database_backup_runs` table) may be unavailable; see the [runbook §1.2](../runbooks/database-restore.md#12-directly-from-the-storage-provider-app-is-down).
+Key convention (before RETRO-D4): `db-backups/<utc-timestamp>-<runId>.dump`; since RETRO-D4 the platform writes `database-backups/memoriahub/YYYY/MM/<file>` (§0). The leading timestamp makes a raw bucket listing chronologically sortable without the database — which matters specifically during disaster recovery, when the app (and its `database_backup_runs` table) may be unavailable; see the [runbook §1.2](../runbooks/database-restore.md#12-directly-from-the-storage-provider-app-is-down).
 
 **Streaming is a hard requirement, not an optimization.** `pg_dump` writes its archive to stdout (no `-f` flag); that stream is piped, with backpressure, straight into `provider.upload(key, stream, options)`. The archive is **never materialized in memory or on local disk** — see §4.2 for the exact mechanism.
 
@@ -171,12 +212,15 @@ Two mechanisms work together, and both exist for the reason detailed in §2.1 �
 
 ### 4.1 `pg_dump` invocation
 
-`buildPgDumpArgs` (`apps/api/src/db-backup/pg-dump.util.ts`):
+`buildPgDumpArgs` (the platform's `pg-dump.util.ts` since RETRO-D4):
 
 ```
-pg_dump -Fc --no-owner --no-acl -Z <compressionLevel> \
+PGOPTIONS='-c app.rls_bypass=on' \
+pg_dump -Fc --no-owner --no-acl --enable-row-security -Z <compressionLevel> \
   -h <host> -p <port> -U <user> -d <database>
 ```
+
+- **`--enable-row-security` + `PGOPTIONS=-c app.rls_bypass=on`** (§0) — the pair that makes a dump of forced-RLS tables complete. The flag alone exits 0 with empty org tables; the option alone is refused by `pg_dump`.
 
 - **`-Fc`** — the custom archive format. This is the *only* `pg_dump` output format `pg_restore` can reorder and parallelize (`-j N`) on restore, and it produces a single file rather than a directory (`-Fd`) — both properties the backup engine and the restore runbook depend on.
 - **`--no-owner --no-acl`** — ownership and GRANTs are re-established by whatever role owns the restore target, not baked in from the source; without this a cross-host restore (a different Postgres instance, a different role name) fails outright.
@@ -213,6 +257,8 @@ Only after verification succeeds does the run write `status='completed'`, `verif
 Both rules delete the storage object **before** the database row, never the reverse — a failure between the two steps must leave an orphaned *row* (visible in the admin UI, still prunable next run) rather than an orphaned multi-GB *object* nothing points at and nobody can find. Pruning is entirely best-effort and never throws into the calling backup run: the backup already exists and is verified by the time pruning runs, so a missed prune costs storage, not correctness.
 
 ### 4.5 Scheduling
+
+> Since RETRO-D4 the platform's `DatabaseBackupScheduleTask` only decides and enqueues `db.backup.run` (and `db.backup.sweep` for stale runs); the steps below describe the pre-slice app task, whose logic the platform jobs inherited.
 
 `DatabaseBackupScheduleTask` ticks every 10 minutes (`@Cron(CronExpression.EVERY_10_MINUTES)`), independent of `ENRICHMENT_WORKER_MODE` (it is not a queue worker and must keep running even under `ENRICHMENT_WORKER_MODE=off`); its own kill-switch is the `DB_BACKUP_SCHEDULE_ENABLED` env var, following the `THUMBNAIL_REPAIR_ENABLED`/`NOTIFICATIONS_RECONCILE_ENABLED` precedent. Each tick, in order:
 
@@ -338,6 +384,7 @@ Full endpoint-by-endpoint reference — parameters, response shapes, permission 
 | `GET /api/admin/db-backup/runs/:id/download` | `db_backup:read` | Signed download URL, resolved against the RUN's recorded provider |
 | `DELETE /api/admin/db-backup/runs/:id` | `db_backup:write` | Delete object then row; refuses a `pending`/`running` row |
 | `POST /api/admin/db-backup/runs/:id/cancel` | `db_backup:write` | Cooperative abort — routes through the same failure path as any other failed run |
+| `GET /api/admin/db-backup/node-credential-preflight` | `db_backup:read` | (platform, RETRO-D4) whether the database role can mint per-job roles for node offload; offload stays off in MemoriaHub |
 
 `POST /api/admin/db-backup/runs/:id/restore` and `POST /api/admin/db-backup/runs/:id/rollback` (`db_backup:restore`, issue #344) live on this same `DatabaseBackupController`, at its bottom — see §5 for the full request/response contract, the three pre-flight outcomes, and the two rollback modes.
 
@@ -345,7 +392,7 @@ Full endpoint-by-endpoint reference — parameters, response shapes, permission 
 
 ## 7. RBAC
 
-Three permissions, all Admin-only, added in issue #340 (all three already exist in `apps/api/prisma/seed.ts` regardless of #344's merge status, since RBAC scaffolding was part of the data-model issue, not the restore issue):
+Three permissions, all Admin-only, system scope. Added in issue #340; since RETRO-D4 they are declared by the platform set `DB_BACKUP_PERMISSIONS` (selected as the `db-backup` slice in `app-registrations/permissions.ts`), same ids and grants:
 
 - **`db_backup:read`** — view configuration, run history/detail, and download backup artifacts
 - **`db_backup:write`** — change configuration, trigger manual runs, delete runs, cancel in-flight runs
@@ -357,7 +404,9 @@ No per-circle role interacts with this feature at all — database backup/restor
 
 ## 8. Settings Reference
 
-The `databaseBackup.*` namespace, `apps/api/src/settings/registry/namespaces/system/database-backup.ts`, edited via `GET`/`PUT /api/admin/db-backup/config` (the db-backup admin controller's `PUT /config` delegates internally to `SystemSettingsService.patchSettings`, so there is exactly one settings writer; since RETRO-B3 the generic `PATCH /api/system-settings` reaches the namespace too).
+> Since RETRO-D4 the namespace is the platform's `DATABASE_BACKUP_SYSTEM_SETTINGS`; see §0 for the shape changes (`storageProvider` `''`, `drop_database`, `nodeOffloadEnabled`, `cron`, `retention`) and the wider platform bounds. The defaults below are kept by `APP_SYSTEM_SETTINGS_DEFAULTS`. Of the environment variables, only `DB_BACKUP_SCHEDULE_ENABLED` is still read.
+
+The `databaseBackup.*` namespace, edited via `GET`/`PUT /api/admin/db-backup/config` (the db-backup admin controller's `PUT /config` delegates internally to `SystemSettingsService.patchSettings`, so there is exactly one settings writer; since RETRO-B3 the generic `PATCH /api/system-settings` reaches the namespace too).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -387,13 +436,14 @@ The `databaseBackup.*` namespace, `apps/api/src/settings/registry/namespaces/sys
 ## 9. Gotchas
 
 - **`pg_dump` blocks DDL for its whole run.** It holds ACCESS SHARE locks and a long-lived MVCC snapshot for the entire dump duration — including blocking a concurrent `prisma migrate deploy`, and holding back autovacuum. This is the concrete reason the default schedule fires at 02:00: pick a schedule window that avoids planned deploys/migrations.
+- **A dump without the RLS pair is silently empty.** `--enable-row-security` without `PGOPTIONS=-c app.rls_bypass=on` writes a valid archive whose org tables have no rows (§0). Every manual command in the runbook carries both; so must any script you write. A transaction-mode pooler rejects the startup option: dump over a direct connection.
 - **Credentials never touch argv.** `PGPASSWORD` goes through the child process's environment only (§4.1) — this is a security requirement with an actual test assertion behind it, not a style preference.
 - **Client (`pg_restore`) version must be ≥ server version.** The server runs Postgres 17 (`pgvector/pgvector:pg17`); `apps/api/Dockerfile` installs `postgresql-client-17` to match, pulled from the PGDG apt repo (apt.postgresql.org) rather than Debian's stock archive, since the stock archive only ever carries the current default major for a given release. See the [runbook §2.2](../runbooks/database-restore.md#22-client-version-must-be--server-version).
 - **pgvector is required on any restore target.** The dump contains `CREATE EXTENSION vector`; restoring into a plain `postgres` image fails outright. See the [runbook §2.1](../runbooks/database-restore.md#21-pgvector-is-required-on-the-target).
 - **Local-provider downloads proxy through the API**, unlike S3/R2's signed URLs — when `databaseBackup.storageProvider` resolves to `local`, a multi-GB download needs to stream with Range support rather than redirect to object storage directly. Relevant for the download endpoint's implementation, not something an operator needs to think about, but worth knowing if a download of a large local-provider backup behaves differently than an S3-backed one.
 - **BigInt fields never leave the API raw.** `sizeBytes`/`bytesWritten` are Prisma `BigInt` columns; every response maps them to strings explicitly (§3.1). See CLAUDE.md's general BigInt gotcha.
 - **Embeddings are recomputable but are NOT excluded from the dump.** `media_item_embedding`, `media_visual_embedding`, and `faces.embedding` could in principle be regenerated via the existing tagging/duplicate/face backfill endpoints, which could shrink dump size by roughly 70%. Deliberately not done in v1: text embeddings cost real money to regenerate at scale (AI provider calls), and silently dropping data from what's supposed to be a complete backup is a footgun waiting to surprise someone during an actual disaster.
-- **Dumps contain plaintext PII** — emails, names, and everything else in the live schema — and must be treated as sensitive as the database itself. Values already encrypted at rest via `SECRETS_ENCRYPTION_KEY` (AI/face/storage/geo/email provider credentials) stay encrypted *inside* the dump too, so a leaked dump exposes nothing beyond what the masked admin APIs already reach — but bucket-level access to the `db-backups/` prefix should still be restricted at the infrastructure layer independent of this feature's own `db_backup:read` gate.
+- **Dumps contain plaintext PII** — emails, names, and everything else in the live schema — and must be treated as sensitive as the database itself. Values already encrypted at rest via `SECRETS_ENCRYPTION_KEY` (AI/face/storage/geo/email provider credentials) stay encrypted *inside* the dump too, so a leaked dump exposes nothing beyond what the masked admin APIs already reach — but bucket-level access to the `database-backups/` and legacy `db-backups/` prefixes should still be restricted at the infrastructure layer independent of this feature's own `db_backup:read` gate.
 - **The restore's `restart: unless-stopped` and single-replica assumptions are structural, not defensive.** See §5.9 — verify both before you need them, not during an incident.
 
 ---
@@ -401,4 +451,5 @@ The `databaseBackup.*` namespace, `apps/api/src/settings/registry/namespaces/sys
 ## 10. Document History
 
 - 2026-08 — Initial version, written alongside the [disaster-recovery runbook](../runbooks/database-restore.md) (issue #346, epic #339), documenting the merged implementation of issues #340–#343 and #348, plus issue #344's design intent (not yet merged as of that writing).
+- 2026-11 — RETRO-D4 (#580): the platform slice replaces the app copy (§0): RLS dump flags, job-based schedule, `database-backups/` keys, platform settings namespace, MemoriaHub's restore gate and Android releases carry-over, the legacy-history data transform.
 - 2026-08 — Issue #344 (restore/rollback via scratch database + atomic swap) merged; §5 rewritten to describe the shipped `DatabaseRestoreService` implementation rather than design intent — the pre-flight gate table, the three `POST /runs/:id/restore` outcomes (no separate dry-run/pre-flight endpoint exists), the `restoreStatus` value set, the swap ordering, the two rollback modes, and the catalog carry-over mechanism.

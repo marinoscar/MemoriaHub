@@ -26,6 +26,10 @@
 // `credentials` (`@marinoscar/platform-api/credentials/testing`, RETRO-B4): purpose owners, addresses
 // and the no-secret-egress shape of the credential info schemas.
 //
+// `db-backup` (`@marinoscar/platform-api/db-backup/testing`, RETRO-D4): both halves of the RLS pair
+// on pg_dump and pg_restore, the restore server-only and the backup node-eligible, system-scope
+// permissions, the `database-backups/` prefix with deployment scope, and every registered
+// carry-over binding `$1` (MemoriaHub's Android releases carry is required).
 // `email` (`@marinoscar/platform-api/email/testing`, RETRO-D2): the platform templates
 // are registered, every sampled template (the platform's plus this app's three) renders
 // a complete document with its data escaped, and no email settings shape carries a secret.
@@ -41,6 +45,7 @@ import { join } from 'node:path';
 import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
 
 import '@marinoscar/platform-api/credentials/testing';
+import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/email/testing';
 import '@marinoscar/platform-api/host/testing';
@@ -57,6 +62,7 @@ import { APP_CREDENTIAL_OWNERS } from '../src/platform/credentials/credential-pu
 // Fills the role, permission and ownership registries the suites read.
 import '../src/app-registrations/permission-manifest';
 import '../src/app-registrations/ownership-manifest';
+import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-backup';
 // Configures email rendering and registers this app's templates (the `email` suite renders them).
 import '../src/platform/email/email.config';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
@@ -103,7 +109,7 @@ runPlatformConformance({
     // Both suites are wired and OPTED OUT with the reason, so the debt is visible in the run summary
     // until the issue that pays it enables the suite (with `exempt` for the three platform
     // exemptions only). Measured with the suites on at the cutover: 18 inline findings in 13 cron
-    // files (the db-backup, insights, memories, node-backup, node-prune, notification-reconcile,
+    // files (the db-backup one is gone since RETRO-D4: the platform task only enqueues; insights, memories, node-backup, node-prune, notification-reconcile,
     // share-expiring, storage-cleanup, storage-processing-recovery and workflow crons) and one
     // listener download (storage/processing/object-processing.service.ts).
     cronEnqueueOnly: {
@@ -117,6 +123,8 @@ runPlatformConformance({
         'the storage slice (RETRO-D1) moves it into a post-upload processor job. No other listener fails.',
     },
 
+    // Database backup and restore (RETRO-D4, #580).
+    dbBackup: { requiredCarryOverIds: [...MEMORIAHUB_REQUIRED_CARRY_OVER_IDS] },
     // The email slice (RETRO-D2, #570). `samples` adds this app's three templates to the
     // rendering check, with hostile text in every field the escaping must catch.
     email: { samples: EMAIL_TEMPLATE_SAMPLES },

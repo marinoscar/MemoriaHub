@@ -9,8 +9,10 @@
 //                 web hides them in single-org mode)
 //   - `settings`  system_settings:*, user_settings:*, org_settings:*
 //   - `jobs`      jobs:read, jobs:write
-// Not listed on purpose: `storage`, `db-backup` and `notifications` collide with
-// MemoriaHub's own (legacy) declarations of the same ids until RETRO-D1, D4 and
+//   - `db-backup` db_backup:read, db_backup:write, db_backup:restore (RETRO-D4, #580; same ids and
+//                 grants as MemoriaHub's former declarations: system scope, admin only)
+// Not listed on purpose: `storage` and `notifications` collide with
+// MemoriaHub's own (legacy) declarations of the same ids until RETRO-D1 and
 // D3 adopt those slices; `nodes`, `ai`, `telemetry`, `sharing`, `user-data`,
 // `webhooks` and `alerts` are not mounted.
 
@@ -19,7 +21,7 @@ import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifes
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],

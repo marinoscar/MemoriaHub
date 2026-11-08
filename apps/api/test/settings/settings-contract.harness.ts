@@ -186,11 +186,14 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     timeOfDay: '02:00',
     timezone: 'UTC',
     retentionCount: 7,
-    storageProvider: null,
+    // The platform declaration (RETRO-D4): '' is "no pin"; node offload stays off. The other three
+    // are MemoriaHub's own defaults, kept by APP_SYSTEM_SETTINGS_DEFAULTS.
+    storageProvider: '',
     runStaleMinutes: 30,
     compressionLevel: 1,
     restoreRollbackMode: 'retain_database',
     oldDatabaseRetentionHours: 168,
+    nodeOffloadEnabled: false,
   },
   maintenance: { enabled: false, allowAdmins: true, startedAt: null, startedById: null },
 } as const;

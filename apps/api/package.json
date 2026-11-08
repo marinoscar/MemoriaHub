@@ -37,6 +37,7 @@
     "db:baseline": "node scripts/platform-env.js db baseline",
     "db:test": "node scripts/test-db-connection.js",
     "credentials:migrate-legacy": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-legacy-credentials.ts",
+    "db-backup:migrate-legacy": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-db-backup-settings.ts",
     "email:migrate-settings": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-email-settings.ts",
     "settings:verify": "ts-node -P scripts/tsconfig.json --transpile-only scripts/verify-settings-rows.ts",
     "settings:migrate-run-retention": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-run-retention-settings.ts",

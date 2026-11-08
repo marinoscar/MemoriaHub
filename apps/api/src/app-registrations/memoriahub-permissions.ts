@@ -214,22 +214,4 @@ export const MEMORIAHUB_PERMISSIONS = {
     scope: 'system',
     defaultGrants: ['admin'],
   },
-  DB_BACKUP_READ: {
-    id: 'db_backup:read',
-    description: 'Admin: read database backup run history and status',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  DB_BACKUP_WRITE: {
-    id: 'db_backup:write',
-    description: 'Admin: configure and trigger database backups',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  DB_BACKUP_RESTORE: {
-    id: 'db_backup:restore',
-    description: 'Admin: restore the database from a backup',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
 } as const satisfies Record<string, PermissionDeclaration>;
