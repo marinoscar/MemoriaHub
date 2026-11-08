@@ -39,7 +39,7 @@
 
 import { ENRICHMENT_MAX_ATTEMPTS } from '../platform/jobs/queue-limits';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, StorageMigrationItemStatus, StorageMigrationStatus, StorageObjectStatus } from '@prisma/client';
+import { EnrichmentJob, MhLegacyStorageMigrationItemStatus, MhLegacyStorageMigrationStatus, StorageObjectStatus } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
@@ -50,8 +50,8 @@ const MAX_ATTEMPTS = ENRICHMENT_MAX_ATTEMPTS;
 
 // Statuses considered "active" — used to gate concurrent migration checks
 const ACTIVE_RUN_STATUSES = [
-  StorageMigrationStatus.pending,
-  StorageMigrationStatus.running,
+  MhLegacyStorageMigrationStatus.pending,
+  MhLegacyStorageMigrationStatus.running,
 ] as const;
 
 // StorageObject statuses whose objects are safe to copy (i.e., fully uploaded)
@@ -91,7 +91,7 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
 
     // ─── Load item ────────────────────────────────────────────────────────────
 
-    const item = await this.prisma.storageMigrationItem.findUnique({
+    const item = await this.prisma.mhLegacyStorageMigrationItem.findUnique({
       where: { id: itemId },
     });
 
@@ -102,14 +102,14 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
     }
 
     // Idempotent no-op for retried/duplicate jobs that already succeeded.
-    if (item.status === StorageMigrationItemStatus.completed) {
+    if (item.status === MhLegacyStorageMigrationItemStatus.completed) {
       this.logger.debug(`storage_migration job ${job.id}: item ${itemId} already completed; skipping`);
       return;
     }
 
     // ─── Load run ─────────────────────────────────────────────────────────────
 
-    const run = await this.prisma.storageMigrationRun.findUnique({
+    const run = await this.prisma.mhLegacyStorageMigrationRun.findUnique({
       where: { id: runId },
     });
 
@@ -120,13 +120,13 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
     }
 
     // If the run was cancelled, skip this item.
-    if (run.status === StorageMigrationStatus.cancelled) {
+    if (run.status === MhLegacyStorageMigrationStatus.cancelled) {
       await this.prisma.$transaction([
-        this.prisma.storageMigrationItem.update({
+        this.prisma.mhLegacyStorageMigrationItem.update({
           where: { id: itemId },
-          data: { status: StorageMigrationItemStatus.skipped, updatedAt: new Date() },
+          data: { status: MhLegacyStorageMigrationItemStatus.skipped, updatedAt: new Date() },
         }),
-        this.prisma.storageMigrationRun.update({
+        this.prisma.mhLegacyStorageMigrationRun.update({
           where: { id: runId },
           data: { skippedCount: { increment: 1 } },
         }),
@@ -137,11 +137,11 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
 
     // ─── Mark run as running (lazy; first item to start flips the run status) ─
 
-    if (run.status === StorageMigrationStatus.pending) {
-      await this.prisma.storageMigrationRun.update({
+    if (run.status === MhLegacyStorageMigrationStatus.pending) {
+      await this.prisma.mhLegacyStorageMigrationRun.update({
         where: { id: runId },
         data: {
-          status: StorageMigrationStatus.running,
+          status: MhLegacyStorageMigrationStatus.running,
           startedAt: run.startedAt ?? new Date(),
         },
       });
@@ -149,9 +149,9 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
 
     // ─── Mark item as copying ─────────────────────────────────────────────────
 
-    await this.prisma.storageMigrationItem.update({
+    await this.prisma.mhLegacyStorageMigrationItem.update({
       where: { id: itemId },
-      data: { status: StorageMigrationItemStatus.copying, updatedAt: new Date() },
+      data: { status: MhLegacyStorageMigrationItemStatus.copying, updatedAt: new Date() },
     });
 
     // ─── Core copy logic (may throw for transient errors → worker retries) ────
@@ -171,15 +171,15 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
         // Record domain-level failure so the status endpoint reflects it.
         try {
           await this.prisma.$transaction([
-            this.prisma.storageMigrationItem.update({
+            this.prisma.mhLegacyStorageMigrationItem.update({
               where: { id: itemId },
               data: {
-                status: StorageMigrationItemStatus.failed,
+                status: MhLegacyStorageMigrationItemStatus.failed,
                 lastError: message,
                 updatedAt: new Date(),
               },
             }),
-            this.prisma.storageMigrationRun.update({
+            this.prisma.mhLegacyStorageMigrationRun.update({
               where: { id: runId },
               data: {
                 failedCount: { increment: 1 },
@@ -225,11 +225,11 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
       // Object was deleted — skip gracefully.
       this.logger.warn(`storage_migration: objectId ${objectId} not found; marking skipped`);
       await this.prisma.$transaction([
-        this.prisma.storageMigrationItem.update({
+        this.prisma.mhLegacyStorageMigrationItem.update({
           where: { id: itemId },
-          data: { status: StorageMigrationItemStatus.skipped, updatedAt: new Date() },
+          data: { status: MhLegacyStorageMigrationItemStatus.skipped, updatedAt: new Date() },
         }),
-        this.prisma.storageMigrationRun.update({
+        this.prisma.mhLegacyStorageMigrationRun.update({
           where: { id: runId },
           data: { skippedCount: { increment: 1 } },
         }),
@@ -251,15 +251,15 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
         `storage_migration: object ${objectId} already on provider=${run.targetProvider} bucket=${destBucket ?? 'default'}; marking completed`,
       );
       await this.prisma.$transaction([
-        this.prisma.storageMigrationItem.update({
+        this.prisma.mhLegacyStorageMigrationItem.update({
           where: { id: itemId },
           data: {
-            status: StorageMigrationItemStatus.completed,
+            status: MhLegacyStorageMigrationItemStatus.completed,
             newStorageKey: object.storageKey,
             updatedAt: new Date(),
           },
         }),
-        this.prisma.storageMigrationRun.update({
+        this.prisma.mhLegacyStorageMigrationRun.update({
           where: { id: runId },
           data: { migratedCount: { increment: 1 } },
         }),
@@ -315,16 +315,16 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
         },
       }),
       // Mark item as completed
-      this.prisma.storageMigrationItem.update({
+      this.prisma.mhLegacyStorageMigrationItem.update({
         where: { id: itemId },
         data: {
-          status: StorageMigrationItemStatus.completed,
+          status: MhLegacyStorageMigrationItemStatus.completed,
           newStorageKey: newKey,
           updatedAt: new Date(),
         },
       }),
       // Increment the run's migrated counter
-      this.prisma.storageMigrationRun.update({
+      this.prisma.mhLegacyStorageMigrationRun.update({
         where: { id: runId },
         data: { migratedCount: { increment: 1 } },
       }),
@@ -348,7 +348,7 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
   // will see status=completed/failed and bail out early.
 
   private async maybeFinalizeRun(runId: string): Promise<void> {
-    const run = await this.prisma.storageMigrationRun.findUnique({
+    const run = await this.prisma.mhLegacyStorageMigrationRun.findUnique({
       where: { id: runId },
     });
 
@@ -356,9 +356,9 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
 
     // Already finalized or cancelled
     if (
-      run.status === StorageMigrationStatus.completed ||
-      run.status === StorageMigrationStatus.failed ||
-      run.status === StorageMigrationStatus.cancelled
+      run.status === MhLegacyStorageMigrationStatus.completed ||
+      run.status === MhLegacyStorageMigrationStatus.failed ||
+      run.status === MhLegacyStorageMigrationStatus.cancelled
     ) {
       return;
     }
@@ -370,10 +370,10 @@ export class StorageMigrationHandler implements EnrichmentHandler, OnModuleInit 
 
     const finalStatus =
       run.failedCount > 0
-        ? StorageMigrationStatus.failed
-        : StorageMigrationStatus.completed;
+        ? MhLegacyStorageMigrationStatus.failed
+        : MhLegacyStorageMigrationStatus.completed;
 
-    await this.prisma.storageMigrationRun.update({
+    await this.prisma.mhLegacyStorageMigrationRun.update({
       where: { id: runId },
       data: {
         status: finalStatus,

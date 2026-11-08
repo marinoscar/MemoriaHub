@@ -81,7 +81,8 @@
     "20260816010000_add_android_release_storage_location",
     "20260817000000_rename_legacy_platform_tables",
     "20261108030000_move_user_avatar_off_users",
-    "20261108040000_cutover_enrichment_jobs_to_jobs"
+    "20261108040000_cutover_enrichment_jobs_to_jobs",
+    "20261108160000_rename_legacy_storage_migration_tables"
   ],
   "deviations": [
     {
@@ -93,6 +94,8 @@
         "CREATE TYPE \"MhLegacyNodeStatus\" AS ENUM ('online', 'draining', 'offline', 'disabled');",
         "CREATE TYPE \"MhLegacyNotificationBroadcastStatus\" AS ENUM ('draft', 'scheduled', 'sending', 'sent', 'canceled', 'failed');",
         "CREATE TYPE \"MhLegacyNotificationDeliveryStatus\" AS ENUM ('queued', 'sent', 'failed');",
+        "CREATE TYPE \"MhLegacyStorageMigrationItemStatus\" AS ENUM ('pending', 'copying', 'verified', 'completed', 'failed', 'skipped');",
+        "CREATE TYPE \"MhLegacyStorageMigrationStatus\" AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled');",
         "CREATE TABLE \"enrichment_jobs_legacy\" ( \"id\" UUID NOT NULL, \"type\" TEXT NOT NULL, \"media_item_id\" UUID, \"circle_id\" UUID, \"status\" \"MhLegacyJobStatus\" NOT NULL DEFAULT 'pending', \"reason\" \"MhLegacyJobReason\" NOT NULL, \"priority\" INTEGER NOT NULL DEFAULT 0, \"provider_key\" TEXT, \"model_version\" TEXT, \"payload\" JSONB, \"attempts\" INTEGER NOT NULL DEFAULT 0, \"last_error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"started_at\" TIMESTAMPTZ(6), \"finished_at\" TIMESTAMPTZ(6), \"scheduled_for\" TIMESTAMPTZ(6), \"rate_limited_at\" TIMESTAMPTZ(6), \"rate_limit_hits\" INTEGER NOT NULL DEFAULT 0, \"claimed_by_node_id\" UUID, \"executor\" TEXT, \"lease_expires_at\" TIMESTAMPTZ(6), CONSTRAINT \"enrichment_jobs_legacy_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"mh_legacy_android_app_releases\" ( \"id\" UUID NOT NULL, \"package_name\" TEXT NOT NULL, \"version_name\" VARCHAR(50) NOT NULL, \"version_code\" INTEGER NOT NULL, \"signing_sha256\" TEXT NOT NULL, \"file_sha256\" CHAR(64) NOT NULL, \"size_bytes\" BIGINT NOT NULL, \"storage_key\" TEXT NOT NULL, \"notes\" VARCHAR(2000), \"is_current\" BOOLEAN NOT NULL DEFAULT false, \"uploaded_by_id\" UUID, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"storage_provider\" TEXT, \"bucket\" TEXT, CONSTRAINT \"mh_legacy_android_app_releases_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"mh_legacy_database_backup_runs\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"status\" \"MhLegacyDatabaseBackupStatus\" NOT NULL DEFAULT 'pending', \"trigger\" \"MhLegacyDatabaseBackupTrigger\" NOT NULL, \"started_at\" TIMESTAMPTZ(6), \"finished_at\" TIMESTAMPTZ(6), \"last_heartbeat_at\" TIMESTAMPTZ(6), \"bytes_written\" BIGINT NOT NULL DEFAULT 0, \"size_bytes\" BIGINT, \"storage_provider\" TEXT, \"storage_key\" TEXT, \"bucket\" TEXT, \"format\" TEXT, \"checksum_sha256\" TEXT, \"db_version\" TEXT, \"app_version\" TEXT, \"migration_name\" TEXT, \"verified_at\" TIMESTAMPTZ(6), \"last_error\" TEXT, \"created_by_id\" UUID, \"restore_status\" TEXT, \"restore_error\" TEXT, \"restored_at\" TIMESTAMPTZ(6), \"restored_by_id\" UUID, \"restore_scratch_db\" TEXT, \"restore_old_db\" TEXT, \"swapped_at\" TIMESTAMPTZ(6), \"pre_restore_backup_id\" UUID, CONSTRAINT \"mh_legacy_database_backup_runs_pkey\" PRIMARY KEY (\"id\") );",
@@ -101,6 +104,8 @@
         "CREATE TABLE \"mh_legacy_notification_deliveries\" ( \"id\" UUID NOT NULL, \"notification_id\" UUID, \"user_id\" UUID, \"type\" \"NotificationType\" NOT NULL, \"channel\" TEXT NOT NULL, \"status\" \"MhLegacyNotificationDeliveryStatus\" NOT NULL, \"provider_message_id\" TEXT, \"error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"mh_legacy_notification_deliveries_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"mh_legacy_notifications\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"user_id\" UUID NOT NULL, \"circle_id\" UUID, \"type\" \"NotificationType\" NOT NULL, \"title\" TEXT NOT NULL, \"body\" TEXT, \"link\" TEXT, \"data\" JSONB, \"read_at\" TIMESTAMPTZ(6), \"dismissed_at\" TIMESTAMPTZ(6), \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"mh_legacy_notifications_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"mh_legacy_push_subscriptions\" ( \"id\" UUID NOT NULL, \"user_id\" UUID NOT NULL, \"endpoint\" TEXT NOT NULL, \"p256dh\" TEXT NOT NULL, \"auth\" TEXT NOT NULL, \"expiration_time\" TIMESTAMPTZ(6), \"user_agent\" TEXT, \"failure_count\" INTEGER NOT NULL DEFAULT 0, \"last_success_at\" TIMESTAMPTZ(6), \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"mh_legacy_push_subscriptions_pkey\" PRIMARY KEY (\"id\") );",
+        "CREATE TABLE \"mh_legacy_storage_migration_items\" ( \"id\" UUID NOT NULL, \"run_id\" UUID NOT NULL, \"object_id\" UUID NOT NULL, \"status\" \"MhLegacyStorageMigrationItemStatus\" NOT NULL DEFAULT 'pending', \"job_id\" UUID, \"new_storage_key\" TEXT, \"last_error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"mh_legacy_storage_migration_items_pkey\" PRIMARY KEY (\"id\") );",
+        "CREATE TABLE \"mh_legacy_storage_migration_runs\" ( \"id\" UUID NOT NULL, \"source_provider\" TEXT NOT NULL, \"target_provider\" TEXT NOT NULL, \"status\" \"MhLegacyStorageMigrationStatus\" NOT NULL DEFAULT 'pending', \"total_count\" INTEGER NOT NULL DEFAULT 0, \"migrated_count\" INTEGER NOT NULL DEFAULT 0, \"failed_count\" INTEGER NOT NULL DEFAULT 0, \"skipped_count\" INTEGER NOT NULL DEFAULT 0, \"started_at\" TIMESTAMPTZ(6), \"finished_at\" TIMESTAMPTZ(6), \"last_error\" TEXT, \"created_by_id\" UUID, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"mh_legacy_storage_migration_runs_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"mh_legacy_worker_nodes\" ( \"id\" UUID NOT NULL, \"name\" TEXT NOT NULL, \"hostname\" TEXT NOT NULL, \"platform\" TEXT NOT NULL, \"cli_version\" TEXT NOT NULL, \"eligible_types\" TEXT[] DEFAULT ARRAY[]::TEXT[], \"concurrency\" INTEGER NOT NULL DEFAULT 1, \"status\" \"MhLegacyNodeStatus\" NOT NULL DEFAULT 'online', \"capabilities\" JSONB, \"registered_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"last_heartbeat_at\" TIMESTAMPTZ(6), \"created_by_id\" UUID NOT NULL, CONSTRAINT \"mh_legacy_worker_nodes_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE INDEX \"enrichment_jobs_legacy_claimed_by_node_id_idx\" ON \"enrichment_jobs_legacy\"(\"claimed_by_node_id\" ASC);",
         "CREATE INDEX \"enrichment_jobs_legacy_created_at_idx\" ON \"enrichment_jobs_legacy\"(\"created_at\" DESC);",
@@ -131,6 +136,8 @@
         "CREATE INDEX \"mh_legacy_notifications_user_id_read_at_idx\" ON \"mh_legacy_notifications\"(\"user_id\" ASC, \"read_at\" ASC);",
         "CREATE UNIQUE INDEX \"mh_legacy_push_subscriptions_endpoint_key\" ON \"mh_legacy_push_subscriptions\"(\"endpoint\" ASC);",
         "CREATE INDEX \"mh_legacy_push_subscriptions_user_id_idx\" ON \"mh_legacy_push_subscriptions\"(\"user_id\" ASC);",
+        "CREATE UNIQUE INDEX \"mh_legacy_storage_migration_items_run_id_object_id_key\" ON \"mh_legacy_storage_migration_items\"(\"run_id\" ASC, \"object_id\" ASC);",
+        "CREATE INDEX \"mh_legacy_storage_migration_items_status_idx\" ON \"mh_legacy_storage_migration_items\"(\"status\" ASC);",
         "CREATE INDEX \"mh_legacy_worker_nodes_created_by_id_idx\" ON \"mh_legacy_worker_nodes\"(\"created_by_id\" ASC);",
         "CREATE UNIQUE INDEX \"mh_legacy_worker_nodes_created_by_id_name_key\" ON \"mh_legacy_worker_nodes\"(\"created_by_id\" ASC, \"name\" ASC);",
         "CREATE INDEX \"mh_legacy_worker_nodes_status_idx\" ON \"mh_legacy_worker_nodes\"(\"status\" ASC);",
@@ -146,10 +153,12 @@
         "ALTER TABLE \"mh_legacy_notifications\" ADD CONSTRAINT \"mh_legacy_notifications_circle_id_fkey\" FOREIGN KEY (\"circle_id\") REFERENCES \"circles\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"mh_legacy_notifications\" ADD CONSTRAINT \"mh_legacy_notifications_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"mh_legacy_push_subscriptions\" ADD CONSTRAINT \"mh_legacy_push_subscriptions_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+        "ALTER TABLE \"mh_legacy_storage_migration_items\" ADD CONSTRAINT \"mh_legacy_storage_migration_items_object_id_fkey\" FOREIGN KEY (\"object_id\") REFERENCES \"storage_objects\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+        "ALTER TABLE \"mh_legacy_storage_migration_items\" ADD CONSTRAINT \"mh_legacy_storage_migration_items_run_id_fkey\" FOREIGN KEY (\"run_id\") REFERENCES \"mh_legacy_storage_migration_runs\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
         "ALTER TABLE \"mh_legacy_worker_nodes\" ADD CONSTRAINT \"mh_legacy_worker_nodes_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;"
       ],
       "id": "memoriahub:legacy-platform-tables",
-      "reason": "MemoriaHub tables and enums that collide with platform migrations 0003-0040, renamed to mh_legacy_* / MhLegacy* by 20260817000000_rename_legacy_platform_tables. Removed piecewise by C2 (worker nodes), D3 (notifications), D4 (database backups), D5 (android releases) as each slice moves its data and drops its legacy table. RETRO-C1 (jobs) dropped mh_legacy_job_stats_rollup and renamed enrichment_jobs to enrichment_jobs_legacy (its follow-up migration drops it)."
+      "reason": "MemoriaHub tables and enums that collide with platform migrations 0003-0040, renamed to mh_legacy_* / MhLegacy* by 20260817000000_rename_legacy_platform_tables. Removed piecewise by C2 (worker nodes), D3 (notifications), D4 (database backups), D5 (android releases) as each slice moves its data and drops its legacy table. RETRO-C1 (jobs) dropped mh_legacy_job_stats_rollup and renamed enrichment_jobs to enrichment_jobs_legacy (its follow-up migration drops it). RETRO-A5b renamed storage_migration_runs / storage_migration_items and their enums (colliding with platform 0042) by 20261108160000_rename_legacy_storage_migration_tables; RETRO-D1 drops them."
     },
     {
       "expectDiff": [
@@ -180,8 +189,6 @@
         "CREATE TYPE \"ReviewRunStatus\" AS ENUM ('evaluating', 'running', 'completed', 'completed_with_errors', 'failed', 'cancelled');",
         "CREATE TYPE \"ReviewRunSubject\" AS ENUM ('burst_group', 'duplicate_group', 'location_suggestion');",
         "CREATE TYPE \"ShareTargetType\" AS ENUM ('media_item', 'album');",
-        "CREATE TYPE \"StorageMigrationItemStatus\" AS ENUM ('pending', 'copying', 'verified', 'completed', 'failed', 'skipped');",
-        "CREATE TYPE \"StorageMigrationStatus\" AS ENUM ('pending', 'running', 'completed', 'failed', 'cancelled');",
         "CREATE TYPE \"TrashEmptyRunItemStatus\" AS ENUM ('matched', 'deleted', 'failed', 'skipped');",
         "CREATE TYPE \"TrashEmptyRunStatus\" AS ENUM ('evaluating', 'running', 'completed', 'completed_with_errors', 'failed', 'cancelled');",
         "CREATE TYPE \"UserAvatarSource\" AS ENUM ('oauth', 'upload', 'person');",
@@ -228,8 +235,6 @@
         "CREATE TABLE \"people\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"circle_id\" UUID NOT NULL, \"name\" TEXT, \"added_by_id\" UUID NOT NULL, \"cover_face_id\" UUID, \"merged_into_id\" UUID, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"deleted_at\" TIMESTAMPTZ(6), \"profile_media_item_id\" UUID, \"profile_crop\" JSONB, \"favorite\" BOOLEAN NOT NULL DEFAULT false, \"hidden_at\" TIMESTAMPTZ(6), CONSTRAINT \"people_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"review_run_items\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"run_id\" UUID NOT NULL, \"subject_type\" \"ReviewRunSubject\" NOT NULL, \"burst_group_id\" UUID, \"duplicate_group_id\" UUID, \"location_suggestion_id\" UUID, \"status\" \"ReviewRunItemStatus\" NOT NULL DEFAULT 'matched', \"error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"review_run_items_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"review_runs\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"circle_id\" UUID NOT NULL, \"subject_type\" \"ReviewRunSubject\" NOT NULL, \"action\" \"ReviewRunAction\" NOT NULL, \"threshold\" INTEGER NOT NULL, \"status\" \"ReviewRunStatus\" NOT NULL DEFAULT 'evaluating', \"matched_count\" INTEGER NOT NULL DEFAULT 0, \"processed_count\" INTEGER NOT NULL DEFAULT 0, \"succeeded_count\" INTEGER NOT NULL DEFAULT 0, \"failed_count\" INTEGER NOT NULL DEFAULT 0, \"skipped_count\" INTEGER NOT NULL DEFAULT 0, \"started_by_id\" UUID, \"last_error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"started_at\" TIMESTAMPTZ(6), \"finished_at\" TIMESTAMPTZ(6), CONSTRAINT \"review_runs_pkey\" PRIMARY KEY (\"id\") );",
-        "CREATE TABLE \"storage_migration_items\" ( \"id\" UUID NOT NULL, \"run_id\" UUID NOT NULL, \"object_id\" UUID NOT NULL, \"status\" \"StorageMigrationItemStatus\" NOT NULL DEFAULT 'pending', \"job_id\" UUID, \"new_storage_key\" TEXT, \"last_error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"storage_migration_items_pkey\" PRIMARY KEY (\"id\") );",
-        "CREATE TABLE \"storage_migration_runs\" ( \"id\" UUID NOT NULL, \"source_provider\" TEXT NOT NULL, \"target_provider\" TEXT NOT NULL, \"status\" \"StorageMigrationStatus\" NOT NULL DEFAULT 'pending', \"total_count\" INTEGER NOT NULL DEFAULT 0, \"migrated_count\" INTEGER NOT NULL DEFAULT 0, \"failed_count\" INTEGER NOT NULL DEFAULT 0, \"skipped_count\" INTEGER NOT NULL DEFAULT 0, \"started_at\" TIMESTAMPTZ(6), \"finished_at\" TIMESTAMPTZ(6), \"last_error\" TEXT, \"created_by_id\" UUID, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"storage_migration_runs_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"storage_provider_credentials\" ( \"id\" UUID NOT NULL, \"provider\" TEXT NOT NULL, \"encrypted_key\" TEXT NOT NULL, \"access_key_id\" TEXT, \"region\" TEXT, \"bucket\" TEXT, \"endpoint\" TEXT, \"last4\" TEXT NOT NULL, \"enabled\" BOOLEAN NOT NULL DEFAULT true, \"updated_by_user_id\" UUID, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"storage_provider_credentials_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"tag_labels\" ( \"id\" UUID NOT NULL, \"name\" TEXT NOT NULL, \"enabled\" BOOLEAN NOT NULL DEFAULT true, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"tag_labels_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"tags\" ( \"id\" UUID NOT NULL DEFAULT uuid_generate_v4(), \"added_by_id\" UUID NOT NULL, \"name\" TEXT NOT NULL, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"circle_id\" UUID NOT NULL, CONSTRAINT \"tags_pkey\" PRIMARY KEY (\"id\") );",
@@ -362,8 +367,6 @@
         "CREATE INDEX \"review_runs_circle_id_subject_type_status_idx\" ON \"review_runs\"(\"circle_id\" ASC, \"subject_type\" ASC, \"status\" ASC);",
         "CREATE UNIQUE INDEX \"review_runs_id_subject_type_key\" ON \"review_runs\"(\"id\" ASC, \"subject_type\" ASC);",
         "CREATE INDEX \"review_runs_status_updated_at_idx\" ON \"review_runs\"(\"status\" ASC, \"updated_at\" ASC);",
-        "CREATE UNIQUE INDEX \"storage_migration_items_run_id_object_id_key\" ON \"storage_migration_items\"(\"run_id\" ASC, \"object_id\" ASC);",
-        "CREATE INDEX \"storage_migration_items_status_idx\" ON \"storage_migration_items\"(\"status\" ASC);",
         "CREATE UNIQUE INDEX \"storage_provider_credentials_provider_key\" ON \"storage_provider_credentials\"(\"provider\" ASC);",
         "CREATE UNIQUE INDEX \"tag_labels_name_key\" ON \"tag_labels\"(\"name\" ASC);",
         "CREATE INDEX \"tags_circle_id_idx\" ON \"tags\"(\"circle_id\" ASC);",
@@ -464,8 +467,6 @@
         "ALTER TABLE \"review_run_items\" ADD CONSTRAINT \"review_run_items_run_id_subject_type_fkey\" FOREIGN KEY (\"run_id\", \"subject_type\") REFERENCES \"review_runs\"(\"id\", \"subject_type\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"review_runs\" ADD CONSTRAINT \"review_runs_circle_id_fkey\" FOREIGN KEY (\"circle_id\") REFERENCES \"circles\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"review_runs\" ADD CONSTRAINT \"review_runs_started_by_id_fkey\" FOREIGN KEY (\"started_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;",
-        "ALTER TABLE \"storage_migration_items\" ADD CONSTRAINT \"storage_migration_items_object_id_fkey\" FOREIGN KEY (\"object_id\") REFERENCES \"storage_objects\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
-        "ALTER TABLE \"storage_migration_items\" ADD CONSTRAINT \"storage_migration_items_run_id_fkey\" FOREIGN KEY (\"run_id\") REFERENCES \"storage_migration_runs\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
         "ALTER TABLE \"storage_provider_credentials\" ADD CONSTRAINT \"storage_provider_credentials_updated_by_user_id_fkey\" FOREIGN KEY (\"updated_by_user_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
         "ALTER TABLE \"tags\" ADD CONSTRAINT \"tags_circle_id_fkey\" FOREIGN KEY (\"circle_id\") REFERENCES \"circles\"(\"id\") ON DELETE RESTRICT ON UPDATE NO ACTION;",
         "ALTER TABLE \"tags\" ADD CONSTRAINT \"tags_owner_id_fkey\" FOREIGN KEY (\"added_by_id\") REFERENCES \"users\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE;",
@@ -729,9 +730,21 @@
       "originId": "platform:0040_add_alerts",
       "sha256": "ec4af7e5123ecd8bb6faf3505893cb2efab4d793dae84a98d8b7f26f2dff3776",
       "since": "1.0.0"
+    },
+    {
+      "localDir": "20261108163317_notifications_state_counted",
+      "originId": "platform:0041_notifications_state_counted",
+      "sha256": "c9285347971920da5310a279351d8de8acac3bba4b281e227cb025745dafc73c",
+      "since": "1.0.0"
+    },
+    {
+      "localDir": "20261108163318_add_storage_migrations",
+      "originId": "platform:0042_add_storage_migrations",
+      "sha256": "8d37841523a5b4737379df567d5ad3feb37abb0f29dcef416cd34f20167ba181",
+      "since": "1.0.0"
     }
   ],
-  "platformVersion": "1.0.0",
+  "platformVersion": "0.1.0-next.27",
   "rawSqlIndexes": [
     {
       "definition": "CREATE INDEX faces_embedding_vec_archive_hnsw_idx ON public.faces USING hnsw (embedding_vec vector_cosine_ops) WHERE ((person_id IS NULL) AND (hidden_at IS NOT NULL))",
