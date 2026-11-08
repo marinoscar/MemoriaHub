@@ -65,6 +65,7 @@ The worker container is configured entirely through environment variables — th
 | Variable | Description |
 |----------|--------------|
 | `MEMORIAHUB_URL` | Base URL of the API the node connects to |
+| `MEMORIAHUB_SERVER_URL` | (CLI 1.4) The platform spelling of the same value; `MEMORIAHUB_URL` is still read and mirrored onto it when this is unset, so existing worker containers need no change |
 | `MEMORIAHUB_TOKEN` | Bearer credential — a `nod_` node credential (preferred) or a PAT |
 | `MEMORIAHUB_NODE_ID` | Existing node ID to resume, if known; normally left unset and let register-or-reattach (below) resolve it |
 | `MEMORIAHUB_NODE_NAME` | This machine/replica's display name; **must be distinct per host/replica** — see below |

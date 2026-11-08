@@ -2,7 +2,7 @@
 
 Issue #566 (RETRO-F2) retires the hand-written VPS installers in `infra/deploy/`. This page maps every behaviour of `install.sh` (first install) and `update.sh` (update) to where it goes, so the deploy pipeline that RETRO-F3 wires can be checked against it line by line.
 
-**Status.** `infra/deploy/install.sh` and `infra/deploy/update.sh` are still in the repository. The replacement, the platform `deploy` pipeline with MemoriaHub's app steps, is not in the CLI yet (`apps/cli` has no `deploy` command). Operators keep running the last released script until RETRO-F3 ships. The scripts are deleted in the PR that lands the replacement, not before.
+**Status.** `infra/deploy/install.sh` and `infra/deploy/update.sh` are still in the repository. RETRO-F3 (#577) added the replacement: `memoriahub deploy install|update` (platform pipeline plus the app steps `database-extensions` and `compreface-healthy`, checks `pgvector-available` and `models-dir`). The scripts are intentionally still here as a fallback until the CLI deploy has run once on a real VPS; delete them in the PR that records that run. The platform generates `STACK_AGENT_TOKEN`/`DEPLOY_ROOT` and writes `APP_BIND_PORT` from `--port`, so the `stack-agent-token` and `public-port` steps needed no app code. `deploy install` defaults the port to 8328 (the old installer's), not the platform's 3535, and says so.
 
 ## Defaults to preserve
 

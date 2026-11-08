@@ -25,6 +25,10 @@ How the baseline treats the deviations: `docs/runbooks/database-baseline.md` in 
 | Shim | Where | What it does | Removed by |
 |---|---|---|---|
 | Platform-schema stub + legacy fragments (RETRO-A4) | `apps/api/prisma/platform-schema-stub/base.prisma`; `apps/api/prisma/fragments/platform-*.legacy.prisma` (header `PLATFORM-ADOPTION-SHIM`); `db:compose` passes `--platform-schema prisma/platform-schema-stub` | The stub holds only the `generator`/`datasource` blocks so no platform model is composed yet; the legacy fragments hold the models a platform slice will replace | Stub: RETRO-B2 (composes the real platform schema). Fragments: identity B2, settings B2/B3, credentials B4/E3, jobs C1, nodes C2, storage D1, notifications D3, db-backup D4, android D5 |
+| Legacy argument translation (RETRO-F3) | `apps/cli/src/extensions/legacy-flags.ts` | One pure rule table: `--no-color`, `-V`, the `node` group, deploy env/default flags | `node-group` rule: RETRO-C10; the rest stays until the 1.3 spellings are retired |
+| `node` command intercept and `node list` (RETRO-F3) | `legacy-flags.ts` (`node-group`), `apps/cli/src/run.ts` (`runLegacyNodeGroup`) | The platform `node` is a reserved built-in; `memoriahub node ...` runs the 1.3 command (which has `node list`, the platform lacks it) | RETRO-C10 (executors on the platform engine; `node list` upstream via seam request) |
+| Legacy TUI bridge (RETRO-F3) | `apps/cli/src/extensions/legacy-tui*.ts(x)`, `apps/cli/src/commands/menu.ts` | "MemoriaHub menu" platform TUI screen and `memoriahub menu` open the 1.3 ink TUI | RETRO-F4 |
+| Config shape bridge (RETRO-F3) | `apps/cli/src/extensions/config-compat.ts`, `apps/cli/src/config.ts` | `pat`/`patExpiresAt` migrated to `token`/`expiresAt`; app fields restored after the platform `login`; credentials copied to `MEMORIAHUB_STATE_DIR` | Platform honours `MEMORIAHUB_STATE_DIR` for `login`/`config`/`api` (seam request) |
 
 ## Infra deviations (RETRO-F2, #566)
 

@@ -256,9 +256,42 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--no-color` | | Disable colored output; also respects `NO_COLOR` env variable |
-| `--version` | `-V` | Print the installed version |
+| `--version` | `-v` (`-V` also accepted) | Print the installed version (`<ver> (platform <ver>)`) |
 
 ---
+
+### Commands that changed in 1.4
+
+1.4.0 rebuilt the CLI on the platform engine (`createCli`, `@marinoscar/platform-cli`). Every 1.3 command and flag still works; the table lists each spelling that is handled differently. The rules live in one tested function, `src/extensions/legacy-flags.ts` (`translateLegacyArgs`).
+
+| 1.3 spelling | Now | How |
+|---|---|---|
+| `memoriahub login [--server] [--token <pat>]` | The platform `login` (device flow, `pat_` token). `--server` and `--token` are the same flags; `--device-name` and `--no-browser` are new | built-in; config migrated (below) |
+| `-V` | `--version` (`-V` still accepted before a command). Output is `1.4.0 (platform <ver>)` | ALIAS |
+| `--no-color` (anywhere) | Stripped and turned into `NO_COLOR=1` | IGNORE |
+| `memoriahub node ...` (all subcommands and flags, including `node list`, `--face-provider`, `--types`, `--poll`) | Unchanged: routed to the 1.3 implementation. The platform's own `node` engine cannot run MemoriaHub's executors until RETRO-C10, so the platform `node` is not reachable yet | PORT (`PLATFORM-ADOPTION-SHIM(RETRO-C10)`) |
+| `memoriahub` (bare, TTY) | The platform menu; its **MemoriaHub menu** entry opens the 1.3 TUI. Non-TTY: usage error, help on stderr (exit 2) | built-in |
+| `memoriahub menu` | The full 1.3 TUI, unchanged | app command |
+| `jobs` / `queue` | Unchanged | app command |
+| headless "update available" notice | The platform's: at most once a day, one stderr line, silent in CI, without a TTY, for `--json`/`--help`/`--version`; off with `MEMORIAHUB_NO_UPDATE_CHECK=1` (`node start` never prints it) | `updateNotice` |
+| `MEMORIAHUB_URL` | Still honoured; mirrored onto the platform's `MEMORIAHUB_SERVER_URL` when that is unset | env compat |
+| `~/.memoriahub/config.json` keys `pat`, `patExpiresAt` | Renamed `token`, `expiresAt` once, on first run, with the old file kept as `config.json.bak` (0600). Everything else (`serverUrl`, `activeCircleId`, `nodeId`, `node`) is untouched. Both spellings are read, so a read-only home still works | config-compat |
+| `infra/deploy/install.sh`, `update.sh` | `memoriahub deploy install` / `update` (below) | new |
+
+New commands from the platform: `init`, `api`, `config`, `deploy doctor|install|update|status|list|about|certs|uninstall`.
+
+Known limitation: the platform's `login`/`config`/`api` keep their config under `$HOME/.memoriahub` and ignore `MEMORIAHUB_STATE_DIR`. After a successful `login` the credentials are copied into the state directory, so the other commands see them.
+
+### Deploying a server: `memoriahub deploy`
+
+`memoriahub deploy install` and `deploy update` replace the hand-written VPS scripts with the platform pipeline plus MemoriaHub's own steps and checks:
+
+- `database-extensions` (before `migrate`): the database server offers pgvector; a missing extension stops the deploy with a remedy.
+- `compreface-healthy` (after `start` / `restart`): warns if the `compreface-core` sidecar is not running; never fails the deploy.
+- check `pgvector-available` (required) and `models-dir` (recommended), shown by `deploy doctor`.
+- host proxy: the platform's stream routes plus `/api/search/agent` (agentic search SSE).
+
+Defaults of the old installer are preserved for `deploy install`: `--root /opt/infra/apps/memoriahub`, `--port 8328`, `--domain memoriahub.marin.cr` (the output says so when they apply). `MEMORIAHUB_HOME`, `MEMORIAHUB_PORT`, `MEMORIAHUB_DOMAIN`, `MEMORIAHUB_REF` and `MEMORIAHUB_REPO` map to `--root`, `--port`, `--domain`, `--ref` and `--repo`; `deploy update --no-cache` and `--skip-proxy` are native flags. The deploy versions `apps/api`, `apps/web` and `packages/shared`, never `apps/cli`. APK releases stay `memoriahub android release`; `deploy` has no `--with-android`.
 
 ### Full command reference
 
