@@ -8,7 +8,7 @@
 //
 //   * the slice's two app metrics (`app.alerts.transitions`, `app.alerts.firing`;
 //     neither carries a rule name, a label value, an org id or a user id);
-//   * MemoriaHub's two rule kinds (`memoriahub_queue_stalled`,
+//   * the platform's five built-in kinds (idempotent) and MemoriaHub's two rule kinds (`memoriahub_queue_stalled`,
 //     `memoriahub_db_backup_stale`; ids permanent).
 //
 // The two notification events and their email templates are registered by the
@@ -17,7 +17,7 @@
 // (`permissions.ts`, slice `alerts`).
 // =============================================================================
 
-import { ALERTS_APP_METRICS } from '@marinoscar/platform-api/alerts';
+import { ALERTS_APP_METRICS, registerBuiltinAlertKinds } from '@marinoscar/platform-api/alerts';
 import { appMetricRegistry, registerAppMetrics } from '@marinoscar/platform-api/otel-core';
 
 import { registerMemoriaHubAlertKinds } from '../platform/alerts/memoriahub-alert-kinds';
@@ -26,4 +26,7 @@ if (!appMetricRegistry.has(ALERTS_APP_METRICS[0].key)) {
   registerAppMetrics(ALERTS_APP_METRICS);
 }
 
+// The five built-in kinds (idempotent; `forRoot` registers them too): the seed
+// validates the starter configs against them.
+registerBuiltinAlertKinds();
 registerMemoriaHubAlertKinds();
