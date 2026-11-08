@@ -90,8 +90,21 @@ export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] 
 /** Fields this app stores in a platform-declared system namespace that the platform lacks. None. */
 export const APP_SYSTEM_SETTINGS_EXTENSIONS: readonly SystemSettingsNamespaceExtension[] = [];
 
-/** Defaults where this app differs from the platform's declaration. None. */
-export const APP_SYSTEM_SETTINGS_DEFAULTS: readonly SettingsDefaultsOverride[] = [];
+/**
+ * Defaults where this app differs from the platform's declaration.
+ *
+ * `databaseBackup` (RETRO-D4, #580): MemoriaHub's own defaults before the slice, kept so a fresh
+ * install behaves as before. `compressionLevel` 1 because the embedding vectors that dominate the
+ * dump are near-incompressible (higher levels buy CPU, not bytes); `oldDatabaseRetentionHours` 168 is
+ * the week-long seconds-fast rollback window; `runStaleMinutes` 30 releases a dead run sooner than
+ * the platform's 120. A stored value always wins over a default.
+ */
+export const APP_SYSTEM_SETTINGS_DEFAULTS: readonly SettingsDefaultsOverride[] = [
+  {
+    key: 'databaseBackup',
+    defaults: { runStaleMinutes: 30, compressionLevel: 1, oldDatabaseRetentionHours: 168 },
+  },
+];
 
 /** MemoriaHub's user namespaces, in order (after the platform's `dataTables` and `navigation`). */
 export const APP_USER_SETTINGS_NAMESPACES: readonly UserSettingsNamespace[] = [
