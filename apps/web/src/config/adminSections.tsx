@@ -7,7 +7,8 @@
  * Epic #388 / issue #389 promotes it from a destination into navigation, so the
  * array now lives here and is consumed by:
  *
- *   1. `SettingsHubPage`      — the card grid (and the phone drill-down hub)
+ *   1. `SettingsHubPage`      — a binding over the packaged `SettingsHub`
+ *                               (card grid; phone drill-down list)
  *   2. `Sidebar` Console mode — the rail's contents at any `/admin/*` route
  *   3. `AppBar`               — resolving an admin route to its page title
  *
@@ -19,7 +20,7 @@
  * 40px and the rail at ~20px, so the size cannot be baked into the declaration.
  */
 
-import type { SvgIconComponent } from '@mui/icons-material';
+import './settingsFeatures';
 import AdminIcon from '@mui/icons-material/AdminPanelSettings';
 import AiIcon from '@mui/icons-material/SmartToy';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
@@ -48,21 +49,23 @@ import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
+import {
+  settingsPageTitle,
+  visibleSettingsSections,
+  type SettingsCardDef,
+  type SettingsSectionDef,
+} from '@marinoscar/platform-web/settings/ui';
+import type { SettingsFeatures } from '@marinoscar/platform-web/settings/headless';
 
-export interface AdminCardDef {
-  title: string;
-  description: string;
-  Icon: SvgIconComponent;
-  path?: string;
-  disabled?: boolean;
-  permission?: string;
-  alwaysShow?: boolean;
-}
-
-export interface AdminSectionDef {
-  label: string;
-  cards: AdminCardDef[];
-}
+/**
+ * The card and section shapes are the platform's (`SettingsCardDef`,
+ * `SettingsSectionDef` of `@marinoscar/platform-web/settings/ui`, RETRO-B5
+ * #621): the packaged `SettingsHub` draws this registry, so it cannot keep a
+ * type of its own. The old names stay as aliases for the consumers that still
+ * import them.
+ */
+export type AdminCardDef = SettingsCardDef;
+export type AdminSectionDef = SettingsSectionDef;
 
 export const ADMIN_SECTIONS: AdminSectionDef[] = [
   {
@@ -90,7 +93,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         description: 'Configure the outbound email provider (AWS SES or SMTP) and test delivery.',
         Icon: EmailIcon,
         path: '/admin/settings/email',
-        permission: 'system_settings:read',
+        // RETRO-B5 (#621): the page reads only `GET /api/email-settings`, which
+        // `email-settings.controller.ts` gates on `email_settings:read`. The
+        // card used to declare `system_settings:read`, a string that controller
+        // never checks.
+        permission: 'email_settings:read',
       },
       {
         title: 'Web Push',
@@ -322,53 +329,34 @@ export const ADMIN_HUB_PATH = '/admin/settings';
 export const ADMIN_HUB_TITLE = 'Settings';
 
 /**
- * Filter the sections to what `hasPermission` allows, dropping sections that end
- * up empty. Every consumer runs the SAME gate, so a card an admin cannot open
- * can never appear in one surface and not another.
+ * Filter the sections to what `hasPermission` (and `features`) allow, dropping
+ * sections that end up empty, optionally applying the hub's title search.
  *
- * `query` (optional) additionally applies the client-side "Search settings"
- * filter — a case-insensitive substring match on the card title (spec §4.4
- * requirement 4). Matching on title only, not description, keeps the result set
- * predictable: a two-letter query should not surface eight cards because their
- * prose happens to share a word.
+ * Since RETRO-B5 (#621) this is the packaged gate (`visibleSettingsSections`),
+ * the same function the packaged `SettingsHub` runs over `ADMIN_SECTIONS`, so
+ * the hub and the Console rail cannot disagree about what an admin may see.
  */
 export function visibleAdminSections(
   hasPermission: (permission: string) => boolean,
   query = '',
+  features: SettingsFeatures = {},
 ): AdminSectionDef[] {
-  const needle = query.trim().toLowerCase();
-  return ADMIN_SECTIONS.map((section) => ({
-    label: section.label,
-    cards: section.cards.filter((card) => {
-      if (needle && !card.title.toLowerCase().includes(needle)) return false;
-      if (card.alwaysShow) return true;
-      if (!card.permission) return true;
-      return hasPermission(card.permission);
-    }),
-  })).filter((section) => section.cards.length > 0);
+  return visibleSettingsSections(ADMIN_SECTIONS, hasPermission, query, features);
 }
 
 /**
  * Resolve an `/admin/*` pathname to the human title of the page it renders.
  *
- * Longest-match wins so `/admin/settings/jobs/insights` resolves to "Job Queue
- * Insights" rather than "Job Queue", and `/admin/settings/nodes/:id/backup`
- * still resolves to its parent's "Worker Nodes" rather than falling back to the
- * hub title. Returns `null` for a path that is not under `/admin`.
+ * Longest-match wins (on segment boundaries) so `/admin/settings/jobs/insights`
+ * resolves to "Job Queue Insights" rather than "Job Queue", and
+ * `/admin/settings/nodes/:id/backup` still resolves to its parent's "Worker
+ * Nodes". Returns `null` for a path that is not under `/admin`; any other
+ * `/admin` path falls back to the hub title.
  */
-export function adminPageTitle(pathname: string): string | null {
+export function adminPageTitle(pathname: string, features: SettingsFeatures = {}): string | null {
   if (pathname !== '/admin' && !pathname.startsWith('/admin/')) return null;
-
-  let best: { title: string; length: number } | null = null;
-  for (const section of ADMIN_SECTIONS) {
-    for (const card of section.cards) {
-      if (!card.path) continue;
-      const matches = pathname === card.path || pathname.startsWith(`${card.path}/`);
-      if (matches && (!best || card.path.length > best.length)) {
-        best = { title: card.title, length: card.path.length };
-      }
-    }
-  }
-
-  return best?.title ?? ADMIN_HUB_TITLE;
+  return (
+    settingsPageTitle(ADMIN_SECTIONS, ADMIN_HUB_PATH, ADMIN_HUB_TITLE, pathname, features) ??
+    ADMIN_HUB_TITLE
+  );
 }
