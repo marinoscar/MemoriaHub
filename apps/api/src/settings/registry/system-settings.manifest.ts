@@ -8,6 +8,10 @@
 // `app-registrations/settings.ts`.
 // =============================================================================
 
+// The app's retention policies must be registered before `retention` is composed
+// (RETRO-C7): every entry point reaches this file, not always `jobs.config.ts` first.
+import '../../app-registrations/jobs';
+
 import { MAINTENANCE_SYSTEM_SETTINGS } from '@marinoscar/platform-api/host';
 import { JOBS_SYSTEM_SETTINGS, RETENTION_SYSTEM_SETTINGS } from '@marinoscar/platform-api/jobs';
 import {

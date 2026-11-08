@@ -8,7 +8,9 @@
 //     its own `label`; the 38 handlers still on the legacy adapter do not, so the
 //     label lives here (it is the table `enrichment/job-type-labels.ts` held);
 //   * enqueue reasons beyond the built-in `upload`, `rerun` and `backfill`: none;
-//   * retention policies beyond the platform's four: none;
+//   * retention policies beyond the platform's four: `workflowRuns` and
+//     `reviewRuns` (RETRO-C7), whose purges keep the permanent type strings
+//     `workflow_history_purge` and `review_run_history_purge`;
 //   * the labels of RETIRED job types, so an old row still renders with a name in
 //     the admin Jobs list after its handler is gone.
 //
@@ -26,6 +28,9 @@ import {
   type JobReasonDefinition,
   type RetentionPolicyDefinition,
 } from '@marinoscar/platform-api/jobs';
+
+import { REVIEW_RUNS_RETENTION_POLICY } from '../review-runs/review-runs.retention';
+import { WORKFLOW_RUNS_RETENTION_POLICY } from '../workflows/runs/workflow-runs.retention';
 
 /** The 38 job types the legacy handlers serve, and the label each shows. */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
@@ -95,7 +100,10 @@ export const RETIRED_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
 export const APP_JOB_REASONS: readonly JobReasonDefinition[] = [];
 
 /** Retention policies this app adds to the platform's. */
-export const APP_RETENTION_POLICIES: readonly RetentionPolicyDefinition[] = [];
+export const APP_RETENTION_POLICIES: readonly RetentionPolicyDefinition[] = [
+  WORKFLOW_RUNS_RETENTION_POLICY,
+  REVIEW_RUNS_RETENTION_POLICY,
+];
 
 let registered = false;
 
