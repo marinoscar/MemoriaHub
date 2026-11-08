@@ -27,7 +27,8 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { EnrichmentJob, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { MediaJobContext, OrgWriteScope } from '../platform/jobs/media-item-job';
 import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -48,7 +49,16 @@ export class ThumbnailNodePersistService {
     private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
-  async persistThumbnail(job: EnrichmentJob, result: ThumbnailResult): Promise<void> {
+  /**
+   * @param scope - where the two `storage_objects` writes run: the handler passes
+   *   the platform `JobScope` (the job's organization, RETRO-C3); omitted, they run
+   *   on the plain client.
+   */
+  async persistThumbnail(
+    job: MediaJobContext,
+    result: ThumbnailResult,
+    scope?: OrgWriteScope,
+  ): Promise<void> {
     if (!job.mediaItemId) {
       this.logger.warn(`persistThumbnail: job ${job.id} has no mediaItemId; skipping`);
       return;
@@ -108,60 +118,75 @@ export class ThumbnailNodePersistService {
       );
     }
 
-    // Upsert the thumbnail's own StorageObject row — mirrors
-    // ThumbnailProcessor.uploadThumbnail's upsert exactly (same key
-    // convention keyed on the unique storageKey, status='ready',
-    // metadata.thumbnailOf pointing back at the original object).
-    const thumbObject = await this.prisma.storageObject.upsert({
-      where: { storageKey: result.storageKey },
-      update: {
-        name: `thumb-${originalObject.name}`,
-        size: BigInt(result.bytes),
-        mimeType: 'image/jpeg',
-        storageProvider: activeProviderId,
-        bucket: activeProvider.getBucket(),
-        status: 'ready',
-        metadata: { thumbnailOf: originalObject.id },
-        updatedAt: new Date(),
-      },
-      create: {
-        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
-        name: `thumb-${originalObject.name}`,
-        size: BigInt(result.bytes),
-        mimeType: 'image/jpeg',
-        storageKey: result.storageKey,
-        storageProvider: activeProviderId,
-        bucket: activeProvider.getBucket(),
-        status: 'ready',
-        uploadedById: originalObject.uploadedById ?? null,
-        metadata: { thumbnailOf: originalObject.id },
-      },
-    });
+    // The two `storage_objects` writes run together, in the job's organization
+    // when a scope is given (`JobScope`, RETRO-C3); the provider checks above ran
+    // OUTSIDE it, so the transaction stays short.
+    const orgId = await this.defaultOrgId.get(); // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+    const runWrites: OrgWriteScope = scope ?? ((fn) => fn(this.prisma as unknown as Prisma.TransactionClient));
+    const thumbObject = await runWrites(async (tx) => {
+      // Upsert the thumbnail's own StorageObject row — mirrors
+      // ThumbnailProcessor.uploadThumbnail's upsert exactly (same key
+      // convention keyed on the unique storageKey, status='ready',
+      // metadata.thumbnailOf pointing back at the original object).
+      const thumb = await tx.storageObject.upsert({
+        where: { storageKey: result.storageKey },
+        update: {
+          name: `thumb-${originalObject.name}`,
+          size: BigInt(result.bytes),
+          mimeType: 'image/jpeg',
+          storageProvider: activeProviderId,
+          bucket: activeProvider.getBucket(),
+          status: 'ready',
+          metadata: { thumbnailOf: originalObject.id },
+          updatedAt: new Date(),
+        },
+        create: {
+          orgId, // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+          name: `thumb-${originalObject.name}`,
+          size: BigInt(result.bytes),
+          mimeType: 'image/jpeg',
+          storageKey: result.storageKey,
+          storageProvider: activeProviderId,
+          bucket: activeProvider.getBucket(),
+          status: 'ready',
+          uploadedById: originalObject.uploadedById ?? null,
+          metadata: { thumbnailOf: originalObject.id },
+        },
+      });
 
-    // Merge into the ORIGINAL object's _processing.thumbnail entry — the same
-    // shape ThumbnailProcessor's return value takes — preserving any existing
-    // _processing keys, then sync typed MediaItem columns through the same
-    // helper the upload/repair pipelines use.
-    const existingMeta = (originalObject.metadata as Record<string, unknown> | null) ?? {};
-    const existingProcessing =
-      (existingMeta['_processing'] as Record<string, unknown> | undefined) ?? {};
+      // Merge into the ORIGINAL object's _processing.thumbnail entry — the same
+      // shape ThumbnailProcessor's return value takes — preserving any existing
+      // _processing keys (re-read here, inside the transaction, so a concurrent
+      // pipeline write is not clobbered by the copy read above).
+      const current = await tx.storageObject.findUnique({
+        where: { id: originalObject.id },
+        select: { metadata: true },
+      });
+      const existingMeta =
+        ((current?.metadata ?? originalObject.metadata) as Record<string, unknown> | null) ?? {};
+      const existingProcessing =
+        (existingMeta['_processing'] as Record<string, unknown> | undefined) ?? {};
 
-    await this.prisma.storageObject.update({
-      where: { id: originalObject.id },
-      data: {
-        metadata: {
-          ...existingMeta,
-          _processing: {
-            ...existingProcessing,
-            thumbnail: {
-              thumbnailObjectId: thumbObject.id,
-              thumbnailStorageKey: result.storageKey,
+      await tx.storageObject.update({
+        where: { id: originalObject.id },
+        data: {
+          metadata: {
+            ...existingMeta,
+            _processing: {
+              ...existingProcessing,
+              thumbnail: {
+                thumbnailObjectId: thumb.id,
+                thumbnailStorageKey: result.storageKey,
+              },
             },
-          },
-        } as Prisma.InputJsonValue,
-      },
+          } as Prisma.InputJsonValue,
+        },
+      });
+      return thumb;
     });
 
+    // Then sync typed MediaItem columns through the same helper the
+    // upload/repair pipelines use (reprocess → sync → prune, issue #434).
     await this.mediaMetadataSyncService.syncFromStorageObject(originalObject.id);
 
     // The node's key carries a RANDOM version (it must be named before the

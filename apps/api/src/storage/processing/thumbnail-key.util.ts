@@ -69,3 +69,15 @@ export function thumbnailVersionFromBytes(thumbBuffer: Buffer): string {
 export function randomThumbnailVersion(): string {
   return randomBytes(8).toString('hex');
 }
+
+/**
+ * Version token for a thumbnail a worker NODE renders for one job (RETRO-C3,
+ * #585): a truncated sha256 of the job id. The platform's `deriveOutputKey`
+ * must answer THE SAME key every time a node asks for an upload target for the
+ * same job (a retried PUT, a lost response), so the version cannot be random;
+ * a new job (every regeneration is a new job) still moves the key, which is all
+ * the cache-busting rule of issue #434 needs.
+ */
+export function thumbnailVersionForJob(jobId: string): string {
+  return createHash('sha256').update(`thumbnail-job:${jobId}`).digest('hex').slice(0, 16);
+}
