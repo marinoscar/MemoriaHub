@@ -144,6 +144,8 @@ const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'))
 const TelemetrySettingsPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/settings-page'));
 const TelemetryExplorerPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/explorer-page'));
 const TelemetryDashboardPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/dashboard-page'));
+// RETRO-H5 (#609): the packaged alerts page, in its own chunk.
+const AlertsAdminPage = lazy(() => import('./platform/alerts/AlertsAdminPage'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -507,6 +509,17 @@ function AppRoutes() {
                       <RequireTelemetryEnabled loading={<LoadingSpinner />}>
                         <TelemetryDashboardPage />
                       </RequireTelemetryEnabled>
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H5 (#609): the alerts page, guarded on the exact string its card
+                    declares and every read route of /api/admin/alerts enforces. Writes
+                    (`alerts:write`) are gated by the PAGE. */}
+                <Route
+                  path="/admin/settings/alerts"
+                  element={
+                    <RequirePermission permission="alerts:read" fallback={<Navigate to="/" replace />}>
+                      <AlertsAdminPage />
                     </RequirePermission>
                   }
                 />

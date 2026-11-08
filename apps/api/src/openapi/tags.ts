@@ -442,6 +442,14 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'assistant (`/api/admin/telemetry/*`, `GET /api/telemetry/config`). Guarded by `telemetry:*`.',
       },
       {
+        name: 'Alerts',
+        description:
+          'The platform alerts slice (RETRO-H5): alert rules over telemetry metrics, worker-node events, fleet ' +
+          'health and MemoriaHub\'s queue and backup kinds, their dry-run test, incidents (pending, firing, ' +
+          'resolved; acknowledging one does not resolve it) and the firing summary (`/api/admin/alerts`). ' +
+          'Guarded by `alerts:read` / `alerts:write`.',
+      },
+      {
         name: 'Admin: Storage Insights',
         description: 'Precomputed global storage metrics and the manual refresh trigger.',
       },

@@ -53,6 +53,7 @@ import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
+import { alertsModules } from './platform/alerts/alerts.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -165,6 +166,11 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
     // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.
     telemetryModule,
+    // Alerts (RETRO-H5, #609): @marinoscar/platform-api/alerts. Rules over telemetry
+    // metrics, worker-node events and fleet health, incidents and their notifications
+    // (`/api/admin/alerts`, `alerts:read|write`), plus MemoriaHub's default rules
+    // and its two kinds. Binding: `platform/alerts/alerts.config.ts`.
+    ...alertsModules,
   ],
   providers: [
     // Global validation pipe (Zod)

@@ -44,17 +44,22 @@
 // `ai-orchestration-boundary` (no orchestration library anywhere) run; the five suites that boot
 // the AI runtime against an app fixture are wired and opted out with their reasons (RETRO-E4).
 //
+// `alerts` (`@marinoscar/platform-api/alerts/testing`, RETRO-H5): the routes' permissions, the
+// starter rules, the open-incident index and the evaluation invariants (see the entry below).
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
 // `{ data }` envelope and the exception filter are global exactly once each.
 // =============================================================================
 
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
 
 import '@marinoscar/platform-api/ai/testing';
+import '@marinoscar/platform-api/alerts/testing';
 import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
@@ -79,11 +84,21 @@ import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-
 import '../src/platform/email/email.config';
 // Registers the notification channels and events the `notifications` suite reads (RETRO-D3).
 import '../src/platform/notifications/notification.manifest';
+// Registers the alerts slice's metrics and MemoriaHub's two rule kinds (RETRO-H5).
+import '../src/app-registrations/alerts';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
+
+// The platform's raw-SQL index list (`@marinoscar/platform-db/raw-sql-indexes.json`): the
+// alerts suite requires the one-open-incident index of migration `0040_add_alerts` on it.
+const PLATFORM_RAW_SQL_INDEX_NAMES: string[] = (
+  JSON.parse(
+    readFileSync(join(REPO_ROOT, 'node_modules', '@marinoscar', 'platform-db', 'raw-sql-indexes.json'), 'utf8'),
+  ) as { indexes: { name: string }[] }
+).indexes.map((index) => index.name);
 
 runPlatformConformance({
   sourceRoots: [join(__dirname, '..', 'src')],
@@ -146,6 +161,12 @@ runPlatformConformance({
     email: { samples: EMAIL_TEMPLATE_SAMPLES },
     // The notifications slice's registrations (RETRO-D3, #576). No file is allowlisted.
     notifications: { afterCommitAllowlist: [] },
+
+    // The alerts slice (RETRO-H5, #609): every `/api/admin/alerts` route authenticated with exactly
+    // `alerts:read` (GET) or `alerts:write`, the built-in kinds registered, every starter rule valid
+    // and seeded disabled, the one-open-incident index on the raw-SQL list, no transaction around a
+    // dispatch, the node-event listener doing no I/O, two evaluations leaving one incident.
+    alerts: { rawSqlIndexNames: PLATFORM_RAW_SQL_INDEX_NAMES },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no

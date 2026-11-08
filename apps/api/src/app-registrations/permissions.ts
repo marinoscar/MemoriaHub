@@ -16,17 +16,18 @@
 //                 (RETRO-E1, #595). MemoriaHub's own ai_settings:* stay until RETRO-E4 retires the
 //                 old /api/ai/* admin routes; an administrator holds both pairs.
 //   - `telemetry` telemetry:read, telemetry:write, telemetry:query (system, admin) (RETRO-T2, #625)
+//   - `alerts`    alerts:read, alerts:write (system, admin) (RETRO-H5, #609)
 // Not listed on purpose: `storage` and `notifications` collide with
 // MemoriaHub's own (legacy) declarations of the same ids until RETRO-D1 and
-// D3 adopt those slices; `nodes`, `sharing`, `user-data`,
-// `webhooks` and `alerts` are not mounted.
+// D3 adopt those slices; `nodes`, `sharing`, `user-data`
+// and `webhooks` are not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';
 
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],

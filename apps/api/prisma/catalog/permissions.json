@@ -204,6 +204,16 @@
       "scope": "org"
     },
     {
+      "name": "alerts:read",
+      "description": "View alert rules, incidents and the firing summary",
+      "scope": "system"
+    },
+    {
+      "name": "alerts:write",
+      "description": "Create, edit and delete alert rules; test them; acknowledge incidents",
+      "scope": "system"
+    },
+    {
       "name": "storage:read",
       "description": "Read object metadata, get download URLs",
       "scope": "org"
@@ -344,6 +354,8 @@
       "telemetry:query",
       "organizations:read",
       "organizations:write",
+      "alerts:read",
+      "alerts:write",
       "storage:delete_any",
       "media:read_any",
       "media:write_any",
