@@ -81,7 +81,7 @@ describe('TrashPurgeTask', () => {
 
   describe('when a trash_purge job is already pending or running', () => {
     it('does NOT call enqueue when state is pending', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue(makeEnrichmentJob('pending') as any);
+      mockPrisma.job.findFirst.mockResolvedValue(makeEnrichmentJob('pending') as any);
 
       await task.handleScheduledPurge();
 
@@ -89,7 +89,7 @@ describe('TrashPurgeTask', () => {
     });
 
     it('does NOT call enqueue when state is running', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue(makeEnrichmentJob('running') as any);
+      mockPrisma.job.findFirst.mockResolvedValue(makeEnrichmentJob('running') as any);
 
       await task.handleScheduledPurge();
 
@@ -103,7 +103,7 @@ describe('TrashPurgeTask', () => {
 
   describe('when no trash_purge job is pending or running', () => {
     beforeEach(() => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue(null);
+      mockPrisma.job.findFirst.mockResolvedValue(null);
     });
 
     it('calls enqueue once', async () => {
@@ -133,11 +133,11 @@ describe('TrashPurgeTask', () => {
 
   describe('findFirst query for existing job', () => {
     it('queries for trash_purge jobs with status pending or running', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue(null);
+      mockPrisma.job.findFirst.mockResolvedValue(null);
 
       await task.handleScheduledPurge();
 
-      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith(
+      expect(mockPrisma.job.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             type: 'trash_purge',
@@ -154,14 +154,14 @@ describe('TrashPurgeTask', () => {
 
   describe('error handling', () => {
     it('does not throw when enqueue fails', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockResolvedValue(null);
+      mockPrisma.job.findFirst.mockResolvedValue(null);
       mockEnrichmentJobService.enqueue.mockRejectedValue(new Error('enqueue error'));
 
       await expect(task.handleScheduledPurge()).resolves.not.toThrow();
     });
 
     it('does not throw when findFirst fails', async () => {
-      mockPrisma.enrichmentJob.findFirst.mockRejectedValue(new Error('DB error'));
+      mockPrisma.job.findFirst.mockRejectedValue(new Error('DB error'));
 
       await expect(task.handleScheduledPurge()).resolves.not.toThrow();
     });

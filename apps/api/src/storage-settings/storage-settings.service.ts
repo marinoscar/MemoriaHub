@@ -778,7 +778,7 @@ export class StorageSettingsService {
     // will skip the in-flight items gracefully.
     try {
       await this.prisma.$executeRaw`
-        DELETE FROM enrichment_jobs
+        DELETE FROM jobs
         WHERE type = 'storage_migration'
           AND status = 'pending'
           AND payload->>'runId' = ${runId}

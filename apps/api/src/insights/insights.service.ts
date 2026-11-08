@@ -172,7 +172,7 @@ export class InsightsService {
   // ---------------------------------------------------------------------------
 
   async getRefreshState(): Promise<RefreshState> {
-    const job = await this.prisma.enrichmentJob.findFirst({
+    const job = await this.prisma.job.findFirst({
       where: { type: 'storage_insights' },
       orderBy: { createdAt: 'desc' },
     });

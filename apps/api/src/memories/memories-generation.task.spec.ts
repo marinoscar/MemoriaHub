@@ -47,7 +47,7 @@ describe('MemoriesGenerationTask', () => {
   let task: MemoriesGenerationTask;
   let prisma: {
     circle: { findMany: jest.Mock };
-    enrichmentJob: { findMany: jest.Mock; groupBy: jest.Mock };
+    job: { findMany: jest.Mock; groupBy: jest.Mock };
   };
   let enrichment: { enqueue: jest.Mock };
   let settings: { getSettings: jest.Mock };
@@ -57,7 +57,7 @@ describe('MemoriesGenerationTask', () => {
   beforeEach(async () => {
     prisma = {
       circle: { findMany: jest.fn().mockResolvedValue([]) },
-      enrichmentJob: {
+      job: {
         findMany: jest.fn().mockResolvedValue([]),
         groupBy: jest.fn().mockResolvedValue([]),
       },
@@ -167,7 +167,7 @@ describe('MemoriesGenerationTask', () => {
 
     it('enqueues for a circle that has never generated (no succeeded job)', async () => {
       prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
-      prisma.enrichmentJob.groupBy.mockResolvedValue([]);
+      prisma.job.groupBy.mockResolvedValue([]);
 
       const result = await task.sweep();
 
@@ -179,7 +179,7 @@ describe('MemoriesGenerationTask', () => {
         { id: 'circle-a' },
         { id: 'circle-b' },
       ]);
-      prisma.enrichmentJob.findMany.mockResolvedValue([{ circleId: 'circle-a' }]);
+      prisma.job.findMany.mockResolvedValue([{ subjectId: 'circle-a' }]);
 
       const result = await task.sweep();
 
@@ -188,7 +188,7 @@ describe('MemoriesGenerationTask', () => {
         expect.objectContaining({ circleId: 'circle-b' }),
       );
       // The in-flight lookup is scoped to pending+running only.
-      expect(prisma.enrichmentJob.findMany).toHaveBeenCalledWith(
+      expect(prisma.job.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
@@ -228,8 +228,8 @@ describe('MemoriesGenerationTask', () => {
         settingsWith({ enabled: true, intervalHours: 24 }),
       );
       prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
-      prisma.enrichmentJob.groupBy.mockResolvedValue([
-        { circleId: 'circle-a', _max: { finishedAt: hoursAgo(1) } },
+      prisma.job.groupBy.mockResolvedValue([
+        { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(1) } },
       ]);
 
       const result = await task.sweep();
@@ -243,8 +243,8 @@ describe('MemoriesGenerationTask', () => {
         settingsWith({ enabled: true, intervalHours: 24 }),
       );
       prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
-      prisma.enrichmentJob.groupBy.mockResolvedValue([
-        { circleId: 'circle-a', _max: { finishedAt: hoursAgo(25) } },
+      prisma.job.groupBy.mockResolvedValue([
+        { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(25) } },
       ]);
 
       const result = await task.sweep();
@@ -257,8 +257,8 @@ describe('MemoriesGenerationTask', () => {
         settingsWith({ enabled: true, intervalHours: 1 }),
       );
       prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
-      prisma.enrichmentJob.groupBy.mockResolvedValue([
-        { circleId: 'circle-a', _max: { finishedAt: hoursAgo(2) } },
+      prisma.job.groupBy.mockResolvedValue([
+        { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(2) } },
       ]);
 
       // 2h since the last run > the 1h interval → eligible again.
@@ -268,8 +268,8 @@ describe('MemoriesGenerationTask', () => {
     it('falls back to a 24h interval when the setting is absent', async () => {
       settings.getSettings.mockResolvedValue(settingsWith({ enabled: true }));
       prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
-      prisma.enrichmentJob.groupBy.mockResolvedValue([
-        { circleId: 'circle-a', _max: { finishedAt: hoursAgo(12) } },
+      prisma.job.groupBy.mockResolvedValue([
+        { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(12) } },
       ]);
 
       expect((await task.sweep()).enqueued).toBe(0);
@@ -280,7 +280,7 @@ describe('MemoriesGenerationTask', () => {
 
       await task.sweep();
 
-      expect(prisma.enrichmentJob.groupBy).toHaveBeenCalledWith(
+      expect(prisma.job.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ status: MhLegacyJobStatus.succeeded }),
         }),
@@ -336,8 +336,8 @@ describe('MemoriesGenerationTask', () => {
 
       await task.sweep();
 
-      expect(prisma.enrichmentJob.findMany).toHaveBeenCalledTimes(1);
-      expect(prisma.enrichmentJob.groupBy).toHaveBeenCalledTimes(1);
+      expect(prisma.job.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.job.groupBy).toHaveBeenCalledTimes(1);
     });
   });
 });

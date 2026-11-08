@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, MhLegacyJobStatus, MediaType } from '@prisma/client';
+import { JobReason, MediaType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
@@ -59,11 +59,12 @@ export class LocationInferenceBackfillService {
       estimatedItems += group._count;
 
       // Per-circle guard: skip if a sweep is already pending/running for this circle.
-      const existing = await this.prisma.enrichmentJob.findFirst({
+      const existing = await this.prisma.job.findFirst({
         where: {
           type: 'location_inference',
-          circleId: group.circleId,
-          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
+          subjectType: 'circle',
+          subjectId: group.circleId,
+          status: { in: ['pending', 'running'] },
         },
       });
 

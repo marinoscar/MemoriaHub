@@ -190,8 +190,8 @@ describe('Workflow Run Lifecycle Integration (DB-gated)', () => {
     jest.clearAllMocks();
     setupWorkflowsSettings(context);
     // Enrichment job enqueue: no existing pending/running dedup match, create succeeds.
-    context.prismaMock.enrichmentJob.findFirst.mockResolvedValue(null);
-    context.prismaMock.enrichmentJob.create.mockImplementation(
+    context.prismaMock.job.findFirst.mockResolvedValue(null);
+    context.prismaMock.job.create.mockImplementation(
       async ({ data }: any) => ({ id: randomUUID(), ...data }) as any,
     );
     context.prismaMock.auditEvent.create.mockResolvedValue({} as any);
@@ -222,7 +222,7 @@ describe('Workflow Run Lifecycle Integration (DB-gated)', () => {
       expect(runResponse.body.data.status).toBe('evaluating');
 
       // Capture the workflow_evaluate payload the service enqueued.
-      const evalCall = (context.prismaMock.enrichmentJob.create as jest.Mock).mock.calls.find(
+      const evalCall = (context.prismaMock.job.create as jest.Mock).mock.calls.find(
         (c) => c[0].data.type === 'workflow_evaluate',
       );
       expect(evalCall).toBeDefined();
@@ -276,7 +276,7 @@ describe('Workflow Run Lifecycle Integration (DB-gated)', () => {
       );
       expect(exclusionCall[0].where.mediaItemId).toEqual({ in: [excludedId] });
 
-      const executeCall = (context.prismaMock.enrichmentJob.create as jest.Mock).mock.calls.find(
+      const executeCall = (context.prismaMock.job.create as jest.Mock).mock.calls.find(
         (c) => c[0].data.type === 'workflow_execute_batch',
       );
       expect(executeCall).toBeDefined();

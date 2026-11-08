@@ -55,7 +55,7 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { MhLegacyJobStatus, MemoryType, Prisma } from '@prisma/client';
+import { MemoryType, Prisma } from '@prisma/client';
 
 import { EmailService } from '../../email/email.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
@@ -249,11 +249,12 @@ export class MemoryDigestService {
    * boundary the task used without any state passed through the payload.
    */
   async lastDigestAt(circleId: string): Promise<Date | null> {
-    const last = await this.prisma.enrichmentJob.findFirst({
+    const last = await this.prisma.job.findFirst({
       where: {
         type: MEMORY_DIGEST_JOB_TYPE,
-        circleId,
-        status: MhLegacyJobStatus.succeeded,
+        subjectType: 'circle',
+        subjectId: circleId,
+        status: 'succeeded',
       },
       orderBy: { finishedAt: 'desc' },
       select: { finishedAt: true },

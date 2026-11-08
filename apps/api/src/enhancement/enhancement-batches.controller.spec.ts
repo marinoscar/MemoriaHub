@@ -382,7 +382,7 @@ describe('EnhancementBatchesController', () => {
     beforeEach(() => {
       (mockPrisma.mediaEnhancementBatch.findUnique as jest.Mock).mockResolvedValue(makeBatch());
       (mockPrisma.mediaEnhancementBatch.update as jest.Mock).mockResolvedValue({});
-      (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+      (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
       (mockPrisma.mediaEnhancement.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
     });
 
@@ -428,7 +428,7 @@ describe('EnhancementBatchesController', () => {
 
       // Their job rows are deleted, scoped to status=pending — a running job
       // for the still-processing row can never match this filter.
-      expect(mockPrisma.enrichmentJob.deleteMany).toHaveBeenCalledWith({
+      expect(mockPrisma.job.deleteMany).toHaveBeenCalledWith({
         where: {
           type: 'picture_enhancement',
           status: MhLegacyJobStatus.pending,
@@ -458,7 +458,7 @@ describe('EnhancementBatchesController', () => {
 
       const result = await controller.cancel(BATCH_ID, USER);
 
-      expect(mockPrisma.enrichmentJob.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.job.deleteMany).not.toHaveBeenCalled();
       expect(mockPrisma.mediaEnhancement.updateMany).not.toHaveBeenCalled();
       expect(result).toEqual({ batchId: BATCH_ID, status: 'cancelled', cancelled: 0 });
     });

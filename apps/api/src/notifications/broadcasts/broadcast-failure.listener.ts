@@ -38,7 +38,7 @@ export class BroadcastFailureListener {
     if (event.outcome !== 'failed' || !BROADCAST_JOB_TYPES.has(event.type)) return;
 
     try {
-      const job = await this.prisma.enrichmentJob.findUnique({
+      const job = await this.prisma.job.findUnique({
         where: { id: event.jobId },
         select: { id: true, type: true, payload: true, attempts: true, lastError: true, finishedAt: true },
       });

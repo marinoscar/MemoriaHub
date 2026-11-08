@@ -6,16 +6,7 @@ import {
   NotFoundException,
   forwardRef,
 } from '@nestjs/common';
-import {
-  BurstGroupStatus,
-  CircleRole,
-  JobReason,
-  MhLegacyJobStatus,
-  MediaType,
-  Prisma,
-  ReviewRunAction,
-  ReviewRunSubject,
-} from '@prisma/client';
+import { BurstGroupStatus, CircleRole, JobReason, MediaType, Prisma, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -702,16 +693,17 @@ export class BurstService {
       return enqueued;
     } else {
       // Only enqueue items without an existing burstGroupId and without a succeeded burst_detection job
-      const succeededJobMediaIds = await this.prisma.enrichmentJob.findMany({
+      const succeededJobMediaIds = await this.prisma.job.findMany({
         where: {
           type: 'burst_detection',
-          circleId,
-          status: MhLegacyJobStatus.succeeded,
+          subjectType: 'media_item',
+          payload: { path: ['circleId'], equals: circleId },
+          status: 'succeeded',
         },
-        select: { mediaItemId: true },
+        select: { subjectId: true },
       });
       const excludeIds = new Set(
-        succeededJobMediaIds.map((j) => j.mediaItemId).filter((id): id is string => id !== null),
+        succeededJobMediaIds.map((j) => j.subjectId).filter((id): id is string => id !== null),
       );
 
       const items = await this.prisma.mediaItem.findMany({

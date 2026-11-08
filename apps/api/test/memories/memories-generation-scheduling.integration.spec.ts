@@ -82,7 +82,7 @@ describeMaybeDb(
 
     afterAll(async () => {
       if (!prisma) return;
-      await prisma.enrichmentJob
+      await prisma.job
         .deleteMany({ where: { circleId: ourCircles } })
         .catch(() => undefined);
       await prisma.circle.deleteMany({ where: { id: ourCircles } });
@@ -95,7 +95,7 @@ describeMaybeDb(
 
     beforeEach(async () => {
       delete process.env['MEMORIES_ENABLED'];
-      await prisma.enrichmentJob.deleteMany({ where: { circleId: ourCircles } });
+      await prisma.job.deleteMany({ where: { circleId: ourCircles } });
 
       // Real PrismaService/EnrichmentJobService; only the settings read is
       // stubbed, so every query in the path is genuine SQL.
@@ -114,7 +114,7 @@ describeMaybeDb(
 
     /** memory_generation rows belonging to this suite's circles. */
     async function ourJobs() {
-      return prisma.enrichmentJob.findMany({
+      return prisma.job.findMany({
         where: { type: MEMORY_GENERATION_JOB_TYPE, circleId: ourCircles },
         orderBy: { circleId: 'asc' },
       });
@@ -132,7 +132,7 @@ describeMaybeDb(
      * A having no pending job than by a global counter having incremented once.
      */
     async function ourPendingCircleIds(): Promise<string[]> {
-      const rows = await prisma.enrichmentJob.findMany({
+      const rows = await prisma.job.findMany({
         where: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: ourCircles,
@@ -178,7 +178,7 @@ describeMaybeDb(
     // -----------------------------------------------------------------------
 
     it('skips a circle whose last SUCCEEDED job is inside the interval, enqueues the other', async () => {
-      await prisma.enrichmentJob.create({
+      await prisma.job.create({
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: circleAId,
@@ -197,7 +197,7 @@ describeMaybeDb(
     });
 
     it('enqueues again once the last success falls outside the interval', async () => {
-      await prisma.enrichmentJob.create({
+      await prisma.job.create({
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: circleAId,
@@ -213,7 +213,7 @@ describeMaybeDb(
     });
 
     it('uses the MOST RECENT success when a circle has several (the _max aggregate)', async () => {
-      await prisma.enrichmentJob.createMany({
+      await prisma.job.createMany({
         data: [
           {
             type: MEMORY_GENERATION_JOB_TYPE,
@@ -239,7 +239,7 @@ describeMaybeDb(
     });
 
     it('ignores FAILED history — only succeeded jobs gate the interval', async () => {
-      await prisma.enrichmentJob.create({
+      await prisma.job.create({
         data: {
           type: MEMORY_GENERATION_JOB_TYPE,
           circleId: circleAId,
@@ -255,7 +255,7 @@ describeMaybeDb(
     });
 
     it('skips a circle with a RUNNING job even when its last success is old', async () => {
-      await prisma.enrichmentJob.createMany({
+      await prisma.job.createMany({
         data: [
           {
             type: MEMORY_GENERATION_JOB_TYPE,

@@ -431,7 +431,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(2);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 2 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -450,7 +450,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(2);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 2 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -459,8 +459,14 @@ describe('FaceDetectionController', () => {
       await controller.deleteAllBiometrics('circle-1', user);
       expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({ where: { circleId: 'circle-1' } });
       expect(mockPrisma.person.deleteMany).toHaveBeenCalledWith({ where: { circleId: 'circle-1' } });
-      expect(mockPrisma.enrichmentJob.deleteMany).toHaveBeenCalledWith({
-        where: { circleId: 'circle-1', type: 'face_detection' },
+      expect(mockPrisma.job.deleteMany).toHaveBeenCalledWith({
+        where: {
+          type: 'face_detection',
+          OR: [
+            { subjectType: 'circle', subjectId: 'circle-1' },
+            { payload: { path: ['circleId'], equals: 'circle-1' } },
+          ],
+        },
       });
     });
 
@@ -471,7 +477,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(1);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
@@ -492,7 +498,7 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.count as jest.Mock).mockResolvedValue(3);
         (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 7 });
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
-        (mockPrisma.enrichmentJob.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+        (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 7 });
         (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
