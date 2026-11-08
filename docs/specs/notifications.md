@@ -275,6 +275,8 @@ Every clause exists to rule out a specific wrong behavior:
 
 ## 7. Retention
 
+> **Since RETRO-C8 ([#608](https://github.com/marinoscar/MemoriaHub/issues/608)): a platform retention policy.** The purge is `retention.appNotifications` (default 30 days, enabled, 1 to 365), registered from `apps/api/src/app-registrations/jobs.ts` (`notifications/notifications.retention.ts`). The platform's 01:00 `RetentionPurgeTask` enqueues it under the permanent type string `notification_purge`; the handler is `NotificationsRetentionHandler` (`notifications/notifications-retention.handler.ts`), which re-reads the policy per run and keeps the three passes below (dismissed, then read-not-dismissed, then the delivery audit by `created_at`), 5 000 ids per batch. **Unread rows are still never deleted by age.** `NotificationPurgeHandler` and the midnight `NotificationPurgeTask` are gone. The old `notifications.retentionDays` / `notifications.purgeEnabled` keys are no longer read: `npm run settings:migrate-notification-retention --workspace=api [-- --apply]` carries them into the policy once (dry run by default, idempotent, never overwrites a saved policy), and RETRO-C11 removes them. The key is `appNotifications`, not `app_notifications` (the platform requires camelCase keys and owns `notifications` for its own inbox); RETRO-D3 removes the policy when the platform notifications slice's purge takes over. The paragraphs below describe the purge rules, which are unchanged; read "the policy" for the two old settings.
+
 `NotificationPurgeHandler` (a global `notification_purge` enrichment job, enqueued nightly by `NotificationPurgeTask`, mirroring `JobHistoryPurgeTask`'s cadence, dedup guard, and 5,000-row batching) deletes two, and only two, categories of row:
 
 ```

@@ -1,8 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, JobReason } from '@prisma/client';
+import { JobReason } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 
-import { EnrichmentHandler } from '../../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../../enrichment/enrichment-handler.registry';
 import { EnrichmentJobService } from '../../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { BroadcastDeliveryService, BroadcastRecipient } from '../broadcast-delivery.service';
@@ -41,18 +45,29 @@ import { broadcastJobDeleteRefusal } from '../broadcast-job-delete-guard';
 // the last committed cursor. A permanently failed chunk flips the broadcast to
 // `failed` via BroadcastFailureListener; resume continues from the cursor.
 //
+// A native platform `JobHandler` (RETRO-C8, #608): global (no subject), enqueued
+// with `skipDedup: true` (and `scheduledFor` for a scheduled start); the
+// `canDelete` veto is the platform's admin-delete hook.
+//
+// RETRO-D3: deleted when the platform notifications slice owns broadcasts.
+//
 // SERVER-ONLY by omission (no node-result pair).
 // =============================================================================
 
 @Injectable()
-export class BroadcastChunkHandler implements EnrichmentHandler, OnModuleInit {
+export class BroadcastChunkHandler implements JobHandler, OnModuleInit {
   readonly type = BROADCAST_CHUNK_TYPE;
+
+  readonly label = 'Broadcast delivery';
+
+  /** One page of up to BROADCAST_CHUNK_SIZE recipients (email included): ten minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
   private readonly logger = new Logger(BroadcastChunkHandler.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jobs: EnrichmentJobService,
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly delivery: BroadcastDeliveryService,
   ) {}
 
@@ -60,11 +75,11 @@ export class BroadcastChunkHandler implements EnrichmentHandler, OnModuleInit {
     this.registry.register(this);
   }
 
-  canDelete(job: EnrichmentJob): Promise<string | null> {
+  canDelete(job: Job): Promise<string | null> {
     return broadcastJobDeleteRefusal(this.prisma, job);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
+  async process(job: Job): Promise<void> {
     const broadcastId = broadcastIdOf(job.payload);
     if (!broadcastId) {
       this.logger.warn(`broadcast_chunk job ${job.id} carries no broadcastId; nothing to do`);

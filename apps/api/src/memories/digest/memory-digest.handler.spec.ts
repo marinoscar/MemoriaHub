@@ -15,22 +15,15 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { EnrichmentJob } from '@prisma/client';
+import { JobHandlerRegistry, type Job, type JobHandler } from '@marinoscar/platform-api/jobs';
 
 import { MemoryDigestHandler } from './memory-digest.handler';
 import { MEMORY_DIGEST_JOB_TYPE, MemoryDigestService } from './memory-digest.service';
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { PrismaService } from '../../prisma/prisma.service';
+import { circleJob, subjectPrisma } from '../../../test/helpers/platform-job';
 
-function job(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: MEMORY_DIGEST_JOB_TYPE,
-    circleId: 'circle-1',
-    mediaItemId: null,
-    payload: null,
-    ...overrides,
-  } as EnrichmentJob;
+function job(overrides: Partial<Job> = {}): Job {
+  return circleJob(MEMORY_DIGEST_JOB_TYPE, 'circle-1', overrides);
 }
 
 describe('MemoryDigestHandler', () => {
@@ -56,7 +49,8 @@ describe('MemoryDigestHandler', () => {
       providers: [
         MemoryDigestHandler,
         { provide: MemoryDigestService, useValue: digest },
-        { provide: EnrichmentHandlerRegistry, useValue: registry },
+        { provide: JobHandlerRegistry, useValue: registry },
+        { provide: PrismaService, useValue: subjectPrisma() },
       ],
     }).compile();
 
@@ -71,13 +65,13 @@ describe('MemoryDigestHandler', () => {
   });
 
   it('is SERVER-ONLY — no node compute/persist pair', () => {
-    // The absence of this pair is exactly what EnrichmentHandlerRegistry
+    // The absence of this pair is exactly what the platform JobHandlerRegistry
     // .serverOnlyTypes() infers from; adding one would make the type
     // node-claimable, and a node holds neither the email credential nor the
     // SECRETS_ENCRYPTION_KEY-derived signing key.
-    // Typed as EnrichmentHandler so the optional members are addressable — the
+    // Typed as JobHandler so the optional members are addressable — the
     // point of the assertion is that the concrete class does not define them.
-    const asHandler: EnrichmentHandler = handler;
+    const asHandler: JobHandler = handler;
     expect(asHandler.nodeResultSchema).toBeUndefined();
     expect(asHandler.persistNodeResult).toBeUndefined();
   });
@@ -88,9 +82,21 @@ describe('MemoryDigestHandler', () => {
     expect(digest.sendForCircle).toHaveBeenCalledWith('circle-1');
   });
 
-  it('does nothing for a circle-less job', async () => {
-    await expect(handler.process(job({ circleId: null }))).resolves.toBeUndefined();
+  it('does nothing for a circle deleted since the job was queued', async () => {
+    await expect(handler.process(job({ subjectId: 'circle-gone' }))).resolves.toBeUndefined();
     expect(digest.sendForCircle).not.toHaveBeenCalled();
+  });
+
+  it('throws for a job that is not about a circle (a malformed row)', async () => {
+    await expect(handler.process(job({ subjectType: null, subjectId: null }))).rejects.toThrow(
+      'not about a circle',
+    );
+    expect(digest.sendForCircle).not.toHaveBeenCalled();
+  });
+
+  it('declares its label and a two-attempt profile', () => {
+    expect(handler.label).toBe('Memory email digest');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 900_000, maxAttempts: 2 });
   });
 
   it.each(['gate', 'no_new_content', 'no_circle'])(

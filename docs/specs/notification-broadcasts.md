@@ -128,6 +128,8 @@ A cancel can therefore never be overwritten by a late chunk, and a failure can n
 
 ## 7. Fan-out: Two Job Types
 
+> **Since RETRO-C8 ([#608](https://github.com/marinoscar/MemoriaHub/issues/608)).** Both are native platform `JobHandler`s registered with `JobHandlerRegistry` (`@marinoscar/platform-api/jobs`), global (no subject), with labels (`Broadcast start`, `Broadcast delivery`) and profiles (`broadcast_start`: 2 minutes, 3 attempts; `broadcast_chunk`: 10 minutes, 3 attempts). `skipDedup`, `scheduledFor`, the cursor compare-and-swap and the `canDelete` veto are unchanged; `canDelete` is the platform `JobHandler.canDelete` hook (the admin delete answers 409 with `details.reason`). `BroadcastFailureListener` subscribes to the platform `JOB_SETTLED_EVENT` and reads the settled row from the event. Both handlers carry a `RETRO-D3` marker: they are deleted when the platform notifications slice owns broadcasts. Where this section says `EnrichmentHandler`, `enrichment_jobs` or `ENRICHMENT_WORKER_MODE`, read the platform `JobHandler`, `jobs` and `JOBS_WORKER_MODE`.
+
 Both are registered `EnrichmentHandler`s, **server-only by omission** (no `nodeResultSchema` / `persistNodeResult`: a node has no database access), which places them in the `ENRICHMENT_WORKER_MODE=system` claim set automatically. Neither is in the CLI's `NODE_JOB_TYPES`. The type strings `broadcast_start` and `broadcast_chunk` are **permanent** once rows exist (renaming orphans queued rows; for `broadcast_start` that is a scheduled announcement that silently never fires). Payload is `{ broadcastId }`; priority 10 (behind upload enrichment, ahead of backfills).
 
 ### 7.1 Enqueue: `skipDedup` and `scheduledFor`
@@ -155,7 +157,7 @@ Both handlers implement the optional `EnrichmentHandler.canDelete(job)`, consult
 
 ## 8. Failure, Resume, Cancel and Delete
 
-**Failure.** `BroadcastFailureListener` subscribes (async, so it never delays the worker's next claim) to `ENRICHMENT_JOB_SETTLED_EVENT`, emitted only on a job's **terminal** failure. For `broadcast_start`/`broadcast_chunk` jobs it re-reads the job, and conditionally flips the broadcast `scheduled|sending` -> `failed`, recording `lastError` ("Start|Chunk job <id> failed permanently after N attempt(s): <cause, truncated to 500 chars>"). `scheduled` is included because a start job that failed before its claim leaves nothing to start the broadcast.
+**Failure.** `BroadcastFailureListener` subscribes (async, so it never delays the worker's next claim) to the platform's `JOB_SETTLED_EVENT` (since RETRO-C8; it was `ENRICHMENT_JOB_SETTLED_EVENT`), emitted only on a job's **terminal** transition. For a failed `broadcast_start`/`broadcast_chunk` job it reads the settled row carried by the event, and conditionally flips the broadcast `scheduled|sending` -> `failed`, recording `lastError` ("Start|Chunk job <id> failed permanently after N attempt(s): <cause, truncated to 500 chars>"). `scheduled` is included because a start job that failed before its claim leaves nothing to start the broadcast.
 
 **Resume** (`POST /:id/resume`, 409 unless `failed`). If an audience cutoff exists the broadcast returns to `sending` and one chunk job is enqueued that continues from the persisted cursor (recipients already reached are not re-sent, beyond one in-flight group). If it failed before ever being claimed it returns to `scheduled` and the start job is re-queued. If the enqueue itself fails, the broadcast is compensated back to `failed` so a resume can never strand it with no job.
 

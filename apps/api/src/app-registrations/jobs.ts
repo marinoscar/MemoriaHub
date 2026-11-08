@@ -30,13 +30,16 @@ import {
   type RetentionPolicyDefinition,
 } from '@marinoscar/platform-api/jobs';
 
+import { APP_NOTIFICATIONS_RETENTION_POLICY } from '../notifications/notifications.retention';
 import { REVIEW_RUNS_RETENTION_POLICY } from '../review-runs/review-runs.retention';
 import { WORKFLOW_RUNS_RETENTION_POLICY } from '../workflows/runs/workflow-runs.retention';
 
 /**
  * The job types the legacy handlers serve, and the label each shows. A native
  * handler declares its own `label` and is not listed (RETRO-C3: the six
- * media/face types).
+ * media/face types; RETRO-C8: memory_generation, memory_digest,
+ * storage_insights, broadcast_start, broadcast_chunk and the notification_purge
+ * retention handler).
  */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   // Media enrichment (per-item compute)
@@ -56,15 +59,10 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   picture_enhancement: 'AI picture enhancer',
   picture_enhancement_purge: 'AI picture enhancer purge',
   // Storage / system
-  storage_insights: 'Storage insights',
   storage_migration: 'Storage migration',
   trash_purge: 'Trash purge',
   trash_empty_evaluate: 'Empty trash evaluate',
   trash_empty_execute_batch: 'Empty trash execute batch',
-  notification_purge: 'Notification purge',
-  // Admin notification broadcasts (issue #488), server-only fan-out
-  broadcast_start: 'Broadcast start',
-  broadcast_chunk: 'Broadcast delivery',
   // Review-queue runs: bursts / duplicates / location suggestions (issue #190)
   review_run_evaluate: 'Review run evaluate',
   review_run_execute_batch: 'Review run execute batch',
@@ -74,9 +72,6 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   workflow_evaluate_item: 'Workflow evaluate (item)',
   workflow_execute_batch: 'Workflow execute batch',
   workflow_history_purge: 'Workflow history purge',
-  // Memories (epic #300)
-  memory_generation: 'Memory generation',
-  memory_digest: 'Memory email digest',
   // Location Grouping (issue #373)
   location_group_rebuild: 'Location Group Rebuild',
 };
@@ -102,6 +97,7 @@ export const APP_JOB_REASONS: readonly JobReasonDefinition[] = [];
 export const APP_RETENTION_POLICIES: readonly RetentionPolicyDefinition[] = [
   WORKFLOW_RUNS_RETENTION_POLICY,
   REVIEW_RUNS_RETENTION_POLICY,
+  APP_NOTIFICATIONS_RETENTION_POLICY,
 ];
 
 let registered = false;

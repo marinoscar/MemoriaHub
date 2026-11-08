@@ -867,6 +867,19 @@ The following handlers are registered in the current production codebase. Each s
 
 A media-item job whose media item no longer exists (or a circle job whose circle is gone) settles as a no-op; a job about the wrong subject fails. The short `storage_objects` writes of the metadata and thumbnail persist paths run under the platform `JobScope` (the job's organization). Contract tests: `apps/api/test/jobs/media-face.conformance.spec.ts`.
 
+### Native housekeeping handlers (RETRO-C8, #608)
+
+| Type | Label | Profile (`maxRuntimeMs`, `maxAttempts`) | Eligibility | Notes |
+|---|---|---|---|---|
+| `memory_generation` | Memory generation | 1 200 000, 3 | server-only | Subject `circle`; enqueued with `skipDedup` (sharded backfill); see [memories.md §3](memories.md) |
+| `memory_digest` | Memory email digest | 900 000, 2 | server-only | Subject `circle`; the watermark is the newest succeeded row in `jobs`; see [memories.md §7](memories.md) |
+| `storage_insights` | Storage insights | 900 000, 3 | server-only | Global; refresh state read from the newest `jobs` row; see [storage-insights.md](storage-insights.md) |
+| `broadcast_start` | Broadcast start | 120 000, 3 | server-only | Global, `skipDedup`, `scheduledFor`, `canDelete` veto; RETRO-D3 deletes it; see [notification-broadcasts.md](notification-broadcasts.md) |
+| `broadcast_chunk` | Broadcast delivery | 600 000, 3 | server-only | Global, `skipDedup`, cursor CAS, `canDelete` veto; RETRO-D3 deletes it |
+| `notification_purge` | Notification purge | 1 800 000, 3 | server-only | The `retention.appNotifications` purge, enqueued by the platform `RetentionPurgeTask`; see [notifications.md §7](notifications.md#7-retention) |
+
+A circle job whose circle is gone settles as a no-op; a job about the wrong subject fails. `storage_migration` stays on the adapter for now. Contract tests: `apps/api/test/jobs/housekeeping.conformance.spec.ts`.
+
 ### Handlers on the legacy adapter
 
 | Handler type | Module | Scope | Scheduled by | Notes |
