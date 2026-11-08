@@ -42,6 +42,10 @@ import {
 
 import { ALERTS_NOTIFICATIONS, registerAlertsEmailTemplates } from '@marinoscar/platform-api/alerts';
 
+// The sharing slice's two e-mail templates (RETRO-I1, #562), registered before its events.
+import '../../app-registrations/sharing';
+import { SHARING_NOTIFICATIONS } from '../sharing/sharing.notifications';
+
 import { MEMORIAHUB_EMAIL_NOTIFICATIONS } from '../../notifications-registry/memoriahub-email.notifications';
 import {
   MEMORIAHUB_EVENT_KEYS,
@@ -81,6 +85,9 @@ const GROUPS: readonly (readonly NotificationRegistration[])[] = [
   ALERTS_NOTIFICATIONS,
   // The webhooks slice's `webhooks.endpoint_disabled` (email and bell, to the endpoint's owner).
   WEBHOOKS_NOTIFICATIONS,
+  // The sharing slice's two events (RETRO-I1, #562): `groups.invitation` and
+  // `sharing.shared_with_you`. Neither fires until groups and grants exist (RETRO-I2..I5).
+  SHARING_NOTIFICATIONS,
 ];
 
 // Their email templates (idempotent), bound before the events are registered.

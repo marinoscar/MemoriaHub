@@ -99,6 +99,10 @@ const NEW_PLATFORM_PERMISSIONS = [
   // The alerts slice (RETRO-H5, #609): system scope, admin only. (The list is sorted.)
   'alerts:read',
   'alerts:write',
+  // The sharing slice (RETRO-I1, #562): org scope; groups:admin and sharing:admin via org_admin.
+  'groups:admin',
+  'groups:read',
+  'groups:write',
   'org_ai_config:read',
   'org_ai_config:write',
   // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
@@ -127,6 +131,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   'system_webhooks:write',
   'webhooks:read',
   'webhooks:write',
+  'sharing:admin',
+  'sharing:read',
+  'sharing:write',
 ];
 
 /**
@@ -138,8 +145,10 @@ const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
   // `webhooks:read|write` (RETRO-H4, #603): a member's own webhook endpoints (`/api/webhooks`);
   // the platform grants them to every org role. What an endpoint receives is still gated by the
   // event's own permission (`media:read`), re-checked for the owner at every fan-out.
-  contributor: ['ai:use', 'webhooks:read', 'webhooks:write'],
-  viewer: ['webhooks:read', 'webhooks:write'],
+  // RETRO-I1 (#562): the sharing slice's org grants. Nothing in MemoriaHub checks them yet: the
+  // slice's own routes are mounted but empty until circles become groups (RETRO-I2..I5).
+  contributor: ['ai:use', 'webhooks:read', 'webhooks:write', 'groups:read', 'groups:write', 'sharing:read', 'sharing:write'],
+  viewer: ['webhooks:read', 'webhooks:write', 'groups:read', 'sharing:read'],
 };
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */
