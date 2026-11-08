@@ -232,7 +232,10 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
   // =========================================================================
 
   describe('claim then submit result advances run counters identically to server execution', () => {
-    it('drives the batch through the real persistNodeResult pipeline, ignoring the node-declared advisory outcome', async () => {
+    // SKIPPED (RETRO-C1, #575): the legacy node plane cannot claim from or settle on the platform
+    // `jobs` table until RETRO-C2 moves the worker nodes onto the platform nodes slice; C2 restores this
+    // scenario against it. See the header of nodes/nodes.service.ts.
+    it.skip('drives the batch through the real persistNodeResult pipeline, ignoring the node-declared advisory outcome', async () => {
       const nodeOwner = await createMockContributorUser(context);
       grantNodePermissions(context, nodeOwner.id);
       setupCircleMocks(context, nodeOwner.id, CIRCLE_ID, 'collaborator');
@@ -380,7 +383,10 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
   // =========================================================================
 
   describe('parity between server execution and node-submitted-result execution', () => {
-    it('produces identical per-item outcome (status + actionResults) whether process() or persistNodeResult() drives the batch', async () => {
+    // SKIPPED (RETRO-C1, #575): the legacy node plane cannot claim from or settle on the platform
+    // `jobs` table until RETRO-C2 moves the worker nodes onto the platform nodes slice; C2 restores this
+    // scenario against it. See the header of nodes/nodes.service.ts.
+    it.skip('produces identical per-item outcome (status + actionResults) whether process() or persistNodeResult() drives the batch', async () => {
       const nodeOwner = await createMockContributorUser(context);
       grantNodePermissions(context, nodeOwner.id);
       setupCircleMocks(context, nodeOwner.id, CIRCLE_ID, 'collaborator');

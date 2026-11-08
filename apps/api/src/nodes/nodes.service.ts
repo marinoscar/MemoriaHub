@@ -3,9 +3,17 @@
 // =============================================================================
 //
 // Control-plane service for the distributed worker-node data plane. Handles node
-// registration/lifecycle, heartbeats, atomic job claiming (delegated to the
-// shared EnrichmentClaimService), lease renewal, admin listing with health, and
-// the static parity model manifest that nodes download to match server output.
+// registration/lifecycle, heartbeats, lease renewal, admin listing with health,
+// and the static parity model manifest that nodes download to match server output.
+//
+// JOB EXECUTION IS PAUSED UNTIL RETRO-C2 (#575). The queue is the platform
+// `jobs` table since RETRO-C1; a legacy worker node is registered in
+// `mh_legacy_worker_nodes`, which `jobs.claimed_by_node_id` cannot reference, so
+// a legacy node cannot hold a platform job. Until the nodes slice replaces this
+// service (C2), `POST /api/nodes/:id/claim` answers an empty list and the
+// job-scoped endpoints (result, failure) answer 409. The server's own worker
+// runs every job (`JOBS_WORKER_MODE=all`). Registration, heartbeats, listing,
+// credentials and the Local Media Backup feed are untouched.
 // =============================================================================
 
 import {
@@ -26,9 +34,7 @@ import {
   MhLegacyWorkerNode,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -69,9 +75,9 @@ export interface HeartbeatInput {
 // Defaults resolved from env
 // ---------------------------------------------------------------------------
 
-/** Default lease duration (ms) for claimed jobs. */
+/** Default lease duration (ms) a renewal extends a legacy claim by (30 minutes). */
 function defaultLeaseMs(): number {
-  return Number(process.env.ENRICHMENT_LEASE_MS) || 1_800_000;
+  return 1_800_000;
 }
 
 /** Freshness window (ms) beyond which a heartbeat is considered stale. */
@@ -110,9 +116,7 @@ export class NodesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly enrichmentClaimService: EnrichmentClaimService,
     private readonly registry: EnrichmentHandlerRegistry,
-    private readonly terminal: EnrichmentTerminalService,
     private readonly objectsService: ObjectsService,
     private readonly storageProviderResolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
@@ -354,13 +358,7 @@ export class NodesService {
     const limit = Math.min(max ?? node.concurrency, node.concurrency);
     const leaseMs = defaultLeaseMs();
 
-    const claimed = await this.enrichmentClaimService.claim({
-      nodeId,
-      executor: 'node',
-      eligibleTypes,
-      limit,
-      leaseMs,
-    });
+    const claimed = await this.claimLegacyJobs({ nodeId, eligibleTypes, limit, leaseMs });
 
     const jobs = await Promise.all(
       claimed.map(async (job) => ({
@@ -371,6 +369,25 @@ export class NodesService {
     );
 
     return { jobs };
+  }
+
+  /**
+   * PLATFORM-ADOPTION-SHIM(RETRO-C2): the claim of the old queue. The queue is the
+   * platform `jobs` table and a legacy node cannot hold a platform job (see the
+   * header), so nothing is claimable by a legacy node and this answers an empty list.
+   * RETRO-C2 replaces the service; the input-URL and params logic below is what the
+   * platform's `NODE_JOB_INPUTS` port takes over.
+   */
+  protected async claimLegacyJobs(request: {
+    nodeId: string;
+    eligibleTypes: string[];
+    limit: number;
+    leaseMs: number;
+  }): Promise<EnrichmentJob[]> {
+    this.logger.debug(
+      `Node ${request.nodeId} asked to claim up to ${request.limit} job(s): node execution is paused until RETRO-C2; answering an empty list`,
+    );
+    return [];
   }
 
   /**
@@ -924,11 +941,40 @@ export class NodesService {
   }
 
   /**
+   * PLATFORM-ADOPTION-SHIM(RETRO-C2): a legacy node's result or failure cannot be
+   * settled on the platform queue (see the header), so the report is refused. It is
+   * unreachable in practice: the cutover released every legacy claim, so
+   * `assertJobHeldByNode` answers 409 first.
+   */
+  protected legacyPlanePaused(): never {
+    throw new ConflictException(
+      'node job execution is paused until the worker-node slice moves to the platform queue (RETRO-C2); the server runs every job',
+    );
+  }
+
+  /** PLATFORM-ADOPTION-SHIM(RETRO-C2): settles a legacy node's success. Refused; see the header. */
+  protected async settleLegacySucceeded(job: EnrichmentJob): Promise<void> {
+    void job;
+    this.legacyPlanePaused();
+  }
+
+  /** PLATFORM-ADOPTION-SHIM(RETRO-C2): settles a legacy node's failure. Refused; see the header. */
+  protected async settleLegacyFailed(
+    job: EnrichmentJob,
+    error: unknown,
+    opts?: { rateLimited?: boolean; retryAfterMs?: number | null },
+  ): Promise<void> {
+    void job;
+    void error;
+    void opts;
+    this.legacyPlanePaused();
+  }
+
+  /**
    * Ingest a node-computed result for a claimed job: validate it against the
-   * handler's nodeResultSchema, persist via the handler's persistNodeResult
-   * (the persist half of the compute/persist split), then complete the job
-   * through the shared terminal service (same succeeded semantics as the
-   * in-process worker).
+   * handler's nodeResultSchema, persist via the handler's persistNodeResult (the
+   * persist half of the compute/persist split), then settle the job. Settling is
+   * refused until RETRO-C2: see the header.
    */
   async submitJobResult(
     userId: string,
@@ -975,22 +1021,20 @@ export class NodesService {
       this.logger.error(
         `Node ${nodeId} result persist failed for EnrichmentJob ${jobId} (type="${job.type}"): ${msg}`,
       );
-      await this.terminal.completeFailed(job, err);
+      await this.settleLegacyFailed(job, err);
       throw new InternalServerErrorException(
         'failed to persist node result; job routed through the failure/retry path',
       );
     }
 
-    await this.terminal.completeSucceeded(job);
+    await this.settleLegacySucceeded(job);
     return { ok: true };
   }
 
   /**
-   * Ingest a node-reported failure for a claimed job. Routed through the same
-   * terminal failure state machine as the in-process worker: rate-limited
-   * reports enter the deferral path (and trip the shared provider-throttle
-   * gate); everything else enters the exponential-retry path. The node's
-   * `willRetry` flag is advisory only — the server's attempts budget decides.
+   * Ingest a node-reported failure for a claimed job. Paused until RETRO-C2 (see
+   * the header); the platform nodes slice routes it through the platform terminal
+   * state machine.
    */
   async reportJobFailure(
     userId: string,
@@ -1000,7 +1044,7 @@ export class NodesService {
   ): Promise<{ ok: true }> {
     const job = await this.assertJobHeldByNode(userId, nodeId, jobId);
 
-    await this.terminal.completeFailed(job, body.error, {
+    await this.settleLegacyFailed(job, body.error, {
       rateLimited: body.rateLimited,
       retryAfterMs: body.retryAfterMs ?? null,
     });

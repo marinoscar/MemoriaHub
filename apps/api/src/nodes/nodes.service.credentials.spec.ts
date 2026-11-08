@@ -41,9 +41,7 @@ import {
 import { MhLegacyJobStatus } from '@prisma/client';
 import { NodesService } from './nodes.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -138,9 +136,7 @@ describe('NodesService.getJobCredentials', () => {
       providers: [
         NodesService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentClaimService, useValue: { claim: jest.fn() } },
         { provide: EnrichmentHandlerRegistry, useValue: { get: jest.fn(), types: jest.fn().mockReturnValue([]) } },
-        { provide: EnrichmentTerminalService, useValue: { completeSucceeded: jest.fn(), completeFailed: jest.fn() } },
         { provide: ObjectsService, useValue: { getDownloadUrl: jest.fn() } },
         { provide: StorageProviderResolver, useValue: { getActiveProvider: jest.fn() } },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
