@@ -213,7 +213,8 @@ MemoriaHub/
 │   │   │   ├── media-sync/    # Android Media Sync devices, config, check-in
 │   │   │   └── health/        # Liveness and readiness probes
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma  # Database schema
+│   │   │   ├── fragments/     # Hand-edited schema fragments
+│   │   │   ├── schema/        # GENERATED schema (npm run db:compose)
 │   │   │   ├── seed.ts        # Database seeds
 │   │   │   └── migrations/    # Migration history
 │   │   └── test/              # Integration tests

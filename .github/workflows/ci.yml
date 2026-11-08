@@ -52,6 +52,7 @@ jobs:
       - run: node scripts/check-platform-pin.mjs --self-test
       - run: npm run check:single-instance
       - run: npm run check:platform-imports
+      - run: npm run db:compose:check --workspace=api
 
   # Typechecking is separated from the test jobs deliberately: it is pure CPU on
   # already-provisioned inputs, so parking it behind the API suite (as it used to
