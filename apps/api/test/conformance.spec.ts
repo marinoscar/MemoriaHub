@@ -61,6 +61,9 @@
 // signing secret never leaves create/rotate, nothing makes an HTTP request outside the delivery job,
 // and endpoints never cross owners, scopes or organizations. It drives the slice over in-memory ports.
 //
+// `exports` (`@marinoscar/platform-api/exports/testing`, RETRO-H2): source permissions, writers,
+// the credential-model policy and the secret-egress sentinel run (see the entry below).
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -78,6 +81,7 @@ import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/email/testing';
+import '@marinoscar/platform-api/exports/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
 import '@marinoscar/platform-api/jobs/testing';
@@ -89,6 +93,7 @@ import '@marinoscar/platform-api/user-data/testing';
 import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
 import '@marinoscar/platform-api/webhooks/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
+import { Prisma } from '@prisma/client';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
 
@@ -110,6 +115,9 @@ import '../src/platform/user-data/user-data.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
+// Registers the exports slice's writers and sources (platform `user-data` / `org-data` plus
+// MemoriaHub's four) the `exports` suite reads (RETRO-H2; AppModule imports it too).
+import '../src/platform/exports/exports.config';
 // Fills the onboarding step and fact registries the `onboarding` suite reads (AppModule imports it too).
 import '../src/platform/onboarding/onboarding.manifest';
 // The sharing slice's registrations (RETRO-I1); AppModule imports them too.
@@ -331,6 +339,13 @@ runPlatformConformance({
       resourceTypeIds: [],
       minRoutes: 100,
     },
+
+    // Data export (RETRO-H2, #596): every source's permission is registered and every source offers a
+    // writer; every credential-shaped user-owned model is excluded or metadata-only; and the
+    // `user-data` / `org-data` sources, run over a client that fills EVERY column with a sentinel,
+    // write no redacted field into any byte of any format. MemoriaHub's own four sources are proven
+    // the same way by test/exports/memoriahub-export.sources.spec.ts.
+    exports: { datamodel: Prisma.dmmf.datamodel, permissions: permissionRegistry.list() },
 
     doctorReadOnly: {
       fixture: doctorConformanceFixture,

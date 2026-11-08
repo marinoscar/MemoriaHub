@@ -147,6 +147,15 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'and the public link resolution `GET /api/public/links/current` (the `X-Link-Token` header is the ' +
           'credential). Platform sharing slice (RETRO-I1); no resource type is shareable until RETRO-I2.',
       },
+      {
+        name: 'Exports',
+        description:
+          'Download your data (RETRO-H2): the export sources the caller may use, queued exports (`export.run`) ' +
+          'and a short-lived signed download per finished file. Sources: the platform\'s `user-data` and ' +
+          '`org-data` (`org_members:read`) and MemoriaHub\'s media, albums, memories and people (`media:read`). ' +
+          'Original files, hashes, storage keys and face embeddings are never exported. Served by the platform ' +
+          'exports slice.',
+      },
     ],
   },
   {

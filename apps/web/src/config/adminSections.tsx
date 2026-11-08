@@ -45,6 +45,7 @@ import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 import AndroidIcon from '@mui/icons-material/Android';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
 import { setupGuideSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
@@ -335,6 +336,16 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // (`webhooksAdminSections.organizations`, `feature: 'orgs'`) is not spread, like the other
       // organization cards: no organization page is routed in single-organization mode.
       ...webhooksAdminSections.operations,
+      {
+        // RETRO-H2 (#596), appended. `org_members:read` is the exact string the exports service
+        // checks for the platform `org-data` source; the page is the packaged `DataExportPage`.
+        title: 'Organization data export',
+        description:
+          'Export what this deployment stores for the organization (members, files list, settings) as JSON, CSV or Excel.',
+        Icon: CloudDownloadOutlinedIcon,
+        path: '/admin/settings/data-export',
+        permission: 'org_members:read',
+      },
     ],
   },
   // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to
