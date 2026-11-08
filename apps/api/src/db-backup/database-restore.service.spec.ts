@@ -297,13 +297,13 @@ function build(overrides: {
     }),
   };
 
+  // The platform MaintenanceModeService: the swap only ever uses the IN-MEMORY
+  // layer (`setInMemoryOverride`), never `setMaintenance` (the persisted write).
   const maintenance = {
-    enable: jest.fn(async (...args: unknown[]) => {
-      h.events.push(`maintenance:${JSON.stringify(args[2] ?? {})}`);
-      return {} as any;
+    setInMemoryOverride: jest.fn((override: unknown) => {
+      h.events.push(`maintenance:${JSON.stringify(override ?? {})}`);
     }),
-    setState: jest.fn(),
-    disable: jest.fn(),
+    setMaintenance: jest.fn(),
   };
 
   const backupRunner = {
@@ -542,14 +542,12 @@ describe('restore execution and swap', () => {
     const harness = build();
     await execute(harness);
 
-    expect(harness.maintenance.enable).toHaveBeenCalledWith(
-      expect.any(String),
-      'admin-1',
-      { allowAdmins: false },
+    expect(harness.maintenance.setInMemoryOverride).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, allowAdmins: false }),
     );
     // The persisted flag lives inside the database being renamed; writing it
     // here would be a write to a database that is about to disappear.
-    expect(harness.maintenance.setState).not.toHaveBeenCalled();
+    expect(harness.maintenance.setMaintenance).not.toHaveBeenCalled();
   });
 
   it('exits the process after a successful swap so the pool is rebuilt', async () => {
@@ -650,7 +648,7 @@ describe('mid-restore failure', () => {
     // database never knew a restore was happening.
     expect(harness.h.events).not.toContain('rename-database');
     expect(harness.h.events).not.toContain('terminate');
-    expect(harness.maintenance.enable).not.toHaveBeenCalled();
+    expect(harness.maintenance.setInMemoryOverride).not.toHaveBeenCalled();
 
     // And no several-hundred-GB scratch database left behind.
     const drops = harness.h.queries.filter((q) =>
@@ -702,10 +700,8 @@ describe('rollback', () => {
     expect(renames[1].text).toContain(
       `"${LIVE_DB}_old_20260810000000" RENAME TO "${LIVE_DB}"`,
     );
-    expect(harness.maintenance.enable).toHaveBeenCalledWith(
-      expect.any(String),
-      'admin-1',
-      { allowAdmins: false },
+    expect(harness.maintenance.setInMemoryOverride).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true, allowAdmins: false }),
     );
     expect(harness.exit).toHaveBeenCalledWith(0);
   });

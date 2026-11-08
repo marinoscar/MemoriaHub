@@ -5,6 +5,7 @@ import {
   BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { rfc8628Error } from './rfc8628-error';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes, createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -116,10 +117,7 @@ export class DeviceAuthService {
     const now = Date.now();
 
     if (lastPoll && now - lastPoll < pollInterval * 1000) {
-      throw new BadRequestException({
-        error: 'slow_down',
-        error_description: 'Polling too frequently. Please slow down.',
-      });
+      throw rfc8628Error(BadRequestException, 'slow_down', 'Polling too frequently. Please slow down.');
     }
 
     // Update last poll timestamp
@@ -142,10 +140,7 @@ export class DeviceAuthService {
     });
 
     if (!record) {
-      throw new UnauthorizedException({
-        error: 'invalid_grant',
-        error_description: 'Invalid device code',
-      });
+      throw rfc8628Error(UnauthorizedException, 'invalid_grant', 'Invalid device code');
     }
 
     // Check if expired
@@ -155,38 +150,23 @@ export class DeviceAuthService {
         data: { status: DeviceCodeStatus.expired },
       });
 
-      throw new BadRequestException({
-        error: 'expired_token',
-        error_description: 'The device code has expired',
-      });
+      throw rfc8628Error(BadRequestException, 'expired_token', 'The device code has expired');
     }
 
     // Check status
     switch (record.status) {
       case DeviceCodeStatus.pending:
-        throw new BadRequestException({
-          error: 'authorization_pending',
-          error_description: 'User has not yet authorized this device',
-        });
+        throw rfc8628Error(BadRequestException, 'authorization_pending', 'User has not yet authorized this device');
 
       case DeviceCodeStatus.denied:
-        throw new BadRequestException({
-          error: 'access_denied',
-          error_description: 'User denied the authorization request',
-        });
+        throw rfc8628Error(BadRequestException, 'access_denied', 'User denied the authorization request');
 
       case DeviceCodeStatus.expired:
-        throw new BadRequestException({
-          error: 'expired_token',
-          error_description: 'The device code has expired',
-        });
+        throw rfc8628Error(BadRequestException, 'expired_token', 'The device code has expired');
 
       case DeviceCodeStatus.approved:
         if (!record.user) {
-          throw new UnauthorizedException({
-            error: 'invalid_grant',
-            error_description: 'User information not found',
-          });
+          throw rfc8628Error(UnauthorizedException, 'invalid_grant', 'User information not found');
         }
 
         // Safely narrow clientInfo: it is Prisma's Json? type (unknown at runtime)
@@ -272,10 +252,7 @@ export class DeviceAuthService {
         };
 
       default:
-        throw new BadRequestException({
-          error: 'invalid_request',
-          error_description: 'Unknown device code status',
-        });
+        throw rfc8628Error(BadRequestException, 'invalid_request', 'Unknown device code status');
     }
   }
 

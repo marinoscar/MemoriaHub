@@ -25,7 +25,7 @@ import { AuthService } from './auth.service';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
-import { AllowDuringMaintenance } from '../common/maintenance/allow-during-maintenance.decorator';
+import { AllowDuringMaintenance } from '@marinoscar/platform-api/core';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { RequestUser } from './interfaces/authenticated-user.interface';
 import { GoogleProfile } from './strategies/google.strategy';
