@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { forSystem } from '@marinoscar/platform-api/core';
 
 import { MediaService } from '../../media/media.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
 
 import { StorageProviderResolver } from '../storage/storage-provider.resolver';
@@ -91,11 +91,12 @@ export class MemoriaHubUserDataService {
     private readonly prisma: PrismaService,
     private readonly media: MediaService,
     private readonly resolver: StorageProviderResolver,
+    private readonly system: PrismaSystemService,
   ) {}
 
   /** `storage_objects` is an organization table with row-level security; a purge must see every row. */
   private storageClient(): PrismaService {
-    return forSystem(this.prisma, 'purge') as unknown as PrismaService;
+    return this.system.asSystem('purge') as unknown as PrismaService;
   }
 
   // ---------------------------------------------------------------------------

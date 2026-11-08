@@ -31,6 +31,18 @@ const ALLOWLIST: Record<string, string> = {
   'platform/user-data/user-data-host.module.ts':
     "purge, admin-aggregate and the slice's own reasons: the user-data slice's USER_DATA_DB port " +
     '(the user purge, the factory reset and organization offboarding, each statement owner-filtered)',
+  'platform/user-data/memoriahub-user-data.service.ts':
+    'purge: the user and circle purges read and delete storage_objects rows across organizations, owner-filtered',
+  'platform/exports/exports-host.module.ts':
+    "export and purge: the exports slice's EXPORTS_SYSTEM_DATA port (the sources' owner-filtered reads, the expiry deletes)",
+  'platform/exports/exports-storage.adapter.ts':
+    'export: finds the storage_objects row of an export file by key to route it to its recorded driver',
+  'platform/webhooks/webhooks-host.module.ts':
+    "webhooks and retention: the webhooks slice's WEBHOOKS_SYSTEM_PRISMA port (system-scope endpoints, the delivery purge)",
+  'platform/webhooks/memoriahub-webhooks.service.ts':
+    'webhooks: the cached "does any enabled endpoint subscribe" read, which must see system-scope endpoints',
+  'platform/sharing/sharing-data.adapter.ts':
+    "the sharing slice's five named reasons (purge, doctor, retention, link-resolution, invite-claim) of SHARING_DATA",
   'media/thumbnail-repair.handler.ts':
     'media-housekeeping: the global thumbnail_repair sweep finds and counts repair attempts across organizations',
 };
