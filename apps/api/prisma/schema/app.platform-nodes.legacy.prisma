@@ -12,6 +12,8 @@ enum NodeStatus {
   draining
   offline
   disabled
+
+  @@map("MhLegacyNodeStatus")
 }
 
 model WorkerNode {
@@ -42,7 +44,7 @@ model WorkerNode {
   @@unique([createdById, name])
   @@index([status])
   @@index([createdById])
-  @@map("worker_nodes")
+  @@map("mh_legacy_worker_nodes")
 }
 
 // Durable, least-privilege bearer credential for worker nodes (`nod_` prefix).
@@ -65,5 +67,5 @@ model NodeCredential {
   user User @relation("UserNodeCredentials", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("node_credentials")
+  @@map("mh_legacy_node_credentials")
 }
