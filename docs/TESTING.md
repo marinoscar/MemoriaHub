@@ -1148,3 +1148,13 @@ This project uses industry-standard testing frameworks tailored to each layer:
 - **Helpers:** Shared utilities for user creation, database reset, and test app setup
 
 When writing tests, focus on behavior over implementation, maintain test isolation, and leverage the provided helpers for consistency. Target 70% coverage with emphasis on business logic, auth flows, and RBAC enforcement.
+
+## Destructive real-database specs
+
+`apps/api/test/user-data/user-data-purge.db.spec.ts` (RETRO-H1, #591) runs the platform's real factory reset against the test database, which deletes every user but one and every circle, media item and storage object outside the backup prefixes. Run it on its own, never in parallel with other `*.db.spec.ts` files that share the same database:
+
+```bash
+cd apps/api && npx jest --config ./test/jest.config.js -i test/user-data/user-data-purge.db.spec.ts
+```
+
+It skips (reported as skipped) when no database listens on the `.env.test` port.
