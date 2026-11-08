@@ -4,9 +4,11 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  HttpException,
   Inject,
   Optional,
 } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaEnhancementStatus, MediaTagSource } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
@@ -58,6 +60,7 @@ import { UploadNotificationService } from '../notification-producers/upload-noti
 import { MediaTouchService } from './media-touch.service';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source';
+import { metricNumber } from '../platform-extensions/telemetry/memoriahub-metrics.manifest';
 
 /**
  * Key for the tiered-browsing group-cover override map (Location Grouping,
@@ -108,6 +111,8 @@ export class MediaService {
     private readonly locationGroupResolver: LocationGroupResolverService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
     @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
+    // App metrics (RETRO-T3, #628): `app.media.uploads` / `app.media.upload.size`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -135,6 +140,18 @@ export class MediaService {
    *   dedup hit (clients may use it to decide HTTP status codes or UI feedback).
    */
   async createMedia(dto: CreateMediaDto, userId: string, userPermissions: string[]) {
+    try {
+      return await this.registerMedia(dto, userId, userPermissions);
+    } catch (err) {
+      // A client error (missing object, not owner, already linked, no access) is a rejected upload.
+      if (err instanceof HttpException && err.getStatus() < 500) {
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'rejected' });
+      }
+      throw err;
+    }
+  }
+
+  private async registerMedia(dto: CreateMediaDto, userId: string, userPermissions: string[]) {
     // Verify the StorageObject exists and belongs to the caller
     const storageObject = await this.prisma.storageObject.findUnique({
       where: { id: dto.storageObjectId },
@@ -186,6 +203,7 @@ export class MediaService {
             `cleaning up redundant StorageObject ${dto.storageObjectId}`,
         );
         await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'deduplicated' });
         return { ...duplicate, deduplicated: true as const, mediaItemId: duplicate.id };
       }
     }
@@ -241,6 +259,7 @@ export class MediaService {
         }
 
         await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'deduplicated' });
         return { ...winner, deduplicated: true as const, mediaItemId: winner.id };
       }
 
@@ -248,6 +267,11 @@ export class MediaService {
     }
 
     this.logger.log(`MediaItem created: ${mediaItem.id} by user ${userId}`);
+    this.metrics?.add('mediaUploads', 1, { media_type: mediaItem.type, source: mediaItem.source, outcome: 'created' });
+    this.metrics?.add('mediaUploadSize', metricNumber(storageObject.size), {
+      media_type: mediaItem.type,
+      source: mediaItem.source,
+    });
 
     // Best-effort: if processing already finished before this createMedia call
     // (i.e. OBJECT_PROCESSED_EVENT fired and no-op'd because no MediaItem
