@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
 import {
   renderThumbnailBuffer,
+  THUMBNAIL_CACHE_CONTROL,
 } from '../thumbnail-render.util';
 import {
   buildThumbnailKey,
@@ -224,10 +225,9 @@ export class ThumbnailProcessor implements ObjectProcessor {
     await activeProvider.upload(thumbKey, thumbStream, {
       mimeType: 'image/jpeg',
       contentLength: thumbBuffer.length,
-      // `Cache-Control: THUMBNAIL_CACHE_CONTROL` is not set: the platform's
-      // `StorageUploadOptions` carries no cache header (seam gap, see
-      // docs/platform-adoption/local-exceptions.md). The content-addressed key
-      // still makes every thumbnail URL safe to cache for good.
+      // Content-addressed key, so the bytes behind it never change (#434). The platform's
+      // `StorageUploadOptions.cacheControl` (0.1.0-next.28) is sent as S3 `CacheControl`.
+      cacheControl: THUMBNAIL_CACHE_CONTROL,
     });
 
     // Upsert a StorageObject row directly via Prisma (NOT emitting

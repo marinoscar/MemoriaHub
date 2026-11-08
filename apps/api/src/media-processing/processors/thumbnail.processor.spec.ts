@@ -174,6 +174,21 @@ describe('ThumbnailProcessor', () => {
       expect(mockStaticProvider.upload).not.toHaveBeenCalled();
     });
 
+    it('passes cacheControl: "public, max-age=31536000, immutable" to the active provider (#434)', async () => {
+      const object = makeStorageObject({ mimeType: 'image/jpeg' });
+      const getStream = async () => Readable.from([Buffer.from('fake')]);
+
+      await processor.process(object as any, getStream);
+
+      expect(mockActiveProvider.upload).toHaveBeenCalledWith(
+        expectedThumbKey(object.id),
+        expect.any(Readable),
+        expect.objectContaining({
+          cacheControl: 'public, max-age=31536000, immutable',
+        }),
+      );
+    });
+
     it('stamps the new thumbnail row with the SOURCE object\'s organization (RETRO-D1)', async () => {
       const object = makeStorageObject({ mimeType: 'image/jpeg', orgId: '11111111-1111-4111-8111-111111111111' });
       const getStream = async () => Readable.from([Buffer.from('fake')]);

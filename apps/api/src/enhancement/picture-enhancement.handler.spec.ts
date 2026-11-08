@@ -878,7 +878,8 @@ describe('PictureEnhancementHandler', () => {
         expect.any(Readable),
         expect.objectContaining({
           mimeType: 'image/jpeg',
-          // No Cache-Control since RETRO-D1: the platform's upload options carry none.
+          // Same immutable caching contract as every other thumbnail (platform `cacheControl`, next.28).
+          cacheControl: 'public, max-age=31536000, immutable',
         }),
       );
 

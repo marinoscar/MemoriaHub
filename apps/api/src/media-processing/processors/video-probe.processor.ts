@@ -47,14 +47,11 @@ export class VideoProbeProcessor implements ObjectProcessor {
 
   readonly name = 'video-probe';
   readonly priority = 20;
-  // Duration/codec metadata is enrichment, not load-bearing — a probe failure
-  // must not fail an object whose thumbnail succeeded. The platform's processor
-  // contract has no "optional" processor (a `success: false` marks the row
-  // `failed`), so a probe failure is answered as a success WITHOUT metadata:
-  // `_processing['video-probe']` stays absent, exactly what every reader saw
-  // before (they never read the old `video-probe_error` key), and the error is
-  // logged. PLATFORM-ADOPTION-SHIM(RETRO-SEAM-STORAGE-2): an `optional` flag on
-  // `ObjectProcessor` would record `_processing['video-probe_error']` again.
+  // Duration/codec metadata is enrichment, not load-bearing: a probe failure
+  // must not fail an object whose thumbnail succeeded. `optional` (platform
+  // 0.1.0-next.28): a failure is recorded as `_processing['video-probe_error']`
+  // and the object still becomes `ready` when every required processor passed.
+  readonly optional = true;
 
   canProcess(object: StorageObject): boolean {
     return object.mimeType.startsWith('video/');
@@ -134,7 +131,7 @@ export class VideoProbeProcessor implements ObjectProcessor {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(`video-probe failed for object ${object.id} (optional, object not failed): ${message}`);
-      return { success: true };
+      return { success: false, error: message };
     } finally {
       await fs.unlink(tmpPath).catch(() => {
         // Ignore errors when cleaning up the temp file

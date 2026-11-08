@@ -136,6 +136,10 @@ describe('VideoProbeProcessor', () => {
     it('should have priority 20', () => {
       expect(processor.priority).toBe(20);
     });
+
+    it('is optional: its failure never fails an object whose required processors passed (platform next.28)', () => {
+      expect(processor.optional).toBe(true);
+    });
   });
 
   describe('canProcess', () => {
@@ -219,12 +223,12 @@ describe('VideoProbeProcessor', () => {
   });
 
   describe('process — ffprobe error', () => {
-    it('answers success WITHOUT metadata when ffprobe reports an error (optional: the object is not failed)', async () => {
+    it('reports the failure, which the platform records as video-probe_error (optional: the object is not failed)', async () => {
       setupFfprobeError(new Error('ffprobe: no such file'));
 
       const result = await processor.process(makeObject(), makeGetStream());
-      // The platform marks a row failed on `success: false`; video-probe is optional (RETRO-D1).
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('ffprobe: no such file');
       expect(result.metadata).toBeUndefined();
     });
   });

@@ -17,6 +17,7 @@ import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import {
   renderThumbnailBuffer,
+  THUMBNAIL_CACHE_CONTROL,
 } from '../media-processing/thumbnail-render.util';
 import { StorageProvider } from '@marinoscar/platform-api/storage';
 import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder';
@@ -352,7 +353,7 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       await provider.upload(key, Readable.from(thumb), {
         mimeType: 'image/jpeg',
         contentLength: thumb.length,
-        // No `Cache-Control`: the platform's upload options carry none (RETRO-D1 seam gap).
+        cacheControl: THUMBNAIL_CACHE_CONTROL,
       });
       return key;
     } catch (err) {
