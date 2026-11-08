@@ -77,8 +77,8 @@ import {
   STORAGE_PROVIDER,
   StorageProvider,
 } from '../../storage/providers/storage-provider.interface';
-import { UserSettingsService } from '../../settings/user-settings/user-settings.service';
-import { PatchUserSettingsDto } from '../../settings/dto/update-user-settings.dto';
+import { UserSettingsService } from '@marinoscar/platform-api/settings';
+import type { PatchUserSettingsDto } from '@marinoscar/platform-api/settings';
 import {
   verifyDigestImageToken,
   verifyDigestUnsubscribeToken,

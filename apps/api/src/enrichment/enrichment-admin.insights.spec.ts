@@ -16,8 +16,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentAdminService, INSIGHTS_WINDOW_DAYS } from './enrichment-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -135,10 +135,10 @@ describe('EnrichmentAdminService.getInsights', () => {
     mockPrisma = createMockPrismaService();
 
     // getInsights() calls getStats() internally, which now resolves the
-    // stuck-running threshold via SystemSettingsService.getSettings()
+    // stuck-running threshold via AppSystemSettingsService.readKnownValue()
     // (jobs.stuckThresholdMinutes). Provide a minimal mock so DI resolves.
     const mockSettingsService = {
-      getSettings: jest.fn().mockResolvedValue({
+      readKnownValue: jest.fn().mockResolvedValue({
         jobs: { stuckThresholdMinutes: 3 },
       }),
     };
@@ -147,7 +147,7 @@ describe('EnrichmentAdminService.getInsights', () => {
       providers: [
         EnrichmentAdminService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: SystemSettingsService, useValue: mockSettingsService },
+        { provide: AppSystemSettingsService, useValue: mockSettingsService },
       ],
     }).compile();
 

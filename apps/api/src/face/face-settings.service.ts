@@ -15,13 +15,13 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
 import { FaceProviderCredentials } from './providers/face-provider.interface';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
 import {
   UpsertFaceCredentialsDto,
   TestFaceProviderDto,
   SetDetectionFeatureDto,
 } from './dto/face-credentials.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class FaceSettingsService {
@@ -30,7 +30,7 @@ export class FaceSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: FaceProviderRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   // ---------------------------------------------------------------------------

@@ -6,8 +6,8 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkActiveStorageProvider` (key
 // `storage.activeProvider`). READ-ONLY: a settings read and one `findFirst`.
@@ -46,7 +46,7 @@ export class ActiveStorageProviderDoctorCheck implements DoctorCheck, OnModuleIn
   constructor(
     private readonly registry: DoctorCheckRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -54,7 +54,7 @@ export class ActiveStorageProviderDoctorCheck implements DoctorCheck, OnModuleIn
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const provider = resolveActiveStorageProvider(settings.storage?.activeProvider, process.env['STORAGE_PROVIDER']);
     if (provider === 'local') return decideActiveStorageProvider(provider, false);
 

@@ -14,13 +14,13 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { GeoLocationService } from './geo-location.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
 import { GoogleGeoLocationProvider } from './google-geo-location.provider';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { encryptSecret } from '../../common/crypto/secret-cipher';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -87,7 +87,7 @@ describe('GeoLocationService', () => {
       providers: [
         GeoLocationService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: OfflineGeoLocationProvider, useValue: mockOffline },
         { provide: NominatimGeoLocationProvider, useValue: mockNominatim },
         { provide: GoogleGeoLocationProvider, useValue: mockGoogle },

@@ -31,7 +31,7 @@ import { SeasonalCurator } from '../../src/memories/curators/seasonal.curator';
 import { YearInReviewCurator } from '../../src/memories/curators/year-in-review.curator';
 import { MemoryCuratorContext } from '../../src/memories/curators/memory-curator.interface';
 import { resolveMemoriesSettings } from '../../src/memories/memories-settings.util';
-import { MemoriesSettingsValue } from '../../src/common/types/settings.types';
+import { MemoriesSettingsValue } from '../../src/settings/registry/namespaces/system/memories';
 import { defaultOrgId } from '../helpers/default-org';
 
 function resolveDatabaseUrl(): string {

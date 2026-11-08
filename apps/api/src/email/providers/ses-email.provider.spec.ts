@@ -27,10 +27,10 @@ jest.mock('@aws-sdk/client-sesv2', () => ({
 
 import { SesEmailProvider } from './ses-email.provider';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { encryptSecret } from '../../common/crypto/secret-cipher';
 import { EmailMessage } from '../types/email.types';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -70,7 +70,7 @@ describe('SesEmailProvider', () => {
 
     provider = new SesEmailProvider(
       mockPrisma as unknown as PrismaService,
-      mockSystemSettings as unknown as SystemSettingsService,
+      mockSystemSettings as unknown as AppSystemSettingsService,
     );
   });
 

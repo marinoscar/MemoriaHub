@@ -20,8 +20,8 @@ import { MemoryDigestService } from './memory-digest.service';
 import { EmailService } from '../../email/email.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { verifyDigestImageToken, verifyDigestUnsubscribeToken } from './digest-token.util';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const VALID_KEY = Buffer.alloc(32, 3).toString('base64');
 
@@ -92,7 +92,7 @@ describe('MemoryDigestService', () => {
       providers: [
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
         { provide: EmailService, useValue: email },
         {
           provide: MediaThumbnailService,

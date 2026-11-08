@@ -25,9 +25,9 @@ import { CircleRole, NotificationType } from '@prisma/client';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { MediaService } from '../media/media.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { NotificationsService } from './notifications.service';
 import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,7 +117,7 @@ describe('ReviewQueueReconcileService', () => {
         ReviewQueueReconcileService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: mockNotifications },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: MediaService, useValue: mockMediaService },
       ],
     }).compile();

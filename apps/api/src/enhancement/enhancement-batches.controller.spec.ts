@@ -54,10 +54,10 @@ import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.serv
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const USER: RequestUser = {
   id: 'user-1',
@@ -144,7 +144,7 @@ describe('EnhancementBatchesController', () => {
         { provide: MediaEnrichmentService, useValue: {} },
         { provide: MediaThumbnailService, useValue: {} },
         { provide: EnrichmentJobService, useValue: {} },
-        { provide: SystemSettingsService, useValue: {} },
+        { provide: AppSystemSettingsService, useValue: {} },
       ],
     }).compile();
 

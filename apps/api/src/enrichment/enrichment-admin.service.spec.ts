@@ -17,15 +17,15 @@ import { EnrichmentAdminService } from './enrichment-admin.service';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
+import { defaultStuckThresholdMinutes } from '../settings/registry/namespaces/system/jobs';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Stuck-threshold test constant
 //
 // The service no longer hardcodes a stuck-running window — getStats() and
-// resetStuck() both resolve it from SystemSettingsService.getSettings()
+// resetStuck() both resolve it from AppSystemSettingsService.readKnownValue()
 // (jobs.stuckThresholdMinutes), falling back to defaultStuckThresholdMinutes()
 // (3 by default, or ENRICHMENT_STUCK_MINUTES when set) when the setting is
 // missing or invalid. Tests below configure the settings mock explicitly per
@@ -72,7 +72,7 @@ function makeJobRow(overrides: Record<string, unknown> = {}) {
 describe('EnrichmentAdminService', () => {
   let service: EnrichmentAdminService;
   let mockPrisma: MockPrismaService;
-  let mockSettingsService: { getSettings: jest.Mock };
+  let mockSettingsService: { readKnownValue: jest.Mock };
 
   // Save/restore ENRICHMENT_STUCK_MINUTES around every test so
   // defaultStuckThresholdMinutes() fallback assertions are deterministic
@@ -84,7 +84,7 @@ describe('EnrichmentAdminService', () => {
 
     mockPrisma = createMockPrismaService();
     mockSettingsService = {
-      getSettings: jest.fn().mockResolvedValue({
+      readKnownValue: jest.fn().mockResolvedValue({
         jobs: { stuckThresholdMinutes: SETTINGS_STUCK_THRESHOLD_MINUTES },
       }),
     };
@@ -93,7 +93,7 @@ describe('EnrichmentAdminService', () => {
       providers: [
         EnrichmentAdminService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: SystemSettingsService, useValue: mockSettingsService },
+        { provide: AppSystemSettingsService, useValue: mockSettingsService },
       ],
     }).compile();
 
@@ -240,7 +240,7 @@ describe('EnrichmentAdminService', () => {
 
     it('resolves the stuck threshold from system settings and applies it to the stuckRunning count', async () => {
       const configuredMinutes = 12;
-      mockSettingsService.getSettings.mockResolvedValue({
+      mockSettingsService.readKnownValue.mockResolvedValue({
         jobs: { stuckThresholdMinutes: configuredMinutes },
       });
 
@@ -263,7 +263,7 @@ describe('EnrichmentAdminService', () => {
 
       const where = stuckCountCall![0].where;
       expect(where.status).toBe(MhLegacyJobStatus.running);
-      expect(mockSettingsService.getSettings).toHaveBeenCalled();
+      expect(mockSettingsService.readKnownValue).toHaveBeenCalled();
 
       const threshold: Date = where.OR[0].startedAt.lt;
       expect(threshold).toBeInstanceOf(Date);
@@ -297,7 +297,7 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('returns stuckThresholdMinutes matching the settings-resolved value', async () => {
-      mockSettingsService.getSettings.mockResolvedValue({
+      mockSettingsService.readKnownValue.mockResolvedValue({
         jobs: { stuckThresholdMinutes: 27 },
       });
       (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
@@ -319,7 +319,7 @@ describe('EnrichmentAdminService', () => {
         ['NaN', NaN],
         ['negative', -5],
       ])('falls back to the default when jobs.stuckThresholdMinutes is %s', async (_label, badValue) => {
-        mockSettingsService.getSettings.mockResolvedValue({
+        mockSettingsService.readKnownValue.mockResolvedValue({
           jobs: { stuckThresholdMinutes: badValue },
         });
         (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
@@ -332,7 +332,7 @@ describe('EnrichmentAdminService', () => {
       });
 
       it('falls back to the default when jobs is undefined in settings', async () => {
-        mockSettingsService.getSettings.mockResolvedValue({});
+        mockSettingsService.readKnownValue.mockResolvedValue({});
         (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
         (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
@@ -342,7 +342,7 @@ describe('EnrichmentAdminService', () => {
       });
 
       it('falls back to the default when stuckThresholdMinutes is undefined within jobs', async () => {
-        mockSettingsService.getSettings.mockResolvedValue({ jobs: {} });
+        mockSettingsService.readKnownValue.mockResolvedValue({ jobs: {} });
         (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
         (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 
@@ -353,7 +353,7 @@ describe('EnrichmentAdminService', () => {
 
       it('honors ENRICHMENT_STUCK_MINUTES as the fallback default when the setting is invalid', async () => {
         process.env['ENRICHMENT_STUCK_MINUTES'] = '45';
-        mockSettingsService.getSettings.mockResolvedValue({
+        mockSettingsService.readKnownValue.mockResolvedValue({
           jobs: { stuckThresholdMinutes: 0 },
         });
         (mockPrisma.enrichmentJob.groupBy as jest.Mock).mockResolvedValue([]);
@@ -619,11 +619,11 @@ describe('EnrichmentAdminService', () => {
       const result = await service.resetStuck();
 
       expect(result).toEqual({ reset: 4, failed: 0 });
-      expect(mockSettingsService.getSettings).toHaveBeenCalled();
+      expect(mockSettingsService.readKnownValue).toHaveBeenCalled();
     });
 
     it('with no argument: resolves the threshold from system settings and applies the NULL-guard OR where clause', async () => {
-      mockSettingsService.getSettings.mockResolvedValue({
+      mockSettingsService.readKnownValue.mockResolvedValue({
         jobs: { stuckThresholdMinutes: SETTINGS_STUCK_THRESHOLD_MINUTES },
       });
       const beforeCall = Date.now();
@@ -675,11 +675,11 @@ describe('EnrichmentAdminService', () => {
       expect(threshold.getTime()).toBeLessThanOrEqual(expectedUpper);
 
       // Explicit override short-circuits the settings lookup entirely.
-      expect(mockSettingsService.getSettings).not.toHaveBeenCalled();
+      expect(mockSettingsService.readKnownValue).not.toHaveBeenCalled();
     });
 
     it('falls back to defaultStuckThresholdMinutes() when the settings value is invalid (0)', async () => {
-      mockSettingsService.getSettings.mockResolvedValue({
+      mockSettingsService.readKnownValue.mockResolvedValue({
         jobs: { stuckThresholdMinutes: 0 },
       });
       const beforeCall = Date.now();
@@ -700,7 +700,7 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('falls back to defaultStuckThresholdMinutes() when the settings value is NaN', async () => {
-      mockSettingsService.getSettings.mockResolvedValue({
+      mockSettingsService.readKnownValue.mockResolvedValue({
         jobs: { stuckThresholdMinutes: NaN },
       });
       const beforeCall = Date.now();
@@ -719,7 +719,7 @@ describe('EnrichmentAdminService', () => {
     });
 
     it('falls back to defaultStuckThresholdMinutes() when jobs.stuckThresholdMinutes is missing from settings', async () => {
-      mockSettingsService.getSettings.mockResolvedValue({ jobs: {} });
+      mockSettingsService.readKnownValue.mockResolvedValue({ jobs: {} });
       const beforeCall = Date.now();
       (mockPrisma.enrichmentJob.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
 
@@ -935,7 +935,7 @@ describe('EnrichmentAdminService', () => {
       });
       const guarded = new EnrichmentAdminService(
         mockPrisma as unknown as PrismaService,
-        mockSettingsService as unknown as SystemSettingsService,
+        mockSettingsService as unknown as AppSystemSettingsService,
         registry,
       );
       (mockPrisma.enrichmentJob.findUnique as jest.Mock).mockResolvedValue(
@@ -951,7 +951,7 @@ describe('EnrichmentAdminService', () => {
       registry.register({ type: 'guarded_type', process: jest.fn(), canDelete: jest.fn().mockResolvedValue(null) });
       const guarded = new EnrichmentAdminService(
         mockPrisma as unknown as PrismaService,
-        mockSettingsService as unknown as SystemSettingsService,
+        mockSettingsService as unknown as AppSystemSettingsService,
         registry,
       );
       const job = makeJobRow({ status: MhLegacyJobStatus.pending, type: 'guarded_type' });
@@ -1509,7 +1509,7 @@ describe('EnrichmentAdminService', () => {
     it('does not share the cache across separate service instances (per-instance field, not a static/module-level singleton)', async () => {
       const mockPrismaB = createMockPrismaService();
       const mockSettingsServiceB = {
-        getSettings: jest.fn().mockResolvedValue({
+        readKnownValue: jest.fn().mockResolvedValue({
           jobs: { stuckThresholdMinutes: SETTINGS_STUCK_THRESHOLD_MINUTES },
         }),
       };
@@ -1518,7 +1518,7 @@ describe('EnrichmentAdminService', () => {
         providers: [
           EnrichmentAdminService,
           { provide: PrismaService, useValue: mockPrismaB },
-          { provide: SystemSettingsService, useValue: mockSettingsServiceB },
+          { provide: AppSystemSettingsService, useValue: mockSettingsServiceB },
         ],
       }).compile();
       const serviceB = moduleB.get<EnrichmentAdminService>(EnrichmentAdminService);

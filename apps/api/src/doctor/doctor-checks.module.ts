@@ -27,7 +27,6 @@ import { DedupModule } from '../dedup/dedup.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { FaceModule } from '../face/face.module';
 import { GeoModule } from '../geo/geo.module';
-import { SettingsModule } from '../settings/settings.module';
 import { SocialMediaModule } from '../social-media/social-media.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 
@@ -112,7 +111,7 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
 
 @Module({
   imports: [
-    SettingsModule,
+    
     AiModule,
     FaceModule,
     GeoModule,

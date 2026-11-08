@@ -32,12 +32,12 @@ import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import {
   MEMORY_DIGEST_JOB_TYPE,
   MEMORY_DIGEST_PRIORITY,
   MemoryDigestService,
 } from './memory-digest.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** Circles fetched per keyset page — the sweep never loads them all at once. */
 const CIRCLE_PAGE_SIZE = 100;
@@ -67,7 +67,7 @@ export class MemoryDigestTask {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly digest: MemoryDigestService,
   ) {}
 

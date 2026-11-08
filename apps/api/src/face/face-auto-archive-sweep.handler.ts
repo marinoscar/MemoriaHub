@@ -3,9 +3,9 @@ import { EnrichmentJob } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { FaceMatchingService } from './face-matching.service';
 import { MediaTouchService } from '../media/media-touch.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * FaceAutoArchiveSweepHandler
@@ -34,7 +34,7 @@ export class FaceAutoArchiveSweepHandler implements EnrichmentHandler, OnModuleI
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly matchingService: FaceMatchingService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaTouch: MediaTouchService,
   ) {}
 

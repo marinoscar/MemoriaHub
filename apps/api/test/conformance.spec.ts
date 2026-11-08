@@ -19,6 +19,10 @@
 // key to `User` has a registry entry whose purge policy matches the relation's
 // `onDelete`, and only allowlisted files issue raw SQL.
 //
+// `settings` (`@marinoscar/platform-api/settings/testing`, RETRO-B3): no registered
+// system or user namespace declares a secret-named field, every default satisfies
+// its stored schema, every org layer is gated by registered org permissions.
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -32,6 +36,7 @@ import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marin
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
+import '@marinoscar/platform-api/settings/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
@@ -64,6 +69,14 @@ runPlatformConformance({
       policies: userOwnedModelRegistry.list(),
       rawSqlAllowlist: RAW_SQL_ALLOWLIST,
       registerIn: 'apps/api/src/app-registrations/user-owned-models.ts',
+    },
+
+    // The settings slice (RETRO-B3, #614). The registries are filled by importing
+    // `src/settings/registry` (AppModule does). `minSystemNamespaces` is a vacuity
+    // guard: 21 app namespaces plus the platform's `maintenance`.
+    settings: {
+      permissions: permissionRegistry.list().map((permission) => ({ id: permission.id, scope: permission.scope })),
+      minSystemNamespaces: 22,
     },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no

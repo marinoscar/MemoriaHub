@@ -32,7 +32,6 @@ import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } fro
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { downloadToTempFile } from '../storage/processing/processors/stream-utils';
@@ -44,6 +43,7 @@ import {
   SocialPlatform,
 } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** The canonical "umbrella" tag applied to every detected social-media item. */
 const SOCIAL_TAG = 'Social Media';
@@ -86,7 +86,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly detector: SocialMediaDetectorService,
     private readonly ocr: SocialMediaOcrService,
     private readonly resolver: StorageProviderResolver,

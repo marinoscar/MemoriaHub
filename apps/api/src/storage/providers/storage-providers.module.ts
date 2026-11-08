@@ -4,7 +4,7 @@ import { STORAGE_PROVIDER } from './storage-provider.interface';
 import { S3StorageProvider } from './s3/s3-storage.provider';
 import { LocalDiskStorageProvider } from './local/local-disk.provider';
 import { StorageProviderResolver } from './storage-provider.resolver';
-import { SettingsModule } from '../../settings/settings.module';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /**
  * Storage Providers Module
@@ -26,9 +26,9 @@ import { SettingsModule } from '../../settings/settings.module';
  */
 @Module({
   imports: [
-    // SettingsModule exports SystemSettingsService which StorageProviderResolver
+    // SettingsModule exports AppSystemSettingsService which StorageProviderResolver
     // needs to read the active provider from system settings.
-    SettingsModule,
+    
   ],
   providers: [
     S3StorageProvider,

@@ -2,7 +2,7 @@
 // Memories — settings resolution (epic #300, issue #303)
 // =============================================================================
 //
-// `SystemSettingsService.getSettings()` returns `memories` as OPTIONAL, and it
+// `AppSystemSettingsService.getSettings()` returns `memories` as OPTIONAL, and it
 // genuinely can be absent: the row is JSONB written before this namespace
 // existed, and nothing back-fills it (that is exactly what makes the namespace
 // migration-free). Curators must not each carry `?? 10` fallbacks for values the
@@ -15,10 +15,9 @@
 // MemoriesSettingsValue and can read `settings.onThisDay.minItems` directly.
 // =============================================================================
 
-import {
-  DEFAULT_SYSTEM_SETTINGS,
-  MemoriesSettingsValue,
-} from '../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../settings/registry/default-system-settings';
+import { MemoriesSettingsValue } from '../settings/registry/namespaces/system/memories';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const DEFAULTS = DEFAULT_SYSTEM_SETTINGS.memories as MemoriesSettingsValue;
 

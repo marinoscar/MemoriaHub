@@ -1,25 +1,41 @@
-// The swap point of the settings contract spec: builds the implementation under
-// test. BEFORE RETRO-B3 this wired the hand-written `SystemSettingsService` and
-// `UserSettingsService` and validated bodies with their wire DTOs.
+// The swap point of the settings contract spec: builds the implementation under test.
+//
+// BEFORE RETRO-B3 this wired the hand-written `SystemSettingsService` and `UserSettingsService` and
+// validated bodies with the canonical schemas. NOW it wires the app's subclasses of the platform
+// settings services (the ones `platform/settings/settings.config.ts` binds to the platform tokens)
+// and validates bodies with the schemas the platform composes from the registry, which are the
+// schemas the real controllers validate against.
 
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import { PLATFORM_PRISMA } from '@marinoscar/platform-api/core';
+import { PrincipalCache } from '@marinoscar/platform-api/identity';
+import {
+  SETTINGS_OPTIONS,
+  SETTINGS_PROFILE_IMAGES,
+  composePatchSystemSettingsSchema,
+  composePatchUserSettingsSchema,
+} from '@marinoscar/platform-api/settings';
 
-import { PrismaService } from '../../src/prisma/prisma.service';
+import '../../src/settings/registry';
+import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
+import { AppUserSettingsService } from '../../src/platform/settings/app-user-settings.service';
+import { SettingsProfileImagesAdapter } from '../../src/platform/settings/settings-profile-images.adapter';
 import { NotificationsService } from '../../src/notifications/notifications.service';
 import { NotificationPolicyService } from '../../src/notifications/notification-policy.service';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
-import { UserSettingsService } from '../../src/settings/user-settings/user-settings.service';
-import { UserTimeZoneService } from '../../src/settings/user-settings/user-timezone.service';
-// The CANONICAL partial, not the wire DTO: the wire DTO strips `email`, `workflows`, `backup` and
-// others (the very pitfall RETRO-B3 retires), so it is not a contract worth pinning.
-import { systemSettingsPatchSchema as patchSystemSettingsSchema } from '../../src/common/schemas/settings.schema';
-import { patchUserSettingsSchema } from '../../src/settings/dto/update-user-settings.dto';
+import { UserTimeZoneService } from '../../src/settings/user-timezone.service';
 import { createFakeSettingsDb, type FakeSettingsDb } from './settings-contract.fake-prisma';
 
 export interface SettingsHarness {
   db: FakeSettingsDb;
-  notifications: { dismissTypesForUser: jest.Mock; dismissTypesGlobally: jest.Mock; invalidatePreferences: jest.Mock };
+  notifications: {
+    dismissTypesForUser: jest.Mock;
+    dismissTypesGlobally: jest.Mock;
+    invalidatePreferences: jest.Mock;
+    invalidateAllUnreadCounts: jest.Mock;
+  };
   timeZone: { invalidate: jest.Mock };
+  policy: { invalidate: jest.Mock };
   system: {
     /** Seed the `global` row with `value` (default: the stored defaults). */
     seed(value: Record<string, unknown>): void;
@@ -31,6 +47,8 @@ export interface SettingsHarness {
     patch(body: unknown, expectedVersion?: number): Promise<Record<string, any>>;
     /** Wire validation of a PATCH body alone; returns the zod result. */
     validatePatch(body: unknown): { success: boolean };
+    /** Drops the settings cache (as a write by another process would be seen after the TTL). */
+    invalidateCache(): void;
   };
   user: {
     seed(userId: string, value: Record<string, unknown>): void;
@@ -39,14 +57,6 @@ export interface SettingsHarness {
     patch(userId: string, body: unknown, expectedVersion?: number): Promise<Record<string, any>>;
     validatePatch(body: unknown): { success: boolean };
   };
-}
-
-function redactEmailSecret<T extends { email?: any }>(settings: T): T {
-  if (settings && settings.email) {
-    const { smtpPassword: _omitted, ...rest } = settings.email as Record<string, unknown>;
-    return { ...settings, email: rest } as T;
-  }
-  return settings;
 }
 
 export async function buildSettingsHarness(): Promise<SettingsHarness> {
@@ -58,36 +68,43 @@ export async function buildSettingsHarness(): Promise<SettingsHarness> {
     invalidateAllUnreadCounts: jest.fn(),
   };
   const timeZone = { invalidate: jest.fn() };
+  const policy = { invalidate: jest.fn() };
 
   const module = await Test.createTestingModule({
     providers: [
-      SystemSettingsService,
-      UserSettingsService,
-      { provide: PrismaService, useValue: db.prisma },
+      AppSystemSettingsService,
+      AppUserSettingsService,
+      { provide: PLATFORM_PRISMA, useValue: db.prisma },
+      { provide: ConfigService, useValue: { get: (_key: string, fallback: unknown) => fallback } },
+      { provide: SETTINGS_OPTIONS, useValue: { systemRowKey: 'global', orgLayer: 'auto', imports: [] } },
+      { provide: PrincipalCache, useValue: { invalidate: jest.fn() } },
+      { provide: SETTINGS_PROFILE_IMAGES, useClass: SettingsProfileImagesAdapter },
       { provide: NotificationsService, useValue: notifications },
-      { provide: NotificationPolicyService, useValue: { invalidate: jest.fn() } },
+      { provide: NotificationPolicyService, useValue: policy },
       { provide: UserTimeZoneService, useValue: timeZone },
     ],
   }).compile();
 
-  const system = module.get(SystemSettingsService);
-  const user = module.get(UserSettingsService);
+  const system = module.get(AppSystemSettingsService);
+  const user = module.get(AppUserSettingsService);
+  const patchSystem = composePatchSystemSettingsSchema();
+  const patchUser = composePatchUserSettingsSchema();
 
   return {
     db,
     notifications,
     timeZone,
+    policy,
     system: {
       seed: (value) => {
         db.system.set('global', { id: 'sys-0', key: 'global', value, version: 1, updatedAt: new Date(), updatedByUserId: null });
       },
       raw: () => JSON.parse(JSON.stringify(db.system.get('global')!.value)),
-      get: async () => redactEmailSecret(await system.getSettings()),
-      patch: async (body, expectedVersion) => {
-        const parsed = patchSystemSettingsSchema.parse(body);
-        return redactEmailSecret(await system.patchSettings(parsed as any, 'admin-1', expectedVersion));
-      },
-      validatePatch: (body) => patchSystemSettingsSchema.safeParse(body),
+      get: async () => (await system.getSettings()) as Record<string, any>,
+      patch: async (body, expectedVersion) =>
+        (await system.patchSettings(patchSystem.parse(body) as any, 'admin-1', expectedVersion)) as Record<string, any>,
+      validatePatch: (body) => patchSystem.safeParse(body),
+      invalidateCache: () => system.invalidateSettingsCache(),
     },
     user: {
       seed: (userId, value) => {
@@ -96,8 +113,8 @@ export async function buildSettingsHarness(): Promise<SettingsHarness> {
       raw: (userId) => JSON.parse(JSON.stringify(db.user.get(userId)!.value)),
       get: (userId) => user.getSettings(userId) as Promise<Record<string, any>>,
       patch: (userId, body, expectedVersion) =>
-        user.patchSettings(userId, patchUserSettingsSchema.parse(body) as any, expectedVersion) as Promise<Record<string, any>>,
-      validatePatch: (body) => patchUserSettingsSchema.safeParse(body),
+        user.patchSettings(userId, patchUser.parse(body) as any, expectedVersion) as Promise<Record<string, any>>,
+      validatePatch: (body) => patchUser.safeParse(body),
     },
   };
 }

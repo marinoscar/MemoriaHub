@@ -85,7 +85,6 @@ import { pipeline } from 'node:stream/promises';
 
 import { MaintenanceModeService } from '@marinoscar/platform-api/host';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
 import {
@@ -120,6 +119,7 @@ import {
   readPgClientMajor,
   readServerMajor,
 } from './pg-version.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -284,7 +284,7 @@ export class DatabaseRestoreService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
     private readonly maintenance: MaintenanceModeService,
     private readonly backupRunner: DatabaseBackupRunnerService,

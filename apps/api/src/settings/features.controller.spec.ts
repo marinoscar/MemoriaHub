@@ -4,7 +4,7 @@
  * This endpoint is the least-privilege carrier for client-visible feature
  * flags — readable by ANY authenticated user, unlike GET /api/system-settings
  * (Admin-only, `system_settings:read`). The controller is a thin delegate to
- * SystemSettingsService.getPublicFeatures(), so these tests assert:
+ * buildPublicFeatures(AppSystemSettingsService.getSettings()), so these tests assert:
  *   - the response shape matches the documented contract exactly
  *   - nothing outside {features, pictureEnhancement} leaks through, in
  *     particular nothing from the `email` settings namespace (which carries
@@ -15,15 +15,10 @@
  */
 
 import { FeaturesController } from './features.controller';
-import { SystemSettingsService } from './system-settings/system-settings.service';
-import { PrismaService } from '../prisma/prisma.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
- * End-to-end (through the REAL SystemSettingsService, mocked Prisma only)
+ * End-to-end (through the REAL AppSystemSettingsService, mocked Prisma only)
  * coverage of the env-kill-switch interaction. The mocked-getPublicFeatures
  * tests above assert the controller passes the resolved value through
  * untouched; these assert the actual `isPictureEnhancementEnabled()` toggle
@@ -56,15 +51,13 @@ function makeSettingsRow(overrides: {
   };
 }
 
-describe('FeaturesController (real SystemSettingsService, env kill-switch)', () => {
+describe('FeaturesController (env kill-switch)', () => {
   let controller: FeaturesController;
-  let mockPrisma: MockPrismaService;
-  let realService: SystemSettingsService;
+  let getSettings: jest.Mock;
 
   beforeEach(() => {
-    mockPrisma = createMockPrismaService();
-    realService = new SystemSettingsService(mockPrisma as unknown as PrismaService);
-    controller = new FeaturesController(realService);
+    getSettings = jest.fn();
+    controller = new FeaturesController({ getSettings } as unknown as AppSystemSettingsService);
   });
 
   afterEach(() => {
@@ -73,9 +66,7 @@ describe('FeaturesController (real SystemSettingsService, env kill-switch)', () 
 
   it('toggled ON via system setting, env unset -> enabled true', async () => {
     delete process.env['PICTURE_ENHANCEMENT_ENABLED'];
-    mockPrisma.systemSettings.findUnique.mockResolvedValue(
-      makeSettingsRow({ pictureEnhancementFeatureFlag: true, model: 'gpt-image-1' }) as any,
-    );
+    getSettings.mockResolvedValue(makeSettingsRow({ pictureEnhancementFeatureFlag: true, model: 'gpt-image-1' }).value);
 
     const result = await controller.getFeatures();
 
@@ -85,9 +76,7 @@ describe('FeaturesController (real SystemSettingsService, env kill-switch)', () 
 
   it('toggled OFF via system setting, env unset -> enabled false', async () => {
     delete process.env['PICTURE_ENHANCEMENT_ENABLED'];
-    mockPrisma.systemSettings.findUnique.mockResolvedValue(
-      makeSettingsRow({ pictureEnhancementFeatureFlag: false }) as any,
-    );
+    getSettings.mockResolvedValue(makeSettingsRow({ pictureEnhancementFeatureFlag: false }).value);
 
     const result = await controller.getFeatures();
 
@@ -96,9 +85,7 @@ describe('FeaturesController (real SystemSettingsService, env kill-switch)', () 
 
   it('toggled ON via system setting, but PICTURE_ENHANCEMENT_ENABLED=false env override -> enabled false', async () => {
     process.env['PICTURE_ENHANCEMENT_ENABLED'] = 'false';
-    mockPrisma.systemSettings.findUnique.mockResolvedValue(
-      makeSettingsRow({ pictureEnhancementFeatureFlag: true, model: 'gpt-image-1' }) as any,
-    );
+    getSettings.mockResolvedValue(makeSettingsRow({ pictureEnhancementFeatureFlag: true, model: 'gpt-image-1' }).value);
 
     const result = await controller.getFeatures();
 
@@ -107,9 +94,7 @@ describe('FeaturesController (real SystemSettingsService, env kill-switch)', () 
 
   it('toggled OFF via system setting AND env override present -> still false (both independently off)', async () => {
     process.env['PICTURE_ENHANCEMENT_ENABLED'] = 'false';
-    mockPrisma.systemSettings.findUnique.mockResolvedValue(
-      makeSettingsRow({ pictureEnhancementFeatureFlag: false }) as any,
-    );
+    getSettings.mockResolvedValue(makeSettingsRow({ pictureEnhancementFeatureFlag: false }).value);
 
     const result = await controller.getFeatures();
 
@@ -118,9 +103,7 @@ describe('FeaturesController (real SystemSettingsService, env kill-switch)', () 
 
   it('model is null when ai.features.enhance is unset, even with the feature ON', async () => {
     delete process.env['PICTURE_ENHANCEMENT_ENABLED'];
-    mockPrisma.systemSettings.findUnique.mockResolvedValue(
-      makeSettingsRow({ pictureEnhancementFeatureFlag: true, model: null }) as any,
-    );
+    getSettings.mockResolvedValue(makeSettingsRow({ pictureEnhancementFeatureFlag: true, model: null }).value);
 
     const result = await controller.getFeatures();
 
@@ -128,15 +111,38 @@ describe('FeaturesController (real SystemSettingsService, env kill-switch)', () 
   });
 });
 
+/** The settings document a given public-features answer is projected from. */
+function settingsFor(publicFeatures: {
+  features: Record<string, boolean>;
+  pictureEnhancement: { enabled?: boolean; allowReplace: boolean; blockReplaceOnDownscale: boolean; model: string | null; maxBatchSize?: number };
+}) {
+  return {
+    features: publicFeatures.features,
+    ai: {
+      features: {
+        enhance: publicFeatures.pictureEnhancement.model
+          ? { provider: 'openai', model: publicFeatures.pictureEnhancement.model }
+          : null,
+      },
+    },
+    pictureEnhancement: {
+      allowReplace: publicFeatures.pictureEnhancement.allowReplace,
+      blockReplaceOnDownscale: publicFeatures.pictureEnhancement.blockReplaceOnDownscale,
+      maxBatchSize: publicFeatures.pictureEnhancement.maxBatchSize,
+    },
+    // Namespaces that must never reach the client.
+    email: { smtpHost: 'mail.example.test' },
+  };
+}
+
 describe('FeaturesController', () => {
   let controller: FeaturesController;
-  let mockSystemSettingsService: { getPublicFeatures: jest.Mock };
+  const mockSystemSettingsService = { getSettings: jest.fn() };
 
   beforeEach(() => {
-    mockSystemSettingsService = { getPublicFeatures: jest.fn() };
-
+    mockSystemSettingsService.getSettings.mockReset();
     controller = new FeaturesController(
-      mockSystemSettingsService as unknown as SystemSettingsService,
+      mockSystemSettingsService as unknown as AppSystemSettingsService,
     );
   });
 
@@ -145,7 +151,7 @@ describe('FeaturesController', () => {
     delete process.env['PICTURE_ENHANCEMENT_ENABLED'];
   });
 
-  it('delegates to SystemSettingsService.getPublicFeatures and returns its result verbatim', async () => {
+  it('projects AppSystemSettingsService.getSettings() into the public contract', async () => {
     const publicFeatures = {
       features: { pictureEnhancement: true, faceRecognition: false },
       pictureEnhancement: {
@@ -155,12 +161,15 @@ describe('FeaturesController', () => {
         model: 'gpt-image-1',
       },
     };
-    mockSystemSettingsService.getPublicFeatures.mockResolvedValue(publicFeatures);
+    mockSystemSettingsService.getSettings.mockResolvedValue(settingsFor(publicFeatures));
 
     const result = await controller.getFeatures();
 
-    expect(mockSystemSettingsService.getPublicFeatures).toHaveBeenCalledWith();
-    expect(result).toEqual(publicFeatures);
+    expect(mockSystemSettingsService.getSettings).toHaveBeenCalledWith();
+    expect(result).toEqual({
+      ...publicFeatures,
+      pictureEnhancement: { ...publicFeatures.pictureEnhancement, maxBatchSize: 25 },
+    });
   });
 
   it('returns ONLY features + pictureEnhancement — no other settings namespace leaks through', async () => {
@@ -173,7 +182,7 @@ describe('FeaturesController', () => {
         model: null,
       },
     };
-    mockSystemSettingsService.getPublicFeatures.mockResolvedValue(publicFeatures);
+    mockSystemSettingsService.getSettings.mockResolvedValue(settingsFor(publicFeatures));
 
     const result = await controller.getFeatures();
 
@@ -187,7 +196,7 @@ describe('FeaturesController', () => {
   describe('pictureEnhancement.enabled reflects the system-setting flag AND the env kill-switch', () => {
     it('is true when features.pictureEnhancement is ON and the env kill-switch is unset', async () => {
       delete process.env['PICTURE_ENHANCEMENT_ENABLED'];
-      mockSystemSettingsService.getPublicFeatures.mockResolvedValue({
+      mockSystemSettingsService.getSettings.mockResolvedValue(settingsFor({
         features: { pictureEnhancement: true },
         pictureEnhancement: {
           enabled: true,
@@ -195,7 +204,7 @@ describe('FeaturesController', () => {
           blockReplaceOnDownscale: false,
           model: 'gpt-image-1',
         },
-      });
+      }));
 
       const result = await controller.getFeatures();
 
@@ -203,7 +212,7 @@ describe('FeaturesController', () => {
     });
 
     it('is false when features.pictureEnhancement is OFF, independent of the env kill-switch', async () => {
-      mockSystemSettingsService.getPublicFeatures.mockResolvedValue({
+      mockSystemSettingsService.getSettings.mockResolvedValue(settingsFor({
         features: { pictureEnhancement: false },
         pictureEnhancement: {
           enabled: false,
@@ -211,7 +220,7 @@ describe('FeaturesController', () => {
           blockReplaceOnDownscale: false,
           model: null,
         },
-      });
+      }));
 
       const result = await controller.getFeatures();
 
@@ -224,7 +233,7 @@ describe('FeaturesController', () => {
       // getPublicFeatures (which owns the isPictureEnhancementEnabled() logic)
       // returns. This asserts the controller passes that resolved value
       // through untouched rather than re-deriving or overriding it.
-      mockSystemSettingsService.getPublicFeatures.mockResolvedValue({
+      mockSystemSettingsService.getSettings.mockResolvedValue(settingsFor({
         features: { pictureEnhancement: true },
         pictureEnhancement: {
           enabled: false,
@@ -232,7 +241,7 @@ describe('FeaturesController', () => {
           blockReplaceOnDownscale: false,
           model: 'gpt-image-1',
         },
-      });
+      }));
 
       const result = await controller.getFeatures();
 
@@ -242,7 +251,7 @@ describe('FeaturesController', () => {
 
   describe('pictureEnhancement.model', () => {
     it('is the configured model name when ai.features.enhance is set', async () => {
-      mockSystemSettingsService.getPublicFeatures.mockResolvedValue({
+      mockSystemSettingsService.getSettings.mockResolvedValue(settingsFor({
         features: { pictureEnhancement: true },
         pictureEnhancement: {
           enabled: true,
@@ -250,7 +259,7 @@ describe('FeaturesController', () => {
           blockReplaceOnDownscale: false,
           model: 'gpt-image-1',
         },
-      });
+      }));
 
       const result = await controller.getFeatures();
 
@@ -258,7 +267,7 @@ describe('FeaturesController', () => {
     });
 
     it('is null when ai.features.enhance is unset', async () => {
-      mockSystemSettingsService.getPublicFeatures.mockResolvedValue({
+      mockSystemSettingsService.getSettings.mockResolvedValue(settingsFor({
         features: { pictureEnhancement: true },
         pictureEnhancement: {
           enabled: true,
@@ -266,7 +275,7 @@ describe('FeaturesController', () => {
           blockReplaceOnDownscale: false,
           model: null,
         },
-      });
+      }));
 
       const result = await controller.getFeatures();
 

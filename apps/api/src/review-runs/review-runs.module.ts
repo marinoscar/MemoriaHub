@@ -3,7 +3,6 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaModule } from '../media/media.module';
-import { SettingsModule } from '../settings/settings.module';
 import { BurstModule } from '../burst/burst.module';
 import { DedupModule } from '../dedup/dedup.module';
 import { ReviewRunsController } from './review-runs.controller';
@@ -16,6 +15,7 @@ import { ReviewRunHistoryPurgeTask } from './review-run-history-purge.task';
 import { BurstGroupReviewStrategy } from './strategies/burst-group.strategy';
 import { DuplicateGroupReviewStrategy } from './strategies/duplicate-group.strategy';
 import { LocationSuggestionReviewStrategy } from './strategies/location-suggestion.strategy';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * ReviewRunsModule — the shared async run engine behind every bulk review-queue
@@ -25,7 +25,7 @@ import { LocationSuggestionReviewStrategy } from './strategies/location-suggesti
  * dependency is genuinely mutual: the strategies here wrap `BurstService` /
  * `DuplicateService` primitives, while those services' threshold endpoints call
  * `ReviewRunService.createRun`. MediaModule (MediaThumbnailService), SettingsModule
- * (SystemSettingsService, read by ReviewRunHistoryPurgeHandler for the retention
+ * (AppSystemSettingsService, read by ReviewRunHistoryPurgeHandler for the retention
  * window) and the rest are plain imports — none of them import this module.
  *
  * The location-suggestion strategy deliberately does NOT depend on
@@ -39,7 +39,7 @@ import { LocationSuggestionReviewStrategy } from './strategies/location-suggesti
     CirclesModule,
     EnrichmentModule,
     MediaModule,
-    SettingsModule,
+    
     forwardRef(() => BurstModule),
     forwardRef(() => DedupModule),
   ],

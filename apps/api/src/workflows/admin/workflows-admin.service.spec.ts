@@ -22,15 +22,15 @@ import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { WorkflowsAdminService } from './workflows-admin.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { WorkflowRunService } from '../runs/workflow-run.service';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const WORKFLOW_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
@@ -105,7 +105,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 describe('WorkflowsAdminService', () => {
   let service: WorkflowsAdminService;
   let prisma: MockPrismaService;
-  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let runService: jest.Mocked<Pick<WorkflowRunService, 'adminCancelRun'>>;
   const ORIGINAL_ENV = { ...process.env };
 
@@ -123,7 +123,7 @@ describe('WorkflowsAdminService', () => {
       providers: [
         WorkflowsAdminService,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
         { provide: WorkflowRunService, useValue: runService },
       ],
     }).compile();

@@ -37,7 +37,6 @@ import {
   randomThumbnailVersion,
 } from '../storage/processing/thumbnail-key.util';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { decryptSecret } from '../common/crypto/secret-cipher';
@@ -45,6 +44,7 @@ import type {
   JobCredentialsResult,
   VideoAutoTaggingJobCredentials,
 } from './dto/job-credentials.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Input shapes
@@ -117,7 +117,7 @@ export class NodesService {
     private readonly storageProviderResolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly aiSettingsService: AiSettingsService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly autoTaggingService: AutoTaggingService,
     private readonly videoAutoTaggingService: VideoAutoTaggingService,
   ) {}

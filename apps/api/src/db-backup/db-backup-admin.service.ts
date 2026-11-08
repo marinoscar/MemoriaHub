@@ -14,7 +14,6 @@ import {
   wallClockToUtc,
 } from '../common/time/zone.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { getStorageProviderDescriptor } from '../storage-settings/providers/storage-provider.registry';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
@@ -24,6 +23,7 @@ import type {
   DownloadDatabaseBackupDto,
   ListDatabaseBackupRunsDto,
 } from './dto/db-backup-runs.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Fallback signed-URL lifetime, matching `ObjectsService.getDownloadUrl`. */
 const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 3600;
@@ -95,7 +95,7 @@ export interface DatabaseBackupConfigDto {
  * feature (issue #343, epic #339).
  *
  * Holds everything the controller needs that is NOT the dump engine itself:
- * config read/write (delegated to `SystemSettingsService` so there is exactly
+ * config read/write (delegated to `AppSystemSettingsService` so there is exactly
  * one settings writer), run listing/detail, signed downloads, deletion, and
  * cancellation. The engine (`DatabaseBackupRunnerService`, #341) is injected,
  * never reimplemented.
@@ -110,7 +110,7 @@ export class DatabaseBackupAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
     private readonly runner: DatabaseBackupRunnerService,
   ) {}

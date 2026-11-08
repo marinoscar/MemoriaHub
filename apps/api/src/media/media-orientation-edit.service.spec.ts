@@ -40,7 +40,6 @@ import { StorageProcessingRecoveryService } from '../storage/tasks/storage-proce
 import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -48,6 +47,7 @@ import {
 import { createMockStorageProvider } from '../../test/mocks/storage-provider.mock';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { applyOrientationTransform } from '../storage/processing/image-orientation.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 jest.mock('../storage/processing/image-orientation.util', () => ({
   applyOrientationTransform: jest.fn(),
@@ -169,7 +169,7 @@ describe('MediaOrientationEditService', () => {
         { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
         { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 

@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { ForwardGeocodeService } from './forward-geocode.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal fetch Response mock (Nominatim-style)
@@ -49,7 +49,7 @@ async function buildServiceWithConfig(
         },
       },
       {
-        provide: SystemSettingsService,
+        provide: AppSystemSettingsService,
         useValue: {
           getSettingValue: jest.fn().mockResolvedValue(
             systemSettingsEnabled !== undefined ? systemSettingsEnabled : undefined,
@@ -98,7 +98,7 @@ describe('ForwardGeocodeService', () => {
           },
         },
         {
-          provide: SystemSettingsService,
+          provide: AppSystemSettingsService,
           useValue: {
             getSettingValue: jest.fn().mockResolvedValue(enabledBool),
           },

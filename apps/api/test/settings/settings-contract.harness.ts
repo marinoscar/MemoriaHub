@@ -48,7 +48,19 @@ export const NOTIFICATION_TYPES = Object.values(NotificationType);
  */
 export const EXPECTED_SYSTEM_DEFAULTS = {
   ui: { allowUserThemeOverride: true },
-  features: {},
+  features: {
+    autoTagging: false,
+    faceRecognition: false,
+    burstDetection: false,
+    duplicateDetection: false,
+    locationInference: false,
+    socialMediaDetection: false,
+    faceAutoArchive: false,
+    pictureEnhancement: false,
+    workflows: false,
+    memories: false,
+    locationGrouping: false,
+  },
   ai: {
     features: {
       search: { provider: null, model: null },

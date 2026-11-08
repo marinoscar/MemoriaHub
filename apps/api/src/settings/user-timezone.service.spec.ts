@@ -1,10 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   createMockPrismaService,
   MockPrismaService,
-} from '../../../test/mocks/prisma.mock';
+} from '../../test/mocks/prisma.mock';
 import {
   DEFAULT_USER_TIME_ZONE,
   USER_TIMEZONE_CACHE_TTL_MS,

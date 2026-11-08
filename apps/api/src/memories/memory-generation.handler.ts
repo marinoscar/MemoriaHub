@@ -28,8 +28,7 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { isMemoriesEnabled } from '../common/types/settings.types';
+import { isMemoriesEnabled } from '../settings/feature-gates';
 import { resolveMemoriesSettings } from './memories-settings.util';
 import { parseMemoryGenerationPayload } from './memory-generation.payload';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
@@ -39,6 +38,7 @@ import {
   MemoryCurator,
   MemoryCuratorContext,
 } from './curators/memory-curator.interface';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit {
@@ -48,7 +48,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
 
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly titles: MemoryTitleService,
     private readonly memoriesNotifications: MemoriesNotificationService,
     @Inject(MEMORY_CURATORS) private readonly curators: MemoryCurator[],

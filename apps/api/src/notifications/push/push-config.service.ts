@@ -18,6 +18,7 @@ import type {
   RotatePushConfigInput,
   UpdatePushConfigInput,
 } from './dto/push-config.dto';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // =============================================================================
 // PushConfigService — runtime-configured Web Push VAPID keys (epic #481, #483)
@@ -39,7 +40,7 @@ import type {
 //   5. otherwise                       -> { publicKey, privateKey, subject }
 //
 // Reads go straight through PrismaService (NotificationsModule imports nothing
-// — see notifications.module.ts), never through SystemSettingsService, which
+// — see notifications.module.ts), never through AppSystemSettingsService, which
 // only ever reads the `global` row anyway.
 // =============================================================================
 

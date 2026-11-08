@@ -17,18 +17,18 @@ import {
   WorkflowTrigger,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
-import { isWorkflowsEnabled } from '../../common/types/settings.types';
+import { isWorkflowsEnabled } from '../../settings/feature-gates';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { getActionDescriptor } from '../registry/subject-registry';
 import { WorkflowActionDescriptor } from '../registry/field-descriptor.interface';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
-/** The resolved settings object returned by SystemSettingsService.getSettings(). */
-type ResolvedSettings = Awaited<ReturnType<SystemSettingsService['getSettings']>>;
+/** The resolved settings object returned by AppSystemSettingsService.getSettings(). */
+type ResolvedSettings = Awaited<ReturnType<AppSystemSettingsService['getSettings']>>;
 
 /** Run statuses that are terminal (no further transition). */
 const TERMINAL_RUN_STATUSES: WorkflowRunStatus[] = [
@@ -62,7 +62,7 @@ export class WorkflowRunService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly circleMembership: CircleMembershipService,
     private readonly enrichmentJobs: EnrichmentJobService,
     private readonly thumbnails: MediaThumbnailService,

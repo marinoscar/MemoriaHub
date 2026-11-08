@@ -46,7 +46,6 @@ import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.serv
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { EnhanceParams } from './dto/enhance-params.dto';
@@ -55,6 +54,7 @@ import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
 import { ListEnhancementsQuery } from './dto/list-enhancements-query.dto';
 import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
@@ -285,7 +285,7 @@ describe('MediaEnhancementService', () => {
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichment },
         { provide: MediaThumbnailService, useValue: mockThumbnails },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 

@@ -26,8 +26,7 @@ import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.serv
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { isPictureEnhancementEnabled } from '../common/types/settings.types';
+import { isPictureEnhancementEnabled } from '../settings/feature-gates';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { EnhanceParams } from './dto/enhance-params.dto';
@@ -47,6 +46,7 @@ import {
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const SYSTEM_TAG = 'AI Enhanced';
 
@@ -87,7 +87,7 @@ export class MediaEnhancementService {
     private readonly mediaEnrichment: MediaEnrichmentService,
     private readonly thumbnails: MediaThumbnailService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly defaultOrgId: DefaultOrgId,
   ) {}
 

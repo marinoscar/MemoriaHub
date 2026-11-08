@@ -13,9 +13,9 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { FaceSettingsService } from './face-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { encryptSecret } from '../common/crypto/secret-cipher';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -55,7 +55,7 @@ describe('FaceSettingsService', () => {
         FaceSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: FaceProviderRegistry, useValue: mockRegistry },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 

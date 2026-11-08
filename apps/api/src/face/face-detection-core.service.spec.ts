@@ -20,7 +20,7 @@
  *  - A person match invalidates that person's cached centroid.
  *
  * FaceProviderRegistry, FaceSettingsService, FaceMatchingService, and
- * SystemSettingsService are all replaced with mocks — no transitive
+ * AppSystemSettingsService are all replaced with mocks — no transitive
  * dependencies, no real DB.
  */
 
@@ -34,8 +34,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
 import { FaceMatchingService } from './face-matching.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,7 +56,7 @@ function makeFace(overrides: Partial<TestFace> = {}): TestFace {
   } as TestFace;
 }
 
-/** Settings shape returned by SystemSettingsService.getSettings() */
+/** Settings shape returned by AppSystemSettingsService.getSettings() */
 function makeSettings(
   faceAutoArchive: boolean,
   matchThreshold = 0.45,
@@ -140,7 +140,7 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
         { provide: FaceSettingsService, useValue: mockFaceSettingsService },
         { provide: FaceProviderRegistry, useValue: mockRegistry },
         { provide: FaceMatchingService, useValue: mockMatchingService },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 

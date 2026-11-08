@@ -13,8 +13,8 @@ import { EnrichmentJob } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaService } from './media.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class TrashPurgeHandler implements EnrichmentHandler, OnModuleInit {
@@ -25,7 +25,7 @@ export class TrashPurgeHandler implements EnrichmentHandler, OnModuleInit {
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaService: MediaService,
   ) {}
 

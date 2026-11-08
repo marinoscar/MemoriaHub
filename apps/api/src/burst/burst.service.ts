@@ -25,8 +25,7 @@ import {
 } from '../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { FEATURE_KEYS } from '../common/types/settings.types';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { BurstQueryDto } from './dto/burst-query.dto';
@@ -35,6 +34,7 @@ import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 import { ReviewRunService } from '../review-runs/review-run.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class BurstService {
@@ -48,7 +48,7 @@ export class BurstService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaThumbnailService: MediaThumbnailService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
     // Circular by nature: the review-run strategies wrap this service's
     // resolve/dismiss primitives, while these threshold endpoints start runs.

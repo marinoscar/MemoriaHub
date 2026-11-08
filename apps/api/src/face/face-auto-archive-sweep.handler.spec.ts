@@ -18,8 +18,8 @@ import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceMatchingService } from './face-matching.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,7 +84,7 @@ describe('FaceAutoArchiveSweepHandler', () => {
       mockRegistry as unknown as EnrichmentHandlerRegistry,
       mockPrisma as unknown as PrismaService,
       mockMatchingService as unknown as FaceMatchingService,
-      mockSystemSettings as unknown as SystemSettingsService,
+      mockSystemSettings as unknown as AppSystemSettingsService,
       { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,
     );
   });

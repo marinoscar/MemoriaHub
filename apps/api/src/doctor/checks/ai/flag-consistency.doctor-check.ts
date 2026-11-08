@@ -5,8 +5,8 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, warn } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkAiFlagConsistency` (key `ai.flagConsistency`).
 // READ-ONLY: a settings read.
@@ -37,7 +37,7 @@ export class AiFlagConsistencyDoctorCheck implements DoctorCheck, OnModuleInit {
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -45,7 +45,7 @@ export class AiFlagConsistencyDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     return decideAiFlagConsistency(
       settings.features?.['autoTagging'] === true,
       !!settings.ai?.features?.tagging?.provider,

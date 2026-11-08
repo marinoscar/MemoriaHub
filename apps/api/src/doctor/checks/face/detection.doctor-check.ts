@@ -6,8 +6,8 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { FaceSettingsService } from '../../../face/face-settings.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass, skip } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkFaceDetection` (key `face.detection`).
 // Live probe of the face provider (the keyless CompreFace sidecar): a
@@ -47,7 +47,7 @@ export class FaceDetectionDoctorCheck implements DoctorCheck, OnModuleInit {
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly faceSettings: FaceSettingsService,
   ) {}
 
@@ -56,7 +56,7 @@ export class FaceDetectionDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const enabled = settings.features?.['faceRecognition'] === true;
     const provider = settings.face?.features?.detection?.provider;
     if (!provider) return decideFaceDetection(enabled, provider, null);

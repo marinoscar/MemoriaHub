@@ -10,11 +10,11 @@ import {
 import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
 import { WorkflowRunService } from './workflow-run.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** Payload shape for a `workflow_evaluate` job. */
 interface WorkflowEvaluatePayload {
@@ -49,7 +49,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly compiler: WorkflowConditionCompiler,
     private readonly runService: WorkflowRunService,
     private readonly runNotifications: WorkflowRunNotificationService,

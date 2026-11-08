@@ -22,7 +22,7 @@ import { EnrichmentJob, MhLegacyJobStatus, Prisma } from '@prisma/client';
 import { EnrichmentHandler } from './enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const DEFAULT_RETENTION_DAYS = 30;
 const BATCH_SIZE = 5000;
@@ -36,7 +36,7 @@ export class JobHistoryPurgeHandler implements EnrichmentHandler, OnModuleInit {
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {

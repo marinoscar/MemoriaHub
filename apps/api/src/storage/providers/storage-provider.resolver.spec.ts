@@ -15,11 +15,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { StorageProviderResolver } from './storage-provider.resolver';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { LocalDiskStorageProvider } from './local/local-disk.provider';
 import { S3StorageProvider } from './s3/s3-storage.provider';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { encryptSecret } from '../../common/crypto/secret-cipher';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -114,7 +114,7 @@ describe('StorageProviderResolver', () => {
         StorageProviderResolver,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: ConfigService, useValue: mockConfig },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: LocalDiskStorageProvider, useValue: mockLocalDiskProvider },
       ],
     }).compile();

@@ -6,8 +6,8 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { GeoSettingsService } from '../../../geo/geo-settings.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkGeoReverseProvider` (key
 // `geo.reverseProvider`). Live probe: one reverse-geocode lookup of a fixed
@@ -38,7 +38,7 @@ export class GeoReverseProviderDoctorCheck implements DoctorCheck, OnModuleInit 
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly geoSettings: GeoSettingsService,
   ) {}
 
@@ -47,7 +47,7 @@ export class GeoReverseProviderDoctorCheck implements DoctorCheck, OnModuleInit 
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const provider = settings.geo?.reverseProvider ?? process.env['GEO_PROVIDER'] ?? 'offline';
     try {
       const result = await this.geoSettings.testProvider({

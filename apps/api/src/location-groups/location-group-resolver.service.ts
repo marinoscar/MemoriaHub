@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LocationGroupLevel } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { isLocationGroupingEnabled } from '../common/types/settings.types';
+import { isLocationGroupingEnabled } from '../settings/feature-gates';
 import { haversineKm } from '../common/geo/haversine.util';
 import { fold } from './normalize-location-name';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** TTL for the in-memory group/alias snapshot, milliseconds. */
 const SNAPSHOT_TTL_MS = 30_000;
@@ -82,7 +82,7 @@ export function aliasKey(
  * the invariant holds in both states and disabling the feature is a no-op
  * rebuild away from being fully reverted.
  *
- * Caching mirrors SystemSettingsService's two-layer shape (TTL + explicit
+ * Caching mirrors AppSystemSettingsService's two-layer shape (TTL + explicit
  * invalidate): the dataset is small (hundreds of rows), so the whole enabled
  * group/alias set is loaded in one pass rather than queried per key.
  */
@@ -97,7 +97,7 @@ export class LocationGroupResolverService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   /**
@@ -105,7 +105,7 @@ export class LocationGroupResolverService {
    *
    * Called by every group/alias mutation (issue #374) — without it an admin
    * edit would take up to SNAPSHOT_TTL_MS to affect resolution. Mirrors
-   * SystemSettingsService.invalidateSettingsCache().
+   * AppSystemSettingsService.invalidateSettingsCache().
    */
   invalidate(): void {
     this.snapshotCache = null;

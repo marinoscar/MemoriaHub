@@ -345,6 +345,12 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     name: 'Configuration',
     tags: [
       {
+        name: 'Organization Settings',
+        description:
+          "An organization's overrides of the deployment settings (`/api/org-settings`). Single-organization " +
+          'mode keeps the layer empty; the page is hidden there.',
+      },
+      {
         name: 'System Settings',
         description: 'The global settings document — every feature flag and tuning parameter. Admin only.',
       },

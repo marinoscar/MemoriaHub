@@ -18,11 +18,11 @@ import { CircleRole } from '@prisma/client';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { FEATURE_KEYS } from '../common/types/settings.types';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { SocialMediaBackfillService } from './social-media-backfill.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -33,7 +33,7 @@ export class SocialMediaMediaController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
-    private readonly systemSettingsService: SystemSettingsService,
+    private readonly systemSettingsService: AppSystemSettingsService,
     private readonly socialMediaBackfillService: SocialMediaBackfillService,
   ) {}
 

@@ -1,18 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
 import { GoogleGeoLocationProvider } from './google-geo-location.provider';
 import { GeoLocationResult } from './geo-location-provider.interface';
 import { decryptSecret } from '../../common/crypto/secret-cipher';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class GeoLocationService {
   private readonly logger = new Logger(GeoLocationService.name);
 
   constructor(
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly offlineProvider: OfflineGeoLocationProvider,
     private readonly nominatimProvider: NominatimGeoLocationProvider,
     private readonly googleProvider: GoogleGeoLocationProvider,

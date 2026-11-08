@@ -7,7 +7,7 @@
  * for the whole deployment.
  *
  * No database required: PrismaService, EnrichmentJobService and
- * SystemSettingsService are fully mocked (same shape as
+ * AppSystemSettingsService are fully mocked (same shape as
  * InsightsRefreshTask's spec).
  */
 
@@ -19,7 +19,7 @@ import {
 } from './memories-generation.task';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -74,7 +74,7 @@ describe('MemoriesGenerationTask', () => {
         MemoriesGenerationTask,
         { provide: PrismaService, useValue: prisma },
         { provide: EnrichmentJobService, useValue: enrichment },
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
       ],
     }).compile();
 

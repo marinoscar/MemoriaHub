@@ -3,7 +3,6 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
-import { SettingsModule } from '../settings/settings.module';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
 import { MediaModule } from '../media/media.module';
 import { LocationSuggestionController } from './location-suggestion.controller';
@@ -39,7 +38,7 @@ import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-sugges
     StorageProvidersModule,
     PrismaModule,
     CirclesModule,
-    SettingsModule,
+    
     GeoLocationModule,
     MediaModule,
     ReviewRunsModule,

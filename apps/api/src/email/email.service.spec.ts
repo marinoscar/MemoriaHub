@@ -9,9 +9,9 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { EmailService } from './email.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { SesEmailProvider } from './providers/ses-email.provider';
 import { SmtpEmailProvider } from './providers/smtp-email.provider';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 describe('EmailService', () => {
   let service: EmailService;
@@ -34,7 +34,7 @@ describe('EmailService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EmailService,
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: SesEmailProvider, useValue: mockSesProvider },
         { provide: SmtpEmailProvider, useValue: mockSmtpProvider },
       ],

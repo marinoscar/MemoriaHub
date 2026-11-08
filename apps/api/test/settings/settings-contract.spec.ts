@@ -126,9 +126,12 @@ describe('settings contract', () => {
     it('PATCH of features merges the flag map key by key', async () => {
       await h.system.patch({ features: { workflows: true } });
       const after = await h.system.patch({ features: { memories: true } });
-      expect(after.features).toEqual({ workflows: true, memories: true });
+      expect(after.features).toMatchObject({ workflows: true, memories: true, faceRecognition: false });
       const flipped = await h.system.patch({ features: { workflows: false } });
-      expect(flipped.features).toEqual({ workflows: false, memories: true });
+      expect(flipped.features).toMatchObject({ workflows: false, memories: true });
+      // A flag nobody declared is carried like any other.
+      const custom = await h.system.patch({ features: { someFutureFlag: true } });
+      expect(custom.features).toMatchObject({ someFutureFlag: true, memories: true });
     });
 
     it('PATCH replaces an array wholesale (socialMedia.ocrLanguages, notifications.disabledTypes)', async () => {
@@ -203,7 +206,10 @@ describe('settings contract', () => {
       ['databaseBackup.dayOfMonth above 28', { databaseBackup: { dayOfMonth: 29 } }],
       ['memories.digest.frequency not an enum member', { memories: { digest: { frequency: 'hourly' } } }],
       ['workflows.maxItemsPerRun below 100', { workflows: { maxItemsPerRun: 99 } }],
-      ['maintenance.message over 500 characters', { maintenance: { message: 'x'.repeat(501) } }],
+      // `maintenance` is the PLATFORM's namespace since RETRO-B3: its message is 1 to 1000 characters
+      // (it was 0 to 500), and a stored empty message reads as the platform default message.
+      ['maintenance.message over 1000 characters', { maintenance: { message: 'x'.repeat(1001) } }],
+      ['maintenance.message empty', { maintenance: { message: '' } }],
       ['features with a non-boolean flag', { features: { workflows: 'yes' } }],
       ['locationGrouping.maxRadiusKm above 200', { locationGrouping: { maxRadiusKm: 201 } }],
     ])('rejects %s', (_name, body) => {
@@ -339,11 +345,9 @@ describe('settings contract', () => {
 
       it('disabling a type dismisses its live rows and invalidates the preference cache; re-enabling dismisses nothing', async () => {
         await h.user.patch(userId, { notifications: { types: { upload_completed: false } } });
-        expect(h.notifications.dismissTypesForUser).toHaveBeenCalledWith(
-          userId,
-          expect.arrayContaining(['upload_completed']),
-          expect.anything(),
-        );
+        const [dismissedFor, dismissedTypes] = h.notifications.dismissTypesForUser.mock.calls[0];
+        expect(dismissedFor).toBe(userId);
+        expect(dismissedTypes).toEqual(expect.arrayContaining(['upload_completed']));
         expect(h.notifications.invalidatePreferences).toHaveBeenCalledWith(userId);
 
         h.notifications.dismissTypesForUser.mockClear();

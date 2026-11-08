@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaType, JobReason, MediaTagStatusType, MediaFaceStatusType, MediaSocialStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** Minimal shape of a MediaItem needed to decide which enrichment jobs to enqueue. */
 export interface EnrichmentMediaItem {
@@ -44,7 +44,7 @@ export class MediaEnrichmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   /**
@@ -272,7 +272,7 @@ export class MediaEnrichmentService {
   async enqueueVideoPostDetectionEnrichment(
     item: EnrichmentMediaItem,
     reason: JobReason,
-    resolvedSettings?: Awaited<ReturnType<SystemSettingsService['getSettings']>>,
+    resolvedSettings?: Awaited<ReturnType<AppSystemSettingsService['getSettings']>>,
   ): Promise<void> {
     try {
       if (item.deletedAt) return;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 
 /**
  * Test data factories for creating mock entities

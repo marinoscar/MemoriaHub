@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { SesEmailProvider } from './providers/ses-email.provider';
 import { SmtpEmailProvider } from './providers/smtp-email.provider';
 import { EmailProvider } from './providers/email-provider.interface';
@@ -10,6 +9,7 @@ import {
   EmailTemplateName,
   EmailTemplateDataMap,
 } from './types/email.types';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * Central transactional-email service.
@@ -23,7 +23,7 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
   constructor(
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly sesProvider: SesEmailProvider,
     private readonly smtpProvider: SmtpEmailProvider,
   ) {}

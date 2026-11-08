@@ -13,13 +13,13 @@ import { StorageProcessingRecoveryService } from '../storage/tasks/storage-proce
 import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import {
   applyOrientationTransform,
   OrientationOp,
 } from '../storage/processing/image-orientation.util';
 import { RequestUser } from '@marinoscar/platform-api/identity';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 export interface OrientationEditResult {
   status: string;
@@ -68,7 +68,7 @@ export class MediaOrientationEditService {
     private readonly metadataSync: MediaMetadataSyncService,
     private readonly thumbnailPrune: ThumbnailPruneService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   async editOrientation(

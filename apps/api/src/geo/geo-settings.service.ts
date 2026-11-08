@@ -5,13 +5,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
 import { GoogleGeoLocationProvider } from '../media/geo/google-geo-location.provider';
 import { OfflineGeoLocationProvider } from '../media/geo/offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from '../media/geo/nominatim-geo-location.provider';
 import { UpsertGeoCredentialDto } from './dto/geo-credential.dto';
 import { TestGeoProviderDto } from './dto/geo-test.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class GeoSettingsService {
@@ -19,7 +19,7 @@ export class GeoSettingsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly googleProvider: GoogleGeoLocationProvider,
     private readonly offlineProvider: OfflineGeoLocationProvider,
     private readonly nominatimProvider: NominatimGeoLocationProvider,

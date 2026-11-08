@@ -22,7 +22,7 @@
 //   settings write. The reason is the same too — consumers call this per user
 //   in loops (a date-grouped listing, a digest render over a circle's whole
 //   membership), and an uncached read would add a `user_settings` round-trip to
-//   each. A single un-keyed slot like SystemSettingsService's would serve one
+//   each. A single un-keyed slot like AppSystemSettingsService's would serve one
 //   user's zone to another, so it must be keyed.
 //
 //   prime() is the batched form for callers that know their whole recipient set
@@ -42,8 +42,9 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 
-import { isSupportedTimeZone } from '../../common/time/zone.util';
-import { PrismaService } from '../../prisma/prisma.service';
+import { isSupportedTimeZone } from '../common/time/zone.util';
+import { PrismaService } from '../prisma/prisma.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** TTL for the per-user zone cache. Mirrors NOTIFICATION_PREFERENCES_CACHE_TTL_MS. */
 export const USER_TIMEZONE_CACHE_TTL_MS = 5000;

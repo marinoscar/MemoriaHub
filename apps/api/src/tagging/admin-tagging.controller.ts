@@ -13,9 +13,9 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { FEATURE_KEYS } from '../common/types/settings.types';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 import { TaggingBackfillService } from './tagging-backfill.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const flexibleDate = z.string().refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
 const adminBackfillSchema = z.object({
@@ -44,7 +44,7 @@ export class AdminTaggingController {
 
   constructor(
     private readonly tagBackfillService: TaggingBackfillService,
-    private readonly systemSettingsService: SystemSettingsService,
+    private readonly systemSettingsService: AppSystemSettingsService,
   ) {}
 
   @Post('backfill')

@@ -7,7 +7,7 @@
  *     `prepareImageForProcessing` never touches sharp/libvips — it returns a
  *     deterministic "prepared" buffer + dimensions.
  *   - PrismaService, StorageProviderResolver, AiSettingsService,
- *     AiProviderRegistry, and SystemSettingsService are plain jest mocks
+ *     AiProviderRegistry, and AppSystemSettingsService are plain jest mocks
  *     (constructed directly, no NestJS TestingModule needed since the handler
  *     has no other DI surface besides EnrichmentHandlerRegistry.register()).
  *
@@ -44,6 +44,7 @@ import {
   ENRICHMENT_MAX_ATTEMPTS,
   ENRICHMENT_RATELIMIT_MAX_HITS,
 } from '../enrichment/enrichment-terminal.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const mockPrepareImageForProcessing = prepareImageForProcessing as jest.Mock;
 

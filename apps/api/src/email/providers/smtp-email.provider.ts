@@ -1,10 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { decryptSecret } from '../../common/crypto/secret-cipher';
+import { EmailSmtpSecretStore } from '../email-smtp-secret.store';
 import { EmailProvider } from './email-provider.interface';
 import { EmailMessage, EmailSendResult } from '../types/email.types';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /**
  * SMTP email provider backed by nodemailer.
@@ -20,7 +21,10 @@ export class SmtpEmailProvider implements EmailProvider {
   private transport: Transporter | null = null;
   private transportKey: string | null = null;
 
-  constructor(private readonly systemSettings: SystemSettingsService) {}
+  constructor(
+    private readonly systemSettings: AppSystemSettingsService,
+    private readonly smtpSecret: EmailSmtpSecretStore,
+  ) {}
 
   private async getTransport(): Promise<Transporter> {
     const settings = await this.systemSettings.getSettings();
@@ -34,7 +38,8 @@ export class SmtpEmailProvider implements EmailProvider {
     const port = email.smtpPort ?? 587;
     const useTls = email.smtpUseTls ?? true;
     const username = email.smtpUsername ?? undefined;
-    const password = email.smtpPassword ? decryptSecret(email.smtpPassword) : undefined;
+    const ciphertext = await this.smtpSecret.getCiphertext();
+    const password = ciphertext ? decryptSecret(ciphertext) : undefined;
 
     // Cache key captures every input that affects transport construction.
     // (Password is hashed via length + tail only to avoid holding plaintext in a key.)

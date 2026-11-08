@@ -11,15 +11,13 @@ import {
   createMockViewerUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
-import {
-  DEFAULT_USER_SETTINGS,
-  UserSettingsValue,
-} from '../../src/common/types/settings.types';
-import {
-  DATA_TABLE_MAX_TABLES,
-  DATA_TABLE_MAX_VISIBLE_COLUMNS,
-  DATA_TABLE_MAX_PAGE_SIZE,
-} from '../../src/common/schemas/settings.schema';
+import { DEFAULT_USER_SETTINGS } from '@marinoscar/platform-api/settings';
+// The limits of the platform's `dataTables` namespace (@marinoscar/platform-contract/settings).
+const DATA_TABLE_MAX_TABLES = 40;
+const DATA_TABLE_MAX_VISIBLE_COLUMNS = 60;
+const DATA_TABLE_MAX_PAGE_SIZE = 500;
+
+type UserSettingsValue = Record<string, any>;
 
 describe('User Settings Integration', () => {
   let context: TestContext;
@@ -117,8 +115,8 @@ describe('User Settings Integration', () => {
       theme: 'dark',
       profile: {
         displayName: 'John Doe',
-        useProviderImage: false,
-        customImageUrl: 'https://example.com/avatar.jpg',
+        imageSource: 'none',
+        imageObjectId: null,
       },
     };
 
@@ -238,14 +236,13 @@ describe('User Settings Integration', () => {
         .expect(400);
     });
 
-    it('should return 400 with invalid URL in customImageUrl', async () => {
+    it('should return 400 with an unknown profile.imageSource', async () => {
       const user = await createMockTestUser(context);
 
       const invalidUrlSettings = {
         theme: 'dark',
         profile: {
-          useProviderImage: false,
-          customImageUrl: 'not-a-valid-url',
+          imageSource: 'carrier-pigeon',
         },
       };
 
@@ -369,7 +366,8 @@ describe('User Settings Integration', () => {
           theme: DEFAULT_USER_SETTINGS.theme,
           profile: {
             displayName: 'Jane Doe',
-            useProviderImage: DEFAULT_USER_SETTINGS.profile.useProviderImage,
+            imageSource: DEFAULT_USER_SETTINGS.profile.imageSource,
+            imageObjectId: null,
           },
         } as any,
         version: 2,
@@ -482,8 +480,8 @@ describe('User Settings Integration', () => {
 
       const partialUpdate = {
         profile: {
-          useProviderImage: false,
-          customImageUrl: 'https://example.com/custom.jpg',
+          imageSource: 'none',
+          displayName: 'Person A',
         },
       };
 
@@ -493,8 +491,9 @@ describe('User Settings Integration', () => {
         value: {
           theme: DEFAULT_USER_SETTINGS.theme,
           profile: {
-            useProviderImage: false,
-            customImageUrl: 'https://example.com/custom.jpg',
+            imageSource: 'none',
+            imageObjectId: null,
+            displayName: 'Person A',
           },
         } as any,
         version: 2,
@@ -509,10 +508,8 @@ describe('User Settings Integration', () => {
         .send(partialUpdate)
         .expect(200);
 
-      expect(response.body.data.profile.useProviderImage).toBe(false);
-      expect(response.body.data.profile.customImageUrl).toBe(
-        'https://example.com/custom.jpg',
-      );
+      expect(response.body.data.profile.imageSource).toBe('none');
+      expect(response.body.data.profile.displayName).toBe('Person A');
     });
   });
 
@@ -601,7 +598,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables,
           })
           .expect(200);
@@ -618,7 +615,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables: { jobs: {} },
           })
           .expect(200);
@@ -634,7 +631,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables: { jobs: { density: 'cozy' } },
           })
           .expect(400);
@@ -648,7 +645,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables: { 'Admin Jobs!': {} },
           })
           .expect(400);
@@ -662,7 +659,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables: { jobs: { pageSize: 0 } },
           })
           .expect(400);
@@ -676,7 +673,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables: {
               jobs: { pageSize: DATA_TABLE_MAX_PAGE_SIZE + 1 },
             },
@@ -697,7 +694,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables,
           })
           .expect(400);
@@ -711,7 +708,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables: {
               jobs: {
                 visibleColumns: Array.from(
@@ -732,7 +729,7 @@ describe('User Settings Integration', () => {
           .set(authHeader(user.accessToken))
           .send({
             theme: 'dark',
-            profile: { useProviderImage: true },
+            profile: { imageSource: 'provider', imageObjectId: null },
             dataTables: { jobs: { columnWidths: { type: 200 } } },
           })
           .expect(400);
@@ -919,7 +916,7 @@ describe('User Settings Integration', () => {
               userId: user2.id,
               value: {
                 theme: 'dark',
-                profile: { useProviderImage: true },
+                profile: { imageSource: 'provider', imageObjectId: null },
               } as any,
               version: 1,
               updatedAt: new Date(),
@@ -949,7 +946,7 @@ describe('User Settings Integration', () => {
 
       const newSettings: UserSettingsValue = {
         theme: 'dark',
-        profile: { useProviderImage: true },
+        profile: { imageSource: 'provider', imageObjectId: null },
       };
 
       context.prismaMock.userSettings.upsert.mockResolvedValue({

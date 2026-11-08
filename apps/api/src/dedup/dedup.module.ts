@@ -3,7 +3,6 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
-import { SettingsModule } from '../settings/settings.module';
 import { MediaModule } from '../media/media.module';
 import { DuplicateController } from './duplicate.controller';
 import { DuplicateService } from './duplicate.service';
@@ -24,7 +23,7 @@ import { ReviewRunsModule } from '../review-runs/review-runs.module';
     StorageProvidersModule,
     PrismaModule,
     CirclesModule,
-    SettingsModule,
+    
     MediaModule,
     // Mutual: the duplicate review-run strategy wraps DuplicateService's
     // primitives while DuplicateService's threshold endpoints start review runs

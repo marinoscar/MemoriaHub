@@ -37,13 +37,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { isValidCron, nextCronDate } from '../workflows/util/cron.util';
 import { DatabaseBackupRunnerService } from './database-backup-runner.service';
 import { DatabaseBackupRetentionService } from './database-backup-retention.service';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
 import { buildCronExpression, DatabaseBackupFrequency } from './schedule.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * How far back `previousFireBoundary` searches for the last fire time. Must
@@ -85,7 +85,7 @@ export class DatabaseBackupScheduleTask {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly runner: DatabaseBackupRunnerService,
     private readonly retention: DatabaseBackupRetentionService,
     private readonly providerResolver: StorageProviderResolver,

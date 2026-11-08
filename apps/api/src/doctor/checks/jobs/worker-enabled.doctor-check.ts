@@ -6,10 +6,10 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { resolveWorkerMode, type EnrichmentWorkerMode } from '../../../enrichment/enrichment-job.worker';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, warn } from '../outcome';
 import { nodeStaleWindowMs } from '../nodes/node-heartbeat-window';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkWorkerEnabled` (key `jobs.workerEnabled`).
 // READ-ONLY: a settings read and one `count` of fresh worker nodes.
@@ -82,7 +82,7 @@ export class WorkerEnabledDoctorCheck implements DoctorCheck, OnModuleInit {
   constructor(
     private readonly registry: DoctorCheckRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -93,7 +93,7 @@ export class WorkerEnabledDoctorCheck implements DoctorCheck, OnModuleInit {
     const mode = resolveWorkerMode();
     if (mode === 'all') return decideWorkerEnabled(mode, false, 0);
 
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const anyEnrichmentFeatureOn =
       settings.features?.['autoTagging'] === true ||
       settings.features?.['faceRecognition'] === true ||

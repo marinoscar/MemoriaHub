@@ -21,15 +21,17 @@ jest.mock('nodemailer', () => ({
 }));
 
 import { SmtpEmailProvider } from './smtp-email.provider';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { encryptSecret } from '../../common/crypto/secret-cipher';
+import type { EmailSmtpSecretStore } from '../email-smtp-secret.store';
 import { EmailMessage } from '../types/email.types';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
 describe('SmtpEmailProvider', () => {
   let provider: SmtpEmailProvider;
   let mockSystemSettings: { getSettings: jest.Mock };
+  let mockSmtpSecret: { getCiphertext: jest.Mock };
   let originalKey: string | undefined;
 
   const testMessage: EmailMessage = {
@@ -47,7 +49,6 @@ describe('SmtpEmailProvider', () => {
       smtpPort: 587,
       smtpUseTls: true,
       smtpUsername: 'mailer@example.com',
-      smtpPassword: encryptSecret('smtp-secret'),
       ...overrides,
     },
   });
@@ -72,8 +73,11 @@ describe('SmtpEmailProvider', () => {
 
     mockSystemSettings = { getSettings: jest.fn().mockResolvedValue(smtpSettings()) };
 
+    mockSmtpSecret = { getCiphertext: jest.fn().mockResolvedValue(encryptSecret('smtp-secret')) };
+
     provider = new SmtpEmailProvider(
-      mockSystemSettings as unknown as SystemSettingsService,
+      mockSystemSettings as unknown as AppSystemSettingsService,
+      mockSmtpSecret as unknown as EmailSmtpSecretStore,
     );
   });
 

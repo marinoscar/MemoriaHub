@@ -25,8 +25,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Schema defaults (#340), used only when a setting is missing/garbage. */
 const DEFAULT_RETENTION_COUNT = 7;
@@ -54,7 +54,7 @@ export class DatabaseBackupRetentionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
   ) {}
 
