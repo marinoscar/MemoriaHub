@@ -412,10 +412,11 @@ export class LegacyOpenAiProvider extends LegacyPlatformProvider implements AiPr
     return caps?.capabilities.includes('reasoning') ? { effort: OPENAI_REASONING_EFFORT } : undefined;
   }
 
-  chat(creds: AiProviderCredentials, req: ChatRequest): AsyncIterable<ChatStreamEvent> {
+  // A generator, like the old providers: a mapping failure surfaces on the first iteration.
+  async *chat(creds: AiProviderCredentials, req: ChatRequest): AsyncIterable<ChatStreamEvent> {
     const adapter = this.adapterFor(creds);
     const tools = req.tools && req.tools.length > 0 ? req.tools.map(toFunctionTool) : undefined;
-    return this.streamChat(adapter, creds, {
+    yield* this.streamChat(adapter, creds, {
       model: req.model,
       ...(req.system ? { instructions: req.system } : {}),
       input: toInputItems(req.messages),
@@ -463,7 +464,7 @@ export class LegacyOpenAiProvider extends LegacyPlatformProvider implements AiPr
     });
   }
 
-  analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string> {
+  async analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string> {
     const adapter = this.adapterFor(creds);
     const reasoning = this.reasoningFor(adapter, req.model);
     return this.respondText(adapter, creds, {
@@ -560,9 +561,9 @@ export class LegacyAnthropicProvider extends LegacyPlatformProvider implements A
     return this.adapters.anthropic;
   }
 
-  chat(creds: AiProviderCredentials, req: ChatRequest): AsyncIterable<ChatStreamEvent> {
+  async *chat(creds: AiProviderCredentials, req: ChatRequest): AsyncIterable<ChatStreamEvent> {
     const tools = req.tools && req.tools.length > 0 ? req.tools.map(toFunctionTool) : undefined;
-    return this.streamChat(this.adapters.anthropic, creds, {
+    yield* this.streamChat(this.adapters.anthropic, creds, {
       model: req.model || ANTHROPIC_DEFAULT_MODEL,
       ...(req.system ? { instructions: req.system } : {}),
       input: toInputItems(req.messages),
@@ -590,7 +591,7 @@ export class LegacyAnthropicProvider extends LegacyPlatformProvider implements A
     });
   }
 
-  analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string> {
+  async analyzeImage(creds: AiProviderCredentials, req: AnalyzeImageRequest): Promise<string> {
     return this.respondText(this.adapters.anthropic, creds, {
       model: req.model,
       ...(req.system ? { instructions: req.system } : {}),
