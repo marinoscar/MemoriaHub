@@ -12,14 +12,12 @@
  *   - the three status tabs driving `status`,
  *   - pagination's 1-based page param,
  *   - the two bulk endpoints and their >25 confirmation threshold,
- *   - the circle filter narrowing the list AND scoping `markAllRead`,
- *   - per-row open (circle-switch-then-navigate, same contract as the bell's
- *     NotificationPanel) and per-row dismiss,
+ *   - per-row open (mark read, then follow the link; the link's `?c=` switches
+ *     the circle in the shell, RETRO-D3) and per-row dismiss,
  *   - loading / empty / error states,
  *   - the rendering contract (shared DataTable, no raw TableContainer).
  *
- * `useCircle` and `useNotifications` are mocked directly (same pattern as
- * NotificationPanel.test.tsx) so each scenario can be driven with exact,
+ * `useCircle` and the platform's `useNotifications` are mocked directly so each scenario can be driven with exact,
  * deterministic circle/store fixtures. `useNotificationList` is NOT mocked —
  * its only network dependency, `listNotifications`, is — so the page's own
  * fetch-on-param-change wiring is exercised for real.
@@ -44,13 +42,12 @@ vi.mock('../../../hooks/useCircle', () => ({
   useCircle: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useNotifications', () => ({
+vi.mock('@marinoscar/platform-web/notifications/headless', () => ({
   useNotifications: vi.fn(),
 }));
 
 vi.mock('../../../services/notifications', () => ({
   listNotifications: vi.fn(),
-  dismissAllNotifications: vi.fn(),
 }));
 
 const mockNavigate = vi.fn();
@@ -67,17 +64,14 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 
 import NotificationsPage, { BULK_CONFIRM_THRESHOLD } from '../../../pages/Notifications/NotificationsPage';
-import { circleScopeFromFilters } from '../../../pages/Notifications/notificationsTable';
 import { useCircle } from '../../../hooks/useCircle';
-import { useNotifications } from '../../../hooks/useNotifications';
-import { listNotifications, dismissAllNotifications } from '../../../services/notifications';
+import { useNotifications } from '@marinoscar/platform-web/notifications/headless';
+import { listNotifications } from '../../../services/notifications';
 import { api } from '../../../services/api';
-import type { DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 
 const mockUseCircle = vi.mocked(useCircle);
 const mockUseNotifications = vi.mocked(useNotifications);
 const mockListNotifications = vi.mocked(listNotifications);
-const mockDismissAllNotifications = vi.mocked(dismissAllNotifications);
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -126,24 +120,25 @@ function listResponse(
 const markRead = vi.fn().mockResolvedValue(undefined);
 const dismiss = vi.fn().mockResolvedValue(undefined);
 const markAllRead = vi.fn().mockResolvedValue(undefined);
-const refreshList = vi.fn().mockResolvedValue(undefined);
-const refreshCount = vi.fn().mockResolvedValue(undefined);
+const dismissAll = vi.fn().mockResolvedValue(undefined);
+const refresh = vi.fn().mockResolvedValue(undefined);
 
 function setNotificationsState(
   overrides: { unreadCount?: number } = {},
 ): void {
   mockUseNotifications.mockReturnValue({
+    notifications: [],
     unreadCount: overrides.unreadCount ?? 0,
-    items: [],
     isLoading: false,
-    hasLoadedList: true,
     error: null,
-    refreshList,
-    refreshCount,
+    streamState: 'open',
+    refresh,
     markRead,
-    dismiss,
     markAllRead,
-  });
+    dismiss,
+    dismissAll,
+  } as unknown as ReturnType<typeof useNotifications>);
+
 }
 
 /** setActiveCircle spy shared with the ordering-assertion tests. */
@@ -203,13 +198,6 @@ async function pickOption(
   await user.click(option);
 }
 
-/** Add the Circle filter through the desktop filter row: column, value, Add. */
-async function addCircleFilter(user: ReturnType<typeof userEvent.setup>, circleName: string) {
-  await pickOption(user, 'Column', 'Circle');
-  await pickOption(user, 'Value', circleName);
-  await user.click(screen.getByTestId('datatable-filter-apply'));
-}
-
 // ---------------------------------------------------------------------------
 
 describe('NotificationsPage', () => {
@@ -226,8 +214,7 @@ describe('NotificationsPage', () => {
     setNotificationsState({ unreadCount: 10 });
     setCircleState('circle-1', [makeCircle('circle-1', 'Home Circle')]);
     mockList({ main: [] });
-    mockDismissAllNotifications.mockResolvedValue({ updated: 0 });
-    // The table's layout-persistence hook reads/writes `/user-settings`
+        // The table's layout-persistence hook reads/writes `/user-settings`
     // (docs/specs/datatable.md §15). Stub the real `api` singleton so the page
     // goes through exactly the client it ships with, without a network call.
     vi.spyOn(api, 'get').mockResolvedValue({} as never);
@@ -344,7 +331,7 @@ describe('NotificationsPage', () => {
       await user.click(screen.getByRole('button', { name: 'Mark all as read' }));
 
       await waitFor(() => {
-        expect(markAllRead).toHaveBeenCalledWith(undefined);
+        expect(markAllRead).toHaveBeenCalled();
       });
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
@@ -357,7 +344,7 @@ describe('NotificationsPage', () => {
       await user.click(screen.getByRole('button', { name: 'Dismiss all' }));
 
       await waitFor(() => {
-        expect(mockDismissAllNotifications).toHaveBeenCalledWith(undefined);
+        expect(dismissAll).toHaveBeenCalled();
       });
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
@@ -387,7 +374,7 @@ describe('NotificationsPage', () => {
       await user.click(screen.getByRole('button', { name: 'Mark all as read' }));
 
       await waitFor(() => {
-        expect(markAllRead).toHaveBeenCalledWith(undefined);
+        expect(markAllRead).toHaveBeenCalled();
       });
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
@@ -409,7 +396,7 @@ describe('NotificationsPage', () => {
       await user.click(within(dialog).getByRole('button', { name: 'Mark all as read' }));
 
       await waitFor(() => {
-        expect(markAllRead).toHaveBeenCalledWith(undefined);
+        expect(markAllRead).toHaveBeenCalled();
       });
     });
 
@@ -440,106 +427,12 @@ describe('NotificationsPage', () => {
       expect(
         within(dialog).getByText(`Dismiss ${BULK_CONFIRM_THRESHOLD + 5} notifications?`),
       ).toBeInTheDocument();
-      expect(mockDismissAllNotifications).not.toHaveBeenCalled();
+      expect(dismissAll).not.toHaveBeenCalled();
 
       await user.click(within(dialog).getByRole('button', { name: 'Dismiss all' }));
 
       await waitFor(() => {
-        expect(mockDismissAllNotifications).toHaveBeenCalledWith(undefined);
-      });
-    });
-  });
-
-  // =========================================================================
-  // Circle filter — narrows the list AND scopes markAllRead
-  // =========================================================================
-
-  describe('Circle filter', () => {
-    function twoCircles() {
-      setCircleState('circle-1', [
-        makeCircle('circle-1', 'Home Circle'),
-        makeCircle('circle-2', 'Work Circle'),
-      ]);
-    }
-
-    it('narrows the rendered rows to the selected circle', async () => {
-      twoCircles();
-      mockListNotifications.mockImplementation(async (params) => {
-        if (params?.pageSize === 1) return listResponse([], { totalItems: 0 });
-        if (params?.circleId === 'circle-2') {
-          return listResponse([makeNotification({ id: 'w', title: 'Work item' })]);
-        }
-        return listResponse([
-          makeNotification({ id: 'h', title: 'Home item', circleId: 'circle-1' }),
-          makeNotification({ id: 'w', title: 'Work item', circleId: 'circle-2' }),
-        ]);
-      });
-      const user = userEvent.setup();
-
-      renderPage();
-      expect(await screen.findByText('Home item')).toBeInTheDocument();
-      expect(screen.getByText('Work item')).toBeInTheDocument();
-
-      await addCircleFilter(user, 'Work Circle');
-
-      await waitFor(() => {
-        expect(mockListNotifications).toHaveBeenCalledWith(
-          expect.objectContaining({ circleId: 'circle-2' }),
-        );
-      });
-      await waitFor(() => {
-        expect(screen.queryByText('Home item')).not.toBeInTheDocument();
-      });
-      expect(screen.getByText('Work item')).toBeInTheDocument();
-    });
-
-    it('scopes "Mark all as read" to the filtered circle', async () => {
-      twoCircles();
-      mockListNotifications.mockImplementation(async (params) => {
-        if (params?.pageSize === 1) {
-          return listResponse([], { totalItems: params?.circleId === 'circle-2' ? 4 : 9 });
-        }
-        return listResponse([]);
-      });
-      const user = userEvent.setup();
-
-      renderPage();
-      await addCircleFilter(user, 'Work Circle');
-      await waitFor(() => {
-        expect(mockListNotifications).toHaveBeenCalledWith(
-          expect.objectContaining({ circleId: 'circle-2', pageSize: 25 }),
-        );
-      });
-
-      await user.click(screen.getByRole('button', { name: 'Mark all as read' }));
-
-      await waitFor(() => {
-        expect(markAllRead).toHaveBeenCalledWith('circle-2');
-      });
-    });
-
-    it('scopes "Dismiss all" to the filtered circle', async () => {
-      twoCircles();
-      mockListNotifications.mockImplementation(async (params) => {
-        if (params?.pageSize === 1) {
-          return listResponse([], { totalItems: params?.circleId === 'circle-2' ? 2 : 9 });
-        }
-        return listResponse([]);
-      });
-      const user = userEvent.setup();
-
-      renderPage();
-      await addCircleFilter(user, 'Work Circle');
-      await waitFor(() => {
-        expect(mockListNotifications).toHaveBeenCalledWith(
-          expect.objectContaining({ circleId: 'circle-2', pageSize: 25 }),
-        );
-      });
-
-      await user.click(screen.getByRole('button', { name: 'Dismiss all' }));
-
-      await waitFor(() => {
-        expect(mockDismissAllNotifications).toHaveBeenCalledWith('circle-2');
+        expect(dismissAll).toHaveBeenCalled();
       });
     });
   });
@@ -549,74 +442,36 @@ describe('NotificationsPage', () => {
   // =========================================================================
 
   describe('Opening a notification row', () => {
-    it('switches the active circle BEFORE navigating for a different, known circle', async () => {
-      setCircleState('circle-1', [
-        makeCircle('circle-1', 'Home Circle'),
-        makeCircle('circle-2', 'Work Circle'),
-      ]);
+    it('follows the link (carrying ?c=<circleId>) without switching the circle itself', async () => {
       const item = makeNotification({
         id: 'x',
         title: 'Switch target',
         circleId: 'circle-2',
-        link: '/bursts',
-        readAt: '2026-08-01T00:00:00.000Z', // already read — isolates ordering from markRead
+        link: '/bursts?c=circle-2',
+        readAt: '2026-08-01T00:00:00.000Z',
       });
       mockList({ main: [item] });
-      mockNavigate.mockImplementation((to: string) => {
-        callOrder.push(`navigate:${to}`);
-      });
       const user = userEvent.setup();
 
       renderPage();
       await user.click(await screen.findByText('Switch target'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/bursts');
-      });
-      expect(setActiveCircle).toHaveBeenCalledWith('circle-2');
-      expect(callOrder).toEqual(['setActiveCircle:circle-2', 'navigate:/bursts']);
-    });
-
-    it('does NOT switch circles when the notification circle matches the active circle', async () => {
-      const item = makeNotification({
-        id: 'same',
-        title: 'Same circle target',
-        circleId: 'circle-1',
-        link: '/bursts',
-      });
-      mockList({ main: [item] });
-      const user = userEvent.setup();
-
-      renderPage();
-      await user.click(await screen.findByText('Same circle target'));
-
-      await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/bursts');
+        expect(mockNavigate).toHaveBeenCalledWith('/bursts?c=circle-2');
       });
       expect(setActiveCircle).not.toHaveBeenCalled();
     });
 
-    it('does NOT switch when the notification circle is not in the membership list (membership guard), but still navigates', async () => {
-      setCircleState('circle-1', [
-        makeCircle('circle-1', 'Home Circle'),
-        makeCircle('circle-2', 'Work Circle'),
-      ]);
-      const item = makeNotification({
-        id: 'gone',
-        title: 'Stale circle target',
-        circleId: 'circle-999',
-        link: '/bursts',
-      });
+    it('does not navigate to an external link', async () => {
+      const item = makeNotification({ id: 'ext', title: 'External target', link: 'https://example.test/x' });
       mockList({ main: [item] });
       const user = userEvent.setup();
 
       renderPage();
-      await user.click(await screen.findByText('Stale circle target'));
+      await user.click(await screen.findByText('External target'));
 
-      await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/bursts');
-      });
-      expect(setActiveCircle).not.toHaveBeenCalled();
+      expect(markRead).toHaveBeenCalledWith('ext');
+      expect(mockNavigate).not.toHaveBeenCalled();
     });
 
     it('marks an unread notification read when opened', async () => {
@@ -735,33 +590,3 @@ describe('NotificationsPage', () => {
 // ---------------------------------------------------------------------------
 // Pure filter-model → circle-scope mapping (notificationsTable.ts)
 // ---------------------------------------------------------------------------
-
-describe('circleScopeFromFilters (pure)', () => {
-  it('returns undefined when no circle filter is present', () => {
-    expect(circleScopeFromFilters([])).toBeUndefined();
-  });
-
-  it('returns the circle id for a complete "is" filter', () => {
-    const model: DataTableFilterModel = [
-      { columnId: 'circleId', operator: 'is', value: 'circle-2' },
-    ];
-    expect(circleScopeFromFilters(model)).toBe('circle-2');
-  });
-
-  it('ignores a draft filter with an empty value', () => {
-    const model: DataTableFilterModel = [{ columnId: 'circleId', operator: 'is', value: '' }];
-    expect(circleScopeFromFilters(model)).toBeUndefined();
-  });
-
-  it('ignores an operator this page does not support', () => {
-    const model: DataTableFilterModel = [
-      { columnId: 'circleId', operator: 'isNot', value: 'circle-2' },
-    ];
-    expect(circleScopeFromFilters(model)).toBeUndefined();
-  });
-
-  it('ignores a filter on an unrelated column', () => {
-    const model: DataTableFilterModel = [{ columnId: 'status', operator: 'is', value: 'Read' }];
-    expect(circleScopeFromFilters(model)).toBeUndefined();
-  });
-});

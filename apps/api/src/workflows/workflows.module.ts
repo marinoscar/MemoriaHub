@@ -7,7 +7,7 @@ import { BurstModule } from '../burst/burst.module';
 import { DedupModule } from '../dedup/dedup.module';
 import { LocationInferenceModule } from '../location-inference/location-inference.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { NotificationsModule } from '../notifications/notifications.module';
+import { NotificationProducersModule } from '../notification-producers/notification-producers.module';
 import { WorkflowsController } from './workflows.controller';
 import { WorkflowsService } from './workflows.service';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
@@ -43,9 +43,9 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
  *   - CirclesModule          → CircleMembershipService
  * None of these import WorkflowsModule, so no forwardRef is required.
  *
- * NotificationsModule (epic #240, issue #247) supplies
+ * NotificationProducersModule (epic #240, issue #247; RETRO-D3) supplies
  * WorkflowRunNotificationService to the run handlers that finalize a run
- * (`workflow_run_completed`). NotificationsModule imports NOTHING, so this edge
+ * (`workflows.run_completed`). NotificationProducersModule imports NOTHING, so this edge
  * cannot close a cycle — and note MediaModule imports it too, which is fine:
  * two producers pointing at the same leaf module, not a loop.
  */
@@ -60,7 +60,7 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
     DedupModule,
     LocationInferenceModule,
     EnrichmentModule,
-    NotificationsModule,
+    NotificationProducersModule,
   ],
   controllers: [WorkflowsController, WorkflowRunsController, WorkflowsAdminController],
   providers: [

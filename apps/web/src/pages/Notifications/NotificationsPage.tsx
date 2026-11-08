@@ -1,44 +1,26 @@
 /**
- * Notification Center — `/notifications` (issue #250, epic #240).
+ * Notification Center — `/notifications` (issue #250, epic #240; the platform
+ * notifications slice since RETRO-D3, #576).
  *
- * The full inbox behind the AppBar bell: every notification, paginated,
- * filterable by status (tabs) and by circle (the DataTable filter bar), with
- * the two bulk operations the API offers.
+ * The full inbox behind the AppBar bell: every notification, paginated and
+ * filterable by status (tabs), with the two bulk operations.
  *
- * ## One poller, three surfaces
+ * ## One store, three surfaces
  *
- * The unread badge on the bell (#249), the sidebar entry (#250) and every
- * mutation on this page all go through the SAME module-level store,
- * `useNotifications`. This page adds no timer of its own — it only fetches a
- * page of rows on demand through `useNotificationList`. So a user sitting on
- * this page still issues exactly one background request per minute (the badge
- * count), not two.
+ * The bell, the shell's unread badge and every mutation on this page go
+ * through the platform's `NotificationProvider` (`useNotifications()` from
+ * `@marinoscar/platform-web/notifications/headless`), which also holds the
+ * live stream. This page only fetches a page of rows on demand
+ * (`useNotificationList`, over the platform `GET /api/notifications`) and
+ * re-fetches it silently after each mutation, so rows swap in place.
  *
- * The division of labour, restated because it is easy to break:
+ * ## Opening a row
  *
- *   - `useNotifications` — unread count + mutations (`markRead`, `dismiss`,
- *     `markAllRead`). Every write goes through it so the badge cannot drift.
- *   - `useNotificationList` — this page's `items` + `meta`. Re-fetched
- *     SILENTLY after each mutation so rows swap in place.
- *
- * `dismissAll` is the one write with no store method (the store has no
- * optimistic model for "dismiss rows I have never loaded"), so the page calls
- * the service directly and then reconciles the store with `refreshCount()` +
- * `refreshList()`.
- *
- * ## Circle-switch-then-navigate
- *
- * Identical to `NotificationPanel.handleOpenNotification` (#249) and for the
- * same reason: the review-queue links are circle-AGNOSTIC routes (`/bursts`,
- * `/duplicates`, …) that render whatever circle is active, so tapping a row
- * for a non-active circle must switch the active circle first or the user
- * lands on the right page showing the wrong circle's data. The membership
- * guard is also carried over verbatim — a notification can outlive the user's
- * access to its circle, and persisting an id that resolves to no circle leaves
- * the whole app stuck with no active circle. `circles.length === 0` means "not
- * loaded yet", never "member of nothing". The logic lives in
- * `useOpenNotificationTarget` (`hooks/useNotificationClickHandling.ts`), shared
- * with the bell panel and OS-toast clicks.
+ * A row is marked read and its link followed. A circle's row carries
+ * `?c=<circleId>` in its link, which the shell (`useCircleLinkParam`) turns
+ * into an active-circle switch before the circle-agnostic route (`/bursts`,
+ * `/duplicates`, ...) renders, so a row for another circle never lands on the
+ * wrong circle's data.
  *
  * ## Bulk confirmation
  *
@@ -46,11 +28,12 @@
  * matching the gallery's convention (`BulkActionToolbar`, >25 items). The count
  * is not guessed: the page asks the server for `meta.totalItems` under exactly
  * the scope the bulk call will use, so the dialog states a real number and a
- * no-op is caught before any write.
+ * no-op is caught before any write. Since RETRO-D3 both act on every circle:
+ * the platform list has no scope filter (a documented seam gap).
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -74,17 +57,13 @@ import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableFilterModel, DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
+import { useNotifications } from '@marinoscar/platform-web/notifications/headless';
 import { useCircle } from '../../hooks/useCircle';
-import { useOpenNotificationTarget } from '../../hooks/useNotificationClickHandling';
-import { useNotifications } from '../../hooks/useNotifications';
 import { useNotificationList } from '../../hooks/useNotificationList';
-import { dismissAllNotifications, listNotifications } from '../../services/notifications';
-import {
-  NOTIFICATIONS_TABLE_ID,
-  buildNotificationColumns,
-  circleScopeFromFilters,
-} from './notificationsTable';
+import { listNotifications } from '../../services/notifications';
+import { isInternalLink } from '../../utils/internalLink';
+import { NOTIFICATIONS_TABLE_ID, buildNotificationColumns } from './notificationsTable';
 import type {
   NotificationItem,
   NotificationStatusFilter,
@@ -135,16 +114,11 @@ const EMPTY_STATE_TEXT: Record<NotificationsTab, string> = {
 
 export default function NotificationsPage() {
   const { circles } = useCircle();
-  // Circle-switch-then-navigate, shared with the bell and OS-toast clicks.
-  const openTarget = useOpenNotificationTarget();
-  const {
-    unreadCount,
-    markRead,
-    dismiss,
-    markAllRead,
-    refreshCount,
-    refreshList,
-  } = useNotifications();
+  const navigate = useNavigate();
+  const store = useNotifications();
+  const unreadCount = store?.unreadCount ?? 0;
+  const markRead = useCallback(async (id: string) => store?.markRead(id), [store]);
+  const dismiss = useCallback(async (id: string) => store?.dismiss(id), [store]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<NotificationsTab>(() =>
@@ -152,7 +126,6 @@ export default function NotificationsPage() {
   );
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [filters, setFilters] = useState<DataTableFilterModel>([]);
 
   const [pendingBulk, setPendingBulk] = useState<PendingBulk | null>(null);
   const [busy, setBusy] = useState(false);
@@ -176,18 +149,15 @@ export default function NotificationsPage() {
   // Query
   // -------------------------------------------------------------------------
 
-  const circleScope = useMemo(() => circleScopeFromFilters(filters), [filters]);
-
   const listParams = useMemo(
     () => ({
       // Every tab key IS a valid `status` param value — that is the point of
       // the tuple, and why there is no tab→param lookup table here.
       status: tab satisfies NotificationStatusFilter,
-      circleId: circleScope,
       page: page + 1, // the table is zero-based, the API is one-based
       pageSize,
     }),
-    [tab, circleScope, page, pageSize],
+    [tab, page, pageSize],
   );
 
   const { items, meta, isLoading, error, refresh, reload } =
@@ -213,28 +183,19 @@ export default function NotificationsPage() {
     [circles],
   );
 
-  const circleOptions = useMemo(
-    () => circles.map((c) => ({ value: c.id, label: c.name })),
-    [circles],
-  );
-
   // -------------------------------------------------------------------------
   // Row interactions
   // -------------------------------------------------------------------------
 
-  /**
-   * Open a notification: mark it read, switch the active circle if the row
-   * belongs to another one, then navigate. See the module docblock.
-   */
+  /** Open a notification: mark it read, then follow its link. See the module docblock. */
   const handleOpen = useCallback(
     (notification: NotificationItem) => {
       if (!notification.readAt) {
         void markRead(notification.id).then(() => reload());
       }
-
-      openTarget({ circleId: notification.circleId, link: notification.link });
+      if (isInternalLink(notification.link)) navigate(notification.link);
     },
-    [markRead, reload, openTarget],
+    [markRead, reload, navigate],
   );
 
   const handleMarkRead = useCallback(
@@ -252,8 +213,8 @@ export default function NotificationsPage() {
   );
 
   const columns = useMemo(
-    () => buildNotificationColumns({ circleNames, circleOptions, onOpen: handleOpen }),
-    [circleNames, circleOptions, handleOpen],
+    () => buildNotificationColumns({ circleNames, onOpen: handleOpen }),
+    [circleNames, handleOpen],
   );
 
   const rowActions = useMemo<DataTableRowAction<NotificationItem>[]>(
@@ -299,31 +260,26 @@ export default function NotificationsPage() {
     async (kind: BulkKind): Promise<number> => {
       const result = await listNotifications({
         status: kind === 'read' ? 'unread' : 'all',
-        circleId: circleScope,
         page: 1,
         pageSize: 1,
       });
       return result.meta?.totalItems ?? 0;
     },
-    [circleScope],
+    [],
   );
 
   const runBulk = useCallback(
-    async (kind: BulkKind) => {
+    async (kind: BulkKind, count: number) => {
       try {
+        if (!store) throw new Error('Notifications are unavailable');
+        // The provider owns both writes, so the badge and the bell follow them.
         if (kind === 'read') {
-          // The store owns this write so the badge follows it. `circleScope`
-          // is `undefined` when unfiltered, which the store treats as "every
-          // circle" and lands on an exact 0.
-          await markAllRead(circleScope);
+          await store.markAllRead();
           setSnack({ message: 'All notifications marked as read', severity: 'success' });
         } else {
-          // No store method for dismiss-all — call the service, then reconcile
-          // the store's count and panel rows rather than guessing at them.
-          const result = await dismissAllNotifications(circleScope);
-          await Promise.all([refreshCount(), refreshList()]);
+          await store.dismissAll();
           setSnack({
-            message: `${result.updated} notification${result.updated === 1 ? '' : 's'} dismissed`,
+            message: `${count} notification${count === 1 ? '' : 's'} dismissed`,
             severity: 'success',
           });
         }
@@ -340,7 +296,7 @@ export default function NotificationsPage() {
         });
       }
     },
-    [markAllRead, circleScope, refreshCount, refreshList, reload],
+    [store, reload],
   );
 
   /** Confirm above the threshold, otherwise fire immediately. */
@@ -361,7 +317,7 @@ export default function NotificationsPage() {
           setPendingBulk({ kind, count: affected });
           return;
         }
-        await runBulk(kind);
+        await runBulk(kind, affected);
       } catch (err) {
         setSnack({
           message: err instanceof Error ? err.message : 'Failed to load notifications',
@@ -380,7 +336,7 @@ export default function NotificationsPage() {
     if (!pending) return;
     setBusy(true);
     try {
-      await runBulk(pending.kind);
+      await runBulk(pending.kind, pending.count);
     } finally {
       setBusy(false);
     }
@@ -395,11 +351,6 @@ export default function NotificationsPage() {
     setPage(0);
   }, []);
 
-  const handleFiltersChange = useCallback((next: DataTableFilterModel) => {
-    setFilters(next);
-    setPage(0);
-  }, []);
-
   const handlePaginationChange = useCallback(
     ({ page: nextPage, pageSize: nextPageSize }: { page: number; pageSize: number }) => {
       setPage(nextPageSize !== pageSize ? 0 : nextPage);
@@ -408,9 +359,7 @@ export default function NotificationsPage() {
     [pageSize],
   );
 
-  const scopeLabel = circleScope
-    ? (circleNames.get(circleScope) ?? 'this circle')
-    : 'all circles';
+  const scopeLabel = 'all circles';
 
   // -------------------------------------------------------------------------
   // Render
@@ -437,7 +386,7 @@ export default function NotificationsPage() {
         <Button
           variant="outlined"
           startIcon={<DoneAllIcon />}
-          disabled={busy || (!circleScope && unreadCount === 0)}
+          disabled={busy || unreadCount === 0}
           onClick={() => void requestBulk('read')}
         >
           Mark all as read
@@ -493,8 +442,6 @@ export default function NotificationsPage() {
           onPaginationChange: handlePaginationChange,
           pageSizeOptions: [10, 25, 50, 100],
         }}
-        filters={filters}
-        onFiltersChange={handleFiltersChange}
         rowActions={rowActions}
       />
 

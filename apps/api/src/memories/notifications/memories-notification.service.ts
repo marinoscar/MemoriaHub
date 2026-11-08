@@ -42,21 +42,25 @@
 // job because a notification write failed; every memory it created is already
 // committed and visible in the app.
 //
-// MODULE PLACEMENT. This producer lives in `MemoriesModule`, which imports
-// `NotificationsModule` — an edge pointing INTO notifications, exactly like
-// `MediaModule` and `WorkflowsModule`. `NotificationsModule` still imports
-// NOTHING, which is the load-bearing property that keeps the module graph
-// acyclic (see its header and docs/specs/notifications.md).
+// PLATFORM (RETRO-D3, #576). The write is the platform's COUNTED primitive,
+// `NotificationsService.notifyCounted('memories.ready', ...)` (scope = the
+// circle, a 24-hour window, `increment` = the run's created count); the title
+// is the event's template over `data` (`count`, `circleName`, `topTitle`).
+// The platform module is global, so `MemoriesModule` imports nothing for it.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { MemoryType, NotificationType } from '@prisma/client';
+import { MemoryType } from '@prisma/client';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
+import {
+  MEMORIAHUB_EVENT_KEYS,
+  MEMORIES_READY_WINDOW_MS,
+} from '../../notifications-registry/memoriahub.notifications';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotificationsService } from '../../notifications/notifications.service';
 
-/** Rolling aggregation window for `memories_ready`. See header. */
-export const MEMORIES_READY_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Rolling aggregation window for `memories.ready`. See header. */
+export { MEMORIES_READY_WINDOW_MS };
 
 /** In-app route the bell row opens. */
 export const MEMORIES_READY_LINK = '/memories';
@@ -133,34 +137,16 @@ export class MemoriesNotificationService {
     const topTitle = await this.resolveTopMemoryTitle(input.circleId, input.since);
     const memberIds = circle.members.map((m) => m.userId);
 
-    // One batched preference read instead of one per member — the same
-    // warm-up #246's reconcile does before fanning out across a membership.
-    await this.notifications.primePreferences(memberIds);
-
     for (const userId of memberIds) {
-      await this.notifications.upsertCountedEvent({
+      // Continued activity re-badges the bell: a COUNTED row's increment
+      // clears `readAt` (the platform's rule), the event-type analog of the
+      // review queues' countAtRead re-unread.
+      await this.notifications.notifyCounted(
+        MEMORIAHUB_EVENT_KEYS.memoriesReady,
         userId,
-        circleId: input.circleId,
-        type: NotificationType.memories_ready,
-        // Redundant with the primitive's own `circle_id` column predicate, and
-        // kept anyway: it is the documented partition key for this type, and it
-        // makes the row self-describing for any future consumer reading `data`.
-        // Every matchData key must also appear in `data` below, or the row this
-        // call creates would not be found by the next one.
-        matchData: { circleId: input.circleId },
-        data: { circleId: input.circleId },
-        windowMs: MEMORIES_READY_WINDOW_MS,
-        increment: input.createdCount,
-        link: MEMORIES_READY_LINK,
-        body: topTitle,
-        buildTitle: (count) =>
-          `${count} new ${count === 1 ? 'memory' : 'memories'} in ${circle.name}`,
-        // Continued activity re-badges the bell: a counted row only ever grows
-        // when something genuinely new happened, so the increment IS the
-        // "new activity" signal (the event-type analog of #246's re-unread rule,
-        // minus the countAtRead comparison a STATE row needs).
-        reunreadOnIncrement: true,
-      });
+        { circleId: input.circleId, circleName: circle.name, ...(topTitle ? { topTitle } : {}) },
+        { scopeId: input.circleId, windowMs: MEMORIES_READY_WINDOW_MS, increment: input.createdCount },
+      );
     }
 
     return { recipients: memberIds.length, skipped: false };

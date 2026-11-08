@@ -119,11 +119,19 @@ export default function SystemSettingsPage() {
                 <StorageSettings
                   settings={settings.storage}
                   jobsSettings={settings.jobs}
-                  notificationsSettings={settings.notifications}
+                  // Notification retention is the platform `retention` namespace since RETRO-D3:
+                  // one window for the inbox and the delivery log, as before.
+                  notificationsSettings={{
+                    retentionDays: settings.retention?.notifications?.days,
+                    purgeEnabled: settings.retention?.notifications?.enabled,
+                  }}
                   onSave={(storage) => handleSave('storage', storage)}
                   onSaveJobs={(jobs) => handleSave('jobs', jobs)}
-                  onSaveNotifications={(notifications) =>
-                    handleSave('notifications', notifications)
+                  onSaveNotifications={({ retentionDays, purgeEnabled }) =>
+                    handleSave('retention', {
+                      notifications: { enabled: purgeEnabled, days: retentionDays },
+                      notificationDeliveries: { enabled: purgeEnabled, days: retentionDays },
+                    })
                   }
                   onResetHistory={canWrite ? () => resetJobHistory().then(() => undefined) : undefined}
                   disabled={!canWrite || isSaving}

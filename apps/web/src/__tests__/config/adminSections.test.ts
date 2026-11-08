@@ -90,13 +90,15 @@ describe('adminSections', () => {
     it('appends Broadcasts to Operations, gated on broadcasts:read (issue #488)', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
-      // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry cards.
-      expect(operations.cards.slice(-5).map((card) => card.title)).toEqual([
+      // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry
+      // cards, RETRO-H5 (#609) the Alerts card.
+      expect(operations.cards.slice(-6).map((card) => card.title)).toEqual([
         'Maintenance',
         'About',
         'Telemetry',
         'Telemetry Explorer',
         'Telemetry Dashboard',
+        'Alerts',
       ]);
       expect(broadcasts).toMatchObject({
         title: 'Broadcasts',
@@ -259,6 +261,26 @@ describe('adminSections', () => {
       expect(adminPageTitle('/admin/settings/telemetry')).toBe('Telemetry');
       expect(adminPageTitle('/admin/settings/telemetry/explorer', { telemetry: true })).toBe('Telemetry Explorer');
       expect(adminPageTitle('/admin/settings/telemetry/dashboard', { telemetry: true })).toBe('Telemetry Dashboard');
+    });
+  });
+
+  describe('alerts card (RETRO-H5, #609)', () => {
+    it('appends the packaged card last in Operations, on alerts:read, with no feature gate', () => {
+      const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
+      const last = operations.cards[operations.cards.length - 1];
+      expect([last.title, last.path, last.permission, last.feature]).toEqual([
+        'Alerts',
+        '/admin/settings/alerts',
+        'alerts:read',
+        undefined,
+      ]);
+    });
+
+    it('is visible to an alerts:read holder and hidden otherwise', () => {
+      const titles = (sections: ReturnType<typeof visibleAdminSections>) =>
+        sections.flatMap((section) => section.cards.map((card) => card.title));
+      expect(titles(visibleAdminSections(allowOnly('alerts:read')))).toEqual(['Alerts']);
+      expect(titles(visibleAdminSections(allowOnly('telemetry:read')))).not.toContain('Alerts');
     });
   });
 

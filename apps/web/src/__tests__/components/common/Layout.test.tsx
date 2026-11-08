@@ -27,7 +27,8 @@ vi.mock('../../../components/navigation/NavigationRail', () => ({
 vi.mock('../../../components/navigation/BottomNav', () => ({
   BottomNav: () => <nav data-testid="bottom-nav" />,
 }));
-vi.mock('../../../components/notifications/NotificationPermissionBanner', () => ({
+vi.mock('@marinoscar/platform-web/notifications/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/platform-web/notifications/ui')>()),
   NotificationPermissionBanner: () => <div data-testid="permission-banner" />,
 }));
 vi.mock('../../../components/common/AndroidUpdateBanner', () => ({
@@ -36,7 +37,10 @@ vi.mock('../../../components/common/AndroidUpdateBanner', () => ({
 vi.mock('../../../components/settings/TimezonePrompt', () => ({
   TimezonePrompt: () => <div data-testid="timezone-prompt" />,
 }));
-vi.mock('../../../hooks/usePushSubscriptionSync', () => ({
+vi.mock('@marinoscar/platform-web/notifications/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/platform-web/notifications/headless')>()),
+  // The real provider needs the identity AuthProvider; the shell only wraps with it.
+  NotificationProvider: ({ children }: { children: React.ReactNode }) => children,
   usePushSubscriptionSync: vi.fn(() => ({
     config: null,
     capability: 'unsupported',
@@ -44,12 +48,12 @@ vi.mock('../../../hooks/usePushSubscriptionSync', () => ({
     isRequestingPermission: false,
   })),
 }));
-vi.mock('../../../hooks/useNotificationClickHandling', () => ({
-  useNotificationClickHandling: vi.fn(),
+vi.mock('../../../hooks/useCircleLinkParam', () => ({
+  useCircleLinkParam: vi.fn(),
 }));
 
-import { usePushSubscriptionSync } from '../../../hooks/usePushSubscriptionSync';
-import { useNotificationClickHandling } from '../../../hooks/useNotificationClickHandling';
+import { usePushSubscriptionSync } from '@marinoscar/platform-web/notifications/headless';
+import { useCircleLinkParam } from '../../../hooks/useCircleLinkParam';
 
 function Page() {
   // Inside the shell providers: the refresh context is the real one.
@@ -92,10 +96,10 @@ describe('Layout (packaged ShellLayout binding)', () => {
     expect(main()).toHaveAttribute('data-main-variant', 'padded');
   });
 
-  it('mounts the push sync and notification-click handling once', () => {
+  it('mounts the push sync and the notification-link circle switch', () => {
     renderLayout('/');
     expect(vi.mocked(usePushSubscriptionSync)).toHaveBeenCalled();
-    expect(vi.mocked(useNotificationClickHandling)).toHaveBeenCalled();
+    expect(vi.mocked(useCircleLinkParam)).toHaveBeenCalled();
   });
 
   it('gives a page that asks for it the full-bleed main, without the banners', () => {

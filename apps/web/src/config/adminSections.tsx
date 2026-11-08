@@ -51,6 +51,8 @@ import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
 // RETRO-T2 (#625): the telemetry slice's three cards (data only; no page reaches the main chunk).
 import { telemetryAdminCards } from '@marinoscar/platform-web/telemetry/ui';
+// RETRO-H5 (#609): the alerts slice's card (data only; the page is lazy in App.tsx).
+import { alertsAdminCards } from '@marinoscar/platform-web/alerts/ui';
 // RETRO-H1 (#591): the user-data slice's factory reset card, in the pinned-last Danger Zone group.
 import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
 import { factoryResetSettingsPage } from '@marinoscar/platform-web/user-data/ui';
@@ -316,6 +318,10 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // it is where telemetry is switched on), `telemetry:query` plus `feature: 'telemetry'` for the
       // Explorer and the Dashboard (`config/settingsFeatures.ts` resolves the feature).
       ...telemetryAdminCards,
+      // RETRO-H5 (#609): the packaged Alerts card, appended. `alerts:read` is the exact string every
+      // read route of `/api/admin/alerts` enforces; writes (`alerts:write`) are gated inside the page.
+      // No `feature`: node and queue rules work with telemetry switched off.
+      ...alertsAdminCards,
     ],
   },
   // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to

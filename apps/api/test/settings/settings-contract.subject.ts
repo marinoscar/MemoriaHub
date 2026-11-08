@@ -18,24 +18,17 @@ import {
 } from '@marinoscar/platform-api/settings';
 
 import '../../src/settings/registry';
+// The notification events the notifications namespaces' onWrite hooks resolve (RETRO-D3).
+import '../../src/platform/notifications/notification.manifest';
 import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 import { AppUserSettingsService } from '../../src/platform/settings/app-user-settings.service';
 import { SettingsProfileImagesAdapter } from '../../src/platform/settings/settings-profile-images.adapter';
-import { NotificationsService } from '../../src/notifications/notifications.service';
-import { NotificationPolicyService } from '../../src/notifications/notification-policy.service';
 import { UserTimeZoneService } from '../../src/settings/user-timezone.service';
 import { createFakeSettingsDb, type FakeSettingsDb } from './settings-contract.fake-prisma';
 
 export interface SettingsHarness {
   db: FakeSettingsDb;
-  notifications: {
-    dismissTypesForUser: jest.Mock;
-    dismissTypesGlobally: jest.Mock;
-    invalidatePreferences: jest.Mock;
-    invalidateAllUnreadCounts: jest.Mock;
-  };
   timeZone: { invalidate: jest.Mock };
-  policy: { invalidate: jest.Mock };
   system: {
     /** Seed the `global` row with `value` (default: the stored defaults). */
     seed(value: Record<string, unknown>): void;
@@ -61,14 +54,7 @@ export interface SettingsHarness {
 
 export async function buildSettingsHarness(): Promise<SettingsHarness> {
   const db = createFakeSettingsDb();
-  const notifications = {
-    dismissTypesForUser: jest.fn().mockResolvedValue(0),
-    dismissTypesGlobally: jest.fn().mockResolvedValue(0),
-    invalidatePreferences: jest.fn(),
-    invalidateAllUnreadCounts: jest.fn(),
-  };
   const timeZone = { invalidate: jest.fn() };
-  const policy = { invalidate: jest.fn() };
 
   const module = await Test.createTestingModule({
     providers: [
@@ -79,8 +65,6 @@ export async function buildSettingsHarness(): Promise<SettingsHarness> {
       { provide: SETTINGS_OPTIONS, useValue: { systemRowKey: 'global', orgLayer: 'auto', imports: [] } },
       { provide: PrincipalCache, useValue: { invalidate: jest.fn() } },
       { provide: SETTINGS_PROFILE_IMAGES, useClass: SettingsProfileImagesAdapter },
-      { provide: NotificationsService, useValue: notifications },
-      { provide: NotificationPolicyService, useValue: policy },
       { provide: UserTimeZoneService, useValue: timeZone },
     ],
   }).compile();
@@ -92,9 +76,7 @@ export async function buildSettingsHarness(): Promise<SettingsHarness> {
 
   return {
     db,
-    notifications,
     timeZone,
-    policy,
     system: {
       seed: (value) => {
         db.system.set('global', { id: 'sys-0', key: 'global', value, version: 1, updatedAt: new Date(), updatedByUserId: null });

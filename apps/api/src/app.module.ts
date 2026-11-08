@@ -33,9 +33,8 @@ import { SocialMediaModule } from './social-media/social-media.module';
 import { EnhancementModule } from './enhancement/enhancement.module';
 import { NodesModule } from './nodes/nodes.module';
 import { WorkflowsModule } from './workflows/workflows.module';
-import { NotificationsModule } from './notifications/notifications.module';
-import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
-import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
+import { BroadcastsModule, notificationsModule } from './platform/notifications/notifications.config';
+import { NotificationReconcileModule } from './notification-producers/notification-reconcile.module';
 import { MemoriesModule } from './memories/memories.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
@@ -54,6 +53,7 @@ import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
+import { alertsModules } from './platform/alerts/alerts.config';
 import { userDataModule } from './platform/user-data/user-data.config';
 
 import configuration from './config/configuration';
@@ -142,7 +142,7 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // The platform email slice (RETRO-D2): transports, the `email` settings row and
     // `/api/email-settings`, the template registry (with this app's three templates,
     // registered by `app-registrations/email.ts`) and the Doctor check `email.config`.
-    // Senders import `AppEmailModule`, which re-exports this same object.
+    // Sends go through the notifications slice's email channel (RETRO-D3).
     emailModule,
     StorageSettingsModule,
     ShareModule,
@@ -150,9 +150,13 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     EnhancementModule,
     NodesModule,
     WorkflowsModule,
-    NotificationsModule,
-    NotificationsReconcileModule,
+    // The platform notifications slice (RETRO-D3, #576): the inbox, the SSE
+    // stream, Web Push, the policy and preferences, broadcasts and the delivery
+    // log. MemoriaHub's events are `platform/notifications/notification.manifest.ts`;
+    // its producers are `notification-producers/`.
+    notificationsModule,
     BroadcastsModule,
+    NotificationReconcileModule,
     MemoriesModule,
     // Database backup and restore (RETRO-D4, #580): @marinoscar/platform-api/db-backup, with
     // MemoriaHub's restore gate, carry-over and legacy prefix (app-registrations/db-backup.ts).
@@ -163,6 +167,11 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
     // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.
     telemetryModule,
+    // Alerts (RETRO-H5, #609): @marinoscar/platform-api/alerts. Rules over telemetry
+    // metrics, worker-node events and fleet health, incidents and their notifications
+    // (`/api/admin/alerts`, `alerts:read|write`), plus MemoriaHub's default rules
+    // and its two kinds. Binding: `platform/alerts/alerts.config.ts`.
+    ...alertsModules,
     // User data (RETRO-H1, #591): @marinoscar/platform-api/user-data. The Danger Zone
     // (`/api/user-data/*`), the admin factory reset and offboarding, with MemoriaHub's
     // keep-or-delete decisions, delegated purges and reset steps (platform/user-data/).

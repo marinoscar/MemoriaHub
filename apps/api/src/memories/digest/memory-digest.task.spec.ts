@@ -24,7 +24,8 @@ import {
 } from './memory-digest.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AppEmailSender, isEmailConfigured } from '../../platform/email/app-email.sender';
+import { EmailSettingsService } from '@marinoscar/platform-api/email';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
@@ -97,17 +98,15 @@ describe('MemoryDigestTask', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EnrichmentJobService, useValue: enrichment },
         { provide: AppSystemSettingsService, useValue: settings },
-        // `sendEmail` is never reached by these tests. Readiness is derived from the
+        // The dispatcher is never reached by these tests. Readiness is derived from the
         // fixture's `email` key, which stands in for the platform `email` row (RETRO-D2).
+        { provide: NotificationsService, useValue: { notifyNow: jest.fn() } },
         {
-          provide: AppEmailSender,
+          provide: EmailSettingsService,
           useValue: {
-            sendEmail: jest.fn(),
             // Read the settings the sweep just loaded, without a second getSettings call
             // (the overlap-guard test counts them).
-            isConfigured: jest.fn(async () =>
-              isEmailConfigured((await settings.getSettings.mock.results.at(-1)?.value)?.email ?? {}),
-            ),
+            get: jest.fn(async () => (await settings.getSettings.mock.results.at(-1)?.value)?.email ?? {}),
           },
         },
         { provide: MediaThumbnailService, useValue: { extractThumbKey: jest.fn() } },

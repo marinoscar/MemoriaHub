@@ -1,17 +1,22 @@
 // ---------------------------------------------------------------------------
-// Notification Center (epic #240) — client types.
+// Notifications: client types (platform notifications slice since RETRO-D3, #576).
 //
-// Mirrors the API's `notificationItemSchema` / `notificationListSchema`
-// (apps/api/src/notifications/dto/notification-response.dto.ts). All date-ish
-// fields are `string` because JSON transports ISO 8601.
+// The bell, the stream, Web Push and the preference matrix are
+// `@marinoscar/platform-web/notifications`; this file keeps what the app's own
+// inbox page (`/notifications`) and its icons need. The wire item is the
+// platform's `AppNotification` (`eventKey`, `scopeId`, `count`, ...);
+// `services/notifications.ts` maps it to `NotificationItem`.
 // ---------------------------------------------------------------------------
 
+export type {
+  NotificationPreferences,
+  NotificationPreferencesPatch,
+} from '@marinoscar/platform-web/notifications/headless';
+
 /**
- * The producer that created a notification row.
- *
- * Kept as a closed union PLUS a `(string & {})` escape hatch so a row produced
- * by a newer API than this bundle still type-checks and renders with the
- * fallback icon rather than crashing the panel.
+ * The pre-platform notification type: still the key of the icon and label
+ * table (`components/notifications/notificationMeta.tsx`). A `(string & {})`
+ * escape hatch keeps an unknown event renderable with the fallback icon.
  */
 export type NotificationType =
   | 'review_queue_bursts'
@@ -23,32 +28,43 @@ export type NotificationType =
   | 'workflow_run_completed'
   | 'share_expiring'
   | 'memories_ready'
-  // Admin broadcasts (issue #488). Inbox rows with `circleId: null` and
-  // `data: { broadcastId, ctaLabel, critical }`. The critical variant is
-  // MANDATORY: its inbox row ignores every preference (only push can be muted).
   | 'admin_broadcast'
   | 'admin_broadcast_critical';
 
-/** One notification row. */
+/**
+ * The platform event key of each MemoriaHub notification (PERMANENT, the
+ * API's `notifications-registry/memoriahub.notifications.ts`), mapped back to
+ * the icon table's key.
+ */
+export const EVENT_KEY_TO_NOTIFICATION_TYPE: Readonly<Record<string, NotificationType>> = {
+  'review.bursts': 'review_queue_bursts',
+  'review.duplicates': 'review_queue_duplicates',
+  'review.location_suggestions': 'review_queue_location_suggestions',
+  'review.enhancements': 'review_queue_enhancements',
+  'media.upload_completed': 'upload_completed',
+  'media.enrichment_failed': 'enrichment_failed',
+  'workflows.run_completed': 'workflow_run_completed',
+  'shares.expiring': 'share_expiring',
+  'memories.ready': 'memories_ready',
+  'admin.broadcast': 'admin_broadcast',
+  'admin.broadcast_critical': 'admin_broadcast_critical',
+};
+
+/** One inbox row, as the inbox page renders it. */
 export interface NotificationItem {
   id: string;
-  /**
-   * Circle the notification belongs to, or `null` for a global (circle-less)
-   * row such as `enrichment_failed` / `share_expiring`.
-   *
-   * When non-null, a client MUST switch the active circle to this id before
-   * following `link` — the review-queue links are deliberately circle-agnostic
-   * routes (`/bursts`, `/duplicates`, …) that render whatever circle is
-   * currently active. See `NotificationPanel.handleOpen`.
-   */
-  circleId: string | null;
+  /** The platform event key (`review.duplicates`, `db_backup.backup_failed`, ...). */
+  eventKey: string;
+  /** The icon-table key: the MemoriaHub type, else the event key itself. */
   type: NotificationType | (string & {});
+  /** The row's circle (the platform `scopeId`), or `null` for a deployment-wide row. */
+  circleId: string | null;
   title: string;
   body: string | null;
-  /** Same-origin app path to navigate to, or `null` for an informational row. */
+  /** Same-origin app path (it carries `?c=<circleId>` for a circle's row), or `null`. */
   link: string | null;
-  /** Free-form producer payload; `{ count, countAtRead? }` for review-queue rows. */
-  data: unknown;
+  /** `{ count }` for a folded (STATE or COUNTED) row, else `null`. */
+  data: { count: number } | null;
   readAt: string | null;
   dismissedAt: string | null;
   createdAt: string;
@@ -60,7 +76,6 @@ export type NotificationStatusFilter = 'unread' | 'read' | 'all' | 'dismissed';
 
 export interface NotificationListParams {
   status?: NotificationStatusFilter;
-  circleId?: string;
   page?: number;
   pageSize?: number;
 }
@@ -72,170 +87,16 @@ export interface NotificationListMeta {
   totalPages: number;
 }
 
-/**
- * Payload of `GET /api/notifications` AFTER the api client unwraps the global
- * TransformInterceptor's `{ data: … }` envelope — so pagination meta lives at
- * the top level here, not under a second `data`.
- */
 export interface NotificationListResponse {
   items: NotificationItem[];
   meta: NotificationListMeta;
 }
 
-/** Payload of the two bulk endpoints. */
-export interface NotificationBulkResult {
-  updated: number;
-}
-
-// ---------------------------------------------------------------------------
-// Per-type notification preferences (issue #251)
-//
-// Mirrors the API's `notificationPreferencesSchema` /
-// `notificationPreferencesPatchSchema` (apps/api/src/common/schemas/
-// settings.schema.ts). Lives inside `user_settings` — read/written ONLY through
-// GET/PATCH/PUT /api/user-settings, there is no notifications-settings
-// endpoint.
-//
-// ABSENT MEANS ENABLED. Every field is optional and the API never materializes
-// one: an absent namespace, an absent `enabled`, or an absent per-type key all
-// resolve to "on". That is what makes a NotificationType added in a later
-// release opt-OUT rather than silently opt-in for anyone who ever saved a
-// preference, so the client must never write a fully-populated object.
-//
-// ONE inversion: `workflowMicroRuns` absent means OFF (see #247).
-// ---------------------------------------------------------------------------
-
-/** The `notifications` namespace as stored and as returned by GET. */
-export interface NotificationPreferences {
-  /** Master switch. Absent === true. */
-  enabled?: boolean;
-  /** Per-type overrides. A type absent from this map is ENABLED. */
-  types?: Partial<Record<NotificationType, boolean>>;
-  /** Opt-in for `on_media_enriched` workflow micro-runs. Absent === false. */
+/**
+ * MemoriaHub's one notification preference without a platform equivalent
+ * (the `memoriahubNotifications` user namespace): opt into the rolling
+ * `on_media_enriched` workflow micro-run notifications. ABSENT MEANS FALSE.
+ */
+export interface MemoriaHubNotificationPreferences {
   workflowMicroRuns?: boolean;
-  /**
-   * Web Push channel preferences (issue #486). Same absent-means-enabled rule:
-   * an absent `push`, `push.enabled` or `push.types` key is ON. Independent of
-   * the inbox switches above, which still gate push (a type with no inbox row
-   * has nothing to push).
-   */
-  push?: NotificationPushPreferences;
-}
-
-/** The `notifications.push` sub-namespace. */
-export interface NotificationPushPreferences {
-  /** Push master switch for this account. Absent === true. */
-  enabled?: boolean;
-  /** Per-type push overrides. A type absent from this map is ENABLED. */
-  types?: Partial<Record<NotificationType, boolean>>;
-}
-
-/**
- * The `notifications` namespace as accepted by PATCH.
- *
- * Identical to the stored shape except a per-type entry may be `null`, which
- * DELETES that key (JSON Merge Patch) and thereby resets the type to its
- * default rather than pinning it to `true`. That distinction is what keeps the
- * stored blob minimal: re-enabling a type removes the override instead of
- * accumulating one.
- */
-export interface NotificationPreferencesPatch {
-  enabled?: boolean;
-  types?: Partial<Record<NotificationType, boolean | null>>;
-  workflowMicroRuns?: boolean;
-  /**
-   * `null` clears the whole push sub-namespace back to defaults; `null` on
-   * `push.enabled` or a `push.types` key deletes that key (back to enabled).
-   */
-  push?: {
-    enabled?: boolean | null;
-    types?: Partial<Record<NotificationType, boolean | null>>;
-  } | null;
-}
-
-// ---------------------------------------------------------------------------
-// Live notification stream (issue #485, epic #481)
-//
-// Mirrors the payload of one `event: notification` frame on
-// `GET /api/notifications/stream`
-// (apps/api/src/notifications/notification-stream.service.ts).
-// ---------------------------------------------------------------------------
-
-/**
- * One parsed `notification` frame.
- *
- * `notification` is the stored row's own shape, so it can be dropped straight
- * into the panel list. `toast` and `pushed` are instructions about THIS live
- * delivery, not properties of the row, which is why they sit beside it rather
- * than on it.
- */
-export type NotificationStreamEvent =
-  | {
-      type: 'notification';
-      notification: NotificationItem;
-      /**
-       * May the page raise an OS notification for this arrival? Server-computed
-       * from the admin policy and the user's preferences. `false` never means
-       * "suppressed" — the row exists and the bell still updates.
-       */
-      toast: boolean;
-      /**
-       * Is the same notification also going to this user over Web Push? When it
-       * is AND this browser holds an active push subscription, the service
-       * worker already shows it, so the page must not raise a second toast.
-       */
-      pushed: boolean;
-      /**
-       * The user's unread badge count AFTER this write, when the server could
-       * read it. Authoritative: when present the client uses it instead of a
-       * reconciling count request.
-       */
-      unreadCount?: number;
-      /**
-       * Why the frame was published: `created` (a new row), `reunread` (a read
-       * row became unread again — a review queue grew past what the user saw)
-       * or `incremented` (a counted row grew while still unread).
-       */
-      reason: 'created' | 'reunread' | 'incremented' | (string & {}) | null;
-    }
-  | {
-      /** "Something changed that a single row cannot describe — re-read." */
-      type: 'sync';
-    };
-
-/**
- * `GET /api/notifications/config` — what this deployment lets a client do with
- * browser notifications (epic #481). Authentication only; exposes the VAPID
- * PUBLIC key and nothing secret.
- */
-export interface NotificationClientConfig {
-  /** Web Push is configured AND the admin kill switch is on. */
-  pushEnabled: boolean;
-  /** The `applicationServerKey` for `pushManager.subscribe`; null when push is off. */
-  vapidPublicKey: string | null;
-  /** May the page raise browser toasts at all? (admin kill switch) */
-  browserEnabled: boolean;
-  /** Types the admin policy lets travel by push — the per-type push toggles offered. */
-  pushTypes: NotificationType[];
-}
-
-// ---------------------------------------------------------------------------
-// Web Push subscriptions (issue #486, epic #481)
-// ---------------------------------------------------------------------------
-
-/**
- * Body of `POST /api/notifications/push/subscriptions` — the browser's
- * `PushSubscription.toJSON()`, passed through unchanged. No user id: the owner
- * is always the authenticated caller.
- */
-export interface PushSubscriptionPayload {
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-  expirationTime?: number | null;
-}
-
-export interface PushSubscriptionResponse {
-  id: string;
-  endpoint: string;
-  createdAt: string;
 }

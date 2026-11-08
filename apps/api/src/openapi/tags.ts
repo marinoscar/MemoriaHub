@@ -393,7 +393,7 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
         description: 'Transactional email provider (SES or SMTP), masked credentials, and test sends.',
       },
       {
-        name: 'Push Settings',
+        name: 'Push Configuration',
         description:
           'Web Push (VAPID) key pair: generate, rotate, enable/disable, remove, and a diagnostic ' +
           "test send to the caller's own devices. The private key is never returned.",
@@ -446,6 +446,14 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'The platform telemetry slice (RETRO-T2): the `telemetry` policy and runtime export gate, the ' +
           'GreptimeDB connection, the read-only SQL explorer, schema and export, the dashboard and the ' +
           'assistant (`/api/admin/telemetry/*`, `GET /api/telemetry/config`). Guarded by `telemetry:*`.',
+      },
+      {
+        name: 'Alerts',
+        description:
+          'The platform alerts slice (RETRO-H5): alert rules over telemetry metrics, worker-node events, fleet ' +
+          'health and MemoriaHub\'s queue and backup kinds, their dry-run test, incidents (pending, firing, ' +
+          'resolved; acknowledging one does not resolve it) and the firing summary (`/api/admin/alerts`). ' +
+          'Guarded by `alerts:read` / `alerts:write`.',
       },
       {
         name: 'Admin: Storage Insights',
