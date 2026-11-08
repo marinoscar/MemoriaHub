@@ -325,12 +325,14 @@ A successful `hard_delete` cascade-deletes the `MediaItem`, which cascade-delete
 - `POST /api/workflow-runs/:id/approve` (`WorkflowRunService.approveRun`): flips up to 500 `excludedItemIds` from `matched` → `excluded`; if the definition contains `hard_delete`, requires `body.confirmation === "DELETE {matchedCount}"` (the exact matched count shown at preview time — a typo-proofed, count-bound confirmation, not a generic "yes"); re-runs `checkGatedActionPermissions` (feature flags + system perms + both-circle checks) at approval time, not just at create time, since time may have passed and permissions may have changed; then transitions `running` and calls `enqueueExecuteBatches`.
 - `POST /api/workflow-runs/:id/cancel` (circle collaborator) / `POST /api/admin/workflow-runs/:id/cancel` (Admin, app-wide, no circle-membership check) both set `status: cancelled, finishedAt: now()` on any non-terminal run; in-flight `workflow_execute_batch` jobs detect this at their next periodic check (§7.4 step 6) and stop.
 
-### 7.6 Retention (`workflow_history_purge`)
+### 7.6 Retention (`workflow_history_purge`, the `retention.workflowRuns` policy)
 
-`WorkflowHistoryPurgeTask` (`@Cron` nightly at midnight, mirrors `JobHistoryPurgeTask`) enqueues a global `workflow_history_purge` job when none is already pending/running. `WorkflowHistoryPurgeHandler` does two things every run:
+Since RETRO-C7 (#604) run history is a **platform retention policy**, `retention.workflowRuns` (`apps/api/src/workflows/runs/workflow-runs.retention.ts`, registered in `app-registrations/jobs.ts`): 30 days, **on** by default, 1–365, edited with the platform's other retention windows (`PATCH /api/system-settings` `{ retention: { workflowRuns: { enabled, days } } }`). The platform's `RetentionPurgeTask` (01:00) enqueues the purge while the policy is enabled; the purge keeps the permanent type string `workflow_history_purge`, so rows of it from before the cutover still dispatch. `WorkflowRunsRetentionHandler` (`workflow-runs-retention.handler.ts`, profile 30 min / 3 attempts) does two things every run:
 
-1. **Expires stale approvals** — `awaiting_approval` runs whose `updatedAt` is older than `workflows.previewTtlHours` become `expired`.
-2. **Deletes terminal runs** older than `workflows.runHistoryRetentionDays`, batched at 5,000 rows per delete (`workflow_run_items` cascade via FK) — the same lock-safe batching pattern as `job_history_purge`.
+1. **Expires stale approvals** — `awaiting_approval` runs whose `updatedAt` is older than `workflows.previewTtlHours` become `expired`. This runs whatever the retention switch says (it is the run lifecycle, not history), but only when the job runs, i.e. while the policy is enabled.
+2. **Deletes terminal runs** older than `retention.workflowRuns.days` through the platform's `runRetentionPolicyPurge` (5,000 ids per batch, `workflow_run_items` cascade via FK); a logged no-op while the policy is disabled.
+
+`workflows.runHistoryRetentionDays` is no longer read. `npm run settings:migrate-run-retention --workspace=api [-- --apply]` copies an operator's value into `retention.workflowRuns` (only while that entry is absent; idempotent); the old key stays until RETRO-C11.
 
 ---
 
@@ -431,6 +433,8 @@ Per §7.2 and §10.1: `hard_delete` is unconditionally rejected on `scheduled`/`
 ## 11. Node Execution (Compute/Persist Split)
 
 ### 11.1 Why `workflow_execute_batch` is node-eligible but the other three types are not
+
+All four are native platform `JobHandler`s since RETRO-C7 (#604), with execution profiles: `workflow_evaluate` 15 min, `workflow_evaluate_item` 1 min, `workflow_execute_batch` 10 min (three attempts each), `workflow_history_purge` 30 min. `workflow_evaluate` and `workflow_execute_batch` declare `canDelete`: `DELETE /api/admin/jobs/:id` refuses (409) a pending job of a run that is still `evaluating` / `running`, since it is the only thing that would move the run on (cancel the run instead).
 
 `workflow_evaluate`, `workflow_evaluate_item`, and `workflow_history_purge` are pure SQL sweeps over the whole media table (or a single-row lookup against live definitions) with no per-item unit of work a node could meaningfully claim — the same precedent as the `location_inference` sweep and `thumbnail_repair`. They stay **server-only**: no `nodeResultSchema`/`persistNodeResult` pair, absent from the CLI's `NODE_JOB_TYPES`.
 
@@ -574,7 +578,7 @@ The entire `workflows.*` schema and its defaults shipped in Phase 1 (#139) so ev
 | `workflows.allowHardDelete` | boolean | **false** | Unlocks `hard_delete` app-wide (§10.1); still needs `media:delete` + manual trigger + typed confirmation |
 | `workflows.maxWorkflowsPerCircle` | int, 1–100 | 20 | Enforced at `POST /api/workflows` |
 | `workflows.previewTtlHours` | int, 1–168 | 24 | `awaiting_approval` runs older than this expire (§7.6) |
-| `workflows.runHistoryRetentionDays` | int, 1–365 | 30 | Terminal run/item retention (§7.6) |
+| `workflows.runHistoryRetentionDays` | int, 1–365 | 30 | **No longer read** (RETRO-C7): replaced by `retention.workflowRuns` (§7.6); removed in RETRO-C11 |
 | `workflows.triggers.onEnrichment` | boolean | true | Master switch for `on_media_enriched` (§9.3) |
 | `workflows.triggers.scheduled` | boolean | true | Master switch for `scheduled` (§9.2) |
 | `workflows.scheduleMinIntervalMinutes` | int, 60–10,080 | 60 | Tightest allowed cron cadence (§9.2) |
@@ -601,7 +605,7 @@ A sub-page in the Settings hub's Operations group, mirroring the bursts/duplicat
 
 ### 16.3 Job queue integration
 
-All four workflow job types appear automatically in `/admin/settings/jobs`'s by-type stats, filters, and `/admin/settings/jobs/insights` duration/ETA breakdowns, with friendly labels (`apps/api/src/enrichment/job-type-labels.ts`): `workflow_evaluate` → "Workflow evaluate", `workflow_evaluate_item` → "Workflow evaluate (item)", `workflow_execute_batch` → "Workflow execute batch", `workflow_history_purge` → "Workflow history purge".
+All four workflow job types appear automatically in `/admin/settings/jobs`'s by-type stats, filters, and `/admin/settings/jobs/insights` duration/ETA breakdowns, with friendly labels (each handler's own `label`): `workflow_evaluate` → "Workflow evaluate", `workflow_evaluate_item` → "Workflow evaluate (item)", `workflow_execute_batch` → "Workflow execute batch", `workflow_history_purge` → "Workflow run history purge".
 
 ### 16.4 Tracing and logging
 
