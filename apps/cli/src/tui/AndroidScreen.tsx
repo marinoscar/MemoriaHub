@@ -20,7 +20,7 @@
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
@@ -46,7 +46,6 @@ import {
   type ScreenEvent,
   type ScreenState,
 } from './android-model.js';
-import { BOX_BORDER } from './theme.js';
 
 export interface AndroidScreenProps {
   onBack: () => void;
@@ -66,7 +65,7 @@ export function androidArgv(args: readonly string[]): { cmd: string; args: strin
 function Frame({ title, hints, children }: { title: string; hints: string; children?: React.ReactNode }): React.ReactElement {
   return (
     <Box flexDirection="column">
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Text bold color="cyan">{title}</Text>
         {children}
       </Box>

@@ -1,29 +1,39 @@
 /**
- * tui/node-dashboard-source.ts — shared state model + data sources for the
- * worker-node TUI dashboard (NodeDashboard.tsx).
+ * tui/node-dashboard-source.ts — the worker-node dashboard as a platform
+ * dashboard (RETRO-F4, #582): the shared state model, a pure reducer and the two
+ * feeds NodeDashboard.tsx follows.
  *
- * The dashboard can render from two different places:
+ * The dashboard can render from two different places, now two `DashboardFeed`s
+ * behind one `DashboardSource` (`@marinoscar/platform-cli/tui`):
  *   - ATTACHED: a `memoriahub node start --daemon` process is already running;
- *     we connect to its NDJSON IPC socket (node/ipc-client.ts), hydrate from
- *     the `snapshot` greeting frame, and translate live `{kind:'event'}`
- *     frames into state updates.
+ *     the platform's `daemonAttachFeed` connects to its NDJSON IPC socket through
+ *     the 1.3 protocol adapter (legacy-daemon.ts), hydrates from the `snapshot`
+ *     greeting, appends the log tail and applies live event frames. It
+ *     reconnects by itself when the daemon restarts (the memory valve restarts a
+ *     worker). Detaching only closes the socket: the daemon keeps running.
  *   - EMBEDDED: no daemon is running; the dashboard owns an in-process
- *     NodeEngine (current historical behavior) and consumes its typed events
- *     directly.
+ *     NodeEngine and `embeddedNodeFeed` follows its typed events.
  *
- * Both feed the SAME pure reducer (reduceNodeEvent) over one DashboardState,
- * so the React component has exactly one update path regardless of where the
- * events come from. The reducer is a plain function (state, ev, payload, now)
- * → state, which keeps it unit-testable without Ink or sockets.
+ * Both feed the SAME pure reducer (`nodeDashboardReducer`, over reduceNodeEvent)
+ * over one DashboardState, so the React component has exactly one update path
+ * regardless of where the events come from. The reducer is a plain function, which
+ * keeps it unit-testable without Ink or sockets.
+ *
+ * Commands (drain, stop) are not part of an attach feed: `daemonControl` sends them
+ * over a short-lived second connection, `engineControl` calls the in-process engine.
  */
 
 import {
-  connectToDaemon,
-  type DaemonClient,
-  type DaemonMessage,
-} from '../node/ipc-client.js';
+  DashboardSource,
+  daemonAttachFeed,
+  type DashboardFeed,
+  type DashboardReducer,
+} from '@marinoscar/platform-cli/tui';
+
+import { nodeSocketPath } from '../paths.js';
 import { NODE_EV } from '../node/node-events.js';
 import type { NodeEngine } from '../node/node-engine.js';
+import { legacyDaemonConnect, parseLegacyEvent, sendDaemonCommand } from './legacy-daemon.js';
 
 // ---------------------------------------------------------------------------
 // State model
@@ -101,7 +111,8 @@ export interface DaemonSnapshot {
 
 let logSeq = 0;
 
-function makeLogEntry(level: DashLogLevel, msg: string, atMs: number): DashLogEntry {
+/** A log line stamped with the next sequence id (ids order lines from several writers). */
+export function makeLogEntry(level: DashLogLevel, msg: string, atMs: number): DashLogEntry {
   return { id: ++logSeq, ts: new Date(atMs), level, msg };
 }
 
@@ -357,209 +368,116 @@ export function reduceNodeEvent(
 }
 
 // ---------------------------------------------------------------------------
-// DashboardSource — one interface, two implementations
+// Platform dashboard pieces: reducer, feeds, controls
 // ---------------------------------------------------------------------------
 
-export type DashboardSourceMode = 'attached' | 'embedded';
-
-export interface DashboardSource {
-  readonly mode: DashboardSourceMode;
-  /** Attached: the greeting snapshot. Embedded: null (state starts empty). */
-  readonly snapshot: DaemonSnapshot | null;
-  /** Attached: recent daemon log lines from the greeting. Embedded: empty. */
-  readonly logTail: string[];
-  /** Subscribe to engine events. Events buffered before subscribe are flushed. */
-  onEvent(cb: (ev: string, payload: unknown) => void): void;
-  /** Subscribe to source loss (attached: socket close). Embedded: never fires. */
-  onDisconnect(cb: () => void): void;
-  setConcurrency(n: number): void;
-  /** Stop claiming, finish in-flight work (daemon/engine keeps running). */
-  drain(): void;
-  /** Fully stop: attached sends {cmd:'stop'} (daemon exits); embedded stops the engine. */
-  stop(): void;
-  /**
-   * Detach the dashboard. Attached: ONLY closes the socket — the daemon keeps
-   * running. Embedded: stops the in-process engine (nothing must outlive the UI).
-   */
-  close(): void;
+/** One engine event as the reducer folds it; `atMs` is when the dashboard saw it. */
+export interface NodeDashEvent {
+  ev: string;
+  payload: unknown;
+  atMs: number;
 }
 
-// ---- Attached --------------------------------------------------------------
+export type NodeDashboardSource = DashboardSource<DashboardState, NodeDashEvent>;
 
-class AttachedDashboardSource implements DashboardSource {
-  readonly mode = 'attached' as const;
-  readonly snapshot: DaemonSnapshot;
-  readonly logTail: string[] = [];
+/**
+ * The pure reducer behind the dashboard: `initial` is the empty state for the configured
+ * concurrency and types, `hydrate` takes the daemon's snapshot, `reduce` is {@link reduceNodeEvent},
+ * `log` appends the daemon's log tail (as the 1.3 dashboard did, at `info`).
+ */
+export function nodeDashboardReducer(
+  concurrency: number,
+  eligibleTypes?: string[],
+): DashboardReducer<DashboardState, NodeDashEvent> {
+  return {
+    initial: () => initialDashboardState(concurrency, eligibleTypes),
+    hydrate: (state, snapshot) =>
+      hydrateFromSnapshot(state, parseSnapshotFrame((snapshot ?? {}) as Record<string, unknown>)),
+    reduce: (state, event) => reduceNodeEvent(state, event.ev, event.payload, event.atMs),
+    log: (state, lines) => appendLogLines(state, lines.map((l) => ({ level: 'info' as const, msg: l.msg }))),
+    parseEvent: (frame) => {
+      const parsed = parseLegacyEvent(frame);
+      return parsed ? { ev: parsed.ev, payload: parsed.payload, atMs: Date.now() } : undefined;
+    },
+  };
+}
 
-  private eventCb: ((ev: string, payload: unknown) => void) | null = null;
-  private readonly pendingEvents: Array<[string, unknown]> = [];
+/** Attach (read-only, reconnecting) to the worker daemon's socket. */
+export function nodeDaemonFeed(socketPath: string = nodeSocketPath()): DashboardFeed<NodeDashEvent> {
+  return daemonAttachFeed<NodeDashEvent>({ socketPath, connect: legacyDaemonConnect('node') as never });
+}
 
-  constructor(
-    private readonly client: DaemonClient,
-    snapshot: DaemonSnapshot,
-  ) {
-    this.snapshot = snapshot;
-  }
-
-  /** @internal wired by createAttachedSource's onMessage handler. */
-  _dispatch(msg: DaemonMessage): void {
-    if (msg.kind === 'event') {
-      const ev = typeof msg.ev === 'string' ? msg.ev : '';
-      if (!ev) return;
-      if (this.eventCb) this.eventCb(ev, msg.payload);
-      else this.pendingEvents.push([ev, msg.payload]);
-    } else if (msg.kind === 'log-tail' && Array.isArray(msg.lines)) {
-      for (const line of msg.lines) {
-        if (typeof line === 'string') this.logTail.push(line);
+/**
+ * Follow an in-process engine's typed events. `onEvent` runs after the dashboard state has the
+ * event (the component uses it to forget a stopped engine). Stopping the feed only detaches the
+ * listeners; stopping the engine is the component's job on unmount.
+ */
+export function embeddedNodeFeed(
+  engine: NodeEngine,
+  hooks: { onEvent?: (event: NodeDashEvent) => void } = {},
+): DashboardFeed<NodeDashEvent> {
+  const emitter = engine as unknown as {
+    on(event: string, listener: (payload: unknown) => void): void;
+    removeAllListeners(): void;
+  };
+  let stopped = false;
+  return {
+    mode: 'embedded',
+    async start(emit) {
+      emit({ kind: 'attempt' });
+      emit({ kind: 'connected' });
+      for (const ev of Object.values(NODE_EV)) {
+        emitter.on(ev, (payload: unknown) => {
+          if (stopped) return;
+          const event: NodeDashEvent = { ev, payload, atMs: Date.now() };
+          emit({ kind: 'event', event });
+          hooks.onEvent?.(event);
+        });
       }
-    }
-  }
-
-  onEvent(cb: (ev: string, payload: unknown) => void): void {
-    this.eventCb = cb;
-    while (this.pendingEvents.length > 0) {
-      const [ev, payload] = this.pendingEvents.shift()!;
-      cb(ev, payload);
-    }
-  }
-
-  onDisconnect(cb: () => void): void {
-    this.client.onClose(cb);
-  }
-
-  setConcurrency(n: number): void {
-    this.client.send({ cmd: 'set-concurrency', value: n });
-  }
-
-  drain(): void {
-    this.client.send({ cmd: 'drain' });
-  }
-
-  stop(): void {
-    this.client.send({ cmd: 'stop' });
-  }
-
-  close(): void {
-    // Never stops the daemon — just detaches this dashboard.
-    this.client.close();
-  }
+    },
+    stop() {
+      stopped = true;
+      emitter.removeAllListeners();
+    },
+  };
 }
 
-/**
- * Connect to a running daemon and build an attached source. Resolves once the
- * greeting `snapshot` frame has arrived (and, best-effort, the `log-tail`
- * frame the daemon sends immediately after it). Rejects when nothing is
- * listening on the socket.
- */
-export async function createAttachedSource(
-  socketPath?: string,
-  timeoutMs?: number,
-): Promise<DashboardSource> {
-  const client = await connectToDaemon(socketPath, timeoutMs);
-  try {
-    let source: AttachedDashboardSource | null = null;
-    const early: DaemonMessage[] = [];
-    client.onMessage((msg) => {
-      if (source) source._dispatch(msg);
-      else early.push(msg);
-    });
-
-    const snapMsg = await client.waitFor((m) => m.kind === 'snapshot', 5000);
-    const snapshot = parseSnapshotFrame(snapMsg);
-    source = new AttachedDashboardSource(client, snapshot);
-    for (const msg of early) source._dispatch(msg);
-    // The daemon writes log-tail right after the snapshot; wait briefly so
-    // source.logTail is populated before the dashboard hydrates. Best-effort.
-    if (source.logTail.length === 0) {
-      await client.waitFor((m) => m.kind === 'log-tail', 1000).catch(() => undefined);
-    }
-    return source;
-  } catch (err) {
-    client.close();
-    throw err;
-  }
+/** A dashboard source over `feed`, starting from the persisted node config. */
+export function createNodeSource(
+  feed: DashboardFeed<NodeDashEvent>,
+  concurrency: number,
+  eligibleTypes?: string[],
+): NodeDashboardSource {
+  return new DashboardSource(nodeDashboardReducer(concurrency, eligibleTypes), feed);
 }
 
-// ---- Embedded ---------------------------------------------------------------
+/** What the dashboard can ask of whatever is doing the work. */
+export interface NodeControl {
+  /** Stop claiming, finish in-flight work (the daemon or engine keeps running). */
+  drain(): void;
+  /** Fully stop: the daemon exits / the engine stops. */
+  stop(): void;
+  setConcurrency(n: number): void;
+}
 
-/**
- * Embedded source: wraps an in-process NodeEngine the dashboard constructs
- * lazily (on `s`). Events from the engine are forwarded through the same
- * onEvent callback the attached source uses, so the component's reducer path
- * is identical in both modes.
- */
-export class EmbeddedDashboardSource implements DashboardSource {
-  readonly mode = 'embedded' as const;
-  readonly snapshot: DaemonSnapshot | null = null;
-  readonly logTail: string[] = [];
+/** Controls for a daemon: each command goes over its own short-lived connection. */
+export function daemonControl(socketPath: string = nodeSocketPath()): NodeControl {
+  const send = (command: Record<string, unknown>): void => {
+    void sendDaemonCommand(command, { socketPath }).catch(() => undefined);
+  };
+  return {
+    drain: () => send({ cmd: 'drain' }),
+    stop: () => send({ cmd: 'stop' }),
+    setConcurrency: (value) => send({ cmd: 'set-concurrency', value }),
+  };
+}
 
-  private engine: NodeEngine | null = null;
-  private eventCb: ((ev: string, payload: unknown) => void) | null = null;
-  private readonly pendingEvents: Array<[string, unknown]> = [];
-  private closed = false;
-
-  /** Whether an engine is currently attached (created and not yet stopped). */
-  get hasEngine(): boolean {
-    return this.engine !== null;
-  }
-
-  /** Attach a freshly-constructed engine and subscribe to all its events. */
-  attachEngine(engine: NodeEngine): void {
-    this.engine = engine;
-    const emitter = engine as unknown as {
-      on(event: string, listener: (payload: unknown) => void): void;
-    };
-    for (const ev of Object.values(NODE_EV)) {
-      emitter.on(ev, (payload: unknown) => this.emit(ev, payload));
-    }
-  }
-
-  /** Drop the engine reference after it has stopped. */
-  releaseEngine(): void {
-    if (this.engine) {
-      this.engine.removeAllListeners();
-      this.engine = null;
-    }
-  }
-
-  private emit(ev: string, payload: unknown): void {
-    if (this.closed) return;
-    if (this.eventCb) this.eventCb(ev, payload);
-    else this.pendingEvents.push([ev, payload]);
-  }
-
-  onEvent(cb: (ev: string, payload: unknown) => void): void {
-    this.eventCb = cb;
-    while (this.pendingEvents.length > 0) {
-      const [ev, payload] = this.pendingEvents.shift()!;
-      cb(ev, payload);
-    }
-  }
-
-  onDisconnect(_cb: () => void): void {
-    // An in-process engine cannot "disconnect"; STOPPED events cover shutdown.
-  }
-
-  setConcurrency(n: number): void {
-    this.engine?.setConcurrency(n);
-  }
-
-  drain(): void {
-    this.engine?.drain();
-  }
-
-  stop(): void {
+/** Controls for an in-process engine. */
+export function engineControl(engine: NodeEngine): NodeControl {
+  return {
+    drain: () => engine.drain(),
     // Preserves the dashboard's historical `d` behavior: a full stop.
-    void this.engine?.stop('drain');
-  }
-
-  close(): void {
-    this.closed = true;
-    const e = this.engine;
-    if (e) {
-      e.removeAllListeners();
-      void e.stop('unmount');
-      this.engine = null;
-    }
-  }
+    stop: () => void engine.stop('drain'),
+    setConcurrency: (n) => engine.setConcurrency(n),
+  };
 }

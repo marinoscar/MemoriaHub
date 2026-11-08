@@ -1,0 +1,15 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  Factory Reset — Delete All Local Data                                                           │
+│                                                                                                  │
+│  The following will be permanently deleted:                                                      │
+│    • Server URL and login token (PAT)                                                            │
+│    • All managed folders                                                                         │
+│    • All upload history and sync runs                                                            │
+│    • All settings                                                                                │
+│                                                                                                  │
+│  This action is irreversible. You will need to log in again.                                     │
+│                                                                                                  │
+│  Type y then Enter to confirm, or Esc to cancel: n                                               │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

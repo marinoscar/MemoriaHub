@@ -1,0 +1,11 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  Menu › File Tools › Convert videos to MP4                                                       │
+│                                                                                                  │
+│  > 1. Convert a single file…                                                                     │
+│    2. Convert selected folder(s)…                                                                │
+│    3. Convert all registered folders                                                             │
+│                                                                                                  │
+│  [1-9] jump   [↑/↓] move   [Enter] select   [Esc] back                                           │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

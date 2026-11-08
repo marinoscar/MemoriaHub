@@ -1,0 +1,13 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  Date range filter                                                                               │
+│  Filter by photo capture date (EXIF, else file date). Leave blank to sync all dates.             │
+│                                                                                                  │
+│  → From YYYY-MM-DD                                                                               │
+│    To   YYYY-MM-DD                                                                               │
+│                                                                                                  │
+│  ✔ Syncing: all dates                                                                            │
+│                                                                                                  │
+│  [up/down] field  [Enter] apply  [c] clear both  [Esc/q] back                                    │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -19,7 +19,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
 
@@ -28,7 +28,6 @@ import { ApiClient, ApiError, type NodeBackupConfig } from '../api.js';
 import { getDb } from '../db/database.js';
 import { SettingsRepo } from '../repo/settings.js';
 import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Schedule presets (a custom cron is always available too)
@@ -292,7 +291,7 @@ export function BackupSettings({ config, onBack }: BackupSettingsProps): React.R
         : 'Cron expression (5 fields, e.g. "0 3 * * *")';
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">MemoriaHub — Backup Settings</Text>
 
       <Box marginTop={1} flexDirection="column">

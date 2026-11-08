@@ -1,0 +1,14 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  Menu › Settings                                                                                 │
+│                                                                                                  │
+│  > 1. Manage folders                                                                             │
+│    2. Manage circles                                                                             │
+│    3. App settings                                                                               │
+│    4. Login / Change server                                                                      │
+│    5. Android app (build, publish, releases)                                                     │
+│    6. Factory reset (delete all local data)                                                      │
+│                                                                                                  │
+│  [1-9] jump   [↑/↓] move   [Enter] select   [Esc] back                                           │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

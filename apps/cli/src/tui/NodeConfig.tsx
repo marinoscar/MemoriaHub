@@ -35,14 +35,13 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
 
 import { saveConfig, type CliConfig } from '../config.js';
 import { DEFAULT_COMPREFACE_URL, NODE_JOB_TYPES } from '../node/capabilities.js';
 import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
-import { BOX_BORDER } from './theme.js';
 
 type FaceProvider = 'compreface';
 
@@ -359,7 +358,7 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
     ];
 
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Configuration</Text>
         <Text dimColor>Select a field to edit. Changes are saved immediately.</Text>
         <Text dimColor>Face provider    = compreface (fixed — the only supported provider)</Text>
@@ -391,7 +390,7 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
   // -------------------------------------------------------------------------
   if (step === 'edit-types') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Eligible Job Types</Text>
         <Text dimColor>Space toggles; Enter saves; Esc cancels.</Text>
 
@@ -435,7 +434,7 @@ export function NodeConfig({ config, onSaved, onBack }: NodeConfigProps): React.
           : 'Poll interval (ms)';
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Worker Node — Configuration</Text>
       <Text> </Text>
       <Text bold>Editing: <Text color="cyan">{fieldLabel}</Text></Text>

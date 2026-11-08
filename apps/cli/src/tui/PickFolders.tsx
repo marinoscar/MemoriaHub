@@ -11,12 +11,11 @@
  */
 
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { FolderRepo } from '../repo/folders.js';
 import type { Folder } from '../db/types.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,7 +86,7 @@ export function PickFolders({ db, onConfirm, onBack, title }: PickFoldersProps):
 
   if (folders.length === 0) {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">{heading}</Text>
         <Box marginTop={1}>
           <Text dimColor>No enabled folders found. Use Manage Folders to add and enable folders first.</Text>
@@ -100,7 +99,7 @@ export function PickFolders({ db, onConfirm, onBack, title }: PickFoldersProps):
   }
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">{heading}</Text>
       <Text dimColor>Space to toggle, Enter to confirm</Text>
 

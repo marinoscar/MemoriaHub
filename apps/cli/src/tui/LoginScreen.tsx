@@ -17,7 +17,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import * as os from 'os';
@@ -25,7 +25,6 @@ import { ApiClient } from '../api.js';
 import { saveConfig, type CliConfig } from '../config.js';
 import { buildPatClientInfo, requestDeviceCode, pollForDeviceToken, type DeviceTokenResult } from '../device-auth.js';
 import { openBrowser } from '../open-browser.js';
-import { BOX_BORDER, success, error as errorColor, warning } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -239,7 +238,7 @@ export function LoginScreen({
 
   return (
     <Box
-      borderStyle={BOX_BORDER}
+      borderStyle="round"
       borderColor="cyan"
       flexDirection="column"
       paddingX={3}
@@ -310,14 +309,14 @@ export function LoginScreen({
       {/* success */}
       {step === 'success' && (
         <Box marginTop={1}>
-          <Text color="green">{success('✔')} Logged in as {identity}</Text>
+          <Text color="green">✔ Logged in as {identity}</Text>
         </Box>
       )}
 
       {/* error */}
       {step === 'error' && (
         <Box flexDirection="column" marginTop={1} gap={1}>
-          <Text color="red">{errorColor('✖')} {errorMsg}</Text>
+          <Text color="red">✖ {errorMsg}</Text>
           <Text dimColor>
             Press <Text color="cyan">Esc</Text> to go back
             {' '}or <Text color="cyan">Enter</Text>/<Text color="cyan">r</Text> to retry.
@@ -333,7 +332,6 @@ export function LoginScreen({
       )}
 
       {/* Keep warning import used to avoid TS unused-import error */}
-      {false && <Text>{warning('')}</Text>}
     </Box>
   );
 }

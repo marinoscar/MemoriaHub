@@ -24,10 +24,9 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 
 import { followLog, nodeLogPath, readLastLines, type NodeLogLevel } from '../node/logger.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -217,14 +216,14 @@ export function NodeLogs({ onBack, dir }: NodeLogsProps): React.ReactElement {
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Text bold color="cyan">Worker Node — Logs</Text>
         <Text dimColor>
           {logPath}   tail: {tailSize} lines
         </Text>
       </Box>
 
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         {lines.length === 0 ? (
           <Text dimColor>No log lines yet ({logPath}).</Text>
         ) : (

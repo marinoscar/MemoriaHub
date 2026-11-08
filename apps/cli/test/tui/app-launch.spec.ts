@@ -1,98 +1,44 @@
 /**
- * test/tui/app-launch.spec.ts
+ * test/tui/app-launch.spec.ts  (RETRO-F4, #582)
  *
- * Regression guard for the `launchTui()` re-exec bug: `launchTui()` in
- * tui/app.tsx used to call `maybeReexecWithHeapLimit()` (from
- * ../node/runtime-tuning.js) before rendering the Ink UI. That re-exec spawns
- * a child node process with a different heap-limit flag, and the re-exec'd
- * child loses raw-mode control over the terminal (`setRawMode EIO`), breaking
- * the interactive TUI. The fix removed that call from `launchTui`; this test
- * fails if it is ever reintroduced.
+ * Regression guard for the `launchTui()` re-exec bug, kept for the code that replaced
+ * `launchTui`. The 1.3 `launchTui()` once called `maybeReexecWithHeapLimit()` (from
+ * ../node/runtime-tuning.js) before rendering the Ink UI. That re-exec spawns a child
+ * node process with a different heap-limit flag, and the re-exec'd child loses raw-mode
+ * control over the terminal (`setRawMode EIO`), which broke the interactive TUI.
  *
- * (`node start`'s use of `maybeReexecWithHeapLimit()` for the long-running
- * daemon in commands/node.ts is unrelated and correct — out of scope here.)
- *
- * Mirrors test/tui/raw-mode.spec.ts's conventions: this repo's Jest config
- * runs ESM (`NODE_OPTIONS=--experimental-vm-modules`), so mocking is done via
- * `jest.unstable_mockModule(...)` before any dynamic `await import(...)` of
- * the module under test, and `ink`'s `render` is mocked the same way (a
- * `jest.fn()` spy returning `{ waitUntilExit: () => Promise.resolve() }`).
+ * The TUI is now opened by the platform (`createCli` -> bare invocation) and the app only
+ * contributes screens, so the guard moves to the source: no module the TUI loads (the
+ * screens, the routes, the registrations, the standalone `render-tui` launcher, `run.ts` and
+ * `app.ts`) may call it. (`node start`'s use of it for the long-running daemon in
+ * commands/node.ts is unrelated and correct.) The "TUI runs in-process" half is covered by
+ * render-tui.spec.ts and the platform's own launch tests.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
-import { jest } from '@jest/globals';
+const SRC = path.resolve(process.cwd(), 'src');
 
-// ---------------------------------------------------------------------------
-// Mocks — registered BEFORE importing the module under test.
-// ---------------------------------------------------------------------------
+function sources(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? sources(full) : /\.tsx?$/.test(entry.name) ? [full] : [];
+  });
+}
 
-const mockRender = jest.fn();
-jest.unstable_mockModule('ink', () => ({
-  render: mockRender,
-  Box: () => null,
-  Text: () => null,
-  useApp: () => ({ exit: jest.fn() }),
-  useInput: () => {},
-}));
+describe('the interactive TUI never re-execs to tune the V8 heap', () => {
+  const files = [...sources(path.join(SRC, 'tui')), path.join(SRC, 'run.ts'), path.join(SRC, 'app.ts')];
 
-// app.tsx imports `maybeReexecWithHeapLimit` from this sibling module. Stub
-// every export it might destructure so the mocked module import is complete
-// (an undefined export used as a function would throw at call time, but more
-// importantly we need to observe whether it's ever invoked).
-const mockMaybeReexecWithHeapLimit = jest.fn(() => false);
-jest.unstable_mockModule('../../src/node/runtime-tuning.js', () => ({
-  maybeReexecWithHeapLimit: mockMaybeReexecWithHeapLimit,
-  resolveHeapLimitMb: jest.fn(() => 0),
-  heapAlreadyTuned: jest.fn(() => true),
-  heapNodeFlags: jest.fn(() => []),
-  tunedChildEnv: jest.fn((env: unknown) => env),
-  configureSharpRuntime: jest.fn(async () => {}),
-  resolveSharpConcurrency: jest.fn(() => 1),
-  resolveDefaultConcurrency: jest.fn(() => 2),
-  currentHeapLimitMb: jest.fn(() => 2048),
-  describeHeapTuning: jest.fn(() => ({ tuned: true, heapLimitMb: 2048, targetMb: 0 })),
-}));
-
-const { launchTui } = await import('../../src/tui/app.js');
-
-// ---------------------------------------------------------------------------
-// launchTui
-// ---------------------------------------------------------------------------
-
-describe('launchTui', () => {
-  let originalStdoutIsTTY: PropertyDescriptor | undefined;
-  let originalStdin: PropertyDescriptor | undefined;
-
-  beforeEach(() => {
-    mockRender.mockClear();
-    mockMaybeReexecWithHeapLimit.mockClear();
-    mockRender.mockReturnValue({ waitUntilExit: () => Promise.resolve() });
-
-    originalStdoutIsTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
-    originalStdin = Object.getOwnPropertyDescriptor(process, 'stdin');
-
-    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
-    const fakeStdin = { isTTY: true, setRawMode: jest.fn() };
-    Object.defineProperty(process, 'stdin', { value: fakeStdin, configurable: true });
+  it('has TUI sources to guard', () => {
+    expect(files.length).toBeGreaterThan(30);
   });
 
-  afterEach(() => {
-    if (originalStdoutIsTTY) {
-      Object.defineProperty(process.stdout, 'isTTY', originalStdoutIsTTY);
-    }
-    if (originalStdin) {
-      Object.defineProperty(process, 'stdin', originalStdin);
-    }
-  });
-
-  it('never calls maybeReexecWithHeapLimit and proceeds to render the Ink UI in-process', async () => {
-    await launchTui({ currentVersion: '9.9.9' });
-
-    // Core regression guard: the interactive TUI path must NEVER re-exec to
-    // tune the V8 heap — that re-exec breaks raw-mode terminal control.
-    expect(mockMaybeReexecWithHeapLimit).toHaveBeenCalledTimes(0);
-
-    // Confirms the TUI actually proceeded to render in-process (not exited
-    // early for some unrelated reason, e.g. a bad TTY stub).
-    expect(mockRender).toHaveBeenCalledTimes(1);
+  it.each(files.map((f) => [path.relative(SRC, f), f]))('%s does not call maybeReexecWithHeapLimit', (_name, file) => {
+    const code = fs
+      .readFileSync(file as string, 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toMatch(/maybeReexecWithHeapLimit/);
   });
 });

@@ -10,9 +10,8 @@
  */
 
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import TextInput from 'ink-text-input';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,7 +49,7 @@ export function FactoryResetScreen({
   }
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="red">Factory Reset — Delete All Local Data</Text>
 
       <Box marginTop={1} flexDirection="column">

@@ -4,19 +4,23 @@
  * Renders a live-updating TUI showing job queue KPIs, per-type stats,
  * ETA/ETC estimates, and throughput metrics fetched from the server.
  *
+ * The polling is a platform dashboard source (jobs-dashboard-source.ts: reducer + pollFeed,
+ * driven by useDashboard).
+ *
  * Keys:
  *   r       — refresh immediately
  *   q / Esc — quit
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Box, Text, useApp, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
+import { useDashboard } from '@marinoscar/platform-cli/tui';
 
 import type { ApiClient, JobInsights } from '../api.js';
 import { formatDuration } from '../format-duration.js';
-import { BOX_BORDER } from './theme.js';
-import { renderTui } from './raw-mode.js';
+import { renderTui } from './render-tui.js';
+import { createJobsSource } from './jobs-dashboard-source.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -60,48 +64,32 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
   const { api, intervalMs, windowDays, serverUrl, onBack } = props;
   const { exit } = useApp();
 
-  // Main data state
-  const [data, setData] = useState<JobInsights | null>(null);
+  // The poll runs in a platform DashboardSource (pollFeed): `useDashboard` starts it on
+  // mount and stops it on unmount. `[r]` asks the same source to poll now
+  // (`source.refresh()`); the data on screen stays until the new poll lands.
   const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const source = useMemo(
+    () =>
+      createJobsSource({
+        api,
+        windowDays,
+        intervalMs,
+        onFetch: (state) => setLoading(state === 'start'),
+      }),
+    [api, windowDays, intervalMs],
+  );
+  const dashboard = useDashboard(source) ?? source.getState();
+  const data: JobInsights | null = dashboard.insights;
+  const error: string | null = dashboard.error ?? null;
+  const lastUpdated: Date | null = dashboard.receivedAt !== null ? new Date(dashboard.receivedAt) : null;
 
   // Seconds-since-last-update display
   const [secondsAgo, setSecondsAgo] = useState<number>(0);
   const lastUpdatedRef = useRef<Date | null>(null);
-
-  // Stable fetch function via ref so we can call it from useInput too
-  const doFetchRef = useRef<() => Promise<void>>(async () => { /* placeholder */ });
-
-  const doFetch = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    try {
-      const result = await api.getJobInsights(windowDays);
-      setData(result);
-      const now = new Date();
-      setLastUpdated(now);
-      lastUpdatedRef.current = now;
-      setSecondsAgo(0);
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      // Keep last good data visible
-    } finally {
-      setLoading(false);
-    }
-  }, [api, windowDays]);
-
-  // Keep ref in sync so useInput can call the latest version
-  doFetchRef.current = doFetch;
-
-  // Fetch on mount and on interval
+  lastUpdatedRef.current = lastUpdated;
   useEffect(() => {
-    void doFetch();
-    const timer = setInterval(() => { void doFetch(); }, intervalMs);
-    return () => { clearInterval(timer); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setSecondsAgo(0);
+  }, [dashboard.receivedAt]);
 
   // Seconds-ago ticker
   useEffect(() => {
@@ -120,7 +108,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
       if (onBack) { onBack(); } else { exit(); }
       return;
     }
-    if (input === 'r') { void doFetchRef.current(); }
+    if (input === 'r') { source.refresh(); }
   });
 
   // -------------------------------------------------------------------------
@@ -129,13 +117,13 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
   if (!data && error) {
     return (
       <Box flexDirection="column" gap={1}>
-        <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
           <Text bold color="cyan">MemoriaHub — Job Queue</Text>
           {loading && (
             <Text color="cyan">  <Spinner type="dots" /></Text>
           )}
         </Box>
-        <Box borderStyle={BOX_BORDER} borderColor="red" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="red" paddingX={2} paddingY={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
         <Box paddingX={2}>
@@ -151,7 +139,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
   if (!data) {
     return (
       <Box flexDirection="column" gap={1}>
-        <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
           <Text bold color="cyan">MemoriaHub — Job Queue</Text>
           <Text color="cyan">  <Spinner type="dots" /></Text>
           <Text dimColor>  Loading…</Text>
@@ -204,7 +192,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
     <Box flexDirection="column" gap={1}>
 
       {/* 1. Header */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={0} flexDirection="row">
+      <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={0} flexDirection="row">
         <Text bold color="cyan">MemoriaHub — Job Queue</Text>
         <Text dimColor>  {serverLabel}  window: {windowDays}d</Text>
         <Text dimColor>  {updatedLabel}</Text>
@@ -213,7 +201,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
 
       {/* 2. KPI band */}
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="row"
         paddingX={2}
@@ -246,7 +234,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
 
       {/* 3. Per-type table */}
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="column"
         paddingX={2}

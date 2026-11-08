@@ -122,17 +122,17 @@ export PATH="$PATH:$HOME/.local/bin"
 
 ### (a) Interactive menu
 
-Run `memoriahub` with no arguments in a terminal (TTY), or run `memoriahub menu` explicitly, to launch the interactive terminal UI:
+Run `memoriahub` with no arguments in a terminal (TTY), or run `memoriahub menu`, to launch the interactive terminal UI:
 
 ```bash
 memoriahub
 # or
-memoriahub menu
+memoriahub menu      # the 1.3 spelling of a bare memoriahub
 ```
 
 When run in a non-TTY context (piped output, CI), bare invocation falls back to printing help.
 
-The root menu displays the ASCII banner, your connected server and account, the DB path, and a navigable hierarchical list of actions. Items marked `▸` are submenus:
+Since 1.5 the menu, the navigation and every screen run on the platform TUI framework (`@marinoscar/platform-cli/tui`): MemoriaHub registers its menu tree, its screens, a header chip for the active circle and its dashboards, and the platform draws the rest. The root menu shows your server in the header (and the active circle and, on a fresh install, a first-run folder hint as chips), then a navigable hierarchical list of actions. Items marked `▸` are submenus:
 
 ```
   1. Sync ▸
@@ -175,18 +175,26 @@ The root menu displays the ASCII banner, your connected server and account, the 
        Manage circles
        App settings
        Login / Change server
+       Android app (build, publish, releases)
        Factory reset (delete all local data)
   8. Help
-  9. Quit
+  9. Deploy  (this server)        (the platform's deploy screen)
+     Quit
 ```
 
-When not logged in the root menu shows `Login / Change server`, `Scan ▸`, `File Tools ▸` (all of the offline utilities), `Settings ▸` (Factory reset only), `Help`, and `Quit`. Once logged in, `Login / Change server` moves into `Settings ▸` so the root menu stays focused on day-to-day work.
+When not logged in the root menu shows `Login / Change server`, `Scan ▸`, `File Tools ▸` (all of the offline utilities), `Settings ▸` (Android and Factory reset only), `Help`, `Deploy` and `Quit`. Once logged in, `Login / Change server` moves into `Settings ▸` so the root menu stays focused on day-to-day work.
 
-Navigate with arrow keys and Enter, or press the item's digit (`1`–`9`) to jump straight to it. Selecting a `▸` item descends one level into its submenu. Press `Esc` or `q` to go back one level (not all the way to the root).
+Navigate with arrow keys (or `j`/`k`) and Enter, or press the item's digit (`1`–`9`) to jump straight to it. Selecting a `▸` item descends one level into its submenu. Press `Esc` to go back one level (not all the way to the root); `q` quits from the main menu, and inside a screen `Esc` / `q` go back as before.
 
-Two label conventions: an entry ending in `…` opens a further step (a folder picker, a date filter, a path prompt) before anything happens — so `Find & delete screenshots…` opens a picker rather than deleting immediately — while a bare label acts straight away. Destructive entries (`Factory reset`, `Find & delete screenshots…`) render in red. The ASCII banner and the connected-server/account identity box render only on the root menu; submenus instead show a breadcrumb trail, e.g. `Menu › Sync`. Every item in the menu is the interactive equivalent of a direct CLI command.
+Two label conventions: an entry ending in `…` opens a further step (a folder picker, a date filter, a path prompt) before anything happens — so `Find & delete screenshots…` opens a picker rather than deleting immediately — while a bare label acts straight away. Destructive entries (`Factory reset`, `Find & delete screenshots…`) render in red. Submenus show a breadcrumb trail, e.g. `Home › Sync`. Colours come from the platform theme tokens and switch off with `NO_COLOR`, `--no-color` or `TERM=dumb`. Every item in the menu is the interactive equivalent of a direct CLI command.
 
-The Reports submenu is generated from a shared reports registry (see [`memoriahub reports`](#memoriahub-reports) below), so it grows automatically as new reports are added — no menu wiring is required per report.
+The Reports submenu is generated from a shared reports registry (see [`memoriahub reports`](#memoriahub-reports) below), so it grows automatically as new reports are registered — no menu wiring is required per report.
+
+**Where the code is** (`apps/cli/src/tui/`): `menu.ts` is the tree (`registerTuiMenuNode` data), `screens.ts` the routes (one per menu action, loaded lazily), `routes.tsx` the glue between a route and a screen (config, local database, the step stack of multi-step flows), `app-state.ts` the circle chip, the folder hint and the update status, `ink.tsx` the theme-token adapter every screen imports `Box` and `Text` from, and `*-dashboard-source.ts` the reducers and feeds of the Node, Backup and Job queue dashboards. The tests are `test/tui/` (screens, flows, dashboards) plus the platform `tui` conformance suite in `test/conformance.spec.ts`, and `test/fixtures/tui-snapshots/{before,after}` pin the menu and screen frames against the 1.3 TUI; every difference is explained in [`docs/platform-adoption/tui-parity.md`](../../docs/platform-adoption/tui-parity.md).
+
+#### The worker-node dashboard
+
+`Worker Node ▸ Node dashboard` **attaches** to a running worker daemon over its socket (`~/.memoriahub/node.sock`) without stopping it, so a headless service can be inspected; closing the dashboard only detaches. With no daemon running, `[s]` spawns the memory-tuned detached daemon and attaches, and `[e]` runs the worker in the terminal process (untuned: it warns and tightens the memory watchdog). `[d]` drains, `[x]` stops the daemon (with confirmation), `[r]` runs the doctor, `[c]` opens the node config. The dashboard reconnects on its own when the daemon restarts (the memory valve restarts a worker). Its data source is the platform's `daemonAttachFeed` reading the 1.3 daemon through a small adapter (`tui/legacy-daemon.ts`) that goes away with RETRO-C10.
 
 ### (b) Direct commands
 
@@ -270,8 +278,8 @@ The CLI validates any token (device-issued or manually supplied) by calling `GET
 | `-V` | `--version` (`-V` still accepted before a command). Output is `1.4.0 (platform <ver>)` | ALIAS |
 | `--no-color` (anywhere) | Stripped and turned into `NO_COLOR=1` | IGNORE |
 | `memoriahub node ...` (all subcommands and flags, including `node list`, `--face-provider`, `--types`, `--poll`) | Unchanged: routed to the 1.3 implementation. The platform's own `node` engine cannot run MemoriaHub's executors until RETRO-C10, so the platform `node` is not reachable yet | PORT (`PLATFORM-ADOPTION-SHIM(RETRO-C10)`) |
-| `memoriahub` (bare, TTY) | The platform menu; its **MemoriaHub menu** entry opens the 1.3 TUI. Non-TTY: usage error, help on stderr (exit 2) | built-in |
-| `memoriahub menu` | The full 1.3 TUI, unchanged | app command |
+| `memoriahub` (bare, TTY) | The platform TUI hosting MemoriaHub's menu and screens (1.5; in 1.4 the platform menu had a **MemoriaHub menu** entry that opened the 1.3 TUI). Non-TTY: usage error, help on stderr (exit 2) | built-in |
+| `memoriahub menu` | The same TUI: a lone `menu` is rewritten to a bare invocation | ALIAS |
 | `jobs` / `queue` | Unchanged | app command |
 | headless "update available" notice | The platform's: at most once a day, one stderr line, silent in CI, without a TTY, for `--json`/`--help`/`--version`; off with `MEMORIAHUB_NO_UPDATE_CHECK=1` (`node start` never prints it) | `updateNotice` |
 | `MEMORIAHUB_URL` | Still honoured; mirrored onto the platform's `MEMORIAHUB_SERVER_URL` when that is unset | env compat |

@@ -1,0 +1,11 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub — Settings                                                                           │
+│  Select a setting to edit its value.                                                             │
+│                                                                                                  │
+│  > concurrency      = 3     (default: 3)  Max concurrent upload workers                          │
+│    attempts_cap     = 5     (default: 5)  Max upload attempts before a file is blocked           │
+│                                                                                                  │
+│  [up/down] navigate  [Enter] edit  [Esc/q] back                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

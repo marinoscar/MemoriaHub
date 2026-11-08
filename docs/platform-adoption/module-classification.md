@@ -175,7 +175,7 @@ Drift for mapped modules comes from the slice view; `n/a (no slice)` means the m
 | `scan` | 4 | n/a | domain | `extraCommands` | F3 (#577) | - |  |
 | `screenshots` | 3 | n/a | domain | `extraCommands` | F3 (#577) | - |  |
 | `sync` | 6 | n/a | domain | `extraCommands` | F3 (#577) | - | Resumable importer. |
-| `tui` | 49 | 0% / +746/-37 | backport | `platform-cli` TUI framework | F4 (#582) | [EAB#1064](https://github.com/marinoscar/EnterpriseAppBase/issues/1064) (G1 epic) | Menu tree, app context, dashboard sources and component kit harvested upstream; screens re-hosted in F4. |
+| `tui` | 49 | 0% / +746/-37 | backport | `platform-cli` TUI framework | F4 (#582) | [EAB#1064](https://github.com/marinoscar/EnterpriseAppBase/issues/1064) (G1 epic) | Menu tree, app context, dashboard sources and component kit harvested upstream; screens re-hosted in F4 (done: `apps/cli/src/tui/`, parity in [tui-parity.md](tui-parity.md)). |
 | `(root files)` | 22 | n/a | divergence | `createCli` | F3 (#577) | - | `index.ts` and shared helpers. |
 
 ## Android: apps/android/app/src/main/java/memoriahub/marin/cr

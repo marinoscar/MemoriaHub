@@ -27,7 +27,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -45,7 +45,6 @@ import { exportDateInference } from '../export/date-inference-export.js';
 import { exportsDir } from '../paths.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -255,7 +254,7 @@ export function DateInferenceScreen({
 
   if (state.phase === 'diagnosing') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Date Inference</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -275,7 +274,7 @@ export function DateInferenceScreen({
 
   if (state.phase === 'checkingTool') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Date Inference</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -287,7 +286,7 @@ export function DateInferenceScreen({
 
   if (state.phase === 'toolUnavailable') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">ExifTool is not available</Text>
         <Box marginTop={1}>
           <Text>{exiftoolInstallHint()}</Text>
@@ -307,7 +306,7 @@ export function DateInferenceScreen({
       .slice(0, MAX_SAMPLE_ROWS);
 
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Date Inference — Report</Text>
         <Box marginTop={1} flexDirection="column">
           <Text><Text color="cyan">{totals?.total ?? 0}</Text> file(s) scanned</Text>
@@ -355,7 +354,7 @@ export function DateInferenceScreen({
 
   if (state.phase === 'applying') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Writing dates…</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -375,7 +374,7 @@ export function DateInferenceScreen({
 
   if (state.phase === 'empty') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Date Inference</Text>
         <Box marginTop={1}>
           <Text dimColor>No media files found in the selected folder(s). Nothing to diagnose.</Text>
@@ -389,7 +388,7 @@ export function DateInferenceScreen({
 
   if (state.phase === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">Date Inference failed</Text>
         <Box marginTop={1}>
           <Text color="red">{state.errorMsg ?? 'Unknown error'}</Text>
@@ -404,7 +403,7 @@ export function DateInferenceScreen({
   // done phase
   const totals = state.applyTotals;
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="green">Date Inference complete</Text>
       <Box marginTop={1} flexDirection="column">
         <Text><Text color="green">{totals?.written ?? 0}</Text> date(s) written</Text>
