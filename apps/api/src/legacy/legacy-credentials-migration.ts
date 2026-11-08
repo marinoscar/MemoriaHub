@@ -93,13 +93,17 @@ export type Decrypt = (ciphertext: string) => string;
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** Build the plan: read the legacy rows, decrypt in memory, compare with what is stored. Writes nothing. */
+/**
+ * Build the plan: read the legacy rows, decrypt in memory, compare with what is stored. Writes nothing.
+ * With `onlyIfAbsent`, a target that already holds ANY secret is left alone (set-if-absent).
+ */
 export async function buildPlan(
   purposes: readonly MigrationPurpose[],
   source: LegacySource,
   credentials: CredentialStore,
   settings: SettingsStore,
   decrypt: Decrypt,
+  options: { onlyIfAbsent?: boolean } = {},
 ): Promise<Plan> {
   const entries: PlanEntry[] = [];
   const undecryptable: string[] = [];
@@ -134,7 +138,9 @@ export async function buildPlan(
       const stored = await credentials.getSecret(item.target.purpose, item.target.name);
       entries.push({
         item,
-        status: stored === plaintext ? 'unchanged' : 'write',
+        // `onlyIfAbsent` (the email carry-over, RETRO-D2): a secret an admin already stored
+        // after cut-over is kept, never replaced by the legacy one.
+        status: stored === plaintext || (options.onlyIfAbsent && stored !== null) ? 'unchanged' : 'write',
         hint: deriveHint(plaintext),
         settingsKeys,
       });

@@ -17,7 +17,8 @@
 //   2. the SMTP password (legacy cipher, `email.smtpPassword`) becomes the
 //      credential `smtp/default`, and the S3 secret access key the SES transport
 //      used to borrow becomes `email_ses/default` (decrypted with the legacy
-//      cipher, re-encrypted by the credential store, read back and compared).
+//      cipher, re-encrypted by the credential store, read back and compared),
+//      each only when that credential is still empty.
 //
 // Idempotent: a second run writes nothing. The legacy keys and rows are left
 // untouched, so reverting the release restores the old readers. Prints key
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
     });
 
     const settingsPlan = await buildEmailSettingsPlan(legacy, s3 ? { accessKeyId: s3.accessKeyId, region: s3.region } : null, row);
-    const secretsPlan = await buildPlan(['smtp', 'ses'], source, credentials, settings, decryptSecret);
+    const secretsPlan = await buildPlan(['smtp', 'ses'], source, credentials, settings, decryptSecret, { onlyIfAbsent: true });
 
     console.log(`${apply ? 'APPLY' : 'DRY RUN'}: email settings and secrets`);
     for (const line of formatEmailSettingsPlan(settingsPlan)) console.log(line);
