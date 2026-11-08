@@ -66,6 +66,10 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/broadcasts': 'broadcasts:read', // notifications/broadcasts/broadcasts.controller
   '/admin/settings/maintenance': 'system_settings:read', // platform host: maintenance controller
   '/admin/settings/about': 'system_settings:read', // platform host: about controller
+  // RETRO-T2 (#625): platform telemetry controllers (TELEMETRY_PERMISSION_DECLARATIONS).
+  '/admin/settings/telemetry': 'telemetry:read', // telemetry-admin.controller (GET admin/telemetry/config)
+  '/admin/settings/telemetry/explorer': 'telemetry:query', // telemetry-explorer.controller
+  '/admin/settings/telemetry/dashboard': 'telemetry:query', // telemetry dashboard controller
 };
 
 describe('settings routes against the registries', () => {
