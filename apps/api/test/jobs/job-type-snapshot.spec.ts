@@ -13,157 +13,30 @@
  *
  * It instantiates every real handler class (the constructors are pure DI
  * assignment, so a no-arg construction is safe) and reads the same values the
- * queue reads. Cutover proof: the same expectations hold before and after the
- * platform adapter, because the adapter forwards the node pair only when the
- * legacy handler has both.
+ * queue reads. Cutover proof (RETRO-C1): the same expectations hold on the
+ * LEGACY registry and on the PLATFORM `JobHandlerRegistry` the adapter fills,
+ * because the adapter forwards the node pair only when the legacy handler has
+ * both, and the platform derives eligibility (`serverOnlyTypes()`) from that pair.
+ *
+ * `job_history_purge` is the one type whose handler is retired: the platform's
+ * `job.history.purge` replaced the purge, and `RetiredJobTypeHandler` keeps the
+ * string dispatching (a pending row settles as a no-op) so a row of it never
+ * sits in the queue unclaimable.
  */
+
+import { ConfigService } from '@nestjs/config';
+import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platform-api/jobs';
 
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
 import type { EnrichmentHandler } from '../../src/enrichment/enrichment-handler.interface';
+import { LegacyEnrichmentHandlerAdapter } from '../../src/platform/jobs/legacy-handlers.adapter';
+import {
+  ALL_HANDLER_CLASSES,
+  EXPECTED_CAN_DELETE_TYPES,
+  EXPECTED_JOB_TYPES,
+  EXPECTED_NODE_ELIGIBLE_TYPES,
+} from './legacy-handlers.fixture';
 
-import { AutoTaggingHandler } from '../../src/tagging/auto-tagging.handler';
-import { BroadcastChunkHandler } from '../../src/notifications/broadcasts/handlers/broadcast-chunk.handler';
-import { BroadcastStartHandler } from '../../src/notifications/broadcasts/handlers/broadcast-start.handler';
-import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
-import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
-import { DuplicateDetectionBatchHandler } from '../../src/dedup/duplicate-detection-batch.handler';
-import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sweep.handler';
-import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
-import { GeocodeHandler } from '../../src/geo/geocode.handler';
-import { JobHistoryPurgeHandler } from '../../src/enrichment/job-history-purge.handler';
-import { LocationGroupRebuildHandler } from '../../src/location-groups/location-group-rebuild.handler';
-import { LocationInferenceHandler } from '../../src/location-inference/location-inference.handler';
-import { LocationSuggestionRunEvaluateHandler } from '../../src/location-inference/runs/location-suggestion-run-evaluate.handler';
-import { LocationSuggestionRunExecuteBatchHandler } from '../../src/location-inference/runs/location-suggestion-run-execute-batch.handler';
-import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';
-import { MemoryGenerationHandler } from '../../src/memories/memory-generation.handler';
-import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
-import { NotificationPurgeHandler } from '../../src/notifications/notification-purge.handler';
-import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
-import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
-import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
-import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-execute-batch.handler';
-import { ReviewRunHistoryPurgeHandler } from '../../src/review-runs/review-run-history-purge.handler';
-import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
-import { StorageInsightsHandler } from '../../src/insights/storage-insights.handler';
-import { StorageMigrationHandler } from '../../src/storage-settings/storage-migration.handler';
-import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
-import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
-import { TrashEmptyEvaluateHandler } from '../../src/media/trash-empty/trash-empty-evaluate.handler';
-import { TrashEmptyExecuteBatchHandler } from '../../src/media/trash-empty/trash-empty-execute-batch.handler';
-import { TrashPurgeHandler } from '../../src/media/trash-purge.handler';
-import { VideoAutoTaggingHandler } from '../../src/tagging/video-auto-tagging.handler';
-import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler';
-import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
-import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
-import { WorkflowHistoryPurgeHandler } from '../../src/workflows/runs/workflow-history-purge.handler';
-
-/** Every handler class the app registers, one per job type. */
-export const ALL_HANDLER_CLASSES = [
-  AutoTaggingHandler,
-  BroadcastChunkHandler,
-  BroadcastStartHandler,
-  BurstDetectionHandler,
-  DuplicateConfidenceBackfillHandler,
-  DuplicateDetectionHandler,
-  DuplicateDetectionBatchHandler,
-  FaceAutoArchiveSweepHandler,
-  FaceDetectionHandler,
-  GeocodeHandler,
-  JobHistoryPurgeHandler,
-  LocationGroupRebuildHandler,
-  LocationInferenceHandler,
-  LocationSuggestionRunEvaluateHandler,
-  LocationSuggestionRunExecuteBatchHandler,
-  MemoryDigestHandler,
-  MemoryGenerationHandler,
-  MetadataExtractionHandler,
-  NotificationPurgeHandler,
-  PictureEnhancementHandler,
-  PictureEnhancementPurgeHandler,
-  ReviewRunEvaluateHandler,
-  ReviewRunExecuteBatchHandler,
-  ReviewRunHistoryPurgeHandler,
-  SocialMediaDetectionHandler,
-  StorageInsightsHandler,
-  StorageMigrationHandler,
-  ThumbnailRegenHandler,
-  ThumbnailRepairHandler,
-  TrashEmptyEvaluateHandler,
-  TrashEmptyExecuteBatchHandler,
-  TrashPurgeHandler,
-  VideoAutoTaggingHandler,
-  VideoFaceDetectionHandler,
-  WorkflowEvaluateHandler,
-  WorkflowEvaluateItemHandler,
-  WorkflowExecuteBatchHandler,
-  WorkflowHistoryPurgeHandler,
-];
-
-/** The 38 permanent type strings. */
-export const EXPECTED_JOB_TYPES = [
-  'auto_tagging',
-  'broadcast_chunk',
-  'broadcast_start',
-  'burst_detection',
-  'duplicate_confidence_backfill',
-  'duplicate_detection',
-  'duplicate_detection_batch',
-  'face_auto_archive_sweep',
-  'face_detection',
-  'geocode',
-  'job_history_purge',
-  'location_group_rebuild',
-  'location_inference',
-  'location_suggestion_run_evaluate',
-  'location_suggestion_run_execute_batch',
-  'memory_digest',
-  'memory_generation',
-  'metadata_extraction',
-  'notification_purge',
-  'picture_enhancement',
-  'picture_enhancement_purge',
-  'review_run_evaluate',
-  'review_run_execute_batch',
-  'review_run_history_purge',
-  'social_media_detection',
-  'storage_insights',
-  'storage_migration',
-  'thumbnail_regen',
-  'thumbnail_repair',
-  'trash_empty_evaluate',
-  'trash_empty_execute_batch',
-  'trash_purge',
-  'video_auto_tagging',
-  'video_face_detection',
-  'workflow_evaluate',
-  'workflow_evaluate_item',
-  'workflow_execute_batch',
-  'workflow_history_purge',
-];
-
-/** Types whose handler carries the node-result pair. */
-export const EXPECTED_NODE_ELIGIBLE_TYPES = [
-  'auto_tagging',
-  'duplicate_detection',
-  'face_detection',
-  'geocode',
-  'metadata_extraction',
-  'social_media_detection',
-  'thumbnail_regen',
-  'thumbnail_repair',
-  'video_auto_tagging',
-  'video_face_detection',
-  'workflow_execute_batch',
-];
-
-/** Types whose handler vetoes an admin delete of a non-terminal row. */
-export const EXPECTED_CAN_DELETE_TYPES = [
-  'broadcast_chunk',
-  'broadcast_start',
-];
 
 describe('job type snapshot (job type strings are permanent)', () => {
   let handlers: EnrichmentHandler[];
@@ -215,5 +88,43 @@ describe('job type snapshot (job type strings are permanent)', () => {
       .map((handler) => handler.type)
       .sort();
     expect(vetoes).toEqual([...EXPECTED_CAN_DELETE_TYPES].sort());
+  });
+});
+
+describe('job type snapshot through the platform adapter (RETRO-C1)', () => {
+  let platform: JobHandlerRegistry;
+  let legacy: EnrichmentHandlerRegistry;
+
+  beforeEach(() => {
+    platform = new JobHandlerRegistry();
+    const throttle = new ProviderThrottleService(new ConfigService());
+    const prisma = {} as never;
+    legacy = new EnrichmentHandlerRegistry(new LegacyEnrichmentHandlerAdapter(platform, throttle, prisma));
+    for (const HandlerClass of ALL_HANDLER_CLASSES) {
+      legacy.register(new (HandlerClass as unknown as new () => EnrichmentHandler)());
+    }
+  });
+
+  it('dispatches every pinned type string on the platform registry', () => {
+    expect(platform.types().sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
+  });
+
+  it('keeps node eligibility: the platform derives the same server-only set', () => {
+    const expected = EXPECTED_JOB_TYPES.filter((type) => !EXPECTED_NODE_ELIGIBLE_TYPES.includes(type)).sort();
+    expect(platform.serverOnlyTypes().sort()).toEqual(expected);
+  });
+
+  it('forwards the node pair only for the node-eligible types', () => {
+    for (const type of EXPECTED_JOB_TYPES) {
+      const handler = platform.get(type)!;
+      const eligible = EXPECTED_NODE_ELIGIBLE_TYPES.includes(type);
+      expect({ type, schema: handler.nodeResultSchema !== undefined }).toEqual({ type, schema: eligible });
+      expect({ type, persist: typeof handler.persistNodeResult === 'function' }).toEqual({ type, persist: eligible });
+    }
+  });
+
+  it('forwards canDelete for exactly the veto types', () => {
+    const vetoes = EXPECTED_JOB_TYPES.filter((type) => typeof platform.get(type)!.canDelete === 'function');
+    expect(vetoes.sort()).toEqual([...EXPECTED_CAN_DELETE_TYPES].sort());
   });
 });

@@ -1,3 +1,4 @@
+import { ENRICHMENT_MAX_ATTEMPTS } from '../platform/jobs/queue-limits';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
@@ -177,8 +178,7 @@ export class ReviewRunEvaluateHandler implements EnrichmentHandler, OnModuleInit
   }
 
   private maxAttempts(): number {
-    const raw = parseInt(process.env['ENRICHMENT_MAX_ATTEMPTS'] ?? '3', 10);
-    return Number.isFinite(raw) && raw > 0 ? raw : 3;
+    return ENRICHMENT_MAX_ATTEMPTS;
   }
 
   private logTransition(

@@ -7,16 +7,17 @@
 // `getNamespace('workflows')` and the user-settings responses.
 //
 //   system (app list): ui, features, ai, autoTagging, face, storage, burst, dedup,
-//                      locationInference, locationGrouping, socialMedia, geo, email, jobs,
+//                      locationInference, locationGrouping, socialMedia, geo, email,
 //                      reviewRuns, notifications, pictureEnhancement, backup, workflows,
 //                      memories, databaseBackup
-//   system (platform): maintenance (registered by the host core)
+//   system (platform): maintenance (registered by the host core), jobs and retention (the jobs slice, RETRO-C1)
 //   user   (app list): search, notifications, memories, timezone
 //   user   (platform): dataTables, navigation (extended with MemoriaHub's `pinned`)
 //
-// Six of the app namespaces are TEMPORARY copies of a namespace whose platform slice MemoriaHub
-// adopts later (`PLATFORM-ADOPTION-SHIM`): ai (RETRO-E1), email (D2), jobs (C1),
-// notifications, system and user (D3), storage (D1), databaseBackup (D4). Each keeps today's
+// Five of the app namespaces are TEMPORARY copies of a namespace whose platform slice MemoriaHub
+// adopts later (`PLATFORM-ADOPTION-SHIM`): ai (RETRO-E1), email (D2),
+// notifications, system and user (D3), storage (D1), databaseBackup (D4). `jobs` was the sixth; the
+// jobs slice (RETRO-C1) swapped it for the platform declaration, same stored shape. Each keeps today's
 // stored shape under the same key, so the swap is a change of declaration and nothing moves in
 // the `global` row. docs/platform-adoption/local-exceptions.md lists them.
 //
@@ -43,7 +44,6 @@ import { EMAIL_SYSTEM_SETTINGS, type EmailSettingsValue } from '../settings/regi
 import { FACE_SYSTEM_SETTINGS, type FaceSettingsValue } from '../settings/registry/namespaces/system/face';
 import { FEATURES_SYSTEM_SETTINGS, type FeaturesSettingsValue } from '../settings/registry/namespaces/system/features';
 import { GEO_SYSTEM_SETTINGS, type GeoSettingsValue } from '../settings/registry/namespaces/system/geo';
-import { JOBS_SYSTEM_SETTINGS, type JobsSettingsValue } from '../settings/registry/namespaces/system/jobs';
 import { LOCATION_GROUPING_SYSTEM_SETTINGS, type LocationGroupingSettingsValue } from '../settings/registry/namespaces/system/location-grouping';
 import { LOCATION_INFERENCE_SYSTEM_SETTINGS, type LocationInferenceSettingsValue } from '../settings/registry/namespaces/system/location-inference';
 import { MEMORIES_SYSTEM_SETTINGS, type MemoriesSettingsValue } from '../settings/registry/namespaces/system/memories';
@@ -76,7 +76,6 @@ export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] 
   SOCIAL_MEDIA_SYSTEM_SETTINGS,
   GEO_SYSTEM_SETTINGS,
   EMAIL_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D2)
-  JOBS_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-C1)
   REVIEW_RUNS_SYSTEM_SETTINGS,
   NOTIFICATIONS_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D3)
   PICTURE_ENHANCEMENT_SYSTEM_SETTINGS,
@@ -105,8 +104,8 @@ export const APP_USER_SETTINGS_EXTENSIONS: readonly UserSettingsNamespaceExtensi
   NAVIGATION_USER_SETTINGS_EXTENSION,
 ];
 
-// The augmentation covers the namespaces MemoriaHub owns for good. The seven temporary ones (system:
-// ai, storage, notifications, databaseBackup, email, jobs; user: notifications) are left out ON
+// The augmentation covers the namespaces MemoriaHub owns for good. The six temporary ones (system:
+// ai, storage, notifications, databaseBackup, email; user: notifications) are left out ON
 // PURPOSE: the platform slices declare the same keys with their own types, and declaring a key twice
 // with different types is TS2717 (and which one wins depends on file order). The app reads those
 // through `AppSystemSettings` (settings/app-settings.types.ts) instead.

@@ -12,7 +12,7 @@ import {
   type IdentityNodeCredentials,
 } from '@marinoscar/platform-api/identity';
 
-import { EnrichmentModule } from '../../enrichment/enrichment.module';
+import { PrismaModule } from '../../prisma/prisma.module';
 import { NodeCredentialService } from '../../nodes/node-credential.service';
 import { IdentityJobsAdapter } from './identity-jobs.adapter';
 import { MemoriaHubIdentityNotifier } from './identity-notifier.adapter';
@@ -33,8 +33,8 @@ import { AppProfileImages, AppUserDefaults } from './identity-user.adapters';
 //   IDENTITY_NODE_CREDENTIALS -> the app's NodeCredentialService (`nod_`).
 //       PLATFORM-ADOPTION-SHIM(RETRO-C2): RETRO-C2 switches to the platform's
 //       NodeCredentialService (`useExisting`).
-//   IDENTITY_JOBS -> the app's enrichment queue.
-//       PLATFORM-ADOPTION-SHIM(RETRO-C1): re-pointed at the platform JobsService.
+//   IDENTITY_JOBS -> the platform queue (RETRO-C1): JobsService + JobHandlerRegistry, both from the
+//       global JobsModule.
 // =============================================================================
 
 /** Compile-time proof that the app's services ARE the ports, unadapted. */
@@ -59,7 +59,7 @@ const PORTS = [
 
 @Global()
 @Module({
-  imports: [EnrichmentModule],
+  imports: [PrismaModule],
   providers: PORTS,
   exports: PORTS.map((port) => port.provide),
 })

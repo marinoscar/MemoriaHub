@@ -27,8 +27,9 @@ import {
 
 const SYSTEM_KEYS = [
   'maintenance', // the platform's, registered first
+  'jobs', 'retention', // the jobs slice's (RETRO-C1)
   'ui', 'features', 'ai', 'autoTagging', 'face', 'storage', 'burst', 'dedup', 'locationInference',
-  'locationGrouping', 'socialMedia', 'geo', 'email', 'jobs', 'reviewRuns', 'notifications',
+  'locationGrouping', 'socialMedia', 'geo', 'email', 'reviewRuns', 'notifications',
   'pictureEnhancement', 'backup', 'workflows', 'memories', 'databaseBackup',
 ];
 const USER_KEYS = ['dataTables', 'navigation', 'search', 'notifications', 'memories', 'timezone'];
@@ -117,8 +118,8 @@ describe('settings registry', () => {
       ['autoTagging.video.transcription.leadSeconds', ['autoTagging', 'video', 'transcription', 'leadSeconds'], 5, 600, true],
       ['storage.trash.retentionDays', ['storage', 'trash', 'retentionDays'], 1, 365, true],
       ['storage.insights.refreshIntervalHours', ['storage', 'insights', 'refreshIntervalHours'], 1, 168, true],
-      ['jobs.stuckThresholdMinutes', ['jobs', 'stuckThresholdMinutes'], 1, 120, true],
-      ['jobs.history.retentionDays', ['jobs', 'history', 'retentionDays'], 1, 365, true],
+      ['jobs.stuckThresholdMinutes', ['jobs', 'stuckThresholdMinutes'], 1, 10080, true],
+      ['jobs.history.retentionDays', ['jobs', 'history', 'retentionDays'], 1, 3650, true],
       ['reviewRuns.runHistoryRetentionDays', ['reviewRuns', 'runHistoryRetentionDays'], 1, 365, true],
       ['notifications.retentionDays', ['notifications', 'retentionDays'], 1, 365, true],
       ['pictureEnhancement.maxBatchSize', ['pictureEnhancement', 'maxBatchSize'], 1, 200, true],

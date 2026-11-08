@@ -8,7 +8,7 @@ import { RateLimitError, classifyRateLimit } from '../enrichment/rate-limit.erro
 import {
   ENRICHMENT_MAX_ATTEMPTS,
   ENRICHMENT_RATELIMIT_MAX_HITS,
-} from '../enrichment/enrichment-terminal.service';
+} from '../platform/jobs/queue-limits';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';

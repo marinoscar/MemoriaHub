@@ -16,8 +16,6 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'doctor/checks/core/pgvector.doctor-check.ts', why: 'Read-only extension probe.' },
   { file: 'doctor/checks/face/pgvector.doctor-check.ts', why: 'Read-only column and index probe.' },
   { file: 'email/email-smtp-secret.store.ts', why: "One jsonb_set on the singleton `global` system_settings row that writes the SMTP ciphertext without clobbering the rest of the document (RETRO-B3 shim, removed by RETRO-D2); the actor id is the authenticated admin." },
-  { file: 'enrichment/enrichment-admin.service.ts', why: 'Queue statistics aggregates; no user ids.' },
-  { file: 'enrichment/enrichment-claim.service.ts', why: 'FOR UPDATE SKIP LOCKED job claim; replaced by the platform jobs slice (RETRO-C1).' },
   { file: 'face/face-matching.service.ts', why: 'pgvector KNN over face embeddings, scoped by circle id.' },
   { file: 'insights/insights.service.ts', why: 'Storage insight aggregates over the whole deployment.' },
   { file: 'location-groups/location-group-rebuild.handler.ts', why: 'Set-based rebuild of the canonical location columns.' },

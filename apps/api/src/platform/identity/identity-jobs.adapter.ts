@@ -1,69 +1,43 @@
 import { Injectable, type Logger } from '@nestjs/common';
-import { JobReason, MhLegacyJobStatus } from '@prisma/client';
-import type { EnrichmentJob } from '@prisma/client';
 import type { IdentityJobHandler, IdentityJobsPort } from '@marinoscar/platform-api/identity';
+import { enqueueHousekeepingJob, JobHandlerRegistry, JobsService } from '@marinoscar/platform-api/jobs';
 
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
-import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // =============================================================================
-// IDENTITY_JOBS -> MemoriaHub's `enrichment_jobs` queue (RETRO-B2, issue #611)
+// IDENTITY_JOBS -> the platform queue (RETRO-B2, #611; re-pointed by RETRO-C1, #575)
 // =============================================================================
 //
 // Identity's two housekeeping job types (`auth.token.cleanup`,
 // `auth.device-code.cleanup`) are queue jobs: the slice's enqueue-only crons call
 // `enqueueHousekeepingJob`, and its two handlers register through
-// `registerHandler`. This replaces the app's two inline `@Cron` bodies
-// (`auth/tasks/token-cleanup.task.ts`, `device-auth/tasks/device-code-cleanup.task.ts`).
+// `registerHandler`. Both are server-only (no node pair): they delete credential
+// rows, a privilege a worker node must never hold.
 //
-// The housekeeping row is global (`mediaItemId: null`, `circleId: null`), low
-// priority, and skipped when one is already pending or running, the same rule as
-// `JobHistoryPurgeTask`. Both types are server-only (no node pair).
-//
-// PLATFORM-ADOPTION-SHIM(RETRO-C1): re-pointed at the platform `JobsService`
-// (`enqueueHousekeepingJob` of `@marinoscar/platform-api/jobs`) when the jobs
-// slice replaces `enrichment_jobs`.
+// The housekeeping row is global (no subject, `orgId: null`), priority 100, and
+// skipped when one is already pending or running: that is the platform's
+// `enqueueHousekeepingJob`, so the app keeps no copy of the rule.
 // =============================================================================
 
 @Injectable()
 export class IdentityJobsAdapter implements IdentityJobsPort {
   constructor(
-    private readonly jobs: EnrichmentJobService,
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
+    private readonly jobs: JobsService,
     private readonly prisma: PrismaService,
   ) {}
 
   async enqueueHousekeepingJob(options: { type: string; what: string; logger: Logger }): Promise<void> {
-    const { type, what, logger } = options;
-    try {
-      const existing = await this.prisma.enrichmentJob.findFirst({
-        where: { type, status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] } },
-        select: { id: true },
-      });
-      if (existing) {
-        logger.debug(`${type} job already queued; skipping ${what}`);
-        return;
-      }
-      await this.jobs.enqueue({
-        type,
-        mediaItemId: null,
-        circleId: null,
-        reason: JobReason.backfill,
-        priority: 100, // background housekeeping
-      });
-      logger.log(`${type} job enqueued (${what})`);
-    } catch (err) {
-      logger.error(`${what} could not be enqueued: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await enqueueHousekeepingJob({
+      jobs: this.jobs,
+      prisma: this.prisma,
+      logger: options.logger,
+      type: options.type,
+      what: options.what,
+    });
   }
 
   registerHandler(handler: IdentityJobHandler): void {
-    const appHandler: EnrichmentHandler = {
-      type: handler.type,
-      process: (job: EnrichmentJob) => handler.process({ id: job.id }),
-    };
-    this.registry.register(appHandler);
+    this.registry.register(handler);
   }
 }

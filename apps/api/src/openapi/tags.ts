@@ -410,8 +410,8 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
       {
         name: 'Admin: Job Queue',
         description:
-          'The shared enrichment job queue: stats, listing, retry, stuck-job recovery, and the ' +
-          'on-demand insights/ETA aggregate.',
+          'The shared background job queue: stats, listing, retry, stuck-job recovery, and the ' +
+          'on-demand insights/ETA aggregate. Served by the platform jobs slice (RETRO-C1).',
       },
       {
         name: 'Doctor',

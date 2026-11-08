@@ -1,40 +1,33 @@
 import { Module } from '@nestjs/common';
-import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
-import { EnrichmentJobService } from './enrichment-job.service';
-import { EnrichmentJobWorker } from './enrichment-job.worker';
-import { EnrichmentClaimService } from './enrichment-claim.service';
-import { EnrichmentTerminalService } from './enrichment-terminal.service';
-import { EnrichmentAdminService } from './enrichment-admin.service';
-import { EnrichmentAdminController } from './enrichment-admin.controller';
-import { EnrichmentStuckResetTask } from './enrichment-stuck-reset.task';
-import { TempFileJanitorTask } from './temp-file-janitor.task';
-import { ProviderThrottleService } from './provider-throttle.service';
-import { JobHistoryPurgeHandler } from './job-history-purge.handler';
-import { JobHistoryPurgeTask } from './job-history-purge.task';
-import { PrismaModule } from '../prisma/prisma.module';
 
+import {
+  LegacyEnrichmentHandlerAdapter,
+} from '../platform/jobs/legacy-handlers.adapter';
+import { EnrichmentJobService, LegacyJobSettledBridge } from '../platform/jobs/enrichment-job.facade';
+import { RetiredJobTypeHandler } from '../platform/jobs/retired-job-types';
+import { PrismaModule } from '../prisma/prisma.module';
+import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
+
+/**
+ * The legacy face of the queue (RETRO-C1, #575): what the feature modules import
+ * to enqueue (`EnrichmentJobService`) and to register a handler
+ * (`EnrichmentHandlerRegistry`). The queue itself is the platform's
+ * `JobsModule` (global, mounted in `platform/jobs/jobs.config.ts`): the worker,
+ * the claim, the terminal state machine, the reaper, the janitor, the history
+ * purge, the provider throttle and `/api/admin/jobs/*` are no longer here.
+ *
+ * PLATFORM-ADOPTION-SHIM(RETRO-C3..C8, C11): shrinks as handler groups are
+ * converted to native `JobHandler`s, and goes with C11.
+ */
 @Module({
-  imports: [PrismaModule, ],
-  controllers: [EnrichmentAdminController],
+  imports: [PrismaModule],
   providers: [
+    LegacyEnrichmentHandlerAdapter,
     EnrichmentHandlerRegistry,
     EnrichmentJobService,
-    EnrichmentJobWorker,
-    EnrichmentClaimService,
-    EnrichmentTerminalService,
-    EnrichmentAdminService,
-    EnrichmentStuckResetTask,
-    TempFileJanitorTask,
-    ProviderThrottleService,
-    JobHistoryPurgeHandler,
-    JobHistoryPurgeTask,
+    LegacyJobSettledBridge,
+    RetiredJobTypeHandler,
   ],
-  exports: [
-    EnrichmentJobService,
-    EnrichmentHandlerRegistry,
-    EnrichmentClaimService,
-    EnrichmentTerminalService,
-    EnrichmentAdminService,
-  ],
+  exports: [EnrichmentJobService, EnrichmentHandlerRegistry],
 })
 export class EnrichmentModule {}
