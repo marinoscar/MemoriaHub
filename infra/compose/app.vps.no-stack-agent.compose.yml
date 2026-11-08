@@ -1,0 +1,16 @@
+# =============================================================================
+# App overlay (scope vps) - this app does not run the stack agent
+# =============================================================================
+# vps.compose.yml adds `stack-agent`, the one container that holds the Docker
+# socket, so the platform's admin UI can redeploy the telemetry containers.
+# MemoriaHub has never run it (the hand-written VPS files did not), so this
+# overlay keeps it out. A service in the `disabled` profile is never started by
+# `docker compose up` and is left out of `docker compose config`.
+#
+# The API still refuses to start without STACK_AGENT_TOKEN
+# (`${STACK_AGENT_TOKEN:?...}` in vps.compose.yml); the deploy generates it, and
+# nothing listens for it.
+# =============================================================================
+services:
+  stack-agent:
+    profiles: ["disabled"]

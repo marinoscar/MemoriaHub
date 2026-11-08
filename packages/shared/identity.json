@@ -5,6 +5,7 @@
   "themeColor": "#1976d2",
   "backgroundColor": "#ffffff",
   "cliName": "memoriahub",
+  "workerImage": "ghcr.io/marinoscar/memoriahub-worker:latest",
   "android": {
     "applicationId": "memoriahub.marin.cr",
     "storagePrefix": "memoriahub",

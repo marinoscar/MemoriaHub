@@ -1,3 +1,5 @@
+# GENERATED from @marinoscar/platform-infra@0.1.0-next.21 (compose) — do not edit; extend through an infra/compose/app.*.compose.yml overlay
+# Source of truth: @marinoscar/platform-infra/compose/dev.compose.yml; re-materialise with `npx platform-infra sync`
 # =============================================================================
 # Docker Compose - Development Overrides
 # =============================================================================
@@ -9,16 +11,23 @@
 
 services:
   # ---------------------------------------------------------------------------
+  # Nginx - Development overrides
+  # ---------------------------------------------------------------------------
+  nginx:
+    volumes:
+      # Replaces the strict csp.conf from base.compose.yml (Compose merges
+      # volumes keyed by container path). The Vite dev server injects an
+      # inline React Refresh preamble script that `script-src 'self'` blocks,
+      # which leaves the app a blank page; this policy permits it.
+      # Development only.
+      - ../nginx/csp.dev.conf:/etc/nginx/csp.conf:ro
+
+  # ---------------------------------------------------------------------------
   # API - Development overrides
   # ---------------------------------------------------------------------------
   api:
     build:
       target: development
-    # Bind-mount targets moved from /app/src and /app/prisma to
-    # /app/apps/api/src and /app/apps/api/prisma: the api Dockerfile now
-    # builds with WORKDIR /app/apps/api (repo-root-relative context; see
-    # apps/api/Dockerfile), so that's where the source lives inside the
-    # running container.
     volumes:
       - ../../apps/api/src:/app/apps/api/src:ro
       - ../../apps/api/prisma:/app/apps/api/prisma:ro
@@ -32,8 +41,6 @@ services:
   web:
     build:
       target: development
-    # See the api service note above: the web Dockerfile now builds with
-    # WORKDIR /app/apps/web, so the bind-mount target moved accordingly.
     volumes:
       - ../../apps/web/src:/app/apps/web/src:ro
     environment:

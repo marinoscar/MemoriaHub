@@ -1,0 +1,30 @@
+# =============================================================================
+# App overlay (scope prod: prod and vps) - container and heap sizing
+# =============================================================================
+# The platform prod.compose.yml limits the API to 512M, which a bulk import
+# exhausts within minutes. This overlay carries the sizing MemoriaHub has run
+# with, and keeps the same variables so an existing .env keeps working:
+#
+#   API_MEMORY_LIMIT  the API container's cgroup limit (default 6G)
+#   API_CPU_LIMIT     the API's CPU share (default 4.0)
+#   WEB_MEMORY_LIMIT  the web container (default 128M)
+#   NODE_OPTIONS      the V8 old-space heap cap, sized to the container minus
+#                     about 1 GB for off-heap buffers (default 5120 MB)
+#
+# Size the two ceilings together: a heap cap above the container limit is an
+# OOM kill, and a heap far below it is wasted memory. See app.env.example.
+# =============================================================================
+services:
+  api:
+    environment:
+      - NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=5120}
+    deploy:
+      resources:
+        limits:
+          memory: ${API_MEMORY_LIMIT:-6G}
+          cpus: "${API_CPU_LIMIT:-4.0}"
+  web:
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEMORY_LIMIT:-128M}

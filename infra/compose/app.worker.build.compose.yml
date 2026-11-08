@@ -1,0 +1,21 @@
+# =============================================================================
+# App overlay (scope worker) - build the worker from source, the `worker` stage
+# =============================================================================
+# worker.build.compose.yml (platform) builds with apps/cli/Dockerfile and the
+# `production` target, which that Dockerfile does not define. MemoriaHub's
+# worker is its `worker` stage. This overlay gives the worker the same complete
+# build definition (repository-root context, the Dockerfile, the stage), so it
+# is correct on its own and when worker.build.compose.yml is also listed.
+#
+# Compose uses the image unless --build is passed (or the image is absent), so
+# a pull-based fleet is unaffected. To build locally:
+#
+#   docker compose -f worker.compose.yml -f app.worker.compreface.compose.yml \
+#     -f app.worker.memoriahub.compose.yml -f app.worker.build.compose.yml up --build
+# =============================================================================
+services:
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/cli/Dockerfile
+      target: worker

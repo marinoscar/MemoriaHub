@@ -1,0 +1,15 @@
+# =============================================================================
+# App overlay (scope devdb) - the development database carries pgvector
+# =============================================================================
+# The platform's devdb.compose.yml runs postgres:16-alpine. Semantic search and
+# face matching need the `vector` extension (embeddings, HNSW indexes); its
+# control file must be installed server-side, so the first migration that uses
+# it would abort on a plain postgres image. pgvector/pgvector:pg17 is the image
+# the test database also uses (app.test.pgvector.compose.yml).
+#
+# The platform's postgres-init/10-application-role.sh creates the application
+# role on the first start of an empty volume.
+# =============================================================================
+services:
+  db:
+    image: pgvector/pgvector:pg17

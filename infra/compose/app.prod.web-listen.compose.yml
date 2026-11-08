@@ -1,0 +1,25 @@
+# =============================================================================
+# App overlay (scope prod: prod and vps) - the web container listens on 5173
+# =============================================================================
+# The generated nginx.conf proxies `/` to `web:5173` in every mode (the platform
+# convention: the development Vite server and the production static server share
+# one port). MemoriaHub's production web image (apps/web/Dockerfile, the nginx
+# stage) serves on port 80, from apps/web/nginx.conf.
+#
+# Until apps/web moves its production listener to 5173 (a follow-up outside
+# infra/), this overlay makes the production container listen on 5173 instead:
+# it rewrites `listen 80;` in the image's own server block at start-up and
+# fails loudly, rather than serving on the wrong port, when that line has
+# changed. The source of truth stays apps/web/nginx.conf.
+# =============================================================================
+services:
+  web:
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        conf=/etc/nginx/conf.d/default.conf
+        sed -i 's/listen 80;/listen 5173;/' "$$conf"
+        grep -q 'listen 5173;' "$$conf" || { echo "web: no 'listen 5173;' after rewrite; apps/web/nginx.conf changed" >&2; exit 1; }
+        exec nginx -g 'daemon off;'
