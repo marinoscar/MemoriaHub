@@ -170,18 +170,54 @@ function applyEnvOverlay(base: CliConfig | null): CliConfig | null {
   return cfg;
 }
 
-export function loadConfig(): CliConfig | null {
+/**
+ * Read `config.json` as a plain object, or null when absent/unreadable.
+ *
+ * The file is shared with the platform CLI (`login`, `config`, `api`), which
+ * names the credential `token` and its expiry `expiresAt`; releases before 1.4
+ * wrote `pat` / `patExpiresAt`. Both spellings are understood here so an
+ * install that has not been migrated yet (extensions/config-compat.ts) keeps
+ * working.
+ */
+export function readRawConfigFile(): Record<string, unknown> | null {
   const p = configPath();
-  let fileConfig: CliConfig | null = null;
-  if (fs.existsSync(p)) {
-    try {
-      const raw = fs.readFileSync(p, 'utf-8');
-      fileConfig = JSON.parse(raw) as CliConfig;
-    } catch {
-      fileConfig = null;
+  if (!fs.existsSync(p)) return null;
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
     }
+  } catch {
+    // fall through: unreadable is treated as "no file", as before
   }
-  return applyEnvOverlay(fileConfig);
+  return null;
+}
+
+/** File shape (platform names, legacy names tolerated) to the in-memory CliConfig. */
+export function fromFileShape(raw: Record<string, unknown>): CliConfig {
+  const { token, expiresAt, pat, patExpiresAt, ...rest } = raw;
+  const cfg = { ...rest } as unknown as CliConfig;
+  const credential = typeof token === 'string' && token ? token : pat;
+  if (typeof credential === 'string') cfg.pat = credential;
+  const expiry = typeof expiresAt === 'string' && expiresAt ? expiresAt : patExpiresAt;
+  if (typeof expiry === 'string') cfg.patExpiresAt = expiry;
+  return cfg;
+}
+
+/** The in-memory CliConfig to the file shape the platform CLI also reads. */
+export function toFileShape(config: CliConfig, existing?: Record<string, unknown> | null): Record<string, unknown> {
+  const { pat, patExpiresAt, ...rest } = config;
+  // Keep what other writers put in the file (tokenId, tokenName, updatedAt, ...)
+  // but never a stale legacy credential.
+  const { pat: _oldPat, patExpiresAt: _oldExpiry, expiresAt: _oldExpiresAt, ...kept } = existing ?? {};
+  const out: Record<string, unknown> = { ...kept, ...rest, token: pat };
+  if (patExpiresAt !== undefined) out['expiresAt'] = patExpiresAt;
+  return out;
+}
+
+export function loadConfig(): CliConfig | null {
+  const raw = readRawConfigFile();
+  return applyEnvOverlay(raw ? fromFileShape(raw) : null);
 }
 
 export function saveConfig(config: CliConfig): void {
@@ -189,7 +225,7 @@ export function saveConfig(config: CliConfig): void {
   const p = configPath();
   try {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(config, null, 2), { mode: 0o600 });
+    fs.writeFileSync(p, JSON.stringify(toFileShape(config, readRawConfigFile()), null, 2), { mode: 0o600 });
   } catch (err) {
     // Env-driven headless deployments (e.g. containers with a read-only home)
     // must not crash on a best-effort persistence write — the env already
