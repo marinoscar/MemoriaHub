@@ -75,7 +75,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     ScheduleModule.forRoot(),
 
     // Event emitter for async events
-    EventEmitterModule.forRoot(),
+    // `job.settled` has eleven listeners once the storage (RETRO-D1), notifications, alerts and
+    // webhooks slices are all mounted beside MemoriaHub's bridges. Past eventemitter2's default
+    // of 10 it emits a leak warning whose object Node's `emitWarning` rejects, failing the boot.
+    EventEmitterModule.forRoot({ maxListeners: 25 }),
 
     // Database
     PrismaModule,
