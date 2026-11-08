@@ -51,7 +51,7 @@
 import { EnrichmentJob, ReviewRunItemStatus, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { ReviewRunExecuteBatchHandler } from './review-run-execute-batch.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -118,7 +118,7 @@ function makeStubStrategy(overrides: Record<string, unknown> = {}): {
 describe('ReviewRunExecuteBatchHandler', () => {
   let handler: ReviewRunExecuteBatchHandler;
   let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let subjects: { get: jest.Mock };
   let stubStrategy: ReturnType<typeof makeStubStrategy>;
 
@@ -129,7 +129,7 @@ describe('ReviewRunExecuteBatchHandler', () => {
     subjects = { get: jest.fn().mockReturnValue(stubStrategy) };
 
     handler = new ReviewRunExecuteBatchHandler(
-      registry as unknown as EnrichmentHandlerRegistry,
+      registry as unknown as JobHandlerRegistry,
       prisma as unknown as PrismaService,
       subjects as unknown as ReviewRunSubjectRegistry,
     );
