@@ -1,4 +1,4 @@
-import type { DataTableStoredLayout } from '../components/datatable/layout/layoutModel';
+import type { DataTableStoredLayout } from '@marinoscar/platform-web/datatable/headless';
 import type {
   NotificationPreferences,
   NotificationPreferencesPatch,

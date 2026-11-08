@@ -41,7 +41,7 @@ import {
   formatCount,
 } from '../../../utils/workflowFormat';
 import type { WorkflowSubjectType } from '../../../types/workflows';
-import type { DataTableColumn } from '../../datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 
 // ---------------------------------------------------------------------------
 // Identity

@@ -13,7 +13,7 @@
  */
 
 import { Chip, Stack, Tooltip, Typography } from '@mui/material';
-import type { DataTableColumn, DataTableFilterModel } from '../../components/datatable';
+import type { DataTableColumn, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import { BROADCAST_RECHECK_INTERVAL, BROADCAST_STATUSES, channelLabel } from '../../services/broadcasts';
 import type { Broadcast, BroadcastStatus } from '../../services/broadcasts';
 

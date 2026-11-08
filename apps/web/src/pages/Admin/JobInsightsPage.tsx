@@ -30,7 +30,7 @@ import { ProportionBar } from '../../components/insights/ProportionBar';
 import { FreshnessPill } from '../../components/insights/FreshnessPill';
 import { formatDuration } from '../../utils/formatBytes';
 import { formatCompactNumber } from '../../utils/formatBytes';
-import { DataTable } from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
 import {
   JOB_INSIGHTS_COLUMNS,
   JOB_INSIGHTS_TABLE_ID,

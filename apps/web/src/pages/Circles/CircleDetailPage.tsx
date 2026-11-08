@@ -53,7 +53,8 @@ import { useCircleInvites } from '../../hooks/useCircleInvites';
 import { useCircleContext } from '../../contexts/CircleContext';
 import { usePermissions } from '../../hooks/usePermissions';
 import { getCircle, updateCircle } from '../../services/circles';
-import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   CIRCLE_INVITES_TABLE_ID,
   CIRCLE_MEMBERS_TABLE_ID,

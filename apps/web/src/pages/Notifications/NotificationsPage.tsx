@@ -73,11 +73,8 @@ import DoneIcon from '@mui/icons-material/DoneOutlined';
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import {
-  DataTable,
-  type DataTableFilterModel,
-  type DataTableRowAction,
-} from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableFilterModel, DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import { useCircle } from '../../hooks/useCircle';
 import { useOpenNotificationTarget } from '../../hooks/useNotificationClickHandling';
 import { useNotifications } from '../../hooks/useNotifications';

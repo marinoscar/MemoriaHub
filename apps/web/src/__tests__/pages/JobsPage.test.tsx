@@ -25,7 +25,7 @@ import {
   installLayoutStubs,
   resetContainerWidth,
   setInitialContainerWidth,
-} from '../../components/datatable/__tests__/testUtils/layoutStubs';
+} from '@marinoscar/platform-web/datatable/testing';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared BEFORE imports they affect
@@ -48,7 +48,7 @@ import { normalizeJobFilters, toJobQuery } from '../../pages/Admin/jobsTable';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
 import type { UseJobsResult } from '../../hooks/useJobs';
-import type { DataTableFilterModel } from '../../components/datatable';
+import type { DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);

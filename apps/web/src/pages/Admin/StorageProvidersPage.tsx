@@ -62,7 +62,8 @@ import type {
   StorageProviderRow,
   StorageTestResult,
 } from '../../services/storage-providers';
-import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   MIGRATION_RUN_COLUMNS,
   MigrationStatusChip,

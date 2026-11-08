@@ -71,12 +71,8 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useJobs } from '../../hooks/useJobs';
 import { listJobs } from '../../services/jobs';
 import type { EnrichmentJobDto } from '../../services/jobs';
-import {
-  DataTable,
-  type DataTableBulkAction,
-  type DataTableFilterModel,
-  type DataTableRowAction,
-} from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableBulkAction, DataTableFilterModel, DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   JOB_TABLE_ID,
   buildJobColumns,
