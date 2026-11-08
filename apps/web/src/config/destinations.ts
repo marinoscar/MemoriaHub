@@ -21,17 +21,16 @@
  *     they are NOT children of it.
  */
 
+import { resolveActiveDestination as resolveShellDestination } from '@marinoscar/platform-web/shell/headless';
+
 export type DestinationKey = 'photos' | 'collections' | 'search' | 'review' | 'console';
 
 /**
- * Does `prefix` own `path`? True when the path equals the prefix or continues
- * with a `/`. `'/'` matches only itself — every path starts with it, so the
- * root has to be exact or it would own the entire app.
+ * Does `prefix` own `path`? The packaged shell's rule (segment boundaries,
+ * `'/'` owns only itself), re-exported so the app and the shell can never
+ * disagree about route ownership (RETRO-F1, #571).
  */
-export function owns(prefix: string, path: string): boolean {
-  if (prefix === '/') return path === '/';
-  return path === prefix || path.startsWith(`${prefix}/`);
-}
+export { owns } from '@marinoscar/platform-web/shell/headless';
 
 /**
  * Route prefixes each destination owns. Child routes are covered by their
@@ -90,24 +89,11 @@ export const UNOWNED_ROUTES: readonly string[] = [
 /**
  * Which destination, if any, owns `pathname`.
  *
- * Longest prefix wins where prefixes overlap. They do not overlap today, but
- * encoding the rule costs nothing and removes the question from every future
- * addition to the table.
+ * Longest prefix wins where prefixes overlap. The rule is the packaged shell's
+ * (`resolveActiveDestination` of `@marinoscar/platform-web/shell/headless`),
+ * applied to this app's table, so the rail, the bottom bar and the context
+ * panes resolve the same destination.
  */
 export function resolveActiveDestination(pathname: string): DestinationKey | null {
-  let best: { key: DestinationKey; length: number } | null = null;
-
-  for (const [key, prefixes] of Object.entries(DESTINATION_ROUTES) as [
-    DestinationKey,
-    readonly string[],
-  ][]) {
-    for (const prefix of prefixes) {
-      if (!owns(prefix, pathname)) continue;
-      if (!best || prefix.length > best.length) {
-        best = { key, length: prefix.length };
-      }
-    }
-  }
-
-  return best?.key ?? null;
+  return resolveShellDestination(DESTINATION_ROUTES, pathname);
 }

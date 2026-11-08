@@ -1,5 +1,15 @@
 /**
- * The desktop context pane — the second column, beside the rail.
+ * The desktop context panes — the second column, beside the rail.
+ *
+ * RETRO-F1 (#571): the column itself (its 240px width, sticky geometry, border
+ * and `<aside>` landmark) is now the packaged shell's: `ShellNavigationRail`
+ * draws the active destination's `ShellDestination.contextPane` beside the
+ * EXPANDED rail (its own `lg` and not-collapsed state, not a new breakpoint
+ * gate). This file supplies the two panes' CONTENTS, bound in
+ * `config/shell.ts` to the Collections and Review destinations. One behaviour
+ * moved with it: collapsing the desktop rail now also hides the pane (the
+ * shell ties the pane to the expanded rail), where the app used to keep it at
+ * `lg` regardless of the collapse preference.
  *
  * Issue #392, epic #388, spec §4.3. It shows what is INSIDE the selected
  * destination, so depth costs a glance rather than a tap. That is what recovers
@@ -39,19 +49,14 @@
  */
 
 import { Box, Typography, useTheme } from '@mui/material';
-import { useLocation } from 'react-router-dom';
+import type { ShellContextPaneProps } from '@marinoscar/platform-web/shell/headless';
 import { CollectionsList } from '../collections/CollectionsList';
 import { ReviewQueueList } from '../review/ReviewQueueList';
 import { COLLECTIONS } from '../../config/collections';
 import type { CollectionKey } from '../../config/collections';
 import { REVIEW_QUEUES } from '../../config/reviewQueues';
 import type { ReviewQueueKey } from '../../config/reviewQueues';
-import { owns, resolveActiveDestination } from '../../config/destinations';
-
-export const CONTEXT_PANE_WIDTH = 240;
-
-/** The AppBar's `Toolbar` height at `lg`, the only place this pane renders. */
-const APPBAR_HEIGHT = 64;
+import { owns } from '../../config/destinations';
 
 /**
  * Which review entry the current URL is showing, or `null`.
@@ -95,66 +100,42 @@ function resolveCollectionKey(pathname: string): CollectionKey | null {
   return null;
 }
 
-export function NavContextPane() {
+function PaneHeading({ children }: { children: string }) {
   const theme = useTheme();
-  const { pathname } = useLocation();
-
-  const destination = resolveActiveDestination(pathname);
-  const isReview = destination === 'review';
-  const isCollections = destination === 'collections';
-
-  if (!isReview && !isCollections) return null;
-
   return (
-    <Box
-      component="nav"
-      // Spec §7: a named landmark, distinct from the rail's, so a screen-reader
-      // user can tell the two navs apart when tabbing between them.
-      aria-label={isReview ? 'Review queues' : 'Collections'}
+    <Typography
+      component="h2"
+      variant="overline"
       sx={{
-        width: CONTEXT_PANE_WIDTH,
-        flexShrink: 0,
-        // Load-bearing (issue #291): a long album or person label inside the
-        // pane must not set a min-content floor that widens the whole shell.
-        minWidth: 0,
-        backgroundColor: theme.palette.background.paper,
-        borderRight: `1px solid ${theme.palette.divider}`,
-        // Same sticky geometry as the rail, so the two columns scroll together
-        // with the toolbar and independently of `main`.
-        position: 'sticky',
-        top: APPBAR_HEIGHT,
-        alignSelf: 'flex-start',
-        height: `calc(100vh - ${APPBAR_HEIGHT}px)`,
-        '@supports (height: 100dvh)': {
-          height: `calc(100dvh - ${APPBAR_HEIGHT}px)`,
-        },
-        overflowY: 'auto',
-        overflowX: 'hidden',
         px: 1,
-        py: 1.5,
+        display: 'block',
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        color: theme.palette.text.disabled,
       }}
     >
-      <Typography
-        component="h2"
-        variant="overline"
-        sx={{
-          px: 1,
-          display: 'block',
-          fontWeight: 700,
-          letterSpacing: '0.08em',
-          color: theme.palette.text.disabled,
-        }}
-      >
-        {isReview ? 'Review' : 'Collections'}
-      </Typography>
+      {children}
+    </Typography>
+  );
+}
 
-      {isReview ? (
-        <ReviewQueueList variant="pane" activeKey={resolveReviewKey(pathname)} />
-      ) : (
-        <CollectionsList variant="pane" activeKey={resolveCollectionKey(pathname)} />
-      )}
+/** Review's pane: the hub's own `ReviewQueueList`, never a second implementation. */
+export function ReviewContextPane({ pathname }: ShellContextPaneProps) {
+  return (
+    // `minWidth: 0` (issue #291): a long label must not set a min-content floor.
+    <Box sx={{ px: 1, py: 1.5, minWidth: 0 }}>
+      <PaneHeading>Review</PaneHeading>
+      <ReviewQueueList variant="pane" activeKey={resolveReviewKey(pathname)} />
     </Box>
   );
 }
 
-export default NavContextPane;
+/** Collections' pane: the hub's own `CollectionsList`. */
+export function CollectionsContextPane({ pathname }: ShellContextPaneProps) {
+  return (
+    <Box sx={{ px: 1, py: 1.5, minWidth: 0 }}>
+      <PaneHeading>Collections</PaneHeading>
+      <CollectionsList variant="pane" activeKey={resolveCollectionKey(pathname)} />
+    </Box>
+  );
+}

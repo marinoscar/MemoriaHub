@@ -63,7 +63,8 @@ import type {
   AdminNodeCredentialDto,
   CreatedNodeCredentialDto,
 } from '../../services/workers';
-import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   NODE_CREDENTIALS_TABLE_ID,
   WORKER_NODES_TABLE_ID,

@@ -20,6 +20,13 @@ vi.mock('../../hooks/useFeatureFlags', () => ({
 vi.mock('../../hooks/useWorkflowSubjects', () => ({
   useWorkflowsEnabled: vi.fn(),
 }));
+// The packaged rail's collapse preference (RETRO-F1, #571): the hub redirects
+// only while the context pane is showing, i.e. at lg AND with the rail expanded.
+const railPreference = vi.hoisted(() => ({ railCollapsed: false, isLoading: false, toggleRailCollapsed: () => undefined }));
+vi.mock('@marinoscar/platform-web/shell/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/platform-web/shell/headless')>()),
+  useShellRailPreference: () => railPreference,
+}));
 vi.mock('../../hooks/useScrollRestoration', () => ({
   useScrollRestoration: vi.fn(),
 }));

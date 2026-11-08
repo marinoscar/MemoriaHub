@@ -9,7 +9,7 @@ interface UseUserSettingsOptions {
   /**
    * Push the fetched `theme` into `ThemeContext` on load. Default `true`.
    *
-   * Pass `false` when the hook is mounted for some OTHER namespace (issue #392's `useNavigationPrefs`
+   * Pass `false` when the hook is mounted for some OTHER namespace (issue #392's former `useNavigationPrefs`
    * reads `navigation` from the always-mounted navigation rail). Without the opt-out, adding a
    * settings consumer to the app shell would silently make the stored theme authoritative on EVERY
    * page load and stamp over the AppBar's local light/dark toggle.

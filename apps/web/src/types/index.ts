@@ -1,4 +1,4 @@
-import type { DataTableStoredLayout } from '../components/datatable/layout/layoutModel';
+import type { DataTableStoredLayout } from '@marinoscar/platform-web/datatable/headless';
 import type {
   NotificationPreferences,
   NotificationPreferencesPatch,
@@ -101,9 +101,9 @@ export interface UserSettings {
    *
    * `pinned` is typed as `string[]` rather than the narrower `PinnableKey[]` ON
    * PURPOSE: this is the WIRE shape, and a blob written by an older release may
-   * legitimately contain a key this build no longer knows. Unknown keys are
-   * dropped on read by `useNavigationPrefs`' `sanitizePinned`; typing them out
-   * of existence here would only push that lie into the compiler.
+   * legitimately contain a key this build no longer knows. Since RETRO-F1
+   * (#571) the web reads only `railCollapsed`, through the packaged shell's
+   * `useShellRailPreference`; `pinned` is kept on the wire untouched.
    */
   navigation?: NavigationPreferences;
   /**

@@ -22,7 +22,7 @@
  */
 
 import { Box, Chip, Typography } from '@mui/material';
-import type { DataTableColumn } from '../../components/datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 import type { MigrationRun, StorageProviderRow } from '../../services/storage-providers';
 
 // ---------------------------------------------------------------------------

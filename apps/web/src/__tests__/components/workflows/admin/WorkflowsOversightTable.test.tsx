@@ -25,7 +25,7 @@ import { render } from '../../../utils/test-utils';
 import {
   installLayoutStubs,
   resetContainerWidth,
-} from '../../../../components/datatable/__tests__/testUtils/layoutStubs';
+} from '@marinoscar/platform-web/datatable/testing';
 import { WorkflowsOversightTable } from '../../../../components/workflows/admin/WorkflowsOversightTable';
 import {
   buildWorkflowOversightColumns,

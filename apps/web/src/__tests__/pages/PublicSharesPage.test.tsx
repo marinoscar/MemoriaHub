@@ -28,7 +28,7 @@ import {
   installLayoutStubs,
   resetContainerWidth,
   setInitialContainerWidth,
-} from '../../components/datatable/__tests__/testUtils/layoutStubs';
+} from '@marinoscar/platform-web/datatable/testing';
 import type { MediaShare } from '../../types/sharing';
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ import {
   truncateShareUrl,
   withStatusFilter,
 } from '../../pages/Admin/sharesTable';
-import type { DataTableFilterModel } from '../../components/datatable';
+import type { DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);

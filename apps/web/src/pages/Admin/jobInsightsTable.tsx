@@ -17,7 +17,7 @@
  */
 
 import { Typography } from '@mui/material';
-import type { DataTableColumn } from '../../components/datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 import { formatCompactNumber, formatDuration } from '../../utils/formatBytes';
 import type {
   JobInsightsLiveByType,

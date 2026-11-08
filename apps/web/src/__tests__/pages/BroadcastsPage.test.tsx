@@ -41,7 +41,7 @@ vi.mock('../../services/notifications', async (importOriginal) => {
   };
 });
 
-vi.mock('../../components/datatable', () => ({
+vi.mock('@marinoscar/platform-web/datatable/ui', () => ({
   DataTable: ({ rows, rowActions, rowId, emptyState }: any) => (
     <div data-testid="datatable">
       {rows.length === 0 && emptyState}

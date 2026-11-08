@@ -1,182 +1,92 @@
-import { Box, useMediaQuery, useTheme } from '@mui/material';
-import { Outlet } from 'react-router-dom';
+import { ShellProviders } from '@marinoscar/platform-web/shell/headless';
+import { ShellLayout } from '@marinoscar/platform-web/shell/ui';
+import type { ShellMainVariant } from '@marinoscar/platform-web/shell/headless';
+import { MaintenanceBanner } from '@marinoscar/platform-web/host/ui';
 import { AppBar } from '../navigation/AppBar';
 import { NavigationRail } from '../navigation/NavigationRail';
-import { NavContextPane } from '../navigation/NavContextPane';
 import { BottomNav } from '../navigation/BottomNav';
-import { MediaRefreshProvider } from '../../contexts/MediaRefreshContext';
-import { MediaPreviewProvider } from '../../contexts/MediaPreviewContext';
-import { SearchProvider } from '../../contexts/SearchContext';
-import { MaintenanceBanner } from '@marinoscar/platform-web/host/ui';
 import { TimezonePrompt } from '../settings/TimezonePrompt';
 import { NotificationPermissionBanner } from '../notifications/NotificationPermissionBanner';
 import { AndroidUpdateBanner } from './AndroidUpdateBanner';
 import { usePushSubscriptionSync } from '../../hooks/usePushSubscriptionSync';
 import { useNotificationClickHandling } from '../../hooks/useNotificationClickHandling';
+import { APP_NAVIGATION } from '../../config/shell';
+import { APP_SHELL_PROVIDERS } from '../../platform/shellProviders';
 
 interface LayoutProps {
   /**
-   * When true, `<main>` drops its padding and becomes a flex container so a
-   * child (e.g. the Map page) can own the full available area edge-to-edge.
+   * How `<main>` is drawn when the page does not ask itself
+   * (`useShellMainVariant`). Default `'padded'`.
    */
-  fullBleed?: boolean;
+  mainVariant?: ShellMainVariant;
 }
 
 /**
- * The app shell — three navigation treatments, one per size class.
+ * The app shell — this app's binding of the packaged `ShellLayout`
+ * (`@marinoscar/platform-web/shell/ui`, RETRO-F1 #571; the shell design is
+ * issue #392, epic #388).
  *
- * Issue #392, epic #388, spec §4. The `Sidebar` drawer this used to mount is
- * gone from every breakpoint:
+ *   compact (< sm)  →  bottom bar only. No drawer, no hamburger.
+ *   medium  (sm–lg) →  a permanent collapsed rail (56px).
+ *   expanded (≥ lg) →  the expanded rail (220px) plus, for Collections and
+ *                      Review, the context pane beside it.
  *
- *   compact (< sm)  →  bottom bar only. No drawer, no hamburger, no drawer
- *                      state to manage — which is why this component no longer
- *                      holds any (spec §4.1).
- *   medium  (sm–lg) →  a permanent collapsed rail (~56px). Always visible, so
- *                      navigating costs zero taps instead of one (spec §4.2).
- *   expanded (≥ lg) →  expanded rail + a context pane for Collections and
- *                      Review (spec §4.3).
+ * The chrome is chosen by MOUNTING in the package. This file fills its slots:
+ * the AppBar, rail and bottom-bar bindings, the shell-wide banners above the
+ * page and the time-zone prompt. A page that owns the whole content area (the
+ * map) asks for it with `useShellMainVariant('full-bleed')`: no padding and no
+ * banners, without remounting the shell.
  *
- * The chrome is chosen by MOUNTING, not by rendering-then-hiding: exactly one
- * navigation surface exists in the tree at any width, so a resize across `sm`
- * or `lg` swaps it rather than briefly showing two.
+ * ⚠️ FIVE BREAKPOINT GATES ARE COUPLED AND MUST MOVE TOGETHER, all at `sm`
+ * (600px), never `md` (issue #402). All five now live in
+ * `@marinoscar/platform-web`, which this repository does not edit:
+ *   1. `ShellLayout`'s `showRail` (`up('sm')`)       shell/ui/ShellLayout
+ *   2. `ShellBottomNav`'s `down('sm')` self-gate     shell/ui/ShellBottomNav
+ *   3. `<main>`'s `pb: { xs: 10, sm: 3 }`            shell/ui/ShellLayout
+ *   4. `SettingsHub`'s `isCompactWindow`             settings/ui/SettingsHub
+ *   5. `ShellAppBar`'s `isCompactWindow`             shell/ui/ShellAppBar
+ * Nothing in this file reads a breakpoint, and nothing may:
+ * `__tests__/config/breakpointGates.test.ts` fails on a new read.
  */
-export function Layout({ fullBleed = false }: LayoutProps) {
-  const theme = useTheme();
-  // 600px, NOT 900px (issue #402). This is Material 3's MEDIUM window class
-  // threshold — compact < 600dp, medium 600–840dp, expanded ≥ 840dp — and M3 is
-  // explicit that a rail is the correct chrome from medium upward ("only use
-  // navigation rails for medium window size classes and larger"), with "a
-  // tablet or foldable in portrait" named as the canonical medium case. Gating
-  // at MUI's `md` (900px) handed the phone treatment to every 600–899px device:
-  // an unfolded Z Fold 7 (~750px), iPad portrait (768px), iPad Pro 11" portrait
-  // (834px), Android tablets in portrait, and phones in landscape.
-  //
-  // ⚠️ FIVE GATES ARE COUPLED TO THIS ONE AND MUST MOVE TOGETHER. Moving the
-  // rail alone renders two navigation surfaces, or none, in the gap:
-  //   1. this `showRail`                               — the rail itself
-  //   2. `BottomNav`'s `down('sm')`                    — the EXACT complement
-  //   3. `AppBar`'s `isTabletUp` (`up('sm')`)          — search pill + upload label
-  //   4. `AppBar`'s `isCompactWindow` (`down('sm')`)   — admin drill-down top bar
-  //   5. the packaged `SettingsHub`'s `isCompactWindow` (both hubs) — must agree with (4)
-  // plus `<main>`'s `pb` below, which clears the bottom bar and so is only
-  // needed where the bottom bar exists.
-  //
-  // The EXPANDED tier is deliberately left at `lg` (1200) rather than M3's
-  // 840dp — see `showContextPane` below; that is a separate design decision.
-  const showRail = useMediaQuery(theme.breakpoints.up('sm'));
-  // The pane is a `lg`-and-up affordance, independent of the rail's collapse
-  // preference: collapsing the rail reclaims RAIL width, it does not mean "I
-  // want less context". A user on a 1400px screen who prefers a narrow rail
-  // still has room for — and still benefits from — the second column.
-  const showContextPane = useMediaQuery(theme.breakpoints.up('lg'));
-
+export function Layout({ mainVariant }: LayoutProps) {
   // Browser notifications (issue #486, epic #481). Mounted ONCE, here, because
   // this shell only renders for an authenticated user: auto-prompts for
   // permission when push is on, keeps this device's push subscription
-  // registered, and routes clicks on OS notifications (service worker toasts,
-  // page toasts, cold opens via `?n=<id>`) to mark-read + circle switch +
-  // navigate.
+  // registered, and routes clicks on OS notifications to mark-read + circle
+  // switch + navigate.
   const pushSync = usePushSubscriptionSync();
   useNotificationClickHandling();
 
   return (
-    <MediaRefreshProvider>
-      <MediaPreviewProvider>
-      <SearchProvider>
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            // The shell is the ONLY owner of viewport height — pages must not
-            // nest their own 100vh inside it (issue #237), or the document is
-            // always at least 100vh + AppBar + padding tall and scrolls even
-            // when the content fits. `100dvh` tracks mobile browser chrome;
-            // `100vh` measures against the LARGEST viewport, so a collapsing
-            // URL bar adds jitter. The plain 100vh below is the fallback for
-            // browsers without dvh support (same lesson as MediaMapPage).
-            minHeight: '100vh',
-            '@supports (min-height: 100dvh)': { minHeight: '100dvh' },
-            backgroundColor: theme.palette.background.default,
-          }}
-        >
-          {/* Above the AppBar so it is visible on every authenticated screen
-              (issue #348). Renders nothing for non-admins. */}
-          <MaintenanceBanner />
-          <AppBar />
-          {/* `minWidth: 0` on the ROW as well as on each of its children: the
-              row is itself a flex item of the column above, and issue #291's
-              runaway width propagates through every level that omits it. */}
-          <Box sx={{ display: 'flex', flexGrow: 1, minWidth: 0 }}>
-            {/* Focus order follows visual order (spec §7): rail, then context
-                pane, then main — which is also their DOM order here, so no
-                tabindex juggling is needed to achieve it. */}
-            {showRail && <NavigationRail />}
-            {showContextPane && <NavContextPane />}
-            <Box
-              component="main"
-              // `minWidth: 0` in BOTH branches is load-bearing, not cosmetic
-              // (issue #291). A flex item's `min-width` defaults to `auto` —
-              // its min-content width — so without this, any descendant that
-              // reports a large intrinsic inline size (a `content-visibility`
-              // placeholder, a wide table, a long unbroken string) cannot be
-              // shrunk and widens the whole app shell past the viewport.
-              sx={
-                fullBleed
-                  ? {
-                      flexGrow: 1,
-                      display: 'flex',
-                      minWidth: 0,
-                      minHeight: 0,
-                      p: 0,
-                    }
-                  : {
-                      flexGrow: 1,
-                      minWidth: 0,
-                      p: 3,
-                      // Clears the fixed bottom bar, which only exists below
-                      // `sm` — the same breakpoint `BottomNav` gates on. Moving
-                      // this with the rail (issue #402) is what keeps 600–899px
-                      // from carrying 80px of padding for a bar that is no
-                      // longer mounted there.
-                      pb: { xs: 10, sm: 3 },
-                    }
-              }
-            >
-              {/* Not in the full-bleed (map) layout, whose `<main>` is a flex
-                  row owned edge-to-edge by the page. */}
-              {!fullBleed && (
-                <NotificationPermissionBanner
-                  config={pushSync.config}
-                  capability={pushSync.capability}
-                  onRequestPermission={() => void pushSync.requestPermission()}
-                  isRequestingPermission={pushSync.isRequestingPermission}
-                />
-              )}
-              {/* Android app update (issue #515): renders only inside the
-                  app's TWA when the installed build is older than the
-                  hosted release; null (and no request) everywhere else. */}
-              {!fullBleed && <AndroidUpdateBanner />}
-              <Outlet />
-            </Box>
-          </Box>
-          {/* Mounted only where it renders. `BottomNav` also gates itself on
-              `down('sm')`, but it calls `useReviewQueues` for its badge, and
-              `useReviewCounts` beneath that deliberately does NOT dedupe across
-              consumers — so a self-gating-but-mounted bottom bar would double
-              every counts request at `sm` and up, where the rail already holds
-              one. `!showRail` is the exact complement of the rail's gate, so
-              there is no width with two navs and none with zero. */}
-          {!showRail && <BottomNav />}
-          {/* Renders only when `AuthProvider` detected a time-zone mismatch
-              (issue #444). It is mounted here, rather than in the provider that
-              owns the state, purely because MUI's ThemeProvider sits below
-              AuthProvider — this is the highest themed mount point available.
-              Remounting it (e.g. crossing to the full-bleed map layout) is
-              harmless: the state and the session dismissal both live above. */}
-          <TimezonePrompt />
-        </Box>
-      </SearchProvider>
-      </MediaPreviewProvider>
-    </MediaRefreshProvider>
+    <ShellProviders providers={APP_SHELL_PROVIDERS}>
+      <ShellLayout
+        navigation={APP_NAVIGATION}
+        mainVariant={mainVariant}
+        appBar={<AppBar />}
+        rail={<NavigationRail />}
+        bottomNav={<BottomNav />}
+        // Each renders NOTHING on an ordinary day; the full-bleed variant
+        // drops them all.
+        banners={
+          <>
+            {/* Issue #348. Nothing for non-admins, nothing outside a window. */}
+            <MaintenanceBanner />
+            <NotificationPermissionBanner
+              config={pushSync.config}
+              capability={pushSync.capability}
+              onRequestPermission={() => void pushSync.requestPermission()}
+              isRequestingPermission={pushSync.isRequestingPermission}
+            />
+            {/* Issue #515: only inside the app's TWA, when the installed build
+                is older than the hosted release. */}
+            <AndroidUpdateBanner />
+          </>
+        }
+        // Renders only when `AuthProvider` detected a time-zone mismatch
+        // (issue #444). Mounted here because this is the highest themed point
+        // below the auth provider that owns the state.
+        overlays={<TimezonePrompt />}
+      />
+    </ShellProviders>
   );
 }

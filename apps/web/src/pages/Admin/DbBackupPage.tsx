@@ -75,8 +75,8 @@ import type {
   DbBackupRollbackMode,
   DbBackupRunDto,
 } from '../../services/dbBackup';
-import { DataTable } from '../../components/datatable';
-import type { DataTableRowAction } from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 import {
   DB_BACKUP_RUNS_TABLE_ID,

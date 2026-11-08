@@ -38,10 +38,7 @@
 
 import { Box, Chip, Tooltip, Typography } from '@mui/material';
 import ScheduleIcon from '@mui/icons-material/Schedule';
-import type {
-  DataTableColumn,
-  DataTableFilterModel,
-} from '../../components/datatable';
+import type { DataTableColumn, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import type {
   EnrichmentJobDto,
   JobProcessedWindow,
