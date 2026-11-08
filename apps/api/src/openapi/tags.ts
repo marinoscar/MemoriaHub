@@ -118,6 +118,14 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'Client-visible feature flags for the calling user. Authentication only, no permission, so ' +
           'non-admin members can resolve gated UI affordances without a 403.',
       },
+      {
+        name: 'Onboarding',
+        description:
+          'First-run onboarding (RETRO-H3): the caller\'s Get started checklist and, for a holder of ' +
+          '`system_settings:read`, the Setup guide (`GET /api/onboarding`), derived from real state on ' +
+          'every read; aggregate activation metrics (`GET /api/admin/onboarding/metrics`). Served by the ' +
+          'platform onboarding slice.',
+      },
     ],
   },
   {
