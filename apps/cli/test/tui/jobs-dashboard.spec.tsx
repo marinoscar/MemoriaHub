@@ -59,11 +59,6 @@ describe('jobsDashboardReducer', () => {
     expect(reducer.initial()).toEqual({ insights: null, receivedAt: null });
   });
 
-  it('a replacement source can be seeded with the data already on screen', () => {
-    const seed = { insights: insights(7), receivedAt: 99 };
-    expect(jobsDashboardReducer(() => 1, seed).initial()).toEqual(seed);
-  });
-
   it('never parses a raw frame (a poll feed emits typed events only)', () => {
     expect(jobsDashboardReducer().parseEvent({ any: 'frame' })).toBeUndefined();
   });
@@ -84,6 +79,24 @@ describe('createJobsSource', () => {
     expect(seen).toEqual(['start', 'end']);
     expect(source.getState().insights?.live.pending).toBe(3);
     expect(source.getState().connected).toBe(true);
+    source.stop();
+  });
+
+  it('refresh() polls now on the same source and keeps the data on screen until it lands', async () => {
+    let pending = 3;
+    const getJobInsights = jest.fn(async (_days?: number) => insights(pending));
+    const source = createJobsSource({ api: { getJobInsights }, windowDays: 7, intervalMs: 60_000 });
+    expect(source.refresh()).toBe(false); // not started yet
+    await source.start();
+    expect(source.getState().insights?.live.pending).toBe(3);
+    pending = 8;
+    expect(source.refresh()).toBe(true);
+    expect(source.getState().insights?.live.pending).toBe(3);
+    for (let i = 0; i < 50 && source.getState().insights?.live.pending !== 8; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(getJobInsights).toHaveBeenCalledTimes(2);
+    expect(source.getState().insights?.live.pending).toBe(8);
     source.stop();
   });
 

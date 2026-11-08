@@ -30,9 +30,9 @@ export interface JobsDashboardData {
 export type JobsDashboardEvent = JobInsights;
 
 /** Pure reducer: a poll result replaces the insights; the clock is injected for tests. */
-export function jobsDashboardReducer(now: () => number = Date.now, seed?: JobsDashboardData): DashboardReducer<JobsDashboardData, JobsDashboardEvent> {
+export function jobsDashboardReducer(now: () => number = Date.now): DashboardReducer<JobsDashboardData, JobsDashboardEvent> {
   return {
-    initial: () => ({ insights: seed?.insights ?? null, receivedAt: seed?.receivedAt ?? null }),
+    initial: () => ({ insights: null, receivedAt: null }),
     hydrate: (state) => state,
     reduce: (_state, insights) => ({ insights, receivedAt: now() }),
     // `pollFeed` emits typed events, never raw frames.
@@ -44,14 +44,15 @@ export interface JobsSourceOptions {
   api: Pick<ApiClient, 'getJobInsights'>;
   windowDays: number;
   intervalMs: number;
-  /** Seeds a replacement source (a manual refresh) with the data already on screen. */
-  seed?: JobsDashboardData | undefined;
   /** Called when a request starts and when it settles: drives the "updating…" indicator. */
   onFetch?: ((state: 'start' | 'end') => void) | undefined;
   now?: (() => number) | undefined;
 }
 
-/** A dashboard source polling the server every `intervalMs`. */
+/**
+ * A dashboard source polling the server every `intervalMs`. `[r]` on the screen calls the
+ * source's `refresh()`, which polls now and keeps the data on screen.
+ */
 export function createJobsSource(options: JobsSourceOptions): DashboardSource<JobsDashboardData, JobsDashboardEvent> {
   const feed = pollFeed<JobsDashboardEvent>(
     async () => {
@@ -64,5 +65,5 @@ export function createJobsSource(options: JobsSourceOptions): DashboardSource<Jo
     },
     { intervalMs: options.intervalMs },
   );
-  return new DashboardSource(jobsDashboardReducer(options.now, options.seed), feed);
+  return new DashboardSource(jobsDashboardReducer(options.now), feed);
 }

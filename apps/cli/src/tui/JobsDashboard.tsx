@@ -20,7 +20,7 @@ import { useDashboard } from '@marinoscar/platform-cli/tui';
 import type { ApiClient, JobInsights } from '../api.js';
 import { formatDuration } from '../format-duration.js';
 import { renderTui } from './render-tui.js';
-import { createJobsSource, type JobsDashboardData } from './jobs-dashboard-source.js';
+import { createJobsSource } from './jobs-dashboard-source.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -65,28 +65,23 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
   const { exit } = useApp();
 
   // The poll runs in a platform DashboardSource (pollFeed): `useDashboard` starts it on
-  // mount and stops it on unmount. `[r]` swaps in a fresh source, seeded with what is on
-  // screen, which polls straight away.
+  // mount and stops it on unmount. `[r]` asks the same source to poll now
+  // (`source.refresh()`); the data on screen stays until the new poll lands.
   const [loading, setLoading] = useState<boolean>(false);
-  const [refreshNonce, setRefreshNonce] = useState<number>(0);
-  const seedRef = useRef<JobsDashboardData | undefined>(undefined);
   const source = useMemo(
     () =>
       createJobsSource({
         api,
         windowDays,
         intervalMs,
-        seed: seedRef.current,
         onFetch: (state) => setLoading(state === 'start'),
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, windowDays, intervalMs, refreshNonce],
+    [api, windowDays, intervalMs],
   );
   const dashboard = useDashboard(source) ?? source.getState();
   const data: JobInsights | null = dashboard.insights;
   const error: string | null = dashboard.error ?? null;
   const lastUpdated: Date | null = dashboard.receivedAt !== null ? new Date(dashboard.receivedAt) : null;
-  seedRef.current = { insights: dashboard.insights, receivedAt: dashboard.receivedAt };
 
   // Seconds-since-last-update display
   const [secondsAgo, setSecondsAgo] = useState<number>(0);
@@ -113,7 +108,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
       if (onBack) { onBack(); } else { exit(); }
       return;
     }
-    if (input === 'r') { setRefreshNonce((n) => n + 1); }
+    if (input === 'r') { source.refresh(); }
   });
 
   // -------------------------------------------------------------------------
