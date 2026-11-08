@@ -269,7 +269,7 @@ MemoriaHub/
 │   │   │   │   ├── strategies/
 │   │   │   │   └── decorators/
 │   │   │   ├── users/                # User management module
-│   │   │   ├── settings/             # Settings module (user + system)
+│   │   │   ├── settings/             # registry/ (one declaration per settings namespace), feature gates, GET /api/features; the routes are the platform slice's (platform/settings/)
 │   │   │   ├── allowlist/            # Email allowlist module
 │   │   │   ├── health/               # Health check module
 │   │   │   ├── prisma/               # Prisma service
@@ -1182,7 +1182,7 @@ Before OAuth authentication completes:
 | **Auth** | `/api/auth/*` | Varies | OAuth, JWT, sessions |
 | **Users** | `/api/users/*` | Yes (Admin) | User management |
 | **Settings** | `/api/user-settings/*` | Yes | User preferences |
-| **System Settings** | `/api/system-settings/*` | Yes (Admin) | App configuration |
+| **System Settings** | `/api/system-settings/*` | Yes (Admin) | App configuration (platform settings slice; namespaces declared in `apps/api/src/settings/registry/`) |
 | **Allowlist** | `/api/allowlist/*` | Yes (Admin) | Access control |
 | **Circles** | `/api/circles/*` | Yes | Circle CRUD, members, invites |
 | **Media Bulk** | `/api/media/bulk*` | Yes (`media:write` / `media:delete`) | Bulk update/tag/delete media items |

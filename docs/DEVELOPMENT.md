@@ -757,3 +757,14 @@ Key takeaways for developers:
 - ✅ **Sanitize redirect URLs**: Encode and remove newlines from error messages
 
 Following these patterns will help you avoid the most common issues and maintain consistency with the existing codebase.
+
+## Adding a setting
+
+Every system and user settings namespace is declared once (RETRO-B3, #614); there is no wire DTO and no hand-written merge to keep in step.
+
+- **A field in an existing namespace**: edit `apps/api/src/settings/registry/namespaces/system/<ns>.ts` (or `user/<ns>.ts`): the zod shape with its bounds and the defaults. The PATCH/PUT bodies, the response, the field-by-field merge and the salvage of a stored document that lacks the field are derived.
+- **A new system namespace**: a new file there, `defineSystemNamespace({ key, description, schema, defaults })` (add `keepOnNull` paths only if an explicit `null` must keep the stored value), appended to `APP_SYSTEM_SETTINGS_NAMESPACES` in `apps/api/src/app-registrations/settings.ts`, and its type to the `declare module '@marinoscar/platform-api/settings'` block in the same file. Do NOT augment a key a platform slice declares (`ai`, `storage`, `notifications`, `databaseBackup`, `email`, `jobs`): add it to `settings/app-settings.types.ts` instead (TS2717 otherwise).
+- **A new user namespace**: a `UserSettingsNamespace` (`schema`, `patchSchema`, `merge`), never `.default()`: absent means "no preference". `null` in a PATCH clears; return `undefined` from `merge` to store nothing.
+- **Reading**: `SystemSettingsService.getSettings()` (cached 5 s, write drops it) or `getNamespace('key')`; a Doctor check uses `readKnownValue()` (never creates the row).
+- **Secrets**: the registry refuses a field named `password`, `secret`, `apiKey`, `token`, `privateKey`, ... Store it with the credential store (RETRO-B4); until then see `email/email-smtp-secret.store.ts`.
+- **Check**: `npx jest --config ./test/jest.config.js test/settings`; and `npm run settings:verify --workspace=api` on a restored backup (reports stored values the schemas would not accept).

@@ -296,7 +296,7 @@ Two tag names are applied on detection: the umbrella tag **`Social Media`** (alw
 | `socialMedia.maxDurationSeconds` | integer | 60–3600 | `300` | A video whose known duration exceeds this is treated as CLEAN without downloading or OCR — genuine social-media clips never exceed ~5 minutes. Recorded as `matchedRule: skip-duration-cap`. See [§2.5](#25-pre-flight-caps-and-orientation-gate). |
 | `socialMedia.maxSizeBytes` | integer | ≥ 10_000_000 | `500_000_000` | Size fallback used only when the video's duration is unknown (no persisted ffprobe metadata) — an over-cap video is treated as CLEAN, `matchedRule: skip-size-cap`. Distinct from the unconditional `VIDEO_ENRICHMENT_MAX_BYTES` env cap (§5.2), which is checked first regardless of duration. |
 
-All `socialMedia.*` values are validated by the same Zod schema used for every other system-settings write path (`apps/api/src/common/schemas/settings.schema.ts`), round-tripped through `PATCH /api/system-settings` / `PUT /api/system-settings` like every other setting group.
+All `socialMedia.*` values are validated by the same Zod schema used for every other system-settings write path (`apps/api/src/settings/registry/`), round-tripped through `PATCH /api/system-settings` / `PUT /api/system-settings` like every other setting group.
 
 ### 5.2 Environment Variables
 

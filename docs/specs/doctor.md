@@ -300,7 +300,7 @@ Some "test connection" methods throw (a `BadRequestException` for missing creden
 
 ### Plain `getSettings()` Writes
 
-`SystemSettingsService.getSettings()` creates the `system_settings` row when it is missing. Every Doctor read (and the host core's `HostSystemSettingsShim`, and the queue stats' stuck threshold) uses `getSettings({ readOnly: true })`. A new check must too; the `doctor-read-only` conformance suite fails otherwise.
+`SystemSettingsService.getSettings()` creates the `system_settings` row when it is missing. Every Doctor read (and the queue stats' stuck threshold) uses `readKnownValue()`, which never creates the row. A new check must too; the `doctor-read-only` conformance suite fails otherwise.
 
 ### Doctor Duplicates Some Signals Also Available Elsewhere
 
