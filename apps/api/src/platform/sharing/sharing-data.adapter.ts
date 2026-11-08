@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { runAsSystem, runInOrg } from '@marinoscar/platform-api/core';
+import { Prisma } from '@prisma/client';
+import { isSystemAccessReason, runInOrg } from '@marinoscar/platform-api/core';
 import type { SharingDataPort, SharingSystemReason } from '@marinoscar/platform-api/sharing';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -15,9 +16,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 //                transaction whose FIRST statement sets the transaction-local
 //                `app.org_id` / `app.user_id` (`set_config(..., true)`, never a
 //                session `SET`). Every request-driven query.
-//   runAsSystem  the platform's `runAsSystem` over `PrismaService`: one
-//                transaction whose first statement is
-//                `set_config('app.rls_bypass', 'on', true)`, for the slice's five
+//   runAsSystem  one transaction on `PrismaService` whose FIRST statement is
+//                `SELECT set_config('app.rls_bypass', 'on', true)` (a SELECT, so
+//                the Doctor read-only suite sees no write when the read-only
+//                check `sharing.groups.orphaned` uses it), for the slice's five
 //                named reasons only (`purge`, `doctor`, `retention`,
 //                `link-resolution`, `invite-claim`; the last one is used only
 //                when an invite auto-accept option is on, which MemoriaHub
@@ -25,8 +27,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 //
 // PLATFORM-ADOPTION-SHIM(RETRO-D1): MemoriaHub has no separate
 // `PrismaSystemService` (its own bypass pool) yet; it arrives with the storage
-// slice, and `runAsSystem` then delegates to it. Same posture as the user-data
-// and AI host modules.
+// slice, and `runAsSystem` then delegates to it. Same posture as the user-data,
+// AI and db-backup host adapters (`DbBackupSystemDataAdapter` is the model).
 // =============================================================================
 
 @Injectable()
@@ -42,6 +44,13 @@ export class SharingDataAdapter implements SharingDataPort {
   }
 
   runAsSystem<R>(reason: SharingSystemReason, fn: (tx: unknown) => Promise<R>): Promise<R> {
-    return runAsSystem(this.prisma as never, reason, fn as never) as Promise<R>;
+    // The platform's rule: every bypass names a registered reason.
+    if (!isSystemAccessReason(reason)) {
+      return Promise.reject(new Error(`SharingDataAdapter.runAsSystem: unregistered system access reason "${reason}"`));
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT set_config('app.rls_bypass', 'on', true)`);
+      return fn(tx);
+    });
   }
 }
