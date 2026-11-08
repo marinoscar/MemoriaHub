@@ -59,6 +59,15 @@ const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
 const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
 const DbBackupPage = lazy(() => import('./platform/db-backup/DbBackupPage'));
+// RETRO-H1 (#591): the platform user-data slice's two pages. The Danger Zone deletes the
+// caller's own data (`/api/user-data/*`, `user_settings:write`, every role); the factory
+// reset wipes the deployment (`system:factory_reset`, Admin only).
+const UserDangerZonePage = lazy(() =>
+  import('@marinoscar/platform-web/user-data/ui').then((m) => ({ default: m.UserDangerZonePage })),
+);
+const FactoryResetPage = lazy(() =>
+  import('@marinoscar/platform-web/user-data/ui').then((m) => ({ default: m.FactoryResetPage })),
+);
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
@@ -188,6 +197,11 @@ function AppRoutes() {
                 <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
                 <Route path="/settings/memories" element={<MemoriesPreferencesPage />} />
                 <Route path="/settings/search" element={<SearchPreferencesPage />} />
+                {/* RETRO-H1 (#591). Ungated like every `/settings/*` sibling: the API gates
+                    `/api/user-data/*` on `user_settings:write`, which every role holds, and
+                    scopes each request to the caller's own data. The typed confirmation in
+                    the page's dialog is the deliberate act, not an authorization. */}
+                <Route path="/settings/danger-zone" element={<UserDangerZonePage />} />
                 {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
@@ -454,6 +468,17 @@ function AppRoutes() {
                   element={
                     <RequirePermission permission="db_backup:read" fallback={<Navigate to="/" replace />}>
                       <DbBackupPage />
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H1 (#591). `system:factory_reset`, the exact SYSTEM permission the
+                    platform factory reset controller enforces (Admin only; never implied by
+                    `system_settings:write`). Declared by the pinned-last Danger Zone card. */}
+                <Route
+                  path="/admin/settings/factory-reset"
+                  element={
+                    <RequirePermission permission="system:factory_reset" fallback={<Navigate to="/" replace />}>
+                      <FactoryResetPage />
                     </RequirePermission>
                   }
                 />

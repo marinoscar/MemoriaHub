@@ -51,6 +51,9 @@ import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
 // RETRO-T2 (#625): the telemetry slice's three cards (data only; no page reaches the main chunk).
 import { telemetryAdminCards } from '@marinoscar/platform-web/telemetry/ui';
+// RETRO-H1 (#591): the user-data slice's factory reset card, in the pinned-last Danger Zone group.
+import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
+import { factoryResetSettingsPage } from '@marinoscar/platform-web/user-data/ui';
 import {
   settingsPageTitle,
   visibleSettingsSections,
@@ -314,6 +317,15 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // Explorer and the Dashboard (`config/settingsFeatures.ts` resolves the feature).
       ...telemetryAdminCards,
     ],
+  },
+  // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to
+  // append-only (a group added later goes BEFORE this one; the registry test asserts
+  // it with `dangerZoneLastViolations`). The packaged factory reset page:
+  // `system:factory_reset`, the exact SYSTEM permission the platform controller
+  // enforces (Admin only; never implied by `system_settings:write`). No `feature`.
+  {
+    label: DANGER_ZONE_GROUP_LABEL,
+    cards: [{ ...factoryResetSettingsPage.card, Icon: factoryResetSettingsPage.Icon }],
   },
 ];
 
