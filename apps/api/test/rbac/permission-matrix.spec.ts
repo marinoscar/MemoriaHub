@@ -113,6 +113,14 @@ const NEW_PLATFORM_PERMISSIONS = [
   'telemetry:query',
   'telemetry:read',
   'telemetry:write',
+  // The webhooks slice (RETRO-H4, #603): webhooks:* (every org role), org_webhooks:* (org_admin),
+  // system_webhooks:* (admin).
+  'org_webhooks:read',
+  'org_webhooks:write',
+  'system_webhooks:read',
+  'system_webhooks:write',
+  'webhooks:read',
+  'webhooks:write',
 ];
 
 /**
@@ -121,7 +129,11 @@ const NEW_PLATFORM_PERMISSIONS = [
  * MemoriaHub checks it yet: the app's AI features run server-side under the deployment key.
  */
 const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
-  contributor: ['ai:use'],
+  // `webhooks:read|write` (RETRO-H4, #603): a member's own webhook endpoints (`/api/webhooks`);
+  // the platform grants them to every org role. What an endpoint receives is still gated by the
+  // event's own permission (`media:read`), re-checked for the owner at every fan-out.
+  contributor: ['ai:use', 'webhooks:read', 'webhooks:write'],
+  viewer: ['webhooks:read', 'webhooks:write'],
 };
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */
@@ -144,8 +156,8 @@ describe('role permission matrix', () => {
     expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor, ...(GAINED_BY_SLICE.contributor ?? [])].sort());
   });
 
-  it('viewer is exactly what it was', () => {
-    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer].sort());
+  it('viewer is exactly what it was, plus the slice grants', () => {
+    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, ...(GAINED_BY_SLICE.viewer ?? [])].sort());
   });
 
   it('an administrator (admin + org_admin) keeps every permission and gains only the new platform ones', () => {
@@ -156,7 +168,7 @@ describe('role permission matrix', () => {
     }
     for (const retired of Object.keys(RETIRED_BY_SLICE)) expect(now).not.toContain(retired);
     const gained = [...now].filter((permission) => !OLD_MATRIX.admin.includes(permission)).sort();
-    expect(gained).toEqual(NEW_PLATFORM_PERMISSIONS);
+    expect(gained).toEqual([...NEW_PLATFORM_PERMISSIONS].sort());
   });
 
   it('no role is granted a permission of the other scope', () => {
