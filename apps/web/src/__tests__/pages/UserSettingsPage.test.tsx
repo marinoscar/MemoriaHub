@@ -3,6 +3,12 @@ import { screen, waitFor } from '@testing-library/react';
 import { render } from '../utils/test-utils';
 import UserSettingsPage from '../../pages/UserSettingsPage';
 
+// The packaged Access Tokens card needs the identity adapters and the platform host,
+// which the app mounts above the routes; it is covered by the identity package's own tests.
+vi.mock('@marinoscar/platform-web/identity/ui', () => ({
+  PersonalAccessTokens: () => <div data-testid="personal-access-tokens" />,
+}));
+
 // Mock the hooks
 vi.mock('../../hooks/useUserSettings', () => ({
   useUserSettings: vi.fn(),
