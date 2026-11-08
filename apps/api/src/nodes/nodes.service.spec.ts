@@ -57,10 +57,10 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -149,7 +149,7 @@ describe('NodesService — result/failure ingestion', () => {
         // so NodesService's constructor resolves.
         { provide: EnrichmentJobService, useValue: { recordModel: jest.fn() } },
         { provide: AiSettingsService, useValue: { resolveCredentials: jest.fn() } },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: AutoTaggingService, useValue: { buildPrompt: jest.fn() } },
         {
           provide: VideoAutoTaggingService,

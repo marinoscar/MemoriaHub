@@ -48,11 +48,11 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { encryptSecret } from '../common/crypto/secret-cipher';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -141,7 +141,7 @@ describe('NodesService.getJobCredentials', () => {
         { provide: StorageProviderResolver, useValue: { getActiveProvider: jest.fn() } },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AiSettingsService, useValue: mockAiSettingsService },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: AutoTaggingService, useValue: mockAutoTaggingService },
         { provide: VideoAutoTaggingService, useValue: mockVideoAutoTaggingService },
       ],

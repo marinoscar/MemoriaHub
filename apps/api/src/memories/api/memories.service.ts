@@ -45,15 +45,11 @@ import { CircleRole, MemoryType, Prisma } from '@prisma/client';
 
 import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
-import {
-  MemoriesPreferencesValue,
-  UserSettingsValue,
-  isMemoriesEnabled,
-} from '../../common/types/settings.types';
+import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
+import { isMemoriesEnabled } from '../../settings/feature-gates';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { MediaService } from '../../media/media.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import {
   MemoryCardDto,
   MemoryDetailDto,
@@ -71,6 +67,7 @@ import {
   preferencesAreEmpty,
   resolveMemoryPreferences,
 } from './memory-preferences';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** Hard cap on feed cards, per the epic. */
 const FEED_LIMIT = 10;
@@ -125,7 +122,7 @@ export class MemoriesService {
     private readonly prisma: PrismaService,
     private readonly circleMembership: CircleMembershipService,
     private readonly thumbnails: MediaThumbnailService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaService: MediaService,
   ) {}
 
@@ -134,7 +131,7 @@ export class MemoriesService {
   // ===========================================================================
 
   /**
-   * The single feature gate. Reads through `SystemSettingsService.getSettings()`
+   * The single feature gate. Reads through `AppSystemSettingsService.getSettings()`
    * (5 s in-process cache) and folds in the `MEMORIES_ENABLED` env kill-switch
    * via the shared `isMemoriesEnabled()` helper, so this surface can never
    * disagree with the generation cron or the handler about what "enabled" means.
@@ -222,7 +219,7 @@ export class MemoriesService {
         where: { userId },
         select: { value: true },
       });
-      const value = row?.value as unknown as UserSettingsValue | undefined;
+      const value = row?.value as unknown as { memories?: MemoriesPreferencesValue } | undefined;
       return resolveMemoryPreferences(
         value?.memories as MemoriesPreferencesValue | undefined,
       );

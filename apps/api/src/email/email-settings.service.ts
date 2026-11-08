@@ -1,18 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
 import { EmailService } from './email.service';
 import { SesEmailProvider } from './providers/ses-email.provider';
 import { UpdateEmailSettingsDto } from './dto/update-email-settings.dto';
+import { EmailSmtpSecretStore } from './email-smtp-secret.store';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class EmailSettingsService {
   private readonly logger = new Logger(EmailSettingsService.name);
 
   constructor(
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly emailService: EmailService,
     private readonly sesProvider: SesEmailProvider,
+    private readonly smtpSecret: EmailSmtpSecretStore,
   ) {}
 
   /**
@@ -25,10 +27,11 @@ export class EmailSettingsService {
 
     const sesCredentialAvailable = await this.sesProvider.sesCredentialAvailable();
 
+    const smtpCiphertext = await this.smtpSecret.getCiphertext();
     let passwordLast4: string | null = null;
-    if (email?.smtpPassword) {
+    if (smtpCiphertext) {
       try {
-        passwordLast4 = decryptSecret(email.smtpPassword).slice(-4);
+        passwordLast4 = decryptSecret(smtpCiphertext).slice(-4);
       } catch {
         passwordLast4 = null;
       }
@@ -54,7 +57,7 @@ export class EmailSettingsService {
         port: email?.smtpPort ?? 587,
         useTls: email?.smtpUseTls ?? true,
         username: email?.smtpUsername ?? null,
-        passwordConfigured: !!email?.smtpPassword,
+        passwordConfigured: !!smtpCiphertext,
         passwordLast4,
       },
       credentialSource,
@@ -64,7 +67,7 @@ export class EmailSettingsService {
   /**
    * Persist email settings. When `smtpPassword` is a non-empty string it is
    * encrypted before storage; when omitted/blank the stored ciphertext is
-   * preserved (patchSettings falls back to the current value).
+   * left alone.
    */
   async updateSettings(dto: UpdateEmailSettingsDto, userId: string) {
     const emailPatch: Record<string, unknown> = {
@@ -80,12 +83,14 @@ export class EmailSettingsService {
     if (dto.fromAddress !== undefined) emailPatch.fromAddress = dto.fromAddress;
     if (dto.fromName !== undefined) emailPatch.fromName = dto.fromName;
 
-    // Only touch the password when a new, non-empty value is provided.
-    if (typeof dto.smtpPassword === 'string' && dto.smtpPassword.length > 0) {
-      emailPatch.smtpPassword = encryptSecret(dto.smtpPassword);
-    }
-
+    // `undefined` keys are dropped by the merge, so only what the caller sent changes.
     await this.systemSettings.patchSettings({ email: emailPatch } as any, userId);
+
+    // Only touch the password when a new, non-empty value is provided; the ciphertext is kept
+    // by the secret store, outside the settings namespace (see email-smtp-secret.store.ts).
+    if (typeof dto.smtpPassword === 'string' && dto.smtpPassword.length > 0) {
+      await this.smtpSecret.setCiphertext(encryptSecret(dto.smtpPassword), userId);
+    }
 
     this.logger.log(`Email settings updated by user ${userId}`);
 

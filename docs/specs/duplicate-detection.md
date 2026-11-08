@@ -398,7 +398,7 @@ One `media_visual_embedding` row costs **512 × 4 bytes ≈ 2.1 KB** for the vec
 | `dedup.knnCandidates` | integer | 5–50 | `20` | Number of nearest-neighbor candidates fetched per item from the pgvector HNSW index before threshold filtering |
 | `dedup.autoResolveThreshold` | integer | 0–100 | `60` | Default percentage pre-filled into the duplicate review page's "Archive above N" / "Delete above N" buttons, which call `POST /api/media/duplicates/bulk/resolve-by-threshold` (§9.4a) |
 
-All three `dedup.*` values are validated by the same Zod schema used for every other system-settings write path (`apps/api/src/settings/dto/update-system-settings.dto.ts`), round-tripped through `PATCH /api/system-settings` / `PUT /api/system-settings` like every other setting group.
+All three `dedup.*` values are validated by the same Zod schema used for every other system-settings write path (`apps/api/src/settings/registry/namespaces/system/`), round-tripped through `PATCH /api/system-settings` / `PUT /api/system-settings` like every other setting group.
 
 ### 8.2 Environment Variables
 

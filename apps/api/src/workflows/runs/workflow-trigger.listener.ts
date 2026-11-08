@@ -10,15 +10,15 @@ import {
   EnrichmentJobSettledEvent,
 } from '../../enrichment/events/enrichment-job-settled.event';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { isWorkflowsEnabled } from '../../common/types/settings.types';
+import { isWorkflowsEnabled } from '../../settings/feature-gates';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { WorkflowDependency } from '../registry/field-descriptor.interface';
 import { DependencyState, isFullySettled } from './settlement-decision';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
-type ResolvedSettings = Awaited<ReturnType<SystemSettingsService['getSettings']>>;
+type ResolvedSettings = Awaited<ReturnType<AppSystemSettingsService['getSettings']>>;
 
 /** Enrichment job types whose in-flight presence blocks a producer's settlement. */
 const IN_FLIGHT_PRODUCER_TYPES = [
@@ -83,7 +83,7 @@ export class WorkflowTriggerListener {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly compiler: WorkflowConditionCompiler,
     private readonly enrichmentJobs: EnrichmentJobService,
   ) {}

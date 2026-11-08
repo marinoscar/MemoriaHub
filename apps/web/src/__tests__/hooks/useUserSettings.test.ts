@@ -87,7 +87,7 @@ describe('useUserSettings', () => {
         expect(result.current.isLoading).toBe(false);
       });
 
-      expect(api.get).toHaveBeenCalledWith('/user-settings');
+      expect(api.get).toHaveBeenCalledWith('/user-settings', {});
       expect(result.current.settings).toEqual(mockUserSettings);
       expect(result.current.error).toBeNull();
     });
@@ -468,7 +468,7 @@ describe('useUserSettings', () => {
       }).rejects.toThrow('Settings were updated elsewhere. Please try again.');
 
       // Verify api.get was called to refresh settings
-      expect(api.get).toHaveBeenCalledWith('/user-settings');
+      expect(api.get).toHaveBeenCalledWith('/user-settings', {});
     });
 
     it('should refresh settings on 409 conflict', async () => {

@@ -12,10 +12,9 @@ import { ProviderThrottleService } from './provider-throttle.service';
 import { JobHistoryPurgeHandler } from './job-history-purge.handler';
 import { JobHistoryPurgeTask } from './job-history-purge.task';
 import { PrismaModule } from '../prisma/prisma.module';
-import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [PrismaModule, SettingsModule],
+  imports: [PrismaModule, ],
   controllers: [EnrichmentAdminController],
   providers: [
     EnrichmentHandlerRegistry,

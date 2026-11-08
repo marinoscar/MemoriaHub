@@ -3,7 +3,6 @@ import { Injectable, Module } from '@nestjs/common';
 import { bindIdentityExtensionClient } from '../app-registrations/identity';
 import { CirclesModule } from '../circles/circles.module';
 import { PrismaService } from '../prisma/prisma.service';
-import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { UserAvatarService } from './user-avatar.service';
 import { UserProfileController } from './user-profile.controller';
@@ -41,7 +40,7 @@ export class IdentityExtensionBinder {
  * before any parametric route.
  */
 @Module({
-  imports: [StorageProvidersModule, CirclesModule, SettingsModule],
+  imports: [StorageProvidersModule, CirclesModule, ],
   controllers: [UserProfileController],
   providers: [UserAvatarService, IdentityExtensionBinder],
   exports: [UserAvatarService],

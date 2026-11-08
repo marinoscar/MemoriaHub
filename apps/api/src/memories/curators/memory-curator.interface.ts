@@ -15,7 +15,7 @@
 // is a correctness requirement, not politeness.
 // =============================================================================
 
-import { MemoriesSettingsValue } from '../../common/types/settings.types';
+import { MemoriesSettingsValue } from '../../settings/registry/namespaces/system/memories';
 import type { MemoryTitleRun } from '../titles/memory-title.types';
 
 /** DI token for the ordered curator registry. */

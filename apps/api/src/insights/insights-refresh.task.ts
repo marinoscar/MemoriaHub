@@ -11,7 +11,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { JobReason } from '@prisma/client';
 import { InsightsService } from './insights.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class InsightsRefreshTask {
@@ -19,7 +19,7 @@ export class InsightsRefreshTask {
 
   constructor(
     private readonly insights: InsightsService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)

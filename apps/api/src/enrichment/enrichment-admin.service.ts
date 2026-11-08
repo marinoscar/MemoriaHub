@@ -9,11 +9,11 @@
 import { Injectable, BadRequestException, NotFoundException, Logger, Optional } from '@nestjs/common';
 import { Prisma, MhLegacyJobStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { defaultStuckThresholdMinutes } from '../common/types/settings.types';
+import { defaultStuckThresholdMinutes } from '../settings/registry/namespaces/system/jobs';
 import { ENRICHMENT_MAX_ATTEMPTS } from './enrichment-job.worker';
 import { jobTypeLabel } from './job-type-labels';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Default rolling window (days) for the duration-history aggregate. */
 export const INSIGHTS_WINDOW_DAYS = 7;
@@ -185,7 +185,7 @@ export class EnrichmentAdminService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly settingsService: SystemSettingsService,
+    private readonly settingsService: AppSystemSettingsService,
     // Optional so specs that only exercise stats/list need not provide it.
     @Optional() private readonly registry?: EnrichmentHandlerRegistry,
   ) {}
@@ -197,11 +197,12 @@ export class EnrichmentAdminService {
   /**
    * Resolve the effective stuck threshold (minutes) shared by getStats and
    * resetStuck: system setting jobs.stuckThresholdMinutes, falling back to the
-   * legacy ENRICHMENT_STUCK_MINUTES env var, else 3. getSettings() is cached
-   * in-process (5 s TTL) so this adds no per-call DB round-trip.
+   * legacy ENRICHMENT_STUCK_MINUTES env var, else 3. Read with readKnownValue():
+   * one primary-key read that never creates the settings row, because the Doctor
+   * reaches this too and a Doctor run writes nothing.
    */
   private async getStuckThresholdMinutes(): Promise<number> {
-    const settings = await this.settingsService.getSettings({ readOnly: true });
+    const settings = await this.settingsService.readKnownValue();
     const configured = settings.jobs?.stuckThresholdMinutes;
     if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
       return configured;
@@ -244,12 +245,12 @@ export class EnrichmentAdminService {
    * instead of re-running the two full-table groupBy aggregates + two
    * count() calls on every request.
    *
-   * Deliberately has NO invalidation hook: unlike SystemSettingsService's
+   * Deliberately has NO invalidation hook: unlike AppSystemSettingsService's
    * cache, no mutation path here clears it early. Mutations (retry,
    * resetStuck, delete, ...) surface via the frontend's own refresh() call
    * in useJobs.ts, and a couple of seconds of staleness on a monitoring
    * dashboard is an accepted tradeoff — the same tradeoff
-   * SystemSettingsService's cache already makes. The 2 s TTL was picked
+   * AppSystemSettingsService's cache already makes. The 2 s TTL was picked
    * specifically shorter than the 5 s frontend poll interval so a
    * single-tab dashboard never visibly observes stale data between polls.
    */

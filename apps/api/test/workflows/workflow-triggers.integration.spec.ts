@@ -36,8 +36,8 @@ import {
 import { resetPrismaMock } from '../mocks/prisma.mock';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 import { createMockContributorUser, authHeader } from '../helpers/auth-mock.helper';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
+import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { WorkflowTriggerListener } from '../../src/workflows/runs/workflow-trigger.listener';
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowMicroRunFinalizeTask } from '../../src/workflows/runs/workflow-micro-run-finalize.task';

@@ -34,8 +34,8 @@ import type { EnrichmentJob } from '@prisma/client';
 import { NotificationPurgeHandler } from './notification-purge.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,7 +77,7 @@ const DAY_MS = 86_400_000;
 describe('NotificationPurgeHandler', () => {
   let handler: NotificationPurgeHandler;
   let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -97,7 +97,7 @@ describe('NotificationPurgeHandler', () => {
       providers: [
         NotificationPurgeHandler,
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
         { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();

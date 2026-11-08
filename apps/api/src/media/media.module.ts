@@ -4,7 +4,6 @@ import { StorageProvidersModule } from '../storage/providers/storage-providers.m
 import { StorageModule } from '../storage/storage.module';
 import { CirclesModule } from '../circles/circles.module';
 import { GeoLocationModule } from './geo/geo-location.module';
-import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MediaTouchModule } from './media-touch.module';
@@ -33,6 +32,7 @@ import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
 import { TrashEmptyRunsController } from './trash-empty/trash-empty-runs.controller';
 import { TrashEmptyEvaluateHandler } from './trash-empty/trash-empty-evaluate.handler';
 import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute-batch.handler';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * MediaModule
@@ -44,7 +44,7 @@ import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute
  * MediaService (used for circle-scoped access checks).
  *
  * Imports SettingsModule so TrashPurgeHandler can read storage.trash.retentionDays
- * and MediaEnrichmentService can call SystemSettingsService.isFeatureEnabled.
+ * and MediaEnrichmentService can call AppSystemSettingsService.isFeatureEnabled.
  *
  * Imports EnrichmentModule so TrashPurgeHandler can register with the handler
  * registry, TrashPurgeTask can enqueue jobs, and MediaEnrichmentService can
@@ -85,7 +85,7 @@ import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute
     StorageModule,
     CirclesModule,
     GeoLocationModule,
-    SettingsModule,
+    
     EnrichmentModule,
     NotificationsModule,
     MediaTouchModule,

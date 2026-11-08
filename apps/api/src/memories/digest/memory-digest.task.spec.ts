@@ -8,7 +8,7 @@
  * circle rather than one job for the whole deployment.
  *
  * No database and NO EMAIL: PrismaService, EnrichmentJobService and
- * SystemSettingsService are fully mocked, and MemoryDigestService is used for
+ * AppSystemSettingsService are fully mocked, and MemoryDigestService is used for
  * real only for its pure gate/window helpers (its Prisma-touching methods are
  * spied). Nothing here can reach a network.
  */
@@ -24,9 +24,9 @@ import {
 } from './memory-digest.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { EmailService } from '../../email/email.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,7 +96,7 @@ describe('MemoryDigestTask', () => {
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
         { provide: EnrichmentJobService, useValue: enrichment },
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
         // Never reached by these tests; present so the real service constructs.
         { provide: EmailService, useValue: { sendEmail: jest.fn() } },
         { provide: MediaThumbnailService, useValue: { extractThumbKey: jest.fn() } },

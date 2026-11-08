@@ -41,7 +41,6 @@ import {
   NodeBackupQueryService,
 } from './node-backup-query.service';
 import { ObjectsService } from '../storage/objects/objects.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { isValidCron, nextCronDate } from '../workflows/util/cron.util';
 import {
   BackupRunStats,
@@ -52,6 +51,7 @@ import {
   StartBackupRunDto,
   UpdateBackupConfigDto,
 } from './dto/node-backup.dto';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const DEFAULT_RUN_STALE_MINUTES = 15;
 const DEFAULT_MAX_PAGE_SIZE = 200;
@@ -80,7 +80,7 @@ export class NodeBackupService {
     private readonly nodesService: NodesService,
     private readonly queryService: NodeBackupQueryService,
     private readonly objectsService: ObjectsService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly config: ConfigService,
   ) {}
 

@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
 import { GeoLocationService } from './geo-location.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /**
  * DelegatingGeoLocationProvider
@@ -30,7 +30,7 @@ export class DelegatingGeoLocationProvider implements GeoLocationProvider {
   constructor(
     private readonly offline: OfflineGeoLocationProvider,
     private readonly nominatim: NominatimGeoLocationProvider,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly geoLocationService: GeoLocationService,
   ) {}
 

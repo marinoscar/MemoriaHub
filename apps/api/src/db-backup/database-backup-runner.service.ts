@@ -6,7 +6,6 @@ import { Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import type { StorageProvider } from '../storage/providers/storage-provider.interface';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
@@ -22,6 +21,7 @@ import {
   readPgClientMajor,
   readServerMajor,
 } from './pg-version.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * How often the run's `lastHeartbeatAt` / `bytesWritten` are refreshed while
@@ -96,7 +96,7 @@ export class DatabaseBackupRunnerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly providerResolver: StorageProviderResolver,
   ) {}
 

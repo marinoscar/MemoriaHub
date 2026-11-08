@@ -15,8 +15,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { AdminMemoriesController } from './admin-memories.controller';
 import { MemoryBackfillService } from './memory-backfill.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 describe('AdminMemoriesController', () => {
   let controller: AdminMemoriesController;
@@ -41,7 +41,7 @@ describe('AdminMemoriesController', () => {
     // metadata level below instead.
     controller = new AdminMemoriesController(
       backfill as unknown as MemoryBackfillService,
-      settings as unknown as SystemSettingsService,
+      settings as unknown as AppSystemSettingsService,
     );
   });
 

@@ -15,8 +15,8 @@ import { MhLegacyJobStatus, JobReason } from '@prisma/client';
 import { JobHistoryPurgeTask } from './job-history-purge.task';
 import { EnrichmentJobService } from './enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -24,7 +24,7 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 
 describe('JobHistoryPurgeTask', () => {
   let task: JobHistoryPurgeTask;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
   let mockEnqueue: jest.Mock;
   let mockPrisma: MockPrismaService;
 
@@ -47,7 +47,7 @@ describe('JobHistoryPurgeTask', () => {
           useValue: { enqueue: mockEnqueue },
         },
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
       ],
     }).compile();
 

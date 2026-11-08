@@ -6,12 +6,12 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { StorageProviderResolver } from '../../../storage/providers/storage-provider.resolver';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass } from '../outcome';
 import {
   STORAGE_PROVIDERS_PATH,
   resolveActiveStorageProvider,
 } from './active-provider.doctor-check';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkStorageLiveTest` (key `storage.liveTest`).
 //
@@ -44,7 +44,7 @@ export class StorageLiveTestDoctorCheck implements DoctorCheck, OnModuleInit {
   constructor(
     private readonly registry: DoctorCheckRegistry,
     private readonly resolver: StorageProviderResolver,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -52,7 +52,7 @@ export class StorageLiveTestDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const provider = resolveActiveStorageProvider(settings.storage?.activeProvider, process.env['STORAGE_PROVIDER']);
 
     try {

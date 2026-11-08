@@ -6,8 +6,8 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { SocialMediaOcrService } from '../../../social-media/social-media-ocr.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkSocialMedia` (key `ai.socialMedia`).
 // READ-ONLY: a settings read and the OCR model's availability status.
@@ -74,7 +74,7 @@ export class SocialMediaDoctorCheck implements DoctorCheck, OnModuleInit {
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly socialMediaOcr: SocialMediaOcrService,
   ) {}
 
@@ -83,7 +83,7 @@ export class SocialMediaDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const base: SocialMediaInput = {
       featureEnabled: settings.features?.['socialMediaDetection'] === true,
       envDisabled: process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false',

@@ -15,7 +15,7 @@
 // faces is not scrubbed at the item level.
 // =============================================================================
 
-import { MemoriesPreferencesValue } from '../../common/types/settings.types';
+import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
 
 /** Just enough of a Memory row to decide whether a preference hides it. */
 export interface PreferenceFilterableMemory {

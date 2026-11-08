@@ -6,8 +6,8 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkPictureEnhancer` (key `ai.pictureEnhancer`).
 // READ-ONLY: a settings read and one credential `findUnique` (presence only,
@@ -60,7 +60,7 @@ export class PictureEnhancerDoctorCheck implements DoctorCheck, OnModuleInit {
   constructor(
     private readonly registry: DoctorCheckRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -68,7 +68,7 @@ export class PictureEnhancerDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const enhance = settings.ai?.features?.enhance;
     const input: PictureEnhancerInput = {
       featureEnabled: settings.features?.['pictureEnhancement'] === true,

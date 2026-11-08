@@ -1,6 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 export interface GeoSearchResult {
   lat: number;
@@ -30,7 +30,7 @@ export class ForwardGeocodeService {
 
   constructor(
     private readonly config: ConfigService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {
     this.baseUrl = this.config.get<string>(
       'NOMINATIM_BASE_URL',

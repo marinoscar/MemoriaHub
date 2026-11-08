@@ -6,7 +6,8 @@ import { APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { PrismaModule } from './prisma/prisma.module';
-import { SettingsModule } from './settings/settings.module';
+import './settings/registry';
+import { FeaturesModule } from './settings/features.module';
 import { StorageModule } from './storage/storage.module';
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
@@ -45,11 +46,12 @@ import { LoggerModule } from './common/logger/logger.module';
 import { platformHostModule } from './platform/platform-host.module';
 import { identityModule } from './platform/identity/identity.config';
 import { ProfileModule } from './profile/profile.module';
-import { HostCorePortsModule } from './platform/host-core-ports.module';
+import { settingsModule } from './platform/settings/settings.config';
 import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 
 import configuration from './config/configuration';
+import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
 
 @Module({
   imports: [
@@ -84,12 +86,12 @@ import configuration from './config/configuration';
     ProfileModule,
 
     // Feature modules
-    SettingsModule,
-    // What the host core injects from slices not adopted yet (settings token,
-    // Doctor registries). PLATFORM-ADOPTION-SHIM(#597); see the file header.
-    // After SettingsModule on purpose: it imports it, and the OpenAPI document
-    // lists paths in module scan order.
-    HostCorePortsModule,
+    // Settings (RETRO-B3, #614): `/api/system-settings`, `/api/user-settings` and `/api/org-settings`
+    // from @marinoscar/platform-api/settings, with every MemoriaHub namespace registered in
+    // `settings/registry`. Global: provides AppSystemSettingsService and UserSettingsService.
+    // Before the host core on purpose: the host reads the `maintenance` namespace through it.
+    settingsModule,
+    FeaturesModule,
     // The platform host core (RETRO-B1, #597): the event bus, the app metrics,
     // maintenance mode (and its ONLY global guard, `MaintenanceGuard`),
     // `/api/health/*`, the `{ data }` envelope, the request log line, the

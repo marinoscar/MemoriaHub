@@ -1,9 +1,10 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
-import { SystemSettingsService } from './system-settings/system-settings.service';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { FeaturesResponseDto } from './dto/features-response.dto';
+import { buildPublicFeatures } from './public-features';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * Client-visible feature flags for ANY authenticated user.
@@ -17,7 +18,7 @@ import { FeaturesResponseDto } from './dto/features-response.dto';
 @ApiTags('Features')
 @Controller('features')
 export class FeaturesController {
-  constructor(private readonly systemSettingsService: SystemSettingsService) {}
+  constructor(private readonly systemSettingsService: AppSystemSettingsService) {}
 
   @Get()
   @Auth()
@@ -30,6 +31,7 @@ export class FeaturesController {
     type: FeaturesResponseDto,
   })
   async getFeatures(): Promise<FeaturesResponseDto> {
-    return this.systemSettingsService.getPublicFeatures();
+    // Reads through the cached getSettings() (5 s TTL), like every other caller.
+    return buildPublicFeatures(await this.systemSettingsService.getSettings());
   }
 }

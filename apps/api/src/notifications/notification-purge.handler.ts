@@ -52,7 +52,7 @@ import { EnrichmentJob, Prisma } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Fallback when `notifications.retentionDays` is unset. */
 const DEFAULT_RETENTION_DAYS = 30;
@@ -69,7 +69,7 @@ export class NotificationPurgeHandler implements EnrichmentHandler, OnModuleInit
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {

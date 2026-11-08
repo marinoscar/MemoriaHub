@@ -3,7 +3,6 @@ import { EnrichmentJob, LocationGroupLevel, Prisma } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { whereNear } from '../search/media-where.builder';
 import { haversineKm } from '../common/geo/haversine.util';
 import { fold } from './normalize-location-name';
@@ -11,6 +10,7 @@ import {
   LOCATION_GROUP_REBUILD_TYPE,
   LocationGroupRebuildPayload,
 } from './location-group-rebuild.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Keyset page size for the circle sweep and the bbox-candidate scan. */
 const PAGE_SIZE = 1000;
@@ -71,7 +71,7 @@ export class LocationGroupRebuildHandler implements EnrichmentHandler, OnModuleI
   constructor(
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {

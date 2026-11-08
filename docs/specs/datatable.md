@@ -15,7 +15,7 @@ against the drawer case and the no-remount-under-poll rule against three polling
 pages (issue #261, §13.2) — all of epic #238. **No raw page-level table
 implementation remains** (§13).
 **Location:** `apps/web/src/components/datatable/`,
-`apps/api/src/common/schemas/settings.schema.ts` (persistence schema)
+`apps/api/src/settings/registry/` (persistence schema)
 **Spec owner:** frontend
 
 ---
@@ -1518,7 +1518,7 @@ from `DataTableColumn` (§4), which is already the DataGrid field, the server
 sort key, and the visibility-model key.
 
 The canonical Zod definition is `dataTablesSchema` in
-`apps/api/src/common/schemas/settings.schema.ts`, imported by the PUT, PATCH and
+`apps/api/src/settings/registry/`, imported by the PUT, PATCH and
 response DTOs rather than copied into each — the bounds in §14.4 are a security
 control and four hand-maintained copies of them would drift.
 

@@ -27,8 +27,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { isMemoriesEnabled } from '../common/types/settings.types';
+import { isMemoriesEnabled } from '../settings/feature-gates';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** The enrichment job type this task schedules. */
 export const MEMORY_GENERATION_JOB_TYPE = 'memory_generation';
@@ -66,7 +66,7 @@ export class MemoriesGenerationTask {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)

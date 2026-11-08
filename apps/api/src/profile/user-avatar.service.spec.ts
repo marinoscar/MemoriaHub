@@ -56,7 +56,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { UserSettingsService } from '../settings/user-settings/user-settings.service';
+import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';

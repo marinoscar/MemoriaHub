@@ -8,6 +8,7 @@ import {
   isMandatoryType,
   supportsChannel,
 } from './notification-channels';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // =============================================================================
 // NotificationPolicyService — the admin kill switches (epic #481, issue #484)
@@ -15,7 +16,7 @@ import {
 //
 // Reads `notifications.{browserEnabled, pushEnabled, disabledTypes}` out of the
 // `global` system_settings row WITH PRISMA DIRECTLY, not through
-// SystemSettingsService: NotificationsModule imports nothing (see its header),
+// AppSystemSettingsService: NotificationsModule imports nothing (see its header),
 // and SettingsModule already imports NotificationsModule.
 //
 // SEMANTICS
@@ -25,7 +26,7 @@ import {
 //   browserEnabled — false withholds the in-page browser TOAST (the SSE
 //                    stream's `toast` flag); the inbox row is unaffected.
 //
-// CACHED 5 s (mirrors SystemSettingsService's TTL) because the gate runs per
+// CACHED 5 s (mirrors AppSystemSettingsService's TTL) because the gate runs per
 // RECIPIENT in hot producer loops, with an explicit invalidate().
 //
 // FAILS OPEN: an unreadable policy resolves to "everything on". A transient DB

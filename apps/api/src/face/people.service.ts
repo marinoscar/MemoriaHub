@@ -14,8 +14,7 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { FEATURE_KEYS } from '../common/types/settings.types';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 import {
   ListPeopleQueryDto,
   CreatePersonDto,
@@ -30,6 +29,7 @@ import { MergePeopleDto } from './dto/merge-people.dto';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { MediaTouchService } from '../media/media-touch.service';
 import { UserAvatarService } from '../profile/user-avatar.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class PeopleService {
@@ -41,7 +41,7 @@ export class PeopleService {
     private readonly clusteringService: FaceClusteringService,
     private readonly matchingService: FaceMatchingService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly mediaTouch: MediaTouchService,
     // Profile picture management (issue #354): an account can be linked to a

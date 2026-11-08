@@ -21,7 +21,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { StorageProvider } from '../storage/providers/storage-provider.interface';
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
-import { UserSettingsService } from '../settings/user-settings/user-settings.service';
+import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { UpdateUserProfileDto, UserProfileDto } from './dto/user-profile.dto';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';

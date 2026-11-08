@@ -13,6 +13,7 @@ import { PushConfigService } from './push/push-config.service';
 import { PushNotificationChannel } from './push/push-notification.channel';
 import { PushSubscriptionService } from './push/push-subscription.service';
 import { PushTestService } from './push/push-test.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * Notification Center (epic #240, issues #245 + #247).
@@ -53,7 +54,7 @@ import { PushTestService } from './push/push-test.service';
  * PushTestService and the admin PushConfigController. They too depend on
  * nothing but PrismaService (the VAPID config lives in its own `webPush`
  * system_settings row, read with Prisma directly — NOT through
- * SettingsModule's SystemSettingsService, for the same cycle reason), so the
+ * SettingsModule's AppSystemSettingsService, for the same cycle reason), so the
  * no-imports rule still holds.
  *
  * #484 adds the channel layer: NotificationPolicyService (admin kill switches,

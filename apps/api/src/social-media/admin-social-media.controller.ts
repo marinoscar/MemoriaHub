@@ -18,10 +18,10 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { FEATURE_KEYS } from '../common/types/settings.types';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { FEATURE_KEYS } from '../settings/feature-gates';
 import { SocialMediaBackfillService } from './social-media-backfill.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const flexibleDate = z
   .string()
@@ -45,7 +45,7 @@ export class AdminSocialMediaController {
 
   constructor(
     private readonly socialMediaBackfillService: SocialMediaBackfillService,
-    private readonly systemSettingsService: SystemSettingsService,
+    private readonly systemSettingsService: AppSystemSettingsService,
     private readonly socialMediaOcr: SocialMediaOcrService,
   ) {}
 

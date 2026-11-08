@@ -357,7 +357,7 @@ No per-circle role interacts with this feature at all — database backup/restor
 
 ## 8. Settings Reference
 
-The `databaseBackup.*` namespace, `apps/api/src/common/schemas/settings.schema.ts` (`systemSettingsSchema`/`systemSettingsPatchSchema`), edited via `GET`/`PUT /api/admin/db-backup/config` — **not** the generic `PATCH /api/system-settings` (see the "three hand-maintained copies" gotcha in CLAUDE.md's settings section; the db-backup admin controller's `PUT /config` delegates internally to `SystemSettingsService.patchSettings`, so there is still exactly one settings writer, just reached through a dedicated route rather than the generic one).
+The `databaseBackup.*` namespace, `apps/api/src/settings/registry/namespaces/system/database-backup.ts`, edited via `GET`/`PUT /api/admin/db-backup/config` (the db-backup admin controller's `PUT /config` delegates internally to `SystemSettingsService.patchSettings`, so there is exactly one settings writer; since RETRO-B3 the generic `PATCH /api/system-settings` reaches the namespace too).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|

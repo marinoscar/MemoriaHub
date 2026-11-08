@@ -20,8 +20,8 @@ import type { EnrichmentJob } from '@prisma/client';
 import { JobHistoryPurgeHandler } from './job-history-purge.handler';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,7 +61,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
 describe('JobHistoryPurgeHandler', () => {
   let handler: JobHistoryPurgeHandler;
   let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -86,7 +86,7 @@ describe('JobHistoryPurgeHandler', () => {
       providers: [
         JobHistoryPurgeHandler,
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
         { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();

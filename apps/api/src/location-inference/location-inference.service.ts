@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JobReason, LocationSuggestionStatus, MediaType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
-import { DEFAULT_SYSTEM_SETTINGS, SystemSettingsValue } from '../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../settings/registry/default-system-settings';
+import type { AppSystemSettingsDocument as SystemSettingsValue } from '../settings/app-settings.types';
 import { haversineKm } from '../common/geo/haversine.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 export type LocationInferenceConfig = NonNullable<SystemSettingsValue['locationInference']>;
 
@@ -222,7 +223,7 @@ export class LocationInferenceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   private async getConfig(): Promise<LocationInferenceConfig> {

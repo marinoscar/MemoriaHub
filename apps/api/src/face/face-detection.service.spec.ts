@@ -37,7 +37,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaFaceStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,7 +130,7 @@ describe('FaceDetectionService', () => {
       matchFaceToPerson: jest.fn().mockResolvedValue(null),
     };
     mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
-    // FaceDetectionCore reads auto-archive gating via SystemSettingsService;
+    // FaceDetectionCore reads auto-archive gating via AppSystemSettingsService;
     // default to the feature OFF so pre-existing matching-behavior tests are
     // unaffected (faceAutoArchive auto-archive branch is covered separately
     // in face-detection-core.service.spec.ts).
@@ -186,7 +186,7 @@ describe('FaceDetectionService', () => {
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: MediaTouchService, useValue: mockMediaTouch },
       ],
     }).compile();

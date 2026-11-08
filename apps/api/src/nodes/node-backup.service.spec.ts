@@ -38,9 +38,9 @@ import { NodeBackupService } from './node-backup.service';
 import { NodesService } from './nodes.service';
 import { NodeBackupQueryService } from './node-backup-query.service';
 import { ObjectsService } from '../storage/objects/objects.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -212,7 +212,7 @@ describe('NodeBackupService', () => {
         { provide: NodesService, useValue: nodesService },
         { provide: NodeBackupQueryService, useValue: queryService },
         { provide: ObjectsService, useValue: objectsService },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
         {
           provide: ConfigService,
           useValue: { get: jest.fn((_key: string, def?: unknown) => def) },

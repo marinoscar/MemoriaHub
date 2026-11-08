@@ -21,8 +21,8 @@ import type { EnrichmentJob } from '@prisma/client';
 import { ReviewRunHistoryPurgeHandler } from './review-run-history-purge.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,7 +65,7 @@ const HOUR_MS = 3_600_000;
 describe('ReviewRunHistoryPurgeHandler', () => {
   let handler: ReviewRunHistoryPurgeHandler;
   let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -85,7 +85,7 @@ describe('ReviewRunHistoryPurgeHandler', () => {
       providers: [
         ReviewRunHistoryPurgeHandler,
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
         { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();

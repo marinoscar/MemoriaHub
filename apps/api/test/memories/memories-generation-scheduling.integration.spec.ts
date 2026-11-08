@@ -30,7 +30,7 @@ import {
 } from '../../src/memories/memories-generation.task';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 
 function resolveDatabaseUrl(): string {
   if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
@@ -108,7 +108,7 @@ describeMaybeDb(
       task = new MemoriesGenerationTask(
         prisma as unknown as PrismaService,
         new EnrichmentJobService(prisma as unknown as PrismaService),
-        settings as unknown as SystemSettingsService,
+        settings as unknown as AppSystemSettingsService,
       );
     });
 

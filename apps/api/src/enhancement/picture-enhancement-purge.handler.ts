@@ -14,7 +14,7 @@ import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class PictureEnhancementPurgeHandler implements EnrichmentHandler, OnModuleInit {
@@ -25,7 +25,7 @@ export class PictureEnhancementPurgeHandler implements EnrichmentHandler, OnModu
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {

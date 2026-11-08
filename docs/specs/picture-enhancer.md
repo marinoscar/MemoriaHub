@@ -389,7 +389,7 @@ Index: `@@index([circleId, createdAt])` (serves the paginated batch list, newest
 
 ### 7.1 System Settings (Admin-editable)
 
-Validated via the shared Zod schema (`apps/api/src/settings/dto/update-system-settings.dto.ts`), round-tripping through `PATCH`/`PUT /api/system-settings`.
+Validated via the shared Zod schema (`apps/api/src/settings/registry/namespaces/system/`), round-tripping through `PATCH`/`PUT /api/system-settings`.
 
 | Setting key | Type | Range | Default | Description |
 |-------------|------|-------|---------|-------------|

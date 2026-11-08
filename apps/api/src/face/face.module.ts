@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { FaceSettingsController } from './face-settings.controller';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
-import { SettingsModule } from '../settings/settings.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { CirclesModule } from '../circles/circles.module';
 import { FaceDetectionService } from './face-detection.service';
@@ -28,11 +27,11 @@ import { ProfileModule } from '../profile/profile.module';
  * ProfileModule is imported for issue #354: PeopleService propagates a person's
  * profile-picture change to any account linked to that person, and carries the
  * link over on merge. The edge points FaceModule -> ProfileModule; ProfileModule
- * imports only StorageProvidersModule / CirclesModule / SettingsModule, so no
+ * imports only StorageProvidersModule / CirclesModule / so no
  * cycle is closed and no forwardRef is needed.
  */
 @Module({
-  imports: [SettingsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule, ProfileModule],
+  imports: [StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule, ProfileModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,

@@ -6,7 +6,6 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import {
   DatabaseBackupRunnerService,
@@ -15,6 +14,7 @@ import {
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
 import { __setSpawnForTests, spawnPgDump, spawnPgRestoreList } from './pg-dump.util';
 import { __resetPgVersionCacheForTests } from './pg-version.util';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // The two spawn entry points are mocked; everything else in the util (argv
 // builders, env builder) stays real so the runner is wired against the true
@@ -203,7 +203,7 @@ describe('DatabaseBackupRunnerService', () => {
         DatabaseBackupRunnerService,
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: config },
-        { provide: SystemSettingsService, useValue: settings },
+        { provide: AppSystemSettingsService, useValue: settings },
         { provide: StorageProviderResolver, useValue: resolver },
       ],
     }).compile();

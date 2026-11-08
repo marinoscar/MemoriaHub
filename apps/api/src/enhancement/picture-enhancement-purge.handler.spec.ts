@@ -16,8 +16,8 @@ import { PictureEnhancementPurgeHandler } from './picture-enhancement-purge.hand
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
   return {
@@ -65,7 +65,7 @@ describe('PictureEnhancementPurgeHandler', () => {
   let mockPrisma: MockPrismaService;
   let mockResolver: { getProviderFor: jest.Mock };
   let mockDeleteFn: jest.Mock;
-  let mockSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
 
   beforeEach(async () => {
     mockRegistry = { register: jest.fn() };
@@ -87,7 +87,7 @@ describe('PictureEnhancementPurgeHandler', () => {
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: SystemSettingsService, useValue: mockSettings },
+        { provide: AppSystemSettingsService, useValue: mockSettings },
       ],
     }).compile();
 

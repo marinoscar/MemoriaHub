@@ -33,8 +33,8 @@ import {
   createMockViewerUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../src/common/types/settings.types';
-import { SystemSettingsService } from '../../src/settings/system-settings/system-settings.service';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
+import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 
 describe('pictureEnhancement.maxBatchSize settings integration (issue #421)', () => {
   let context: TestContext;

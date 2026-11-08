@@ -5,7 +5,6 @@ import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider'
 import { GoogleGeoLocationProvider } from './google-geo-location.provider';
 import { GeoLocationService } from './geo-location.service';
 import { DelegatingGeoLocationProvider } from './delegating-geo-location.provider';
-import { SettingsModule } from '../../settings/settings.module';
 
 /**
  * GeoLocationModule — provides the active reverse-geocoding provider via the
@@ -23,7 +22,7 @@ import { SettingsModule } from '../../settings/settings.module';
  *   google     — Google Maps Geocoding API (requires encrypted credential in geo_provider_credentials)
  */
 @Module({
-  imports: [SettingsModule],
+  imports: [],
   providers: [
     OfflineGeoLocationProvider,
     NominatimGeoLocationProvider,

@@ -9,10 +9,11 @@ import { BadRequestException } from '@nestjs/common';
 import { AiSettingsService } from './ai-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderRegistry } from './providers/ai-provider.registry';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { encryptSecret } from '../common/crypto/secret-cipher';
-import { patchSystemSettingsSchema } from '../settings/dto/update-system-settings.dto';
+import { composePatchSystemSettingsSchema } from '@marinoscar/platform-api/settings';
+import '../settings/registry';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -52,7 +53,7 @@ describe('AiSettingsService', () => {
         AiSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AiProviderRegistry, useValue: mockRegistry },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 
@@ -535,7 +536,7 @@ describe('AiSettingsService', () => {
   // ---------------------------------------------------------------------------
   describe('ai.features.transcription is registered in the PATCH wire DTO', () => {
     it('survives patchSystemSettingsSchema parsing rather than being stripped', () => {
-      const parsed = patchSystemSettingsSchema.parse({
+      const parsed: any = composePatchSystemSettingsSchema().parse({
         ai: {
           features: {
             transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
@@ -550,7 +551,7 @@ describe('AiSettingsService', () => {
     });
 
     it('accepts an explicit null (clearing the selection)', () => {
-      const parsed = patchSystemSettingsSchema.parse({
+      const parsed: any = composePatchSystemSettingsSchema().parse({
         ai: { features: { transcription: null } },
       });
 

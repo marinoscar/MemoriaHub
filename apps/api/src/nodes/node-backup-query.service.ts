@@ -25,7 +25,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Hard cap on manifest page size, independent of backup.maxPageSize. */
 const MANIFEST_MAX_LIMIT = 1000;
@@ -191,7 +191,7 @@ const iso = (d: Date | null | undefined): string | null =>
 export class NodeBackupQueryService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   // ---------------------------------------------------------------------------

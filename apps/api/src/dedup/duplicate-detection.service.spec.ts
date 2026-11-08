@@ -23,10 +23,10 @@ import { Readable } from 'stream';
 import { DuplicateDetectionService, DuplicateComputeResult } from './duplicate-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, EnrichmentJob, MediaType } from '@prisma/client';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,7 +117,7 @@ describe('DuplicateDetectionService', () => {
         DuplicateDetectionService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: VisualEmbeddingService, useValue: mockVisualEmbeddingService },
       ],
     }).compile();

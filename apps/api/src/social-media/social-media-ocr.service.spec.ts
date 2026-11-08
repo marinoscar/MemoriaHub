@@ -21,7 +21,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SocialMediaOcrService } from './social-media-ocr.service';
 import { VideoFrameExtractionService } from '../face/video-frame-extraction.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const mockCreateWorker = jest.fn();
 
@@ -64,7 +64,7 @@ describe('SocialMediaOcrService', () => {
       providers: [
         SocialMediaOcrService,
         { provide: VideoFrameExtractionService, useValue: mockFrameExtractor },
-        { provide: SystemSettingsService, useValue: { getSettings: jest.fn() } },
+        { provide: AppSystemSettingsService, useValue: { getSettings: jest.fn() } },
       ],
     }).compile();
 

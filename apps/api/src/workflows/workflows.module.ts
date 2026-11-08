@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { SettingsModule } from '../settings/settings.module';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';
 import { FaceModule } from '../face/face.module';
@@ -54,7 +53,7 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
 @Module({
   imports: [
     PrismaModule,
-    SettingsModule,
+    
     CirclesModule,
     MediaModule,
     FaceModule,

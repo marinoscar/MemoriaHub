@@ -12,11 +12,11 @@ import { CircleMembershipService } from '../circles/circle-membership.service';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { MediaTouchService } from '../media/media-touch.service';
 import { UserAvatarService } from '../profile/user-avatar.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -147,7 +147,7 @@ describe('PeopleService', () => {
         { provide: FaceClusteringService, useValue: mockClusteringService },
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
         { provide: MediaTouchService, useValue: mockMediaTouch },
         { provide: UserAvatarService, useValue: mockUserAvatarService },

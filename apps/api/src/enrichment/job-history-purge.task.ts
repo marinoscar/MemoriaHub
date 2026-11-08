@@ -12,7 +12,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentJobService } from './enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class JobHistoryPurgeTask {
@@ -21,7 +21,7 @@ export class JobHistoryPurgeTask {
   constructor(
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)

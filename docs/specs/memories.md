@@ -837,7 +837,7 @@ Item DTO: `{ id, mediaItemId, position, mediaType, width, height, durationMs, ca
 
 ### 6.7 Per-user preferences — the `user_settings.memories` namespace
 
-Read and written **only** through the existing `GET`/`PATCH`/`PUT /api/user-settings`. No new endpoint, no new table, no migration, no new permission — the same model as `user_settings.dataTables` (#255) and `user_settings.notifications` (#251), and the canonical schema sits beside theirs in `apps/api/src/common/schemas/settings.schema.ts`.
+Read and written **only** through the existing `GET`/`PATCH`/`PUT /api/user-settings`. No new endpoint, no new table, no migration, no new permission — the same model as `user_settings.dataTables` (#255) and `user_settings.notifications` (#251), and the canonical schema sits beside theirs in `apps/api/src/settings/registry/`.
 
 ```
 memories: {
@@ -1395,19 +1395,9 @@ A boolean in the open `features` record (`z.record(z.string(), z.boolean())`), s
 
 Note the per-type `enabled` flags all default to **`true`** while `features.memories` defaults to **`false`**. That is intentional: the master flag is the only off switch that matters for a fresh install, and once an admin turns Memories on they should get all seven memory types without having to enable each one individually.
 
-### 9.3 Three hand-maintained copies — a real pitfall
+### 9.3 One declaration (RETRO-B3)
 
-This repo duplicates every settings namespace by hand across **three** files, and all three must be edited together:
-
-| File | Symbol | Role |
-|---|---|---|
-| `common/schemas/settings.schema.ts` | `systemSettingsSchema` | Validation + defaults for `PUT`, and for the merged document `patchSettings` re-parses |
-| `common/schemas/settings.schema.ts` | `systemSettingsPatchSchema` | All-optional twin |
-| `settings/dto/update-system-settings.dto.ts` | `patchSystemSettingsSchema` | **The wire DTO** |
-
-The third one is the trap. It is what `nestjs-zod` validates the request body against, and it **strips unknown keys**, so a namespace added only to the first two validates and merges perfectly in unit tests while every real `PATCH` silently no-ops — the key never survives the DTO. (`workflows.*` and `backup.*` are, as of this writing, in exactly that state: schema-complete but absent from the wire DTO, hence not PATCH-able over HTTP.) `memories` is present in all three, and `test/memories/memories-settings.integration.spec.ts` round-trips every key through the real HTTP endpoint precisely to keep it that way.
-
-`SystemSettingsService.patchSettings` also merges each key by hand (there is no generic deep merge), and `getSettings()`/`replaceSettings()` project the resolved document field by field — so a new namespace must be added there too or it will never be *returned*, only stored.
+The `memories.*` namespace is declared once, in `apps/api/src/settings/registry/namespaces/system/memories.ts` (the zod shape with every bound, and the defaults), and registered in `app-registrations/settings.ts`. The `GET`/`PUT`/`PATCH /api/system-settings` bodies, the response, the PATCH merge (absent keeps; an object merges field by field; arrays replace) and the salvage of a stored document that lacks a leaf are derived from it by `defineSystemNamespace`, so there is no longer a wire DTO or a hand-written merge to keep in step. Before RETRO-B3 this took three hand-maintained copies and a namespace missing from the wire DTO silently no-opped over HTTP. `test/memories/memories-settings.integration.spec.ts` still round-trips every key through the real HTTP endpoint, and `test/settings/settings-contract.spec.ts` pins the merge.
 
 ### 9.4 `ai.features.memories`
 

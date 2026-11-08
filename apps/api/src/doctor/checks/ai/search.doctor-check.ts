@@ -6,8 +6,8 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { AiSettingsService } from '../../../ai/ai-settings.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass, skip } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkAiSearch` (key `ai.search`).
 //
@@ -40,7 +40,7 @@ export class AiSearchDoctorCheck implements DoctorCheck, OnModuleInit {
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly aiSettings: AiSettingsService,
   ) {}
 
@@ -49,7 +49,7 @@ export class AiSearchDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const cfg = settings.ai?.features?.search;
     if (!cfg?.provider || !cfg?.model) return decideAiSearch(cfg, null);
     try {

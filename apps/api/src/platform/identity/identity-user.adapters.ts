@@ -1,17 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import type { IdentityProfileImages, UserDefaults } from '@marinoscar/platform-api/identity';
 
-import { DEFAULT_USER_SETTINGS } from '../../common/types/settings.types';
+import { DEFAULT_USER_SETTINGS } from '@marinoscar/platform-api/settings';
 
 // =============================================================================
 // USER_DEFAULTS and IDENTITY_PROFILE_IMAGES -> the app's settings and avatar
 // =============================================================================
 
-/** A new user's `user_settings` value: MemoriaHub's `DEFAULT_USER_SETTINGS`. */
+/**
+ * A new user's `user_settings` value: the platform's `DEFAULT_USER_SETTINGS` (theme, profile) and
+ * MemoriaHub's empty `search` namespace, which a new user has always started with.
+ */
 @Injectable()
 export class AppUserDefaults implements UserDefaults {
   userSettings(): Record<string, unknown> {
-    return structuredClone(DEFAULT_USER_SETTINGS) as unknown as Record<string, unknown>;
+    return { ...structuredClone(DEFAULT_USER_SETTINGS), search: { visibleFields: [] } } as unknown as Record<string, unknown>;
   }
 }
 

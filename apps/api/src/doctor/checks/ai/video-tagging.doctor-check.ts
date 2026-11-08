@@ -7,8 +7,8 @@ import {
 
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AiProviderRegistry } from '../../../ai/providers/ai-provider.registry';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkVideoTagging` (key `ai.videoTagging`, epic
 // #452, issue #457). READ-ONLY: a settings read, credential presence and a
@@ -104,7 +104,7 @@ export class VideoTaggingDoctorCheck implements DoctorCheck, OnModuleInit {
   constructor(
     private readonly registry: DoctorCheckRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly aiProviderRegistry: AiProviderRegistry,
   ) {}
 
@@ -113,7 +113,7 @@ export class VideoTaggingDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const video = settings.autoTagging?.video;
     const tagging = settings.ai?.features?.tagging;
     const transcription = (

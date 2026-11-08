@@ -29,11 +29,10 @@ import { WorkflowRunStatus, WorkflowRunItemStatus, WorkflowTrigger } from '@pris
 import { randomUUID } from 'crypto';
 import { WorkflowRunService } from './workflow-run.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { CircleMembershipService } from '../../circles/circle-membership.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
-import { DEFAULT_SYSTEM_SETTINGS } from '../../common/types/settings.types';
+import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
@@ -41,6 +40,7 @@ import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -134,7 +134,7 @@ function settingsWithWorkflows(overrides: Record<string, unknown> = {}) {
 describe('WorkflowRunService', () => {
   let service: WorkflowRunService;
   let prisma: MockPrismaService;
-  let systemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let circleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
   let thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'attachThumbnailUrls'>>;
@@ -161,7 +161,7 @@ describe('WorkflowRunService', () => {
       providers: [
         WorkflowRunService,
         { provide: PrismaService, useValue: prisma },
-        { provide: SystemSettingsService, useValue: systemSettings },
+        { provide: AppSystemSettingsService, useValue: systemSettings },
         { provide: CircleMembershipService, useValue: circleMembership },
         { provide: EnrichmentJobService, useValue: enrichmentJobs },
         { provide: MediaThumbnailService, useValue: thumbnails },

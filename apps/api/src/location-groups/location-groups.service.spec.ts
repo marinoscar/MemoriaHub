@@ -19,10 +19,10 @@ import { LocationGroupsService, titleCase } from './location-groups.service';
 import { LocationGroupResolverService } from './location-group-resolver.service';
 import { LocationGroupRebuildService } from './location-group-rebuild.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
  * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
@@ -102,7 +102,7 @@ describe('LocationGroupsService', () => {
         LocationGroupsService,
         { provide: PrismaService, useValue: prisma },
         {
-          provide: SystemSettingsService,
+          provide: AppSystemSettingsService,
           useValue: { getSettings: jest.fn().mockResolvedValue(SETTINGS) },
         },
         { provide: LocationGroupResolverService, useValue: resolver },

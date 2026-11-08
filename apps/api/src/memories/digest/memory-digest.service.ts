@@ -60,14 +60,10 @@ import { MhLegacyJobStatus, MemoryType, Prisma } from '@prisma/client';
 import { EmailService } from '../../email/email.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
-import {
-  MemoriesPreferencesValue,
-  MemoriesSettingsValue,
-  SystemSettingsValue,
-  UserSettingsValue,
-  isMemoriesEnabled,
-} from '../../common/types/settings.types';
+import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
+import { MemoriesSettingsValue } from '../../settings/registry/namespaces/system/memories';
+import type { AppSystemSettingsDocument as SystemSettingsValue } from '../../settings/app-settings.types';
+import { isMemoriesEnabled } from '../../settings/feature-gates';
 import { MemoryDigestItemData } from '../../email/types/email.types';
 import {
   isMemoryHiddenByPreferences,
@@ -78,6 +74,7 @@ import {
   signDigestImageToken,
   signDigestUnsubscribeToken,
 } from './digest-token.util';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** The enrichment job type this feature schedules. */
 export const MEMORY_DIGEST_JOB_TYPE = 'memory_digest';
@@ -185,7 +182,7 @@ export class MemoryDigestService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly email: EmailService,
     private readonly thumbnails: MediaThumbnailService,
   ) {}
@@ -506,7 +503,7 @@ export class MemoryDigestService {
         select: { userId: true, value: true },
       });
       for (const row of rows) {
-        const value = row.value as unknown as UserSettingsValue | undefined;
+        const value = row.value as unknown as { memories?: MemoriesPreferencesValue } | undefined;
         map.set(
           row.userId,
           resolveMemoryPreferences(

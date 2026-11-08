@@ -8,8 +8,8 @@ import {
 import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 
 import { PrismaService } from '../../../prisma/prisma.service';
-import { SystemSettingsService } from '../../../settings/system-settings/system-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../outcome';
+import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
 // Ported from `DoctorService.checkWorkflowsState` (key `workflows.state`).
 // READ-ONLY: pure DB counts. Surfaces operational inconsistencies an admin
@@ -85,7 +85,7 @@ export class WorkflowsStateDoctorCheck implements DoctorCheck, OnModuleInit {
   constructor(
     private readonly registry: DoctorCheckRegistry,
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -93,7 +93,7 @@ export class WorkflowsStateDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.getSettings({ readOnly: true });
+    const settings = await this.systemSettings.readKnownValue();
     const base = {
       featureEnabled: settings.features?.['workflows'] === true,
       envDisabled: process.env['WORKFLOWS_ENABLED'] === 'false',

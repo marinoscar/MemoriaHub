@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { SettingsModule } from '../settings/settings.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { LocationGroupResolverService } from './location-group-resolver.service';
 import { LocationGroupRebuildService } from './location-group-rebuild.service';
@@ -14,11 +13,11 @@ import { LocationGroupRebuildHandler } from './location-group-rebuild.handler';
  * that touches a `geoCanonical*` column imports this module.
  *
  * Cycle-free by construction: EnrichmentModule imports only PrismaModule +
- * SettingsModule, and neither of those (nor this module) imports MediaModule /
+ * and neither of those (nor this module) imports MediaModule /
  * GeoModule / LocationInferenceModule / WorkflowsModule — the four consumers.
  */
 @Module({
-  imports: [PrismaModule, SettingsModule, EnrichmentModule],
+  imports: [PrismaModule, EnrichmentModule],
   providers: [
     LocationGroupResolverService,
     LocationGroupRebuildService,

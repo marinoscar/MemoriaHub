@@ -22,7 +22,6 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
 import {
@@ -33,6 +32,7 @@ import { UpsertStorageCredentialsDto } from './dto/storage-credentials.dto';
 import { TestStorageProviderDto } from './dto/test-storage-provider.dto';
 import { SetActiveStorageProviderDto } from './dto/set-active-provider.dto';
 import type { S3ProviderConfig } from '../storage/providers/s3/s3-storage.provider';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
 export class StorageSettingsService {
@@ -41,7 +41,7 @@ export class StorageSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 

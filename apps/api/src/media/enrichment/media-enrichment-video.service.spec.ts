@@ -6,7 +6,7 @@
  * extends coverage to the video branch.
  *
  * Real service implementation uses `systemSettings.getSettings()` which
- * returns a full settings object.  We mock `SystemSettingsService` to return
+ * returns a full settings object.  We mock `AppSystemSettingsService` to return
  * a settings object with any combination of flags.
  *
  * Cases:
@@ -31,9 +31,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MediaEnrichmentService } from './media-enrichment.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { MediaType, JobReason, MediaFaceStatusType } from '@prisma/client';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -107,7 +107,7 @@ describe('MediaEnrichmentService — video_face_detection routing', () => {
         MediaEnrichmentService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
+        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
       ],
     }).compile();
 

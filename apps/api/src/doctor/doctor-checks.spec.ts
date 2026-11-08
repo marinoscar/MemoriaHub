@@ -25,7 +25,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { DoctorCheck as PlatformDoctorCheck } from '@marinoscar/platform-api/doctor';
 import type { PrismaService } from '../prisma/prisma.service';
-import type { SystemSettingsService, ResolvedSettings } from '../settings/system-settings/system-settings.service';
+import type { AppSystemSettings } from '../settings/app-settings.types';
 import type { AiSettingsService } from '../ai/ai-settings.service';
 import type { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
 import type { FaceSettingsService } from '../face/face-settings.service';
@@ -44,6 +44,7 @@ import {
 } from '../../test/mocks/prisma.mock';
 
 import { MEMORIAHUB_DOCTOR_CHECKS } from './doctor-checks.module';
+import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
 // Harness: run the registered checks and report them in the old shape
@@ -177,7 +178,7 @@ function healthyQueryRawHandlers(): Array<[string, unknown]> {
   ];
 }
 
-function makeSettings(overrides: Partial<ResolvedSettings> = {}): ResolvedSettings {
+function makeSettings(overrides: Record<string, unknown> = {}): AppSystemSettings {
   return {
     ui: { allowUserThemeOverride: true },
     features: { autoTagging: false, faceRecognition: false, burstDetection: false },
@@ -191,6 +192,7 @@ function makeSettings(overrides: Partial<ResolvedSettings> = {}): ResolvedSettin
     face: {
       features: { detection: { provider: null, model: null } },
       video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
+      autoArchive: { matchThreshold: 0.45 },
     },
     storage: {
       activeProvider: 's3',
@@ -204,10 +206,10 @@ function makeSettings(overrides: Partial<ResolvedSettings> = {}): ResolvedSettin
     updatedBy: null,
     version: 1,
     ...overrides,
-  } as ResolvedSettings;
+  } as unknown as AppSystemSettings;
 }
 
-function makeHealthySettings(overrides: Partial<ResolvedSettings> = {}): ResolvedSettings {
+function makeHealthySettings(overrides: Record<string, unknown> = {}): AppSystemSettings {
   return makeSettings({
     features: { autoTagging: true, faceRecognition: true, burstDetection: true },
     ai: {
@@ -220,6 +222,7 @@ function makeHealthySettings(overrides: Partial<ResolvedSettings> = {}): Resolve
     face: {
       features: { detection: { provider: 'compreface', model: null } },
       video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
+      autoArchive: { matchThreshold: 0.45 },
     },
     ...overrides,
   });
@@ -263,7 +266,7 @@ const HEALTHY_STATS = {
 describe('MemoriaHub Doctor checks', () => {
   let service: { runDiagnostics: () => Promise<DoctorReport> };
   let mockPrisma: MockPrismaService;
-  let mockSystemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
+  let mockSystemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'readKnownValue'>>;
   let mockAiSettings: jest.Mocked<Pick<AiSettingsService, 'testProvider' | 'testEmbedding'>>;
   let mockFaceSettings: jest.Mocked<Pick<FaceSettingsService, 'testProvider'>>;
   let mockGeoSettings: jest.Mocked<Pick<GeoSettingsService, 'testProvider'>>;
@@ -285,7 +288,7 @@ describe('MemoriaHub Doctor checks', () => {
     const tokens: Array<[string, unknown]> = [
       ['DoctorCheckRegistry', { register: jest.fn() }],
       ['PrismaService', mockPrisma as unknown as PrismaService],
-      ['SystemSettingsService', mockSystemSettings],
+      ['AppSystemSettingsService', mockSystemSettings],
       ['AiSettingsService', mockAiSettings],
       ['AiProviderRegistry', mockAiProviderRegistry as unknown as AiProviderRegistry],
       ['FaceSettingsService', mockFaceSettings],
@@ -338,7 +341,7 @@ describe('MemoriaHub Doctor checks', () => {
 
   beforeEach(() => {
     mockPrisma = createMockPrismaService();
-    mockSystemSettings = { getSettings: jest.fn() };
+    mockSystemSettings = { readKnownValue: jest.fn() };
     mockAiSettings = { testProvider: jest.fn(), testEmbedding: jest.fn() };
     mockFaceSettings = { testProvider: jest.fn() };
     mockGeoSettings = { testProvider: jest.fn() };
@@ -387,7 +390,7 @@ describe('MemoriaHub Doctor checks', () => {
   describe('all-healthy fixture', () => {
     beforeEach(() => {
       process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
@@ -465,7 +468,7 @@ describe('MemoriaHub Doctor checks', () => {
   describe('storage.liveTest (read-only probe)', () => {
     beforeEach(() => {
       process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({ provider: 's3', enabled: true });
@@ -521,7 +524,7 @@ describe('MemoriaHub Doctor checks', () => {
       // Fresh install: env fully healthy, but no AI/face providers configured
       // and all feature flags off. This must not raise any failing check.
       process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features false, all providers null
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings()); // all features false, all providers null
       mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
@@ -616,7 +619,7 @@ describe('MemoriaHub Doctor checks', () => {
       } as any);
 
     it('is skipped when the master autoTagging flag is off', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({
           features: { autoTagging: false, faceRecognition: true, burstDetection: true },
           autoTagging: { video: { enabled: true, maxFrames: 6, sampleIntervalSeconds: 5, transcription: { enabled: false, leadSeconds: 30 } } },
@@ -628,7 +631,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is skipped when video tagging itself is off — the default, so an upgrade reports nothing new', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(withVideo({ enabled: false }));
+      mockSystemSettings.readKnownValue.mockResolvedValue(withVideo({ enabled: false }));
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'ai.videoTagging');
@@ -638,7 +641,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it('warns when AUTO_TAG_ENABLED=false overrides the setting — video tagging has no kill-switch of its own', async () => {
       process.env = healthyEnv({ AUTO_TAG_ENABLED: 'false' });
-      mockSystemSettings.getSettings.mockResolvedValue(withVideo({}));
+      mockSystemSettings.readKnownValue.mockResolvedValue(withVideo({}));
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'ai.videoTagging');
@@ -647,7 +650,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:error when enabled with no tagging provider/model selected', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         withVideo(
           {},
           {
@@ -673,14 +676,14 @@ describe('MemoriaHub Doctor checks', () => {
         provider: 'openai',
         enabled: false,
       });
-      mockSystemSettings.getSettings.mockResolvedValue(withVideo({}));
+      mockSystemSettings.readKnownValue.mockResolvedValue(withVideo({}));
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'ai.videoTagging').status).toBe('error');
     });
 
     it('is status:ok, visual-only, when transcription is off', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(withVideo({ maxFrames: 8 }));
+      mockSystemSettings.readKnownValue.mockResolvedValue(withVideo({ maxFrames: 8 }));
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'ai.videoTagging');
@@ -690,7 +693,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('WARNS (never errors) when transcription is on but no transcription model is selected', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         withVideo({ transcription: { enabled: true, leadSeconds: 30 } }),
       );
 
@@ -702,7 +705,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('warns when the selected transcription provider has no audio capability (e.g. Anthropic)', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         withVideo(
           { transcription: { enabled: true, leadSeconds: 30 } },
           {
@@ -725,7 +728,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:ok and names both models when transcription is fully configured', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         withVideo(
           { transcription: { enabled: true, leadSeconds: 45 } },
           {
@@ -766,7 +769,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:error when autoTagging is enabled but no tagging provider is configured', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: { autoTagging: true, faceRecognition: false, burstDetection: false },
           ai: {
@@ -784,7 +787,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:warning when a tagging provider is configured but autoTagging is disabled', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false },
           ai: {
@@ -802,7 +805,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:ok when autoTagging is enabled and a tagging provider is configured', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: { autoTagging: true, faceRecognition: false, burstDetection: false },
           ai: {
@@ -837,12 +840,13 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:warning when a face provider is configured but faceRecognition is disabled', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false },
           face: {
             features: { detection: { provider: 'compreface', model: null } },
             video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
+      autoArchive: { matchThreshold: 0.45 },
           },
         }),
       );
@@ -852,12 +856,13 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:ok when faceRecognition is enabled (provider configured)', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: { autoTagging: false, faceRecognition: true, burstDetection: false },
           face: {
             features: { detection: { provider: 'compreface', model: null } },
             video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
+      autoArchive: { matchThreshold: 0.45 },
           },
         }),
       );
@@ -867,7 +872,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:skipped when faceRecognition is disabled and no provider is configured', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(makeSettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings());
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'face.flagConsistency').status).toBe('skipped');
@@ -891,7 +896,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:skipped when social media detection is disabled', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(makeSettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings());
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'ai.socialMedia').status).toBe('skipped');
@@ -899,7 +904,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:ok (two-tier operational) when the feature is on, OCR enabled, and the model is available', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false, socialMediaDetection: true } as any,
           socialMedia: {
@@ -927,7 +932,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:warning (degraded) when OCR is enabled but the model is unavailable', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false, socialMediaDetection: true } as any,
           socialMedia: {
@@ -973,7 +978,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:skipped when duplicate detection is disabled, and does not consult VisualEmbeddingService', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(makeSettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings());
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'ai.duplicateDetection').status).toBe('skipped');
@@ -981,7 +986,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:ok (two-tier operational) when the feature is on and the CLIP model is available', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: {
             autoTagging: false,
@@ -1000,7 +1005,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:warning (degraded) when the feature is on but the CLIP model is unavailable', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeSettings({
           features: {
             autoTagging: false,
@@ -1024,7 +1029,7 @@ describe('MemoriaHub Doctor checks', () => {
   describe('core.pgvector', () => {
     beforeEach(() => {
       process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
         provider: 's3',
@@ -1080,7 +1085,7 @@ describe('MemoriaHub Doctor checks', () => {
   describe('core.pgClientVersion', () => {
     beforeEach(() => {
       process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
         provider: 's3',
@@ -1198,7 +1203,7 @@ describe('MemoriaHub Doctor checks', () => {
     ];
 
     beforeEach(() => {
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
         provider: 's3',
@@ -1328,7 +1333,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is ok in mode 'all' (explicit) without touching worker_nodes for this check", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'all' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'jobs.workerEnabled');
@@ -1339,7 +1344,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is ok when the mode var is unset and the legacy vars are truthy (legacy → 'all')", async () => {
       process.env = healthyEnv(); // ENRICHMENT_WORKER_ENABLED=true, no mode var
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
 
       const report = await service.runDiagnostics();
 
@@ -1348,7 +1353,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is ok in mode 'system' when a fresh heavy-media node is registered", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(2);
 
       const report = await service.runDiagnostics();
@@ -1361,7 +1366,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it('the fresh-node count is scoped to online, fresh-heartbeat nodes serving heavy media types', async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(1);
 
       await service.runDiagnostics();
@@ -1380,7 +1385,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is warning in mode 'system' when enrichment features are on but no healthy node exists", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
@@ -1393,7 +1398,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is warning (not error) in mode 'system' when no features are on and no nodes exist", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features off
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings()); // all features off
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
@@ -1403,7 +1408,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is warning in mode 'off' with fresh nodes — no server fallback", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(3);
 
       const report = await service.runDiagnostics();
@@ -1416,7 +1421,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is error in mode 'off' when enrichment features are on and no healthy nodes exist", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
@@ -1434,7 +1439,7 @@ describe('MemoriaHub Doctor checks', () => {
       });
       delete process.env['ENRICHMENT_WORKER_MODE'];
       delete process.env['FACE_WORKER_ENABLED'];
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
@@ -1444,7 +1449,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it("is plain warning in mode 'off' when no features are on and no nodes exist", async () => {
       process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
-      mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features off
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings()); // all features off
       (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
 
       const report = await service.runDiagnostics();
@@ -1462,7 +1467,7 @@ describe('MemoriaHub Doctor checks', () => {
   describe('nodes.capabilityHealth', () => {
     beforeEach(() => {
       process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
@@ -1636,7 +1641,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:skipped when the workflows feature flag is off', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // features.workflows absent/false
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings()); // features.workflows absent/false
 
       const report = await service.runDiagnostics();
       const check = findCheck(report, 'workflows.state');
@@ -1649,7 +1654,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:ok when the feature is on and no runs are stuck, stale, or misconfigured', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
       );
 
@@ -1662,7 +1667,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     it('is status:warning when WORKFLOWS_ENABLED=false overrides the enabled feature flag (env kill-switch)', async () => {
       process.env = healthyEnv({ WORKFLOWS_ENABLED: 'false' });
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
       );
 
@@ -1675,7 +1680,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:warning when runs are stuck non-terminal past the stuck window with no progress', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
       );
       mockWorkflowRunCounts({ stuck: 2 });
@@ -1689,7 +1694,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:warning when awaiting_approval runs are past their previewTtlHours TTL but not expired', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any,
           workflows: { previewTtlHours: 12 } as any,
@@ -1707,7 +1712,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:warning when enabled scheduled workflows exist but workflows.triggers.scheduled is off', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any,
           workflows: { triggers: { scheduled: false } } as any,
@@ -1729,7 +1734,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('does not query workflow.count for scheduled workflows when the scheduled trigger is on', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({ features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any }),
       );
 
@@ -1739,7 +1744,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('combines multiple simultaneous warnings into one message', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(
+      mockSystemSettings.readKnownValue.mockResolvedValue(
         makeHealthySettings({
           features: { autoTagging: false, faceRecognition: false, burstDetection: false, workflows: true } as any,
           workflows: { triggers: { scheduled: false } } as any,
@@ -1806,7 +1811,7 @@ describe('MemoriaHub Doctor checks', () => {
 
     beforeEach(() => {
       process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
       mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
       (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
       (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({

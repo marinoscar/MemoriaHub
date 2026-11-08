@@ -2,10 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { WorkflowRun, WorkflowRunItemStatus, WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SystemSettingsService } from '../../settings/system-settings/system-settings.service';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { WorkflowRunService } from './workflow-run.service';
 import { MICRO_RUN_WINDOW_MINUTES } from './workflow-evaluate-item.handler';
+import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** Cap on micro-runs finalized per tick. */
 const MAX_PER_TICK = 100;
@@ -29,7 +29,7 @@ export class WorkflowMicroRunFinalizeTask {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: SystemSettingsService,
+    private readonly systemSettings: AppSystemSettingsService,
     private readonly runService: WorkflowRunService,
   ) {}
 
@@ -72,7 +72,7 @@ export class WorkflowMicroRunFinalizeTask {
 
   private async dispatch(
     run: WorkflowRun,
-    settings: Awaited<ReturnType<SystemSettingsService['getSettings']>>,
+    settings: Awaited<ReturnType<AppSystemSettingsService['getSettings']>>,
   ): Promise<void> {
     // Race-safe claim: stamp approvedAt so only ONE finalize attempt dispatches.
     const claimed = await this.prisma.workflowRun.updateMany({
