@@ -19,7 +19,7 @@
 import { EnrichmentJob, TrashEmptyRunStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { TrashEmptyEvaluateHandler } from './trash-empty-evaluate.handler';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TrashEmptyRunService } from './trash-empty-run.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
@@ -79,7 +79,7 @@ function rows(n: number, startIndex = 0) {
 describe('TrashEmptyEvaluateHandler', () => {
   let handler: TrashEmptyEvaluateHandler;
   let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let runService: jest.Mocked<Pick<TrashEmptyRunService, 'enqueueExecuteBatches'>>;
 
   beforeEach(() => {
@@ -88,7 +88,7 @@ describe('TrashEmptyEvaluateHandler', () => {
     runService = { enqueueExecuteBatches: jest.fn().mockResolvedValue(undefined) };
 
     handler = new TrashEmptyEvaluateHandler(
-      registry as unknown as EnrichmentHandlerRegistry,
+      registry as unknown as JobHandlerRegistry,
       prisma as unknown as PrismaService,
       runService as unknown as TrashEmptyRunService,
     );

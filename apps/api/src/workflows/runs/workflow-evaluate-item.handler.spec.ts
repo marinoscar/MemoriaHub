@@ -29,7 +29,7 @@ import { EnrichmentJob, WorkflowRunStatus, WorkflowTrigger } from '@prisma/clien
 import { randomUUID } from 'crypto';
 import { WorkflowEvaluateItemHandler } from './workflow-evaluate-item.handler';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
@@ -90,7 +90,7 @@ describe('WorkflowEvaluateItemHandler', () => {
   let handler: WorkflowEvaluateItemHandler;
   let prisma: MockPrismaService;
   let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
-  let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
 
   beforeEach(async () => {
     prisma = createMockPrismaService();
@@ -103,7 +103,7 @@ describe('WorkflowEvaluateItemHandler', () => {
       providers: [
         WorkflowEvaluateItemHandler,
         WorkflowConditionCompiler,
-        { provide: EnrichmentHandlerRegistry, useValue: registry },
+        { provide: JobHandlerRegistry, useValue: registry },
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: systemSettings },
       ],

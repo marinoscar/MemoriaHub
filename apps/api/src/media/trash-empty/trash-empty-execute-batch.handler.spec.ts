@@ -26,7 +26,7 @@
 import { EnrichmentJob, TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { TrashEmptyExecuteBatchHandler } from './trash-empty-execute-batch.handler';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaService } from '../media.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
@@ -77,7 +77,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 describe('TrashEmptyExecuteBatchHandler', () => {
   let handler: TrashEmptyExecuteBatchHandler;
   let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let mediaService: jest.Mocked<Pick<MediaService, 'purgeMediaItemsBatched'>>;
 
   beforeEach(() => {
@@ -88,7 +88,7 @@ describe('TrashEmptyExecuteBatchHandler', () => {
     };
 
     handler = new TrashEmptyExecuteBatchHandler(
-      registry as unknown as EnrichmentHandlerRegistry,
+      registry as unknown as JobHandlerRegistry,
       prisma as unknown as PrismaService,
       mediaService as unknown as MediaService,
     );
