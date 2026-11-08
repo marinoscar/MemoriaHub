@@ -4,18 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  CircleRole,
-  MhLegacyJobStatus,
-  MediaType,
-  MediaEnhancementBatch,
-  MediaEnhancementStatus,
-  MediaEnhancementDecision,
-  MediaTagSource,
-  JobReason,
-  MediaFaceStatusType,
-  Prisma,
-} from '@prisma/client';
+import { CircleRole, MediaType, MediaEnhancementBatch, MediaEnhancementStatus, MediaEnhancementDecision, MediaTagSource, JobReason, MediaFaceStatusType, Prisma } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
@@ -770,10 +759,10 @@ export class MediaEnhancementService {
       // Delete only the still-PENDING job rows, matched precisely on the
       // enhancement id in their payload (never by mediaItemId, which could
       // catch an unrelated job for the same item).
-      await this.prisma.enrichmentJob.deleteMany({
+      await this.prisma.job.deleteMany({
         where: {
           type: 'picture_enhancement',
-          status: MhLegacyJobStatus.pending,
+          status: 'pending',
           OR: pendingRows.map((r) => ({
             payload: { path: ['enhancementId'], equals: r.id },
           })),

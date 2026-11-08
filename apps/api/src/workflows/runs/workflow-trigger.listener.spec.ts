@@ -117,7 +117,7 @@ describe('WorkflowTriggerListener', () => {
     prisma.mediaTagStatus.findUnique.mockResolvedValue(null);
     prisma.mediaFaceStatus.findUnique.mockResolvedValue(null);
     prisma.locationSuggestion.findUnique.mockResolvedValue(null);
-    prisma.enrichmentJob.findMany.mockResolvedValue([]);
+    prisma.job.findMany.mockResolvedValue([]);
   });
 
   function mockWorkflows(rows: Array<{ id: string; definition: WorkflowDefinition }>): void {
@@ -322,7 +322,7 @@ describe('WorkflowTriggerListener', () => {
       // in-flight-producer escape hatch applicable -- a photo, not a social video).
       prisma.mediaTagStatus.findUnique.mockResolvedValue({ status: 'processed' } as any);
       prisma.mediaFaceStatus.findUnique.mockResolvedValue({ status: 'pending' } as any);
-      prisma.enrichmentJob.findMany.mockResolvedValue([
+      prisma.job.findMany.mockResolvedValue([
         { type: 'face_detection' },
       ] as any); // face_detection still in flight
 
@@ -355,7 +355,7 @@ describe('WorkflowTriggerListener', () => {
       // Now both are terminal: tags processed, faces processed, nothing in flight.
       prisma.mediaTagStatus.findUnique.mockResolvedValue({ status: 'processed' } as any);
       prisma.mediaFaceStatus.findUnique.mockResolvedValue({ status: 'processed' } as any);
-      prisma.enrichmentJob.findMany.mockResolvedValue([]);
+      prisma.job.findMany.mockResolvedValue([]);
 
       await listener.handleJobSettled(
         new EnrichmentJobSettledEvent(
@@ -411,7 +411,7 @@ describe('WorkflowTriggerListener', () => {
         duplicateGroupId: null,
         socialMediaSource: null,
       } as any);
-      prisma.enrichmentJob.findMany.mockResolvedValue([]); // burst_detection no longer in flight
+      prisma.job.findMany.mockResolvedValue([]); // burst_detection no longer in flight
 
       await listener.handleJobSettled(
         new EnrichmentJobSettledEvent(
@@ -440,7 +440,7 @@ describe('WorkflowTriggerListener', () => {
         socialMediaSource: 'tiktok',
       } as any);
       prisma.mediaFaceStatus.findUnique.mockResolvedValue(null); // never processed -- skipped
-      prisma.enrichmentJob.findMany.mockResolvedValue([]); // no face_detection/video_face_detection in flight
+      prisma.job.findMany.mockResolvedValue([]); // no face_detection/video_face_detection in flight
 
       await listener.handleJobSettled(
         new EnrichmentJobSettledEvent(

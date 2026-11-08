@@ -20,7 +20,7 @@ import { setupBaseMocks } from '../fixtures/mock-setup.helper';
  * secret.
  */
 
-/** The 32 app checks (the 35 documented ones minus the 3 the host core retired). */
+/** The 30 app checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice retired). */
 const MEMORIAHUB_CHECK_IDS = [
   'memoriahub.core.pgvector',
   'memoriahub.core.pg-client-version',
@@ -42,8 +42,6 @@ const MEMORIAHUB_CHECK_IDS = [
   'memoriahub.face.flag-consistency',
   'memoriahub.face.pgvector',
   'memoriahub.geo.reverse-provider',
-  'memoriahub.jobs.worker-enabled',
-  'memoriahub.jobs.queue-health',
   'memoriahub.jobs.burst-config',
   'memoriahub.nodes.registered-count',
   'memoriahub.nodes.heartbeat-freshness',
@@ -57,7 +55,14 @@ const MEMORIAHUB_CHECK_IDS = [
 ];
 
 /** The platform checks that replace the three retired app checks. */
-const PLATFORM_REPLACEMENT_IDS = ['db.connection', 'db.migrations', 'secrets.encryption-key'];
+const PLATFORM_REPLACEMENT_IDS = [
+  'db.connection',
+  'db.migrations',
+  'secrets.encryption-key',
+  // The jobs slice (RETRO-C1) replaces memoriahub.jobs.worker-enabled and memoriahub.jobs.queue-health.
+  'jobs.worker',
+  'jobs.backlog',
+];
 
 describe('Platform Doctor (Integration)', () => {
   let context: TestContext;
@@ -77,7 +82,7 @@ describe('Platform Doctor (Integration)', () => {
     context.prismaMock.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
   });
 
-  it('registers all 32 memoriahub checks plus the three platform replacements after app.init()', () => {
+  it('registers all 30 memoriahub checks plus the five platform replacements after app.init()', () => {
     const ids = context.module.get(DoctorCheckRegistry).list().map((check) => check.id);
 
     for (const id of [...MEMORIAHUB_CHECK_IDS, ...PLATFORM_REPLACEMENT_IDS]) {

@@ -6,13 +6,12 @@
  * genuinely `undefined`, exactly as a real `fetch(url, { method: 'POST' })`
  * produces it — rather than only calling the pipe directly with a hand-built
  * `undefined` + metatype. This file does the real-HTTP-round-trip form: it
- * mounts the REAL production controllers (`EnrichmentAdminController`,
- * `AdminMetadataController`) on a REAL `NestFastifyApplication`, with the
+ * mounts the REAL production controller (`AdminMetadataController`) on a REAL `NestFastifyApplication`, with the
  * REAL global `ZodValidationPipe` wired in via `APP_PIPE` (nestjs-zod) and
  * the REAL `RolesGuard`/`PermissionsGuard` — only `JwtAuthGuard` is stubbed,
  * stamping a fake authenticated Admin user, mirroring
  * `notifications.controller.spec.ts` / `media-enhancement.controller.spec.ts`.
- * The underlying services (`EnrichmentAdminService`, `MetadataBackfillService`)
+ * The underlying services (`MetadataBackfillService`)
  * are mocked — no database required. This was practical here because both
  * controllers' dependency graphs are cheap to construct fully-mocked (see the
  * companion schema-level spec's header comment for why other candidate
@@ -47,8 +46,6 @@ import { ZodValidationPipe, createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import request from 'supertest';
 
-import { EnrichmentAdminController } from '../../enrichment/enrichment-admin.controller';
-import { EnrichmentAdminService } from '../../enrichment/enrichment-admin.service';
 import { AdminMetadataController } from '../../metadata/admin-metadata.controller';
 import { MetadataBackfillService } from '../../metadata/metadata-backfill.service';
 import { JwtAuthGuard, AuthenticatedUser } from '@marinoscar/platform-api/identity';
@@ -111,17 +108,6 @@ class UnfixedController {
   }
 }
 
-function makeMockEnrichmentAdminService() {
-  return {
-    getStats: jest.fn(),
-    listJobs: jest.fn(),
-    retryJob: jest.fn(),
-    retryAllFailed: jest.fn().mockResolvedValue({ retried: 5 }),
-    resetStuck: jest.fn().mockResolvedValue({ reset: 2, failed: 0 }),
-    deleteJob: jest.fn(),
-  };
-}
-
 function makeMockMetadataBackfillService() {
   return {
     backfillAllCircles: jest.fn().mockResolvedValue({ enqueued: 42 }),
@@ -130,14 +116,12 @@ function makeMockMetadataBackfillService() {
 
 describe('issue #289 — bodyless POST reaches the handler via the REAL ZodValidationPipe + Fastify', () => {
   let app: NestFastifyApplication;
-  let mockEnrichmentAdminService: ReturnType<typeof makeMockEnrichmentAdminService>;
   let mockMetadataBackfillService: ReturnType<typeof makeMockMetadataBackfillService>;
 
   async function buildApp(): Promise<NestFastifyApplication> {
     const moduleRef: TestingModule = await Test.createTestingModule({
-      controllers: [EnrichmentAdminController, AdminMetadataController, UnfixedController],
+      controllers: [AdminMetadataController, UnfixedController],
       providers: [
-        { provide: EnrichmentAdminService, useValue: mockEnrichmentAdminService },
         { provide: MetadataBackfillService, useValue: mockMetadataBackfillService },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
       ],
@@ -157,7 +141,6 @@ describe('issue #289 — bodyless POST reaches the handler via the REAL ZodValid
   }
 
   beforeEach(async () => {
-    mockEnrichmentAdminService = makeMockEnrichmentAdminService();
     mockMetadataBackfillService = makeMockMetadataBackfillService();
     app = await buildApp();
   });
@@ -165,42 +148,6 @@ describe('issue #289 — bodyless POST reaches the handler via the REAL ZodValid
   afterEach(async () => {
     if (app) await app.close();
     jest.clearAllMocks();
-  });
-
-  // ===========================================================================
-  // POST /admin/jobs/reset-stuck — ResetStuckDto, the DTO named in the issue.
-  // ===========================================================================
-  describe('POST /admin/jobs/reset-stuck (ResetStuckDto)', () => {
-    it('201s for a genuinely bodyless request (no .send() at all) and calls the service with undefined', async () => {
-      // No .send(...) call whatsoever: supertest issues the request with no
-      // body and no Content-Type header, so Fastify leaves request.body
-      // undefined — the exact shape of `fetch(url, { method: 'POST' })`.
-      const res = await request(app.getHttpServer()).post('/admin/jobs/reset-stuck').expect(201);
-
-      expect(mockEnrichmentAdminService.resetStuck).toHaveBeenCalledWith(undefined);
-      expect(res.body).toEqual({ reset: 2, failed: 0 });
-    });
-
-    it('still 400s for a malformed body — the fix did not loosen validation', async () => {
-      await request(app.getHttpServer())
-        .post('/admin/jobs/reset-stuck')
-        .send({ olderThanMinutes: -1 })
-        .expect(400);
-
-      expect(mockEnrichmentAdminService.resetStuck).not.toHaveBeenCalled();
-    });
-  });
-
-  // ===========================================================================
-  // POST /admin/jobs/retry-failed — RetryAllFailedDto.
-  // ===========================================================================
-  describe('POST /admin/jobs/retry-failed (RetryAllFailedDto)', () => {
-    it('201s for a genuinely bodyless request and calls the service with undefined', async () => {
-      const res = await request(app.getHttpServer()).post('/admin/jobs/retry-failed').expect(201);
-
-      expect(mockEnrichmentAdminService.retryAllFailed).toHaveBeenCalledWith(undefined);
-      expect(res.body).toEqual({ retried: 5 });
-    });
   });
 
   // ===========================================================================

@@ -193,8 +193,8 @@ describe('settings contract', () => {
     it.each<[string, unknown]>([
       ['burst.minGroupSize below the floor', { burst: { minGroupSize: 1 } }],
       ['dedup.similarityThreshold above the ceiling', { dedup: { similarityThreshold: 0.999 } }],
-      ['jobs.history.retentionDays above 365', { jobs: { history: { retentionDays: 366 } } }],
-      ['jobs.stuckThresholdMinutes above 120', { jobs: { stuckThresholdMinutes: 121 } }],
+      ['jobs.history.retentionDays above 3650', { jobs: { history: { retentionDays: 3651 } } }],
+      ['jobs.stuckThresholdMinutes above 10080', { jobs: { stuckThresholdMinutes: 10081 } }],
       ['socialMedia.ocrLanguages empty', { socialMedia: { ocrLanguages: [] } }],
       ['socialMedia.maxSizeBytes below 10 MB', { socialMedia: { maxSizeBytes: 9_999_999 } }],
       ['face.autoArchive.matchThreshold below 0.30', { face: { autoArchive: { matchThreshold: 0.2 } } }],

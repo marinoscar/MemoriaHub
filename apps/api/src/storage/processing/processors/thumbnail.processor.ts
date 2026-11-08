@@ -170,7 +170,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
     // Use the original file extension so ffmpeg recognises the container format;
     // fall back to .mp4 when the extension is absent or unknown.
     const origExt = extname(object.name || '') || '.mp4';
-    const tmpIn = join(tmpdir(), `memoriaHub-thumb-in-${randomUUID()}${origExt}`);
+    const tmpIn = join(tmpdir(), `memoriahub-job-thumb-in-${randomUUID()}${origExt}`);
 
     try {
       // 1. Stream the video to a temp file (ffmpeg requires a seekable path)

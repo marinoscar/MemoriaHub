@@ -42,7 +42,7 @@ export class NodesStaleLeasesDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    const expired = await this.prisma.enrichmentJob.count({
+    const expired = await this.prisma.job.count({
       where: { status: 'running', leaseExpiresAt: { lt: new Date() } },
     });
     return decideStaleLeases(expired);

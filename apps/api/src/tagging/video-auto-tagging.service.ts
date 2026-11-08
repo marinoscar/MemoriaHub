@@ -309,7 +309,7 @@ export class VideoAutoTaggingService {
         bucket: mediaItem.storageObject.bucket,
         sizeBytes: mediaItem.storageObject.size,
         extension: fileExt,
-        tempPrefix: 'memoriaHub-vtag-dl-',
+        tempPrefix: 'memoriahub-job-vtag-dl-',
         streamingEnabled: params.streamInput,
         jobId: job.id,
       });

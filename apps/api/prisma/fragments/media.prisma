@@ -104,7 +104,6 @@ model MediaItem {
   mediaTags              MediaTag[]
   // Face Recognition relations
   faces                  Face[]
-  enrichmentJobs         EnrichmentJob[]
   faceStatus             MediaFaceStatus?
   profileForPeople       Person[]             @relation("PersonProfileMedia")
   // Auto-Tagging relations

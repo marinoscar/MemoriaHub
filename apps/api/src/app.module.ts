@@ -46,6 +46,8 @@ import { LoggerModule } from './common/logger/logger.module';
 import { platformHostModule } from './platform/platform-host.module';
 import { identityModule } from './platform/identity/identity.config';
 import { ProfileModule } from './profile/profile.module';
+// The jobs slice registers the `jobs` and `retention` namespaces; it must be composed before the settings.
+import { jobsModule } from './platform/jobs/jobs.config';
 import { settingsModule } from './platform/settings/settings.config';
 import { credentialsModules } from './platform/credentials/credentials.config';
 import { hostCoreModule } from './platform/host-core.config';
@@ -92,6 +94,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // `settings/registry`. Global: provides AppSystemSettingsService and UserSettingsService.
     // Before the host core on purpose: the host reads the `maintenance` namespace through it.
     settingsModule,
+    // Jobs (RETRO-C1, #575): the background queue, the in-process worker pool, the reaper and
+    // `/api/admin/jobs/*` from @marinoscar/platform-api/jobs. Global. The 38 handlers are still the
+    // app's, behind the legacy adapter (EnrichmentModule).
+    jobsModule,
     // Credentials (RETRO-B4, #617): the encrypted (purpose, name) store; purposes in
     // platform/credentials/credential-purposes.manifest.ts.
     ...credentialsModules,

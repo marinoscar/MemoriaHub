@@ -6,7 +6,7 @@ const BID = '11111111-1111-4111-8111-111111111111';
 
 function build(job: Record<string, unknown> | null) {
   const prisma = {
-    enrichmentJob: { findUnique: jest.fn().mockResolvedValue(job) },
+    job: { findUnique: jest.fn().mockResolvedValue(job) },
     mhLegacyNotificationBroadcast: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
   return { listener: new BroadcastFailureListener(prisma as never), prisma };
@@ -42,7 +42,7 @@ describe('BroadcastFailureListener', () => {
     const t = build(failedChunk);
     await t.listener.handleJobSettled(ev('broadcast_chunk', 'succeeded'));
     await t.listener.handleJobSettled(ev('face_detection'));
-    expect(t.prisma.enrichmentJob.findUnique).not.toHaveBeenCalled();
+    expect(t.prisma.job.findUnique).not.toHaveBeenCalled();
   });
 
   it('never throws', async () => {

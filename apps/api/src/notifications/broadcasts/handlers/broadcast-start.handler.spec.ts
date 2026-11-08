@@ -18,7 +18,7 @@ function build(broadcast: Record<string, unknown> | null) {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     user: { count: jest.fn().mockResolvedValue(42) },
-    enrichmentJob: { findFirst: jest.fn().mockResolvedValue(null) },
+    job: { findFirst: jest.fn().mockResolvedValue(null) },
   };
   const jobs = { enqueue: jest.fn().mockResolvedValue({ id: 'chunk-1' }) };
   const registry = { register: jest.fn() };
@@ -93,7 +93,7 @@ describe('BroadcastStartHandler', () => {
     const cutoff = new Date('2030-01-01T00:00:00Z');
     const t = build({ ...scheduled, status: 'sending', audienceCutoff: cutoff });
     await t.handler.process(job());
-    expect(t.prisma.enrichmentJob.findFirst).toHaveBeenCalledWith(
+    expect(t.prisma.job.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { type: BROADCAST_CHUNK_TYPE, payload: { path: ['broadcastId'], equals: BID } } }),
     );
     expect(t.prisma.user.count).toHaveBeenCalledWith({ where: { isActive: true, createdAt: { lte: cutoff } } });
@@ -107,7 +107,7 @@ describe('BroadcastStartHandler', () => {
   it('does not resume a sending broadcast that already has a chunk or progress', async () => {
     const cutoff = new Date();
     const withChunk = build({ ...scheduled, status: 'sending', audienceCutoff: cutoff });
-    withChunk.prisma.enrichmentJob.findFirst.mockResolvedValue({ id: 'c' });
+    withChunk.prisma.job.findFirst.mockResolvedValue({ id: 'c' });
     await withChunk.handler.process(job());
     expect(withChunk.jobs.enqueue).not.toHaveBeenCalled();
 

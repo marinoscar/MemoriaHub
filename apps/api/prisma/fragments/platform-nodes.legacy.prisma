@@ -30,7 +30,6 @@ model MhLegacyWorkerNode {
 
   // Relations
   createdBy    User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  claimedJobs  EnrichmentJob[]
   // Local Media Backup relations (issue #310, epic #308)
   backupConfig NodeBackupConfig?
   backupRuns   NodeBackupRun[]

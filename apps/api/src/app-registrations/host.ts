@@ -26,11 +26,13 @@
 
 import { registerAboutContributor } from '@marinoscar/platform-api/host';
 
+import { configuredWorkerMode } from '../platform/jobs/legacy-env';
+
 /** The "Enrichment" group: plain, non-secret process facts. */
 export function describeEnrichment(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const workerMode = env.ENRICHMENT_WORKER_MODE ?? (env.ENRICHMENT_WORKER_ENABLED === 'false' ? 'off' : 'all');
+  const workerMode = configuredWorkerMode(env);
   return {
     workerMode,
     faceVectorBackend: env.FACE_VECTOR_BACKEND ?? 'pgvector',

@@ -268,7 +268,7 @@ export class VideoFaceDetectionService {
             )
             .then((p) => p.download(mediaItem.storageObject!.storageKey)),
         sizeBytes: mediaItem.storageObject.size,
-        prefix: 'memoriaHub-vface-dl-',
+        prefix: 'memoriahub-job-vface-dl-',
         extension: fileExt,
       });
 

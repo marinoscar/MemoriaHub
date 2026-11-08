@@ -333,7 +333,7 @@ describe('InsightsService', () => {
 
   describe('getRefreshState', () => {
     it('returns idle when no job exists', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(null);
 
       const result = await service.getRefreshState();
 
@@ -341,7 +341,7 @@ describe('InsightsService', () => {
     });
 
     it('returns pending with jobId when latest job is pending', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.pending));
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.pending));
 
       const result = await service.getRefreshState();
 
@@ -349,7 +349,7 @@ describe('InsightsService', () => {
     });
 
     it('returns running with jobId when latest job is running', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.running));
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.running));
 
       const result = await service.getRefreshState();
 
@@ -357,7 +357,7 @@ describe('InsightsService', () => {
     });
 
     it('returns failed with jobId and lastError when latest job failed', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(
         makeJob(MhLegacyJobStatus.failed, 'DB connection lost'),
       );
 
@@ -367,7 +367,7 @@ describe('InsightsService', () => {
     });
 
     it('returns idle when latest job succeeded', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.succeeded));
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(makeJob(MhLegacyJobStatus.succeeded));
 
       const result = await service.getRefreshState();
 
@@ -375,11 +375,11 @@ describe('InsightsService', () => {
     });
 
     it('queries enrichment_jobs by type=storage_insights ordered by createdAt desc', async () => {
-      (mockPrisma.enrichmentJob.findFirst as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.job.findFirst as jest.Mock).mockResolvedValue(null);
 
       await service.getRefreshState();
 
-      expect(mockPrisma.enrichmentJob.findFirst).toHaveBeenCalledWith({
+      expect(mockPrisma.job.findFirst).toHaveBeenCalledWith({
         where: { type: 'storage_insights' },
         orderBy: { createdAt: 'desc' },
       });

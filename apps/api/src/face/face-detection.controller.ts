@@ -288,8 +288,15 @@ export class FaceDetectionController {
       await tx.person.deleteMany({ where: { circleId } });
 
       // 3. Delete EnrichmentJob rows for face_detection type in this circle
-      await tx.enrichmentJob.deleteMany({
-        where: { circleId, type: 'face_detection' },
+      // (the circle of a media-item job lives in `payload.circleId`; see EnrichmentJobService)
+      await tx.job.deleteMany({
+        where: {
+          type: 'face_detection',
+          OR: [
+            { subjectType: 'circle', subjectId: circleId },
+            { payload: { path: ['circleId'], equals: circleId } },
+          ],
+        },
       });
 
       // 4. Delete all MediaFaceStatus rows (via mediaItem.circleId join)

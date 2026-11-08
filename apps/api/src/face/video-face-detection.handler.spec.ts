@@ -784,7 +784,7 @@ describe('VideoFaceDetectionHandler', () => {
       // The path handed to extractFrames is the same one the handler must clean up.
       const tmpVideoPath = mockFrameExtractor.extractFrames.mock.calls[0][0] as string;
       expect(typeof tmpVideoPath).toBe('string');
-      expect(tmpVideoPath).toMatch(/memoriaHub-vface-dl-.*\.mp4$/);
+      expect(tmpVideoPath).toMatch(/memoriahub-job-vface-dl-.*\.mp4$/);
 
       expect(mockUnlink).toHaveBeenCalledTimes(1);
       expect(mockUnlink).toHaveBeenCalledWith(tmpVideoPath);

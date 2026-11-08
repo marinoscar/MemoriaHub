@@ -40,6 +40,7 @@ import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
+import '@marinoscar/platform-api/jobs/testing';
 import '@marinoscar/platform-api/settings/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
@@ -79,16 +80,34 @@ runPlatformConformance({
 
     // The settings slice (RETRO-B3, #614). The registries are filled by importing
     // `src/settings/registry` (AppModule does). `minSystemNamespaces` is a vacuity
-    // guard: 21 app namespaces plus the platform's `maintenance`.
+    // guard: 20 app namespaces plus the platform's `maintenance`, `jobs` and `retention`.
     settings: {
       permissions: permissionRegistry.list().map((permission) => ({ id: permission.id, scope: permission.scope })),
-      minSystemNamespaces: 22,
+      minSystemNamespaces: 23,
     },
 
     // The credentials slice (RETRO-B4, #617): every registered purpose names a platform slice or one of
     // this app's owners as its owner, every user purpose's fallback address resolves, and no credential
     // `*Info` schema can carry a secret.
     credentials: { appOwners: [...APP_CREDENTIAL_OWNERS] },
+
+    // Jobs (RETRO-C1, #575).
+    // Both suites are wired and OPTED OUT with the reason, so the debt is visible in the run summary
+    // until the issue that pays it enables the suite (with `exempt` for the three platform
+    // exemptions only). Measured with the suites on at the cutover: 18 inline findings in 13 cron
+    // files (the db-backup, insights, memories, node-backup, node-prune, notification-reconcile,
+    // share-expiring, storage-cleanup, storage-processing-recovery and workflow crons) and one
+    // listener download (storage/processing/object-processing.service.ts).
+    cronEnqueueOnly: {
+      skip:
+        'RETRO-C9 (cron remediation) turns the crons that still work inline into enqueue-only ones; ' +
+        'until then 13 cron files fail this suite. The queue they enqueue into is the platform\'s since RETRO-C1.',
+    },
+    onEventNoIo: {
+      skip:
+        'object-processing.service.ts downloads object bytes inside an OBJECT_UPLOADED_EVENT listener; ' +
+        'the storage slice (RETRO-D1) moves it into a post-upload processor job. No other listener fails.',
+    },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no

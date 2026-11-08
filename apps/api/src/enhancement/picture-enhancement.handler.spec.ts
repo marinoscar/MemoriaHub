@@ -43,7 +43,7 @@ import { RateLimitError } from '../enrichment/rate-limit.error';
 import {
   ENRICHMENT_MAX_ATTEMPTS,
   ENRICHMENT_RATELIMIT_MAX_HITS,
-} from '../enrichment/enrichment-terminal.service';
+} from '../platform/jobs/queue-limits';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const mockPrepareImageForProcessing = prepareImageForProcessing as jest.Mock;

@@ -124,7 +124,14 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     fromAddress: null,
     fromName: null,
   },
-  jobs: { history: { retentionDays: 30, purgeEnabled: true }, stuckThresholdMinutes: 3 },
+  // The jobs slice's declarations (RETRO-C1); the stuck threshold's default is the platform's 30 (it was 3).
+  jobs: { history: { retentionDays: 30, purgeEnabled: true }, stuckThresholdMinutes: 30 },
+  retention: {
+    notifications: { enabled: true, days: 180 },
+    notificationDeliveries: { enabled: true, days: 90 },
+    auditEvents: { enabled: false, days: 365 },
+    aiRuns: { enabled: true, days: 90 },
+  },
   reviewRuns: { runHistoryRetentionDays: 30 },
   notifications: {
     retentionDays: 30,

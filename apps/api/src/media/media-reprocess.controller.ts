@@ -135,7 +135,7 @@ export class MediaReprocessController {
     // explicit admin request should pre-empt the queue. Running jobs are left
     // untouched (they are already being worked on).
     if (job.status === MhLegacyJobStatus.pending && job.priority > 0) {
-      await this.prisma.enrichmentJob.update({
+      await this.prisma.job.update({
         where: { id: job.id },
         data: { priority: 0 },
       });

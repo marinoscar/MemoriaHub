@@ -140,8 +140,8 @@ describe('adminSections', () => {
       const sections = visibleAdminSections(allowOnly('jobs:read'));
       const titles = sections.flatMap((s) => s.cards.map((c) => c.title));
 
-      expect(titles).toContain('Job Queue');
-      expect(titles).toContain('Job Queue Insights');
+      expect(titles).toContain('Jobs');
+      expect(titles).toContain('Job Insights');
       expect(titles).toContain('Worker Nodes');
       expect(titles).not.toContain('System');
       expect(titles).not.toContain('AI Providers');
@@ -177,13 +177,13 @@ describe('adminSections', () => {
         const sections = visibleAdminSections(allowAll(), 'job');
         const titles = sections.flatMap((s) => s.cards.map((c) => c.title));
 
-        expect(titles.sort()).toEqual(['Job Queue', 'Job Queue Insights']);
+        expect(titles.sort()).toEqual(['Job Insights', 'Jobs']);
       });
 
       it('matches regardless of the query\'s casing', () => {
-        const lower = visibleAdminSections(allowAll(), 'job queue');
-        const upper = visibleAdminSections(allowAll(), 'JOB QUEUE');
-        const mixed = visibleAdminSections(allowAll(), 'Job Queue');
+        const lower = visibleAdminSections(allowAll(), 'job insights');
+        const upper = visibleAdminSections(allowAll(), 'JOB INSIGHTS');
+        const mixed = visibleAdminSections(allowAll(), 'Job Insights');
 
         const titlesOf = (sections: ReturnType<typeof visibleAdminSections>) =>
           sections.flatMap((s) => s.cards.map((c) => c.title)).sort();
@@ -214,7 +214,7 @@ describe('adminSections', () => {
       });
 
       it('a permission-gated card stays hidden regardless of a matching search text', () => {
-        // "Job Queue" matches the query text, but the caller cannot see it —
+        // "Jobs" matches the query text, but the caller cannot see it —
         // the classic filter-bypasses-authz bug this function must not have.
         const sections = visibleAdminSections(allowNone(), 'job');
         expect(sections).toEqual([]);
@@ -245,18 +245,18 @@ describe('adminSections', () => {
     });
 
     it('resolves an exact card path to that card\'s title', () => {
-      expect(adminPageTitle('/admin/settings/jobs')).toBe('Job Queue');
+      expect(adminPageTitle('/admin/settings/jobs')).toBe('Jobs');
     });
 
     it('longest-prefix-wins: a nested detail route resolves to the more specific card', () => {
       // /admin/settings/jobs/insights is a prefix-match for BOTH the "Job
-      // Queue" card (/admin/settings/jobs) and an exact match for "Job Queue
+      // Queue" card (/admin/settings/jobs) and an exact match for "Jobs
       // Insights" (/admin/settings/jobs/insights) — the longer path must win.
-      expect(adminPageTitle('/admin/settings/jobs/insights')).toBe('Job Queue Insights');
+      expect(adminPageTitle('/admin/settings/jobs/insights')).toBe('Job Insights');
     });
 
-    it('a path nested one level under "Job Queue" (not "Insights") resolves to "Job Queue"', () => {
-      expect(adminPageTitle('/admin/settings/jobs/some-detail')).toBe('Job Queue');
+    it('a path nested one level under "Jobs" (not "Insights") resolves to "Jobs"', () => {
+      expect(adminPageTitle('/admin/settings/jobs/some-detail')).toBe('Jobs');
     });
 
     it('resolves a deeply-nested detail route to its parent card (Worker Nodes)', () => {

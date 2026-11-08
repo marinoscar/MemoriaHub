@@ -31,9 +31,7 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import MapIcon from '@mui/icons-material/Map';
 import StorageIcon from '@mui/icons-material/Storage';
 import InsightsIcon from '@mui/icons-material/Insights';
-import WorkHistoryIcon from '@mui/icons-material/WorkHistory';
 import ArchiveIcon from '@mui/icons-material/Archive';
-import QueryStatsIcon from '@mui/icons-material/QueryStats';
 import PublicIcon from '@mui/icons-material/Public';
 import MovieIcon from '@mui/icons-material/Movie';
 import HubIcon from '@mui/icons-material/Hub';
@@ -49,6 +47,7 @@ import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
+import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import {
   settingsPageTitle,
   visibleSettingsSections,
@@ -239,20 +238,10 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
   {
     label: 'Operations',
     cards: [
-      {
-        title: 'Job Queue',
-        description: 'Monitor enrichment jobs, retry failed items, and reset stuck workers.',
-        Icon: WorkHistoryIcon,
-        path: '/admin/settings/jobs',
-        permission: 'jobs:read',
-      },
-      {
-        title: 'Job Queue Insights',
-        description: 'Live queue stats, per-type durations, and an ETA for the backlog.',
-        Icon: QueryStatsIcon,
-        path: '/admin/settings/jobs/insights',
-        permission: 'jobs:read',
-      },
+      // RETRO-C1 (#575): the packaged Jobs and Job Insights cards (`jobs:read`, the string
+      // `GET /api/admin/jobs*` enforces). The nodes slice's own Worker Nodes card in the same
+      // array is NOT spread: the app keeps its `WorkersPage` until RETRO-C2.
+      ...jobsAdminSections.operations.filter((card) => card.path.startsWith('/admin/settings/jobs')),
       {
         title: 'Worker Nodes',
         description: 'Distributed CLI worker nodes: fleet health, heartbeats, and per-node job stats.',

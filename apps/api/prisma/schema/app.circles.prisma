@@ -30,7 +30,6 @@ model Circle {
   // Face Recognition relations
   people                  Person[]
   faces                   Face[]
-  enrichmentJobs          EnrichmentJob[]
   // Auto-Tagging relations
   mediaTagStatuses      MediaTagStatus[]
   // Video Auto-Tagging relations (epic #452, issue #454)

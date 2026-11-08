@@ -65,7 +65,7 @@ describe('MediaReprocessController', () => {
         {
           provide: PrismaService,
           useValue: {
-            enrichmentJob: {
+            job: {
               update: mockJobUpdate,
             },
           },

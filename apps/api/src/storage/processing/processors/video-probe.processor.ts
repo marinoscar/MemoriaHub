@@ -59,7 +59,7 @@ export class VideoProbeProcessor implements ObjectProcessor {
     object: StorageObject,
     getStream: () => Promise<Readable>,
   ): Promise<ObjectProcessorResult> {
-    const tmpPath = join(tmpdir(), `memoriaHub-probe-${randomUUID()}`);
+    const tmpPath = join(tmpdir(), `memoriahub-job-probe-${randomUUID()}`);
 
     try {
       // Stream the download to a temp file

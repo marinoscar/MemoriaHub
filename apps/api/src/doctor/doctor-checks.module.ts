@@ -24,7 +24,6 @@ import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
 import { AndroidAppModule } from '../android-app/android-app.module';
 import { DedupModule } from '../dedup/dedup.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { FaceModule } from '../face/face.module';
 import { GeoModule } from '../geo/geo.module';
 import { SocialMediaModule } from '../social-media/social-media.module';
@@ -53,8 +52,6 @@ import { FaceFlagConsistencyDoctorCheck } from './checks/face/flag-consistency.d
 import { FacePgvectorDoctorCheck } from './checks/face/pgvector.doctor-check';
 import { GeoReverseProviderDoctorCheck } from './checks/geo/reverse-provider.doctor-check';
 import { BurstConfigDoctorCheck } from './checks/jobs/burst-config.doctor-check';
-import { QueueHealthDoctorCheck } from './checks/jobs/queue-health.doctor-check';
-import { WorkerEnabledDoctorCheck } from './checks/jobs/worker-enabled.doctor-check';
 import { NodesCapabilityHealthDoctorCheck } from './checks/nodes/capability-health.doctor-check';
 import { NodesHeartbeatDoctorCheck } from './checks/nodes/heartbeat-freshness.doctor-check';
 import { NodesRegisteredDoctorCheck } from './checks/nodes/registered-count.doctor-check';
@@ -92,8 +89,6 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
   // geo
   GeoReverseProviderDoctorCheck,
   // jobs
-  WorkerEnabledDoctorCheck,
-  QueueHealthDoctorCheck,
   BurstConfigDoctorCheck,
   // nodes
   NodesRegisteredDoctorCheck,
@@ -116,7 +111,6 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
     FaceModule,
     GeoModule,
     StorageProvidersModule,
-    EnrichmentModule,
     SocialMediaModule,
     DedupModule,
     AndroidAppModule,

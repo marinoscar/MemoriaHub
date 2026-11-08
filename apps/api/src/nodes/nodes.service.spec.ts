@@ -51,9 +51,7 @@ import { z } from 'zod';
 import { NodesService } from './nodes.service';
 import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
 import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { EnrichmentTerminalService } from '../enrichment/enrichment-terminal.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { ObjectsService } from '../storage/objects/objects.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -133,9 +131,7 @@ describe('NodesService — result/failure ingestion', () => {
       providers: [
         NodesService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentClaimService, useValue: mockClaimService },
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
-        { provide: EnrichmentTerminalService, useValue: mockTerminal },
         {
           provide: ObjectsService,
           useValue: {
@@ -162,6 +158,24 @@ describe('NodesService — result/failure ingestion', () => {
 
     service = module.get(NodesService);
     mockObjects = module.get(ObjectsService);
+
+    // The queue is the platform `jobs` table since RETRO-C1 and a legacy node cannot hold a
+    // platform job, so the service's claim and settle hooks are the paused ones (see the service
+    // header). The assertions below are about the node plane's own logic (params, input URLs,
+    // the held-job guard, result validation), so the hooks are pointed at the old collaborators'
+    // doubles. The real hooks have their own describe at the end of this file.
+    jest
+      .spyOn(service as unknown as { claimLegacyJobs: (r: unknown) => Promise<unknown> }, 'claimLegacyJobs')
+      .mockImplementation((request) => mockClaimService.claim({ ...(request as object), executor: 'node' }));
+    jest
+      .spyOn(service as unknown as { settleLegacySucceeded: (j: unknown) => Promise<unknown> }, 'settleLegacySucceeded')
+      .mockImplementation((job) => mockTerminal.completeSucceeded(job));
+    jest
+      .spyOn(
+        service as unknown as { settleLegacyFailed: (...a: unknown[]) => Promise<unknown> },
+        'settleLegacyFailed',
+      )
+      .mockImplementation((...args) => mockTerminal.completeFailed(...args));
 
     // Default: node exists and is owned by the caller.
     (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(makeNode());
@@ -1301,6 +1315,46 @@ describe('NodesService — result/failure ingestion', () => {
       const result = await service.getNode(USER_ID, NODE_ID);
 
       expect(result.health).toBe('offline');
+    });
+  });
+
+  // =========================================================================
+  // 9. The legacy node plane while the queue is the platform's (RETRO-C1)
+  // =========================================================================
+
+  describe('legacy node plane (paused until RETRO-C2)', () => {
+    type Hooks = {
+      claimLegacyJobs: jest.SpyInstance;
+      settleLegacySucceeded: jest.SpyInstance;
+      settleLegacyFailed: jest.SpyInstance;
+    };
+
+    beforeEach(() => {
+      // Put the real hooks back (the outer beforeEach points them at doubles).
+      const hooks = service as unknown as Hooks;
+      hooks.claimLegacyJobs.mockRestore();
+      hooks.settleLegacySucceeded.mockRestore();
+      hooks.settleLegacyFailed.mockRestore();
+    });
+
+    it('claim() answers an empty list: a legacy node cannot hold a platform job', async () => {
+      (mockPrisma.mhLegacyWorkerNode.findUnique as jest.Mock).mockResolvedValue(makeNode({ concurrency: 4 }));
+
+      await expect(service.claim(USER_ID, NODE_ID, 4, ['face_detection'])).resolves.toEqual({ jobs: [] });
+    });
+
+    it('refuses to settle a node success with 409', async () => {
+      const settle = (service as unknown as { settleLegacySucceeded: (j: unknown) => Promise<void> })
+        .settleLegacySucceeded.bind(service);
+
+      await expect(settle({ id: JOB_ID })).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('refuses to settle a node failure with 409', async () => {
+      const settle = (service as unknown as { settleLegacyFailed: (j: unknown, e: unknown) => Promise<void> })
+        .settleLegacyFailed.bind(service);
+
+      await expect(settle({ id: JOB_ID }, 'boom')).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

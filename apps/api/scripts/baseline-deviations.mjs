@@ -60,13 +60,15 @@ export const AVATAR_INDEX = 'users_linked_person_id_idx';
 export const AVATAR_FK = 'users_linked_person_id_fkey';
 
 const LEGACY_TABLE_PREFIX = 'mh_legacy_';
+/** RETRO-C1 (#575): the retired queue table keeps its name and takes a suffix, because it is dropped one release later. */
+const LEGACY_TABLE_SUFFIX = '_legacy';
 const LEGACY_TYPE_PREFIX = 'MhLegacy';
 
 const REASONS = {
   [AVATAR_ID]:
     'MemoriaHub-only columns users.avatar_source, avatar_storage_key, avatar_version, linked_person_id, their index and users_linked_person_id_fkey (migration 20260810010000_add_user_avatar_source_and_person_link). Temporary: RETRO-B2 moves them off users and removes this entry.',
   [LEGACY_ID]:
-    'MemoriaHub tables and enums that collide with platform migrations 0003-0040, renamed to mh_legacy_* / MhLegacy* by 20260817000000_rename_legacy_platform_tables. Removed piecewise by RETRO-C1 (jobs), C2 (worker nodes), D3 (notifications), D4 (database backups), D5 (android releases) as each slice moves its data and drops its legacy table.',
+    'MemoriaHub tables and enums that collide with platform migrations 0003-0040, renamed to mh_legacy_* / MhLegacy* by 20260817000000_rename_legacy_platform_tables. Removed piecewise by C2 (worker nodes), D3 (notifications), D4 (database backups), D5 (android releases) as each slice moves its data and drops its legacy table. RETRO-C1 (jobs) dropped mh_legacy_job_stats_rollup and renamed enrichment_jobs to enrichment_jobs_legacy (its follow-up migration drops it).',
   [DOMAIN_ID]:
     'MemoriaHub domain tables and enums created by app-only migrations; not a change to a platform table. A permanent record of what the app owns.',
 };
@@ -162,6 +164,7 @@ function isAvatarStatement(statement, target, addedColumns) {
 export function originalName(kind, name) {
   if (kind === 'type' && name.startsWith(LEGACY_TYPE_PREFIX)) return { legacy: true, original: name.slice(LEGACY_TYPE_PREFIX.length) };
   if (kind !== 'type' && name.startsWith(LEGACY_TABLE_PREFIX)) return { legacy: true, original: name.slice(LEGACY_TABLE_PREFIX.length) };
+  if (kind !== 'type' && name.endsWith(LEGACY_TABLE_SUFFIX)) return { legacy: true, original: name.slice(0, -LEGACY_TABLE_SUFFIX.length) };
   return { legacy: false, original: name };
 }
 

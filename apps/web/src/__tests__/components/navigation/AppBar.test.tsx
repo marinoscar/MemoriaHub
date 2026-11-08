@@ -113,7 +113,7 @@ describe('AppBar (packaged ShellAppBar binding)', () => {
   describe('settings drill-down (below sm only)', () => {
     it('shows Back and the resolved title on an admin page, and drops chip / upload / search', () => {
       renderBar('/admin/settings/jobs', 390);
-      expect(screen.getByText('Job Queue')).toBeInTheDocument();
+      expect(screen.getByText('Jobs')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Active circle/ })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Upload media' })).not.toBeInTheDocument();
       expect(screen.queryByLabelText('Search your photos')).not.toBeInTheDocument();

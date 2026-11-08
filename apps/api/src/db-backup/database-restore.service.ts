@@ -942,8 +942,8 @@ export class DatabaseRestoreService {
   ): Promise<void> {
     const tmpPath = path.join(
       os.tmpdir(),
-      // `memoriaHub-` prefix so TempFileJanitorTask reaps it if we are SIGKILLed.
-      `memoriaHub-dbrestore-${runId}.dump`,
+      // `memoriahub-job-` prefix so TempFileJanitorTask reaps it if we are SIGKILLed.
+      `memoriahub-job-dbrestore-${runId}.dump`,
     );
     let scratchCreated = false;
 

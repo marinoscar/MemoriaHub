@@ -142,9 +142,17 @@ function describeRequirements(rbac: CircleAwareRbac): string {
   return `${REQUIREMENTS_MARKER} authentication, plus ${joined}.`;
 }
 
+/**
+ * Platform tags this app keeps under its own earlier name, so a client generated from the document
+ * sees no renamed tag. RETRO-C1 (#575): the jobs slice tags its routes `Jobs`; they were, and stay,
+ * `Admin: Job Queue`.
+ */
+const RETAGGED: Readonly<Record<string, string>> = { Jobs: 'Admin: Job Queue' };
+
 function applyAppTags(document: MutableDocument): void {
   const used = new Set<string>();
   forEachOperation(document, (operation) => {
+    if (operation.tags) operation.tags = operation.tags.map((tag) => RETAGGED[tag] ?? tag);
     for (const tag of operation.tags ?? []) used.add(tag);
   });
 

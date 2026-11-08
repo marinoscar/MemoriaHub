@@ -18,7 +18,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason, MhLegacyJobStatus } from '@prisma/client';
+import { JobReason } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -45,10 +45,10 @@ export class NotificationPurgeTask {
       }
 
       // Skip if a notification_purge job is already pending or running
-      const existing = await this.prisma.enrichmentJob.findFirst({
+      const existing = await this.prisma.job.findFirst({
         where: {
           type: 'notification_purge',
-          status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
+          status: { in: ['pending', 'running'] },
         },
       });
 

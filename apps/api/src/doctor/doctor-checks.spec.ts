@@ -1,7 +1,7 @@
 /**
  * Unit tests for the MemoriaHub Doctor checks (RETRO-B1b, #602).
  *
- * Ported from the old `DoctorService` spec. The 32 checks that stayed in the app
+ * Ported from the old `DoctorService` spec. The 30 checks that stayed in the app
  * are instantiated here with the same mocked services the old service used, and
  * run through a small harness (`runDiagnostics`) that reports them in the OLD
  * shape (section/key, ok|warning|error|skipped, message, actionItem), so the
@@ -31,7 +31,6 @@ import type { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
 import type { FaceSettingsService } from '../face/face-settings.service';
 import type { GeoSettingsService } from '../geo/geo-settings.service';
 import type { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import type { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
 import type { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import type { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import type { AndroidAppService } from '../android-app/android-app.service';
@@ -88,8 +87,6 @@ const KEY_BY_ID: Record<string, string> = {
   'face.flag-consistency': 'face.flagConsistency',
   'face.pgvector': 'face.pgvector',
   'geo.reverse-provider': 'geo.reverseProvider',
-  'jobs.worker-enabled': 'jobs.workerEnabled',
-  'jobs.queue-health': 'jobs.queueHealth',
   'jobs.burst-config': 'jobs.burstConfig',
   'nodes.registered-count': 'nodes.registeredCount',
   'nodes.heartbeat-freshness': 'nodes.heartbeatFreshness',
@@ -251,13 +248,6 @@ function healthyEnv(overrides: Record<string, string | undefined> = {}): NodeJS.
   };
 }
 
-const HEALTHY_STATS = {
-  total: 0,
-  byStatus: { pending: 0, running: 0, succeeded: 0, failed: 0 },
-  byType: [],
-  stuckRunning: 0,
-  scheduled: 0,
-};
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -272,7 +262,6 @@ describe('MemoriaHub Doctor checks', () => {
   let mockGeoSettings: jest.Mocked<Pick<GeoSettingsService, 'testProvider'>>;
   let mockStorageProvider: { exists: jest.Mock; getBucket: jest.Mock };
   let mockStorageResolver: { getProviderFor: jest.Mock };
-  let mockEnrichmentAdmin: jest.Mocked<Pick<EnrichmentAdminService, 'getStats'>>;
   let mockSocialMediaOcr: jest.Mocked<Pick<SocialMediaOcrService, 'getStatus'>>;
   let mockVisualEmbeddingService: jest.Mocked<Pick<VisualEmbeddingService, 'isAvailable'>>;
   let mockAiProviderRegistry: { get: jest.Mock };
@@ -294,7 +283,6 @@ describe('MemoriaHub Doctor checks', () => {
       ['FaceSettingsService', mockFaceSettings],
       ['GeoSettingsService', mockGeoSettings],
       ['StorageProviderResolver', mockStorageResolver as unknown as StorageProviderResolver],
-      ['EnrichmentAdminService', mockEnrichmentAdmin],
       ['SocialMediaOcrService', mockSocialMediaOcr],
       ['VisualEmbeddingService', mockVisualEmbeddingService],
       ['AndroidAppService', mockAndroidApp],
@@ -348,7 +336,6 @@ describe('MemoriaHub Doctor checks', () => {
     // Read-only storage probe: `exists()` on a key that is never written.
     mockStorageProvider = { exists: jest.fn().mockResolvedValue(false), getBucket: jest.fn().mockReturnValue('my-bucket') };
     mockStorageResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
-    mockEnrichmentAdmin = { getStats: jest.fn() };
     mockSocialMediaOcr = { getStatus: jest.fn() };
     mockVisualEmbeddingService = { isAvailable: jest.fn().mockReturnValue(true) };
     // OpenAI implements transcribeAudio; Anthropic deliberately does not (the
@@ -401,7 +388,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
     });
 
@@ -413,7 +399,7 @@ describe('MemoriaHub Doctor checks', () => {
       );
     });
 
-    it('runs the 32 kept checks (the 35 documented ones minus the 3 the host core retired)', async () => {
+    it('runs the 30 kept checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice retired)', async () => {
       const report = await service.runDiagnostics();
 
       expect(report.checks.map((c) => c.key)).toEqual([
@@ -437,8 +423,6 @@ describe('MemoriaHub Doctor checks', () => {
         'face.flagConsistency',
         'face.pgvector',
         'geo.reverseProvider',
-        'jobs.workerEnabled',
-        'jobs.queueHealth',
         'jobs.burstConfig',
         'nodes.registeredCount',
         'nodes.heartbeatFreshness',
@@ -476,7 +460,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
     });
 
@@ -511,7 +494,7 @@ describe('MemoriaHub Doctor checks', () => {
       expect(findCheck(report, 'geo.reverseProvider').status).toBe('error');
       expect(findCheck(report, 'geo.reverseProvider').message).toContain('geo down');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(32);
+      expect(report.summary.total).toBe(30);
     });
   });
 
@@ -532,7 +515,6 @@ describe('MemoriaHub Doctor checks', () => {
         enabled: true,
       });
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
       // AI/face provider test methods should not even be called in this fixture,
       // but stub them defensively in case of an unexpected call.
@@ -592,7 +574,6 @@ describe('MemoriaHub Doctor checks', () => {
         enabled: true,
       });
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -762,7 +743,6 @@ describe('MemoriaHub Doctor checks', () => {
         enabled: true,
       });
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -833,7 +813,6 @@ describe('MemoriaHub Doctor checks', () => {
         enabled: true,
       });
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -889,7 +868,6 @@ describe('MemoriaHub Doctor checks', () => {
         enabled: true,
       });
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -970,7 +948,6 @@ describe('MemoriaHub Doctor checks', () => {
         enabled: true,
       });
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -1039,7 +1016,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
     });
 
     it('is status:error when the pgvector extension is not installed (empty extension row set)', async () => {
@@ -1095,7 +1071,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
       // The memo is keyed by resolved binary path and lives for the whole
       // file (module state is not reset between tests) — without this, a
@@ -1213,7 +1188,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
     });
 
@@ -1312,155 +1286,6 @@ describe('MemoriaHub Doctor checks', () => {
   });
 
   // =========================================================================
-  // 10. jobs.workerEnabled — worker-mode aware (ENRICHMENT_WORKER_MODE)
-  // =========================================================================
-
-  describe('jobs.workerEnabled — worker mode aware', () => {
-    beforeEach(() => {
-      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
-      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
-      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
-        provider: 's3',
-        enabled: true,
-      });
-      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
-      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
-      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockNoWorkerNodes(mockPrisma);
-    });
-
-    it("is ok in mode 'all' (explicit) without touching worker_nodes for this check", async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'all' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'jobs.workerEnabled');
-
-      expect(check.status).toBe('ok');
-      expect(check.message).toContain('mode: all');
-    });
-
-    it("is ok when the mode var is unset and the legacy vars are truthy (legacy → 'all')", async () => {
-      process.env = healthyEnv(); // ENRICHMENT_WORKER_ENABLED=true, no mode var
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-
-      const report = await service.runDiagnostics();
-
-      expect(findCheck(report, 'jobs.workerEnabled').status).toBe('ok');
-    });
-
-    it("is ok in mode 'system' when a fresh heavy-media node is registered", async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(2);
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'jobs.workerEnabled');
-
-      expect(check.status).toBe('ok');
-      expect(check.message).toContain('system mode');
-      expect(check.message).toContain('2 healthy worker node(s)');
-    });
-
-    it('the fresh-node count is scoped to online, fresh-heartbeat nodes serving heavy media types', async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(1);
-
-      await service.runDiagnostics();
-
-      const heavyCall = (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mock.calls.find(
-        ([arg]) => arg?.where?.eligibleTypes !== undefined,
-      );
-      expect(heavyCall).toBeDefined();
-      const where = heavyCall![0].where;
-      expect(where.status).toBe('online');
-      expect(where.lastHeartbeatAt.gte).toBeInstanceOf(Date);
-      expect(where.eligibleTypes).toEqual({
-        hasSome: ['face_detection', 'auto_tagging', 'video_auto_tagging'],
-      });
-    });
-
-    it("is warning in mode 'system' when enrichment features are on but no healthy node exists", async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'jobs.workerEnabled');
-
-      expect(check.status).toBe('warning');
-      expect(check.message).toContain('no healthy worker nodes');
-      expect(check.actionItem).toBeTruthy();
-    });
-
-    it("is warning (not error) in mode 'system' when no features are on and no nodes exist", async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'system' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings()); // all features off
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
-
-      const report = await service.runDiagnostics();
-
-      expect(findCheck(report, 'jobs.workerEnabled').status).toBe('warning');
-    });
-
-    it("is warning in mode 'off' with fresh nodes — no server fallback", async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(3);
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'jobs.workerEnabled');
-
-      expect(check.status).toBe('warning');
-      expect(check.message).toContain('no server fallback');
-      expect(check.actionItem).toContain('ENRICHMENT_WORKER_MODE=system');
-    });
-
-    it("is error in mode 'off' when enrichment features are on and no healthy nodes exist", async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'jobs.workerEnabled');
-
-      expect(check.status).toBe('error');
-      expect(check.actionItem).toContain('ENRICHMENT_WORKER_MODE=all');
-    });
-
-    it("is error via the LEGACY off switch too (ENRICHMENT_WORKER_ENABLED=false, mode unset)", async () => {
-      process.env = healthyEnv({
-        ENRICHMENT_WORKER_MODE: undefined,
-        ENRICHMENT_WORKER_ENABLED: 'false',
-        FACE_WORKER_ENABLED: undefined,
-      });
-      delete process.env['ENRICHMENT_WORKER_MODE'];
-      delete process.env['FACE_WORKER_ENABLED'];
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
-
-      const report = await service.runDiagnostics();
-
-      expect(findCheck(report, 'jobs.workerEnabled').status).toBe('error');
-    });
-
-    it("is plain warning in mode 'off' when no features are on and no nodes exist", async () => {
-      process.env = healthyEnv({ ENRICHMENT_WORKER_MODE: 'off' });
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeSettings()); // all features off
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'jobs.workerEnabled');
-
-      expect(check.status).toBe('warning');
-      expect(check.message).toContain('off');
-    });
-  });
-
-  // =========================================================================
   // 11. nodes.capabilityHealth — issue #148 operational-self-test overlay
   // =========================================================================
 
@@ -1478,7 +1303,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
       // One online node with a fresh heartbeat so nodes.heartbeatFreshness stays
       // 'ok' and doesn't interfere with this check's isolated assertions —
@@ -1634,7 +1458,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
       mockWorkflowRunCounts();
       (mockPrisma.workflow.count as jest.Mock).mockResolvedValue(0);
@@ -1822,7 +1645,6 @@ describe('MemoriaHub Doctor checks', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
     });
 

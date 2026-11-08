@@ -110,7 +110,7 @@ export class BroadcastStartHandler implements EnrichmentHandler, OnModuleInit {
       this.logger.log(`Broadcast ${broadcast.id} already under way; start job ${job.id} is a no-op`);
       return;
     }
-    const existingChunk = await this.prisma.enrichmentJob.findFirst({
+    const existingChunk = await this.prisma.job.findFirst({
       where: { type: BROADCAST_CHUNK_TYPE, payload: { path: ['broadcastId'], equals: broadcast.id } },
       select: { id: true },
     });

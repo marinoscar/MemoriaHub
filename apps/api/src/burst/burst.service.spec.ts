@@ -1234,7 +1234,7 @@ describe('BurstService', () => {
       // force=false path (default opts): no succeeded jobs, no eligible items —
       // keeps the per-circle enqueue loop a no-op so these tests isolate the
       // eviction remediation step.
-      (mockPrisma.enrichmentJob.findMany as jest.Mock).mockResolvedValue([]);
+      (mockPrisma.job.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
     }
 

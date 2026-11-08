@@ -36,7 +36,7 @@ describe('MemoryBackfillService', () => {
   let service: MemoryBackfillService;
   let prisma: {
     circle: { findMany: jest.Mock; findUnique: jest.Mock };
-    enrichmentJob: { findMany: jest.Mock };
+    job: { findMany: jest.Mock };
   };
   let enrichment: { enqueue: jest.Mock };
 
@@ -46,7 +46,7 @@ describe('MemoryBackfillService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue(null),
       },
-      enrichmentJob: { findMany: jest.fn().mockResolvedValue([]) },
+      job: { findMany: jest.fn().mockResolvedValue([]) },
     };
     enrichment = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
@@ -172,7 +172,7 @@ describe('MemoryBackfillService', () => {
   describe('in-flight skipping', () => {
     it('skips a circle that already has a generation job pending or running', async () => {
       prisma.circle.findMany.mockResolvedValueOnce([{ id: 'busy' }, { id: 'free' }]);
-      prisma.enrichmentJob.findMany.mockResolvedValueOnce([{ circleId: 'busy' }]);
+      prisma.job.findMany.mockResolvedValueOnce([{ subjectId: 'busy' }]);
 
       const result = await service.backfillLibrary();
 
@@ -187,11 +187,12 @@ describe('MemoryBackfillService', () => {
 
       await service.backfillLibrary();
 
-      expect(prisma.enrichmentJob.findMany).toHaveBeenCalledTimes(1);
-      expect(prisma.enrichmentJob.findMany.mock.calls[0]![0]).toMatchObject({
+      expect(prisma.job.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.job.findMany.mock.calls[0]![0]).toMatchObject({
         where: {
           type: MEMORY_GENERATION_JOB_TYPE,
-          circleId: { in: ['c1', 'c2', 'c3'] },
+          subjectType: 'circle',
+          subjectId: { in: ['c1', 'c2', 'c3'] },
           status: { in: [MhLegacyJobStatus.pending, MhLegacyJobStatus.running] },
         },
       });
@@ -220,7 +221,7 @@ describe('MemoryBackfillService', () => {
 
     it('still honours the in-flight skip', async () => {
       prisma.circle.findUnique.mockResolvedValueOnce({ id: 'c9' });
-      prisma.enrichmentJob.findMany.mockResolvedValueOnce([{ circleId: 'c9' }]);
+      prisma.job.findMany.mockResolvedValueOnce([{ subjectId: 'c9' }]);
 
       const result = await service.backfillLibrary({ circleId: 'c9' });
 
