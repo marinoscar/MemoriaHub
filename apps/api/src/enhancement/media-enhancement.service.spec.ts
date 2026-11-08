@@ -53,7 +53,7 @@ import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
 import { ListEnhancementsQuery } from './dto/list-enhancements-query.dto';
-import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 /**

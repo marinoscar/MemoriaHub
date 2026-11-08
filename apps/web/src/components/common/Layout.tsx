@@ -7,7 +7,7 @@ import { BottomNav } from '../navigation/BottomNav';
 import { MediaRefreshProvider } from '../../contexts/MediaRefreshContext';
 import { MediaPreviewProvider } from '../../contexts/MediaPreviewContext';
 import { SearchProvider } from '../../contexts/SearchContext';
-import { MaintenanceBanner } from './MaintenanceBanner';
+import { MaintenanceBanner } from '@marinoscar/platform-web/host/ui';
 import { TimezonePrompt } from '../settings/TimezonePrompt';
 import { NotificationPermissionBanner } from '../notifications/NotificationPermissionBanner';
 import { AndroidUpdateBanner } from './AndroidUpdateBanner';

@@ -11,7 +11,7 @@ import {
   toRunDto,
 } from './db-backup-admin.service';
 import { DatabaseBackupAlreadyRunningError } from './db-backup.errors';
-import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 
 /**
  * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and

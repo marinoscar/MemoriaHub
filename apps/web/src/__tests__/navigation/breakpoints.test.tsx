@@ -76,6 +76,9 @@ import type { UseReviewQueuesResult } from '../../hooks/useReviewQueues';
 // (search context, upload dialog, circle chip) to a file whose job is the
 // rail/bottom-bar/context-pane sweep. `AppBar`'s own gates are covered in
 // `AppBar.test.tsx` (see the file header above).
+vi.mock('@marinoscar/platform-web/host/ui', () => ({
+  MaintenanceBanner: () => null,
+}));
 vi.mock('../../components/navigation/AppBar', () => ({
   AppBar: vi.fn(() => <div data-testid="mock-appbar">AppBar</div>),
 }));

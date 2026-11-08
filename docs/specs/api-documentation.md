@@ -1,7 +1,12 @@
 # API Documentation
 
 > Epic [#414](https://github.com/marinoscar/MemoriaHub/issues/414). Implemented in
-> `apps/api/src/openapi/`.
+> `apps/api/src/openapi/`; since RETRO-B1 ([#597](https://github.com/marinoscar/MemoriaHub/issues/597))
+> the document pipeline and the two routes are the platform host slice's
+> (`createOpenApiDocument`, `registerDocsRoutesOrDegrade` from
+> `@marinoscar/platform-api/host`) and `apps/api/src/openapi/` keeps only what the
+> platform has no option for. Sections 2 to 5 describe the passes; the platform now
+> runs them.
 
 The interactive API reference at `/api/docs` and the OpenAPI document at
 `/api/openapi.json`: how they are built, which decisions are load-bearing, and
@@ -36,28 +41,25 @@ Two problems were less visible and more damaging:
 
 ## 2. Shape of the solution
 
-Everything that shapes the document lives in `apps/api/src/openapi/`, not in
-`main.ts`. The reason is concrete: the spec is now asserted by tests and dumped
-by a CI script, and neither can boot a listening server. A pure
-`buildOpenApiConfig()` / `createOpenApiDocument(app)` pair is callable from the
-test harness, from `scripts/dump-openapi.ts`, and from `main.ts` alike — so the
-document CI lints is the document users get.
+Everything that shapes the document lives in `apps/api/src/openapi/` (the
+app's part) and `@marinoscar/platform-api/host` (the platform's part), not in
+`main.ts`. The reason is concrete: the spec is asserted by tests and dumped by a
+CI script, and neither can boot a listening server. `createAppOpenApiDocument(app)`
+is callable from the test harness, from `scripts/dump-openapi.ts` and from
+`main.ts` alike, so the document CI lints is the document users get.
 
-| File | Responsibility |
+| Where | Responsibility |
 | --- | --- |
-| `document.ts` | `DocumentBuilder` config, security schemes, operation ids, and the pass pipeline |
-| `description.ts` | The Markdown getting-started guide baked into `info.description` |
-| `tags.ts` | Every tag name, its description, and its `x-tagGroups` section |
-| `rbac-docs.ts` | Renders the `x-rbac` extension into operation descriptions |
-| `data-envelope.ts` | Applies the `{ data: … }` wrapper the global interceptor produces |
-| `nullable.ts` | Rewrites 3.0 `nullable` into 3.1 type unions |
-| `docs-page.ts` | The Scalar page, including one-click session pre-authorization |
-| `version.ts` | Resolves the application version |
-| `types.ts` | Structural types and the shared operation walker |
+| platform `createOpenApiDocument` | `DocumentBuilder` config (JWT and PAT schemes), operation ids, `cleanupOpenApiDoc`, the RBAC "Requires" line (`rbac-docs`), the `{ data }` envelope (`data-envelope`), the default error response, the OpenAPI 3.1 nullable rewrite (`nullable`) |
+| platform `registerDocsRoutesOrDegrade` | `/api/openapi.json` and the Scalar page `/api/docs` (`docs-page`, including one-click session pre-authorization); answers 503 on both when the document cannot be built |
+| `apps/api/src/openapi/document.ts` | `APP_OPENAPI` (name, repository, version, description) and the app passes: the `Node-credential` security scheme and its `/api/nodes/*` alternative-auth entries, the per-circle role clause of the "Requires" line, the tag taxonomy and `x-tagGroups` |
+| `apps/api/src/openapi/description.ts` | The Markdown getting-started guide baked into `info.description` |
+| `apps/api/src/openapi/tags.ts` | Every tag name, its description, and its `x-tagGroups` section. The platform tag registry rejects `:` in a tag name and the `Admin: X` convention is load-bearing for generated clients, so the taxonomy is applied as an app pass (`PLATFORM-ADOPTION-SHIM(#597)`) |
+| `apps/api/src/openapi/version.ts` | Resolves the application version |
 
-`createOpenApiDocument` runs Nest's introspection, then `cleanupOpenApiDoc`
-(nestjs-zod's recommended post-processing, so zod DTOs emit real JSON Schema),
-then five passes in a fixed order.
+`createAppOpenApiDocument` runs the platform's `createOpenApiDocument` (Nest's
+introspection, then `cleanupOpenApiDoc`, then the platform's passes in a fixed
+order), then the three app passes.
 
 ---
 
@@ -206,7 +208,7 @@ so two `list` handlers cannot collide, without the noise a generator would bake
 into every SDK method name. Uniqueness is asserted.
 
 **Tests.** `test/openapi/openapi-document.spec.ts` boots the real `AppModule`
-and asserts the finished document; `src/openapi/*.spec.ts` cover the pure passes.
+and asserts the finished document; `test/openapi/docs-routes.spec.ts` serves the two routes; the pure passes are the platform's and are tested in its package.
 
 **CI.** `scripts/dump-openapi.ts` writes the document to a file, booting the app
 in Nest's **preview mode** — every module loaded and every controller's metadata

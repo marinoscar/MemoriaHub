@@ -1,9 +1,8 @@
-import { Module, MiddlewareConsumer, NestModule, DynamicModule } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { OtelMetricsModule } from '@marinoscar/platform-api/otel-core';
+import { Module, DynamicModule } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
 
 import { PrismaModule } from './prisma/prisma.module';
@@ -11,7 +10,6 @@ import { CommonModule } from './common/common.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { SettingsModule } from './settings/settings.module';
-import { HealthModule } from './health/health.module';
 import { AllowlistModule } from './allowlist/allowlist.module';
 import { DeviceAuthModule } from './device-auth/device-auth.module';
 import { StorageModule } from './storage/storage.module';
@@ -43,7 +41,6 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
 import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
 import { MemoriesModule } from './memories/memories.module';
-import { MaintenanceModule } from './common/maintenance/maintenance.module';
 import { DbBackupModule } from './db-backup/db-backup.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
@@ -51,11 +48,10 @@ import { DoctorModule } from './doctor/doctor.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
 
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
-import { MaintenanceGuard } from './common/maintenance/maintenance.guard';
+import { platformHostModule } from './platform/platform-host.module';
+import { HostCorePortsModule } from './platform/host-core-ports.module';
+import { hostCoreModule } from './platform/host-core.config';
+import { aboutModule } from './platform/about/about.config';
 
 import configuration from './config/configuration';
 
@@ -84,15 +80,6 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
       load: [configuration],
     }),
 
-    // Platform metrics host (observable gauges only while OTEL is enabled).
-    // Superseded by PlatformHostCoreModule.forRoot() once that is adopted.
-    OtelMetricsModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        gauges: config.get('otel.enabled') === true,
-      }),
-    }),
-
     // Scheduling (must be at root level for NestJS 11)
     ScheduleModule.forRoot(),
 
@@ -102,6 +89,9 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     // Database
     PrismaModule,
 
+    // The platform's DI-time host ports (audit sink, Prisma). Global.
+    platformHostModule,
+
     // Logger
     LoggerModule,
 
@@ -110,7 +100,21 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     AuthModule,
     UsersModule,
     SettingsModule,
-    HealthModule,
+    // What the host core injects from slices not adopted yet (settings token,
+    // Doctor registries). PLATFORM-ADOPTION-SHIM(#597); see the file header.
+    // After SettingsModule on purpose: it imports it, and the OpenAPI document
+    // lists paths in module scan order.
+    HostCorePortsModule,
+    // The platform host core (RETRO-B1, #597): the event bus, the app metrics,
+    // maintenance mode (and its ONLY global guard, `MaintenanceGuard`),
+    // `/api/health/*`, the `{ data }` envelope, the request log line, the
+    // exception filter and request ids. Replaces the old HealthModule,
+    // MaintenanceModule and this file's own APP_FILTER / APP_INTERCEPTOR /
+    // APP_GUARD providers and request-id middleware. Placed here because the
+    // generated OpenAPI document lists paths in module order.
+    hostCoreModule,
+    // `GET /api/admin/about` (`system_settings:read`).
+    aboutModule,
     AllowlistModule,
     DeviceAuthModule,
     StorageModule,
@@ -143,7 +147,6 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     NotificationsReconcileModule,
     BroadcastsModule,
     MemoriesModule,
-    MaintenanceModule,
     DbBackupModule,
     MediaSyncModule,
     AndroidAppModule,
@@ -191,42 +194,11 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
       provide: APP_PIPE,
       useClass: ZodValidationPipe,
     },
-    // Global exception filter
-    {
-      provide: APP_FILTER,
-      useClass: HttpExceptionFilter,
-    },
-    // Global logging interceptor
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: LoggingInterceptor,
-    },
-    // Global response transform interceptor
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: TransformInterceptor,
-    },
-    // Global maintenance-mode guard (issue #348).
-    //
-    // This is the application's ONLY global guard — authentication is still
-    // applied per-route via @Auth()/JwtAuthGuard. That ordering matters: a
-    // global guard runs BEFORE route guards, so `request.user` is not yet
-    // populated when MaintenanceGuard runs, which is why it resolves the
-    // admin role from the bearer JWT itself. See maintenance.guard.ts.
-    //
-    // Routes carrying @AllowDuringMaintenance() are exempt — including the
-    // maintenance toggle endpoints themselves, without which enabling
-    // maintenance would lock the admin out of disabling it again.
-    {
-      provide: APP_GUARD,
-      useClass: MaintenanceGuard,
-    },
+    // The exception filter, the logging and envelope interceptors and
+    // `MaintenanceGuard` (the application's ONLY global guard, and the first)
+    // are the platform host core's (`hostCoreModule` above). If another global
+    // guard is ever added, list it with a reason under `allowedAppGuards` of the
+    // `host` conformance suite (`test/conformance.spec.ts`).
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(RequestIdMiddleware)
-      .forRoutes('*');
-  }
-}
+export class AppModule {}

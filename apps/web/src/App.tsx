@@ -7,10 +7,16 @@ import { ThemeContextProvider, useThemeContext } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { Layout } from './components/common/Layout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { MaintenanceGate } from './components/common/MaintenanceGate';
 import { RequirePermission } from './components/common/RequirePermission';
-import { UpdatePrompt } from './components/pwa/UpdatePrompt';
-import { InstallPrompt } from './components/pwa/InstallPrompt';
+// The packaged host UI (RETRO-B1, #597): the maintenance gate that takes the
+// application over while the API is refusing, and the PWA prompts. The two
+// admin pages (About, Maintenance) are bound in pages/Admin.
+import { InstallPrompt, MaintenanceGate, UpdatePrompt } from '@marinoscar/platform-web/host/ui';
+// `virtual:pwa-register/react` exists only in this app's bundler (vite-plugin-pwa),
+// so the packaged `UpdatePrompt` takes the hook as a prop.
+import { useRegisterSW } from 'virtual:pwa-register/react';
+import { AppPlatformHostProvider } from './platform/platformHost';
+import { APP_NAME } from './constants/app';
 
 // Pages (lazy loaded)
 import { Suspense, lazy } from 'react';
@@ -44,6 +50,11 @@ const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
 const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
 const NodeBackupPage = lazy(() => import('./pages/Admin/NodeBackupPage'));
 const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
+// RETRO-B1 (#597): the platform host's two admin pages, packaged. Lazy like
+// every other admin page: nobody who never opens the Console needs them in the
+// entry chunk.
+const AdminMaintenancePage = lazy(() => import('./pages/Admin/MaintenancePage'));
+const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
 const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettingsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
@@ -106,13 +117,13 @@ function AppRoutes() {
           update can be offered — on every route, including /login, public
           share pages and the maintenance takeover (which is exactly when a
           fixed build is about to land). Both render null by default. */}
-      <UpdatePrompt />
-      <InstallPrompt />
+      <UpdatePrompt useRegisterSW={useRegisterSW} />
+      <InstallPrompt appName={APP_NAME} />
       <ErrorBoundary>
         {/* Maintenance mode (issue #348): sits outside <Routes> so the takeover
             is global — every route, authenticated or not — instead of each
             page having to handle a maintenance 503 itself. */}
-        <MaintenanceGate>
+        <MaintenanceGate appName={APP_NAME}>
         <Suspense fallback={<LoadingSpinner fullScreen />}>
           <Routes>
             {/* Public routes */}
@@ -176,6 +187,31 @@ function AppRoutes() {
                 <Route path="/admin/settings/nodes" element={<WorkersPage />} />
                 <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
                 <Route path="/admin/settings/doctor" element={<DoctorPage />} />
+                {/* RETRO-B1 (#597). Same permission string the `Maintenance` and
+                    `About` cards declare and the platform host's controllers
+                    enforce on their GETs. Opening and closing a window needs
+                    `system_settings:write`, which the page gates by disabling its
+                    controls. The maintenance route is the one the packaged
+                    `MaintenanceGate` never covers (`MAINTENANCE_ADMIN_PATH`),
+                    mirroring `@AllowDuringMaintenance()` on the controller behind
+                    it: the switch that ends a window has to be reachable while the
+                    window is open. */}
+                <Route
+                  path="/admin/settings/maintenance"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AdminMaintenancePage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/about"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <AboutPage />
+                    </RequirePermission>
+                  }
+                />
                 <Route path="/admin/settings/broadcasts" element={<BroadcastsPage />} />
                 <Route path="/admin/settings/workflows" element={<WorkflowsSettingsPage />} />
                 {/* v0 server-side backup retired (#367) — superseded by the node-based
@@ -265,9 +301,14 @@ export default function App() {
   return (
     <ThemeContextProvider>
       <AuthProvider>
-        <CircleProvider>
-          <AppRoutes />
-        </CircleProvider>
+        {/* The platform host (RETRO-B1, #597): the transport and viewer every
+            packaged page and hook reads. Inside the auth provider (it reads the
+            signed-in user's permissions), above the router outlet. */}
+        <AppPlatformHostProvider>
+          <CircleProvider>
+            <AppRoutes />
+          </CircleProvider>
+        </AppPlatformHostProvider>
       </AuthProvider>
     </ThemeContextProvider>
   );

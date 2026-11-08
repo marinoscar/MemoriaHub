@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 
 import {
   DatabaseRestoreAlreadyRunningError,

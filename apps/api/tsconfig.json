@@ -14,11 +14,8 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "paths": {
-      "@marinoscar/platform-api/otel-core": [
-        "../../node_modules/@marinoscar/platform-api/dist/otel-core/index.d.ts"
-      ],
-      "@marinoscar/platform-api/otel-core/sdk": [
-        "../../node_modules/@marinoscar/platform-api/dist/otel-core/sdk/index.d.ts"
+      "@marinoscar/platform-api/*": [
+        "../../node_modules/@marinoscar/platform-api/dist/*/index.d.ts"
       ]
     },
     "incremental": true,

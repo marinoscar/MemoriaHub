@@ -83,7 +83,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { MaintenanceModeService } from '../common/maintenance/maintenance-mode.service';
+import { MaintenanceModeService } from '@marinoscar/platform-api/host';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
@@ -455,11 +455,11 @@ export class DatabaseRestoreService {
         );
       }
 
-      await this.maintenance.enable(
-        'Rolling back a database restore. The application will be back in a moment.',
-        opts.userId,
-        { allowAdmins: false },
-      );
+      this.maintenance.setInMemoryOverride({
+        enabled: true,
+        message: 'Rolling back a database restore. The application will be back in a moment.',
+        allowAdmins: false,
+      });
 
       const supersededName = buildScratchDatabaseName(
         pg.database,
@@ -1209,12 +1209,12 @@ export class DatabaseRestoreService {
       swappedAt,
     });
 
-    await this.maintenance.enable(
-      'Restoring the database. The application will be back in a moment.',
-      ctx.userId,
-      // Even an admin request would hit a database that is momentarily gone.
-      { allowAdmins: false },
-    );
+    // Even an admin request would hit a database that is momentarily gone.
+    this.maintenance.setInMemoryOverride({
+      enabled: true,
+      message: 'Restoring the database. The application will be back in a moment.',
+      allowAdmins: false,
+    });
 
     await withAdminConnection(ctx.pg, async (client) => {
       await this.prisma.$disconnect().catch(() => {});

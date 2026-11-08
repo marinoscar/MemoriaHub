@@ -21,7 +21,7 @@ import { LocationGroupRebuildService } from './location-group-rebuild.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SystemSettingsService } from '../settings/system-settings/system-settings.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
-import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 /**

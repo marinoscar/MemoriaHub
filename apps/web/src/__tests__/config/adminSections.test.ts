@@ -89,8 +89,10 @@ describe('adminSections', () => {
 
     it('appends Broadcasts to Operations, gated on broadcasts:read (issue #488)', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
-      const last = operations.cards[operations.cards.length - 1];
-      expect(last).toMatchObject({
+      const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
+      // RETRO-B1 (#597) appends Maintenance and About after it.
+      expect(operations.cards.slice(-2).map((card) => card.title)).toEqual(['Maintenance', 'About']);
+      expect(broadcasts).toMatchObject({
         title: 'Broadcasts',
         path: '/admin/settings/broadcasts',
         permission: 'broadcasts:read',

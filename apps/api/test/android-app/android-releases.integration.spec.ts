@@ -27,7 +27,7 @@ import request from 'supertest';
 
 import { PERMISSIONS_KEY } from '../../src/auth/decorators/permissions.decorator';
 import { IS_PUBLIC_KEY } from '../../src/auth/decorators/public.decorator';
-import { ALLOW_DURING_MAINTENANCE_KEY } from '../../src/common/maintenance/allow-during-maintenance.decorator';
+import { ALLOW_DURING_MAINTENANCE_KEY } from '@marinoscar/platform-api/core';
 import { ANDROID_APP_SETTINGS_KEY } from '../../src/android-app/android-app.schema';
 import { AndroidReleaseAdminController } from '../../src/android-app/releases/android-release-admin.controller';
 import { AndroidReleaseController } from '../../src/android-app/releases/android-release.controller';
