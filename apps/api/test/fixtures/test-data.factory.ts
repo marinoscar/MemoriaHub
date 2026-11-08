@@ -424,8 +424,6 @@ export const rolePermissionsMap = {
     mockPermissions.mediaDeleteAny,
     mockPermissions.sharesManage,
     mockPermissions.sharesManageAny,
-    mockPermissions.emailSettingsRead,
-    mockPermissions.emailSettingsWrite,
   ],
   contributor: [
     mockPermissions.userSettingsRead,
