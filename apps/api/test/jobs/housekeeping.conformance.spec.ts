@@ -219,7 +219,7 @@ describeJobHandlerConformance('memory_digest', () => alias(buildMemoryDigest()),
 describe('memory_digest watermark (read from the platform jobs table)', () => {
   function service(row: { finishedAt: Date } | null) {
     const prisma = { job: { findFirst: jest.fn().mockResolvedValue(row) } };
-    const svc = new MemoryDigestService(prisma as never, {} as never, {} as never, {} as never);
+    const svc = new MemoryDigestService(prisma as never, {} as never, {} as never, {} as never, {} as never);
     return { svc, prisma };
   }
 
