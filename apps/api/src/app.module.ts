@@ -54,6 +54,7 @@ import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
+import { userDataModule } from './platform/user-data/user-data.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -162,6 +163,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
     // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.
     telemetryModule,
+    // User data (RETRO-H1, #591): @marinoscar/platform-api/user-data. The Danger Zone
+    // (`/api/user-data/*`), the admin factory reset and offboarding, with MemoriaHub's
+    // keep-or-delete decisions, delegated purges and reset steps (platform/user-data/).
+    userDataModule,
   ],
   providers: [
     // Global validation pipe (Zod)

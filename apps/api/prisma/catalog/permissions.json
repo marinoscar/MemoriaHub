@@ -174,6 +174,16 @@
       "scope": "org"
     },
     {
+      "name": "system:factory_reset",
+      "description": "Factory reset: delete every other user and all application data, keeping configuration and backups",
+      "scope": "system"
+    },
+    {
+      "name": "orgs:offboard",
+      "description": "Offboard an organization: delete it with all its data, members and invitations",
+      "scope": "system"
+    },
+    {
       "name": "storage:read",
       "description": "Read object metadata, get download URLs",
       "scope": "org"
@@ -330,6 +340,8 @@
       "telemetry:query",
       "organizations:read",
       "organizations:write",
+      "system:factory_reset",
+      "orgs:offboard",
       "storage:delete_any",
       "media:read_any",
       "media:write_any",
