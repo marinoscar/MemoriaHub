@@ -23,6 +23,7 @@ The same `ADMIN_SECTIONS` also feeds the Console rail (`visibleAdminSections`, a
 | Account | Notifications | `/settings/notifications` | none |
 | Account | Memories | `/settings/memories` | none |
 | Account | Search | `/settings/search` | none |
+| Account | Getting started (onboarding slice, RETRO-H3) | `/settings/getting-started` | none |
 | Android | Android app | `/settings/android-app` | none |
 | Android | Media sync | `/settings/media-sync` | `media:read` |
 | Security | Access Tokens (identity slice) | `/settings/tokens` | none |
