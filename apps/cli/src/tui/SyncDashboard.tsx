@@ -2,13 +2,13 @@
  * tui/SyncDashboard.tsx — Live sync dashboard.
  *
  * Constructs ApiClient + repos from passed deps, subscribes to SyncEngine
- * events, and renders:
+ * events, and renders (with the platform component kit, see sync-view.tsx):
  *   - StatusLine (header)
- *   - ContextMeter + Legend (headline progress meter)
- *   - ActiveUploads (per-file bars)
+ *   - SegmentMeter + MeterLegend (headline progress meter)
+ *   - ActiveItems (per-file bars)
  *   - EventLog (rolling log)
  *
- * On run:done transitions to Summary screen.
+ * On run:done transitions to the run summary.
  * Re-renders are throttled to ~10/s for run:progress events.
  */
 
@@ -32,13 +32,16 @@ import { SettingsRepo } from '../repo/settings.js';
 import type { CliConfig } from '../config.js';
 import { describeRange } from '../sync/date-range.js';
 
-import { StatusLine } from './components/StatusLine.js';
-import { ContextMeter } from './components/ContextMeter.js';
-import { Legend } from './components/Legend.js';
-import { ActiveUploads, type ActiveFile } from './components/ActiveUploads.js';
-import { EventLog, type LogEvent } from './components/EventLog.js';
-import { Summary, type SummaryFailure } from './components/Summary.js';
+import { ActiveItems, EventLog, MeterLegend, SegmentMeter, StatusLine } from '@marinoscar/platform-cli/tui/ui';
+import { SYNC_LOG_KINDS, SyncSummary, basename, fileLogEvent, syncSegments, type SyncFailure, type SyncLogEvent } from './sync-view.js';
 import { BOX_BORDER } from './theme.js';
+
+/** An upload in flight. */
+interface ActiveFile {
+  fileId: number;
+  path: string;
+  fraction: number; // 0..1
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,8 +72,8 @@ interface DashboardState {
   counts: RunProgressCounts;
   total: number;
   activeFiles: ActiveFile[];
-  logEvents: LogEvent[];
-  failures: SummaryFailure[];
+  logEvents: SyncLogEvent[];
+  failures: SyncFailure[];
   isDone: boolean;
   runId: number;
   doneStats: RunStats | null;
@@ -256,11 +259,7 @@ export function SyncDashboard({
 
     // file:done — remove from active, add to log
     engine.on(EV.FILE_DONE, (payload) => {
-      const logEv: LogEvent = {
-        id: payload.fileId,
-        kind: 'done',
-        path: payload.path,
-      };
+      const logEv = fileLogEvent({ kind: 'done', id: payload.fileId, path: payload.path });
       setState((prev) => ({
         ...prev,
         activeFiles: prev.activeFiles.filter((f) => f.fileId !== payload.fileId),
@@ -270,12 +269,7 @@ export function SyncDashboard({
 
     // file:skipped — log it
     engine.on(EV.FILE_SKIPPED, (payload) => {
-      const logEv: LogEvent = {
-        id: payload.fileId,
-        kind: 'skipped',
-        path: payload.path,
-        reason: payload.reason,
-      };
+      const logEv = fileLogEvent({ kind: 'skipped', id: payload.fileId, path: payload.path, reason: payload.reason });
       setState((prev) => ({
         ...prev,
         activeFiles: prev.activeFiles.filter((f) => f.fileId !== payload.fileId),
@@ -285,14 +279,14 @@ export function SyncDashboard({
 
     // file:failed — remove from active, add to log + failures list
     engine.on(EV.FILE_FAILED, (payload) => {
-      const logEv: LogEvent = {
-        id: payload.fileId,
+      const logEv = fileLogEvent({
         kind: 'failed',
+        id: payload.fileId,
         path: payload.path,
         error: payload.error,
         willRetry: payload.willRetry,
-      };
-      const failure: SummaryFailure = {
+      });
+      const failure: SyncFailure = {
         fileId: payload.fileId,
         path: payload.path,
         error: payload.error,
@@ -406,7 +400,7 @@ export function SyncDashboard({
   // Summary screen after run:done
   if (isDone && doneStats) {
     return (
-      <Summary
+      <SyncSummary
         runId={runId}
         stats={doneStats}
         durationMs={durationMs}
@@ -432,16 +426,21 @@ export function SyncDashboard({
 
   const hasDateFilter = fromMs != null || toMs != null;
 
+  const segments = syncSegments(counts);
+  const meterTotal = total || 1;
+
   return (
     <Box flexDirection="column" gap={1}>
       {/* Header */}
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={1}>
         <StatusLine
-          serverUrl={serverHost}
-          folderCount={folderCount}
-          isDone={isDone}
+          title={`MemoriaHub ${dashboardTitle}`}
+          items={[
+            { label: 'server', value: serverHost },
+            { label: 'folders', value: String(folderCount) },
+          ]}
+          done={isDone}
           durationMs={durationMs}
-          title={dashboardTitle}
         />
         {hasDateFilter && (
           <Text dimColor>Filter: {describeRange({ fromMs, toMs })}</Text>
@@ -452,10 +451,10 @@ export function SyncDashboard({
       <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold>Progress</Text>
         <Box marginTop={1}>
-          <ContextMeter counts={counts} total={total || 1} />
+          <SegmentMeter segments={segments} total={meterTotal} />
         </Box>
         <Box marginTop={1}>
-          <Legend counts={counts} total={total || 1} />
+          <MeterLegend segments={segments} total={meterTotal} />
         </Box>
       </Box>
 
@@ -471,14 +470,17 @@ export function SyncDashboard({
       {/* Active uploads */}
       {activeFiles.length > 0 && (
         <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-          <ActiveUploads files={activeFiles} />
+          <ActiveItems
+            title={`Active uploads (${activeFiles.length})`}
+            items={activeFiles.map((f) => ({ id: f.fileId, label: basename(f.path), fraction: f.fraction }))}
+          />
         </Box>
       )}
 
       {/* Event log */}
       {logEvents.length > 0 && (
         <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-          <EventLog events={logEvents} />
+          <EventLog events={logEvents} kinds={SYNC_LOG_KINDS} title="Recent events" />
         </Box>
       )}
 
