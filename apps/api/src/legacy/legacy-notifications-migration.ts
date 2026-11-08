@@ -20,7 +20,7 @@
 // are only ever READ):
 //   1. push_subscriptions  `mh_legacy_push_subscriptions` -> `push_subscriptions`
 //      (same columns, `platform = 'browser'`). Same endpoints and the same VAPID
-//      key (moved by `npm run credentials:migrate-legacy -- --purposes push_vapid`)
+//      key (moved by `npm run credentials:migrate-legacy -- --purpose push_vapid`)
 //      mean no browser re-subscribes.
 //   2. broadcasts          `mh_legacy_notification_broadcasts` -> `notification_broadcasts`:
 //      `critical` -> `event_key` (admin.broadcast[_critical]), channel `inbox` ->
@@ -55,7 +55,7 @@
 //      per user, in the `system_settings` row `mh_legacy_notification_preferences`
 //      (user settings writes strip unknown keys, so they cannot live in the row).
 //
-// VAPID is not moved here: `credentials:migrate-legacy --purposes push_vapid`
+// VAPID is not moved here: `credentials:migrate-legacy --purpose push_vapid`
 // already plans it (RETRO-B4). The `webPush` row keeps `enabled`, `publicKey`
 // and `subject` as they are: the platform reads the same row and ignores the
 // legacy `privateKeyEncrypted` / `privateKeyLast4`, which stay for rollback.

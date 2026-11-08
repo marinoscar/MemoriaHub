@@ -13,7 +13,7 @@
 // 0041, i.e. the release that mounts the platform notifications slice is deployed) and
 // while a legacy broadcast is scheduled or sending. One transaction; re-running copies
 // nothing twice; the legacy tables are never modified. The VAPID private key moves with
-// `npm run credentials:migrate-legacy --workspace=api -- --purposes push_vapid --apply`.
+// `npm run credentials:migrate-legacy --workspace=api -- --purpose push_vapid --apply`.
 // Runbook: docs/runbooks/notifications-cutover.md. Needs the API's database settings (POSTGRES_*).
 // =============================================================================
 
