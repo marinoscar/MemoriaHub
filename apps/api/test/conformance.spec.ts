@@ -23,6 +23,9 @@
 // system or user namespace declares a secret-named field, every default satisfies
 // its stored schema, every org layer is gated by registered org permissions.
 //
+// `credentials` (`@marinoscar/platform-api/credentials/testing`, RETRO-B4): purpose owners, addresses
+// and the no-secret-egress shape of the credential info schemas.
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -33,6 +36,7 @@ import { join } from 'node:path';
 
 import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
 
+import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
@@ -42,6 +46,8 @@ import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
 
 import { AppModule } from '../src/app.module';
+// Declares the credential purposes the `credentials` suite reads.
+import { APP_CREDENTIAL_OWNERS } from '../src/platform/credentials/credential-purposes.manifest';
 // Fills the role, permission and ownership registries the suites read.
 import '../src/app-registrations/permission-manifest';
 import '../src/app-registrations/ownership-manifest';
@@ -78,6 +84,11 @@ runPlatformConformance({
       permissions: permissionRegistry.list().map((permission) => ({ id: permission.id, scope: permission.scope })),
       minSystemNamespaces: 22,
     },
+
+    // The credentials slice (RETRO-B4, #617): every registered purpose names a platform slice or one of
+    // this app's owners as its owner, every user purpose's fallback address resolves, and no credential
+    // `*Info` schema can carry a secret.
+    credentials: { appOwners: [...APP_CREDENTIAL_OWNERS] },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no

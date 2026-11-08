@@ -47,6 +47,7 @@ import { platformHostModule } from './platform/platform-host.module';
 import { identityModule } from './platform/identity/identity.config';
 import { ProfileModule } from './profile/profile.module';
 import { settingsModule } from './platform/settings/settings.config';
+import { credentialsModules } from './platform/credentials/credentials.config';
 import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 
@@ -91,6 +92,9 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // `settings/registry`. Global: provides AppSystemSettingsService and UserSettingsService.
     // Before the host core on purpose: the host reads the `maintenance` namespace through it.
     settingsModule,
+    // Credentials (RETRO-B4, #617): the encrypted (purpose, name) store; purposes in
+    // platform/credentials/credential-purposes.manifest.ts.
+    ...credentialsModules,
     FeaturesModule,
     // The platform host core (RETRO-B1, #597): the event bus, the app metrics,
     // maintenance mode (and its ONLY global guard, `MaintenanceGuard`),

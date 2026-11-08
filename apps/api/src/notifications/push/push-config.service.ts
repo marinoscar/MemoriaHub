@@ -2,7 +2,7 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as webpush from 'web-push';
 
-import { decryptSecret, encryptSecret } from '../../common/crypto/secret-cipher';
+import { decryptSecret, encryptSecret } from '../../legacy/legacy-secret-cipher';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   DEFAULT_VAPID_SUBJECT,

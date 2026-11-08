@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { decryptSecret } from '../../common/crypto/secret-cipher';
+import { decryptSecret } from '../../legacy/legacy-secret-cipher';
 import { StorageProvider } from './storage-provider.interface';
 import { S3StorageProvider, S3ProviderConfig } from './s3/s3-storage.provider';
 import { LocalDiskStorageProvider } from './local/local-disk.provider';

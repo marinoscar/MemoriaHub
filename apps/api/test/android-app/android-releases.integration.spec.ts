@@ -30,7 +30,7 @@ import { ALLOW_DURING_MAINTENANCE_KEY } from '@marinoscar/platform-api/core';
 import { ANDROID_APP_SETTINGS_KEY } from '../../src/android-app/android-app.schema';
 import { AndroidReleaseAdminController } from '../../src/android-app/releases/android-release-admin.controller';
 import { AndroidReleaseController } from '../../src/android-app/releases/android-release.controller';
-import { deriveSubKey } from '../../src/common/crypto/secret-cipher';
+import { deriveSubKey } from '../../src/legacy/legacy-secret-cipher';
 import {
   ANDROID_APK_STEM,
   DEFAULT_ANDROID_PACKAGE_NAME,

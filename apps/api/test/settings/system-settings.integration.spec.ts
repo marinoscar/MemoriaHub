@@ -15,7 +15,7 @@ import {
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import type { AppSystemSettingsDocument as SystemSettingsValue } from '../../src/settings/app-settings.types';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
-import { encryptSecret } from '../../src/common/crypto/secret-cipher';
+import { encryptSecret } from '../../src/legacy/legacy-secret-cipher';
 
 describe('System Settings Integration', () => {
   let context: TestContext;

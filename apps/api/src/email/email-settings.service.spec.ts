@@ -15,7 +15,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EmailSettingsService } from './email-settings.service';
 import { EmailService } from './email.service';
 import { SesEmailProvider } from './providers/ses-email.provider';
-import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
 import { EmailSmtpSecretStore } from './email-smtp-secret.store';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 

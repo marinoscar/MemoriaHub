@@ -1,3 +1,9 @@
+// PLATFORM-ADOPTION-SHIM(RETRO-E3): the pre-platform secret cipher (RETRO-B4, #617).
+// Moved from common/crypto/secret-cipher.ts. The platform credential store uses its own envelope
+// (@marinoscar/platform-api/core), so this file is READ-ONLY legacy: the credential migration script
+// decrypts legacy rows with it, and the slices not yet migrated (storage D1, email D2, push D3, AI E3)
+// still use it. RETRO-E3 is the last consumer and deletes it. `deriveSubKey` (android download links,
+// memories digest tokens) is signing, not storage, and stays with it.
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'crypto';
 
 // =============================================================================

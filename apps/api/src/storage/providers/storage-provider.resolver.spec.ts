@@ -18,7 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LocalDiskStorageProvider } from './local/local-disk.provider';
 import { S3StorageProvider } from './s3/s3-storage.provider';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
-import { encryptSecret } from '../../common/crypto/secret-cipher';
+import { encryptSecret } from '../../legacy/legacy-secret-cipher';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------

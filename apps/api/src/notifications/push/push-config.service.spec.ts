@@ -9,7 +9,7 @@ import { randomBytes } from 'crypto';
 process.env.SECRETS_ENCRYPTION_KEY =
   process.env.SECRETS_ENCRYPTION_KEY ?? randomBytes(32).toString('base64');
 
-import { decryptSecret, encryptSecret } from '../../common/crypto/secret-cipher';
+import { decryptSecret, encryptSecret } from '../../legacy/legacy-secret-cipher';
 import { DEFAULT_VAPID_SUBJECT, PUSH_CONFIG_KEY } from './push-config.schema';
 import { PushConfigService } from './push-config.service';
 import { privateKeyDerivesPublicKey } from './push-test.service';

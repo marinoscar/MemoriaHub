@@ -8,8 +8,8 @@
  *   - falls back to offline when google credential is absent or disabled
  *   - uses offline as default when setting is unset
  *
- * All dependencies are mocked — no DB, no network.
- * SECRETS_ENCRYPTION_KEY is set to a valid test value.
+ * All dependencies are mocked — no DB, no network. The key comes from GeoGoogleCredentialResolver
+ * (the credential store, RETRO-B4); `null` means absent or disabled.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -17,12 +17,9 @@ import { GeoLocationService } from './geo-location.service';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
 import { GoogleGeoLocationProvider } from './google-geo-location.provider';
-import { PrismaService } from '../../prisma/prisma.service';
-import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
-import { encryptSecret } from '../../common/crypto/secret-cipher';
+import { GeoGoogleCredentialResolver } from './geo-google-credential.resolver';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
-const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,28 +52,13 @@ const NOMINATIM_RESULT = {
 
 describe('GeoLocationService', () => {
   let service: GeoLocationService;
-  let mockPrisma: MockPrismaService;
+  let mockGoogleCredential: { resolveApiKey: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockOffline: { reverseGeocode: jest.Mock };
   let mockNominatim: { reverseGeocode: jest.Mock };
   let mockGoogle: { reverseGeocodeWithKey: jest.Mock };
-  let originalKey: string | undefined;
-
-  beforeAll(() => {
-    originalKey = process.env['SECRETS_ENCRYPTION_KEY'];
-    process.env['SECRETS_ENCRYPTION_KEY'] = VALID_KEY;
-  });
-
-  afterAll(() => {
-    if (originalKey === undefined) {
-      delete process.env['SECRETS_ENCRYPTION_KEY'];
-    } else {
-      process.env['SECRETS_ENCRYPTION_KEY'] = originalKey;
-    }
-  });
-
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockGoogleCredential = { resolveApiKey: jest.fn().mockResolvedValue(null) };
 
     mockSystemSettings = { getSettings: jest.fn() };
     mockOffline = { reverseGeocode: jest.fn().mockResolvedValue(OFFLINE_RESULT) };
@@ -86,7 +68,7 @@ describe('GeoLocationService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GeoLocationService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: GeoGoogleCredentialResolver, useValue: mockGoogleCredential },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: OfflineGeoLocationProvider, useValue: mockOffline },
         { provide: NominatimGeoLocationProvider, useValue: mockNominatim },
@@ -218,17 +200,10 @@ describe('GeoLocationService', () => {
     beforeEach(() => {
       mockSystemSettings.getSettings.mockResolvedValue({ geo: { reverseProvider: 'google' } });
 
-      const encryptedKey = encryptSecret(plainApiKey);
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
-        provider: 'google',
-        encryptedKey,
-        enabled: true,
-        last4: 'test',
-        baseUrl: null,
-      } as any);
+      mockGoogleCredential.resolveApiKey.mockResolvedValue(plainApiKey);
     });
 
-    it('decrypts the credential and calls the google provider', async () => {
+    it('resolves the stored key and calls the google provider', async () => {
       await service.reverseGeocode(37.7749, -122.4194);
 
       expect(mockGoogle.reverseGeocodeWithKey).toHaveBeenCalledWith(
@@ -265,7 +240,7 @@ describe('GeoLocationService', () => {
   describe('when geo.reverseProvider is "google" but credential is absent', () => {
     beforeEach(() => {
       mockSystemSettings.getSettings.mockResolvedValue({ geo: { reverseProvider: 'google' } });
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
+      mockGoogleCredential.resolveApiKey.mockResolvedValue(null);
     });
 
     it('falls back to the offline provider', async () => {
@@ -294,13 +269,7 @@ describe('GeoLocationService', () => {
   describe('when geo.reverseProvider is "google" but credential is disabled', () => {
     beforeEach(() => {
       mockSystemSettings.getSettings.mockResolvedValue({ geo: { reverseProvider: 'google' } });
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: encryptSecret('some-key'),
-        enabled: false,
-        last4: 'abcd',
-        baseUrl: null,
-      } as any);
+      mockGoogleCredential.resolveApiKey.mockResolvedValue(null); // switched off in settings
     });
 
     it('falls back to the offline provider', async () => {

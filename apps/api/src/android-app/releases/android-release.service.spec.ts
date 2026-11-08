@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { ConflictException, HttpException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-import { deriveSubKey } from '../../common/crypto/secret-cipher';
+import { deriveSubKey } from '../../legacy/legacy-secret-cipher';
 import { DOWNLOAD_TOKEN_KEY_PURPOSE } from './android-release.constants';
 import { AndroidReleaseService, isUniqueViolationOn, toPublicRelease } from './android-release.service';
 import { signDownloadToken } from './download-token';

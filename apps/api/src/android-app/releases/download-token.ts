@@ -21,7 +21,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 // link needs.
 //
 // The key is `deriveSubKey('android-app-download')` from
-// `common/crypto/secret-cipher.ts` (derived from SECRETS_ENCRYPTION_KEY, spec
+// `legacy/legacy-secret-cipher.ts` (derived from SECRETS_ENCRYPTION_KEY, spec
 // §22 D2), never a new environment variable. Purpose-bound, so a Memories
 // digest token can never verify here and vice versa. The token carries ids only; anyone holding it can
 // fetch that one APK until it expires, which is the point of a link.

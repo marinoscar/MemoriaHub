@@ -28,7 +28,7 @@ jest.mock('@aws-sdk/client-sesv2', () => ({
 import { SesEmailProvider } from './ses-email.provider';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
-import { encryptSecret } from '../../common/crypto/secret-cipher';
+import { encryptSecret } from '../../legacy/legacy-secret-cipher';
 import { EmailMessage } from '../types/email.types';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 

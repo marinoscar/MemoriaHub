@@ -559,6 +559,28 @@ If `GEO_FORWARD_PROVIDER=google` but `GOOGLE_MAPS_API_KEY` is not set, the servi
 
 ---
 
+## 3c. Credential store (runtime-configured secrets)
+
+Provider secrets an admin enters at run time live in the platform `credentials` table (RETRO-B4, issue #617),
+addressed by `(purpose, name)` and encrypted with AES-256-GCM under a **per-purpose sub-key** derived from
+`SECRETS_ENCRYPTION_KEY`. A purpose is permanent once rows exist. Purposes are declared in
+`apps/api/src/platform/credentials/credential-purposes.manifest.ts`: `storage`, `smtp`, `email_ses`,
+`push_vapid` (platform), `face_provider` (name = provider key) and `geo_provider` (`google`) (this app). Reads and writes go through
+`CredentialsService`; a module that needs a plaintext secret imports `CredentialsModule` explicitly (it is not global).
+
+- **No plaintext egress.** `getSecret` is the only call that returns plaintext, server-side, at the moment of use
+  (`GeoGoogleCredentialResolver`, `FaceSettingsService.resolveCredentials`). `describe` and `list` return a type
+  that cannot hold a secret. The admin responses keep their `last4` field, derived from the stored hint
+  (`••••1234`; a secret under eight characters reveals nothing, so `last4` is `null`).
+- **Blank preserves.** Saving without retyping a key keeps the stored one; removal is the delete route.
+- **Non-secret half is a setting.** `enabled` and `baseUrl` of a provider are `face.providers.*` / `geo.google` in
+  the settings document (the settings registry forbids secret-named fields), so no secret ever shares a document with config.
+- **The node transient credential is unchanged.** A worker node still receives the Google key per job from
+  `POST /api/nodes/:id/jobs/:jobId/credentials`, held in memory only, until RETRO-C6 moves it to a `nodeSecretBroker`.
+- **Legacy cipher.** `apps/api/src/legacy/legacy-secret-cipher.ts` (the pre-platform envelope, no purpose binding)
+  is read-only legacy: the migration command and the slices not yet migrated use it. RETRO-E3 removes it.
+  Moving rows: [credentials-migration runbook](runbooks/credentials-migration.md).
+
 ## 4. Email Allowlist Access Control
 
 ### Overview

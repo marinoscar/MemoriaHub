@@ -1,3 +1,4 @@
+import { SecretField } from '@marinoscar/platform-web/credentials/ui';
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
@@ -363,30 +364,18 @@ function GeoSettingsContent() {
               ) : (
                 /* Keyed provider (Google Maps) */
                 <>
-                  {providerConfig.configured && providerConfig.last4 && (
-                    <TextField
-                      label="Current API Key"
-                      value={`••••••••${providerConfig.last4}`}
-                      size="small"
-                      fullWidth
-                      disabled
-                      sx={{ mb: 2 }}
-                    />
-                  )}
-
-                  <TextField
+                  <SecretField
                     label="New API Key"
-                    type="password"
-                    size="small"
-                    fullWidth
+                    noun="key"
                     value={providerKeys[providerConfig.provider] ?? ''}
-                    onChange={(e) =>
+                    onChange={(value) =>
                       setProviderKeys((prev) => ({
                         ...prev,
-                        [providerConfig.provider]: e.target.value,
+                        [providerConfig.provider]: value,
                       }))
                     }
-                    placeholder={providerConfig.configured ? 'Leave blank to keep current key' : 'Enter API key'}
+                    saved={providerConfig.configured ? { hint: providerConfig.last4 ? `••••${providerConfig.last4}` : null } : null}
+                    emptyHelp="Enter the API key. It is stored encrypted and never shown again."
                     sx={{ mb: 2 }}
                   />
 

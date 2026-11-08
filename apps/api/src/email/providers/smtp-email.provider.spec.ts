@@ -21,7 +21,7 @@ jest.mock('nodemailer', () => ({
 }));
 
 import { SmtpEmailProvider } from './smtp-email.provider';
-import { encryptSecret } from '../../common/crypto/secret-cipher';
+import { encryptSecret } from '../../legacy/legacy-secret-cipher';
 import type { EmailSmtpSecretStore } from '../email-smtp-secret.store';
 import { EmailMessage } from '../types/email.types';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';

@@ -39,7 +39,7 @@ import {
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
-import { decryptSecret } from '../common/crypto/secret-cipher';
+import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
 import type {
   JobCredentialsResult,
   VideoAutoTaggingJobCredentials,
@@ -120,6 +120,7 @@ export class NodesService {
     private readonly systemSettings: AppSystemSettingsService,
     private readonly autoTaggingService: AutoTaggingService,
     private readonly videoAutoTaggingService: VideoAutoTaggingService,
+    private readonly geoGoogleCredential: GeoGoogleCredentialResolver,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -898,13 +899,12 @@ export class NodesService {
       'offline';
 
     if (activeProvider === 'google') {
-      const cred = await this.prisma.geoProviderCredential.findUnique({ where: { provider: 'google' } });
-      if (!cred || !cred.enabled) {
+      const apiKey = await this.geoGoogleCredential.resolveApiKey();
+      if (!apiKey) {
         // Mirrors GeoLocationService's own fallback-to-offline behavior when
         // google is configured active but the credential is missing/disabled.
         return { type: 'geocode', provider: 'offline', lat, lng };
       }
-      const apiKey = decryptSecret(cred.encryptedKey);
       return { type: 'geocode', provider: 'google', apiKey, lat, lng };
     }
 
