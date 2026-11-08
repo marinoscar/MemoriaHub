@@ -248,6 +248,18 @@ export class MemoryDigestService {
    * The currently-running job is `running`, not `succeeded`, so it can never be
    * its own watermark — which is what lets the handler re-derive the same
    * boundary the task used without any state passed through the payload.
+   *
+   * READS THE PLATFORM `jobs` TABLE (RETRO-C1 migrated the old rows with their
+   * ids, so the history survives the cutover; RETRO-C8, #608, confirmed the
+   * query): the circle is the job's subject. A FAILED row is never a watermark.
+   *
+   * ⚠ KNOWN GAP (RETRO-C8): the platform's `job.history.purge` deletes
+   * terminal rows older than `jobs.history.retentionDays` (default 30, minimum
+   * 1), and a `monthly` digest needs the row to survive ~30 days. When the
+   * window is shorter than the digest cadence the watermark can be purged and
+   * the next run behaves as a first-ever digest. This was equally true of the
+   * old `job_history_purge`; a dedicated watermark table is a migration-lock
+   * follow-up (docs/specs/memories.md §7).
    */
   async lastDigestAt(circleId: string): Promise<Date | null> {
     const last = await this.prisma.job.findFirst({
