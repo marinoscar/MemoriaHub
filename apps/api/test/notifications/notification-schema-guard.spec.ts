@@ -27,7 +27,8 @@ const MIGRATION_SQL_PATH = path.join(
   __dirname,
   '../../prisma/migrations/20260805000000_add_notifications/migration.sql',
 );
-const SCHEMA_PRISMA_PATH = path.join(__dirname, '../../prisma/schema.prisma');
+// The generated schema folder (`npm run db:compose`); read as one text.
+const SCHEMA_PRISMA_DIR = path.join(__dirname, '../../prisma/schema');
 
 const REVIEW_QUEUE_TYPES = [
   'review_queue_bursts',
@@ -57,7 +58,12 @@ function readMigrationSql(): string {
 }
 
 function readSchemaPrisma(): string {
-  return fs.readFileSync(SCHEMA_PRISMA_PATH, 'utf8');
+  return fs
+    .readdirSync(SCHEMA_PRISMA_DIR)
+    .filter((f) => f.endsWith('.prisma'))
+    .sort()
+    .map((f) => fs.readFileSync(path.join(SCHEMA_PRISMA_DIR, f), 'utf8'))
+    .join('\n');
 }
 
 /**
