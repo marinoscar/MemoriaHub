@@ -273,7 +273,7 @@ describe('NavigationRail', () => {
 
       expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Photos' })).toBeInTheDocument();
-      expect(screen.queryByText('Job Queue')).not.toBeInTheDocument();
+      expect(screen.queryByText('Jobs')).not.toBeInTheDocument();
 
       const console = screen.getByRole('link', { name: 'Console' });
       expect(console).toHaveAttribute('aria-current', 'page');
@@ -356,7 +356,7 @@ describe('NavigationRail', () => {
       for (const section of ADMIN_SECTIONS) {
         expect(screen.getByText(section.label)).toBeInTheDocument();
       }
-      expect(screen.getByText('Job Queue')).toBeInTheDocument();
+      expect(screen.getByText('Jobs')).toBeInTheDocument();
 
       expect(screen.queryByRole('link', { name: 'Photos' })).not.toBeInTheDocument();
       expect(screen.queryByRole('link', { name: 'Collections' })).not.toBeInTheDocument();

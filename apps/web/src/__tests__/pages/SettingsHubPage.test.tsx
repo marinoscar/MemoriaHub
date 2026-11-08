@@ -177,16 +177,16 @@ describe('SettingsHubPage', () => {
       expect(screen.getByText('Geo Location')).toBeInTheDocument();
     });
 
-    it('renders Job Queue card', () => {
+    it('renders Jobs card', () => {
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.getByText('Job Queue')).toBeInTheDocument();
+      expect(screen.getByText('Jobs')).toBeInTheDocument();
     });
 
-    it('renders Job Queue Insights card when user has jobs:read', () => {
+    it('renders Job Insights card when user has jobs:read', () => {
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.getByText('Job Queue Insights')).toBeInTheDocument();
+      expect(screen.getByText('Job Insights')).toBeInTheDocument();
     });
 
     // The v0 "Backup" card was removed with the feature (#367). "Worker Nodes"
@@ -223,14 +223,14 @@ describe('SettingsHubPage', () => {
       expect(screen.queryByText('AI Providers')).not.toBeInTheDocument();
     });
 
-    it('hides Job Queue Insights when user lacks jobs:read', () => {
+    it('hides Job Insights when user lacks jobs:read', () => {
       mockUsePermissions.mockReturnValue(
         adminPermissionsMock(['system_settings:read', 'users:read', 'ai_settings:read']) as any,
       );
 
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.queryByText('Job Queue Insights')).not.toBeInTheDocument();
+      expect(screen.queryByText('Job Insights')).not.toBeInTheDocument();
     });
 
     it('hides Archiving & Deletion when user lacks system_settings:read', () => {
@@ -353,7 +353,7 @@ describe('SettingsHubPage', () => {
       });
     });
 
-    it('navigates to /admin/settings/jobs/insights when Job Queue Insights card is clicked', async () => {
+    it('navigates to /admin/settings/jobs/insights when Job Insights card is clicked', async () => {
       const user = userEvent.setup();
       render(
         <>
@@ -363,7 +363,7 @@ describe('SettingsHubPage', () => {
         { wrapperOptions: { user: mockAdminUser } },
       );
 
-      await user.click(screen.getByText('Job Queue Insights'));
+      await user.click(screen.getByText('Job Insights'));
 
       await waitFor(() => {
         expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/jobs/insights');
@@ -421,8 +421,8 @@ describe('SettingsHubPage', () => {
 
       await user.type(screen.getByLabelText('Search settings'), 'job');
 
-      expect(screen.getByText('Job Queue')).toBeInTheDocument();
-      expect(screen.getByText('Job Queue Insights')).toBeInTheDocument();
+      expect(screen.getByText('Jobs')).toBeInTheDocument();
+      expect(screen.getByText('Job Insights')).toBeInTheDocument();
       expect(screen.queryByText('AI Providers')).not.toBeInTheDocument();
       expect(screen.queryByText('System')).not.toBeInTheDocument();
     });
@@ -433,7 +433,7 @@ describe('SettingsHubPage', () => {
 
       await user.type(screen.getByLabelText('Search settings'), 'JOB');
 
-      expect(screen.getByText('Job Queue')).toBeInTheDocument();
+      expect(screen.getByText('Jobs')).toBeInTheDocument();
     });
 
     it('a group whose every card is filtered out is not rendered at all', async () => {
@@ -444,7 +444,7 @@ describe('SettingsHubPage', () => {
 
       // "Storage" section has no card with "job" in its title.
       expect(screen.queryByText('Storage')).not.toBeInTheDocument();
-      // "Operations" (home of Job Queue) still renders.
+      // "Operations" (home of Jobs) still renders.
       expect(screen.getByText('Operations')).toBeInTheDocument();
     });
 
@@ -471,7 +471,7 @@ describe('SettingsHubPage', () => {
       await user.clear(field);
 
       expect(screen.getByText('AI Providers')).toBeInTheDocument();
-      expect(screen.getByText('Job Queue')).toBeInTheDocument();
+      expect(screen.getByText('Jobs')).toBeInTheDocument();
       expect(screen.getByText('General')).toBeInTheDocument();
       expect(screen.getByText('Storage')).toBeInTheDocument();
     });
@@ -507,8 +507,8 @@ describe('SettingsHubPage', () => {
 
       await user.type(screen.getByLabelText('Search settings'), 'job');
 
-      expect(screen.queryByText('Job Queue')).not.toBeInTheDocument();
-      expect(screen.queryByText('Job Queue Insights')).not.toBeInTheDocument();
+      expect(screen.queryByText('Jobs')).not.toBeInTheDocument();
+      expect(screen.queryByText('Job Insights')).not.toBeInTheDocument();
       expect(screen.getByText(/No settings match/)).toBeInTheDocument();
     });
   });

@@ -27,6 +27,8 @@ import {
 } from '@marinoscar/platform-web/identity/ui';
 import { IdentityWebAdaptersProvider } from '@marinoscar/platform-web/identity/headless';
 import { appIdentityAdapters } from './platform/identityAdapters';
+import { JobsWebAdaptersProvider } from '@marinoscar/platform-web/jobs/headless';
+import { appJobsAdapters } from './platform/jobsAdapters';
 import { APP_NAME } from './constants/app';
 
 // Pages (lazy loaded)
@@ -57,8 +59,12 @@ const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
 const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
 const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
 const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
+// The platform's Jobs and Job Insights pages (RETRO-C1, #575); the Jobs one is a thin binding that adds
+// the app's "Repair missing thumbnails" action to the page toolbar.
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
-const JobInsightsPage = lazy(() => import('./pages/Admin/JobInsightsPage'));
+const JobInsightsPage = lazy(() =>
+  import('@marinoscar/platform-web/jobs/ui').then((m) => ({ default: m.JobInsightsPage })),
+);
 const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
 const NodeBackupPage = lazy(() => import('./pages/Admin/NodeBackupPage'));
 const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
@@ -528,9 +534,11 @@ export default function App() {
             signed-in user's permissions), above the router outlet. */}
         <AppPlatformHostProvider>
           <IdentityWebAdaptersProvider adapters={appIdentityAdapters}>
-            <CircleProvider>
-              <AppRoutes />
-            </CircleProvider>
+            <JobsWebAdaptersProvider adapters={appJobsAdapters}>
+              <CircleProvider>
+                <AppRoutes />
+              </CircleProvider>
+            </JobsWebAdaptersProvider>
           </IdentityWebAdaptersProvider>
         </AppPlatformHostProvider>
       </AuthProvider>

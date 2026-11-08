@@ -2,34 +2,16 @@ import { api } from './api';
 
 // ---------------------------------------------------------------------------
 // Types
+//
+// Since RETRO-C1 (#575) the Jobs and Job Insights pages are the platform's and read the platform
+// client; what is left here is the one thing the app still reads from `GET /api/admin/jobs`: the
+// Location Groups page polls the rebuild job (`status` is all it uses), and "Repair missing
+// thumbnails" posts to an app endpoint.
 // ---------------------------------------------------------------------------
 
 export type JobStatus = 'pending' | 'running' | 'succeeded' | 'failed';
 
 export type JobProcessedWindow = '4h' | '24h' | '7d' | '30d' | 'all';
-
-export interface JobStats {
-  total: number;
-  byStatus: {
-    pending: number;
-    running: number;
-    succeeded: number;
-    failed: number;
-  };
-  byType: Array<{
-    type: string;
-    pending: number;
-    running: number;
-    succeeded: number;
-    failed: number;
-    total: number;
-  }>;
-  stuckRunning: number;
-  /** Number of pending jobs currently waiting on backoff (scheduledFor > now). */
-  scheduled: number;
-  /** Configured stuck-job threshold in minutes (system setting jobs.stuckThresholdMinutes). */
-  stuckThresholdMinutes: number;
-}
 
 export interface EnrichmentJobDto {
   id: string;
@@ -37,8 +19,9 @@ export interface EnrichmentJobDto {
   status: JobStatus;
   reason: string;
   priority: number;
-  mediaItemId: string | null;
-  circleId: string | null;
+  /** What the job is about: `media_item`, `circle`, or null for a global job. */
+  subjectType: string | null;
+  subjectId: string | null;
   attempts: number;
   lastError: string | null;
   providerKey: string | null;
@@ -86,10 +69,6 @@ export interface ListJobsParams {
 // API functions
 // ---------------------------------------------------------------------------
 
-export async function getJobStats(): Promise<JobStats> {
-  return api.get<JobStats>('/admin/jobs/stats');
-}
-
 export async function listJobs(params: ListJobsParams = {}): Promise<JobsListResponse> {
   const qs = new URLSearchParams();
   if (params.scheduled) {
@@ -109,22 +88,6 @@ export async function listJobs(params: ListJobsParams = {}): Promise<JobsListRes
   return api.get<JobsListResponse>(`/admin/jobs${query ? `?${query}` : ''}`);
 }
 
-export async function retryJob(id: string): Promise<EnrichmentJobDto> {
-  return api.post<EnrichmentJobDto>(`/admin/jobs/${id}/retry`);
-}
-
-export async function retryAllFailed(type?: string): Promise<{ retried: number }> {
-  return api.post<{ retried: number }>('/admin/jobs/retry-failed', type ? { type } : {});
-}
-
-export async function resetStuck(olderThanMinutes?: number): Promise<{ reset: number }> {
-  return api.post<{ reset: number }>('/admin/jobs/reset-stuck', olderThanMinutes != null ? { olderThanMinutes } : {});
-}
-
 export async function repairThumbnails(): Promise<{ jobId: string; status: string }> {
   return api.post<{ jobId: string; status: string }>('/admin/media/thumbnails/repair', {});
-}
-
-export async function deleteJob(id: string): Promise<{ deleted: boolean }> {
-  return api.delete<{ deleted: boolean }>(`/admin/jobs/${id}`);
 }

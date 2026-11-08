@@ -2,7 +2,7 @@
  * Reachability regression (issue #389, epic #388, spec §9).
  *
  * The single most important test in this epic: issue #389 deletes eight
- * drawer rows (Circles, Notifications, User Settings, Settings, Job Queue,
+ * drawer rows (Circles, Notifications, User Settings, Settings, Jobs,
  * Worker Nodes, Storage Insights, Public Sharing) because each duplicates
  * chrome that is already on screen elsewhere. Deleting a NAV ROW must never
  * delete the ROUTE it pointed at — every one of those destinations remains
@@ -67,7 +67,7 @@ const REQUIRED_REACHABLE_PATHS = [
   '/notifications', // was: drawer "Notifications" row -> now: AppBar bell -> "See all notifications"
   '/settings', // was: drawer "User Settings" row -> now: UserMenu "Settings"
   '/admin/settings', // was: implicit via the old drawer's admin shortcuts -> now: Sidebar "Console"
-  '/admin/settings/jobs', // was: drawer "Job Queue" row -> now: Console > Operations > Job Queue
+  '/admin/settings/jobs', // was: drawer "Jobs" row -> now: Console > Operations > Jobs
   '/admin/settings/nodes', // was: drawer "Worker Nodes" row -> now: Console > Operations > Worker Nodes
   '/admin/settings/storage/insights', // was: drawer "Storage Insights" row -> now: Console > Storage > Storage Insights
   '/admin/settings/sharing', // was: drawer "Public Sharing" row -> now: Console > Operations > Public Sharing

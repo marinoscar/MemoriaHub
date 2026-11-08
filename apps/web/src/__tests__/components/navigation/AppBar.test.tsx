@@ -477,7 +477,7 @@ describe('AppBar', () => {
       });
 
       expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Job Queue' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Jobs' })).toBeInTheDocument();
 
       expect(screen.queryByRole('button', { name: /active circle/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /upload media/i })).not.toBeInTheDocument();
@@ -486,7 +486,7 @@ describe('AppBar', () => {
       expect(screen.queryByRole('button', { name: 'toggle drawer' })).not.toBeInTheDocument();
     });
 
-    it('back from a detail page (e.g. Job Queue) navigates to the hub, /admin/settings', async () => {
+    it('back from a detail page (e.g. Jobs) navigates to the hub, /admin/settings', async () => {
       const user = userEvent.setup();
       setViewportWidth(500);
 
@@ -564,7 +564,7 @@ describe('AppBar', () => {
       // /admin/* — the normal toolbar (with the circle chip) renders instead.
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
       expect(
-        screen.queryByRole('heading', { name: 'Job Queue' }),
+        screen.queryByRole('heading', { name: 'Jobs' }),
       ).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /active circle/i })).toBeInTheDocument();
 
