@@ -42,6 +42,7 @@
     "email:migrate-settings": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-email-settings.ts",
     "settings:verify": "ts-node -P scripts/tsconfig.json --transpile-only scripts/verify-settings-rows.ts",
     "settings:migrate-run-retention": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-run-retention-settings.ts",
+    "settings:migrate-telemetry": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-telemetry-settings.ts",
     "openapi:dump": "ts-node -P scripts/tsconfig.json --transpile-only scripts/dump-openapi.ts",
     "openapi:typecheck": "tsc -p scripts/tsconfig.json"
   },

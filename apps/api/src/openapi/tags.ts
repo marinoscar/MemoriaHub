@@ -435,6 +435,13 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           '(RETRO-B1b).',
       },
       {
+        name: 'Telemetry',
+        description:
+          'The platform telemetry slice (RETRO-T2): the `telemetry` policy and runtime export gate, the ' +
+          'GreptimeDB connection, the read-only SQL explorer, schema and export, the dashboard and the ' +
+          'assistant (`/api/admin/telemetry/*`, `GET /api/telemetry/config`). Guarded by `telemetry:*`.',
+      },
+      {
         name: 'Admin: Storage Insights',
         description: 'Precomputed global storage metrics and the manual refresh trigger.',
       },

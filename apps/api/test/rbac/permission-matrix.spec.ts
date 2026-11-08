@@ -109,6 +109,10 @@ const NEW_PLATFORM_PERMISSIONS = [
   'org_settings:write',
   'organizations:read',
   'organizations:write',
+  // The telemetry slice (RETRO-T2, #625): system scope, admin only.
+  'telemetry:query',
+  'telemetry:read',
+  'telemetry:write',
 ];
 
 /**

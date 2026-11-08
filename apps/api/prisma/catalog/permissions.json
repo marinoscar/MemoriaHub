@@ -139,6 +139,21 @@
       "scope": "org"
     },
     {
+      "name": "telemetry:read",
+      "description": "View telemetry settings and status",
+      "scope": "system"
+    },
+    {
+      "name": "telemetry:write",
+      "description": "Change telemetry settings",
+      "scope": "system"
+    },
+    {
+      "name": "telemetry:query",
+      "description": "Run SQL, export and use the AI assistant against telemetry",
+      "scope": "system"
+    },
+    {
       "name": "org_members:read",
       "description": "View the members of the organization and their organization roles",
       "scope": "org"
@@ -324,6 +339,9 @@
       "push:write",
       "ai_config:read",
       "ai_config:write",
+      "telemetry:read",
+      "telemetry:write",
+      "telemetry:query",
       "organizations:read",
       "organizations:write",
       "storage:delete_any",

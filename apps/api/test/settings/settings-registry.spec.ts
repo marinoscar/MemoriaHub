@@ -33,6 +33,7 @@ const SYSTEM_KEYS = [
   'ui', 'features', 'ai', 'autoTagging', 'face', 'storage', 'burst', 'dedup', 'locationInference',
   'locationGrouping', 'socialMedia', 'geo', 'email', 'reviewRuns',
   'pictureEnhancement', 'backup', 'workflows', 'memories',
+  'telemetry', // the telemetry slice's declaration, appended by the app (RETRO-T2)
 ];
 const USER_KEYS = [
   'dataTables', 'navigation', 'notifications', // the platform's (notifications: RETRO-D3)

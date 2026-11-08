@@ -90,8 +90,14 @@ describe('adminSections', () => {
     it('appends Broadcasts to Operations, gated on broadcasts:read (issue #488)', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
-      // RETRO-B1 (#597) appends Maintenance and About after it.
-      expect(operations.cards.slice(-2).map((card) => card.title)).toEqual(['Maintenance', 'About']);
+      // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry cards.
+      expect(operations.cards.slice(-5).map((card) => card.title)).toEqual([
+        'Maintenance',
+        'About',
+        'Telemetry',
+        'Telemetry Explorer',
+        'Telemetry Dashboard',
+      ]);
       expect(broadcasts).toMatchObject({
         title: 'Broadcasts',
         path: '/admin/settings/broadcasts',
@@ -159,8 +165,8 @@ describe('adminSections', () => {
       expect(sections[0].cards.map((c) => c.title)).toEqual(['Database Backup']);
     });
 
-    it('returns every section/card when every permission is granted', () => {
-      const sections = visibleAdminSections(allowAll());
+    it('returns every section/card when every permission is granted and every feature is on', () => {
+      const sections = visibleAdminSections(allowAll(), '', { telemetry: true });
 
       expect(sections).toHaveLength(ADMIN_SECTIONS.length);
       const totalCards = sections.reduce((sum, s) => sum + s.cards.length, 0);
@@ -226,6 +232,33 @@ describe('adminSections', () => {
         const sections = visibleAdminSections(allowOnly('db_backup:read'), 'job');
         expect(sections).toEqual([]);
       });
+    });
+  });
+
+  describe('telemetry cards (RETRO-T2, #625)', () => {
+    const telemetryCards = () =>
+      ADMIN_SECTIONS.flatMap((section) => section.cards).filter((card) => card.path.startsWith('/admin/settings/telemetry'));
+
+    it('registers the three packaged cards with the exact permissions the controllers enforce', () => {
+      expect(telemetryCards().map((card) => [card.path, card.permission, card.feature])).toEqual([
+        ['/admin/settings/telemetry', 'telemetry:read', undefined],
+        ['/admin/settings/telemetry/explorer', 'telemetry:query', 'telemetry'],
+        ['/admin/settings/telemetry/dashboard', 'telemetry:query', 'telemetry'],
+      ]);
+    });
+
+    it('shows the Explorer and the Dashboard only while telemetry is on; the settings card always', () => {
+      const titles = (features: { telemetry?: boolean }) =>
+        visibleAdminSections(allowAll(), 'telemetry', features).flatMap((section) => section.cards.map((card) => card.title));
+
+      expect(titles({})).toEqual(['Telemetry']);
+      expect(titles({ telemetry: true })).toEqual(['Telemetry', 'Telemetry Explorer', 'Telemetry Dashboard']);
+    });
+
+    it('titles the nested pages by the longest prefix', () => {
+      expect(adminPageTitle('/admin/settings/telemetry')).toBe('Telemetry');
+      expect(adminPageTitle('/admin/settings/telemetry/explorer', { telemetry: true })).toBe('Telemetry Explorer');
+      expect(adminPageTitle('/admin/settings/telemetry/dashboard', { telemetry: true })).toBe('Telemetry Dashboard');
     });
   });
 

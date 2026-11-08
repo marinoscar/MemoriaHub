@@ -724,6 +724,20 @@ docker compose -f base.compose.yml -f dev.compose.yml -f devdb.compose.yml -f te
 
 Set the `GREPTIME_*` writer and reader passwords in `.env` (never commit them). Details: the platform telemetry runbook and `docs/specs/telemetry.md` in EnterpriseAppBase.
 
+### Turn telemetry on (RETRO-T2, #625)
+
+The API side is the platform telemetry slice (`@marinoscar/platform-api/telemetry`, mounted once by `apps/api/src/platform/telemetry/telemetry.config.ts`), and the pages are `@marinoscar/platform-web/telemetry/ui`. The SDK's export gate starts **closed**: nothing leaves the API until an administrator switches telemetry on, even with `OTEL_ENABLED=true`. The gate opens when the `telemetry.enabled` system setting is on **and** a GreptimeDB store is configured, and it follows the setting at runtime (no restart; other instances converge within the refresh interval).
+
+1. Run the telemetry stack (above) and set `OTEL_ENABLED=true` plus the `GREPTIME_*` passwords in `.env`. `GREPTIME_HOST`, `GREPTIME_PG_PORT`, `GREPTIME_DB` and the reader and admin logins are only the **deployment default** connection.
+2. Sign in as an administrator and open **Settings → Operations → Telemetry** (`/admin/settings/telemetry`, `telemetry:read`; saving needs `telemetry:write`). Optionally save a GreptimeDB connection there: it replaces the `GREPTIME_*` default wholly, its passwords are stored encrypted under the credential purpose `telemetry_greptime` and are never returned.
+3. Switch collection on and choose the retention (days). The retention is applied by the server-only job `telemetry.retention.apply` (visible on the Job Queue page).
+4. **Telemetry Explorer** (`/admin/settings/telemetry/explorer`) runs read-only SQL (`SELECT 1` is a quick check) and exports results; **Telemetry Dashboard** (`/admin/settings/telemetry/dashboard`) shows the health verdict and the metric groups. Both need `telemetry:query` and appear only while telemetry is on. The AI assistant shows "AI disabled" until RETRO-E4.
+5. The Doctor (`/admin/settings/doctor`) has a Telemetry section: `telemetry.export`, `telemetry.connection`, `telemetry.reachable`, `telemetry.tables`, `telemetry.freshness`.
+
+**Upgrading a deployment that exported before the slice** (`OTEL_ENABLED=true`): the `telemetry` namespace defaults to off, so run `npm run settings:migrate-telemetry --workspace=api` (dry run) and then with `-- --apply` to store `telemetry.enabled: true`. It writes only while the namespace is absent.
+
+Operator detail (retention, the assistant, the connection from the UI): the telemetry runbook in EnterpriseAppBase, `docs/runbooks/telemetry.md` §4 (turn on), §5 (retention), §6 (assistant) and §9 (connection from the UI), and the slice README (`packages/platform-api/src/telemetry/README.md`).
+
 ## Resources
 
 - [NestJS Documentation](https://docs.nestjs.com/)
