@@ -2,8 +2,9 @@
 
 **Audience:** the operator of a deployment upgrading to the release that adopts the platform
 credentials slice (RETRO-B4, issue #617, epic #565).
-**Applies to:** `face` and `geo` now; `storage`, `smtp`, `ses` and `push_vapid` are planned here and
-applied by RETRO-D1, D2 and D3 together with the reader switch of each slice. AI keys
+**Applies to:** `face` and `geo`, and `smtp` and `ses`, which RETRO-D2 applies through its own command
+(`npm run email:migrate-settings`, [email configuration](email-configuration.md)); `storage` and `push_vapid` are
+planned here and applied by RETRO-D1 and D3 together with the reader switch of each slice. AI keys
 (`ai_provider_credentials`) are RETRO-E3.
 
 Source of truth:
@@ -21,8 +22,8 @@ Source of truth:
 | Google Maps key | `geo_provider_credentials` (`google`) | `credentials` `geo_provider/google` | `geo.google.{enabled,baseUrl}` in the `global` settings row |
 | Face provider key (none for CompreFace, which is keyless) | `face_provider_credentials` | `credentials` `face_provider/<provider>` (only when a key exists) | `face.providers.compreface.{enabled,baseUrl}` |
 | Storage secret access key | `storage_provider_credentials` | `storage/default` (D1) | stays with D1 |
-| SMTP password | `system_settings.global.email.smtpPassword` | `smtp/default` (D2) | stays with D2 |
-| SES secret | the S3 row (reused) | `email_ses/default` (D2) | stays with D2 |
+| SMTP password | `system_settings.global.email.smtpPassword` | `smtp/default` (D2, done) | the platform `email` row, [email configuration](email-configuration.md) |
+| SES secret | the S3 row (reused) | `email_ses/default` (D2, done) | `transports.ses.accessKeyId` of the platform `email` row |
 | VAPID private key | `system_settings` row `webPush` | `push_vapid/default` (D3) | stays with D3 |
 
 The legacy cipher stores base64 `[iv][tag][ciphertext]` under the master key. The platform cipher uses its own
@@ -40,7 +41,8 @@ No migration (schema change) is part of this step: the `credentials` table exist
 - **Idempotent.** A target already holding the same secret is reported `already present` and left alone. The
   non-secret half is **set-if-absent**: a value an admin saved after cut-over is never overwritten.
 - **Legacy rows are never modified or deleted.**
-- `storage`, `smtp`, `ses` and `push_vapid` refuse `--apply` until their slice switches its reader.
+- `storage` and `push_vapid` refuse `--apply` until their slice switches its reader. `smtp` and `ses` apply; use
+  `npm run email:migrate-settings`, which also writes the settings half and never replaces a stored secret.
 
 ## 3. Procedure
 
