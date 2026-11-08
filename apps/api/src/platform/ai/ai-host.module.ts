@@ -7,6 +7,7 @@ import {
   type AiSystemPrisma,
 } from '@marinoscar/platform-api/ai';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
+import { StorageProvidersModule } from '@marinoscar/platform-api/storage';
 
 import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { AiObjectStoreAdapter } from './ai-object-store.adapter';
@@ -33,6 +34,8 @@ import { AiObjectStoreAdapter } from './ai-object-store.adapter';
 
 @Global()
 @Module({
+  // The platform storage slice's static provider module (`StorageProviderRouter`).
+  imports: [StorageProvidersModule],
   providers: [
     {
       provide: AI_SYSTEM_PRISMA,
