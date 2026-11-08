@@ -136,12 +136,10 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     reviewRuns: { enabled: true, days: 30 },
   },
   reviewRuns: { runHistoryRetentionDays: 30 },
+  // The notifications slice's deployment policy (RETRO-D3): absent channels means every channel on.
   notifications: {
-    retentionDays: 30,
-    purgeEnabled: true,
     browserEnabled: true,
-    pushEnabled: true,
-    disabledTypes: [],
+    disabledEvents: [],
   },
   pictureEnhancement: {
     defaultQuality: 'high',

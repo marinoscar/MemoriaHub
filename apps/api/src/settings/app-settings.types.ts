@@ -5,7 +5,7 @@
 // WHY THIS IS NOT JUST `SystemSettingsValue`. The platform types the document from the
 // `SystemSettingsNamespaces` interface, which every slice's declaration file AUGMENTS with its own
 // namespace. Six of this app's namespaces are TEMPORARY copies of a namespace whose slice MemoriaHub
-// adopts later (`ai`, `storage`, `notifications`, `email`), stored under the
+// adopts later (`ai`, `storage`, `email`), stored under the
 // SAME key but in MemoriaHub's own shape. Augmenting the interface for those keys would declare a
 // property twice with different types as soon as the program also sees the platform's declaration
 // (any import of `@marinoscar/platform-api/manifest` does): TS2717, and which declaration wins then
@@ -14,8 +14,9 @@
 // So those keys are NOT augmented, and the app reads the document through this type instead
 // (`AppSystemSettingsService.getSettings()` and `readKnownValue()` are typed with it). Each slice
 // adoption removes a key's entry here and augments the interface instead.
-// PLATFORM-ADOPTION-SHIM: RETRO-E1 (ai), D1 (storage), D3 (notifications), D2 (email).
-// `jobs` and `retention` are the jobs slice's (RETRO-C1), `databaseBackup` the db-backup slice's (RETRO-D4).
+// PLATFORM-ADOPTION-SHIM: RETRO-E1 (ai), D1 (storage), D2 (email).
+// `jobs` and `retention` are the jobs slice's (RETRO-C1), `databaseBackup` the db-backup slice's (RETRO-D4),
+// `notifications` the notifications slice's (RETRO-D3).
 // =============================================================================
 
 import type { AiSettingsValue } from './registry/namespaces/system/ai';
@@ -32,7 +33,6 @@ import type { SystemSettingsNamespaces } from '@marinoscar/platform-api/settings
 import type { LocationGroupingSettingsValue } from './registry/namespaces/system/location-grouping';
 import type { LocationInferenceSettingsValue } from './registry/namespaces/system/location-inference';
 import type { MemoriesSettingsValue } from './registry/namespaces/system/memories';
-import type { NotificationsSettingsValue } from './registry/namespaces/system/notifications';
 import type { PictureEnhancementSettingsValue } from './registry/namespaces/system/picture-enhancement';
 import type { ReviewRunsSettingsValue } from './registry/namespaces/system/review-runs';
 import type { SocialMediaSettingsValue } from './registry/namespaces/system/social-media';
@@ -67,7 +67,7 @@ export interface AppSystemSettingsDocument {
   jobs: SystemSettingsNamespaces['jobs'];
   retention: RetentionSettingsValue;
   reviewRuns: ReviewRunsSettingsValue;
-  notifications: NotificationsSettingsValue;
+  notifications: SystemSettingsNamespaces['notifications'];
   pictureEnhancement: PictureEnhancementSettingsValue;
   backup: BackupSettingsValue;
   workflows: WorkflowsSettingsValue;

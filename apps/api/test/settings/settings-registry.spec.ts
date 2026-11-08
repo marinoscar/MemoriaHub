@@ -29,11 +29,15 @@ const SYSTEM_KEYS = [
   'maintenance', // the platform's, registered first
   'jobs', 'retention', // the jobs slice's (RETRO-C1)
   'databaseBackup', // the db-backup slice's (RETRO-D4)
+  'notifications', // the notifications slice's (RETRO-D3)
   'ui', 'features', 'ai', 'autoTagging', 'face', 'storage', 'burst', 'dedup', 'locationInference',
-  'locationGrouping', 'socialMedia', 'geo', 'email', 'reviewRuns', 'notifications',
+  'locationGrouping', 'socialMedia', 'geo', 'email', 'reviewRuns',
   'pictureEnhancement', 'backup', 'workflows', 'memories',
 ];
-const USER_KEYS = ['dataTables', 'navigation', 'search', 'notifications', 'memories', 'timezone'];
+const USER_KEYS = [
+  'dataTables', 'navigation', 'notifications', // the platform's (notifications: RETRO-D3)
+  'search', 'memories', 'timezone', 'memoriahubNotifications',
+];
 
 describe('settings registry', () => {
   let h: SettingsHarness;
@@ -122,7 +126,6 @@ describe('settings registry', () => {
       ['jobs.stuckThresholdMinutes', ['jobs', 'stuckThresholdMinutes'], 1, 10080, true],
       ['jobs.history.retentionDays', ['jobs', 'history', 'retentionDays'], 1, 3650, true],
       ['reviewRuns.runHistoryRetentionDays', ['reviewRuns', 'runHistoryRetentionDays'], 1, 365, true],
-      ['notifications.retentionDays', ['notifications', 'retentionDays'], 1, 365, true],
       ['pictureEnhancement.maxBatchSize', ['pictureEnhancement', 'maxBatchSize'], 1, 200, true],
       ['pictureEnhancement.retentionHours', ['pictureEnhancement', 'retentionHours'], 1, 720, true],
       ['pictureEnhancement.maxInputMegapixels', ['pictureEnhancement', 'maxInputMegapixels'], 1, 100, false],
@@ -237,36 +240,23 @@ describe('settings registry', () => {
       const fresh = await h.system.get();
       expect(fresh.ui.allowUserThemeOverride).toBe(false);
     });
-
-    it('a write drops the notification-policy cache too', async () => {
-      await h.system.patch({ notifications: { browserEnabled: false } });
-      expect(h.policy.invalidate).toHaveBeenCalled();
-    });
   });
 
-  describe('admin dismiss-on-disable (notifications.disabledTypes)', () => {
-    it('dismisses live rows of a NEWLY disabled type app-wide, and only that type', async () => {
-      await h.system.patch({ notifications: { disabledTypes: ['share_expiring'] } });
-      expect(h.notifications.dismissTypesGlobally).toHaveBeenCalledWith(['share_expiring']);
-      expect(h.notifications.invalidateAllUnreadCounts).toHaveBeenCalled();
-
-      h.notifications.dismissTypesGlobally.mockClear();
-      await h.system.patch({ notifications: { disabledTypes: ['share_expiring', 'upload_completed'] } });
-      expect(h.notifications.dismissTypesGlobally).toHaveBeenCalledWith(['upload_completed']);
+  describe('admin dismiss-on-disable (notifications.disabledEvents, the platform onWrite hook)', () => {
+    it('dismisses the live rows of every disabled non-mandatory event inside the settings write', async () => {
+      const raw = h.db.prisma.$executeRaw as jest.Mock;
+      raw.mockClear();
+      await h.system.patch({ notifications: { disabledEvents: ['shares.expiring', 'admin.broadcast_critical'] } });
+      expect(raw).toHaveBeenCalledTimes(1);
+      const call = JSON.stringify(raw.mock.calls[0]);
+      expect(call).toContain('shares.expiring');
+      // The mandatory critical broadcast is never dismissed by a policy switch.
+      expect(call).not.toContain('admin.broadcast_critical');
     });
 
-    it('dismisses nothing when the list shrinks or is not in the body', async () => {
-      await h.system.patch({ notifications: { disabledTypes: ['share_expiring'] } });
-      h.notifications.dismissTypesGlobally.mockClear();
-      await h.system.patch({ notifications: { disabledTypes: [] } });
-      await h.system.patch({ ui: { allowUserThemeOverride: true } });
-      expect(h.notifications.dismissTypesGlobally).not.toHaveBeenCalled();
-    });
-
-    it('a failed dismissal does not fail the settings write', async () => {
-      h.notifications.dismissTypesGlobally.mockRejectedValueOnce(new Error('db down'));
-      const after = await h.system.patch({ notifications: { disabledTypes: ['share_expiring'] } });
-      expect(after.notifications.disabledTypes).toEqual(['share_expiring']);
+    it('a failed dismissal fails the settings write (same transaction)', async () => {
+      (h.db.prisma.$executeRaw as jest.Mock).mockRejectedValueOnce(new Error('db down'));
+      await expect(h.system.patch({ notifications: { disabledEvents: ['shares.expiring'] } })).rejects.toThrow(/db down/);
     });
   });
 
@@ -292,7 +282,7 @@ describe('settings registry', () => {
         profile: { displayName: 'Person A', useProviderImage: true },
         search: { visibleFields: ['tag'] },
         dataTables: { 'admin-jobs': { visibleColumns: ['id'], density: 'compact', sort: { field: 'id', direction: 'desc' }, pageSize: 50 } },
-        notifications: { types: { upload_completed: false } },
+        notifications: { browser: { 'media.upload_completed': false } },
         memories: { emailDigestOptOut: true },
         navigation: { pinned: ['albums'], railCollapsed: true },
         timezone: 'Europe/Paris',
@@ -303,7 +293,7 @@ describe('settings registry', () => {
         theme: 'dark',
         search: { visibleFields: ['tag'] },
         dataTables: { 'admin-jobs': { visibleColumns: ['id'], density: 'compact', sort: { field: 'id', direction: 'desc' }, pageSize: 50 } },
-        notifications: { types: { upload_completed: false } },
+        notifications: { browser: { 'media.upload_completed': false } },
         memories: { emailDigestOptOut: true },
         navigation: { pinned: ['albums'], railCollapsed: true },
         timezone: 'Europe/Paris',

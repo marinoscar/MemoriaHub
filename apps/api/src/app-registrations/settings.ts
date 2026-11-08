@@ -8,16 +8,17 @@
 //
 //   system (app list): ui, features, ai, autoTagging, face, storage, burst, dedup,
 //                      locationInference, locationGrouping, socialMedia, geo, email,
-//                      reviewRuns, notifications, pictureEnhancement, backup, workflows,
-//                      memories
+//                      reviewRuns, pictureEnhancement, backup, workflows, memories
 //   system (platform): maintenance (registered by the host core), jobs and retention (the jobs slice, RETRO-C1),
-//                      databaseBackup (the db-backup slice, RETRO-D4)
-//   user   (app list): search, notifications, memories, timezone
-//   user   (platform): dataTables, navigation (extended with MemoriaHub's `pinned`)
+//                      databaseBackup (the db-backup slice, RETRO-D4), notifications (the
+//                      notifications slice, RETRO-D3)
+//   user   (app list): search, memories, timezone, memoriahubNotifications
+//   user   (platform): dataTables, navigation (extended with MemoriaHub's `pinned`), notifications (RETRO-D3)
 //
-// Four of the app namespaces are TEMPORARY copies of a namespace whose platform slice MemoriaHub
-// adopts later (`PLATFORM-ADOPTION-SHIM`): ai (RETRO-E1), email (D2),
-// notifications, system and user (D3), storage (D1). `jobs` was the sixth; the
+// Three of the app namespaces are TEMPORARY copies of a namespace whose platform slice MemoriaHub
+// adopts later (`PLATFORM-ADOPTION-SHIM`): ai (RETRO-E1), email (D2), storage (D1). `notifications`
+// (system and user) was swapped for the platform declarations by RETRO-D3 (#576), whose carry-over
+// (`npm run notifications:migrate-legacy`) rewrites the stored values into the platform's shape. `jobs` was the sixth; the
 // jobs slice (RETRO-C1) swapped it for the platform declaration, same stored shape. `databaseBackup`
 // was the fifth; the db-backup slice (RETRO-D4) swapped it for the platform declaration, and
 // `scripts/migrate-db-backup-settings.ts` rewrites the stored value into the platform's shape. Each keeps today's
@@ -49,7 +50,6 @@ import { GEO_SYSTEM_SETTINGS, type GeoSettingsValue } from '../settings/registry
 import { LOCATION_GROUPING_SYSTEM_SETTINGS, type LocationGroupingSettingsValue } from '../settings/registry/namespaces/system/location-grouping';
 import { LOCATION_INFERENCE_SYSTEM_SETTINGS, type LocationInferenceSettingsValue } from '../settings/registry/namespaces/system/location-inference';
 import { MEMORIES_SYSTEM_SETTINGS, type MemoriesSettingsValue } from '../settings/registry/namespaces/system/memories';
-import { NOTIFICATIONS_SYSTEM_SETTINGS, type NotificationsSettingsValue } from '../settings/registry/namespaces/system/notifications';
 import { PICTURE_ENHANCEMENT_SYSTEM_SETTINGS, type PictureEnhancementSettingsValue } from '../settings/registry/namespaces/system/picture-enhancement';
 import { REVIEW_RUNS_SYSTEM_SETTINGS, type ReviewRunsSettingsValue } from '../settings/registry/namespaces/system/review-runs';
 import { SOCIAL_MEDIA_SYSTEM_SETTINGS, type SocialMediaSettingsValue } from '../settings/registry/namespaces/system/social-media';
@@ -58,7 +58,10 @@ import { UI_SYSTEM_SETTINGS, type UiSettingsValue } from '../settings/registry/n
 import { WORKFLOWS_SYSTEM_SETTINGS, type WorkflowsSettingsValue } from '../settings/registry/namespaces/system/workflows';
 import { MEMORIES_USER_SETTINGS, type MemoriesPreferencesValue } from '../settings/registry/namespaces/user/memories';
 import { NAVIGATION_USER_SETTINGS_EXTENSION } from '../settings/registry/namespaces/user/navigation';
-import { NOTIFICATIONS_USER_SETTINGS, type NotificationPreferencesValue } from '../settings/registry/namespaces/user/notifications';
+import {
+  MEMORIAHUB_NOTIFICATIONS_USER_SETTINGS,
+  type MemoriaHubNotificationsValue,
+} from '../settings/registry/namespaces/user/memoriahub-notifications';
 import { SEARCH_USER_SETTINGS, type SearchPreferencesValue } from '../settings/registry/namespaces/user/search';
 import { TIMEZONE_USER_SETTINGS } from '../settings/registry/namespaces/user/timezone';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -79,7 +82,7 @@ export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] 
   GEO_SYSTEM_SETTINGS,
   EMAIL_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D2): legacy, read-only rollback copy since #570
   REVIEW_RUNS_SYSTEM_SETTINGS,
-  NOTIFICATIONS_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D3)
+  // `notifications` is the notifications slice's since RETRO-D3 (#576): settings/registry/system-settings.manifest.ts.
   PICTURE_ENHANCEMENT_SYSTEM_SETTINGS,
   BACKUP_SYSTEM_SETTINGS,
   WORKFLOWS_SYSTEM_SETTINGS,
@@ -109,9 +112,11 @@ export const APP_SYSTEM_SETTINGS_DEFAULTS: readonly SettingsDefaultsOverride[] =
 /** MemoriaHub's user namespaces, in order (after the platform's `dataTables` and `navigation`). */
 export const APP_USER_SETTINGS_NAMESPACES: readonly UserSettingsNamespace[] = [
   SEARCH_USER_SETTINGS,
-  NOTIFICATIONS_USER_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D3)
+  // `notifications` is the notifications slice's since RETRO-D3 (#576); `memoriahubNotifications`
+  // keeps the one app-only preference, workflowMicroRuns.
   MEMORIES_USER_SETTINGS,
   TIMEZONE_USER_SETTINGS,
+  MEMORIAHUB_NOTIFICATIONS_USER_SETTINGS,
 ] as unknown as readonly UserSettingsNamespace[];
 
 /** Fields this app stores in a platform-declared user namespace that the platform lacks. */
@@ -119,8 +124,8 @@ export const APP_USER_SETTINGS_EXTENSIONS: readonly UserSettingsNamespaceExtensi
   NAVIGATION_USER_SETTINGS_EXTENSION,
 ];
 
-// The augmentation covers the namespaces MemoriaHub owns for good. The five temporary ones (system:
-// ai, storage, notifications, email; user: notifications) are left out ON
+// The augmentation covers the namespaces MemoriaHub owns for good. The temporary ones (system:
+// ai, storage, email) are left out ON
 // PURPOSE: the platform slices declare the same keys with their own types, and declaring a key twice
 // with different types is TS2717 (and which one wins depends on file order). The app reads those
 // through `AppSystemSettings` (settings/app-settings.types.ts) instead.
@@ -147,5 +152,6 @@ declare module '@marinoscar/platform-api/settings' {
     search: SearchPreferencesValue;
     memories: MemoriesPreferencesValue;
     timezone: string;
+    memoriahubNotifications: MemoriaHubNotificationsValue;
   }
 }
