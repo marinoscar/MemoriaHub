@@ -6,7 +6,7 @@ services:
     # is available for integration tests that exercise semantic search migrations.
     # pg17 matches the production server major.
     image: pgvector/pgvector:pg17
-    container_name: enterprise-app-db-test
+    container_name: memoriahub-db-test
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

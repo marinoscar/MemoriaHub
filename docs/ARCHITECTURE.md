@@ -258,7 +258,7 @@ All components served from the same base URL via Nginx reverse proxy:
 ### 5.1 Repository Structure
 
 ```
-EnterpriseAppBase/
+MemoriaHub/
 ├── apps/
 │   ├── api/                          # Backend API (NestJS + Fastify)
 │   │   ├── src/
@@ -2025,7 +2025,7 @@ The orchestrating agent (Claude) handles:
 ```bash
 # 1. Clone repository
 git clone <repository-url>
-cd EnterpriseAppBase
+cd MemoriaHub
 
 # 2. Configure environment
 cp infra/compose/.env.example infra/compose/.env

@@ -1,4 +1,5 @@
 import { buildDatabaseUrl } from './database-url.util';
+import { resolveServiceName } from '../common/otel/service-name';
 
 export default () => {
   // Individual PostgreSQL variables (kept for the `database` config object shape)
@@ -61,7 +62,7 @@ export default () => {
   otel: {
     enabled: process.env.OTEL_ENABLED === 'true',
     endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-    serviceName: process.env.OTEL_SERVICE_NAME || 'enterprise-app-api',
+    serviceName: resolveServiceName(),
   },
 
   // Storage Configuration

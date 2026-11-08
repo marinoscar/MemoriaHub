@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { resolveServiceName } from '../otel/service-name';
 
 export const pinoConfig: pino.LoggerOptions = {
   level: process.env.LOG_LEVEL || 'info',
@@ -7,7 +8,7 @@ export const pinoConfig: pino.LoggerOptions = {
     bindings: (bindings) => ({
       pid: bindings.pid,
       host: bindings.hostname,
-      service: process.env.OTEL_SERVICE_NAME || 'enterprise-app-api',
+      service: resolveServiceName(),
     }),
   },
   timestamp: pino.stdTimeFunctions.isoTime,

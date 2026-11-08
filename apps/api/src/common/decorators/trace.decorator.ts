@@ -1,6 +1,7 @@
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import { resolveServiceName } from '../otel/service-name';
 
-const tracer = trace.getTracer('enterprise-app-api');
+const tracer = trace.getTracer(resolveServiceName());
 
 /**
  * Decorator to add tracing to a method

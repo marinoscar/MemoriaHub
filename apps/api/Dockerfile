@@ -109,6 +109,7 @@ COPY apps/api/package.json ./apps/api/package.json
 COPY apps/api/prisma ./apps/api/prisma/
 COPY apps/api/scripts ./apps/api/scripts/
 COPY packages/enrichment-compute ./packages/enrichment-compute/
+COPY packages/shared ./packages/shared/
 # Using npm install since this is a workspace package without its own lock file
 RUN npm install --ignore-scripts
 

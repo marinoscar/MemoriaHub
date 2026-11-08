@@ -1,0 +1,14 @@
+{
+  "productName": "MemoriaHub",
+  "tagline": "A personal media-ownership platform that gives families full control over their photos and videos, independent of any single cloud provider.",
+  "repoSlug": "marinoscar/MemoriaHub",
+  "themeColor": "#1976d2",
+  "backgroundColor": "#ffffff",
+  "cliName": "memoriahub",
+  "android": {
+    "applicationId": "memoriahub.marin.cr",
+    "storagePrefix": "memoriahub",
+    "deepLinkScheme": "memoriahub",
+    "apkStem": "memoriahub-android"
+  }
+}
