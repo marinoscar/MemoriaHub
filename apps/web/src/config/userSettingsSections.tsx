@@ -12,9 +12,10 @@
  * PERMISSIONS. A card's `permission` is the exact string the API enforces, so
  * almost every card here declares none: the pages edit the caller's own
  * settings through `/api/user-settings` and `/api/users/me/*`, which every
- * signed-in user may use. The one gated card is `Media sync`, behind
+ * signed-in user may use. The gated cards are `Media sync`, behind
  * `media:read`, the string `media-sync.controller.ts` enforces on
- * `GET /api/media-sync/devices` (and the route's `RequirePermission`).
+ * `GET /api/media-sync/devices` (and the route's `RequirePermission`), and
+ * `Webhooks`, behind `webhooks:read` (`GET /api/webhooks`).
  */
 
 import './settingsFeatures';
@@ -27,6 +28,7 @@ import ManageSearchIcon from '@mui/icons-material/ManageSearch';
 import AndroidIcon from '@mui/icons-material/Android';
 import PhonelinkRingIcon from '@mui/icons-material/PhonelinkRing';
 import { identityUserSettingsSections } from '@marinoscar/platform-web/identity/ui';
+import { webhooksUserSettingsSections } from '@marinoscar/platform-web/webhooks/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
 import { ANDROID_APP_SETTINGS_PATH, MEDIA_SYNC_SETTINGS_PATH } from '../services/androidApp';
 
@@ -107,5 +109,12 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
     // the identity slice's card, as data.
     label: 'Security',
     cards: [...identityUserSettingsSections.security],
+  },
+  {
+    // RETRO-H4 (#603): `Webhooks` (`/settings/webhooks`), the caller's own endpoints, from the
+    // webhooks slice as data. `webhooks:read` is the string `GET /api/webhooks` enforces (every
+    // org role holds it); writes need `webhooks:write`, gated inside the page.
+    label: 'Integrations',
+    cards: [...webhooksUserSettingsSections.integrations],
   },
 ];

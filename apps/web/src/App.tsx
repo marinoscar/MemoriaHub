@@ -144,6 +144,10 @@ const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'))
 const TelemetrySettingsPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/settings-page'));
 const TelemetryExplorerPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/explorer-page'));
 const TelemetryDashboardPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/dashboard-page'));
+// RETRO-H4 (#603): the webhooks slice's one page, routed once per scope.
+const WebhooksPage = lazy(() =>
+  import('@marinoscar/platform-web/webhooks/ui').then((m) => ({ default: m.WebhooksPage })),
+);
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -507,6 +511,26 @@ function AppRoutes() {
                       <RequireTelemetryEnabled loading={<LoadingSpinner />}>
                         <TelemetryDashboardPage />
                       </RequireTelemetryEnabled>
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H4 (#603): the two Webhooks cards' routes, each gated on the exact
+                    string its controller enforces: `webhooks:read` (`/api/webhooks`, the
+                    caller's own endpoints) and `system_webhooks:read` (`/api/admin/webhooks`).
+                    The `org` scope (`/api/org/webhooks`) is not routed in single-organization mode. */}
+                <Route
+                  path="/settings/webhooks"
+                  element={
+                    <RequirePermission permission="webhooks:read" fallback={<Navigate to="/settings" replace />}>
+                      <WebhooksPage scope="user" />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/webhooks"
+                  element={
+                    <RequirePermission permission="system_webhooks:read" fallback={<Navigate to="/" replace />}>
+                      <WebhooksPage scope="system" />
                     </RequirePermission>
                   }
                 />

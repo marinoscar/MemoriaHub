@@ -51,6 +51,7 @@ import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
 // RETRO-T2 (#625): the telemetry slice's three cards (data only; no page reaches the main chunk).
 import { telemetryAdminCards } from '@marinoscar/platform-web/telemetry/ui';
+import { webhooksAdminSections } from '@marinoscar/platform-web/webhooks/ui';
 import {
   settingsPageTitle,
   visibleSettingsSections,
@@ -313,6 +314,12 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // it is where telemetry is switched on), `telemetry:query` plus `feature: 'telemetry'` for the
       // Explorer and the Dashboard (`config/settingsFeatures.ts` resolves the feature).
       ...telemetryAdminCards,
+      // RETRO-H4 (#603): the packaged Webhooks card (the deployment's endpoints), appended.
+      // `system_webhooks:read` is the string `GET /api/admin/webhooks` enforces; writes need
+      // `system_webhooks:write`, gated inside the page. The organization card
+      // (`webhooksAdminSections.organizations`, `feature: 'orgs'`) is not spread, like the other
+      // organization cards: no organization page is routed in single-organization mode.
+      ...webhooksAdminSections.operations,
     ],
   },
 ];
