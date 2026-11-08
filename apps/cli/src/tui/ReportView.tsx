@@ -10,12 +10,11 @@
  */
 
 import React, { useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { getReport } from '../reports/registry.js';
 import type { ReportTable } from '../reports/types.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -67,7 +66,7 @@ export function ReportView({ db, reportId, onBack }: ReportViewProps): React.Rea
   if (!report || !table) {
     return (
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="column"
         paddingX={2}
@@ -85,7 +84,7 @@ export function ReportView({ db, reportId, onBack }: ReportViewProps): React.Rea
 
   return (
     <Box
-      borderStyle={BOX_BORDER}
+      borderStyle="round"
       borderColor="cyan"
       flexDirection="column"
       paddingX={2}

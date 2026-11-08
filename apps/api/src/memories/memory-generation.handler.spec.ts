@@ -18,10 +18,10 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { EnrichmentJob } from '@prisma/client';
+import { JobHandlerRegistry, type Job, type JobHandler } from '@marinoscar/platform-api/jobs';
 import { MemoryGenerationHandler } from './memory-generation.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
+import { PrismaService } from '../prisma/prisma.service';
+import { circleJob, subjectPrisma } from '../../test/helpers/platform-job';
 import {
   MEMORY_CURATORS,
   MemoryCurator,
@@ -32,15 +32,8 @@ import { MemoryTitleService } from './titles/memory-title.service';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'memory_generation',
-    mediaItemId: null,
-    circleId: 'circle-a',
-    payload: null,
-    ...overrides,
-  } as EnrichmentJob;
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return circleJob('memory_generation', 'circle-a', overrides);
 }
 
 function result(over: Partial<MemoryCuratorResult> = {}): MemoryCuratorResult {
@@ -60,7 +53,7 @@ function fakeCurator(name: string, over: Partial<MemoryCurator> = {}): jest.Mock
 
 describe('MemoryGenerationHandler', () => {
   let handler: MemoryGenerationHandler;
-  let registry: EnrichmentHandlerRegistry;
+  let registry: JobHandlerRegistry;
   let settings: { getSettings: jest.Mock };
   let titles: { beginRun: jest.Mock };
   let memoriesNotifications: { recordGeneratedAsync: jest.Mock };
@@ -73,7 +66,8 @@ describe('MemoryGenerationHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoryGenerationHandler,
-        EnrichmentHandlerRegistry,
+        { provide: JobHandlerRegistry, useValue: new JobHandlerRegistry() },
+        { provide: PrismaService, useValue: subjectPrisma({ circles: ['circle-a'] }) },
         { provide: AppSystemSettingsService, useValue: settings },
         { provide: MemoryTitleService, useValue: titles },
         { provide: MemoriesNotificationService, useValue: memoriesNotifications },
@@ -82,7 +76,7 @@ describe('MemoryGenerationHandler', () => {
     }).compile();
 
     handler = module.get(MemoryGenerationHandler);
-    registry = module.get(EnrichmentHandlerRegistry);
+    registry = module.get(JobHandlerRegistry);
   }
 
   beforeEach(async () => {
@@ -122,7 +116,7 @@ describe('MemoryGenerationHandler', () => {
 
     // Viewed through the interface, since the class deliberately declares
     // neither optional member at all.
-    const asHandler: EnrichmentHandler = handler;
+    const asHandler: JobHandler = handler;
     expect(asHandler.nodeResultSchema).toBeUndefined();
     expect(asHandler.persistNodeResult).toBeUndefined();
     expect(registry.serverOnlyTypes()).toContain('memory_generation');
@@ -153,12 +147,27 @@ describe('MemoryGenerationHandler', () => {
     expect(curator.run).not.toHaveBeenCalled();
   });
 
-  it('does not throw on a circle-less job — every memory is circle-scoped', async () => {
+  it('a circle deleted since the job was queued is a no-op', async () => {
     const curator = fakeCurator('on_this_day');
     await build([curator]);
 
-    await expect(handler.process(makeJob({ circleId: null }))).resolves.toBeUndefined();
+    await expect(handler.process(makeJob({ subjectId: 'circle-gone' }))).resolves.toBeUndefined();
     expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('a job that is not about a circle is malformed and throws', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await expect(handler.process(makeJob({ subjectType: null, subjectId: null }))).rejects.toThrow(
+      'not about a circle',
+    );
+    expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('declares its label and execution profile', () => {
+    expect(handler.label).toBe('Memory generation');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: 3 });
   });
 
   it('runs every enabled curator and passes one shared context', async () => {

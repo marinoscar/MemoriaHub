@@ -1,0 +1,21 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub CLI v<version> · Home › Worker Node                                                      │
+│                                                                                                  │
+│  Daily operations first; first-run setup below                                                   │
+│                                                                                                  │
+│  ❯ 1. Node dashboard                                                                             │
+│    2. Start worker (background)                                                                  │
+│    3. Stop worker                                                                                │
+│    4. Node logs                                                                                  │
+│    5. Node doctor                                                                                │
+│    6. Enroll node (login + credential)                                                           │
+│    7. Install dependencies (Linux)                                                               │
+│    8. Register node                                                                              │
+│    9. Node config                                                                                │
+│       List nodes                                                                                 │
+│       Node service (systemd)                                                                     │
+│                                                                                                  │
+│  ↑↓ move  ·  enter select  ·  1-9 jump  ·  esc back  ·  ctrl-c exit                              │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -11,7 +11,6 @@ import {
   snapshotAppFields,
 } from './extensions/config-compat.js';
 import { translateLegacyArgs } from './extensions/legacy-flags.js';
-import { clearLegacyTuiRequest, legacyTuiRequested } from './extensions/legacy-tui-request.js';
 import { printBanner } from './ui.js';
 import { readVersion } from './version.js';
 
@@ -27,7 +26,6 @@ import { readVersion } from './version.js';
 //   2. `translateLegacyArgs` (extensions/legacy-flags.ts),
 //   3. the `node` group, which stays the 1.3 command until RETRO-C10,
 //   4. after `login`, restores the app's fields the platform's login replaced,
-//   5. after the platform TUI, launches the legacy TUI if the user chose it.
 //
 // It returns the exit code and never calls `process.exit()` itself.
 // =============================================================================
@@ -52,8 +50,6 @@ export interface RunAppOptions {
   createCli?: typeof createCli | undefined;
   /** Runs the 1.3 `node` command group; tests substitute a fake. */
   runLegacyNode?: ((argv: string[]) => Promise<number>) | undefined;
-  /** Launches the 1.3 TUI; tests substitute a fake. */
-  launchLegacyTui?: (() => Promise<void>) | undefined;
 }
 
 /**
@@ -75,11 +71,6 @@ async function runLegacyNodeGroup(argv: string[]): Promise<number> {
   program.addCommand(nodeCommand());
   await program.parseAsync(argv, { from: 'user' });
   return EXIT.OK;
-}
-
-async function launchLegacyTui(): Promise<void> {
-  const { launchTui } = await import('./tui/app.js');
-  await launchTui({ currentVersion: readVersion() });
 }
 
 /**
@@ -127,12 +118,6 @@ export async function runApp(argv: string[], options: RunAppOptions = {}): Promi
   const code = await cli.run(plan.argv);
 
   if (isLogin && code === EXIT.OK) mergeAfterPlatformLogin(appFields, platformConfigDir(env));
-
-  // 5. "MemoriaHub menu" was chosen in the platform TUI: the terminal is free now.
-  if (legacyTuiRequested()) {
-    clearLegacyTuiRequest();
-    await (options.launchLegacyTui ?? launchLegacyTui)();
-  }
 
   return code;
 }

@@ -24,7 +24,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -38,7 +38,6 @@ import {
 } from '../organize/events.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -204,7 +203,7 @@ export function OrganizeScreen({
 
   if (state.phase === 'planning') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Organize by Date</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -228,7 +227,7 @@ export function OrganizeScreen({
       ? Object.entries(totals.byBucket).sort((a, b) => b[1] - a[1]).slice(0, MAX_BUCKET_ROWS)
       : [];
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Organize by Date — Plan</Text>
         <Box marginTop={1} flexDirection="column">
           <Text>
@@ -270,7 +269,7 @@ export function OrganizeScreen({
 
   if (state.phase === 'running') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Organizing…</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -290,7 +289,7 @@ export function OrganizeScreen({
 
   if (state.phase === 'empty') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Organize by Date</Text>
         <Box marginTop={1}>
           <Text dimColor>No media files found in the selected folder(s). Nothing to organize.</Text>
@@ -304,7 +303,7 @@ export function OrganizeScreen({
 
   if (state.phase === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">Organize failed</Text>
         <Box marginTop={1}>
           <Text color="red">{state.errorMsg ?? 'Unknown error'}</Text>
@@ -319,7 +318,7 @@ export function OrganizeScreen({
   // done phase
   const totals = state.finalTotals;
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="green">Organize complete</Text>
       <Box marginTop={1} flexDirection="column">
         <Text>

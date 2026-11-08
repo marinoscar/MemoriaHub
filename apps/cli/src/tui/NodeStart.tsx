@@ -37,7 +37,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 
@@ -50,7 +50,6 @@ import {
   type AlreadyRunningCheck,
   type SpawnedDaemonResult,
 } from '../node/daemon-launch.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Defaults (mirror commands/node.ts / NodeConfig.tsx)
@@ -294,7 +293,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   if (step === 'checking') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Start</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /> Checking for an existing daemon…</Text>
@@ -305,7 +304,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   if (step === 'not-registered') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="yellow">Worker Node — Start</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow">⚠ This machine is not registered as a worker node.</Text>
@@ -320,7 +319,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   if (step === 'already-running') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="yellow">Worker Node — Start</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow">
@@ -337,7 +336,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   if (step === 'starting') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Start</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /> Starting worker daemon…</Text>
@@ -348,7 +347,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   if (step === 'success') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Start</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="green">✔ Worker daemon started (pid {spawnResult?.pid ?? '?'}).</Text>
@@ -363,7 +362,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   if (step === 'timeout') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="yellow">Worker Node — Start</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow">
@@ -382,7 +381,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   if (step === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Start</Text>
         <Box marginTop={1}>
           <Text color="red">✖ {errorMsg}</Text>
@@ -396,7 +395,7 @@ export function NodeStart({ config, onStarted, onBack }: NodeStartProps): React.
 
   // 'form'
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Worker Node — Start</Text>
       <Text dimColor>Confirm concurrency and eligible job types, then start the background daemon.</Text>
 

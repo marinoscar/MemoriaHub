@@ -22,7 +22,7 @@ import { LocationSuggestionRunExecuteBatchHandler } from '../../src/location-inf
 import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';
 import { MemoryGenerationHandler } from '../../src/memories/memory-generation.handler';
 import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
-import { NotificationPurgeHandler } from '../../src/notifications/notification-purge.handler';
+import { NotificationsRetentionHandler } from '../../src/notifications/notifications-retention.handler';
 import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
 import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
 import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
@@ -73,7 +73,7 @@ export const ALL_HANDLER_CLASSES = [
   MemoryDigestHandler,
   MemoryGenerationHandler,
   MetadataExtractionHandler,
-  NotificationPurgeHandler,
+  NotificationsRetentionHandler,
   PictureEnhancementHandler,
   PictureEnhancementPurgeHandler,
   ReviewRunEvaluateHandler,

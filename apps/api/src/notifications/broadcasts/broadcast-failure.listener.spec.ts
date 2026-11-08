@@ -1,19 +1,21 @@
-/** BroadcastFailureListener (issue #488). */
-import { EnrichmentJobSettledEvent } from '../../enrichment/events/enrichment-job-settled.event';
+/** BroadcastFailureListener (issue #488; on the platform JOB_SETTLED_EVENT since RETRO-C8, #608). */
+import { JobSettledEvent } from '@marinoscar/platform-api/jobs';
+
 import { BroadcastFailureListener } from './broadcast-failure.listener';
+import { systemJob } from '../../../test/helpers/platform-job';
 
 const BID = '11111111-1111-4111-8111-111111111111';
 
-function build(job: Record<string, unknown> | null) {
+function build() {
   const prisma = {
-    job: { findUnique: jest.fn().mockResolvedValue(job) },
     mhLegacyNotificationBroadcast: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
   return { listener: new BroadcastFailureListener(prisma as never), prisma };
 }
 
-const ev = (type: string, outcome: 'failed' | 'succeeded' = 'failed') =>
-  new EnrichmentJobSettledEvent('job-1', type, 'backfill', null, null, outcome);
+/** The settled event the platform emits: it carries the terminal row itself. */
+const ev = (row: Record<string, unknown>, status: 'failed' | 'succeeded' = 'failed') =>
+  new JobSettledEvent(systemJob(String(row['type']), { ...row, status } as never));
 
 describe('BroadcastFailureListener', () => {
   const failedChunk = {
@@ -26,8 +28,8 @@ describe('BroadcastFailureListener', () => {
   };
 
   it('flips a scheduled/sending broadcast to failed with the cause', async () => {
-    const t = build(failedChunk);
-    await t.listener.handleJobSettled(ev('broadcast_chunk'));
+    const t = build();
+    await t.listener.handleJobSettled(ev(failedChunk));
     expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).toHaveBeenCalledWith({
       where: { id: BID, status: { in: ['scheduled', 'sending'] } },
       data: {
@@ -39,21 +41,23 @@ describe('BroadcastFailureListener', () => {
   });
 
   it('ignores successes and non-broadcast types without touching the DB', async () => {
-    const t = build(failedChunk);
-    await t.listener.handleJobSettled(ev('broadcast_chunk', 'succeeded'));
-    await t.listener.handleJobSettled(ev('face_detection'));
-    expect(t.prisma.job.findUnique).not.toHaveBeenCalled();
+    const t = build();
+    await t.listener.handleJobSettled(ev(failedChunk, 'succeeded'));
+    await t.listener.handleJobSettled(ev({ ...failedChunk, type: 'face_detection' }));
+    expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).not.toHaveBeenCalled();
   });
 
   it('never throws', async () => {
-    const t = build(failedChunk);
+    const t = build();
     t.prisma.mhLegacyNotificationBroadcast.updateMany.mockRejectedValue(new Error('db'));
-    await expect(t.listener.handleJobSettled(ev('broadcast_start'))).resolves.toBeUndefined();
+    await expect(
+      t.listener.handleJobSettled(ev({ ...failedChunk, type: 'broadcast_start' })),
+    ).resolves.toBeUndefined();
   });
 
   it('does nothing for a job without a broadcastId', async () => {
-    const t = build({ ...failedChunk, payload: null });
-    await t.listener.handleJobSettled(ev('broadcast_chunk'));
+    const t = build();
+    await t.listener.handleJobSettled(ev({ ...failedChunk, payload: null }));
     expect(t.prisma.mhLegacyNotificationBroadcast.updateMany).not.toHaveBeenCalled();
   });
 });

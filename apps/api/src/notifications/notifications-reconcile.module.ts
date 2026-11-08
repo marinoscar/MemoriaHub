@@ -3,8 +3,7 @@ import { Module } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaModule } from '../media/media.module';
 import { NotificationsModule } from './notifications.module';
-import { NotificationPurgeHandler } from './notification-purge.handler';
-import { NotificationPurgeTask } from './notification-purge.task';
+import { NotificationsRetentionHandler } from './notifications-retention.handler';
 import { NotificationReconcileTask } from './notification-reconcile.task';
 import { EnrichmentFailureNotificationListener } from './producers/enrichment-failure-notification.listener';
 import { ShareExpiringService } from './producers/share-expiring.service';
@@ -22,8 +21,9 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *           daily `share_expiring` sweep.
  *   #247  EnrichmentFailureNotificationListener
  *           `enrichment_failed`, off ENRICHMENT_JOB_SETTLED_EVENT.
- *   #248  NotificationPurgeHandler + NotificationPurgeTask
- *           nightly `notification_purge` retention sweep.
+ *   #248  NotificationsRetentionHandler (RETRO-C8, #608)
+ *           the `retention.appNotifications` purge (`notification_purge`),
+ *           enqueued by the platform's 01:00 RetentionPurgeTask.
  *
  * Kept SEPARATE from NotificationsModule on purpose. NotificationsModule owns
  * the table's write path and is imported BY producers; this module imports
@@ -70,9 +70,8 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     ShareExpiringService,
     ShareExpiringTask,
     EnrichmentFailureNotificationListener,
-    NotificationPurgeHandler,
-    NotificationPurgeTask,
+    NotificationsRetentionHandler,
   ],
-  exports: [ReviewQueueReconcileService, ShareExpiringService, NotificationPurgeHandler],
+  exports: [ReviewQueueReconcileService, ShareExpiringService, NotificationsRetentionHandler],
 })
 export class NotificationsReconcileModule {}

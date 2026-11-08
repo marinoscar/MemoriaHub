@@ -1,4 +1,4 @@
-import { EnrichmentJob, MhLegacyJobStatus } from '@prisma/client';
+import type { Job } from '@marinoscar/platform-api/jobs';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { broadcastIdOf } from './broadcast-constants';
@@ -15,9 +15,9 @@ import { broadcastIdOf } from './broadcast-constants';
  */
 export async function broadcastJobDeleteRefusal(
   prisma: PrismaService,
-  job: Pick<EnrichmentJob, 'status' | 'payload'>,
+  job: Pick<Job, 'status' | 'payload'>,
 ): Promise<string | null> {
-  if (job.status !== MhLegacyJobStatus.pending) return null;
+  if (job.status !== 'pending') return null;
   const broadcastId = broadcastIdOf(job.payload);
   if (!broadcastId) return null;
 

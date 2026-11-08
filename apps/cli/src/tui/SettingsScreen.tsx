@@ -15,13 +15,12 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { SettingsRepo } from '../repo/settings.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Known settings definition
@@ -148,7 +147,7 @@ export function SettingsScreen({ db, onBack }: SettingsScreenProps): React.React
 
     return (
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="column"
         paddingX={2}
@@ -185,7 +184,7 @@ export function SettingsScreen({ db, onBack }: SettingsScreenProps): React.React
 
   return (
     <Box
-      borderStyle={BOX_BORDER}
+      borderStyle="round"
       borderColor="cyan"
       flexDirection="column"
       paddingX={2}

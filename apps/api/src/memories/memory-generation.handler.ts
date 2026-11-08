@@ -5,13 +5,20 @@
 // Runs one circle's memory curation pass. Enqueued once per circle by
 // MemoriesGenerationTask (see memories-generation.task.ts).
 //
+// A native platform `JobHandler` (RETRO-C8, #608). The circle is the job's
+// SUBJECT (`subjectType: 'circle'`, the facade's mapping of a circle-scoped
+// enqueue); a job about anything else is malformed and throws, and a circle
+// deleted after the job was queued settles as a no-op (`jobs.subject_id` is
+// text, nothing cascades).
+//
 // SERVER-ONLY by design: no `nodeResultSchema` / `persistNodeResult` pair, so
-// EnrichmentHandlerRegistry.serverOnlyTypes() picks it up automatically and it
-// becomes eligible for the ENRICHMENT_WORKER_MODE=system claim set with no
-// explicit pinning — the same no-node-pair inference that covers
-// `face_auto_archive_sweep` and the `location_inference` sweep. Curation is a
+// the platform's JobHandlerRegistry.serverOnlyTypes() picks it up and it stays
+// in the system worker mode's claim set with no explicit pinning. Curation is a
 // pure DB read + write pass over a whole circle with no per-item unit of work
 // to hand a node, and (from #306) needs a server-held AI credential.
+//
+// DEDUP: the enqueue sites keep `skipDedup: true` (the sharded backfill queues
+// up to 18 rows for ONE circle, which a per-subject dedup would collapse).
 //
 // PER-CURATOR ERROR ISOLATION IS A CORRECTNESS REQUIREMENT (#303), not
 // politeness. The curators are independent producers of independent content: a
@@ -25,9 +32,14 @@
 // =============================================================================
 
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob } from '@prisma/client';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import { resolveCircleJob } from '../platform/jobs/media-item-job';
+import { PrismaService } from '../prisma/prisma.service';
 import { isMemoriesEnabled } from '../settings/feature-gates';
 import { resolveMemoriesSettings } from './memories-settings.util';
 import { parseMemoryGenerationPayload } from './memory-generation.payload';
@@ -41,13 +53,19 @@ import {
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
-export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit {
+export class MemoryGenerationHandler implements JobHandler, OnModuleInit {
   readonly type = 'memory_generation';
+
+  readonly label = 'Memory generation';
+
+  /** One circle's seven curators plus AI titling: 20 minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 1_200_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(MemoryGenerationHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
+    private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly titles: MemoryTitleService,
     private readonly memoriesNotifications: MemoriesNotificationService,
@@ -58,7 +76,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
+  async process(job: Job): Promise<void> {
     // Re-check the gate here as well as in the cron. A job can sit pending
     // across a settings change, be retried by hand from /admin/settings/jobs,
     // or be enqueued by the future admin backfill (#315) — none of which go
@@ -73,14 +91,11 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
       return;
     }
 
-    if (!job.circleId) {
-      // Every memory is circle-scoped, so a circle-less job has nothing to
-      // curate. Not an error — just nothing to do.
-      this.logger.warn(
-        `memory_generation job ${job.id} has no circleId; nothing to generate`,
-      );
-      return;
-    }
+    // Every memory is circle-scoped: the job's subject is the circle. A job
+    // about anything else throws (a malformed row); a circle deleted since the
+    // job was queued is a no-op.
+    const circleId = await resolveCircleJob(this.prisma, job, this.logger);
+    if (!circleId) return;
 
     const payload = parseMemoryGenerationPayload(job.payload);
     const memoriesSettings = resolveMemoriesSettings(settings.memories);
@@ -98,7 +113,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
       ...(payload.aiTitleCap !== undefined ? { maxAiCalls: payload.aiTitleCap } : {}),
     });
     const ctx: MemoryCuratorContext = {
-      circleId: job.circleId,
+      circleId,
       settings: memoriesSettings,
       titling,
       // ONE wall clock for the whole run: a pass that straddles midnight must
@@ -135,6 +150,7 @@ export class MemoryGenerationHandler implements EnrichmentHandler, OnModuleInit 
 
       try {
         const result = await curator.run(ctx);
+        // metrics: RETRO-T3 (app.memories.generated{type}: result.created per curator type)
         created += result.created;
         refreshed += result.refreshed;
         tombstoned += result.tombstoned;

@@ -1,5 +1,5 @@
-// PLATFORM-ADOPTION-SHIM(RETRO-F4): removed together with the legacy `menu` TUI once the
-// platform TUI hosts the MemoriaHub screens. The `node` rule is removed by RETRO-C10.
+// PLATFORM-ADOPTION-SHIM(RETRO-C10): the `node` rule is removed when the executors move onto the
+// platform engine. (The `menu` rule is permanent: `menu` is the 1.3 spelling of a bare `memoriahub`.)
 
 // =============================================================================
 // Legacy spellings, translated in one place  (issue #577, RETRO-F3)
@@ -24,14 +24,15 @@
 //   id            disposition  legacy spelling                    becomes
 //   no-color      IGNORE       `--no-color` anywhere              stripped; NO_COLOR=1
 //   short-version ALIAS        `-V` (before any command)          `--version`
+//   menu          ALIAS        `menu` (alone)                      a bare `memoriahub` (the platform TUI)
 //   node-group    PORT         `node ...` (every subcommand/flag)  the 1.3 `node` command, untouched
 //   deploy-env    ALIAS        MEMORIAHUB_DOMAIN/PORT/HOME/REF/REPO  --domain/--port/--root/--ref/--repo
 //   deploy-defaults ALIAS      `deploy install` without them      --root /opt/infra/apps/memoriahub, --port 8328,
 //                                                                  --domain memoriahub.marin.cr (the old installer's defaults)
 //
 // `login --token <pat>` and `login --server <url>` are native flags of the
-// platform `login`, so they need no rule. `menu` and `jobs|queue` are app
-// commands with their original names and aliases.
+// platform `login`, so they need no rule. `jobs|queue` is an app command with its
+// original name and aliases.
 // =============================================================================
 
 /** The defaults `infra/deploy/install.sh` baked in, preserved for `deploy install`. */
@@ -102,6 +103,14 @@ export function translateLegacyArgs(argv: readonly string[], context: LegacyCont
   if (rootFlags.includes('-V')) {
     plan.argv = plan.argv.map((a, i) => (a === '-V' && (cmdAt === -1 || i < cmdAt) ? '--version' : a));
     plan.applied.push('short-version');
+  }
+
+  // --- menu: ALIAS ------------------------------------------------------------
+  // 1.3's `menu` opened the TUI; the platform TUI opens for a bare invocation.
+  if (plan.argv.length === 1 && plan.argv[0] === 'menu') {
+    plan.argv = [];
+    plan.applied.push('menu');
+    return plan;
   }
 
   // --- node-group: PORT -------------------------------------------------------

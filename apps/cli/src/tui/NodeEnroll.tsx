@@ -28,7 +28,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import * as os from 'node:os';
@@ -47,7 +47,6 @@ import {
   NodeEnrollmentUnsupportedError,
 } from '../node/enroll.js';
 import { openBrowser } from '../open-browser.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props + local types
@@ -274,7 +273,7 @@ export function NodeEnroll({ config, onEnrolled, onBack }: NodeEnrollProps): Rea
   // -------------------------------------------------------------------------
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Worker Node — Enroll</Text>
       <Text dimColor>
         Log in and mint a durable, node-scoped credential, stored as this CLI's token.

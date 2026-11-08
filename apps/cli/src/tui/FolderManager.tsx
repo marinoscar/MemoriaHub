@@ -10,13 +10,12 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import TextInput from 'ink-text-input';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { FolderRepo } from '../repo/folders.js';
 import type { Folder } from '../db/types.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,7 +156,7 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
   // ---- Render sub-screens ----
   if (subScreen === 'add-path') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Add Folder</Text>
         <Box flexDirection="row" gap={1} marginTop={1}>
           <Text dimColor>Path:</Text>
@@ -177,7 +176,7 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
 
   if (subScreen === 'add-recursive') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Add Folder — {newPath}</Text>
         <Box flexDirection="row" gap={1} marginTop={1}>
           <Text dimColor>Scan subdirectories recursively? [y/n]:</Text>
@@ -195,7 +194,7 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
   if (subScreen === 'confirm-remove') {
     const f = folders[selected];
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">Remove Folder?</Text>
         <Box marginTop={1}>
           <Text>{f?.path ?? '(none)'}</Text>
@@ -210,7 +209,7 @@ export function FolderManager({ db, onBack }: FolderManagerProps): React.ReactEl
 
   // ---- Main list ----
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Managed Folders ({folders.length})</Text>
 
       {folders.length === 0 ? (

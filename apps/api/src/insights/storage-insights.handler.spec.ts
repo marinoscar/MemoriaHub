@@ -9,33 +9,16 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { StorageInsightsHandler } from './storage-insights.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { InsightsService } from './insights.service';
-import type { EnrichmentJob } from '@prisma/client';
+import { systemJob } from '../../test/helpers/platform-job';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-si-1',
-    type: 'storage_insights',
-    mediaItemId: null,
-    circleId: null,
-    status: 'running' as any,
-    reason: 'backfill' as any,
-    priority: 100,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 1,
-    lastError: null,
-    startedAt: new Date(),
-    finishedAt: null,
-    createdAt: new Date(),
-    ...overrides,
-  } as EnrichmentJob;
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return systemJob('storage_insights', { id: 'job-si-1', status: 'running', reason: 'backfill', priority: 100, attempts: 1, ...overrides });
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +27,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
 
 describe('StorageInsightsHandler', () => {
   let handler: StorageInsightsHandler;
-  let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let mockInsightsService: jest.Mocked<Pick<InsightsService, 'runComputation'>>;
 
   beforeEach(async () => {
@@ -68,7 +51,7 @@ describe('StorageInsightsHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StorageInsightsHandler,
-        { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+        { provide: JobHandlerRegistry, useValue: mockRegistry },
         { provide: InsightsService, useValue: mockInsightsService },
       ],
     }).compile();
@@ -88,6 +71,12 @@ describe('StorageInsightsHandler', () => {
     it('has type === "storage_insights"', () => {
       expect(handler.type).toBe('storage_insights');
     });
+
+    it('declares its label and execution profile, and no node pair', () => {
+      expect(handler.label).toBe('Storage insights');
+      expect(handler.profile).toEqual({ maxRuntimeMs: 900_000, maxAttempts: 3 });
+      expect((handler as { nodeResultSchema?: unknown }).nodeResultSchema).toBeUndefined();
+    });
   });
 
   // =========================================================================
@@ -95,7 +84,7 @@ describe('StorageInsightsHandler', () => {
   // =========================================================================
 
   describe('onModuleInit', () => {
-    it('registers itself in the EnrichmentHandlerRegistry on init', () => {
+    it('registers itself in the platform JobHandlerRegistry on init', () => {
       handler.onModuleInit();
 
       expect(mockRegistry.register).toHaveBeenCalledWith(handler);
@@ -117,28 +106,25 @@ describe('StorageInsightsHandler', () => {
 
   describe('process', () => {
     it('calls insightsService.runComputation() with no arguments', async () => {
-      const job = makeJob();
-      await handler.process(job);
+      await handler.process();
 
       expect(mockInsightsService.runComputation).toHaveBeenCalledTimes(1);
       expect(mockInsightsService.runComputation).toHaveBeenCalledWith();
     });
 
     it('resolves without throwing when runComputation succeeds', async () => {
-      const job = makeJob();
-      await expect(handler.process(job)).resolves.toBeUndefined();
+      await expect(handler.process()).resolves.toBeUndefined();
     });
 
     it('propagates errors thrown by runComputation (worker records lastError and retries)', async () => {
       mockInsightsService.runComputation.mockRejectedValue(new Error('DB unavailable'));
 
-      const job = makeJob();
-      await expect(handler.process(job)).rejects.toThrow('DB unavailable');
+      await expect(handler.process()).rejects.toThrow('DB unavailable');
     });
 
-    it('ignores the job payload — global job has null mediaItemId and circleId', async () => {
-      const job = makeJob({ mediaItemId: null, circleId: null });
-      await handler.process(job);
+    it('ignores the job — a global job has no subject', async () => {
+      const job = makeJob({ subjectType: null, subjectId: null });
+      await (handler.process as (job: Job) => Promise<void>)(job);
 
       // runComputation is called regardless of job fields
       expect(mockInsightsService.runComputation).toHaveBeenCalledTimes(1);

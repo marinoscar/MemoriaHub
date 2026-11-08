@@ -1,14 +1,13 @@
 /** broadcast_start (issue #488): CAS claim, audience freeze, hand-off, resume. */
-import { EnrichmentJob } from '@prisma/client';
+import type { Job, JobHandler } from '@marinoscar/platform-api/jobs';
 
-import { EnrichmentHandler } from '../../../enrichment/enrichment-handler.interface';
 import { BroadcastStartHandler } from './broadcast-start.handler';
 import { BROADCAST_CHUNK_TYPE } from '../broadcast-constants';
 
 const BID = '11111111-1111-4111-8111-111111111111';
 
-function job(payload: unknown = { broadcastId: BID }): EnrichmentJob {
-  return { id: 'job-1', type: 'broadcast_start', payload, status: 'running' } as unknown as EnrichmentJob;
+function job(payload: unknown = { broadcastId: BID }): Job {
+  return { id: 'job-1', type: 'broadcast_start', payload, status: 'running' } as unknown as Job;
 }
 
 function build(broadcast: Record<string, unknown> | null) {
@@ -33,7 +32,7 @@ describe('BroadcastStartHandler', () => {
     const t = build(null);
     t.handler.onModuleInit();
     expect(t.registry.register).toHaveBeenCalledWith(t.handler);
-    const asHandler: EnrichmentHandler = t.handler;
+    const asHandler: JobHandler = t.handler;
     expect(asHandler.nodeResultSchema).toBeUndefined();
     expect(asHandler.persistNodeResult).toBeUndefined();
   });

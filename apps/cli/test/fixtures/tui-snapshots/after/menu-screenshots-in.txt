@@ -1,0 +1,13 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub CLI v<version> · Home › File Tools › Find/Clean Screenshots                              │
+│                                                                                                  │
+│  Choose an entry. Esc goes up one level.                                                         │
+│                                                                                                  │
+│  ❯ 1. Find screenshots (list only)…                                                              │
+│    2. Find & move screenshots…                                                                   │
+│    3. Find & delete screenshots…                                                                 │
+│                                                                                                  │
+│  ↑↓ move  ·  enter select  ·  1-9 jump  ·  esc back  ·  ctrl-c exit                              │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

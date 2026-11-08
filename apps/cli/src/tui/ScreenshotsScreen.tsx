@@ -29,7 +29,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import type BetterSqlite3 from 'better-sqlite3';
@@ -46,7 +46,6 @@ import type { ScreenshotMatch } from '../screenshots/plan.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
 import { formatBytes } from '../format-bytes.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -259,7 +258,7 @@ export function ScreenshotsScreen({
 
   if (state.phase === 'destInput') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">{TITLE[mode]}</Text>
         <Box marginTop={1} flexDirection="column">
           <Text dimColor>Enter the destination folder for matched screenshots:</Text>
@@ -286,7 +285,7 @@ export function ScreenshotsScreen({
 
   if (state.phase === 'scanning') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">{TITLE[mode]}</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -310,7 +309,7 @@ export function ScreenshotsScreen({
     const actionLabel = mode === 'move' ? 'move' : 'permanently delete';
     return (
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor={mode === 'delete' ? 'red' : 'cyan'}
         flexDirection="column"
         paddingX={2}
@@ -376,7 +375,7 @@ export function ScreenshotsScreen({
   if (state.phase === 'running') {
     const verb = mode === 'move' ? 'Moving' : 'Deleting';
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">{verb}…</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -394,7 +393,7 @@ export function ScreenshotsScreen({
 
   if (state.phase === 'empty') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">{TITLE[mode]}</Text>
         <Box marginTop={1}>
           <Text dimColor>No files with "screenshot" in the name were found. Nothing to do.</Text>
@@ -408,7 +407,7 @@ export function ScreenshotsScreen({
 
   if (state.phase === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">{TITLE[mode]} failed</Text>
         <Box marginTop={1}>
           <Text color="red">{state.errorMsg ?? 'Unknown error'}</Text>
@@ -425,7 +424,7 @@ export function ScreenshotsScreen({
     const totals = state.scanTotals;
     const sample = state.scanMatches.slice(0, MAX_FILE_ROWS);
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="green">{TITLE[mode]} — Results</Text>
         <Box marginTop={1}>
           <Text>
@@ -455,7 +454,7 @@ export function ScreenshotsScreen({
   // done phase (mode 'move' or 'delete', after the real pass)
   const totals = state.finalTotals;
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="green">{TITLE[mode]} complete</Text>
       <Box marginTop={1} flexDirection="column">
         {mode === 'move' && (

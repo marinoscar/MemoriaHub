@@ -4,7 +4,6 @@ import * as path from 'node:path';
 
 import type { createCli } from '@marinoscar/platform-cli';
 
-import { requestLegacyTui, legacyTuiRequested } from '../src/extensions/legacy-tui-request.js';
 import { runApp } from '../src/run.js';
 
 let state: string;
@@ -100,15 +99,9 @@ describe('runApp', () => {
     });
   });
 
-  it('launches the legacy TUI after the platform TUI when the user chose it', async () => {
-    let launched = 0;
-    await runApp([], {
-      stderr, env,
-      createCli: fakeCli(0, () => requestLegacyTui()),
-      launchLegacyTui: async () => { launched += 1; },
-    });
-    expect(launched).toBe(1);
-    expect(legacyTuiRequested()).toBe(false);
+  it('opens the platform TUI for a lone `menu` (the 1.3 spelling of a bare invocation)', async () => {
+    await runApp(['menu'], { stderr, env, createCli: fakeCli() });
+    expect(handed).toEqual([[]]);
   });
 
   it('a broken composition is one stderr line and a non-zero exit', async () => {

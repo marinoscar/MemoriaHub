@@ -27,7 +27,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import * as os from 'node:os';
@@ -43,7 +43,6 @@ import {
   NODE_JOB_TYPES,
   type CapabilityStatus,
 } from '../node/capabilities.js';
-import { BOX_BORDER } from './theme.js';
 
 type FaceProvider = 'compreface';
 
@@ -310,7 +309,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
 
   if (step === 'detecting') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Register</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /> Detecting local capabilities…</Text>
@@ -321,7 +320,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
 
   if (step === 'confirm') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="yellow">Worker Node — Register</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow">
@@ -339,7 +338,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
 
   if (step === 'submitting') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Register</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /> Registering with the server…</Text>
@@ -350,7 +349,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
 
   if (step === 'success') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Register</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="green">
@@ -370,7 +369,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
 
   if (step === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Register</Text>
         <Box marginTop={1}>
           <Text color="red">✖ {errorMsg}</Text>
@@ -384,7 +383,7 @@ export function NodeRegister({ config, onRegistered, onBack }: NodeRegisterProps
 
   // 'form'
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Worker Node — Register</Text>
       <Text dimColor>Review the fields below, then submit on the last field.</Text>
 

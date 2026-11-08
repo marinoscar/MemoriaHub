@@ -5,10 +5,14 @@
 // Runs one circle's digest send. Enqueued once per due circle by
 // MemoryDigestTask.
 //
+// A native platform `JobHandler` (RETRO-C8, #608): the circle is the job's
+// subject (`subjectType: 'circle'`); a job about anything else throws, a circle
+// deleted since the job was queued settles as a no-op.
+//
 // SERVER-ONLY by omission: no `nodeResultSchema` / `persistNodeResult` pair, so
-// EnrichmentHandlerRegistry.serverOnlyTypes() picks the type up automatically
-// and it becomes eligible for the ENRICHMENT_WORKER_MODE=system claim set with
-// no explicit pinning — the same inference that covers `memory_generation`,
+// the platform's JobHandlerRegistry.serverOnlyTypes() picks the type up and it
+// stays in the system worker mode's claim set with no explicit pinning — the
+// same inference that covers `memory_generation`,
 // `face_auto_archive_sweep` and the `location_inference` sweep. There is no
 // per-item unit of work to hand a node, and the send needs a server-held email
 // credential plus the `SECRETS_ENCRYPTION_KEY`-derived signing key that a node
@@ -32,28 +36,43 @@
 // (same posture as MemoryGenerationHandler).
 //
 // THE WATERMARK IS THE JOB ROW ITSELF. Nothing is written to record "the digest
-// was sent" — `finishedAt` of this succeeded row IS the watermark the next
-// period reads (see MemoryDigestService.lastDigestAt). That is what makes a
+// was sent" — `finishedAt` of this succeeded row in the platform `jobs` table IS
+// the watermark the next period reads (see MemoryDigestService.lastDigestAt). That is what makes a
 // hand-retry from the admin dashboard safe to reason about, and it is why the
 // handler must not fail on a partial send: a failed row is not a watermark, so
 // the next tick would re-send everything.
 // =============================================================================
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { resolveCircleJob } from '../../platform/jobs/media-item-job';
+import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_DIGEST_JOB_TYPE, MemoryDigestService } from './memory-digest.service';
 
 @Injectable()
-export class MemoryDigestHandler implements EnrichmentHandler, OnModuleInit {
+export class MemoryDigestHandler implements JobHandler, OnModuleInit {
   readonly type = MEMORY_DIGEST_JOB_TYPE;
+
+  readonly label = 'Memory email digest';
+
+  /**
+   * One circle's render-and-send: 15 minutes, and only TWO attempts. A retry
+   * re-mails nobody it already reached only because a partial send succeeds;
+   * a failed attempt is an infrastructure error worth one more try, not three.
+   */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 2 };
 
   private readonly logger = new Logger(MemoryDigestHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
+    private readonly prisma: PrismaService,
     private readonly digest: MemoryDigestService,
   ) {}
 
@@ -61,30 +80,28 @@ export class MemoryDigestHandler implements EnrichmentHandler, OnModuleInit {
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    if (!job.circleId) {
-      // A digest is per circle by construction; a circle-less row has nothing
-      // to send. Not an error — nothing to do.
-      this.logger.warn(`memory_digest job ${job.id} has no circleId; nothing to send`);
-      return;
-    }
+  async process(job: Job): Promise<void> {
+    // A digest is per circle by construction: the circle is the job's subject.
+    const circleId = await resolveCircleJob(this.prisma, job, this.logger);
+    if (!circleId) return;
 
-    const result = await this.digest.sendForCircle(job.circleId);
+    const result = await this.digest.sendForCircle(circleId);
 
     // Quiet when the run was a deliberate no-op (gate closed, or no new content
     // since the watermark) — that is the expected steady state for most circles
     // most of the time and an hourly log line saying so is noise.
     if (result.skippedReason) {
       this.logger.debug(
-        `memory_digest job ${job.id} (circle ${job.circleId}) skipped: ${result.skippedReason}`,
+        `memory_digest job ${job.id} (circle ${circleId}) skipped: ${result.skippedReason}`,
       );
       return;
     }
 
+    // metrics: RETRO-T3 (app.memories.digest.sent{outcome}: result.sent / result.failed)
     this.logger.log({
       event: 'memory_digest.completed',
       jobId: job.id,
-      circleId: job.circleId,
+      circleId,
       candidates: result.candidates,
       recipients: result.recipients,
       sent: result.sent,

@@ -1,8 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, JobReason } from '@prisma/client';
+import { JobReason } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 
-import { EnrichmentHandler } from '../../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../../enrichment/enrichment-handler.registry';
 import { EnrichmentJobService } from '../../../enrichment/enrichment-job.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
@@ -35,32 +39,43 @@ import { broadcastJobDeleteRefusal } from '../broadcast-job-delete-guard';
 // cursor, no progress and no chunk job, and finishes the hand-off with the
 // STORED cutoff instead of stranding it.
 //
+// A native platform `JobHandler` (RETRO-C8, #608): global (no subject), enqueued
+// with `skipDedup: true` (and `scheduledFor` for a scheduled start); the
+// `canDelete` veto is the platform's admin-delete hook.
+//
+// RETRO-D3: deleted when the platform notifications slice owns broadcasts.
+//
 // SERVER-ONLY by omission (no nodeResultSchema/persistNodeResult): a node has
 // no database access. That omission puts the type in the
 // ENRICHMENT_WORKER_MODE=system claim set automatically.
 // =============================================================================
 
 @Injectable()
-export class BroadcastStartHandler implements EnrichmentHandler, OnModuleInit {
+export class BroadcastStartHandler implements JobHandler, OnModuleInit {
   readonly type = BROADCAST_START_TYPE;
+
+  readonly label = 'Broadcast start';
+
+  /** Claim, count and hand off: two minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 120_000, maxAttempts: 3 };
   private readonly logger = new Logger(BroadcastStartHandler.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jobs: EnrichmentJobService,
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(this);
   }
 
-  canDelete(job: EnrichmentJob): Promise<string | null> {
+  canDelete(job: Job): Promise<string | null> {
     return broadcastJobDeleteRefusal(this.prisma, job);
   }
 
   /** Throws on a database error so the queue retries. */
-  async process(job: EnrichmentJob): Promise<void> {
+  async process(job: Job): Promise<void> {
     const broadcastId = broadcastIdOf(job.payload);
     if (!broadcastId) {
       this.logger.warn(`broadcast_start job ${job.id} carries no broadcastId; nothing to do`);
@@ -103,7 +118,7 @@ export class BroadcastStartHandler implements EnrichmentHandler, OnModuleInit {
   }
 
   private async resumeHandOff(
-    job: EnrichmentJob,
+    job: Job,
     broadcast: { id: string; audienceCutoff: Date | null; cursorUserId: string | null; processedCount: number },
   ): Promise<void> {
     if (!broadcast.audienceCutoff || broadcast.cursorUserId !== null || broadcast.processedCount > 0) {

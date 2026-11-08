@@ -11,13 +11,12 @@
  */
 
 import React from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from './ink.js';
 
 import type { ScanReport } from '../scan/report.js';
 import { formatBytes } from '../format-bytes.js';
 import { formatDuration } from '../format-duration.js';
-import { BOX_BORDER, METER } from './theme.js';
-import { renderTui } from './raw-mode.js';
+import { renderTui } from './render-tui.js';
 
 export interface ScanDashboardProps {
   report: ScanReport;
@@ -56,7 +55,7 @@ function CoverageMeter(props: {
 }): React.ReactElement {
   const { label, count, total, pct, color } = props;
   const fill = total > 0 ? Math.round((count / total) * 10) : 0;
-  const bar = METER.uploaded.repeat(fill) + METER.queued.repeat(10 - fill);
+  const bar = '█'.repeat(fill) + '░'.repeat(10 - fill);
   return (
     <Box flexDirection="row">
       <Text>{label.padEnd(14)}</Text>
@@ -98,7 +97,7 @@ export function ScanReportBody({
     <Box flexDirection="column" gap={1}>
 
       {/* 1. Header */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={0} flexDirection="row">
+      <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={0} flexDirection="row">
         <Text bold color="cyan">MemoriaHub — Scan Report</Text>
         <Text dimColor>  #{scan.id}</Text>
         <Text dimColor>  {createdLabel}</Text>
@@ -107,7 +106,7 @@ export function ScanReportBody({
 
       {/* 2. KPI band */}
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="row"
         paddingX={2}
@@ -123,7 +122,7 @@ export function ScanReportBody({
 
       {/* 3. Coverage meters */}
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="column"
         paddingX={2}
@@ -144,7 +143,7 @@ export function ScanReportBody({
 
       {/* 4. By folder */}
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="column"
         paddingX={2}
@@ -168,7 +167,7 @@ export function ScanReportBody({
       {/* 5. By camera (only when present) */}
       {byCamera.length > 0 && (
         <Box
-          borderStyle={BOX_BORDER}
+          borderStyle="round"
           borderColor="cyan"
           flexDirection="column"
           paddingX={2}
@@ -191,7 +190,7 @@ export function ScanReportBody({
       {/* 6. Largest files */}
       {largest.length > 0 && (
         <Box
-          borderStyle={BOX_BORDER}
+          borderStyle="round"
           borderColor="cyan"
           flexDirection="column"
           paddingX={2}
