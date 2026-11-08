@@ -2,8 +2,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 1.8 |
-| **Last Updated** | July 2026 |
+| **Version** | 1.9 |
+| **Last Updated** | November 2026 |
+
+> **Status since RETRO-C1 (issue #575): the queue is the platform's.** The background queue runs on the `jobs` slice of `@marinoscar/platform-api` (`JobsModule.forRoot`, mounted in `apps/api/src/platform/jobs/`); this document describes the handler model the 38 job types still use and marks what moved. Operator procedure and every wire change: [Jobs cutover runbook](../runbooks/jobs-cutover.md). The platform's own documentation: `@marinoscar/platform-api/jobs` README and the add-job-type recipe.
+>
+> | Section | Now |
+> |---|---|
+> | 2 Data Model (`enrichment_jobs`) | The platform `jobs` table (`subject_type` / `subject_id` replace `media_item_id` / `circle_id`; `dedup_key`, `claim_token`, `trace_context`, `org_id` are new). `enrichment_jobs` was renamed `enrichment_jobs_legacy` (frozen archive, dropped one release later). Columns and semantics of `status`, `reason`, `priority`, `attempts` (charged at claim), `scheduled_for`, `rate_limit_*` are unchanged. |
+> | 3 to 6 Components, `EnrichmentHandler`, registry, self-registration | Unchanged for the handlers. `EnrichmentHandlerRegistry.register` forwards each handler to `LegacyEnrichmentHandlerAdapter` (`platform/jobs/legacy-handlers.adapter.ts`), which registers a platform `JobHandler` with the same `type`. `EnrichmentClaimService`, `EnrichmentTerminalService` and `ProviderThrottleService` are the platform's `JobClaimService`, `JobTerminalService` and `ProviderThrottleService`. |
+> | 7 `EnrichmentJobService.enqueue` | Same signature; a facade over `JobsService.enqueue` (`platform/jobs/enrichment-job.facade.ts`). Dedup is the database's (`jobs_active_dedup_uniq_idx`); a circle-scoped job without a media item now dedups per `(type, circle)`. |
+> | 8 `EnrichmentJobWorker` | The platform `JobWorker` (modes `all`/`system`/`off`, claim with `FOR UPDATE SKIP LOCKED`, leases renewed from `maxRuntimeMs`). Video types carry the 20 minute profile. |
+> | 11 Admin Jobs Dashboard | `/admin/settings/jobs` and `/jobs/insights` are `JobsPage` / `JobInsightsPage` of `@marinoscar/platform-web/jobs/ui`. |
+> | 13 Configuration | `JOBS_*` (the `ENRICHMENT_*` names are read for one release; table in the runbook). |
+> | 14 Operational notes | The lease reaper is `JobStuckResetTask`; the temp-file janitor sweeps `memoriahub-job-*`; the history purge is the platform's `job.history.purge`. |
+> | Node plane (distributed-nodes.md) | Paused for legacy nodes until RETRO-C2: the server's worker runs every job. |
+>
+> Conversion of the handlers to native `JobHandler`s is RETRO-C3 to C8; the adapter and this facade are deleted by RETRO-C11.
 
 ---
 
