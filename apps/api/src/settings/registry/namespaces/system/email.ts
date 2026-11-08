@@ -1,11 +1,11 @@
-// PLATFORM-ADOPTION-SHIM(RETRO-D2): the email slice swaps this for the platform namespace; the SMTP
-// password moves to the credential store (RETRO-B4).
-//
-// `smtpPassword` is NOT part of this namespace. The AES-256-GCM ciphertext stays in the same
-// `email` object of the `global` row, but as a key the namespace does not know: the platform
-// service carries unmodelled keys forward on every write, never returns them from GET and never
-// accepts them from a PATCH or PUT body. That is the redaction. The only reader and writer is
-// `EmailSmtpSecretStore`.
+// PLATFORM-ADOPTION-SHIM(RETRO-D2): the LEGACY `email.*` block of the `global` row, kept read-only
+// for rollback. Since RETRO-D2 (#570) nothing sends with it: the platform email slice reads its own
+// `email` row of `system_settings` plus the credential store (`smtp/default`, `email_ses/default`),
+// written once from this block by `scripts/migrate-email-settings.ts` and from then on by
+// `PUT /api/email-settings`. It stays registered so the stored values (and the inline-encrypted
+// `smtpPassword`, which this namespace never declares, so it is never returned or accepted) survive
+// every settings write until a later cleanup release removes the key. A write to it through the
+// generic settings route changes nothing that sends mail.
 import { z } from 'zod';
 
 import { defineSystemNamespace } from '../../define-namespace';

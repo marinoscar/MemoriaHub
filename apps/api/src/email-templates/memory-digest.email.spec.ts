@@ -14,11 +14,18 @@
  *      is what makes a mail client's own unsubscribe button work; losing it
  *      silently degrades deliverability rather than failing loudly.
  *
- * Pure rendering — no network, no email, no database.
+ * Pure rendering — no network, no email, no database. Since RETRO-D2 (#570)
+ * the template renders through the platform render context, configured here
+ * with the app's own email options.
  */
 
+import { configureEmailRendering } from '@marinoscar/platform-api/email';
+
+import { EMAIL_MODULE_OPTIONS } from '../platform/email/email.options';
 import { memoryDigestEmail, memoryDigestSubject } from './memory-digest.email';
-import { MemoryDigestEmailData, MemoryDigestItemData } from '../types/email.types';
+import type { MemoryDigestEmailData, MemoryDigestItemData } from './types';
+
+configureEmailRendering(EMAIL_MODULE_OPTIONS);
 
 function item(overrides: Partial<MemoryDigestItemData> = {}): MemoryDigestItemData {
   return {
@@ -38,7 +45,7 @@ function item(overrides: Partial<MemoryDigestItemData> = {}): MemoryDigestItemDa
 function data(overrides: Partial<MemoryDigestEmailData> = {}): MemoryDigestEmailData {
   return {
     circleName: 'Familia',
-    recipientName: 'Oscar',
+    recipientName: 'Person A',
     memories: [item()],
     memoriesUrl: 'https://app.test/memories',
     unsubscribeUrl: 'https://app.test/api/public/memories/digest-unsubscribe/tok',

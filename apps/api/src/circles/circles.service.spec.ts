@@ -9,14 +9,14 @@ import { CircleRole } from '@prisma/client';
 import { CirclesService } from './circles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
-import { EmailService } from '../email/email.service';
+import { AppEmailSender } from '../platform/email/app-email.sender';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 describe('CirclesService', () => {
   let service: CirclesService;
   let mockPrisma: MockPrismaService;
   let mockMembership: jest.Mocked<CircleMembershipService>;
-  let mockEmail: jest.Mocked<EmailService>;
+  let mockEmail: jest.Mocked<AppEmailSender>;
 
   const mockUser = {
     id: 'user-1',
@@ -42,7 +42,7 @@ describe('CirclesService', () => {
         CirclesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockMembership },
-        { provide: EmailService, useValue: mockEmail },
+        { provide: AppEmailSender, useValue: mockEmail },
       ],
     }).compile();
 
@@ -445,7 +445,7 @@ describe('CirclesService', () => {
 
     // ---- Email graceful degradation ----
 
-    it('should still create the invite even if EmailService.sendEmailAsync throws', async () => {
+    it('should still create the invite even if AppEmailSender.sendEmailAsync throws', async () => {
       mockMembership.assertCircleAccess.mockResolvedValue({
         role: CircleRole.circle_admin,
         isSuperAdmin: false,
@@ -540,7 +540,7 @@ describe('CirclesService', () => {
       expect(mockPrisma.circleMember.upsert).not.toHaveBeenCalled();
     });
 
-    it('should still add the member even if EmailService.sendEmailAsync throws', async () => {
+    it('should still add the member even if AppEmailSender.sendEmailAsync throws', async () => {
       mockMembership.assertCircleAccess.mockResolvedValue({
         role: CircleRole.circle_admin,
         isSuperAdmin: false,

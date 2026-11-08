@@ -633,13 +633,17 @@ Merges many raw reverse-geocoder place names into ONE admin-curated canonical na
 
 **With no groups defined every read path is a strict no-op:** the #372 migration seeded `canonical = raw` for every existing row and the resolver is the identity function when the feature is off, so canonical equals raw byte-for-byte. That neutrality is asserted directly in `apps/api/src/media/media.service.location-grouping.spec.ts`.
 
-### Email Settings (Admin only — email_settings:read / email_settings:write)
-Admin-configurable transactional email with two provider routes: AWS SES (reuses the AWS keys already stored for the S3 storage provider in `storage_provider_credentials` — no separate credential) and SMTP (nodemailer; Gmail/M365/SendGrid/Mailgun/WorkMail/Custom presets). Two transactional emails are sent: circle invitation (on `POST /api/circles/:id/invites`) and circle membership confirmation (on member-add / invite-claim). Sends are fire-and-forget — a failed send never blocks or fails the user action — with graceful degradation when unconfigured.
-- `GET /api/email-settings` (email_settings:read) - Get masked email provider configuration: `{ provider: 'ses'|'smtp'|null, enabled, fromAddress, fromName, sesRegion, sesCredentialAvailable, smtp: { host, port, useTls, username, passwordConfigured, passwordLast4 }, credentialSource: 'ses:reuses-s3'|'smtp:inline'|null }`; never returns the SMTP password ciphertext/plaintext
-- `PUT /api/email-settings` (email_settings:write) - Update email provider configuration; `smtpPassword` is encrypted at rest — omitting or blanking it preserves the stored password
-- `POST /api/email-settings/test` body `{ recipient }` (email_settings:write) - Send a test email through the active provider; returns `{ ok, messageId?, error? }`, surfacing the raw SES/SMTP error on failure
+### Email Settings (Admin only — system_settings:read / system_settings:write)
+**The email slice is the platform's (RETRO-D2, issue #570):** `@marinoscar/platform-api/email`, mounted once in `apps/api/src/platform/email/` (`email.config.ts`, `email.options.ts`: product name and brand colour `#1976d2` from `identity.json`, the jobs rate-limit classifier, `AWS_SES_REGION` as the SES region fallback). It owns the SES and SMTP transports, the `email` row of `system_settings` (`provider`, `enabled`, `fromAddress`, `fromName`, `transports.<id>`), the secrets in the credential store (`smtp/default`, `email_ses/default`), the layout and the template registry, and the Doctor check `email.config`. The admin page is the platform's `EmailSettingsPage` (`@marinoscar/platform-web/email/ui`). Do not look for `src/email`: it is deleted.
 
-When `provider='ses'`, AWS credentials are read from `storage_provider_credentials` (provider='s3') — single source of truth, no duplicate credential storage. The AWS IAM user (the same one used for S3 storage) must additionally have `ses:SendEmail` and `ses:SendRawEmail`. SES reuse assumes REAL AWS keys — if the s3 provider points at a non-AWS/custom endpoint (MinIO/R2), `sesCredentialAvailable` is false and SES won't authenticate. Unverified SES (sandbox) accounts can only send to/from verified identities.
+MemoriaHub registers three templates under PERMANENT names from `apps/api/src/email-templates/` (via `app-registrations/email.ts`, imported before `forRoot`, with an `EmailTemplateDataMap` augmentation): `circle-invitation` (on `POST /api/circles/:id/invites`), `membership-confirmation` (member add / invite claim) and `memory-digest` (the `memory_digest` job, with its per-recipient `List-Unsubscribe` / `List-Unsubscribe-Post` headers, which the platform transports pass through). Every interpolation goes through the `html` tag and every link through `safeUrl`. Broadcast emails use the platform's `broadcast` template. Callers send through `AppEmailSender` (`platform/email/app-email.sender.ts`, imported via `AppEmailModule`): `sendEmail` never throws, `sendEmailAsync` is fire-and-forget (a failed send never blocks or fails the user action), and an unconfigured deployment is a graceful no-op (`email_disabled`). `AppEmailSender` is a `PLATFORM-ADOPTION-SHIM(#570)` (the platform has no send-a-template-to-an-address service outside its notifications channel; RETRO-D3 replaces it).
+- `GET /api/email-settings` (system_settings:read) - The platform admin view: the settings, `transports` per registered transport (defaults filled; the legacy flat `sesRegion`/`smtpHost`/... are a deprecated read view), descriptors, `secretStatuses` (`configured`, a mask hint, never a value), `settingsError`, `version`
+- `PUT /api/email-settings` (system_settings:write) - Merge the settings and `transports.<id>`; write-only secrets in `secrets.<id>.<name>` (blank keeps the stored one); `If-Match` versioning
+- `POST /api/email-settings/test` (system_settings:write) - Send the platform `test-email` to the CALLER's own address (no recipient parameter; stricter than before); always 200 with `{ success, error? }`
+
+**SES keys (decision 1 of #570):** the old SES path borrowed the S3 storage credential at send time; the platform SES transport has its own `accessKeyId` and `email_ses/default` secret, copied ONCE from the S3 key pair by the carry-over below. Rotate both together. The IAM user needs `ses:SendEmail` and `ses:SendRawEmail`; unverified (sandbox) SES accounts can send only to/from verified identities.
+
+**Carry-over after the upgrade:** `npm run email:migrate-settings --workspace=api [-- --apply]` (`scripts/migrate-email-settings.ts`, logic in `src/legacy/email-settings-migration.ts`) writes the platform row and the two secrets from the legacy `global.email.*` block, the inline-encrypted SMTP password and the S3 credential. Dry run by default, set-if-absent (never overwrites what an admin saved), idempotent, legacy keys untouched for rollback. Until it runs, nothing is sent. Runbook: [email configuration](docs/runbooks/email-configuration.md).
 
 ### Media — Geo Services
 - `GET /api/media/geo/reverse?lat=&lng=` - On-demand reverse geocoding; provider resolved per-call from system setting `geo.reverseProvider` (`offline`|`nominatim`|`google`), selected in Admin Settings → Geo (fallback: `GEO_PROVIDER` env var; default `offline`)
@@ -949,7 +953,7 @@ Sub-pages:
 - `/admin/settings/location-groups` — Location Grouping admin (issue #375; gated on `geo_settings:read`, **not** `system_settings:read` like its Media-section neighbours, since the whole feature reuses the `geo_settings:*` pair): one Save covering `features.locationGrouping` plus the whole `locationGrouping.*` namespace, a Suggestions panel that merges a detected cluster into a group with one click, Countries/Regions/Cities tabs over the group list (member/item counts, cover thumbnail, enable toggle, edit, delete), a group editor dialog (canonical name, country scope, `GET /values`-backed member picker, cover picker, and an optional Area block whose radius slider binds its max to the **loaded** `locationGrouping.maxRadiusKm` — a larger value is a 400, never a silent clamp), and a rebuild trigger with `location_group_rebuild` job polling. The member picker surfaces #374's `409` by reading **`details.groupName`** ("Already in group *X*") — never a top-level `groupName`, which `HttpExceptionFilter` strips. **All locations (issue #407):** a fourth section — a searchable, `GET /values`-paginated (50/page) checkbox list of every raw value app-wide (value, country, item count, owning group) — feeds the same `MergeLocationsDialog` used by `/places`' Select mode (see the Media — Explore section above); the tick set is a keyed map, so it survives both a search-term change and a page change, letting an admin tick two values under one search term and two more under another before merging all four at once
 - `/admin/settings/social-media` — global social-media video detection toggle (`features.socialMediaDetection`), OCR/threshold tuning (`socialMedia.*`), global backfill
 - `/admin/settings/geo` — geo provider settings (`geo.provider`, `geo.forwardSearchEnabled`)
-- `/admin/settings/email` — email provider configuration (SES vs SMTP toggle, provider presets, test-connection, masked credentials, enable/disable)
+- `/admin/settings/email` — the platform `EmailSettingsPage` (RETRO-D2): transport (SES or SMTP), sender, write-only secrets, enable/disable, test send to your own address (`system_settings:read`; saving needs `system_settings:write`)
 - `/admin/settings/storage/providers` — storage provider configuration (replaces `/admin/storage-providers`)
 - `/admin/settings/storage/insights` — storage insights dashboard
 - `/admin/settings/jobs` — enrichment job queue (replaces `/admin/jobs`)
@@ -1091,8 +1095,7 @@ Served by the platform host core (`PlatformHostCoreModule`, RETRO-B1 #597; the o
 - `face_settings:write` - Configure face provider credentials and set active detection provider/model (Admin only)
 - `geo_settings:read` - View geo provider config, test provider connectivity, and read location groups / raw location values / group suggestions (Admin only)
 - `geo_settings:write` - Configure geo provider credentials, set active reverse provider, run app-wide geocode backfill, and create/update/delete location groups and their members plus trigger a `location_group_rebuild` (Admin only)
-- `email_settings:read` - View email provider configuration and test connectivity (Admin only)
-- `email_settings:write` - Configure email provider credentials, set active provider, and send test emails (Admin only)
+- `email_settings:read` / `email_settings:write` - **Retired by RETRO-D2 (#570)**: the platform email routes check `system_settings:read` / `system_settings:write`
 - `jobs:read` - View enrichment job queue stats and list jobs (Admin only)
 - `jobs:write` - Retry, reset, and delete enrichment jobs (Admin only); also gates registering/managing a caller's own worker nodes and minting/revoking that owner's durable node credentials (`nod_` tokens, accepted only on `/api/nodes/*` routes) — no separate node permission exists
 - `shares:manage` - Create, list, update expiration, and revoke own public shares (Contributor + Admin)
@@ -1283,14 +1286,9 @@ Note: `DATABASE_URL` is constructed automatically from these variables at runtim
 - `GEO_FORWARD_PROVIDER` - Forward geocoding provider: `nominatim` (default, OSM) or `google`; Google option requires `GOOGLE_MAPS_API_KEY`
 - `GOOGLE_MAPS_API_KEY` - Google Maps API key for forward geocoding via `GEO_FORWARD_PROVIDER=google`; server-side only, never exposed to clients. For **reverse** geocoding the Google API key is stored encrypted in the credential store (`geo_provider/google`) and configured via the Admin UI — this env var does not affect reverse geocoding.
 
-**Email:**
-- `EMAIL_PROVIDER` - Bootstrap default for `email.provider`: `ses` or `smtp`; only seeds the system setting's default before an explicit value is saved via the admin UI (`/admin/settings/email`)
-- `AWS_SES_REGION` - Bootstrap default for `email.sesRegion`; AWS credentials for SES are NOT set via env vars here — they are reused from the S3 storage provider's `storage_provider_credentials` row (see Storage Provider Configuration above)
-- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USE_TLS` / `SMTP_USERNAME` - Bootstrap defaults for the corresponding `email.smtp*` settings
-- `SMTP_PASSWORD` - Bootstrap default for `email.smtpPassword`; encrypted into the setting via `SECRETS_ENCRYPTION_KEY` on first boot, then managed exclusively through the admin UI thereafter
-- `EMAIL_FROM_ADDRESS` / `EMAIL_FROM_NAME` - Bootstrap defaults for `email.fromAddress` / `email.fromName`
-
-**AWS SES IAM note:** the AWS IAM user used for S3 storage must additionally have `ses:SendEmail` and `ses:SendRawEmail` permissions for the `ses` provider to work. SES reuse assumes real AWS keys — if the S3 provider points at a non-AWS/custom endpoint (MinIO/R2), `sesCredentialAvailable` is false and SES cannot authenticate. Unverified SES (sandbox) accounts can only send to/from verified identities.
+**Email:** runtime email configuration has no environment variable (it is the platform `email` row and the credential store, RETRO-D2).
+- `AWS_SES_REGION` - The SES region fallback when the email settings name none (`sesRegionFallback`)
+- `EMAIL_PROVIDER`, `SMTP_HOST` / `SMTP_PORT` / `SMTP_USE_TLS` / `SMTP_USERNAME`, `EMAIL_FROM_ADDRESS` / `EMAIL_FROM_NAME` - **Legacy**: they seed only the read-only legacy `email.*` block of the `global` row that `npm run email:migrate-settings` reads; removed in the cleanup release once the migration is verified. `SMTP_PASSWORD` is not read by anything
 
 **Face Recognition:**
 - `FACE_COMPREFACE_URL` - Base URL of the CompreFace core sidecar (default: `http://compreface-core:3000`); used as the default `baseUrl` for the CompreFace provider. The provider is keyless — no API key is required.
@@ -1510,15 +1508,7 @@ The geo provider is now configurable at runtime in addition to the env vars (env
 
 **Email Settings (System Settings):**
 
-Stored under the `email.*` namespace in `system_settings` JSONB; editable in Admin Settings → Email (`/admin/settings/email`).
-- `email.provider` — `'ses'` | `'smtp'` | `null`, default `null`; selects the active transactional email provider
-- `email.enabled` — boolean, default false; global on/off for sending circle-invitation and membership-confirmation emails
-- `email.sesRegion` — string, nullable; AWS region used for SES sends. AWS credentials themselves are NOT stored here — when `provider='ses'`, credentials are read from `storage_provider_credentials` (provider='s3'), reusing the S3 storage provider's AWS keys rather than duplicating a credential
-- `email.smtpHost`, `email.smtpPort` (default 587), `email.smtpUseTls` (default true), `email.smtpUsername` — SMTP connection settings for the `smtp` provider (nodemailer; Gmail/M365/SendGrid/Mailgun/WorkMail/Custom presets)
-- `email.smtpPassword` — **AES-256-GCM encrypted at rest via `SECRETS_ENCRYPTION_KEY`** (the same key used for AI/Face/Storage/Geo provider credentials); redacted from the generic `GET /api/system-settings` response; surfaced only masked (last-4) via `GET /api/email-settings` as `smtp.passwordLast4`
-- `email.fromAddress`, `email.fromName` — sender identity used on outgoing mail
-
-Two transactional emails are driven by this configuration: circle invitation (on `POST /api/circles/:id/invites`) and circle membership confirmation (on member-add / invite-claim). Both are fire-and-forget — a failed send never blocks or fails the triggering user action — and gracefully no-op when `email.enabled` is false or `email.provider` is unset.
+The platform `email` row of `system_settings` (not a namespace of the `global` document; RETRO-D2), edited only through `/admin/settings/email` (`PUT /api/email-settings`): `provider` (a transport id: `ses` | `smtp` | `null`), `enabled`, `fromAddress`, `fromName`, `transports.smtp` (`host`, `port`, `useTls`, `username`), `transports.ses` (`region`, `accessKeyId`). Secrets live in the credential store (`smtp/default`, `email_ses/default`), never in a row. The legacy `email.*` keys of the `global` row (including the inline-encrypted `smtpPassword`) are kept read-only for rollback and as the source of `npm run email:migrate-settings`; nothing sends with them.
 
 **Storage Insights:**
 

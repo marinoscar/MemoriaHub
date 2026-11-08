@@ -25,7 +25,7 @@ import { LocationInferenceModule } from './location-inference/location-inference
 import { ReviewRunsModule } from './review-runs/review-runs.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
-import { EmailModule } from './email/email.module';
+import { emailModule } from './platform/email/email.config';
 import { StorageSettingsModule } from './storage-settings/storage-settings.module';
 import { ShareModule } from './share/share.module';
 import { SocialMediaModule } from './social-media/social-media.module';
@@ -133,7 +133,11 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     ReviewRunsModule,
     MetadataModule,
     GeoModule,
-    EmailModule,
+    // The platform email slice (RETRO-D2): transports, the `email` settings row and
+    // `/api/email-settings`, the template registry (with this app's three templates,
+    // registered by `app-registrations/email.ts`) and the Doctor check `email.config`.
+    // Senders import `AppEmailModule`, which re-exports this same object.
+    emailModule,
     StorageSettingsModule,
     ShareModule,
     SocialMediaModule,
