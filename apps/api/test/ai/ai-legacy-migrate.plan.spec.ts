@@ -38,6 +38,7 @@ function input(rows: LegacyAiKeyFacts[], over: Partial<AiKeyPlanInput> = {}): Ai
     existingUserIds: new Set([EDITOR]),
     fallbackActorId: ADMIN,
     storedPolicy: {},
+    storedSlots: new Set(['openai', 'anthropic']),
     ...over,
   };
 }
@@ -66,6 +67,18 @@ describe('planAiKeyImport', () => {
     const plan = planAiKeyImport(input([row({ existing: 'same' })], { replace: true }));
     expect(plan.entries[0]).toMatchObject({ outcome: 'skipped_existing', writeKey: false, slot: null });
     expect(plan.policy).toEqual({});
+  });
+
+  it('finishes an interrupted earlier run: the key is there but the slot was never stored', () => {
+    const plan = planAiKeyImport(input([row({ existing: 'same', enabled: true })], { storedSlots: new Set() }));
+    expect(plan.entries[0]).toMatchObject({
+      outcome: 'imported',
+      reason: 'key_present_slot_completed',
+      writeKey: false,
+      writeSlot: true,
+      slot: { enabled: true },
+    });
+    expect(plan.policy).toEqual({ keyPolicy: DEPLOYMENT_KEY_POLICY, deploymentKeyServesOrgs: true });
   });
 
   it('keeps a different platform key unless --replace', () => {

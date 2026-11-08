@@ -97,9 +97,10 @@ export interface AiKeyImportResult {
   exitCode: number;
 }
 
-async function readAiNamespace(prisma: PrismaService): Promise<Record<string, unknown>> {
+async function readAiNamespace(prisma: PrismaService): Promise<Record<string, unknown> | null> {
   const row = await prisma.systemSettings.findUnique({ where: { key: SYSTEM_SETTINGS_ROW_KEY } });
-  const value = isRecord(row?.value) ? row!.value : {};
+  if (!row) return null;
+  const value = isRecord(row.value) ? row.value : {};
   return isRecord(value['ai']) ? (value['ai'] as Record<string, unknown>) : {};
 }
 
@@ -136,6 +137,13 @@ async function updateAiNamespace(
 export async function runAiKeyImport(deps: AiKeyImportDeps, opts: AiKeyImportOptions): Promise<AiKeyImportResult> {
   const { prisma, credentials } = deps;
   const log = deps.log ?? (() => undefined);
+
+  // Checked before anything is written, so an apply never stores a key it cannot finish.
+  const storedAi = await readAiNamespace(prisma);
+  if (opts.apply && storedAi === null) {
+    throw new Error('The system_settings "global" row does not exist yet; start the API once, then re-run.');
+  }
+  const ai = storedAi ?? {};
 
   const rows = await prisma.aiProviderCredential.findMany({ orderBy: { provider: 'asc' } });
 
@@ -176,7 +184,7 @@ export async function runAiKeyImport(deps: AiKeyImportDeps, opts: AiKeyImportOpt
   const admin = adminEmail
     ? await prisma.user.findFirst({ where: { email: { equals: adminEmail, mode: 'insensitive' } }, select: { id: true } })
     : null;
-  const ai = await readAiNamespace(prisma);
+  const storedProviders = isRecord(ai['providers']) ? (ai['providers'] as Record<string, unknown>) : {};
 
   const plan = planAiKeyImport({
     rows: facts,
@@ -186,6 +194,7 @@ export async function runAiKeyImport(deps: AiKeyImportDeps, opts: AiKeyImportOpt
     existingUserIds: new Set(users.map((u) => u.id)),
     fallbackActorId: admin?.id ?? null,
     storedPolicy: { keyPolicy: ai['keyPolicy'], deploymentKeyServesOrgs: ai['deploymentKeyServesOrgs'] },
+    storedSlots: new Set(Object.keys(storedProviders).filter((id) => isRecord(storedProviders[id]))),
   });
 
   const entries = plan.entries.map((e) => ({ ...e }));
@@ -193,22 +202,24 @@ export async function runAiKeyImport(deps: AiKeyImportDeps, opts: AiKeyImportOpt
 
   if (opts.apply) {
     for (const e of entries) {
-      if (!e.writeKey) continue;
-      const plaintext = plaintexts.get(e.provider);
-      if (!plaintext) {
-        Object.assign(e, { outcome: 'failed', reason: 'key_unavailable', writeKey: false });
-        continue;
-      }
+      if (!e.writeKey && !e.writeSlot) continue;
       try {
-        const label = aiCredentialLabel(getAiProviderDefinition(e.provider)?.label ?? e.provider);
-        await credentials.setSecret(AI_CREDENTIAL_PURPOSE, aiCredentialName(e.provider), plaintext, {
-          label,
-          updatedByUserId: e.actorUserId,
-        });
-        const back = await credentials.getSecret(AI_CREDENTIAL_PURPOSE, aiCredentialName(e.provider));
-        if (back !== plaintext) {
-          Object.assign(e, { outcome: 'failed', reason: 'round_trip_mismatch', writeKey: false });
-          continue;
+        if (e.writeKey) {
+          const plaintext = plaintexts.get(e.provider);
+          if (!plaintext) {
+            Object.assign(e, { outcome: 'failed', reason: 'key_unavailable', writeKey: false, writeSlot: false });
+            continue;
+          }
+          const label = aiCredentialLabel(getAiProviderDefinition(e.provider)?.label ?? e.provider);
+          await credentials.setSecret(AI_CREDENTIAL_PURPOSE, aiCredentialName(e.provider), plaintext, {
+            label,
+            updatedByUserId: e.actorUserId,
+          });
+          const back = await credentials.getSecret(AI_CREDENTIAL_PURPOSE, aiCredentialName(e.provider));
+          if (back !== plaintext) {
+            Object.assign(e, { outcome: 'failed', reason: 'round_trip_mismatch', writeKey: false, writeSlot: false });
+            continue;
+          }
         }
         const slot = e.slot!;
         await updateAiNamespace(
@@ -221,15 +232,17 @@ export async function runAiKeyImport(deps: AiKeyImportDeps, opts: AiKeyImportOpt
           },
           e.actorUserId,
         );
-        await prisma.auditEvent.create({
-          data: {
-            actorUserId: e.actorUserId,
-            action: 'ai_config:set_key',
-            targetType: 'ai_config',
-            targetId: e.provider,
-            meta: { provider: e.provider, source: 'legacy_import', replaced: e.replacesExisting },
-          },
-        });
+        if (e.writeKey) {
+          await prisma.auditEvent.create({
+            data: {
+              actorUserId: e.actorUserId,
+              action: 'ai_config:set_key',
+              targetType: 'ai_config',
+              targetId: e.provider,
+              meta: { provider: e.provider, source: 'legacy_import', replaced: e.replacesExisting },
+            },
+          });
+        }
         log(`ai:migrate-keys provider=${e.provider} outcome=${e.outcome} last4=${e.last4}`);
       } catch (err) {
         // The error class only: a driver message could echo a parameter.
@@ -237,6 +250,7 @@ export async function runAiKeyImport(deps: AiKeyImportDeps, opts: AiKeyImportOpt
           outcome: 'failed',
           reason: `write_failed:${err instanceof Error ? err.constructor.name : 'unknown'}`,
           writeKey: false,
+          writeSlot: false,
         });
       }
     }

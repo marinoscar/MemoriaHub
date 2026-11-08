@@ -73,6 +73,8 @@ export interface AiKeyPlanInput {
   fallbackActorId: string | null;
   /** The stored `ai` namespace's policy fields (raw, may be absent). */
   storedPolicy: { keyPolicy?: unknown; deploymentKeyServesOrgs?: unknown };
+  /** Providers whose `ai.providers.<id>` slot is stored in the row (not only defaulted on read). */
+  storedSlots: ReadonlySet<string>;
 }
 
 export interface AiKeyPlanEntry {
@@ -84,6 +86,8 @@ export interface AiKeyPlanEntry {
   reason: string | null;
   /** Write the key (an `imported` entry). */
   writeKey: boolean;
+  /** Write the slot (with the key, or alone to finish an interrupted earlier run). */
+  writeSlot: boolean;
   /** The platform key it overwrites (a `--replace` of a different key). */
   replacesExisting: boolean;
   /** The slot fields to write with the key. */
@@ -113,6 +117,7 @@ function entry(
     outcome,
     reason,
     writeKey: false,
+    writeSlot: false,
     replacesExisting: false,
     slot: null,
     actorUserId: null,
@@ -146,30 +151,40 @@ export function planAiKeyImport(input: AiKeyPlanInput): AiKeyPlan {
         continue;
       }
     }
+    const actorUserId =
+      facts.updatedByUserId && input.existingUserIds.has(facts.updatedByUserId)
+        ? facts.updatedByUserId
+        : input.fallbackActorId;
+    const slot = { enabled: facts.enabled, ...(baseUrl ? { baseUrl } : {}) };
     if (facts.existing === 'same') {
-      entries.push(entry(facts, 'skipped_existing', 'same_key_already_stored'));
+      // The key is there; an earlier run that stopped between the key and the slot left the slot
+      // at its read-time default (off). Finish it, once: a stored slot is never touched again.
+      if (!input.storedSlots.has(facts.provider)) {
+        entries.push(
+          entry(facts, 'imported', 'key_present_slot_completed', { writeSlot: true, slot, actorUserId }),
+        );
+      } else {
+        entries.push(entry(facts, 'skipped_existing', 'same_key_already_stored'));
+      }
       continue;
     }
     if (facts.existing === 'different' && !input.replace) {
       entries.push(entry(facts, 'skipped_existing', 'different_key_kept_use_replace'));
       continue;
     }
-    const actorUserId =
-      facts.updatedByUserId && input.existingUserIds.has(facts.updatedByUserId)
-        ? facts.updatedByUserId
-        : input.fallbackActorId;
     entries.push(
       entry(facts, 'imported', facts.existing === 'different' ? 'replaced_existing_key' : null, {
         writeKey: true,
+        writeSlot: true,
         replacesExisting: facts.existing === 'different',
-        slot: { enabled: facts.enabled, ...(baseUrl ? { baseUrl } : {}) },
+        slot,
         actorUserId,
       }),
     );
   }
 
   const policy: AiKeyPlan['policy'] = {};
-  if (entries.some((e) => e.writeKey)) {
+  if (entries.some((e) => e.writeKey || e.writeSlot)) {
     if (input.storedPolicy.keyPolicy !== DEPLOYMENT_KEY_POLICY) policy.keyPolicy = DEPLOYMENT_KEY_POLICY;
     if (input.storedPolicy.deploymentKeyServesOrgs === undefined) policy.deploymentKeyServesOrgs = true;
   }
