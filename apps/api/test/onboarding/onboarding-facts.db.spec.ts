@@ -48,6 +48,11 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
   });
 
   afterAll(async () => {
+    // Children first: `albums` and `people` reference the circle and the users without a cascade.
+    await prisma.person.deleteMany({ where: { circleId } });
+    await prisma.album.deleteMany({ where: { circleId } });
+    await prisma.circleInvite.deleteMany({ where: { circleId } });
+    await prisma.circleMember.deleteMany({ where: { circleId } });
     await prisma.circle.deleteMany({ where: { id: circleId } });
     await prisma.user.deleteMany({ where: { id: { in: [userId, otherId] } } });
     await prisma.$disconnect();
