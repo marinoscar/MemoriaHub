@@ -25,6 +25,7 @@ import { APP_DEPLOY_CHECKS } from './extensions/deploy-checks.js';
 import { APP_DEPLOY_STEPS } from './extensions/deploy-steps.js';
 import { APP_ENV_SPEC } from './extensions/env-spec.js';
 import { APP_TUI_MENU, PLATFORM_HIDDEN_SCREENS } from './tui/menu.js';
+import { APP_TUI_MENU_ROOT } from './tui/menu-slots.js';
 import { APP_TUI_SCREENS } from './tui/screens.js';
 import { APP_TUI_SELECTIONS, APP_TUI_STATE_LOADERS } from './tui/app-state.js';
 import { BRAND_HEX } from './brand.js';
@@ -126,6 +127,7 @@ export const APP_CLI_OPTIONS: CreateCliOptions = {
   tuiScreens: [...APP_TUI_SCREENS],
   tuiMenu: [...APP_TUI_MENU],
   tuiHiddenScreens: [...PLATFORM_HIDDEN_SCREENS],
+  tuiMenuRoot: APP_TUI_MENU_ROOT,
   tuiSelections: [...APP_TUI_SELECTIONS],
   tuiStateLoaders: [...APP_TUI_STATE_LOADERS],
   tuiTheme: { brand: BRAND_HEX },
