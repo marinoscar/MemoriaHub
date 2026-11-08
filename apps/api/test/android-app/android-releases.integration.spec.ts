@@ -129,7 +129,7 @@ function installReleaseTable(prisma: any, users: () => Map<string, Row>) {
     if (rows.some((r) => r.packageName === data.packageName && r.versionCode === data.versionCode)) {
       throw unique('android_app_releases_package_name_version_code_key');
     }
-    if (data.isCurrent && rows.some((r) => r.isCurrent)) throw unique('android_app_releases_one_current_uniq_idx');
+    if (data.isCurrent && rows.some((r) => r.isCurrent)) throw unique('mh_legacy_android_app_releases_one_current_uniq_idx');
     const row = { notes: null, createdAt: new Date(Date.now() + rows.length), ...data };
     rows.push(row);
     return withUploader(row, include);
@@ -143,7 +143,7 @@ function installReleaseTable(prisma: any, users: () => Map<string, Row>) {
     const row = rows.find((r) => matches(r, where));
     if (!row) throw new Error('not found');
     if (data.isCurrent && rows.some((r) => r.isCurrent && r !== row)) {
-      throw unique('android_app_releases_one_current_uniq_idx');
+      throw unique('mh_legacy_android_app_releases_one_current_uniq_idx');
     }
     Object.assign(row, data);
     return withUploader(row, include);

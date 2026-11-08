@@ -25,6 +25,7 @@ import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.ser
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import type { EnrichmentJob } from '@prisma/client';
 import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
+import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -127,6 +128,7 @@ describe('ThumbnailNodePersistService', () => {
       providers: [
         ThumbnailNodePersistService,
         { provide: PrismaService, useValue: mockPrisma },
+        defaultOrgIdProvider,
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: MediaMetadataSyncService, useValue: mockSync },
         { provide: ThumbnailPruneService, useValue: mockPrune },

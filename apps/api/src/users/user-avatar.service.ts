@@ -24,6 +24,7 @@ import { prepareImageForProcessing } from '../storage/processing/image-orientati
 import { UserSettingsService } from '../settings/user-settings/user-settings.service';
 import { RequestUser } from '../auth/interfaces/authenticated-user.interface';
 import { UpdateUserProfileDto, UserProfileDto } from './dto/user-profile.dto';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -140,6 +141,7 @@ export class UserAvatarService {
     private readonly resolver: StorageProviderResolver,
     private readonly circleMembership: CircleMembershipService,
     private readonly userSettings: UserSettingsService,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -688,6 +690,7 @@ export class UserAvatarService {
 
     await this.prisma.storageObject.create({
       data: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         name: `avatar-${userId}.jpg`,
         size: BigInt(jpeg.length),
         mimeType: 'image/jpeg',

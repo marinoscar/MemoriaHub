@@ -13,6 +13,7 @@ import {
 } from '../../src/common/fastify-setup';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { prismaMock } from '../mocks/prisma.mock';
+import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
 import { OfflineGeoLocationProvider } from '../../src/media/geo/offline-geo-location.provider';
 
 /**
@@ -122,6 +123,9 @@ export async function createTestApp(
     moduleFixture = await builder
       .overrideProvider(PrismaService)
       .useValue(prismaMock)
+      // PLATFORM-ADOPTION-SHIM(RETRO-D1): no organizations table behind the mock.
+      .overrideProvider(DefaultOrgId)
+      .useValue({ get: async () => '00000000-0000-4000-8000-0000000000d0' })
       .compile();
   } else {
     // Real database (for true E2E tests).

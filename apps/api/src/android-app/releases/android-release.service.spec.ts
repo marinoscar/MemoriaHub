@@ -339,7 +339,7 @@ describe('AndroidReleaseService', () => {
     it('maps a P2002 on the one-current index to 409 RELEASE_CURRENT_CONFLICT', async () => {
       const { service, prisma } = setup();
       prisma.androidAppRelease.findUnique.mockResolvedValue(row());
-      prisma.$transaction.mockRejectedValue(p2002('android_app_releases_one_current_uniq_idx'));
+      prisma.$transaction.mockRejectedValue(p2002('mh_legacy_android_app_releases_one_current_uniq_idx'));
 
       const error = await rejection(service.makeCurrent(RELEASE_ID, USER));
       expect(error).toBeInstanceOf(ConflictException);
@@ -490,9 +490,9 @@ describe('AndroidReleaseService', () => {
 
   describe('isUniqueViolationOn', () => {
     it('recognises the index by name and nothing else', () => {
-      expect(isUniqueViolationOn(p2002('android_app_releases_one_current_uniq_idx'), 'android_app_releases_one_current_uniq_idx')).toBe(true);
-      expect(isUniqueViolationOn(p2002('android_app_releases_package_name_version_code_key'), 'android_app_releases_one_current_uniq_idx')).toBe(false);
-      expect(isUniqueViolationOn(new Error('x'), 'android_app_releases_one_current_uniq_idx')).toBe(false);
+      expect(isUniqueViolationOn(p2002('mh_legacy_android_app_releases_one_current_uniq_idx'), 'mh_legacy_android_app_releases_one_current_uniq_idx')).toBe(true);
+      expect(isUniqueViolationOn(p2002('android_app_releases_package_name_version_code_key'), 'mh_legacy_android_app_releases_one_current_uniq_idx')).toBe(false);
+      expect(isUniqueViolationOn(new Error('x'), 'mh_legacy_android_app_releases_one_current_uniq_idx')).toBe(false);
     });
   });
 });

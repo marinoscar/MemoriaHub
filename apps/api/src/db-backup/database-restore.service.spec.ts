@@ -70,8 +70,8 @@ function label(sql: string): string {
   if (s.startsWith('DROP DATABASE')) return 'drop-database';
   if (s.startsWith('ALTER DATABASE')) return 'rename-database';
   if (s.includes('pg_terminate_backend')) return 'terminate';
-  if (s.startsWith('INSERT INTO database_backup_runs')) return 'catalog-insert';
-  if (s.startsWith('UPDATE database_backup_runs')) return 'catalog-update';
+  if (s.startsWith('INSERT INTO mh_legacy_database_backup_runs')) return 'catalog-insert';
+  if (s.startsWith('UPDATE mh_legacy_database_backup_runs')) return 'catalog-update';
   return 'query';
 }
 
@@ -585,7 +585,7 @@ describe('restore execution and swap', () => {
     await execute(harness);
 
     const inserts = harness.h.queries.filter((q) =>
-      q.text.startsWith('INSERT INTO database_backup_runs'),
+      q.text.startsWith('INSERT INTO mh_legacy_database_backup_runs'),
     );
     expect(inserts).toHaveLength(2);
     // Re-inserted into the NEWLY-renamed live database, not the scratch name.

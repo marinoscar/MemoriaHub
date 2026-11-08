@@ -20,6 +20,7 @@ import { STORAGE_PROVIDER, StorageProvider } from '../../providers/storage-provi
 import { StorageProviderResolver } from '../../providers/storage-provider.resolver';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { streamToBuffer, streamToTempFile } from './stream-utils';
+import { DefaultOrgId } from '../../../common/tenancy/default-org-id';
 
 /**
  * ThumbnailProcessor — generates a JPEG thumbnail (≤800 px on each side, by
@@ -94,6 +95,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
     private readonly storageProvider: StorageProvider,
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {
     this.maxDim = parseInt(process.env.THUMBNAIL_MAX_DIM ?? '800', 10);
     this.quality = parseInt(process.env.THUMBNAIL_QUALITY ?? '85', 10);
@@ -253,6 +255,7 @@ export class ThumbnailProcessor implements ObjectProcessor {
         updatedAt: new Date(),
       },
       create: {
+        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
         name: `thumb-${object.name}`,
         size: BigInt(thumbBuffer.length),
         mimeType: 'image/jpeg',

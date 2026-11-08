@@ -1,6 +1,6 @@
 /**
  * Real-Postgres tier (issue #502): proves the raw-SQL partial unique index
- * `android_app_releases_one_current_uniq_idx` (intentional schema drift, see
+ * `mh_legacy_android_app_releases_one_current_uniq_idx` (intentional schema drift, see
  * the AndroidAppRelease model comment) allows at most ONE current release
  * deployment-wide, and that the CHECK constraints on media_sync_runs hold.
  *

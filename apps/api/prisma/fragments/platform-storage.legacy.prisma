@@ -24,6 +24,10 @@ model StorageObject {
   s3UploadId      String?             @map("s3_upload_id") // S3 multipart upload ID
   metadata        Json? // JSONB for flexible metadata
   uploadedById    String?             @map("uploaded_by_id") @db.Uuid
+  // PLATFORM-ADOPTION-SHIM(RETRO-D1): platform migration 0025 made storage_objects.org_id
+  // NOT NULL (forced row-level security). The legacy storage service writes it from
+  // DefaultOrgId until RETRO-D1 replaces this model with the platform's.
+  orgId           String              @map("org_id") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -46,6 +50,8 @@ model StorageObjectChunk {
   eTag       String   @map("e_tag") // S3 ETag for verification
   size       BigInt // Chunk size in bytes
   uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+  // PLATFORM-ADOPTION-SHIM(RETRO-D1): storage_object_chunks.org_id is NOT NULL since platform 0025.
+  orgId      String   @map("org_id") @db.Uuid
 
   // Relations
   object StorageObject @relation(fields: [objectId], references: [id], onDelete: Cascade)

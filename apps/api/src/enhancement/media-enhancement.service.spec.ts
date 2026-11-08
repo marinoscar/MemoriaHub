@@ -54,6 +54,7 @@ import { BulkEnhance } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
 import { ListEnhancementsQuery } from './dto/list-enhancements-query.dto';
 import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 /**
  * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
@@ -275,6 +276,7 @@ describe('MediaEnhancementService', () => {
       providers: [
         MediaEnhancementService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } },
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
