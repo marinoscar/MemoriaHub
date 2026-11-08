@@ -34,6 +34,11 @@
 // are registered, every sampled template (the platform's plus this app's three) renders
 // a complete document with its data escaped, and no email settings shape carries a secret.
 //
+// `ai-*` (`@marinoscar/platform-api/ai/testing`, RETRO-E1): `ai-no-sdk-leak` (no provider SDK
+// imported in apps/api, apps/cli or apps/web, none declared by an app manifest) and
+// `ai-orchestration-boundary` (no orchestration library anywhere) run; the five suites that boot
+// the AI runtime against an app fixture are wired and opted out with their reasons (RETRO-E4).
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -44,6 +49,7 @@ import { join } from 'node:path';
 
 import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
 
+import '@marinoscar/platform-api/ai/testing';
 import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
@@ -68,6 +74,8 @@ import '../src/platform/email/email.config';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
+
+const REPO_ROOT = join(__dirname, '..', '..', '..');
 
 runPlatformConformance({
   sourceRoots: [join(__dirname, '..', 'src')],
@@ -133,6 +141,85 @@ runPlatformConformance({
     // global JWT guard (every route declares its own @Auth()/@Public()) and no
     // global throttler. If one is ever added, list it here with a reason.
     host: { rootModule: AppModule },
+
+    // The AI slice (RETRO-E1, #595). The two static suites run.
+    //   - ai-no-sdk-leak: no provider SDK is imported anywhere in the app trees (`providerDirs: []`,
+    //     MemoriaHub registers no provider of its own) and no app manifest declares one; the SDKs
+    //     are declared only by the two platform packages that own them. NOT scanned:
+    //     `packages/enrichment-compute`, the worker-node compute package that still imports the
+    //     `openai` and `@anthropic-ai/sdk` SDKs for the node-side `auto_tagging` /
+    //     `video_auto_tagging` calls under a brokered per-job key (PLATFORM-ADOPTION-SHIM(#1083):
+    //     the platform's node credential delivery, EnterpriseAppBase #1083, is unreleased; the node
+    //     compute moves server-side or onto platform executors in RETRO-C4/C10).
+    //   - ai-orchestration-boundary: no orchestration library anywhere (`allowedRoots: {}`).
+    aiNoSdkLeak: {
+      apiTrees: [
+        { name: 'apps/api', root: join(REPO_ROOT, 'apps', 'api', 'src'), minFiles: 500 },
+        { name: 'apps/cli', root: join(REPO_ROOT, 'apps', 'cli', 'src'), minFiles: 50 },
+      ],
+      webTrees: [{ name: 'apps/web', root: join(REPO_ROOT, 'apps', 'web', 'src'), minFiles: 200 }],
+      providerDirs: [],
+      sdkOwner: [
+        {
+          manifest: join(REPO_ROOT, 'node_modules', '@marinoscar', 'platform-ai-providers', 'package.json'),
+          declares: ['openai', '@anthropic-ai/sdk'],
+        },
+        {
+          manifest: join(REPO_ROOT, 'node_modules', '@marinoscar', 'platform-api', 'package.json'),
+          declares: ['openai', '@anthropic-ai/sdk'],
+        },
+      ],
+      noSdkManifests: [
+        join(REPO_ROOT, 'package.json'),
+        join(REPO_ROOT, 'apps', 'api', 'package.json'),
+        join(REPO_ROOT, 'apps', 'web', 'package.json'),
+        join(REPO_ROOT, 'apps', 'cli', 'package.json'),
+        join(REPO_ROOT, 'packages', 'shared', 'package.json'),
+      ],
+    },
+    aiOrchestrationBoundary: {
+      apiSourceRoots: [join(REPO_ROOT, 'apps', 'api', 'src'), join(REPO_ROOT, 'apps', 'cli', 'src')],
+      webSourceRoots: [join(REPO_ROOT, 'apps', 'web', 'src')],
+      packageJsonPaths: [
+        join(REPO_ROOT, 'package.json'),
+        join(REPO_ROOT, 'apps', 'api', 'package.json'),
+        join(REPO_ROOT, 'apps', 'web', 'package.json'),
+        join(REPO_ROOT, 'apps', 'cli', 'package.json'),
+      ],
+      allowedRoots: {},
+    },
+    // The five suites that boot the AI runtime need an app fixture (`AiConformanceFixture`: an app
+    // with the fake provider registered, a user factory, the role-to-permission map). RETRO-E4
+    // builds it and turns them on, with every MemoriaHub AI call on `AiService` by then (E2).
+    aiKillSwitch: {
+      skip:
+        'RETRO-E4 builds the AiConformanceFixture these runtime suites boot. Until RETRO-E2 no MemoriaHub ' +
+        'feature calls the platform runtime, so the kill switch governs only the platform routes, which ' +
+        'test/ai/ai-platform-mount.integration.spec.ts checks (AI_DISABLED while off; admin routes not gated).',
+    },
+    aiRbacMatrix: {
+      skip:
+        'RETRO-E4 builds the AiConformanceFixture. The AI permissions are registered (permissions.ts, ' +
+        '`ai` slice) and test/ai/ai-platform-mount.integration.spec.ts checks ai_config:read on /api/admin/ai.',
+    },
+    aiSecretEgress: {
+      skip:
+        'RETRO-E4 builds the AiConformanceFixture. Known gap it would report: worker nodes still receive a ' +
+        'transient per-job provider key for auto_tagging, video_auto_tagging and geocode from ' +
+        'POST /api/nodes/:id/jobs/:jobId/credentials (PLATFORM-ADOPTION-SHIM(#1083): the platform node ' +
+        'credential delivery, EnterpriseAppBase #1083, is unreleased; RETRO-C4 decides server-only).',
+    },
+    aiKeyPolicy: {
+      skip:
+        'RETRO-E4 builds the AiConformanceFixture; the deployment keys move into the platform store in ' +
+        'RETRO-E3 (until then MemoriaHub reads ai_provider_credentials through the legacy adapter).',
+    },
+    aiJobsServerOnly: {
+      skip:
+        'RETRO-E4 builds the AiConformanceFixture. MemoriaHub adds no ai.* job type (the platform ones are server-only); its node-claimable ' +
+        'AI types (auto_tagging, video_auto_tagging) keep their permanent non-ai.* type strings and the ' +
+        'brokered-key node path (PLATFORM-ADOPTION-SHIM(#1083), EnterpriseAppBase #1083 unreleased; RETRO-C4).',
+    },
 
     // Rule 3 of the Doctor check contract (RETRO-B1b, #602): every registered
     // check is read-only. Suite id: `doctor-read-only`. The checks are DISCOVERED
