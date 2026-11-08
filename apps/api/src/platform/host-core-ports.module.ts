@@ -2,26 +2,25 @@
 // Ports the host core needs from slices MemoriaHub has not adopted yet
 // =============================================================================
 //
-// PlatformHostCoreModule is written against the settings and Doctor slices:
+// PlatformHostCoreModule is written against the settings slice:
 // `MaintenanceModeService` reads and patches the `maintenance` namespace
-// through the platform `SystemSettingsService`, and the host's generic Doctor
-// checks register with the platform `DoctorCheckRegistry`. MemoriaHub adopts
-// those slices in RETRO-B3 and RETRO-B1b, and mounting them early would add
-// their routes (`/api/system-settings`, `/api/admin/doctor`) on top of the
-// app's own. So this global module supplies exactly what the host core injects:
+// through the platform `SystemSettingsService`. MemoriaHub adopts that slice in
+// RETRO-B3, and mounting it early would add `/api/system-settings` on top of the
+// app's own. So this global module supplies exactly what the host core injects
+// (the Doctor registries it also needs come from `DoctorModule.forRoot`, mounted
+// by RETRO-B1b in `../doctor/doctor.config.ts`):
 //
 //   SystemSettingsService (platform class token)
 //       -> `HostSystemSettingsShim`, three methods over the app's own
 //          `SystemSettingsService` (which owns the `system_settings` `global`
 //          row and its `maintenance.*` / `databaseBackup.*` keys, byte for byte
 //          what the platform namespace stores).
-//   DoctorCheckRegistry, SupportBundleRegistry, EgressRegistry
-//       -> the platform classes themselves, so the host's checks register and
-//          About can contribute its support-bundle section; nothing serves
-//          them until RETRO-B1b mounts DoctorModule.
 //
-// PLATFORM-ADOPTION-SHIM(#597): removed by RETRO-B3 (settings token) and
-// RETRO-B1b (registry; DoctorModule.forRoot provides its own).
+// Reads go through `getSettings({ readOnly: true })`: the host's Doctor checks
+// (`core.deployment-mode`, `maintenance.mode`) call these, and a Doctor check
+// must not seed a missing settings row.
+//
+// PLATFORM-ADOPTION-SHIM(#597): removed by RETRO-B3 (settings token).
 // =============================================================================
 
 import { Global, Injectable, Module } from '@nestjs/common';

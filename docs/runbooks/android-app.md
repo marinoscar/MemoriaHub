@@ -157,7 +157,7 @@ Other makers have similar switches; the community list at dontkillmyapp.com trac
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| A large video never finishes on the **local** storage provider | The local provider has no presigned URLs, so each part goes through the API's own part route. The reverse proxy must allow a part (64 MB) through, and the API must be reachable for the whole transfer | Use the shipped nginx files (`infra/nginx/nginx.conf` and `nginx.prod.conf` carry the part-upload location). With a custom proxy, allow `PUT /api/storage/objects/<id>/upload/parts/<n>` bodies of at least the part size and disable request buffering. The Doctor check `android.uploadPath` confirms the provider can take phone parts |
+| A large video never finishes on the **local** storage provider | The local provider has no presigned URLs, so each part goes through the API's own part route. The reverse proxy must allow a part (64 MB) through, and the API must be reachable for the whole transfer | Use the shipped nginx files (`infra/nginx/nginx.conf` and `nginx.prod.conf` carry the part-upload location). With a custom proxy, allow `PUT /api/storage/objects/<id>/upload/parts/<n>` bodies of at least the part size and disable request buffering. The Doctor check `memoriahub.android.upload-path` confirms the provider can take phone parts |
 | The run ends with `UPLOAD_PARTS_MISSING` or `UPLOAD_SESSION_INVALID` | The server lost a part or forgot the upload session (a restart, a purge, a provider change) | Nothing to do: the app re-sends the missing parts, or starts that file over, on its own. If it repeats, check storage health and the **Upload backlog** diagnostic |
 | `TARGET_CIRCLE_FORBIDDEN` (check `upload.target`, run error code, files blocked) | The target circle was changed to one where the account is no longer a collaborator, or the account lost `media:write` | On the web, Settings, then Media sync, choose a circle where you are a collaborator or admin. Then **Retry failed** |
 | Files show **Blocked** | A file failed five times, or the server refused it permanently (for example a 4xx other than a retryable one). Blocked files wait for a manual retry | Read the error on the row (Hub, then **Files**, then **Blocked**), fix the cause, then **Retry** that row or **Retry blocked**. The web's **Retry failed** also re-queues blocked files |
@@ -204,7 +204,7 @@ Each row is one self-test check on the Diagnostics screen. **Warn** and **fail**
 | `upload.stalled` | Warns | A file has been uploading for over an hour with no progress | **Retry failed**; if it repeats on a big file, see the local-provider row in [section 8](#8-upload-problems) |
 | `upload.target` | Fails | The latest run stopped on `TARGET_CIRCLE_FORBIDDEN` (paused and skipped runs are ignored) | Choose a different target circle on the web ([section 8](#8-upload-problems)) |
 | `storage.space` | Warns under 500 MB free | Hashing and temporary files need room | Free some space on the phone |
-| `twa.verification` | Warns (never fails) | `/.well-known/assetlinks.json` does not list this package and signing key, could not be fetched, or Chrome cached an old answer. The app still works with a URL bar | Trust the build ([section 4](#4-make-the-app-open-full-screen)); check the `curl` output; reopen the app. The Doctor check `android.assetlinks` shows the same on the server |
+| `twa.verification` | Warns (never fails) | `/.well-known/assetlinks.json` does not list this package and signing key, could not be fetched, or Chrome cached an old answer. The app still works with a URL bar | Trust the build ([section 4](#4-make-the-app-open-full-screen)); check the `curl` output; reopen the app. The Doctor check `memoriahub.android.assetlinks` shows the same on the server |
 
 Server-side symptoms:
 
@@ -220,20 +220,20 @@ Server-side symptoms:
 
 ## 11. The Doctor `android` section
 
-Admin, then Settings, then **Doctor** (`/admin/settings/doctor`) has an **Android app** section with four checks. It needs no phone to be open; it reads the server's view. See the [Doctor spec](../specs/doctor.md).
+Admin, then Settings, then **Doctor** (`/admin/settings/doctor`) has an **Android app** category with four checks (ids `memoriahub.android.*`; before the platform Doctor they were `android.assetlinks`, `android.releases`, `android.mediaSync` and `android.uploadPath`). It needs no phone to be open; it reads the server's view. In the table, Warning is the platform's `warn`, Error is `fail`, OK is `pass` and Skipped is `skip`. See the [Doctor spec](../specs/doctor.md).
 
 | Check | Status | Meaning and fix |
 |---|---|---|
-| `android.assetlinks` | Skipped | No active phone has reported its signing key yet |
+| `memoriahub.android.assetlinks` | Skipped | No active phone has reported its signing key yet |
 | | Warning | A phone reported a package and signing key that is not in the trusted list (up to 3 are named). Trust it at Admin, then Settings, then Android app ([section 4](#4-make-the-app-open-full-screen)) |
 | | OK | Every reported package and key is trusted |
-| `android.releases` | Skipped | No active phone |
+| `memoriahub.android.releases` | Skipped | No active phone |
 | | Warning | Phones are paired but no release is current. Publish one ([release runbook](android-release.md)) |
 | | OK | A release is current; the message says how many phones are behind it |
-| `android.mediaSync` | Skipped | No active phone |
+| `memoriahub.android.media-sync` | Skipped | No active phone |
 | | Warning | A phone has not been seen for over 48 hours, has blocked files, lacks full media access, or its token was revoked or expired (the phones and counts are named) |
 | | OK | Otherwise |
-| `android.uploadPath` | OK | The active storage provider takes phone uploads (presigned parts for S3 and R2, or the API part route for the local provider) |
+| `memoriahub.android.upload-path` | OK | The active storage provider takes phone uploads (presigned parts for S3 and R2, or the API part route for the local provider) |
 | | Error | No storage provider is configured. Configure it at Admin, then Settings, then Storage |
 
 ## 12. Unpair, re-pair and token expiry
