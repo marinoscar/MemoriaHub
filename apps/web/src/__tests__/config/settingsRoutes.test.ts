@@ -70,6 +70,8 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/telemetry': 'telemetry:read', // telemetry-admin.controller (GET admin/telemetry/config)
   '/admin/settings/telemetry/explorer': 'telemetry:query', // telemetry-explorer.controller
   '/admin/settings/telemetry/dashboard': 'telemetry:query', // telemetry dashboard controller
+  // RETRO-H5 (#609): platform alerts controller (ALERTS_PERMISSIONS; GET admin/alerts/*).
+  '/admin/settings/alerts': 'alerts:read',
 };
 
 describe('settings routes against the registries', () => {
