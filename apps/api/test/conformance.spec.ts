@@ -52,6 +52,10 @@
 // registered category that `everything` reaches; every hint and scope names what exists; the
 // relation-ordered delete plan exists for the composed schema.
 //
+// `onboarding` (`@marinoscar/platform-api/onboarding/testing`, RETRO-H3): the step and fact
+// registries are consistent, every step's permission is registered, each fact resolves once and no
+// step's `evaluate` reads anything.
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -73,6 +77,7 @@ import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
 import '@marinoscar/platform-api/jobs/testing';
 import '@marinoscar/platform-api/notifications/testing';
+import '@marinoscar/platform-api/onboarding/testing';
 import '@marinoscar/platform-api/settings/testing';
 import '@marinoscar/platform-api/user-data/testing';
 import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
@@ -98,6 +103,8 @@ import '../src/platform/user-data/user-data.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
+// Fills the onboarding step and fact registries the `onboarding` suite reads (AppModule imports it too).
+import '../src/platform/onboarding/onboarding.manifest';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
@@ -259,6 +266,30 @@ runPlatformConformance({
         'RETRO-E4 builds the AiConformanceFixture. MemoriaHub adds no ai.* job type (the platform ones are server-only); its node-claimable ' +
         'AI types (auto_tagging, video_auto_tagging) keep their permanent non-ai.* type strings and the ' +
         'brokered-key node path (PLATFORM-ADOPTION-SHIM(#1083), EnterpriseAppBase #1083 unreleased; RETRO-C4).',
+    },
+
+    // The onboarding slice (RETRO-H3, #599): the registries are well formed, every step's permission
+    // is one this app registers, and one derivation, for a caller holding every permission against a
+    // spied data port, resolves each fact once and reads nothing while evaluating. The samples stand
+    // in for MemoriaHub's six facts, which read Prisma and the settings service (app providers the
+    // suite's probe does not have). Floor: 9 MemoriaHub steps plus the platform's kept built-ins.
+    onboarding: {
+      permissions: permissionRegistry.list(),
+      factSamples: {
+        'memoriahub.media_counts': { addedByUser: 0 },
+        'memoriahub.album_counts': { addedByUser: 0 },
+        'memoriahub.circle_membership': { collaboratorCircles: 1, otherMembers: 0, pendingInvites: 0 },
+        'memoriahub.people_named': { named: 0 },
+        'memoriahub.devices': { syncDevices: 0, activeTokens: 0 },
+        'memoriahub.feature_readiness': {
+          storageReady: false,
+          faceRecognition: false,
+          autoTagging: false,
+          taggingProviderReady: false,
+          memories: false,
+        },
+      },
+      minSteps: 15,
     },
 
     // Rule 3 of the Doctor check contract (RETRO-B1b, #602): every registered

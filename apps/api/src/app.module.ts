@@ -55,6 +55,7 @@ import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
 import { alertsModules } from './platform/alerts/alerts.config';
 import { userDataModule } from './platform/user-data/user-data.config';
+import { onboardingModule } from './platform/onboarding/onboarding.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -176,6 +177,12 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // (`/api/user-data/*`), the admin factory reset and offboarding, with MemoriaHub's
     // keep-or-delete decisions, delegated purges and reset steps (platform/user-data/).
     userDataModule,
+    // First-run onboarding (RETRO-H3, #599): @marinoscar/platform-api/onboarding. `GET /api/onboarding`
+    // (the Get started and Setup guide checklists, derived on every read) and
+    // `GET /api/admin/onboarding/metrics`, over the platform's steps plus MemoriaHub's media steps
+    // (`platform/onboarding/`). Last among the feature modules: it reads the Doctor and the settings,
+    // owns no table, and stores only the user's intent in the `onboarding` user-settings namespace.
+    onboardingModule,
   ],
   providers: [
     // Global validation pipe (Zod)

@@ -124,6 +124,14 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'The Danger Zone: what the caller holds per category, and deleting their own data by scope with a ' +
           'typed confirmation (`user.data.purge`). Served by the platform user-data slice (RETRO-H1).',
       },
+      {
+        name: 'Onboarding',
+        description:
+          'First-run onboarding (RETRO-H3): the caller\'s Get started checklist and, for a holder of ' +
+          '`system_settings:read`, the Setup guide (`GET /api/onboarding`), derived from real state on ' +
+          'every read; aggregate activation metrics (`GET /api/admin/onboarding/metrics`). Served by the ' +
+          'platform onboarding slice.',
+      },
     ],
   },
   {

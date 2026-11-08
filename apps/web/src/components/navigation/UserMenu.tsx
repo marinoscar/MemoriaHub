@@ -15,6 +15,7 @@ import AdminIcon from '@mui/icons-material/AdminPanelSettings';
 import ProfileIcon from '@mui/icons-material/AccountCircle';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useNavigate } from 'react-router-dom';
+import { GettingStartedMenuItem } from '@marinoscar/platform-web/onboarding/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAuthedImage } from '../../hooks/useAuthedImage';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -144,6 +145,10 @@ export function UserMenu() {
             <ListItemText>System Settings</ListItemText>
           </MenuItem>
         )}
+
+        {/* RETRO-H3 (#599): brings the welcome and the checklists back.
+            Renders nothing until the onboarding state has loaded. */}
+        <GettingStartedMenuItem onDone={handleClose} />
 
         <Divider />
 

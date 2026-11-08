@@ -87,6 +87,9 @@ const NotificationPolicyPage = lazy(() =>
 const BroadcastsPage = lazy(() =>
   import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.BroadcastsPage })),
 );
+// RETRO-H3 (#599): the onboarding slice's two pages (`@marinoscar/platform-web/onboarding/ui`).
+const SetupGuidePage = lazy(() => import('./platform/onboarding/SetupGuideRoute'));
+const GettingStartedPage = lazy(() => import('./platform/onboarding/GettingStartedRoute'));
 const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
 // The platform's Jobs and Job Insights pages (RETRO-C1, #575); the Jobs one is a thin binding that adds
 // the app's "Repair missing thumbnails" action to the page toolbar.
@@ -212,6 +215,9 @@ function AppRoutes() {
                     scopes each request to the caller's own data. The typed confirmation in
                     the page's dialog is the deliberate act, not an authorization. */}
                 <Route path="/settings/danger-zone" element={<UserDangerZonePage />} />
+                {/* RETRO-H3 (#599): the user steps of `GET /api/onboarding`, which needs
+                    only `user_settings:read` (every role). */}
+                <Route path="/settings/getting-started" element={<GettingStartedPage />} />
                 {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
@@ -545,6 +551,16 @@ function AppRoutes() {
                   element={
                     <RequirePermission permission="alerts:read" fallback={<Navigate to="/" replace />}>
                       <AlertsAdminPage />
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H3 (#599): the Setup guide, behind `system_settings:read`, the
+                    onboarding slice's `adminPermission` (the admin block and the metrics). */}
+                <Route
+                  path="/admin/settings/setup"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <SetupGuidePage />
                     </RequirePermission>
                   }
                 />

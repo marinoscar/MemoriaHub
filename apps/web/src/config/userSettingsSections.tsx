@@ -30,6 +30,7 @@ import { identityUserSettingsSections } from '@marinoscar/platform-web/identity/
 // RETRO-H1 (#591): the user-data slice's Danger Zone card, in its pinned-last group.
 import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
 import { dangerZoneSettingsPage } from '@marinoscar/platform-web/user-data/ui';
+import { gettingStartedSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
 import { ANDROID_APP_SETTINGS_PATH, MEDIA_SYNC_SETTINGS_PATH } from '../services/androidApp';
 
@@ -82,6 +83,13 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
         description: 'Choose which fields the search panel offers.',
         Icon: ManageSearchIcon,
         path: '/settings/search',
+      },
+      {
+        // RETRO-H3 (#599): the onboarding slice's card, appended, as data. NO permission:
+        // `GET /api/onboarding` needs only `user_settings:read`, which every role holds. It stays
+        // after the checklist is dismissed: this is where the user finds it again.
+        ...gettingStartedSettingsPage.card,
+        Icon: gettingStartedSettingsPage.Icon,
       },
     ],
   },

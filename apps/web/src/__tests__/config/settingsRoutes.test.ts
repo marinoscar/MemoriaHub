@@ -43,6 +43,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/push': 'push:read', // notifications/push/push-config.controller
   '/admin/settings/notifications': 'system_settings:read', // system settings (notifications.* policy)
   '/admin/settings/android': 'system_settings:read', // android-app/android-app.controller
+  '/admin/settings/setup': 'system_settings:read', // platform onboarding (admin block, metrics) RETRO-H3
   '/admin/settings/ai': 'ai_settings:read', // ai/ai-settings.controller
   '/admin/settings/tagging': 'ai_settings:read', // tagging/tag-labels.controller
   '/admin/settings/face': 'face_settings:read', // face/face-settings.controller
