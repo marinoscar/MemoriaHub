@@ -184,6 +184,36 @@
       "scope": "system"
     },
     {
+      "name": "groups:read",
+      "description": "View the groups you belong to, answer your group invitations and leave a group",
+      "scope": "org"
+    },
+    {
+      "name": "groups:write",
+      "description": "Create groups and manage the members and invitations of groups you administer",
+      "scope": "org"
+    },
+    {
+      "name": "groups:admin",
+      "description": "View and administer every group of the organization, including groups you do not belong to",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:read",
+      "description": "View what is shared with you and who a record you can share is shared with, and remove your own access",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:write",
+      "description": "Share records you are allowed to share with people and groups of the organization, and change or revoke those shares",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:admin",
+      "description": "Manage the shares of every record of the organization, including records you do not own",
+      "scope": "org"
+    },
+    {
       "name": "org_settings:read",
       "description": "Read the active organization's settings overrides",
       "scope": "org"
@@ -387,6 +417,10 @@
       "user_settings:read",
       "user_settings:write",
       "ai:use",
+      "groups:read",
+      "groups:write",
+      "sharing:read",
+      "sharing:write",
       "storage:read",
       "storage:write",
       "media:read",
@@ -400,6 +434,8 @@
     "viewer": [
       "user_settings:read",
       "user_settings:write",
+      "groups:read",
+      "sharing:read",
       "storage:read",
       "media:read",
       "media:write",
@@ -418,6 +454,12 @@
       "org_members:write",
       "org_invites:read",
       "org_invites:write",
+      "groups:read",
+      "groups:write",
+      "groups:admin",
+      "sharing:read",
+      "sharing:write",
+      "sharing:admin",
       "org_settings:read",
       "org_settings:write",
       "org_broadcasts:read",
