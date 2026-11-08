@@ -186,7 +186,16 @@ function AppRoutes() {
                 <Route path="/admin/settings/jobs/insights" element={<JobInsightsPage />} />
                 <Route path="/admin/settings/nodes" element={<WorkersPage />} />
                 <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
-                <Route path="/admin/settings/doctor" element={<DoctorPage />} />
+                {/* RETRO-B1b (#602): the packaged Doctor, behind the permission
+                    `GET /api/admin/doctor` enforces. */}
+                <Route
+                  path="/admin/settings/doctor"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <DoctorPage />
+                    </RequirePermission>
+                  }
+                />
                 {/* RETRO-B1 (#597). Same permission string the `Maintenance` and
                     `About` cards declare and the platform host's controllers
                     enforce on their GETs. Opening and closing a window needs
