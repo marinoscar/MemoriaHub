@@ -19,7 +19,7 @@ describe('legacyJobsEnv (ENRICHMENT_* -> JOBS_*)', () => {
   it('with nothing set, keeps the old queue defaults the platform would otherwise change', () => {
     const env = legacyJobsEnv({}, warn);
     expect(env.JOBS_WORKER_CONCURRENCY).toBe('1');
-    expect(env.JOBS_SYSTEM_MODE_EXTRA_TYPES).toBe('thumbnail_repair,workflow_execute_batch');
+    expect(env.JOBS_SYSTEM_MODE_EXTRA_TYPES).toBe('workflow_execute_batch');
     expect(warnings).toEqual([]);
   });
 
@@ -82,16 +82,16 @@ describe('legacyJobsEnv (ENRICHMENT_* -> JOBS_*)', () => {
   });
 
   describe('system-mode extra types', () => {
-    it('adds the operator list to the two always-pinned types', () => {
+    it('adds the operator list to the always-pinned type', () => {
       const env = legacyJobsEnv({ ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES: 'geocode, metadata_extraction' }, warn);
       expect(env.JOBS_SYSTEM_MODE_EXTRA_TYPES!.split(',').sort()).toEqual(
-        ['geocode', 'metadata_extraction', 'thumbnail_repair', 'workflow_execute_batch'].sort(),
+        ['geocode', 'metadata_extraction', 'workflow_execute_batch'].sort(),
       );
     });
 
     it('does not repeat a pinned type the operator also named', () => {
-      const env = legacyJobsEnv({ JOBS_SYSTEM_MODE_EXTRA_TYPES: 'thumbnail_repair,geocode' }, warn);
-      expect(env.JOBS_SYSTEM_MODE_EXTRA_TYPES!.split(',').filter((t) => t === 'thumbnail_repair')).toHaveLength(1);
+      const env = legacyJobsEnv({ JOBS_SYSTEM_MODE_EXTRA_TYPES: 'workflow_execute_batch,geocode' }, warn);
+      expect(env.JOBS_SYSTEM_MODE_EXTRA_TYPES!.split(',').filter((t) => t === 'workflow_execute_batch')).toHaveLength(1);
     });
   });
 
@@ -137,7 +137,7 @@ describe('legacyJobsEnv (ENRICHMENT_* -> JOBS_*)', () => {
       rateLimitMaxHits: 7,
       reaperEnabled: false,
       workerConcurrency: 1,
-      systemModeExtraTypes: ['thumbnail_repair', 'workflow_execute_batch'],
+      systemModeExtraTypes: ['workflow_execute_batch'],
     });
   });
 });

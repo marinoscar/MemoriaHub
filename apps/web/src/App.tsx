@@ -57,7 +57,11 @@ const DbBackupPage = lazy(() => import('./pages/Admin/DbBackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
-const EmailSettingsPage = lazy(() => import('./pages/Admin/EmailSettingsPage'));
+// The platform's email settings page (RETRO-D2, #570): transports, sender, write-only secrets and the
+// test send to the caller's own address (`@marinoscar/platform-web/email/ui`).
+const EmailSettingsPage = lazy(() =>
+  import('@marinoscar/platform-web/email/ui').then((m) => ({ default: m.EmailSettingsPage })),
+);
 const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
 const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
 const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
@@ -307,7 +311,7 @@ function AppRoutes() {
                 <Route
                   path="/admin/settings/email"
                   element={
-                    <RequirePermission permission="email_settings:read" fallback={<Navigate to="/" replace />}>
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
                       <EmailSettingsPage />
                     </RequirePermission>
                   }

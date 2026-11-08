@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
-import { EmailService } from '../email/email.service';
+import { AppEmailSender } from '../platform/email/app-email.sender';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { CircleRole } from '@prisma/client';
 import { RequestUser } from '@marinoscar/platform-api/identity';
@@ -31,7 +31,7 @@ export class CirclesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly membership: CircleMembershipService,
-    private readonly email: EmailService,
+    private readonly email: AppEmailSender,
   ) {}
 
   /** Base URL for building absolute links in emails. */

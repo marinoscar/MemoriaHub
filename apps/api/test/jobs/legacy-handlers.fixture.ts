@@ -43,7 +43,15 @@ import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-e
 import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
 
-/** Every handler class the app registers, one per job type. */
+/**
+ * Every handler class the app registers, one per job type.
+ *
+ * Since RETRO-C3 (#585) six of them are native platform `JobHandler`s
+ * (`face_detection`, `video_face_detection`, `face_auto_archive_sweep`,
+ * `metadata_extraction`, `thumbnail_regen`, `thumbnail_repair`) that register
+ * with `JobHandlerRegistry` themselves. They keep `type`, the node pair and
+ * `canDelete` as plain members, so the snapshot reads the same facts off them.
+ */
 export const ALL_HANDLER_CLASSES = [
   AutoTaggingHandler,
   BroadcastChunkHandler,
@@ -127,7 +135,13 @@ export const EXPECTED_JOB_TYPES = [
   'workflow_history_purge',
 ];
 
-/** Types whose handler carries the node-result pair. */
+/**
+ * Types whose handler carries the node-result pair.
+ *
+ * `thumbnail_repair` left this list in RETRO-C3: it carried the schema only "for
+ * interface parity" and was never claimable (a global sweep; the system worker
+ * mode pinned it). Its documented eligibility is unchanged: server-only.
+ */
 export const EXPECTED_NODE_ELIGIBLE_TYPES = [
   'auto_tagging',
   'duplicate_detection',
@@ -136,7 +150,6 @@ export const EXPECTED_NODE_ELIGIBLE_TYPES = [
   'metadata_extraction',
   'social_media_detection',
   'thumbnail_regen',
-  'thumbnail_repair',
   'video_auto_tagging',
   'video_face_detection',
   'workflow_execute_batch',

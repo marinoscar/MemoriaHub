@@ -36,7 +36,7 @@ Four further suites were repaired alongside it:
 
 **Two real (if minor) product bugs were found by these specs once they could run**, both a `@Post` bulk mutation documenting `@ApiResponse({ status: 200 })` with no `@HttpCode`, so Nest's POST default returned 201: `POST /api/media/bulk/tags` (its four sibling `bulk/*` endpoints all had `@HttpCode(HttpStatus.OK)`) and `POST /api/shares/bulk`. Both fixed in the controllers.
 
-**Known, deliberately unfixed:** every `POST /test` connectivity endpoint (`email-settings`, `face`, `geo`, `storage-settings`) has the same doc/behaviour mismatch — all document 200, none sets `@HttpCode`, all return 201. Because they are *consistent* with each other, the email spec was updated to assert 201 rather than change four controllers' status codes from inside a test-repair change. Worth resolving one way or the other in its own PR.
+**Known, deliberately unfixed:** every `POST /test` connectivity endpoint (`face`, `geo`, `storage-settings`; `email-settings` is the platform's since RETRO-D2 and answers 200) has the same doc/behaviour mismatch — all document 200, none sets `@HttpCode`, all return 201. Because they are *consistent* with each other, the email spec was updated to assert 201 rather than change four controllers' status codes from inside a test-repair change. Worth resolving one way or the other in its own PR.
 
 ---
 

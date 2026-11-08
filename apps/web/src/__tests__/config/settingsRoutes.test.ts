@@ -39,7 +39,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/general': 'system_settings:read', // platform settings: system-settings.controller
   '/admin/settings/users': 'users:read', // platform identity: users.controller
   '/admin/settings/archiving': 'system_settings:read', // system settings
-  '/admin/settings/email': 'email_settings:read', // email/email-settings.controller
+  '/admin/settings/email': 'system_settings:read', // platform email: email-settings.controller (RETRO-D2)
   '/admin/settings/push': 'push:read', // notifications/push/push-config.controller
   '/admin/settings/notifications': 'system_settings:read', // system settings (notifications.* policy)
   '/admin/settings/android': 'system_settings:read', // android-app/android-app.controller

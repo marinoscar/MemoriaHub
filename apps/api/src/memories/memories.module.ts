@@ -25,7 +25,7 @@ import { AiModule } from '../ai/ai.module';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { EmailModule } from '../email/email.module';
+import { AppEmailModule } from '../platform/email/app-email.module';
 import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
 import { MemoryDigestService } from './digest/memory-digest.service';
@@ -66,7 +66,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   // NotificationsModule itself still imports NOTHING, which is the load-bearing
   // property that keeps the module graph acyclic (see its header).
   //
-  // #311's digest adds two more one-way edges: EmailModule (EmailService, the
+  // #311's digest adds two more one-way edges: AppEmailModule (AppEmailSender, the
   // fire-and-forget send path shared with the circle-invitation mails) and
   // StorageProvidersModule (StorageProviderResolver, so the public digest-image
   // route can stream thumbnail bytes the way PublicShareController does).
@@ -81,7 +81,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     CirclesModule,
     MediaModule,
     NotificationsModule,
-    EmailModule,
+    AppEmailModule,
     StorageProvidersModule,
   ],
   // #315's AdminMemoriesController is mounted here rather than in a separate

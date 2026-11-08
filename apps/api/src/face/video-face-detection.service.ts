@@ -33,7 +33,8 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { EnrichmentJob, MediaFaceStatusType } from '@prisma/client';
+import { MediaFaceStatusType } from '@prisma/client';
+import type { MediaJobContext } from '../platform/jobs/media-item-job';
 import { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -135,7 +136,7 @@ export class VideoFaceDetectionService {
   // processMediaItem — orchestrates the in-process path
   // ---------------------------------------------------------------------------
 
-  async processMediaItem(job: EnrichmentJob): Promise<void> {
+  async processMediaItem(job: MediaJobContext): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('video_face_detection job missing mediaItemId');
     }
@@ -531,7 +532,7 @@ export class VideoFaceDetectionService {
   // already-computed DTO.
   // ---------------------------------------------------------------------------
 
-  async persistVideoFaces(job: EnrichmentJob, result: VideoFaceDetectionResult): Promise<void> {
+  async persistVideoFaces(job: MediaJobContext, result: VideoFaceDetectionResult): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('video_face_detection job missing mediaItemId');
     }

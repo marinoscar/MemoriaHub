@@ -1,20 +1,26 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob } from '@prisma/client';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import { resolveCircleJob } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceMatchingService } from './face-matching.service';
 import { MediaTouchService } from '../media/media-touch.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
- * FaceAutoArchiveSweepHandler
+ * FaceAutoArchiveSweepHandler: a native platform `JobHandler` (RETRO-C3, #585).
  *
- * SERVER-ONLY sweep handler (implements ONLY the in-process `process()` half —
- * no nodeResultSchema / persistNodeResult, so it is never node-claimable; the
- * CLI's NODE_JOB_TYPES deliberately omits `face_auto_archive_sweep`). Mirrors
- * LocationInferenceHandler's sweep-mode shape: one job per circle, keyed by
- * job.circleId, mediaItemId is null.
+ * SERVER-ONLY sweep handler (implements ONLY `process()` — no nodeResultSchema /
+ * persistNodeResult, so it is never node-claimable; the CLI's NODE_JOB_TYPES
+ * deliberately omits `face_auto_archive_sweep`): it is a whole-circle KNN pass
+ * over `faces.embedding_vec`, all database, with no per-item unit of work to
+ * hand a node. One job per circle (`subjectType: 'circle'`, `subjectId` = the
+ * circle; enqueued with `skipDedup`, priority 100); a circle deleted since the
+ * job was queued settles it as a no-op.
  *
  * Backfills the existing unassigned-face backlog against the circle's already-
  * archived unassigned faces: any LIVE unassigned face that closely matches a
@@ -23,15 +29,18 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * detections and manual archives, applied here to the whole live pool at once.
  */
 @Injectable()
-export class FaceAutoArchiveSweepHandler implements EnrichmentHandler, OnModuleInit {
+export class FaceAutoArchiveSweepHandler implements JobHandler, OnModuleInit {
   readonly type = 'face_auto_archive_sweep';
+  readonly label = 'Face auto-archive sweep';
+  /** Pages the whole live unassigned pool of one circle against its archived set. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
   private readonly logger = new Logger(FaceAutoArchiveSweepHandler.name);
 
   /** Live unassigned faces scanned per DB page (bounds memory). */
   private static readonly LIVE_BATCH_SIZE = 500;
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly matchingService: FaceMatchingService,
     private readonly systemSettings: AppSystemSettingsService,
@@ -42,12 +51,9 @@ export class FaceAutoArchiveSweepHandler implements EnrichmentHandler, OnModuleI
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    if (!job.circleId) {
-      this.logger.warn(`face_auto_archive_sweep job ${job.id} has no circleId; skipping`);
-      return;
-    }
-    const circleId = job.circleId;
+  async process(job: Job): Promise<void> {
+    const circleId = await resolveCircleJob(this.prisma, job, this.logger);
+    if (!circleId) return;
 
     // Defensive guard — the admin endpoint also gates on this feature, but a job
     // may have been enqueued before the toggle was flipped off.

@@ -92,11 +92,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         description: 'Configure the outbound email provider (AWS SES or SMTP) and test delivery.',
         Icon: EmailIcon,
         path: '/admin/settings/email',
-        // RETRO-B5 (#621): the page reads only `GET /api/email-settings`, which
-        // `email-settings.controller.ts` gates on `email_settings:read`. The
-        // card used to declare `system_settings:read`, a string that controller
-        // never checks.
-        permission: 'email_settings:read',
+        // RETRO-D2 (#570): the page is the platform's, and the platform
+        // `email-settings.controller` gates `GET /api/email-settings` on
+        // `system_settings:read` (saving and the test send need
+        // `system_settings:write`, which the page gates internally).
+        permission: 'system_settings:read',
       },
       {
         title: 'Web Push',
