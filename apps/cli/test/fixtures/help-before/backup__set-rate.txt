@@ -1,0 +1,9 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub backup set-rate [options]
+
+Set backup throttle knobs (persisted; applied live to a running daemon)
+
+Options:
+  --concurrency <n>  Concurrent download workers (1-32)
+  --max-mbps <x>     Aggregate bandwidth cap in Mbps; 0 = unlimited
+  -h, --help         display help for command

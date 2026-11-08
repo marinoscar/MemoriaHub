@@ -1,0 +1,45 @@
+Usage: memoriahub deploy certs [options]
+
+Inspect or renew this deployment's TLS certificate
+
+Options:
+  --root <path>             Deployment directory (rank 1: an explicit path)
+  --apps-root <path>        Directory holding the deployments (rank 3 walks up
+                            inside it) (default: "/opt/infra/apps")
+  --name <app>              Which deployment to act on, by name
+  --proxy-root <path>       Shared reverse proxy directory (default:
+                            "/opt/infra/proxy")
+  --domain <domain>         Domain to act on (default: the recorded one)
+  --proxy-container <name>  Name of the shared proxy container (default: as
+                            recorded, else proxy-nginx)
+  --proxy-mode <mode>       How the shared proxy runs: container or host
+                            (default: as recorded, else detected)
+  --renew                   Renew when the certificate is inside the renewal
+                            window
+  --force                   Renew even when it is not due. Spends rate-limit
+                            budget.
+  --email <email>           Registration address (default: INITIAL_ADMIN_EMAIL)
+  --staging                 Use Let's Encrypt staging, which is not trusted by
+                            browsers
+  --json                    Print a machine-readable report on stdout
+  -h, --help                display help for command
+
+Without --renew this reports and changes nothing.
+
+With --renew it renews only when the certificate expires within 30 days.
+Let's Encrypt allows 5 DUPLICATE certificates per week, and a command that
+re-issued on every invocation would exhaust that during one debugging
+session -- leaving the deployment unable to get a certificate at the moment
+it most needs one. --force overrides that and is deliberately not implied.
+
+An unreadable expiry is reported, never treated as "not due": silently
+assuming a certificate is healthy is how one quietly expires.
+
+A renewal validates and RELOADS the proxy afterwards: a renewed certificate
+on disk is not served until nginx reloads. A renewal whose reload failed
+exits 1, because the old certificate is still what browsers see.
+
+Exit codes:
+  0  reported, or renewed and reloaded successfully
+  1  the certificate is due and --renew was not passed, or the reload failed
+  2  nothing is installed at --root

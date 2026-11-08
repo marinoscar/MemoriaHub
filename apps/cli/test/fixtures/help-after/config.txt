@@ -1,0 +1,6 @@
+Usage: memoriahub config [options]
+
+Show the stored server URL and a masked token hint
+
+Options:
+  -h, --help  display help for command

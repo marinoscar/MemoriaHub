@@ -1,0 +1,32 @@
+Usage: memoriahub api [options] <method> <path>
+
+Call any API endpoint and print the response
+
+Arguments:
+  method               HTTP method (GET, HEAD, POST, PUT, PATCH, DELETE,
+                       OPTIONS)
+  path                 Request path, e.g. /api/auth/me
+
+Options:
+  --query <key=value>  Query parameter; repeat for more than one
+  --data <json>        Request body: inline JSON, @file.json, or - for stdin
+  --raw                Print unformatted JSON on stdout and nothing else
+  -q, --quiet          Suppress the status line and spinner on stderr
+  --no-color           Disable colour even on a terminal
+  --timeout <ms>       Per-request timeout in milliseconds
+  -h, --help           display help for command
+
+Examples:
+  memoriahub api GET /api/auth/me
+  memoriahub api GET /api/users --query page=2 --query pageSize=50
+  memoriahub api POST /api/allowlist --data '{"email":"a@b.com"}'
+  memoriahub api POST /api/allowlist --data @entry.json
+  cat entry.json | memoriahub api POST /api/allowlist --data -
+  memoriahub api GET /api/users --raw | jq '.data[].email'
+
+Output:
+  The response body goes to stdout; everything else goes to stderr, so
+  `--raw | jq` and `--raw > file.json` both stay clean. The exit code is 0
+  only for a 2xx; a non-2xx exits non-zero with the server’s own message.
+
+  The `/api` prefix is optional: /api/auth/me and /auth/me are the same.

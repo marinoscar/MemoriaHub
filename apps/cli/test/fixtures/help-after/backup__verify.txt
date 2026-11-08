@@ -1,0 +1,17 @@
+Usage: memoriahub backup verify [options]
+
+Verify the local backup root against the catalog (existence, size, sha256)
+
+Options:
+  --deep             Hash EVERY file, not only the ones not yet proven
+  --json             Emit NDJSON events instead of human output
+  --concurrency <n>  Parallel hashing workers (default: 4)
+  -h, --help         display help for command
+
+By default verify stats every `present` item and fully hashes only the items
+whose bytes have not been proven since they landed (downloaded since the last
+verify, never verified, or previously failed). --deep hashes everything.
+
+A missing file or a hash mismatch marks the item for re-download — the next
+`memoriahub backup run` re-fetches it. Verify never deletes or moves anything.
+Exits non-zero when any item failed.

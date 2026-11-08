@@ -520,7 +520,7 @@ mkdir -p "$MEMORIAHUB_BIN_DIR"
 
 cat > "$BIN_SHIM" <<SHIM
 #!/usr/bin/env bash
-exec node "$APP_DIR/dist/index.js" "\$@"
+exec node "$APP_DIR/dist/cli.js" "\$@"
 SHIM
 
 chmod +x "$BIN_SHIM"

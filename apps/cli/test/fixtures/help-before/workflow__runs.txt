@@ -1,0 +1,10 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub workflow runs [options] <id>
+
+List recent runs for a workflow
+
+Arguments:
+  id          Workflow ID
+
+Options:
+  -h, --help  display help for command

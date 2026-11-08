@@ -1,0 +1,9 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub login [options]
+
+Authenticate with a MemoriaHub server
+
+Options:
+  --server <url>  Server URL (skips interactive prompt)
+  --token <pat>   Use an existing Personal Access Token (CI/headless fallback)
+  -h, --help      display help for command

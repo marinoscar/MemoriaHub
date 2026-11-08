@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node service install [options]
+
+Write ~/.config/systemd/user/memoriahub-node.service and enable it now
+
+Options:
+  -h, --help  display help for command

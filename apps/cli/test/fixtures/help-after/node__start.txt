@@ -1,0 +1,21 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node start [options]
+
+Run the worker-node loop (claim → compute → submit)
+
+Options:
+  --concurrency <n>             Set concurrency (persisted to config)
+  --types <csv>                 Override configured job types
+  --poll <ms>                   Override poll interval (ms) when idle
+  --daemon                      Detach and run in the background (logs under
+                                ~/.memoriahub/logs)
+  --headless                    Container mode: auto-register when no nodeId is
+                                stored, and drain WITHOUT deregistering on
+                                SIGTERM/SIGINT so the node re-attaches on
+                                restart (also implied by MEMORIAHUB_HEADLESS=1)
+  --face-provider <compreface>  Set face-detection provider (persisted to
+                                config)
+  --compreface-url <url>        Set the compreface-core sidecar URL (persisted
+                                to config; only used with --face-provider
+                                compreface)
+  -h, --help                    display help for command

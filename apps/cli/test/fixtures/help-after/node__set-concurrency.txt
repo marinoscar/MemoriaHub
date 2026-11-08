@@ -1,0 +1,10 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node set-concurrency [options] <n>
+
+Adjust worker concurrency — live via IPC when running, else saved to config
+
+Arguments:
+  n           New concurrency (positive integer)
+
+Options:
+  -h, --help  display help for command

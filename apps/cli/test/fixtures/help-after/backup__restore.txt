@@ -1,0 +1,49 @@
+Usage: memoriahub backup restore [options]
+
+Restore a backup root back into a MemoriaHub server
+
+Options:
+  --root <dir>            Backup root to restore FROM (the folder `backup init
+                          --dest` created)
+  --dry-run               Print the full plan (circle mapping + totals) and
+                          write nothing
+  --into-circle <id>      Restore every source circle into this existing circle
+  --map-circle <src=dst>  Map one source circle id to a target circle id
+                          (repeatable)
+  --include <what>        Extra scope: "trashed" (restored as ACTIVE items).
+                          Repeatable.
+  --concurrency <n>       Concurrent upload workers (default: 2)
+  --skip-metadata         Upload originals only — reapply no sidecar metadata
+  --json                  Emit NDJSON events instead of human output
+  -h, --help              display help for command
+
+AUTHENTICATION
+  Restore writes media, albums, tags and people, so it needs a NORMAL account
+  login (`memoriahub login`) or a personal access token. A `nod_` node
+  credential is refused up front: the server accepts it ONLY on /api/nodes/*
+  routes, so it can never reach any endpoint a restore needs.
+
+CIRCLE MAPPING (precedence)
+  1. --map-circle <sourceCircleId>=<targetCircleId>
+  2. --into-circle <targetCircleId>  (everything lands there)
+  3. find-or-create a circle matching the sidecar's circle name
+  The resolved mapping is printed before anything is written; an unknown
+  --map-circle/--into-circle target is a hard error BEFORE the first write.
+
+SCOPE
+  Default: every `present` item — active AND archived (archived items are
+  restored, then re-archived at the end). --include trashed additionally
+  restores trashed rows, but they land as ACTIVE items: no public API can
+  put an item back into the server's Trash. Quarantined items are NEVER
+  restored — the server no longer lists them.
+
+WHAT IS NOT RESTORED
+  Detected faces (bounding boxes / embeddings), thumbnails, EXIF-derived
+  columns, perceptual hashes and burst/duplicate grouping are DERIVED data:
+  enrichment regenerates them from the restored bytes. People associations
+  ARE restored, by name.
+
+RE-RUNNABLE
+  Every restored item records the MediaItem id it landed on. A second run
+  verifies those ids and skips them; anything else is caught by server-side
+  content-hash dedup. Interrupt it freely and re-run.

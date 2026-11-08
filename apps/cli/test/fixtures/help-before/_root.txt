@@ -1,0 +1,54 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub [options] [command]
+
+Import and sync photos/videos into MemoriaHub
+
+Options:
+  -V, --version                      Print the installed version
+  --no-color                         Disable colored output (also respects
+                                     NO_COLOR env)
+  -h, --help                         display help for command
+
+Commands:
+  login [options]                    Authenticate with a MemoriaHub server
+  import [options] <folder>          One-shot import: register a folder and
+                                     sync it immediately (alias for sync
+                                     <folder>)
+  sync [options] [folder...]         Incremental sync: skip already-uploaded
+                                     files, process new/changed files
+  scan [options] [folder...]         Dry-run scan: preview and persist the file
+                                     set a sync would process
+  organize [options] [folder...]     Move files into YEAR/MM - Month/ folders
+                                     by EXIF capture date (undated → NODATE/)
+  screenshots [options] [folder...]  Find files with 'screenshot' in the name
+                                     (case-insensitive); list, move, or delete
+                                     matches
+  convert [options] [path...]        Convert video files (MOV, MTS, AVI, WMV,
+                                     …) to MP4 (requires ffmpeg)
+  date-infer                         Infer missing capture dates from filenames
+                                     (diagnose report or write via ExifTool)
+  status [options]                   Show sync status: folder overview or
+                                     recent run history
+  folders                            Manage the set of folders watched by
+                                     MemoriaHub
+  circles                            Manage the active circle for uploads
+  retry [options]                    Retry failed uploads (up to the attempts
+                                     cap). Use --force to also retry blocked
+                                     files.
+  settings                           View and update CLI settings (concurrency,
+                                     attempts cap, etc.)
+  backup                             Local media backup to a folder on this
+                                     machine (node-based)
+  jobs|queue [options]               Live job queue dashboard (server load,
+                                     ETA)
+  reports                            Run extensible sync/storage reports from
+                                     local state
+  node                               Run this machine as a worker node that
+                                     processes the enrichment queue
+  workflow                           List and run Media Workflow Automation
+                                     workflows
+  android [options]                  Build, sign, version and publish the
+                                     Android app
+  menu                               Launch the interactive terminal UI
+                                     (requires a TTY)
+  help [command]                     display help for command

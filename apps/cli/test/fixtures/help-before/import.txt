@@ -1,0 +1,15 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub import [options] <folder>
+
+One-shot import: register a folder and sync it immediately (alias for sync
+<folder>)
+
+Arguments:
+  folder           Path to the folder to import
+
+Options:
+  -r, --recursive  Descend into sub-directories (default: false)
+  --dry-run        Show what would be uploaded without actually uploading
+                   (default: false)
+  --circle <id>    Target circle ID (overrides active circle in config)
+  -h, --help       display help for command

@@ -63,3 +63,7 @@ cd apps/cli && npx jest --config jest.config.js test/infra-conformance.spec.ts  
 ```
 
 The conformance suite needs Docker (`docker compose config`) and an nginx binary or a running daemon for `nginx -t`. A missing tool is reported in the test name, not hidden.
+
+## Deploying with the CLI
+
+`memoriahub deploy install` and `memoriahub deploy update` (CLI 1.4.0) run the platform deploy pipeline with MemoriaHub's steps (`database-extensions`, `compreface-healthy`) and checks (`pgvector-available`, `models-dir`); run `memoriahub deploy doctor` first. Defaults match the old `infra/deploy/install.sh`: root `/opt/infra/apps/memoriahub`, host port 8328, domain `memoriahub.marin.cr`; override with `--root`, `--port`, `--domain` or `MEMORIAHUB_HOME`, `MEMORIAHUB_PORT`, `MEMORIAHUB_DOMAIN`. Reference: [apps/cli/README.md](../../apps/cli/README.md#deploying-a-server-memoriahub-deploy). `infra/deploy/install.sh` and `update.sh` are kept as a fallback until a first production deploy with the CLI has been verified.

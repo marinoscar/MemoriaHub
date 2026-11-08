@@ -1,0 +1,94 @@
+Usage: memoriahub deploy install [options]
+
+Install this application on this server
+
+Options:
+  --root <path>             Deployment directory (rank 1: an explicit path)
+  --apps-root <path>        Directory holding the deployments (rank 3 walks up
+                            inside it) (default: "/opt/infra/apps")
+  --name <app>              Which deployment to act on, by name
+  --domain <domain>         Public domain to publish under
+  --proxy-root <path>       Shared reverse proxy directory (default:
+                            "/opt/infra/proxy")
+  --proxy-container <name>  Name of the shared proxy container (default: as
+                            recorded, else proxy-nginx)
+  --proxy-mode <mode>       How the shared proxy runs: container or host
+                            (default: as recorded, else detected)
+  --port <port>             Loopback port the proxy forwards to (default:
+                            "3535")
+  --repo <url>              Repository to deploy (default: this checkout's
+                            origin)
+  --ref <ref>               Branch, tag or commit (default: the remote default
+                            branch)
+  --email <email>           Certificate registration address
+  --group <name>            Optional feature group; repeat for more (default:
+                            [])
+  --all                     Review every environment variable, not only the
+                            essential ones
+  --non-interactive         Never prompt; fail listing anything unresolved
+  --answer <key=value>      Supply one environment answer; repeat for more
+                            (default: {})
+  --answers-file <path>     Read answers from a KEY=value file (like .env)
+  --reinstall               Install over an existing deployment
+  --resume                  Continue from the step that failed
+  --skip-doctor             Skip the prerequisite checks
+  --skip-proxy              Do not touch the reverse proxy or request a
+                            certificate
+  --skip-seed               Do not run the database seed
+  --bootstrap-proxy         Create the shared proxy if this server has none (no
+                            prompt)
+  --create-database         Create the database if it does not exist (no prompt)
+  --app-db-user <name>      Name of the dedicated application database role
+                            (default: <app>_app)
+  --admin-user <name>       Administrative database login that provisions the
+                            role (password: $MEMORIAHUB_DB_ADMIN_PASSWORD or
+                            DB_ADMIN_PASSWORD in the answers file; never a flag)
+  --skip-role-provisioning  Create no role; POSTGRES_USER must already be an
+                            ordinary role
+  --allow-superuser         Run the API as a superuser/BYPASSRLS login anyway
+                            (tenant isolation OFF)
+  --rotate-app-password     Generate a new password for the application role
+  --provision-app-role      Consent: create the role when the database login is
+                            a superuser (no prompt)
+  --transfer-ownership      Consent: change the owner of an existing database's
+                            objects to the role (no prompt)
+  --allow-reduced-role      Consent: accept a role the server would not give
+                            CREATEROLE/createrole_self_grant
+  --show-credentials        Print the generated application login once at the
+                            end (never journaled)
+  --skip-renewal            Do not schedule certificate renewal
+  --skip-oauth-check        Do not verify the Google OAuth credentials with
+                            Google
+  --no-cache                Rebuild images without the layer cache
+  --force                   Discard uncommitted changes in the checkout
+  --staging                 Use Let's Encrypt staging while working out the
+                            setup
+  --app-version <version>   Release version to deploy (default: a patch bump of
+                            the current one)
+  --no-version-bump         Deploy the current version: no write, no commit, no
+                            push
+  --json                    Print a machine-readable result on stdout
+  -h, --help                display help for command
+
+Examples:
+  memoriahub deploy install --domain app.example.com
+  memoriahub deploy install --domain app.example.com --staging
+  memoriahub deploy install --non-interactive --domain app.example.com
+
+What it does, in order: checks prerequisites, clones the repository,
+collects the environment, provisions a dedicated, ordinary database role
+when the login you enter is a superuser (row-level security does not
+apply to one), validates the database and the Google OAuth
+credentials, creates the database if it is missing (asked, or
+--create-database), builds the images, migrates, seeds, starts the
+stack, waits for health, creates the shared proxy if the server has
+none (asked, or --bootstrap-proxy), issues the certificate and
+publishes the vhost, schedules renewal unless something already owns
+it, then verifies the result -- including that sign-in redirects to
+Google with the configured client.
+
+The repository and branch come from THIS checkout's git remote unless
+you pass --repo/--ref, so a fork deploys itself with no configuration.
+
+[stderr]
+memoriahub: using the legacy default domain memoriahub.marin.cr and host port 8328; pass --domain/--port or set MEMORIAHUB_DOMAIN/MEMORIAHUB_PORT to change them.

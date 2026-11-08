@@ -1,0 +1,11 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub android releases current [options] <id>
+
+Make a release current — the rollback; asks first when its versionCode is lower
+
+Arguments:
+  id          Release id (see `memoriahub android releases`)
+
+Options:
+  -y, --yes   Do not ask, even for a rollback to a lower versionCode
+  -h, --help  display help for command

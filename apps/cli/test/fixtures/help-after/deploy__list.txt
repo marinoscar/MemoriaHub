@@ -1,0 +1,19 @@
+Usage: memoriahub deploy list [options]
+
+List every deployment on this server
+
+Options:
+  --apps-root <path>  Directory holding the deployments (default:
+                      "/opt/infra/apps")
+  --json              Print a machine-readable inventory on stdout
+  -h, --help          display help for command
+
+Reads only the filesystem: no git, no Docker, no network. A deployment
+with no record reports a null commit rather than having one looked up,
+so listing a host with several applications costs no subprocesses and
+cannot fail differently per application.
+
+The SOURCE column says where each row came from:
+  record      a deployment record was read
+  inferred    reconstructed from the environment file; `update` adopts it
+  unreadable  a record is present and this build cannot interpret it

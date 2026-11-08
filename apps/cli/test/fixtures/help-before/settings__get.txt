@@ -1,0 +1,10 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub settings get [options] <key>
+
+Get the current value of a setting
+
+Arguments:
+  key         Setting key
+
+Options:
+  -h, --help  display help for command

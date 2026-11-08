@@ -168,4 +168,4 @@ USER node
 # sizes stop_grace_period; a job killed past the grace window is recovered by
 # the server lease reaper.
 STOPSIGNAL SIGTERM
-ENTRYPOINT ["node", "/app/apps/cli/dist/index.js", "node", "start", "--headless"]
+ENTRYPOINT ["node", "/app/apps/cli/dist/cli.js", "node", "start", "--headless"]

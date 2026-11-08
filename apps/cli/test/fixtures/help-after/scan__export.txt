@@ -1,0 +1,8 @@
+Usage: memoriahub scan export [options] <id>
+
+Export a scan report to Excel (.xlsx) or CSV
+
+Options:
+  --out <file>    Output file path (extension picks the format)
+  --format <fmt>  Force output format: xlsx | csv
+  -h, --help      display help for command

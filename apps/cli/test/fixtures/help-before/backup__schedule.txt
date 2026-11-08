@@ -1,0 +1,18 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub backup schedule [options] [cron]
+
+Manage the automatic backup schedule (cron is computed server-side)
+
+Arguments:
+  cron         5-field cron expression, e.g. "0 3 * * *"
+
+Options:
+  --tz <iana>  IANA timezone for the schedule (e.g. America/Costa_Rica)
+  --show       Show the current schedule
+  --disable    Clear the schedule (no more scheduled runs)
+  -h, --help   display help for command
+
+Scheduled runs fire from a RUNNING worker-node daemon (`memoriahub node start`),
+which polls the server every minute and starts a run when the server-computed
+nextRunAt is due. A machine offline at the scheduled time self-heals: the run
+fires on the first poll after the daemon is back up.

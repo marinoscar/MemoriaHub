@@ -1,0 +1,16 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub folders [options] [command]
+
+Manage the set of folders watched by MemoriaHub
+
+Options:
+  -h, --help            display help for command
+
+Commands:
+  add [options] <path>  Add a folder to the managed registry
+  list [options]        List all registered folders
+  remove <id|path>      Remove a folder from the registry (cascade-deletes its
+                        file records)
+  enable <id|path>      Enable a previously disabled folder
+  disable <id|path>     Disable a folder (skipped during sync)
+  help [command]        display help for command

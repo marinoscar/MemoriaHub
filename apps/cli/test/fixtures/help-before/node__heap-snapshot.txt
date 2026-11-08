@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub node heap-snapshot [options]
+
+Write a V8 heap snapshot from the running worker daemon (memory-leak diagnosis)
+
+Options:
+  -h, --help  display help for command

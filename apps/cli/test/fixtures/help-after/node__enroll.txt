@@ -1,0 +1,11 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node enroll [options]
+
+Log in and mint a durable node credential, storing it as this CLI's token
+(enrollment without hand-copying a soon-to-expire PAT)
+
+Options:
+  --name <label>  Credential label (default: node-<hostname>)
+  --server <url>  Server URL (default: configured server, else prompt)
+  --show-token    Print the full node token once (default: masked prefix only)
+  -h, --help      display help for command

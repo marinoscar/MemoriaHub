@@ -1,0 +1,21 @@
+Usage: memoriahub scan [options] [command] [folder...]
+
+Dry-run scan: preview and persist the file set a sync would process
+
+Arguments:
+  folder                 Paths to folders to scan (omit to use --all)
+
+Options:
+  --all                  Scan all registered enabled folders (default: false)
+  --json                 Emit the report as JSON instead of a dashboard
+                         (default: false)
+  --no-report            Skip rendering the report after scanning
+  -r, --recursive        Descend into sub-directories (when auto-registering a
+                         folder) (default: false)
+  --concurrency <n>      Number of concurrent metadata workers
+  -h, --help             display help for command
+
+Commands:
+  list [options]         List recent scans
+  report [options] [id]  Re-render a stored scan report (default: latest)
+  export [options] <id>  Export a scan report to Excel (.xlsx) or CSV

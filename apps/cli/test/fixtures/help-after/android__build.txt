@@ -1,0 +1,9 @@
+Usage: memoriahub android build [options]
+
+Build and sign the APK into dist/android/ with a sidecar metadata JSON
+
+Options:
+  --server-url <url>  Default server URL baked into the app
+  --debug             Build the debug variant (debug-signed, package <id>.debug;
+                      not for publishing)
+  -h, --help          display help for command

@@ -1,0 +1,14 @@
+Usage: memoriahub settings [options] [command]
+
+View and update CLI settings (concurrency, attempts cap, etc.)
+
+Options:
+  -h, --help         display help for command
+
+Commands:
+  list               Print all settings and their current values
+  get <key>          Get the current value of a setting
+  set <key> <value>  Set the value of a setting
+  reset [options]    Factory-reset the CLI: removes config, database, and all
+                     local state (irreversible)
+  help [command]     display help for command

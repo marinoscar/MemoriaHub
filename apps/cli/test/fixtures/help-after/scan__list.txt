@@ -1,0 +1,7 @@
+Usage: memoriahub scan list [options]
+
+List recent scans
+
+Options:
+  --json      Emit as JSON (default: false)
+  -h, --help  display help for command

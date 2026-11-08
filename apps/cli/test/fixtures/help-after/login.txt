@@ -1,0 +1,19 @@
+Usage: memoriahub login [options]
+
+Authorize this machine and store a token
+
+Options:
+  --server <url>        Server URL (or set MEMORIAHUB_SERVER_URL)
+  --token <pat>         Skip the device flow and use an existing personal access
+                        token (headless)
+  --device-name <name>  Name shown for this machine in the Access Tokens page
+  --no-browser          Do not try to open a browser; just print the URL
+  -h, --help            display help for command
+
+Examples:
+  memoriahub login                                   Device flow, prompting for the server
+  memoriahub login --server https://app.example.com  Device flow, no prompt
+  memoriahub login --server https://app.example.com --token pat_...
+
+In CI, skip this command entirely and set:
+  MEMORIAHUB_SERVER_URL and MEMORIAHUB_TOKEN

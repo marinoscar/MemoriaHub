@@ -1,0 +1,14 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node service [options] [command]
+
+Manage the systemd user service that keeps the worker node always on
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  install         Write ~/.config/systemd/user/memoriahub-node.service and
+                  enable it now
+  uninstall       Stop, disable, and remove the systemd user service
+  status          Show systemd status for the worker-node service
+  help [command]  display help for command

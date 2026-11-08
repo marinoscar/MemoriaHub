@@ -1,0 +1,12 @@
+Usage: memoriahub android releases [options] [command]
+
+List the server's releases (current marked *); `releases current <id>` makes one
+current (rollback)
+
+Options:
+  --json                  Print the releases as JSON
+  -h, --help              display help for command
+
+Commands:
+  current [options] <id>  Make a release current — the rollback; asks first when
+                          its versionCode is lower

@@ -1,0 +1,17 @@
+Usage: memoriahub deploy [options] [command]
+
+Check, install and update this application on a server
+
+Options:
+  -h, --help           display help for command
+
+Commands:
+  doctor [options]     Check that this server meets the prerequisites
+  install [options]    Install this application on this server
+  update [options]     Bring this server up to the latest revision
+  status [options]     Report whether the deployment on this server is healthy
+  list [options]       List every deployment on this server
+  about [options]      Show what this server says it is running
+  certs [options]      Inspect or renew this deployment's TLS certificate
+  uninstall [options]  Remove a deployment from this server
+  help [command]       display help for command

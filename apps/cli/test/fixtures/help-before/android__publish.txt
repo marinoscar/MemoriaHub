@@ -1,0 +1,14 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub android publish [options] [apk]
+
+Upload a built APK (default: the newest in dist/android) to the logged-in
+server
+
+Arguments:
+  apk             APK path; its sidecar .json must sit next to it
+
+Options:
+  --notes <text>  Release notes
+  --no-current    Upload without making it the current release
+  --force         Make it current even if its versionCode is not newer
+  -h, --help      display help for command

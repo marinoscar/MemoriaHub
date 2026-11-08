@@ -16,7 +16,7 @@ export default {
   collectCoverageFrom: [
     'src/**/*.ts',
     'src/**/*.tsx',
-    '!src/index.ts',
+    '!src/cli.ts',
   ],
   coverageDirectory: './coverage',
   testEnvironment: 'node',

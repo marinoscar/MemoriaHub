@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub circles list [options]
+
+List your circles on the server
+
+Options:
+  -h, --help  display help for command

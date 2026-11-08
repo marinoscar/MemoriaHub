@@ -1,0 +1,10 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub circles use [options] <id>
+
+Set the active circle for uploads
+
+Arguments:
+  id          Circle ID to activate
+
+Options:
+  -h, --help  display help for command

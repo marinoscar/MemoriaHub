@@ -1,0 +1,11 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub reports show [options] <id>
+
+Run a single report and print its results
+
+Arguments:
+  id          Report id (see `memoriahub reports list`)
+
+Options:
+  --json      Output structured JSON (default: false)
+  -h, --help  display help for command

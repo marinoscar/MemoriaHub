@@ -1,0 +1,13 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub retry [options]
+
+Retry failed uploads (up to the attempts cap). Use --force to also retry
+blocked files.
+
+Options:
+  --all               Retry failed files across all folders (default: false)
+  --folder <id|path>  Limit retry to a specific folder (ID or path)
+  --force             Also retry files blocked at the attempts cap (resets
+                      their attempt count) (default: false)
+  --circle <id>       Target circle ID (overrides active circle in config)
+  -h, --help          display help for command

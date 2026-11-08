@@ -1,0 +1,18 @@
+Usage: memoriahub reports [options] [command]
+
+Run extensible sync/storage reports from local state
+
+Options:
+  -h, --help           display help for command
+
+Commands:
+  list [options]       List the available reports
+  show [options] <id>  Run a single report and print its results
+  help [command]       display help for command
+
+Examples:
+  $ memoriahub reports list
+  $ memoriahub reports show overview
+  $ memoriahub reports show storage --json
+  $ memoriahub reports show duplicates
+
