@@ -9,6 +9,8 @@
 | **Status** | Implemented |
 | **Extended by** | Epic #481: channels, Web Push, the live SSE stream and admin broadcasts. See [section 16](#16-channels-web-push-and-the-live-stream-epic-481), [Browser Notifications, Web Push and the Live Stream](browser-notifications.md) and [Admin Notification Broadcasts](notification-broadcasts.md) |
 
+> **Platform adoption (RETRO-D3, #576).** Phase 1 declares this feature's events for the platform notifications slice (`apps/api/src/notifications-registry/memoriahub.notifications.ts`: nine PERMANENT event keys such as `review.duplicates`, `media.upload_completed`, `memories.ready`; the two broadcast types map to the platform's `admin.broadcast` / `admin.broadcast_critical`), with a fold descriptor per event (STATE / COUNTED / per occurrence) that keeps the volume guards below, and ships the dry-run-by-default carry-over `npm run notifications:migrate-legacy`. Everything this spec describes still runs from `apps/api/src/notifications/` on the `mh_legacy_*` tables until phase 2 mounts the platform slice after the 0.1.0-next.27 bump. Procedure: [notifications cutover runbook](../runbooks/notifications-cutover.md).
+
 ---
 
 ## Table of Contents
