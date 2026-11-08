@@ -1,0 +1,18 @@
+# =============================================================================
+# App overlay (every base mode) - a persistent volume for the enrichment models
+# =============================================================================
+# The CLIP ViT-B/32 vision model (duplicate detection) is downloaded on first use
+# into MODELS_DIR, which defaults to ./data/models. The API image runs from
+# /app/apps/api, so that default is /app/apps/api/data/models in the container.
+# A named volume keeps the download across container recreation, so an upgrade
+# does not fetch it again. Nothing here is a secret.
+#
+# For an air-gapped host, place clip-vit-b32-vision-quantized.onnx in the volume
+# before the first start (docs/specs/duplicate-detection.md).
+# =============================================================================
+services:
+  api:
+    volumes:
+      - models-data:/app/apps/api/data/models
+volumes:
+  models-data:

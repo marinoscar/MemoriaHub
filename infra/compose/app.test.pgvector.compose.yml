@@ -1,0 +1,10 @@
+# =============================================================================
+# App overlay (scope test) - the disposable test database carries pgvector
+# =============================================================================
+# Same reason as app.devdb.pgvector.compose.yml: the migrations create the
+# `vector` extension, which the platform's postgres:16-alpine image does not
+# ship. pgvector/pgvector:pg17 is the image the suite has always run against.
+# =============================================================================
+services:
+  db-test:
+    image: pgvector/pgvector:pg17

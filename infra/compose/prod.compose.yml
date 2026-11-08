@@ -1,3 +1,5 @@
+# GENERATED from @marinoscar/platform-infra@0.1.0-next.21 (compose) — do not edit; extend through an infra/compose/app.*.compose.yml overlay
+# Source of truth: @marinoscar/platform-infra/compose/prod.compose.yml; re-materialise with `npx platform-infra sync`
 # =============================================================================
 # Docker Compose - Production Overrides
 # =============================================================================
@@ -16,22 +18,18 @@ services:
       target: production
     environment:
       - NODE_ENV=production
-      # Node.js V8 old-space heap cap. This is a SEPARATE ceiling from the
-      # container `memory` limit below: without it the process FATAL-crashes at
-      # V8's old-space limit (JS heap OOM) long before the cgroup limit, even
-      # with plenty of container memory. Size it UNDER the container limit,
-      # leaving ~1 GB of headroom for off-heap/native buffers (image decode,
-      # sharp, onnxruntime): max-old-space-size ≈ container_mem_MB − 1024.
-      # Current live pairing: 6 G container / 5120 MB heap.
-      - NODE_OPTIONS=${NODE_OPTIONS:---max-old-space-size=5120}
+    # ⚠ REQUIRED BY THE DATABASE RESTORE, not only good hygiene. A restore's
+    # swap ends in `process.exit(0)` on purpose — the connection pool is bound
+    # to a database that has just been renamed out from under it and every
+    # pooled session was terminated to allow the rename, so the process cannot
+    # be trusted to keep serving. Without a supervisor that restarts it, a
+    # SUCCESSFUL restore leaves the application down. See
+    # docs/runbooks/database-restore.md §7.1.
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          # Sized to real production load. `.env`-parameterized so a host can
-          # override without editing this file. See issue #102.
-          memory: ${API_MEMORY_LIMIT:-6G}
-          cpus: "${API_CPU_LIMIT:-4.0}"
+          memory: 512M
 
   # ---------------------------------------------------------------------------
   # Web - Production settings
@@ -43,14 +41,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${WEB_MEMORY_LIMIT:-128M}
+          memory: 128M
 
   # ---------------------------------------------------------------------------
   # Nginx - Production settings
   # ---------------------------------------------------------------------------
   nginx:
     restart: unless-stopped
-    volumes:
-      # Override the dev nginx.conf with the prod variant that routes to web:80
-      # (production web container serves static files on :80, not Vite :5173)
-      - ../nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro

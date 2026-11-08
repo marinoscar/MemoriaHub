@@ -1,0 +1,24 @@
+# =============================================================================
+# App overlay (every base mode: dev, devdb, prod, vps) - CompreFace sidecar
+# =============================================================================
+# Face detection and recognition run on the keyless `compreface-core` sidecar
+# (RetinaFace detector + ArcFace MobileFaceNet calculator). The hand-written
+# base.compose.yml carried this service; the platform base does not, so this
+# overlay keeps it for every mode built on base.compose.yml.
+#
+# The API reaches it at http://compreface-core:3000 on app-network (the
+# default of FACE_COMPREFACE_URL). Nothing is published on the host.
+#
+# The worker stack has its own copy with a health check and the worker's
+# depends_on: app.worker.compreface.compose.yml.
+# =============================================================================
+services:
+  compreface-core:
+    image: exadel/compreface-core:1.2.0-mobilenet
+    restart: unless-stopped
+    environment:
+      # VPS tuning: one uWSGI worker serializes face detection on a shared CPU.
+      - UWSGI_PROCESSES=${COMPREFACE_PROCESSES:-1}
+      - UWSGI_THREADS=1
+    networks:
+      - app-network

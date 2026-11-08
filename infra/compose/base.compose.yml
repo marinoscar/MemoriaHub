@@ -1,16 +1,21 @@
+# GENERATED from @marinoscar/platform-infra@0.1.0-next.21 (compose) — do not edit; extend through an infra/compose/app.*.compose.yml overlay
+# Source of truth: @marinoscar/platform-infra/compose/base.compose.yml; re-materialise with `npx platform-infra sync`
 # =============================================================================
 # Docker Compose - Base Services
 # =============================================================================
 # Usage (run from infra/compose folder):
 #   docker compose -f base.compose.yml -f dev.compose.yml up
 #
-# With observability:
-#   docker compose -f base.compose.yml -f dev.compose.yml -f otel.compose.yml up
+# With telemetry (OpenTelemetry Collector + GreptimeDB):
+#   docker compose -f base.compose.yml -f dev.compose.yml -f telemetry.compose.yml up
 #
 # Production:
 #   docker compose -f base.compose.yml -f prod.compose.yml up
 #
 # Note: .env file is in this folder (infra/compose/)
+#
+# GENERATED into the app from @marinoscar/platform-infra; an app changes it
+# with an infra/compose/app.*.compose.yml overlay, applied after this file.
 # =============================================================================
 
 services:
@@ -18,13 +23,32 @@ services:
   # Nginx - Reverse Proxy
   # ---------------------------------------------------------------------------
   nginx:
-    image: nginx:alpine
+    image: nginx:1.30-alpine
     ports:
-      # 8327 is the memoriahub slot in the dev.marin.cr host-nginx map.
-      # See docs/ssl-nginx-setup.md for the full port table.
-      - "8327:80"
+      # Overridable per deployment when several apps share one VPS host
+      # (each app picks its own slot in the shared nginx map). Defaults to
+      # 3535 for local development.
+      - "${NGINX_PORT:-3535}:80"
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/csp.conf:/etc/nginx/csp.conf:ro
+      # The platform's snippets (security headers, the SSE proxy body) and
+      # the app's include points (app.d/http, app.d/server, app.d/locations,
+      # app.d/permissions-policy.conf). DIRECTORY mounts, so a file added or
+      # replaced by `git checkout` is seen by path (a single-file mount pins
+      # an inode); nginx still needs a reload or a recreate to read it.
+      - ../nginx/platform:/etc/nginx/platform:ro
+      - ../nginx/app.d:/etc/nginx/app.d:ro
+    # Open-file limit for long-lived SSE (issue #684). nginx.conf raises
+    # worker_rlimit_nofile to 65536, which only takes effect when the
+    # container's HARD limit allows it; without this the limit is whatever the
+    # Docker host defaults to. Changing this block also makes `docker compose
+    # up -d` RECREATE nginx on update, which is what picks up a changed
+    # single-file nginx.conf bind mount.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     depends_on:
       - api
       - web
@@ -36,51 +60,66 @@ services:
   # ---------------------------------------------------------------------------
   api:
     build:
-      # Context is the repo root (not apps/api) so npm workspaces can
-      # resolve the local @memoriahub/enrichment-compute package under
-      # packages/enrichment-compute. See apps/api/Dockerfile for detail.
       context: ../..
       dockerfile: apps/api/Dockerfile
-    # Load every variable from .env (APP_URL, COOKIE_SECRET, STORAGE_*, DEVICE_*,
-    # etc.) so newly added env vars don't have to be enumerated below. The explicit
-    # `environment` entries still take precedence over values from the env_file.
+    # EVERY variable in .env reaches the container, not a hand-maintained subset.
+    #
+    # This block used to be an allow-list, and the keys it forgot were exactly
+    # the ones whose absence is silent: APP_URL, COOKIE_SECRET,
+    # SECRETS_ENCRYPTION_KEY, every DEVICE_* and every storage limit. An
+    # operator would set SECRETS_ENCRYPTION_KEY in .env, watch the app boot with
+    # the "no encryption key" warning anyway, and have nothing pointing at
+    # compose as the cause.
+    #
+    # It was also hostile to forks of this template: adding a variable to
+    # .env.example was not enough, you had to remember to add it here too, and
+    # nothing told you otherwise. With env_file, .env.example IS the contract.
+    #
+    # `required: false` keeps a missing .env a soft condition, as it was before
+    # this block existed: `docker compose config` and a fresh clone still work,
+    # falling back to the defaults below. Without it, every compose invocation
+    # fails outright until the file is created.
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
+      # ONLY keys that need a COMPOSE-LEVEL DEFAULT when .env omits them.
+      #
+      # Do not add a bare `- FOO=${FOO}` here. `environment` overrides
+      # `env_file`, and an unset FOO interpolates to an empty string — so the
+      # entry would blank out the value .env just supplied. Every line below
+      # therefore carries a `:-default`.
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=${PORT:-3000}
-      - APP_URL=${APP_URL}
-      # Database connection (individual variables)
+      # Database connection (individual variables; DATABASE_URL is derived)
       - POSTGRES_HOST=${POSTGRES_HOST:-db}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_USER=${POSTGRES_USER:-app}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DB:-appdb}
       - POSTGRES_SSL=${POSTGRES_SSL:-false}
-      # JWT
-      - JWT_SECRET=${JWT_SECRET}
+      # JWT lifetimes (JWT_SECRET and COOKIE_SECRET arrive via env_file)
       - JWT_ACCESS_TTL_MINUTES=${JWT_ACCESS_TTL_MINUTES:-15}
       - JWT_REFRESH_TTL_DAYS=${JWT_REFRESH_TTL_DAYS:-14}
-      # OAuth
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL}
-      # AWS
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      # Admin bootstrap
-      - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL}
-      # Observability
+      # Observability: off unless asked for, so the telemetry overlay is opt-in.
+      # GREPTIME_* (telemetry reads) arrive via env_file with no default here:
+      # absent, the API reports telemetry as unavailable.
       - OTEL_ENABLED=${OTEL_ENABLED:-false}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-memoriahub-api}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+    # The API holds one socket per proxied SSE stream, so its descriptor limit
+    # must not become the ceiling once nginx's is raised (issue #684).
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     networks:
       - app-network
-      # Shared network where the central postgres container (hostname `postgres`)
-      # lives. Required because POSTGRES_HOST=postgres resolves on devnet.
+      # Shared external network carrying the central postgres container
+      # (reachable as hostname `postgres`) on VPS deployments where several
+      # apps share one Postgres instance. Required wherever .env sets
+      # POSTGRES_HOST=postgres. Unused for local development, where
+      # POSTGRES_HOST typically points elsewhere.
       - devnet
 
   # ---------------------------------------------------------------------------
@@ -88,35 +127,10 @@ services:
   # ---------------------------------------------------------------------------
   web:
     build:
-      # Context widened to the repo root to match the api service's
-      # convention, so a future workspace dependency doesn't require
-      # revisiting this file again.
       context: ../..
       dockerfile: apps/web/Dockerfile
     networks:
       - app-network
-
-  # ---------------------------------------------------------------------------
-  # CompreFace Core — Keyless ML engine sidecar (default face provider)
-  #
-  # Runs the bare CompreFace core ML container: RetinaFace detector +
-  # ArcFace MobileFaceNet calculator. No gateway, no admin UI, no Postgres,
-  # no API key. The API reaches it directly at http://compreface-core:3000
-  # on the shared app-network.
-  #
-  # Key endpoints used by the face provider:
-  #   GET  /status                                         → health check
-  #   POST /find_faces?face_plugins=calculator&det_prob_threshold=0.8
-  #        multipart field: file=<image>                  → bounding box + 128-d embedding
-  # ---------------------------------------------------------------------------
-  compreface-core:
-    image: exadel/compreface-core:1.2.0-mobilenet
-    environment:
-      - UWSGI_PROCESSES=1        # VPS tuning: single worker for shared CPU server
-      - UWSGI_THREADS=1
-    networks:
-      - app-network
-    # No ports exposed externally — the API reaches it via the docker network
 
 # =============================================================================
 # Networks
@@ -124,13 +138,10 @@ services:
 networks:
   app-network:
     driver: bridge
-  # Shared external network created once on the host (`docker network create devnet`);
-  # the central postgres container is reachable here as hostname `postgres`.
+  # Created once per host with `docker network create devnet`. The central
+  # postgres container shared with other apps on that host lives here and
+  # resolves as hostname `postgres`.
   devnet:
     external: true
     name: devnet
 
-# =============================================================================
-# Volumes
-# =============================================================================
-# (No application-specific volumes in base config; compreface-core is stateless)

@@ -48,7 +48,7 @@ The roadmap covers further long-term enrichment such as platform import paths (G
 - **Framework**: NestJS with Fastify adapter
 - **Database**: PostgreSQL with Prisma ORM
 - **Authentication**: Passport.js (Google OAuth)
-- **Observability**: OpenTelemetry + Uptrace
+- **Observability**: OpenTelemetry (collector into GreptimeDB)
 - **Testing**: Jest + Supertest
 
 ### Frontend
@@ -99,8 +99,8 @@ GOOGLE_CLIENT_SECRET=your-client-secret
 ### 3. Start Application
 
 ```bash
-# From infra/compose directory
-docker compose -f base.compose.yml -f dev.compose.yml up
+# From infra/compose directory (the face sidecar and the development database are app overlays, listed explicitly)
+docker compose -f base.compose.yml -f dev.compose.yml -f devdb.compose.yml -f app.compreface.compose.yml -f app.devdb.pgvector.compose.yml -f app.models-volume.compose.yml up
 ```
 
 ### 4. Seed Database (CRITICAL - Must run before first login)
@@ -134,14 +134,14 @@ The first user to login with email matching `INITIAL_ADMIN_EMAIL` (from `.env`) 
 
 ### Running with Observability Stack
 
-To enable full observability (Uptrace UI for traces, metrics, logs):
+To enable observability (traces, metrics and logs go to GreptimeDB through the platform's collector):
 
 ```bash
 cd infra/compose
-docker compose -f base.compose.yml -f dev.compose.yml -f otel.compose.yml up
+docker compose -f base.compose.yml -f dev.compose.yml -f telemetry.compose.yml up
 ```
 
-Access Uptrace UI at: http://localhost:14318
+Access the GreptimeDB dashboard at: http://localhost:14000/dashboard
 
 ### Running Tests
 
@@ -241,13 +241,14 @@ MemoriaHub/
 │   ├── specs/                 # Feature specs and contracts (android-media-sync.md, ...)
 │   └── ssl-nginx-setup.md     # VPS/HTTPS deployment with Nginx
 ├── infra/
-│   ├── compose/               # Docker Compose configs
-│   │   ├── base.compose.yml   # Core services
-│   │   ├── dev.compose.yml    # Development overrides
-│   │   ├── prod.compose.yml   # Production overrides
-│   │   └── otel.compose.yml   # Observability stack
-│   ├── nginx/                 # Nginx config
-│   └── otel/                  # OpenTelemetry config
+│   ├── compose/               # Docker Compose: generated base/dev/prod/telemetry files + app.* overlays
+│   │   ├── base.compose.yml   # Core services (generated)
+│   │   ├── dev.compose.yml    # Development overrides (generated)
+│   │   ├── prod.compose.yml   # Production overrides (generated)
+│   │   └── app.*.compose.yml  # MemoriaHub overlays (CompreFace, pgvector, memory limits, worker)
+│   ├── nginx/                 # Nginx config (generated) and app.d/ (app locations)
+│   ├── deployment/            # VPS deployment: generated vs app-owned files (vps.md)
+│   └── otel/                  # OpenTelemetry collector config (generated)
 ├── tests/e2e/                 # Playwright E2E tests
 ├── VISION.MD                  # Product vision and MVP definition
 └── CLAUDE.md                  # AI assistant guidance
@@ -475,7 +476,7 @@ For more troubleshooting, see [DEVELOPMENT.md](docs/DEVELOPMENT.md#debugging-tip
 
 For local `docker compose`-based production:
 
-1. Use `prod.compose.yml` overrides
+1. Use `prod.compose.yml` with the app overlays (`app.compreface.compose.yml`, `app.prod.memory-limits.compose.yml`, `app.prod.web-listen.compose.yml`); the VPS procedure is in `docs/deployment/vps.md`
 2. Set `NODE_ENV=production`
 3. Use strong secrets (generate with `openssl rand -base64 32`)
 4. Enable HTTPS with valid certificates

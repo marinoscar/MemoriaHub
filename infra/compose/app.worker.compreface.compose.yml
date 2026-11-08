@@ -1,0 +1,32 @@
+# =============================================================================
+# App overlay (scope worker) - the CompreFace sidecar beside the worker
+# =============================================================================
+# A fat worker node runs face detection against its own CompreFace core, so the
+# worker stack carries the sidecar (the hand-written docker-compose.worker.yml
+# did). The worker starts only once the sidecar answers /status.
+#
+# The sidecar is reached at http://compreface-core:3000 on the stack's default
+# network. Nothing is published on the host.
+# =============================================================================
+services:
+  compreface-core:
+    image: exadel/compreface-core:1.2.0-mobilenet
+    restart: unless-stopped
+    environment:
+      - UWSGI_PROCESSES=${COMPREFACE_PROCESSES:-2}
+      - UWSGI_THREADS=1
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/status')" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+  worker:
+    depends_on:
+      compreface-core:
+        condition: service_healthy
+    environment:
+      - MEMORIAHUB_FACE_PROVIDER=compreface
+      - MEMORIAHUB_COMPREFACE_URL=http://compreface-core:3000

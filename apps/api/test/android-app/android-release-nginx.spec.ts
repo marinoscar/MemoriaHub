@@ -5,8 +5,10 @@
 // A 150 MiB APK only reaches the API if the edge proxy lets the body through
 // unspooled, and only reaches the phone promptly if the download is not
 // buffered first. Configuration, not code: asserted by reading the files the
-// deployment uses — BOTH infra/nginx/nginx.conf and nginx.prod.conf, which are
-// maintained by hand and drift independently.
+// deployment uses. The two android locations are generated into
+// infra/nginx/platform/android-app.conf (the platform's fragment, issue #566),
+// included by infra/nginx/app.d/locations/android-app.conf, which nginx.conf
+// includes before `location /api`.
 // =============================================================================
 
 import { readFileSync } from 'node:fs';
@@ -28,8 +30,11 @@ function seconds(value: string): number {
   return Number(m[1]) * ({ s: 1, m: 60, h: 3600 } as Record<string, number>)[m[2] ?? 's'];
 }
 
-describe.each(['infra/nginx/nginx.conf', 'infra/nginx/nginx.prod.conf'])('nginx: Android APK releases (%s)', (file) => {
+describe('nginx: Android APK releases', () => {
+  const file = 'infra/nginx/platform/android-app.conf';
   const conf = readFileSync(resolve(repoRoot, file), 'utf8');
+  const server = readFileSync(resolve(repoRoot, 'infra/nginx/nginx.conf'), 'utf8');
+  const include = readFileSync(resolve(repoRoot, 'infra/nginx/app.d/locations/android-app.conf'), 'utf8');
 
   function locationBlock(selector: string): string {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/\s+/g, '\\s+');
@@ -42,7 +47,8 @@ describe.each(['infra/nginx/nginx.conf', 'infra/nginx/nginx.prod.conf'])('nginx:
     return block.match(new RegExp(`^\\s*${name}\\s+([^;]+);`, 'm'))?.[1].trim();
   }
 
-  const api = locationBlock('/api');
+  // The generic API block is in nginx.conf; the android locations are in the fragment.
+  const api = server.match(/location \/api \{([^}]*)\}/)?.[1] ?? '';
 
   it('lets an upload of the largest APK (plus multipart overhead) through, streamed, with long timeouts', () => {
     const block = locationBlock('= /api/admin/android-app/releases');
@@ -64,9 +70,10 @@ describe.each(['infra/nginx/nginx.conf', 'infra/nginx/nginx.prod.conf'])('nginx:
     expect(seconds(directive(block, 'proxy_send_timeout') ?? '60s')).toBeGreaterThanOrEqual(600);
   });
 
-  it('declares both before the generic /api block', () => {
-    const generic = conf.indexOf('location /api {');
-    expect(conf.indexOf('location = /api/admin/android-app/releases')).toBeLessThan(generic);
-    expect(conf.indexOf('location /api/android-app/download/')).toBeLessThan(generic);
+  it('includes both before the generic /api block', () => {
+    expect(include).toContain('include /etc/nginx/platform/android-app.conf;');
+    expect(server.indexOf('include /etc/nginx/app.d/locations/*.conf;')).toBeLessThan(server.indexOf('location /api {'));
+    expect(conf.indexOf('location = /api/admin/android-app/releases')).toBeGreaterThanOrEqual(0);
+    expect(conf.indexOf('location /api/android-app/download/')).toBeGreaterThanOrEqual(0);
   });
 });
