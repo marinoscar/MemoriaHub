@@ -2,7 +2,9 @@
  * Unit tests for DuplicateDetectionBatchHandler.
  *
  * Covers:
- *  - Registers itself with the EnrichmentHandlerRegistry on module init
+ *  - Registers itself with the platform JobHandlerRegistry on module init
+ *  - Label and the 30-minute, three-attempt profile; server-only (no node pair)
+ *  - A circle gone since the job was queued settles as a no-op
  *  - Processes all ids in the chunk sequentially, calling
  *    DuplicateDetectionService.processMediaItem once per id
  *  - Per-item failures are collected rather than aborting the chunk early
@@ -11,36 +13,20 @@
  *  - No-op (warn + return) when the job payload has no mediaItemIds
  */
 
-import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
+import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { DuplicateDetectionBatchHandler } from './duplicate-detection-batch.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { DuplicateDetectionService } from './duplicate-detection.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { circleJob, subjectPrisma } from '../../test/helpers/platform-job';
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return circleJob('duplicate_detection_batch', 'circle-1', {
     id: 'batch-job-1',
-    type: 'duplicate_detection_batch',
-    mediaItemId: null,
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.backfill,
+    reason: 'backfill',
     priority: 100,
-    providerKey: null,
-    modelVersion: null,
     payload: { mediaItemIds: ['media-1', 'media-2', 'media-3'] },
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
     ...overrides,
-  } as EnrichmentJob;
+  });
 }
 
 describe('DuplicateDetectionBatchHandler', () => {
@@ -53,19 +39,37 @@ describe('DuplicateDetectionBatchHandler', () => {
     mockDuplicateDetectionService = { processMediaItem: jest.fn().mockResolvedValue(undefined) };
 
     handler = new DuplicateDetectionBatchHandler(
-      mockRegistry as unknown as EnrichmentHandlerRegistry,
+      mockRegistry as unknown as JobHandlerRegistry,
+      subjectPrisma() as unknown as PrismaService,
       mockDuplicateDetectionService as unknown as DuplicateDetectionService,
     );
   });
 
-  it('registers itself with the EnrichmentHandlerRegistry on module init', () => {
+  it('registers itself with the platform registry on module init', () => {
     handler.onModuleInit();
 
     expect(mockRegistry.register).toHaveBeenCalledWith(handler);
   });
 
-  it('exposes type "duplicate_detection_batch"', () => {
+  it('exposes type "duplicate_detection_batch", its label and profile, and no node pair', () => {
     expect(handler.type).toBe('duplicate_detection_batch');
+    expect(handler.label).toBe('Duplicate detection (batch)');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 1_800_000, maxAttempts: 3 });
+    expect('nodeResultSchema' in handler).toBe(false);
+    expect('persistNodeResult' in handler).toBe(false);
+  });
+
+  it('settles as a no-op when the circle no longer exists', async () => {
+    await expect(
+      handler.process(circleJob('duplicate_detection_batch', 'gone-circle', { payload: { mediaItemIds: ['media-1'] } })),
+    ).resolves.toBeUndefined();
+    expect(mockDuplicateDetectionService.processMediaItem).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-string ids in the payload', async () => {
+    await handler.process(makeJob({ payload: { mediaItemIds: ['media-1', 7, null, ''] } }));
+    expect(mockDuplicateDetectionService.processMediaItem).toHaveBeenCalledTimes(1);
+    expect(mockDuplicateDetectionService.processMediaItem).toHaveBeenCalledWith('media-1');
   });
 
   it('processes every id in the chunk sequentially via processMediaItem', async () => {
