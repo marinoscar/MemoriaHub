@@ -90,13 +90,15 @@ describe('adminSections', () => {
     it('appends Broadcasts to Operations, gated on broadcasts:read (issue #488)', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
-      // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry cards.
-      expect(operations.cards.slice(-5).map((card) => card.title)).toEqual([
+      // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry
+      // cards, RETRO-H4 (#603) the Webhooks card.
+      expect(operations.cards.slice(-6).map((card) => card.title)).toEqual([
         'Maintenance',
         'About',
         'Telemetry',
         'Telemetry Explorer',
         'Telemetry Dashboard',
+        'Webhooks',
       ]);
       expect(broadcasts).toMatchObject({
         title: 'Broadcasts',
@@ -109,6 +111,20 @@ describe('adminSections', () => {
     it('resolves both routes to their page titles', () => {
       expect(adminPageTitle('/admin/settings/push')).toBe('Web Push');
       expect(adminPageTitle('/admin/settings/notifications')).toBe('Notifications');
+    });
+  });
+
+  describe('Webhooks card (RETRO-H4, #603)', () => {
+    it('appends the packaged system card to Operations, gated on system_webhooks:read', () => {
+      const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
+      expect(operations.cards.at(-1)).toMatchObject({
+        path: '/admin/settings/webhooks',
+        permission: 'system_webhooks:read',
+      });
+      // The organization card (feature `orgs`) is not spread in single-organization mode.
+      expect(ADMIN_SECTIONS.flatMap((s) => s.cards).map((c) => c.path)).not.toContain(
+        '/admin/settings/organization-webhooks',
+      );
     });
   });
 

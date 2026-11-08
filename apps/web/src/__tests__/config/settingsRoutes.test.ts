@@ -70,6 +70,8 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/telemetry': 'telemetry:read', // telemetry-admin.controller (GET admin/telemetry/config)
   '/admin/settings/telemetry/explorer': 'telemetry:query', // telemetry-explorer.controller
   '/admin/settings/telemetry/dashboard': 'telemetry:query', // telemetry dashboard controller
+  // RETRO-H4 (#603): platform webhooks admin controller (SYSTEM_WEBHOOKS_PERMISSIONS).
+  '/admin/settings/webhooks': 'system_webhooks:read', // admin-webhooks.controller (GET admin/webhooks)
 };
 
 describe('settings routes against the registries', () => {
