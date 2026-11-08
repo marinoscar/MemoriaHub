@@ -85,6 +85,8 @@ export const LEGACY_PREFERENCES_ROW_KEY = 'mh_legacy_notification_preferences';
 export const MEMORIAHUB_NOTIFICATIONS_USER_NAMESPACE = 'memoriahubNotifications';
 /** The platform's "a job failed for good" event, suppressed in favour of the app roll-up. */
 export const PLATFORM_JOB_FAILED_EVENT_KEY = 'jobs.job_failed';
+/** RETRO-C8's (#657) retention key for the pre-platform inbox; read as a carry-over source, left in place. */
+export const C8_RETENTION_KEY = 'appNotifications';
 /** The `recipient` label of a carried-over delivery row (the legacy table kept none). */
 export const CARRIED_DELIVERY_RECIPIENT = 'carried over (pre-platform)';
 /** Columns the platform inbox needs to hold MemoriaHub's rows (platform migration 0041). */
@@ -177,9 +179,14 @@ export function transformSystemSettingsDocument(stored: unknown): SettingsTransf
   changes.push(`disabledTypes -> disabledEvents [${disabledEvents.join(', ')}]`);
 
   // Retention: the platform purges are the jobs slice's `retention.*` policies.
+  // The source is RETRO-C8's `retention.appNotifications` when an operator
+  // already carried it over (or edited it since), else the legacy two keys.
   const retention: Json = isObject(doc.retention) ? { ...doc.retention } : {};
-  const days = intInRange(old.retentionDays, 1, 3650);
-  const enabled = typeof old.purgeEnabled === 'boolean' ? old.purgeEnabled : true;
+  const c8 = isObject(retention[C8_RETENTION_KEY]) ? (retention[C8_RETENTION_KEY] as Json) : null;
+  const days = intInRange(c8 ? c8.days : old.retentionDays, 1, 3650);
+  const enabledSource = c8 ? c8.enabled : old.purgeEnabled;
+  const enabled = typeof enabledSource === 'boolean' ? enabledSource : true;
+  const source = c8 ? `retention.${C8_RETENTION_KEY}` : 'retentionDays/purgeEnabled';
   let retentionChanged = false;
   for (const policy of ['notifications', 'notificationDeliveries'] as const) {
     if (isObject(retention[policy])) {
@@ -189,12 +196,14 @@ export function transformSystemSettingsDocument(stored: unknown): SettingsTransf
     if (days === null) continue;
     retention[policy] = { enabled, days };
     retentionChanged = true;
-    changes.push(`retentionDays/purgeEnabled -> retention.${policy} { enabled: ${enabled}, days: ${days} }`);
+    changes.push(`${source} -> retention.${policy} { enabled: ${enabled}, days: ${days} }`);
   }
-  if (old.retentionDays !== undefined && days === null) {
-    warnings.push(`retentionDays ${JSON.stringify(old.retentionDays)} is not a whole number of days: the platform default applies`);
+  if ((c8 ? c8.days : old.retentionDays) !== undefined && days === null) {
+    warnings.push(`${source} days is not a whole number of days: the platform default applies`);
   }
-  warnings.push('the platform inbox purge deletes by age, read or not (MemoriaHub never deleted an unread row)');
+  warnings.push(
+    'the platform inbox purge deletes a plain event row by age, read or not; a STATE or COUNTED row only once read or dismissed (MemoriaHub never deleted an unread row)',
+  );
 
   if (doc[LEGACY_NOTIFICATIONS_SETTINGS_KEY] === undefined) doc[LEGACY_NOTIFICATIONS_SETTINGS_KEY] = old;
   doc.notifications = next;

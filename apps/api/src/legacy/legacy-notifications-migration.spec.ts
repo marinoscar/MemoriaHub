@@ -68,6 +68,18 @@ describe('transformSystemSettingsDocument', () => {
     expect(isLegacySystemPolicy(first.next.notifications)).toBe(false);
   });
 
+  it("prefers RETRO-C8's retention.appNotifications over the legacy keys and leaves it in place", () => {
+    const out = transformSystemSettingsDocument({
+      notifications: { retentionDays: 30, purgeEnabled: true },
+      retention: { appNotifications: { enabled: false, days: 12 } },
+    });
+    expect(out.next.retention).toEqual({
+      appNotifications: { enabled: false, days: 12 },
+      notifications: { enabled: false, days: 12 },
+      notificationDeliveries: { enabled: false, days: 12 },
+    });
+  });
+
   it('leaves a document with no notifications alone', () => {
     expect(transformSystemSettingsDocument({}).changed).toBe(false);
     expect(transformSystemSettingsDocument(null).changed).toBe(false);
