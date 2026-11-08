@@ -775,7 +775,7 @@ describe('SocialMediaDetectionHandler', () => {
 
       expect(mockUnlink).toHaveBeenCalledTimes(1);
       const [tmpPath] = mockUnlink.mock.calls[0];
-      expect(tmpPath).toMatch(/memoriaHub-social-dl-.*\.mp4$/);
+      expect(tmpPath).toMatch(/memoriahub-job-social-dl-.*\.mp4$/);
 
       // The OCR call received the very same memoized path.
       const [ocrPathArg] = mockOcr.recognizeVideo.mock.calls[0];

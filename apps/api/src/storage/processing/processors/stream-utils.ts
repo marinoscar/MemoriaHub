@@ -73,7 +73,7 @@ export async function downloadToTempFile(opts: {
   getStream: () => Promise<Readable>;
   /** Object size in bytes, for the disk-space pre-flight. */
   sizeBytes: bigint | number;
-  /** Temp filename prefix, e.g. 'memoriaHub-vtag-dl-'. */
+  /** Temp filename prefix, e.g. 'memoriahub-job-vtag-dl-'. */
   prefix: string;
   /** File extension including the dot, for ffmpeg container detection. */
   extension?: string;

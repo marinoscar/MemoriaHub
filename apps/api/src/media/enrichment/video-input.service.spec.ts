@@ -35,7 +35,7 @@ function makeRequest(overrides: Record<string, unknown> = {}) {
     bucket: 'test-bucket',
     sizeBytes: BigInt(4_000_000_000),
     extension: '.mp4',
-    tempPrefix: 'memoriaHub-vtag-dl-',
+    tempPrefix: 'memoriahub-job-vtag-dl-',
     streamingEnabled: true,
     jobId: 'job-1',
     ...overrides,
@@ -156,7 +156,7 @@ describe('VideoInputResolver', () => {
       expect(mockDownload).toHaveBeenCalledWith(
         expect.objectContaining({
           sizeBytes: BigInt(4_000_000_000),
-          prefix: 'memoriaHub-vtag-dl-',
+          prefix: 'memoriahub-job-vtag-dl-',
           extension: '.mp4',
         }),
       );

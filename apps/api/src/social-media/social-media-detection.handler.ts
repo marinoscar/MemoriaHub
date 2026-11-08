@@ -256,7 +256,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
         const { path: tmpPath } = await downloadToTempFile({
           getStream: () => provider.download(mediaItem.storageObject!.storageKey),
           sizeBytes,
-          prefix: 'memoriaHub-social-dl-',
+          prefix: 'memoriahub-job-social-dl-',
           extension: fileExt,
         });
         downloadedVideoPath = tmpPath;
