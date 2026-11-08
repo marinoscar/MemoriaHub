@@ -24,8 +24,6 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'memories/curators/theme.curator.ts', why: 'Tag aggregates scoped by circle id.' },
   { file: 'notifications/notifications.service.ts', why: "Counted-event advisory lock and the read-all JSONB snapshot update, both keyed by the caller's user id." },
   { file: 'notifications/producers/share-expiring.service.ts', why: 'Expiry sweep over shares.' },
-  { file: 'platform/db-backup/db-backup-system-data.adapter.ts', why: "The first statement of the db-backup slice's system transaction: set_config('app.rls_bypass', 'on', true) for the read-only backup.rls-bypass Doctor count; no ids (RETRO-D4 shim, replaced by PrismaSystemService.runAsSystem in RETRO-D1)." },
-  { file: 'platform/settings/settings-data.adapter.ts', why: "The first statement of an org-scoped transaction: set_config('app.org_id'/'app.user_id', ..., true) for the settings slice's SETTINGS_DATA port (RETRO-B3 shim, replaced by PrismaService.runInOrg in RETRO-D1)." },
   { file: 'prisma/prisma.service.ts', why: 'Connection bootstrap and health probes.' },
   { file: 'search/semantic-search.service.ts', why: 'pgvector KNN scoped by circle id.' },
   { file: 'storage-settings/storage-settings.service.ts', why: 'Provider credential row maintenance.' },
