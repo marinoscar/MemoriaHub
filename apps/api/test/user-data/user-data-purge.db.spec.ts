@@ -51,7 +51,7 @@ function fakeProvider(id: string, bucket: string | null) {
   return {
     deleteMany: async (keys: string[]) => {
       deletedKeys.set(group, [...(deletedKeys.get(group) ?? []), ...keys]);
-      return { deleted: keys.length, errors: [] };
+      return { deleted: [...keys], failed: [] }; // the platform StorageDeleteManyResult (next.28)
     },
     delete: async (key: string) => {
       deletedKeys.set(group, [...(deletedKeys.get(group) ?? []), key]);
