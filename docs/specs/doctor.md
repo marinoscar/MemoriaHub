@@ -93,7 +93,7 @@ The report's `verdict` is the worst status (`pass < skip < warn < fail`). The ol
 
 ## 4. Check Catalog
 
-The former 35 checks, now 32 app checks plus 3 the platform host ships. One class per check in `apps/api/src/doctor/checks/<section>/<name>.doctor-check.ts`, each a `@Injectable()` that registers with `DoctorCheckRegistry` in `onModuleInit`, with a pure `decide*()` function the unit tests drive; they are provided by `DoctorChecksModule` (`doctor-checks.module.ts`). Ids are lower-case kebab (`memoriahub.core.pg-client-version`), which the platform's identity rule requires, so the camelCase tails of the old keys changed (`pgClientVersion` is `pg-client-version`, `mediaSync` is `media-sync`). Every check keeps the old 10 s ceiling (`timeoutMs`); the platform default is 5 s.
+The former 35 checks, now 29 app checks: 3 moved to the platform host (B1b), 2 to the jobs slice (C1) and `core.pgClientVersion` to the db-backup slice (D4). One class per check in `apps/api/src/doctor/checks/<section>/<name>.doctor-check.ts`, each a `@Injectable()` that registers with `DoctorCheckRegistry` in `onModuleInit`, with a pure `decide*()` function the unit tests drive; they are provided by `DoctorChecksModule` (`doctor-checks.module.ts`). Ids are lower-case kebab (`memoriahub.core.pg-client-version`), which the platform's identity rule requires, so the camelCase tails of the old keys changed (`pgClientVersion` is `pg-client-version`, `mediaSync` is `media-sync`). Every check keeps the old 10 s ceiling (`timeoutMs`); the platform default is 5 s.
 
 ### Mapping from the former keys
 
@@ -103,7 +103,7 @@ The former 35 checks, now 32 app checks plus 3 the platform host ships. One clas
 | `core.migrations` | `db.migrations` | `core` | Retired: the platform host core ships it (`PlatformHostCoreModule`) |
 | `core.secretsKey` | `secrets.encryption-key` | `core` | Retired: the platform host core ships it (`PlatformHostCoreModule`) |
 | `core.pgvector` | `memoriahub.core.pgvector` | `core` | Domain check; stays an app check |
-| `core.pgClientVersion` | `memoriahub.core.pg-client-version` | `core` | Domain check; stays an app check |
+| `core.pgClientVersion` | `backup.pg-client` (platform) | `backup` | Replaced by the db-backup slice's check in RETRO-D4 (#580); the app check and the utils it used are deleted |
 | `core.appUrl` | `memoriahub.core.app-url` | `core` | Domain check; stays an app check |
 | `auth.jwt` | `memoriahub.auth.jwt` | `auth` | Stays an app check; retired by the identity slice (RETRO-B2) |
 | `auth.googleOauth` | `memoriahub.auth.google-oauth` | `auth` | Stays an app check; retired by the identity slice (RETRO-B2) |
@@ -144,7 +144,7 @@ The tables below keep the former key in the first column for continuity; read it
 | Check key | Label | What it verifies | Failure → status + action item |
 |-----------|-------|-------------------|----------------------------------|
 | `core.pgvector` → `memoriahub.core.pgvector` | pgvector extension | `pg_extension` contains `vector` AND `to_regclass('public.media_item_embedding')` resolves | `error` — "Use a pgvector-capable Postgres image (pgvector/pgvector:pg17) and re-run migrations; semantic search is unavailable without it." |
-| `core.pgClientVersion` → `memoriahub.core.pg-client-version` | PostgreSQL client version | `pg_dump --version` major vs. `server_version_num` major — `pg_dump` refuses to dump a server newer than itself (issue #364) | `error` when the client is positively older than the server; `warning` when `pg_dump` is missing from PATH (backup/restore unavailable, nothing else affected) or the server version could not be read; action item — "Rebuild the API image with postgresql-client-17 (or newer) — see apps/api/Dockerfile." |
+| `core.pgClientVersion` → `backup.pg-client` (platform, since RETRO-D4) | PostgreSQL client (pg_dump) | `pg_dump --version` major vs. `server_version_num` major — `pg_dump` refuses to dump a server newer than itself (issue #364) | `error` when the client is positively older than the server; `warning` when `pg_dump` is missing from PATH (backup/restore unavailable, nothing else affected) or the server version could not be read; action item — "Rebuild the API image with postgresql-client-17 (or newer) — see apps/api/Dockerfile." |
 | `core.appUrl` → `memoriahub.core.app-url` | App URL | `APP_URL` is set; warns if it still contains `localhost` while `NODE_ENV=production` | `warning` (both branches — unset, or localhost-in-prod) |
 
 ### Authentication (`auth`)
@@ -261,7 +261,7 @@ Doctor reuses the domain services that already know how to ask a provider a ques
 | Android trusted / reported apps | `AndroidAppService` | `getTrustedApps()`, `getReportedApps(trusted)` |
 | Android releases, upload target | `AndroidReleaseService` | `current()`, `resolveUploadTarget()` |
 
-`core.pgvector` and `face.pgvector` are Doctor-specific catalog SELECTs (no settings page backs them). `core.pg-client-version` spawns `pg_dump --version` through the db-backup util and reads `server_version_num`.
+`core.pgvector` and `face.pgvector` are Doctor-specific catalog SELECTs (no settings page backs them). The former `core.pg-client-version` is the db-backup slice's `backup.pg-client` since RETRO-D4.
 
 ---
 

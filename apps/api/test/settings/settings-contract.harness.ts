@@ -131,6 +131,9 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     notificationDeliveries: { enabled: true, days: 90 },
     auditEvents: { enabled: false, days: 365 },
     aiRuns: { enabled: true, days: 90 },
+    // MemoriaHub's run-history policies (RETRO-C7), after the platform's four.
+    workflowRuns: { enabled: true, days: 30 },
+    reviewRuns: { enabled: true, days: 30 },
   },
   reviewRuns: { runHistoryRetentionDays: 30 },
   notifications: {
@@ -183,11 +186,14 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     timeOfDay: '02:00',
     timezone: 'UTC',
     retentionCount: 7,
-    storageProvider: null,
+    // The platform declaration (RETRO-D4): '' is "no pin"; node offload stays off. The other three
+    // are MemoriaHub's own defaults, kept by APP_SYSTEM_SETTINGS_DEFAULTS.
+    storageProvider: '',
     runStaleMinutes: 30,
     compressionLevel: 1,
     restoreRollbackMode: 'retain_database',
     oldDatabaseRetentionHours: 168,
+    nodeOffloadEnabled: false,
   },
   maintenance: { enabled: false, allowAdmins: true, startedAt: null, startedById: null },
 } as const;

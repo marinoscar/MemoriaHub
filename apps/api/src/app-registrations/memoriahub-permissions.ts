@@ -29,7 +29,8 @@
 // `user_settings:*` is the platform's. Its default grants (org_admin,
 // contributor, viewer) are the same.
 //
-// REMOVED BY SLICE: email_settings:* (D2), ai_settings:* (E1), storage_settings:*
+// REMOVED BY SLICE: email_settings:* (D2, done: the platform email routes check
+// system_settings:read|write), ai_settings:* (E1), storage_settings:*
 // and storage:* (D1), db_backup:* (D4), push:* and broadcasts:* (D3). Their ids
 // are permanent: the web cards and the CLI use the strings exactly.
 // =============================================================================
@@ -177,18 +178,6 @@ export const MEMORIAHUB_PERMISSIONS = {
     scope: 'system',
     defaultGrants: ['admin'],
   },
-  EMAIL_SETTINGS_READ: {
-    id: 'email_settings:read',
-    description: 'View email provider configuration and test connectivity',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  EMAIL_SETTINGS_WRITE: {
-    id: 'email_settings:write',
-    description: 'Configure email provider credentials, set active provider, and send test emails',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
   STORAGE_SETTINGS_READ: {
     id: 'storage_settings:read',
     description: 'View storage provider configuration and test connectivity',
@@ -222,24 +211,6 @@ export const MEMORIAHUB_PERMISSIONS = {
   BROADCASTS_WRITE: {
     id: 'broadcasts:write',
     description: 'Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  DB_BACKUP_READ: {
-    id: 'db_backup:read',
-    description: 'Admin: read database backup run history and status',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  DB_BACKUP_WRITE: {
-    id: 'db_backup:write',
-    description: 'Admin: configure and trigger database backups',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  DB_BACKUP_RESTORE: {
-    id: 'db_backup:restore',
-    description: 'Admin: restore the database from a backup',
     scope: 'system',
     defaultGrants: ['admin'],
   },

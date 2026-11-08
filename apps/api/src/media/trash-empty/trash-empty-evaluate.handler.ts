@@ -1,17 +1,24 @@
-import { ENRICHMENT_MAX_ATTEMPTS } from '../../platform/jobs/queue-limits';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
-  EnrichmentJob,
   Prisma,
   TrashEmptyRun,
   TrashEmptyRunItemStatus,
   TrashEmptyRunStatus,
 } from '@prisma/client';
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TrashEmptyRunService } from './trash-empty-run.service';
+import {
+  runJobPayload,
+  vetoDeleteWhileRunActive,
+  type RunJobInput,
+} from '../../platform/jobs/run-engine-jobs';
 
 /** Payload shape for a `trash_empty_evaluate` job. */
 interface TrashEmptyEvaluatePayload {
@@ -36,19 +43,24 @@ const tracer = trace.getTracer('trash-empty');
  *   - 0 matches → completed
  *   - otherwise → running (+ enqueues chunked execute-batch jobs)
  *
- * SERVER-ONLY by omission: no `nodeResultSchema` / `persistNodeResult` pair, so
- * EnrichmentHandlerRegistry.serverOnlyTypes() auto-classifies it server-only and
- * systemModeEligibleTypes() auto-includes it in `system` mode — no
- * enrichment-job.worker.ts edit is needed.
+ * A native platform `JobHandler` (RETRO-C7, #604). SERVER-ONLY by omission: no
+ * `nodeResultSchema` / `persistNodeResult` pair, so the platform registry
+ * derives it server-only and the `system` worker mode runs it. `canDelete`
+ * refuses to delete a pending job of a run still `evaluating`.
  */
 @Injectable()
-export class TrashEmptyEvaluateHandler implements EnrichmentHandler, OnModuleInit {
+export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
   readonly type = 'trash_empty_evaluate';
+
+  readonly label = 'Empty trash evaluate';
+
+  /** A keyset scan over one circle's trash: 15 minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(TrashEmptyEvaluateHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly runService: TrashEmptyRunService,
   ) {}
@@ -57,8 +69,8 @@ export class TrashEmptyEvaluateHandler implements EnrichmentHandler, OnModuleIni
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    const payload = job.payload as unknown as TrashEmptyEvaluatePayload | null;
+  async process(job: RunJobInput): Promise<void> {
+    const payload = runJobPayload<TrashEmptyEvaluatePayload>(job);
     if (!payload?.runId) {
       this.logger.warn(`trash_empty_evaluate job ${job.id} missing runId payload; skipping`);
       return;
@@ -93,7 +105,18 @@ export class TrashEmptyEvaluateHandler implements EnrichmentHandler, OnModuleIni
     );
   }
 
-  private async runEvaluation(job: EnrichmentJob, run: TrashEmptyRun): Promise<void> {
+  /** Refuses to delete a pending job whose run is still being evaluated. */
+  canDelete(job: Job): Promise<string | null> {
+    return vetoDeleteWhileRunActive(job, {
+      engine: 'empty-trash run',
+      activeStatuses: [TrashEmptyRunStatus.evaluating],
+      readRunStatus: async (runId) =>
+        (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId }, select: { status: true } }))
+          ?.status ?? null,
+    });
+  }
+
+  private async runEvaluation(job: RunJobInput, run: TrashEmptyRun): Promise<void> {
     const runId = run.id;
     try {
       const orderBy: Prisma.MediaItemOrderByWithRelationInput[] = [
@@ -148,6 +171,7 @@ export class TrashEmptyEvaluateHandler implements EnrichmentHandler, OnModuleIni
           where: { id: runId },
           data: { status: TrashEmptyRunStatus.completed, finishedAt: new Date() },
         });
+        // metrics: RETRO-T3 (app.runs.finished{engine=trash_empty,outcome=completed})
         this.logTransition(run, TrashEmptyRunStatus.completed, { matchedCount: 0 });
         return;
       }
@@ -175,6 +199,7 @@ export class TrashEmptyEvaluateHandler implements EnrichmentHandler, OnModuleIni
             },
           })
           .catch(() => undefined);
+        // metrics: RETRO-T3 (app.runs.finished{engine=trash_empty,outcome=failed})
         this.logTransition(run, TrashEmptyRunStatus.failed, { error: message });
       }
       throw err;
@@ -202,7 +227,7 @@ export class TrashEmptyEvaluateHandler implements EnrichmentHandler, OnModuleIni
   }
 
   private maxAttempts(): number {
-    return ENRICHMENT_MAX_ATTEMPTS;
+    return this.profile.maxAttempts;
   }
 
   private logTransition(

@@ -119,7 +119,7 @@ export class MemoryDigestTask {
     // and evaluated by the same helper the handler uses, so the cron and the
     // send can never disagree about whether the digest is live.
     const settings = await this.systemSettings.getSettings();
-    const gate = this.digest.evaluateGlobalGate(settings);
+    const gate = this.digest.evaluateGlobalGate(settings, await this.digest.emailReady());
     if (!gate.ok) {
       result.gate = gate.reason;
       return result;

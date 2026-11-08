@@ -1,8 +1,9 @@
 /**
  * Unit tests for ThumbnailRegenHandler.
  *
- * Verifies: handler type constant; onModuleInit registers with the registry;
- * process() throws when mediaItemId is missing, gracefully skips (no throw,
+ * Verifies (a native platform JobHandler, RETRO-C3 #585): handler type, label
+ * and profile; onModuleInit registers with the platform registry;
+ * process() throws when the job is not about a media item, gracefully skips (no throw,
  * no reprocessObjectNow call) when the item is missing/deleted/has no
  * storageObject, and on the happy path calls
  * StorageProcessingRecoveryService.reprocessObjectNow with the exact
@@ -11,8 +12,8 @@
  * No database required — all dependencies are fully mocked.
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { JobHandlerRegistry, JobScope, type Job } from '@marinoscar/platform-api/jobs';
 import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
@@ -21,37 +22,21 @@ import {
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
 import { randomUUID } from 'crypto';
-import type { EnrichmentJob } from '@prisma/client';
+import { mediaItemJob } from '../../test/helpers/platform-job';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return mediaItemJob('thumbnail_regen', randomUUID(), randomUUID(), {
     id: 'job-thumb-1',
-    type: 'thumbnail_regen',
-    mediaItemId: randomUUID(),
-    circleId: randomUUID(),
-    status: 'running' as any,
-    reason: 'rerun' as any,
-    priority: 0,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
+    status: 'running',
+    reason: 'rerun',
     attempts: 1,
-    lastError: null,
     startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
     ...overrides,
-  } as EnrichmentJob;
+  });
 }
 
 function makeStorageObject(overrides: Partial<any> = {}) {
@@ -83,7 +68,8 @@ function makeMediaItem(overrides: Partial<any> = {}) {
 
 describe('ThumbnailRegenHandler', () => {
   let handler: ThumbnailRegenHandler;
-  let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
+  let mockJobScope: { run: jest.Mock };
   let mockRecoveryService: jest.Mocked<Pick<StorageProcessingRecoveryService, 'reprocessObjectNow'>>;
   let mockThumbnailNodePersistService: jest.Mocked<Pick<ThumbnailNodePersistService, 'persistThumbnail'>>;
   let mockPrisma: MockPrismaService;
@@ -102,11 +88,13 @@ describe('ThumbnailRegenHandler', () => {
     };
 
     mockPrisma = createMockPrismaService();
+    mockJobScope = { run: jest.fn(async (_job: unknown, fn: (tx: unknown) => Promise<unknown>) => fn('tx')) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ThumbnailRegenHandler,
-        { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+        { provide: JobHandlerRegistry, useValue: mockRegistry },
+        { provide: JobScope, useValue: mockJobScope },
         { provide: PrismaService, useValue: mockPrisma },
         {
           provide: StorageProcessingRecoveryService,
@@ -140,8 +128,15 @@ describe('ThumbnailRegenHandler', () => {
   // onModuleInit — registers with the registry
   // =========================================================================
 
+  describe('platform contract', () => {
+    it('declares a label and the 10-minute, 3-attempt profile', () => {
+      expect(handler.label).toBe('Thumbnail regeneration');
+      expect(handler.profile).toEqual({ maxRuntimeMs: 600_000, maxAttempts: 3 });
+    });
+  });
+
   describe('onModuleInit', () => {
-    it('registers itself in the EnrichmentHandlerRegistry on init', () => {
+    it('registers itself in the platform JobHandlerRegistry on init', () => {
       handler.onModuleInit();
       expect(mockRegistry.register).toHaveBeenCalledWith(handler);
     });
@@ -158,40 +153,22 @@ describe('ThumbnailRegenHandler', () => {
   // =========================================================================
 
   describe('process', () => {
-    it('throws when job.mediaItemId is null', async () => {
-      const job = makeJob({ mediaItemId: null });
+    it('throws when the job is not about a media item', async () => {
+      const job = makeJob({ subjectType: null, subjectId: null });
 
-      await expect(handler.process(job)).rejects.toThrow(
-        /missing mediaItemId/i,
-      );
+      await expect(handler.process(job)).rejects.toThrow(/not about a media item/i);
       expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
       expect(mockRecoveryService.reprocessObjectNow).not.toHaveBeenCalled();
     });
 
-    it('throws when job.mediaItemId is undefined', async () => {
-      const job = makeJob({ mediaItemId: undefined as any });
-
-      await expect(handler.process(job)).rejects.toThrow(
-        /missing mediaItemId/i,
-      );
-      expect(mockRecoveryService.reprocessObjectNow).not.toHaveBeenCalled();
-    });
-
-    it('returns without calling reprocessObjectNow when the MediaItem is missing', async () => {
+    it('settles as a no-op without calling reprocessObjectNow when the MediaItem is gone', async () => {
       const job = makeJob();
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
 
       await expect(handler.process(job)).resolves.toBeUndefined();
 
       expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: job.mediaItemId },
-          select: expect.objectContaining({
-            id: true,
-            deletedAt: true,
-            storageObject: true,
-          }),
-        }),
+        expect.objectContaining({ where: { id: job.subjectId } }),
       );
       expect(mockRecoveryService.reprocessObjectNow).not.toHaveBeenCalled();
     });
@@ -264,6 +241,7 @@ describe('ThumbnailRegenHandler', () => {
 
     it('parses a valid result payload and delegates to ThumbnailNodePersistService.persistThumbnail', async () => {
       const job = makeJob();
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(makeMediaItem({ id: job.subjectId }) as any);
       const result = {
         storageKey: 'thumbnails/some-object-id.jpg',
         width: 400,
@@ -275,8 +253,9 @@ describe('ThumbnailRegenHandler', () => {
 
       expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledTimes(1);
       expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledWith(
-        job,
+        { id: job.id, mediaItemId: job.subjectId, circleId: (job.payload as { circleId: string }).circleId },
         result,
+        expect.any(Function),
       );
     });
 
@@ -286,6 +265,40 @@ describe('ThumbnailRegenHandler', () => {
 
       await expect(handler.persistNodeResult(job, invalidResult)).rejects.toThrow();
       expect(mockThumbnailNodePersistService.persistThumbnail).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // deriveOutputKey (where a node's thumbnail lands)
+  // =========================================================================
+
+  describe('deriveOutputKey', () => {
+    const SOURCE_OBJECT_ID = '11111111-1111-4111-8111-111111111111';
+
+    it('answers a versioned key in the source object thumbnail namespace', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ storageObjectId: SOURCE_OBJECT_ID } as any);
+
+      const key = await handler.deriveOutputKey(makeJob());
+
+      expect(key).toMatch(new RegExp(`^thumbnails/${SOURCE_OBJECT_ID}-[0-9a-f]{16}\\.jpg$`));
+    });
+
+    it('is idempotent per job and moves with a new job', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ storageObjectId: SOURCE_OBJECT_ID } as any);
+      const job = makeJob();
+
+      const first = await handler.deriveOutputKey(job);
+      const again = await handler.deriveOutputKey(job);
+      const other = await handler.deriveOutputKey(makeJob({ id: 'job-thumb-2' }));
+
+      expect(again).toBe(first);
+      expect(other).not.toBe(first);
+    });
+
+    it('refuses a media item with no storage object', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({ storageObjectId: null } as any);
+
+      await expect(handler.deriveOutputKey(makeJob())).rejects.toThrow(/no linked StorageObject/);
     });
   });
 });

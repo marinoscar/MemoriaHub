@@ -39,7 +39,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/general': 'system_settings:read', // platform settings: system-settings.controller
   '/admin/settings/users': 'users:read', // platform identity: users.controller
   '/admin/settings/archiving': 'system_settings:read', // system settings
-  '/admin/settings/email': 'email_settings:read', // email/email-settings.controller
+  '/admin/settings/email': 'system_settings:read', // platform email: email-settings.controller (RETRO-D2)
   '/admin/settings/push': 'push:read', // notifications/push/push-config.controller
   '/admin/settings/notifications': 'system_settings:read', // system settings (notifications.* policy)
   '/admin/settings/android': 'system_settings:read', // android-app/android-app.controller
@@ -59,7 +59,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/jobs': 'jobs:read', // enrichment/enrichment-admin.controller
   '/admin/settings/jobs/insights': 'jobs:read', // enrichment/enrichment-admin.controller
   '/admin/settings/nodes': 'jobs:read', // nodes/nodes-admin.controller
-  '/admin/settings/db-backup': 'db_backup:read', // db-backup/db-backup.controller
+  '/admin/settings/db-backup': 'db_backup:read', // platform db-backup slice: DatabaseBackupController (RETRO-D4)
   '/admin/settings/sharing': 'shares:manage_any', // share/share.service (scope=all)
   '/admin/settings/workflows': 'system_settings:read', // workflows/admin/workflows-admin.controller
   '/admin/settings/doctor': 'system_settings:read', // platform doctor: DEFAULT_DOCTOR_PERMISSION

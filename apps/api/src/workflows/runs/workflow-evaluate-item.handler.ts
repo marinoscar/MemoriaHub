@@ -1,18 +1,17 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { JobHandlerRegistry, type JobExecutionProfile, type JobHandler } from '@marinoscar/platform-api/jobs';
 import {
-  EnrichmentJob,
   Prisma,
   WorkflowRunItemStatus,
   WorkflowRunStatus,
   WorkflowTrigger,
 } from '@prisma/client';
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isWorkflowsEnabled } from '../../settings/feature-gates';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { runJobPayload, type RunJobInput } from '../../platform/jobs/run-engine-jobs';
 
 /**
  * Length of the rolling micro-run collection window, in minutes. A CODE
@@ -58,16 +57,27 @@ interface WorkflowEvaluateItemPayload {
  * Loop / backpressure protection: the evaluate-once guard (an item already has a
  * workflow_run_item on ANY run of this workflow → skip) stops a workflow-applied
  * mutation from re-firing evaluation, breaking workflow→enrichment→workflow
- * cascades. Server-only (no nodeResultSchema/persistNodeResult).
+ * cascades.
+ *
+ * A native platform `JobHandler` (RETRO-C7, #604). SERVER-ONLY: no node-result
+ * pair. The subject is the media item; the payload names the workflow and the
+ * item. No `canDelete`: a micro-run is dispatched by its finalize task, never
+ * by this job, so deleting one strands nothing (the item is simply not
+ * evaluated).
  */
 @Injectable()
-export class WorkflowEvaluateItemHandler implements EnrichmentHandler, OnModuleInit {
+export class WorkflowEvaluateItemHandler implements JobHandler, OnModuleInit {
   readonly type = 'workflow_evaluate_item';
+
+  readonly label = 'Workflow evaluate (item)';
+
+  /** One item against one workflow: a minute is generous. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 60_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(WorkflowEvaluateItemHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly compiler: WorkflowConditionCompiler,
@@ -77,8 +87,8 @@ export class WorkflowEvaluateItemHandler implements EnrichmentHandler, OnModuleI
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    const payload = job.payload as unknown as WorkflowEvaluateItemPayload | null;
+  async process(job: RunJobInput): Promise<void> {
+    const payload = runJobPayload<WorkflowEvaluateItemPayload>(job);
     if (!payload?.workflowId || !payload?.mediaItemId) {
       this.logger.warn(`workflow_evaluate_item job ${job.id} missing payload; skipping`);
       return;

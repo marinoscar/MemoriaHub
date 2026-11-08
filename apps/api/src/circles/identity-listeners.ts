@@ -6,7 +6,7 @@ import {
   type IdentityUserCreatedEvent,
 } from '@marinoscar/platform-api/identity';
 
-import { EmailService } from '../email/email.service';
+import { AppEmailSender } from '../platform/email/app-email.sender';
 import { PrismaService } from '../prisma/prisma.service';
 
 // =============================================================================
@@ -48,7 +48,7 @@ export class CircleIdentityListeners {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly email: EmailService,
+    private readonly email: AppEmailSender,
   ) {}
 
   @OnEvent(IDENTITY_EVENTS.USER_CREATED)

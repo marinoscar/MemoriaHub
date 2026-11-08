@@ -1,67 +1,24 @@
 import { api } from './api';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// =============================================================================
+// Email readiness (RETRO-D2, #570)
+// =============================================================================
+//
+// The email settings page is the platform's (`@marinoscar/platform-web/email/ui`,
+// with its own hook and client). The one thing the app still reads itself is
+// whether outbound email is usable, for the Memories settings page's digest
+// warning: the `provider` and `enabled` fields of `GET /api/email-settings`
+// (the platform route, `system_settings:read`).
+// =============================================================================
 
-export type EmailProvider = 'ses' | 'smtp';
-
-export type EmailCredentialSource = 'ses:reuses-s3' | 'smtp:inline';
-
-export interface EmailSmtpSettings {
-  host: string | null;
-  port: number;
-  useTls: boolean;
-  username: string | null;
-  passwordConfigured: boolean;
-  passwordLast4: string | null;
-}
-
-export interface EmailSettings {
-  provider: EmailProvider | null;
+/** The two fields of the platform email settings response the app reads. */
+export interface EmailReadiness {
+  /** The selected transport id (`ses`, `smtp`, or an app-registered one), or null. */
+  provider: string | null;
+  /** Master switch: nothing is sent while false. */
   enabled: boolean;
-  fromAddress: string | null;
-  fromName: string | null;
-  sesRegion: string | null;
-  sesCredentialAvailable: boolean;
-  smtp: EmailSmtpSettings;
-  credentialSource: EmailCredentialSource | null;
 }
 
-export interface UpdateEmailSettingsBody {
-  provider: EmailProvider;
-  enabled: boolean;
-  sesRegion?: string;
-  smtpHost?: string;
-  smtpPort?: number;
-  smtpUseTls?: boolean;
-  smtpUsername?: string;
-  // Send only when a new password was typed; omit/blank preserves the stored one.
-  smtpPassword?: string;
-  fromAddress?: string;
-  fromName?: string;
-}
-
-export interface TestEmailResult {
-  ok: boolean;
-  messageId?: string;
-  error?: string;
-}
-
-// ---------------------------------------------------------------------------
-// API functions
-// ---------------------------------------------------------------------------
-
-export async function getEmailSettings(): Promise<EmailSettings> {
-  return api.get<EmailSettings>('/email-settings');
-}
-
-export async function updateEmailSettings(
-  body: UpdateEmailSettingsBody,
-): Promise<EmailSettings> {
-  return api.put<EmailSettings>('/email-settings', body);
-}
-
-export async function testEmail(recipient: string): Promise<TestEmailResult> {
-  return api.post<TestEmailResult>('/email-settings/test', { recipient });
+export async function getEmailSettings(): Promise<EmailReadiness> {
+  return api.get<EmailReadiness>('/email-settings');
 }

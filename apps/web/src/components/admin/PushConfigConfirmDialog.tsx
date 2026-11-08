@@ -2,7 +2,7 @@
  * The rotate / remove confirmation dialog for Web Push (VAPID) config.
  * Epic #481, issue #487.
  *
- * ONE COMPONENT FOR BOTH INTENTS, mirroring `DbBackupRestoreDialog`: rotate and
+ * ONE COMPONENT FOR BOTH INTENTS, mirroring the db-backup restore dialog (now `@marinoscar/platform-web/db-backup/ui`): rotate and
  * remove need exactly the same safety machinery — a stated consequence and a
  * TYPED CONFIRMATION LITERAL — and differ only in copy and which literal they
  * require.

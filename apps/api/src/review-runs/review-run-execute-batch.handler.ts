@@ -1,17 +1,25 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
-  EnrichmentJob,
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import {
   Prisma,
   ReviewRunItemStatus,
   ReviewRunStatus,
 } from '@prisma/client';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
 import { createExecutionContext } from './review-run-subject.strategy';
 import { subjectIdOf } from './review-run.service';
+import {
+  runJobPayload,
+  vetoDeleteWhileRunActive,
+  type RunJobInput,
+} from '../platform/jobs/run-engine-jobs';
 
 /** Payload shape for a `review_run_execute_batch` job. */
 export interface ReviewRunExecuteBatchPayload {
@@ -43,16 +51,24 @@ const tracer = trace.getTracer('review-run');
  * it simply drops out of the work set — finalize keys off "no rows remain in
  * matched/processing", never on processedCount === matchedCount.
  *
- * SERVER-ONLY by omission: no `nodeResultSchema` / `persistNodeResult` node pair.
+ * A native platform `JobHandler` (RETRO-C7, #604). SERVER-ONLY by omission: no
+ * `nodeResultSchema` / `persistNodeResult` node pair (resolving a group calls
+ * the archive/trash services, which need the database). `canDelete` refuses to
+ * delete a pending batch of a run that is still `running`.
  */
 @Injectable()
-export class ReviewRunExecuteBatchHandler implements EnrichmentHandler, OnModuleInit {
+export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
   readonly type = 'review_run_execute_batch';
+
+  readonly label = 'Review run execute batch';
+
+  /** 200 subjects, each one short transaction: 10 minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(ReviewRunExecuteBatchHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly subjects: ReviewRunSubjectRegistry,
   ) {}
@@ -61,12 +77,13 @@ export class ReviewRunExecuteBatchHandler implements EnrichmentHandler, OnModule
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    const payload = job.payload as unknown as ReviewRunExecuteBatchPayload | null;
-    if (!payload?.runId || !Array.isArray(payload.subjectIds)) {
+  async process(job: RunJobInput): Promise<void> {
+    const raw = runJobPayload<ReviewRunExecuteBatchPayload>(job);
+    if (typeof raw?.runId !== 'string' || raw.runId === '' || !Array.isArray(raw.subjectIds)) {
       this.logger.warn(`review_run_execute_batch job ${job.id} missing payload; skipping`);
       return;
     }
+    const payload: ReviewRunExecuteBatchPayload = { runId: raw.runId, subjectIds: raw.subjectIds };
     await tracer.startActiveSpan(
       'review_run.execute_batch',
       {
@@ -92,6 +109,17 @@ export class ReviewRunExecuteBatchHandler implements EnrichmentHandler, OnModule
         }
       },
     );
+  }
+
+  /** Refuses to delete a pending batch of a run that is still running. */
+  canDelete(job: Job): Promise<string | null> {
+    return vetoDeleteWhileRunActive(job, {
+      engine: 'review run',
+      activeStatuses: [ReviewRunStatus.running],
+      readRunStatus: async (runId) =>
+        (await this.prisma.reviewRun.findUnique({ where: { id: runId }, select: { status: true } }))?.status ??
+        null,
+    });
   }
 
   /**
@@ -229,6 +257,7 @@ export class ReviewRunExecuteBatchHandler implements EnrichmentHandler, OnModule
     });
 
     if (fin.count > 0) {
+      // metrics: RETRO-T3 (app.runs.finished{engine=review,outcome})
       this.logger.log({
         event: 'review_run.finalized',
         runId,

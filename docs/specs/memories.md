@@ -959,7 +959,7 @@ MemoryDigestHandler  (server-only)
 MemoryDigestService.sendForCircle()
       │  per recipient: preferences → filter → render → send
       ▼
-EmailService.sendEmail('memory-digest', …)   →  SES | SMTP
+AppEmailSender.sendEmail('memory-digest', …)   →  platform email transport (SES | SMTP)
 ```
 
 | File | Role |

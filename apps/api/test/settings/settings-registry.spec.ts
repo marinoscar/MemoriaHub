@@ -28,9 +28,10 @@ import {
 const SYSTEM_KEYS = [
   'maintenance', // the platform's, registered first
   'jobs', 'retention', // the jobs slice's (RETRO-C1)
+  'databaseBackup', // the db-backup slice's (RETRO-D4)
   'ui', 'features', 'ai', 'autoTagging', 'face', 'storage', 'burst', 'dedup', 'locationInference',
   'locationGrouping', 'socialMedia', 'geo', 'email', 'reviewRuns', 'notifications',
-  'pictureEnhancement', 'backup', 'workflows', 'memories', 'databaseBackup',
+  'pictureEnhancement', 'backup', 'workflows', 'memories',
 ];
 const USER_KEYS = ['dataTables', 'navigation', 'search', 'notifications', 'memories', 'timezone'];
 
@@ -136,10 +137,10 @@ describe('settings registry', () => {
       ['memories.digest.sendHourUtc', ['memories', 'digest', 'sendHourUtc'], 0, 23, true],
       ['databaseBackup.dayOfWeek', ['databaseBackup', 'dayOfWeek'], 0, 6, true],
       ['databaseBackup.dayOfMonth', ['databaseBackup', 'dayOfMonth'], 1, 28, true],
-      ['databaseBackup.retentionCount', ['databaseBackup', 'retentionCount'], 1, 100, true],
-      ['databaseBackup.runStaleMinutes', ['databaseBackup', 'runStaleMinutes'], 5, 240, true],
+      ['databaseBackup.retentionCount', ['databaseBackup', 'retentionCount'], 1, 365, true],
+      ['databaseBackup.runStaleMinutes', ['databaseBackup', 'runStaleMinutes'], 1, 10080, true],
       ['databaseBackup.compressionLevel', ['databaseBackup', 'compressionLevel'], 0, 9, true],
-      ['databaseBackup.oldDatabaseRetentionHours', ['databaseBackup', 'oldDatabaseRetentionHours'], 1, 720, true],
+      ['databaseBackup.oldDatabaseRetentionHours', ['databaseBackup', 'oldDatabaseRetentionHours'], 1, 8760, true],
       ['locationInference.autoApplyMaxGapMinutes', ['locationInference', 'autoApplyMaxGapMinutes'], 0, 60, true],
       ['locationGrouping.suggestionMinItems', ['locationGrouping', 'suggestionMinItems'], 1, 1000, true],
       ['socialMedia.minConfidence', ['socialMedia', 'minConfidence'], 0.5, 1, false],
@@ -163,8 +164,8 @@ describe('settings registry', () => {
       expect([ok('24:00'), ok('12:60'), ok('2:00'), ok('noon')]).toEqual([false, false, false, false]);
     });
 
-    it('databaseBackup.storageProvider takes null or a key', () => {
-      expect(h.system.validatePatch({ databaseBackup: { storageProvider: null } }).success).toBe(true);
+    it('databaseBackup.storageProvider takes a key or the empty string ("no pin", the platform shape)', () => {
+      expect(h.system.validatePatch({ databaseBackup: { storageProvider: '' } }).success).toBe(true);
       expect(h.system.validatePatch({ databaseBackup: { storageProvider: 'r2' } }).success).toBe(true);
     });
 
@@ -181,10 +182,15 @@ describe('settings registry', () => {
       expect(after.face.features.detection).toEqual({ provider: 'compreface', model: 'm1' });
     });
 
-    it('databaseBackup.storageProvider clears on an explicit null', async () => {
+    it('databaseBackup.storageProvider clears on the empty string (the platform merge)', async () => {
       await h.system.patch({ databaseBackup: { storageProvider: 'r2' } });
-      const after = await h.system.patch({ databaseBackup: { storageProvider: null } });
-      expect(after.databaseBackup.storageProvider).toBeNull();
+      const after = await h.system.patch({ databaseBackup: { storageProvider: '' } });
+      expect(after.databaseBackup.storageProvider).toBe('');
+    });
+
+    it('databaseBackup.retentionCount and retention.count are one value (the platform alias)', async () => {
+      const after = await h.system.patch({ databaseBackup: { retention: { count: 12 } } });
+      expect(after.databaseBackup.retentionCount).toBe(12);
     });
 
     it('a stored sub-object that lacks one field keeps the others (what `.default()` per leaf did)', async () => {
