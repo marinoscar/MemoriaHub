@@ -138,7 +138,7 @@ runPlatformConformance({
     },
     // Since RETRO-D1 post-upload processing is the platform's `storage.object.process` job; the
     // object-processing listener that downloaded bytes is gone.
-    onEventNoIo: { minListenerFiles: 8 },
+    onEventNoIo: { minListenerFiles: 7 }, // 7 since RETRO-D3 removed the broadcast-failure listener
 
     // Every MemoriaHub writer's key prefix is registered (platform/storage/storage-key-prefix.manifest.ts).
     storage: { requiredPrefixIds: [...MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS] },
