@@ -1,26 +1,38 @@
 /**
- * tui/backup-dashboard-source.ts — shared state model + data sources for the
- * backup TUI dashboard (BackupDashboard.tsx).
+ * tui/backup-dashboard-source.ts — the backup dashboard as a platform dashboard
+ * (RETRO-F4, #582): the shared state model, a pure reducer and the two feeds
+ * BackupDashboard.tsx follows.
  *
  * Deliberately the SAME shape as tui/node-dashboard-source.ts, because the two
  * dashboards have the same problem: the work can be happening in a detached
  * daemon or in this process, and the view must not care which.
  *
  *   - ATTACHED: a `memoriahub node start --daemon` process is running with a
- *     bound backup root. We connect to its NDJSON IPC socket
- *     (node/ipc-client.ts), hydrate from a `backup-status` reply, and translate
- *     live `{kind:'backup-event', ev, payload}` frames into state updates.
- *     Closing DETACHES — it never stops the daemon or its backup run.
+ *     bound backup root. The platform's `daemonAttachFeed` (channel `backup`)
+ *     connects to its NDJSON IPC socket through the 1.3 protocol adapter
+ *     (legacy-daemon.ts), hydrates from a `backup-status` reply, and applies live
+ *     `{kind:'backup-event', ev, payload}` frames. Closing DETACHES: it never
+ *     stops the daemon or its backup run.
  *   - EMBEDDED: no daemon is running; the dashboard owns an in-process
- *     BackupEngine and consumes its typed events directly.
+ *     BackupEngine and `embeddedBackupFeed` follows its typed events.
  *
  * Both feed the SAME pure reducer (reduceBackupEvent) over one
  * BackupDashboardState, so the React component has exactly one update path.
- * The reducer and the snapshot parser are plain functions — unit-testable
- * without Ink or sockets.
+ * The reducer and the snapshot parser are plain functions: unit-testable
+ * without Ink or sockets. Commands (run now, cancel, set rate) are not part of an
+ * attach feed: `daemonBackupControl` sends each over a short-lived connection.
  */
 
-import { connectToDaemon, type DaemonClient, type DaemonMessage } from '../node/ipc-client.js';
+import {
+  DashboardSource,
+  daemonAttachFeed,
+  type DashboardFeed,
+  type DashboardReducer,
+} from '@marinoscar/platform-cli/tui';
+
+import { connectToDaemon } from '../node/ipc-client.js';
+import { nodeSocketPath } from '../paths.js';
+import { legacyDaemonConnect, parseLegacyEvent, sendDaemonCommand } from './legacy-daemon.js';
 import { BACKUP_EV } from '../backup/events.js';
 import type { BackupTypedEmitter } from '../backup/events.js';
 
@@ -110,7 +122,8 @@ export interface BackupSnapshot {
 
 let logSeq = 0;
 
-function makeLogEntry(level: BackupLogLevel, msg: string, atMs: number): BackupLogEntry {
+/** A log line stamped with the next sequence id (ids order lines from several writers). */
+export function makeBackupLogEntry(level: BackupLogLevel, msg: string, atMs: number): BackupLogEntry {
   return { id: ++logSeq, ts: new Date(atMs), level, msg };
 }
 
@@ -146,7 +159,7 @@ export function appendBackupLog(
   nowMs: number = Date.now(),
 ): BackupDashboardState {
   if (entries.length === 0) return state;
-  const log = [...state.log, ...entries.map((e) => makeLogEntry(e.level, e.msg, nowMs))].slice(
+  const log = [...state.log, ...entries.map((e) => makeBackupLogEntry(e.level, e.msg, nowMs))].slice(
     -MAX_LOG,
   );
   return { ...state, log };
@@ -469,248 +482,172 @@ export function markCancelling(state: BackupDashboardState): BackupDashboardStat
 }
 
 // ---------------------------------------------------------------------------
-// BackupDashboardSource — one interface, two implementations
+// Platform dashboard pieces: reducer, feeds, controls
 // ---------------------------------------------------------------------------
 
-export type BackupSourceMode = 'attached' | 'embedded';
+/** One engine event as the reducer folds it; `atMs` is when the dashboard saw it. */
+export interface BackupDashEvent {
+  ev: string;
+  payload: unknown;
+  atMs: number;
+}
 
-export interface BackupDashboardSource {
-  readonly mode: BackupSourceMode;
-  /** Attached: the initial backup-status reply. Embedded: null. */
-  readonly snapshot: BackupSnapshot | null;
-  /** Subscribe to engine events. Events buffered before subscribe are flushed. */
-  onEvent(cb: (ev: string, payload: unknown) => void): void;
-  /** Subscribe to source loss (attached: socket close). Embedded: never fires. */
-  onDisconnect(cb: () => void): void;
-  /** Request a fresh status snapshot (attached only; embedded resolves null). */
-  refreshStatus(): Promise<BackupSnapshot | null>;
+export type BackupDashboardSource = DashboardSource<BackupDashboardState, BackupDashEvent>;
+
+/**
+ * The pure reducer behind the dashboard. `seed` starts a replacement source from the state already
+ * on screen (a second in-process run keeps the first one's counters and run history).
+ */
+export function backupDashboardReducer(
+  seed?: BackupDashboardState,
+): DashboardReducer<BackupDashboardState, BackupDashEvent> {
+  return {
+    initial: () => seed ?? initialBackupDashboardState(),
+    hydrate: (state, snapshot) =>
+      hydrateFromBackupSnapshot(state, parseBackupSnapshot((snapshot ?? {}) as Record<string, unknown>), Date.now()),
+    reduce: (state, event) => reduceBackupEvent(state, event.ev, event.payload, event.atMs),
+    parseEvent: (frame) => {
+      const parsed = parseLegacyEvent(frame);
+      return parsed ? { ev: parsed.ev, payload: parsed.payload, atMs: Date.now() } : undefined;
+    },
+  };
+}
+
+/** Attach (read-only, reconnecting) to the worker daemon's backup channel. */
+export function backupDaemonFeed(socketPath: string = nodeSocketPath()): DashboardFeed<BackupDashEvent> {
+  return daemonAttachFeed<BackupDashEvent>({ socketPath, channel: 'backup', connect: legacyDaemonConnect('backup') as never });
+}
+
+/** What the embedded feed needs from an in-process engine. */
+export type EmbeddableBackupEngine = BackupTypedEmitter & { cancel(): void };
+
+/**
+ * Follow an in-process BackupEngine's typed events. Stopping the feed only detaches the listeners;
+ * cancelling the run is the component's job on unmount.
+ */
+export function embeddedBackupFeed(engine: EmbeddableBackupEngine): DashboardFeed<BackupDashEvent> {
+  const emitter = engine as unknown as {
+    on(event: string, listener: (payload: unknown) => void): void;
+    removeAllListeners(): void;
+  };
+  let stopped = false;
+  return {
+    mode: 'embedded',
+    async start(emit) {
+      emit({ kind: 'attempt' });
+      emit({ kind: 'connected' });
+      for (const ev of Object.values(BACKUP_EV)) {
+        emitter.on(ev, (payload: unknown) => {
+          if (!stopped) emit({ kind: 'event', event: { ev, payload, atMs: Date.now() } });
+        });
+      }
+    },
+    stop() {
+      stopped = true;
+      emitter.removeAllListeners();
+    },
+  };
+}
+
+/** A dashboard source over `feed`; `seed` carries the state of the source it replaces. */
+export function createBackupSource(
+  feed: DashboardFeed<BackupDashEvent>,
+  seed?: BackupDashboardState,
+): BackupDashboardSource {
+  return new DashboardSource(backupDashboardReducer(seed), feed);
+}
+
+/** What the dashboard can ask of whatever is doing the work. */
+export interface BackupControl {
   /** Start a run. Attached: the daemon owns it; embedded: in-process. */
   runNow(kind?: 'incremental' | 'reconcile'): void;
   /** Cooperatively cancel the active run. */
   cancel(): void;
   /** Push new throttle knobs (attached: live to the daemon). */
   setRate(update: { concurrency?: number; maxMbps?: number }): void;
-  /**
-   * Detach. Attached: ONLY closes the socket — the daemon and any in-flight
-   * backup run keep going. Embedded: cancels the in-process run (nothing must
-   * outlive the UI).
-   */
-  close(): void;
 }
 
-// ---- Attached ---------------------------------------------------------------
-
-class AttachedBackupSource implements BackupDashboardSource {
-  readonly mode = 'attached' as const;
-  readonly snapshot: BackupSnapshot;
-
-  private eventCb: ((ev: string, payload: unknown) => void) | null = null;
-  private readonly pendingEvents: Array<[string, unknown]> = [];
-
-  constructor(
-    private readonly client: DaemonClient,
-    snapshot: BackupSnapshot,
-  ) {
-    this.snapshot = snapshot;
-  }
-
-  /** @internal wired by createAttachedBackupSource's onMessage handler. */
-  _dispatch(msg: DaemonMessage): void {
-    if (msg.kind !== 'backup-event') return;
-    const ev = typeof msg.ev === 'string' ? msg.ev : '';
-    if (!ev) return;
-    if (this.eventCb) this.eventCb(ev, msg.payload);
-    else this.pendingEvents.push([ev, msg.payload]);
-  }
-
-  onEvent(cb: (ev: string, payload: unknown) => void): void {
-    this.eventCb = cb;
-    while (this.pendingEvents.length > 0) {
-      const [ev, payload] = this.pendingEvents.shift()!;
-      cb(ev, payload);
-    }
-  }
-
-  onDisconnect(cb: () => void): void {
-    this.client.onClose(cb);
-  }
-
-  async refreshStatus(): Promise<BackupSnapshot | null> {
-    this.client.send({ cmd: 'backup-status' });
-    try {
-      const msg = await this.client.waitFor((m) => m.kind === 'backup-status', 5000);
-      return parseBackupSnapshot(msg);
-    } catch {
-      return null;
-    }
-  }
-
-  runNow(kind: 'incremental' | 'reconcile' = 'incremental'): void {
-    this.client.send({ cmd: 'backup-run-now', kind });
-  }
-
-  cancel(): void {
-    this.client.send({ cmd: 'backup-cancel' });
-  }
-
-  setRate(update: { concurrency?: number; maxMbps?: number }): void {
-    this.client.send({ cmd: 'backup-set-rate', ...update });
-  }
-
-  close(): void {
-    // Never stops the daemon or its run — just detaches this dashboard.
-    this.client.close();
-  }
+/** Controls for a daemon: each command goes over its own short-lived connection. */
+export function daemonBackupControl(socketPath: string = nodeSocketPath()): BackupControl {
+  const send = (command: Record<string, unknown>): void => {
+    void sendDaemonCommand(command, { socketPath }).catch(() => undefined);
+  };
+  return {
+    runNow: (kind = 'incremental') => send({ cmd: 'backup-run-now', kind }),
+    cancel: () => send({ cmd: 'backup-cancel' }),
+    setRate: (update) => send({ cmd: 'backup-set-rate', ...update }),
+  };
 }
 
 /**
- * Connect to a running daemon and build an attached source. Resolves once the
- * `backup-status` reply has arrived; rejects when nothing is listening or the
- * daemon has no bound backup root (`configured: false`).
+ * Controls for an in-process run: `start` constructs and runs an engine (one run at a time, mirroring
+ * BackupHost) and `engine` is the one running now, if any.
  */
-export async function createAttachedBackupSource(
+export function embeddedBackupControl(deps: {
+  start: (kind: 'incremental' | 'reconcile') => void;
+  engine: () => EmbeddableBackupEngine | null;
+}): BackupControl {
+  return {
+    runNow: (kind = 'incremental') => {
+      if (deps.engine()) return;
+      deps.start(kind);
+    },
+    cancel: () => deps.engine()?.cancel(),
+    // Embedded runs read their knobs at construction; persistence is the settings screen's job.
+    setRate: () => undefined,
+  };
+}
+
+/**
+ * Ask a running daemon for its backup status. Resolves with the snapshot, or `null` when nothing is
+ * listening, the daemon answers nothing in time, or it has no bound backup root (`configured: false`:
+ * it started before `memoriahub backup init`).
+ */
+export async function probeBackupDaemon(
   socketPath?: string,
   timeoutMs?: number,
-): Promise<BackupDashboardSource> {
-  const client = await connectToDaemon(socketPath, timeoutMs);
+  connect: typeof connectToDaemon = connectToDaemon,
+): Promise<BackupSnapshot | null> {
+  let client;
   try {
-    let source: AttachedBackupSource | null = null;
-    const early: DaemonMessage[] = [];
-    client.onMessage((msg) => {
-      if (source) source._dispatch(msg);
-      else early.push(msg);
-    });
-
-    client.send({ cmd: 'backup-status' });
-    const statusMsg = await client.waitFor((m) => m.kind === 'backup-status', 5000);
-    const snapshot = parseBackupSnapshot(statusMsg);
-    if (!snapshot.configured) {
-      throw new Error(
-        'the running daemon has no backup root bound (it started before `memoriahub backup init`)',
-      );
-    }
-    source = new AttachedBackupSource(client, snapshot);
-    for (const msg of early) source._dispatch(msg);
-    return source;
-  } catch (err) {
-    client.close();
-    throw err;
-  }
-}
-
-// ---- Embedded ---------------------------------------------------------------
-
-/** What the embedded source needs from an in-process engine. */
-export type EmbeddableBackupEngine = BackupTypedEmitter & { cancel(): void };
-
-/**
- * Embedded source: wraps an in-process BackupEngine the dashboard constructs
- * lazily (on [r]). Events are forwarded through the same onEvent callback the
- * attached source uses, so the component's reducer path is identical.
- */
-export class EmbeddedBackupSource implements BackupDashboardSource {
-  readonly mode = 'embedded' as const;
-  readonly snapshot: BackupSnapshot | null = null;
-
-  private engine: EmbeddableBackupEngine | null = null;
-  private eventCb: ((ev: string, payload: unknown) => void) | null = null;
-  private readonly pendingEvents: Array<[string, unknown]> = [];
-  private closed = false;
-  /** Set by the component; starts one in-process run. */
-  private starter: ((kind: 'incremental' | 'reconcile') => void) | null = null;
-
-  /** Whether a run engine is currently attached. */
-  get hasEngine(): boolean {
-    return this.engine !== null;
-  }
-
-  /** Register the callback that constructs + runs an in-process engine. */
-  setStarter(fn: (kind: 'incremental' | 'reconcile') => void): void {
-    this.starter = fn;
-  }
-
-  /** Attach a freshly-constructed engine and subscribe to all its events. */
-  attachEngine(engine: EmbeddableBackupEngine): void {
-    this.engine = engine;
-    const emitter = engine as unknown as {
-      on(event: string, listener: (payload: unknown) => void): void;
-    };
-    for (const ev of Object.values(BACKUP_EV)) {
-      emitter.on(ev, (payload: unknown) => this.emit(ev, payload));
-    }
-  }
-
-  /** Drop the engine reference once its run has settled. */
-  releaseEngine(): void {
-    if (this.engine) {
-      this.engine.removeAllListeners();
-      this.engine = null;
-    }
-  }
-
-  private emit(ev: string, payload: unknown): void {
-    if (this.closed) return;
-    if (this.eventCb) this.eventCb(ev, payload);
-    else this.pendingEvents.push([ev, payload]);
-  }
-
-  onEvent(cb: (ev: string, payload: unknown) => void): void {
-    this.eventCb = cb;
-    while (this.pendingEvents.length > 0) {
-      const [ev, payload] = this.pendingEvents.shift()!;
-      cb(ev, payload);
-    }
-  }
-
-  onDisconnect(_cb: () => void): void {
-    // An in-process engine cannot "disconnect"; run-finished covers shutdown.
-  }
-
-  async refreshStatus(): Promise<BackupSnapshot | null> {
+    client = await connect(socketPath, timeoutMs);
+  } catch {
     return null;
   }
-
-  runNow(kind: 'incremental' | 'reconcile' = 'incremental'): void {
-    if (this.engine) return; // one run at a time, mirroring BackupHost
-    this.starter?.(kind);
-  }
-
-  cancel(): void {
-    this.engine?.cancel();
-  }
-
-  setRate(_update: { concurrency?: number; maxMbps?: number }): void {
-    // Embedded runs read their knobs at construction; persistence is the
-    // settings screen's job.
-  }
-
-  close(): void {
-    this.closed = true;
-    const e = this.engine;
-    if (e) {
-      e.removeAllListeners();
-      e.cancel();
-      this.engine = null;
-    }
+  try {
+    client.send({ cmd: 'backup-status' });
+    const reply = await client.waitFor((m) => m.kind === 'backup-status', 5000);
+    const snapshot = parseBackupSnapshot(reply);
+    return snapshot.configured ? snapshot : null;
+  } catch {
+    return null;
+  } finally {
+    client.close();
   }
 }
 
+/** Where the dashboard reads from. */
+export type BackupSourceChoice =
+  | { mode: 'attached'; snapshot: BackupSnapshot }
+  | { mode: 'embedded' };
+
 /**
- * Pick the data source: attach to a running daemon when one is up AND has a
- * backup root bound, otherwise fall back to the embedded engine. Mirrors
- * NodeDashboard.initSource so both dashboards behave identically.
+ * Pick the data source: attach to a running daemon when one is up AND has a backup root bound,
+ * otherwise fall back to the embedded engine. Mirrors NodeDashboard.initSource so both dashboards
+ * behave identically.
  */
 export async function selectBackupSource(deps: {
   isDaemonRunning: () => Promise<boolean>;
-  createAttached: () => Promise<BackupDashboardSource>;
-}): Promise<BackupDashboardSource> {
+  probe: () => Promise<BackupSnapshot | null>;
+}): Promise<BackupSourceChoice> {
   try {
     if (await deps.isDaemonRunning()) {
-      return await deps.createAttached();
+      const snapshot = await deps.probe();
+      if (snapshot) return { mode: 'attached', snapshot };
     }
   } catch {
-    // Daemon vanished between probe and connect, or has no bound root —
+    // Daemon vanished between probe and connect, or has no bound root:
     // embedded is always a valid fallback.
   }
-  return new EmbeddedBackupSource();
+  return { mode: 'embedded' };
 }

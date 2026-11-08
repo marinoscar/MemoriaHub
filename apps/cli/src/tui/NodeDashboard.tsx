@@ -1,15 +1,19 @@
 /**
  * tui/NodeDashboard.tsx — Ink live control surface for the worker-node engine.
  *
- * TWO data sources behind one interface (see tui/node-dashboard-source.ts):
+ * TWO data sources behind one platform `DashboardSource` (see
+ * tui/node-dashboard-source.ts; `useDashboard` starts it on mount and stops it on
+ * unmount, RETRO-F4 #582):
  *
  *   ATTACHED — a `memoriahub node start --daemon` process is already running.
- *   The dashboard connects to its NDJSON IPC socket, hydrates from the
- *   `snapshot` greeting, appends the daemon's log tail to the log pane, and
- *   applies live `{kind:'event'}` frames through the same reducer the embedded
- *   mode uses. Detaching (q/unmount) ONLY closes the socket — the daemon keeps
- *   running. Keys: [d] drain, [x] stop daemon (with confirm), [r] doctor, and
- *   after a socket loss [r] retries the connection.
+ *   The platform's `daemonAttachFeed` connects to its NDJSON IPC socket (through
+ *   the 1.3 protocol adapter), hydrates from the `snapshot` greeting, appends the
+ *   daemon's log tail to the log pane, and applies live event frames through the
+ *   same reducer the embedded mode uses. It reconnects by itself when the daemon
+ *   restarts (the memory valve restarts a worker), so a socket loss shows
+ *   "daemon disconnected" until it is back. Detaching (q/unmount) ONLY closes
+ *   the socket — the daemon keeps running. Keys: [d] drain, [x] stop daemon (with
+ *   confirm), [r] doctor, and after a socket loss [r] re-attaches right away.
  *
  *   EMBEDDED — no daemon is running. Pressing `s` spawns a DETACHED, memory-
  *   tuned daemon (node/daemon-launch.ts — raised heap ceiling, near-OOM heap
@@ -30,9 +34,10 @@
  * probe, both of which load native libs dynamically behind an `any` boundary.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
+import { useDashboard } from '@marinoscar/platform-cli/tui';
 
 import { ApiClient } from '../api.js';
 import type { CliConfig } from '../config.js';
@@ -54,14 +59,19 @@ import {
   WORKER_NODE_SETUP_GUIDE_URL,
 } from '../node/doctor-summary.js';
 import {
-  appendLogLines,
-  createAttachedSource,
-  EmbeddedDashboardSource,
-  hydrateFromSnapshot,
+  MAX_LOG,
+  createNodeSource,
+  daemonControl,
+  embeddedNodeFeed,
+  engineControl,
   initialDashboardState,
-  reduceNodeEvent,
-  type DashboardSource,
+  makeLogEntry,
+  nodeDaemonFeed,
+  type DashLogEntry,
   type DashboardState,
+  type NodeControl,
+  type NodeDashEvent,
+  type NodeDashboardSource,
 } from './node-dashboard-source.js';
 
 // ---------------------------------------------------------------------------
@@ -167,10 +177,11 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   const options = resolveOptions(config);
   const registered = Boolean(config.nodeId);
 
-  // Data source + mode
-  const sourceRef = useRef<DashboardSource | null>(null);
+  // Data source + mode. `source` is a platform DashboardSource (attached to a daemon, or following
+  // the in-process engine); with none yet the screen draws the empty initial state.
+  const [source, setSource] = useState<NodeDashboardSource | undefined>(undefined);
+  const controlRef = useRef<NodeControl | null>(null);
   const [mode, setMode] = useState<SourceMode>('detecting');
-  const [disconnected, setDisconnected] = useState<boolean>(false);
   const [daemonPid, setDaemonPid] = useState<number | null>(null);
   const [confirmStop, setConfirmStop] = useState<boolean>(false);
 
@@ -178,10 +189,28 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   const engineRef = useRef<NodeEngine | null>(null);
   const [engineState, setEngineState] = useState<EngineState>('stopped');
 
-  // All live view state flows through the shared reducer.
-  const [dash, setDash] = useState<DashboardState>(() =>
-    initialDashboardState(options.concurrency, options.eligibleTypes),
+  // The live view state flows through the shared reducer; the dashboard's own notes (what it did,
+  // model download progress) are kept beside it and merged by sequence id.
+  const live = useDashboard(source);
+  const emptyState = useMemo(
+    () => initialDashboardState(options.concurrency, options.eligibleTypes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
+  const [notes, setNotes] = useState<DashLogEntry[]>([]);
+  const [modelNote, setModelNote] = useState<string | null>(null);
+  const base: DashboardState = live ?? emptyState;
+  const dash: DashboardState = useMemo(
+    () => ({
+      ...base,
+      log: [...base.log, ...notes].sort((x, y) => x.id - y.id).slice(-MAX_LOG),
+      modelStatus: modelNote ?? base.modelStatus,
+    }),
+    [base, notes, modelNote],
+  );
+
+  // The attached source reconnects by itself; "disconnected" is only a lost connection that was up.
+  const disconnected = mode === 'attached' && live !== undefined && !live.connected && live.everConnected;
 
   // 1s ticker so elapsed times + throughput refresh
   const [, setTick] = useState<number>(0);
@@ -196,88 +225,56 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   const stopMemWatchRef = useRef<(() => void) | null>(null);
 
   const pushLog = useCallback((level: 'error' | 'warn' | 'info', msg: string): void => {
-    setDash((prev) => appendLogLines(prev, [{ level, msg }]));
-  }, []);
-
-  // The single event→state path shared by both modes.
-  const applyEvent = useCallback((ev: string, payload: unknown): void => {
-    setDash((prev) => reduceNodeEvent(prev, ev, payload, Date.now()));
-    if (ev === NODE_EV.STOPPED) {
-      // Embedded lifecycle: forget the stopped engine so `s` can start anew.
-      const src = sourceRef.current;
-      if (src instanceof EmbeddedDashboardSource) src.releaseEngine();
-      engineRef.current = null;
-      stopMemWatchRef.current?.();
-      stopMemWatchRef.current = null;
-      setEngineState('stopped');
-    }
+    setNotes((prev) => [...prev, makeLogEntry(level, msg, Date.now())].slice(-MAX_LOG));
   }, []);
 
   // -------------------------------------------------------------------------
   // Source selection: attach to a running daemon, else embedded fallback
   // -------------------------------------------------------------------------
-  const initSource = useCallback(async (): Promise<void> => {
+  const initSource = useCallback(async (): Promise<SourceMode> => {
     setMode('detecting');
-    setDisconnected(false);
 
-    let attached: DashboardSource | null = null;
+    let running = false;
     try {
-      if (await isDaemonRunning()) {
-        attached = await createAttachedSource();
-      }
+      running = await isDaemonRunning();
     } catch {
-      attached = null; // daemon vanished between probe and connect
+      running = false; // daemon vanished between probe and connect
     }
-    if (!mountedRef.current) {
-      attached?.close();
-      return;
-    }
+    if (!mountedRef.current) return 'embedded';
 
-    if (attached) {
-      sourceRef.current = attached;
+    if (running) {
+      controlRef.current = daemonControl();
       setDaemonPid(readPidFile()?.pid ?? null);
-      setDash((prev) => {
-        let next = hydrateFromSnapshot(
-          initialDashboardState(prev.concurrency, prev.eligibleTypes ?? undefined),
-          attached.snapshot!,
-        );
-        next = appendLogLines(next, attached.logTail.map((msg) => ({ level: 'info' as const, msg })));
-        return next;
-      });
-      attached.onEvent(applyEvent);
-      attached.onDisconnect(() => {
-        if (mountedRef.current) setDisconnected(true);
-      });
+      setSource(createNodeSource(nodeDaemonFeed(), options.concurrency, options.eligibleTypes));
       setMode('attached');
-      return;
+      return 'attached';
     }
 
-    const embedded = new EmbeddedDashboardSource();
-    embedded.onEvent(applyEvent);
-    sourceRef.current = embedded;
+    controlRef.current = null;
+    setSource(undefined);
     setMode('embedded');
-  }, [applyEvent]);
+    return 'embedded';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
     void initSource();
     return () => {
       mountedRef.current = false;
-      // Attached: ONLY closes the socket (daemon keeps running).
-      // Embedded: stops the in-process engine so no worker is orphaned.
-      sourceRef.current?.close();
-      sourceRef.current = null;
+      // Attached: the source's cleanup ONLY closes the socket (daemon keeps running).
+      // Embedded: stop the in-process engine so no worker is orphaned.
+      void engineRef.current?.stop('unmount');
       engineRef.current = null;
+      controlRef.current = null;
       stopMemWatchRef.current?.();
       stopMemWatchRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Retry attach after a daemon disconnect (on `r`).
+  // Re-attach right away after a daemon disconnect (on `r`); the feed would also retry on its timer.
   const retryAttach = useCallback((): void => {
-    sourceRef.current?.close();
-    sourceRef.current = null;
     void initSource();
   }, [initSource]);
 
@@ -302,9 +299,18 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   // dashboard detaches.
   // -------------------------------------------------------------------------
   const launchingDaemonRef = useRef<boolean>(false);
+
+  // The embedded engine stopped: forget it so `e` can start a new one, and stop the watchdog.
+  const onEmbeddedEvent = useCallback((event: NodeDashEvent): void => {
+    if (event.ev !== NODE_EV.STOPPED) return;
+    engineRef.current = null;
+    controlRef.current = null;
+    stopMemWatchRef.current?.();
+    stopMemWatchRef.current = null;
+    if (mountedRef.current) setEngineState('stopped');
+  }, []);
   const startDaemon = useCallback(async (): Promise<void> => {
-    const src = sourceRef.current;
-    if (!(src instanceof EmbeddedDashboardSource)) return;
+    if (mode !== 'embedded') return;
     if (engineRef.current || launchingDaemonRef.current) return;
     if (!config.nodeId) {
       pushLog('error', 'Not registered — run `memoriahub node register` first.');
@@ -328,15 +334,10 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
         );
         return;
       }
-      src.close();
-      sourceRef.current = null;
       setEngineState('stopped'); // engineState is unused once attached
-      await initSource();
+      const attachedMode = await initSource();
       if (!mountedRef.current) return;
-      // TS narrows sourceRef.current to null from the assignment above and
-      // cannot see that initSource() re-populates it — hence the cast.
-      const nowAttached = sourceRef.current as unknown as DashboardSource | null;
-      if (nowAttached?.mode === 'attached') {
+      if (attachedMode === 'attached') {
         pushLog('info', 'attached — the daemon keeps running after you quit this dashboard');
       } else {
         pushLog('warn', 'daemon came up but attaching failed — press [r] to retry, or [e] to run in-process');
@@ -352,7 +353,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     } finally {
       launchingDaemonRef.current = false;
     }
-  }, [config, initSource, pushLog]);
+  }, [config, mode, initSource, pushLog]);
 
   // -------------------------------------------------------------------------
   // Start the embedded in-process engine (on `e`; embedded mode only)
@@ -363,8 +364,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
   // warns and tightens the memory watchdog.
   // -------------------------------------------------------------------------
   const startEngine = useCallback(async (): Promise<void> => {
-    const src = sourceRef.current;
-    if (!(src instanceof EmbeddedDashboardSource)) return;
+    if (mode !== 'embedded') return;
     if (engineRef.current || launchingDaemonRef.current) return;
     if (!config.nodeId) {
       pushLog('error', 'Not registered — run `memoriahub node register` first.');
@@ -377,23 +377,18 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     try {
       const manifest = await api.getModelManifest();
       if (manifest.length > 0) {
-        setDash((prev) => ({ ...prev, modelStatus: `Ensuring ${manifest.length} model file(s)…` }));
+        setModelNote(`Ensuring ${manifest.length} model file(s)…`);
         const res = await ensureModels(manifest);
-        setDash((prev) => ({
-          ...prev,
-          modelStatus:
-            `Models ready in ${res.targetDir} (${res.downloaded.length} downloaded, ` +
+        setModelNote(
+          `Models ready in ${res.targetDir} (${res.downloaded.length} downloaded, ` +
             `${res.present.length} present${res.failed.length > 0 ? `, ${res.failed.length} failed` : ''})`,
-        }));
+        );
         for (const f of res.failed) pushLog('warn', `model ${f.name}: ${f.error}`);
       } else {
-        setDash((prev) => ({ ...prev, modelStatus: 'No model files listed in the server manifest.' }));
+        setModelNote('No model files listed in the server manifest.');
       }
     } catch (err) {
-      setDash((prev) => ({
-        ...prev,
-        modelStatus: `Model manifest unavailable: ${err instanceof Error ? err.message : String(err)}`,
-      }));
+      setModelNote(`Model manifest unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Bound libvips/sharp once before the embedded engine claims image work,
@@ -452,9 +447,17 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       nodeId: config.nodeId,
       options,
     });
-    src.attachEngine(engine);
     engineRef.current = engine;
-    setDash((prev) => ({ ...prev, stopped: false }));
+    controlRef.current = engineControl(engine);
+    // A fresh source per engine: its reducer starts from the empty state, so `stopped` is false again.
+    setSource(
+      createNodeSource(
+        embeddedNodeFeed(engine, { onEvent: onEmbeddedEvent }),
+        options.concurrency,
+        options.eligibleTypes,
+      ),
+    );
+    setModelNote(null);
     setEngineState('running');
 
     // start() resolves only after stop(); don't await it in the handler.
@@ -466,31 +469,28 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       .finally(() => {
         if (mountedRef.current) setEngineState('stopped');
       });
-  }, [config, options, pushLog]);
+  }, [config, mode, options, pushLog, onEmbeddedEvent]);
 
   // -------------------------------------------------------------------------
   // Drain / stop (mode-dependent)
   // -------------------------------------------------------------------------
   const drainOrStop = useCallback((): void => {
-    const src = sourceRef.current;
-    if (!src) return;
-    if (src.mode === 'attached') {
+    if (mode === 'attached') {
       // Graceful drain of the daemon: stop claiming, finish in-flight.
-      src.drain();
+      controlRef.current?.drain();
       pushLog('info', 'drain requested — daemon stops claiming, finishes in-flight jobs');
     } else {
       if (!engineRef.current) return;
       setEngineState('draining');
-      src.stop();
+      controlRef.current?.stop();
     }
-  }, [pushLog]);
+  }, [mode, pushLog]);
 
   const stopDaemon = useCallback((): void => {
-    const src = sourceRef.current;
-    if (!src || src.mode !== 'attached') return;
-    src.stop();
+    if (mode !== 'attached') return;
+    controlRef.current?.stop();
     pushLog('info', 'stop requested — daemon is shutting down');
-  }, [pushLog]);
+  }, [mode, pushLog]);
 
   // -------------------------------------------------------------------------
   // Run doctor overlay (on `r`) — the FULL sweep (API access, installed
@@ -568,7 +568,11 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     connLabel = 'detecting…';
     connColor = 'yellow';
   } else if (mode === 'attached') {
-    if (disconnected) {
+    if (live !== undefined && !live.connected && !live.everConnected) {
+      // The feed has not completed its first attach yet.
+      connLabel = 'connecting…';
+      connColor = 'yellow';
+    } else if (disconnected) {
       connLabel = 'daemon disconnected';
       connColor = 'red';
     } else if (dash.stopped) {

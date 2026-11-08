@@ -2,14 +2,16 @@
  * tui/BackupDashboard.tsx — Ink live control surface for the backup engine
  * (issue #320, epic #308).
  *
- * TWO data sources behind one interface (see tui/backup-dashboard-source.ts),
- * exactly mirroring NodeDashboard:
+ * TWO data sources behind one platform `DashboardSource` (see
+ * tui/backup-dashboard-source.ts; `useDashboard` starts it on mount and stops it
+ * on unmount, RETRO-F4 #582), exactly mirroring NodeDashboard:
  *
  *   ATTACHED — a `memoriahub node start --daemon` process with a bound backup
- *   root is already running. We connect to its IPC socket, hydrate from a
- *   `backup-status` reply, and apply live `backup-event` frames through the
- *   shared reducer. Detaching (q/unmount) ONLY closes the socket — the daemon
- *   and any in-flight run keep going.
+ *   root is already running. The platform's `daemonAttachFeed` (channel
+ *   `backup`) connects to its IPC socket, hydrates from a `backup-status`
+ *   reply, and applies live `backup-event` frames through the shared reducer.
+ *   Detaching (q/unmount) ONLY closes the socket — the daemon and any
+ *   in-flight run keep going.
  *
  *   EMBEDDED — no daemon is running. [r] runs the engine IN THIS PROCESS
  *   through the executeRun() seam, and the run is cancelled on unmount so no
@@ -18,10 +20,11 @@
  * Keys: [r] run now · [R] reconcile run · [c] cancel · [v] verify · [q] back.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createRequire } from 'node:module';
 import { Box, Text, useInput } from 'ink';
 import Spinner from 'ink-spinner';
+import { useDashboard } from '@marinoscar/platform-cli/tui';
 
 import type { CliConfig } from '../config.js';
 import { ApiClient } from '../api.js';
@@ -32,19 +35,23 @@ import { executeRun } from '../backup/execute-run.js';
 import { resolveRunKind } from '../backup/reconcile.js';
 import { BOX_BORDER } from './theme.js';
 import {
-  appendBackupLog,
+  MAX_LOG,
   applyPendingLag,
+  backupDaemonFeed,
   checkpointAgeMs,
-  createAttachedBackupSource,
+  createBackupSource,
   currentBytesPerSec,
-  EmbeddedBackupSource,
-  hydrateFromBackupSnapshot,
+  daemonBackupControl,
+  embeddedBackupControl,
+  embeddedBackupFeed,
   initialBackupDashboardState,
-  markCancelling,
-  reduceBackupEvent,
+  makeBackupLogEntry,
+  probeBackupDaemon,
   selectBackupSource,
+  type BackupControl,
   type BackupDashboardSource,
   type BackupDashboardState,
+  type EmbeddableBackupEngine,
 } from './backup-dashboard-source.js';
 
 // ---------------------------------------------------------------------------
@@ -118,12 +125,37 @@ export function BackupDashboard({
   onOpenSettings,
   autoRun,
 }: BackupDashboardProps): React.ReactElement {
-  const sourceRef = useRef<BackupDashboardSource | null>(null);
   const mountedRef = useRef<boolean>(true);
   const [mode, setMode] = useState<SourceMode>('detecting');
-  const [disconnected, setDisconnected] = useState<boolean>(false);
-  const [dash, setDash] = useState<BackupDashboardState>(initialBackupDashboardState);
   const [, setTick] = useState<number>(0);
+
+  // The platform DashboardSource (attached to a daemon, or following an in-process run) and the
+  // controls that go with it. With no source yet the screen draws the empty initial state.
+  const [source, setSource] = useState<BackupDashboardSource | undefined>(undefined);
+  const controlRef = useRef<BackupControl | null>(null);
+  const engineRef = useRef<EmbeddableBackupEngine | null>(null);
+  const live = useDashboard(source);
+  const emptyState = useMemo(initialBackupDashboardState, []);
+  const base: BackupDashboardState = live ?? emptyState;
+  const lastStateRef = useRef<BackupDashboardState>(base);
+  lastStateRef.current = base;
+
+  // What the dashboard adds to the engine's own state: the server-side pending lag, the optimistic
+  // "cancelling" after [c] (the run-finished event resolves it), and its own log lines.
+  const [lag, setLag] = useState<{ items: number; bytes: string | number } | null | undefined>(undefined);
+  const [cancelRequested, setCancelRequested] = useState<boolean>(false);
+  const [notes, setNotes] = useState<BackupDashboardState['log']>([]);
+  const dash: BackupDashboardState = useMemo(() => {
+    let next = lag === undefined ? base : applyPendingLag(base, lag);
+    if (cancelRequested && next.runState === 'running') next = { ...next, runState: 'cancelling' };
+    return { ...next, log: [...next.log, ...notes].sort((x, y) => x.id - y.id).slice(-MAX_LOG) };
+  }, [base, lag, cancelRequested, notes]);
+  useEffect(() => {
+    if (base.runState === 'idle') setCancelRequested(false);
+  }, [base.runState]);
+
+  // The attached source reconnects by itself; "lost" is only a connection that was up.
+  const disconnected = mode === 'attached' && live !== undefined && !live.connected && live.everConnected;
 
   // Backup binding — read once; a missing root is a hard stop with guidance.
   const bindingRef = useRef<{ root: string | null; nodeId: string | null }>({
@@ -142,58 +174,15 @@ export function BackupDashboard({
   const configured = Boolean(root && nodeId);
 
   const pushLog = useCallback((level: 'error' | 'warn' | 'info', msg: string): void => {
-    setDash((prev) => appendBackupLog(prev, [{ level, msg }]));
+    setNotes((prev) => [...prev, makeBackupLogEntry(level, msg, Date.now())].slice(-MAX_LOG));
   }, []);
-
-  // The single event→state path shared by both modes.
-  const applyEvent = useCallback((ev: string, payload: unknown): void => {
-    setDash((prev) => reduceBackupEvent(prev, ev, payload, Date.now()));
-  }, []);
-
-  // -------------------------------------------------------------------------
-  // Source selection: attach to a running daemon, else embedded fallback
-  // -------------------------------------------------------------------------
-  const initSource = useCallback(async (): Promise<void> => {
-    if (!configured) return;
-    setMode('detecting');
-    setDisconnected(false);
-
-    const source = await selectBackupSource({
-      isDaemonRunning,
-      createAttached: () => createAttachedBackupSource(),
-    });
-    if (!mountedRef.current) {
-      source.close();
-      return;
-    }
-
-    sourceRef.current = source;
-    if (source.mode === 'attached' && source.snapshot) {
-      setDash((prev) => hydrateFromBackupSnapshot(prev, source.snapshot!, Date.now()));
-      source.onDisconnect(() => {
-        if (mountedRef.current) setDisconnected(true);
-      });
-    } else if (source instanceof EmbeddedBackupSource) {
-      source.setStarter((kind) => void startEmbeddedRun(kind));
-    }
-    source.onEvent(applyEvent);
-    setMode(source.mode);
-
-    // "Run backup now" lands here with autoRun — but never on top of a run
-    // the daemon already has in flight.
-    if (autoRun && !(source.mode === 'attached' && source.snapshot?.running)) {
-      source.runNow('incremental');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyEvent, configured]);
 
   // -------------------------------------------------------------------------
   // Embedded run: the executeRun() seam, cancelled on unmount
   // -------------------------------------------------------------------------
   const startEmbeddedRun = useCallback(
     async (kind: 'incremental' | 'reconcile'): Promise<void> => {
-      const source = sourceRef.current;
-      if (!(source instanceof EmbeddedBackupSource) || !root || !nodeId) return;
+      if (!root || !nodeId) return;
       const settings = new SettingsRepo(getDb());
       try {
         await executeRun({
@@ -210,29 +199,65 @@ export function BackupDashboard({
           pacingMs: settings.backupPacingMs(),
           retry: settings.retryConfig(),
           cooldown: settings.cooldownConfig(),
-          attachRenderer: (engine) => source.attachEngine(engine),
+          attachRenderer: (engine) => {
+            // A fresh source per run, seeded with what is on screen (counters, run history).
+            engineRef.current = engine as EmbeddableBackupEngine;
+            setSource(createBackupSource(embeddedBackupFeed(engine as EmbeddableBackupEngine), lastStateRef.current));
+          },
         });
       } catch (err) {
         if (mountedRef.current) {
           pushLog('error', err instanceof Error ? err.message : String(err));
-          setDash((prev) => ({ ...prev, runState: 'idle', runId: null }));
+          setSource(undefined);
         }
       } finally {
-        source.releaseEngine();
+        // The run settled: forget the engine (the source keeps the final state on screen).
+        engineRef.current?.removeAllListeners();
+        engineRef.current = null;
       }
     },
     [config, nodeId, pushLog, root],
   );
+
+  // -------------------------------------------------------------------------
+  // Source selection: attach to a running daemon, else embedded fallback
+  // -------------------------------------------------------------------------
+  const initSource = useCallback(async (): Promise<void> => {
+    if (!configured) return;
+    setMode('detecting');
+
+    const choice = await selectBackupSource({ isDaemonRunning, probe: () => probeBackupDaemon() });
+    if (!mountedRef.current) return;
+
+    if (choice.mode === 'attached') {
+      controlRef.current = daemonBackupControl();
+      setSource(createBackupSource(backupDaemonFeed()));
+    } else {
+      controlRef.current = embeddedBackupControl({
+        start: (kind) => void startEmbeddedRun(kind),
+        engine: () => engineRef.current,
+      });
+    }
+    setMode(choice.mode);
+
+    // "Run backup now" lands here with autoRun — but never on top of a run
+    // the daemon already has in flight.
+    if (autoRun && !(choice.mode === 'attached' && choice.snapshot.running)) {
+      controlRef.current.runNow('incremental');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configured, startEmbeddedRun]);
 
   useEffect(() => {
     mountedRef.current = true;
     void initSource();
     return () => {
       mountedRef.current = false;
-      // Attached: ONLY closes the socket (daemon + run keep going).
-      // Embedded: cancels the in-process run so nothing is orphaned.
-      sourceRef.current?.close();
-      sourceRef.current = null;
+      // Attached: the source's cleanup ONLY closes the socket (daemon + run keep going).
+      // Embedded: cancel the in-process run so nothing is orphaned.
+      engineRef.current?.cancel();
+      engineRef.current = null;
+      controlRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -252,7 +277,7 @@ export function BackupDashboard({
         const api = new ApiClient({ serverUrl: config.serverUrl, pat: config.pat });
         const { config: cfg } = await api.getNodeBackupConfig(nodeId);
         if (cancelled || !mountedRef.current) return;
-        setDash((prev) => applyPendingLag(prev, cfg?.pending ?? null));
+        setLag(cfg?.pending ?? null);
       } catch {
         /* offline is fine — the local sections still render */
       }
@@ -281,8 +306,8 @@ export function BackupDashboard({
     }
     if (input === 'c') {
       if (dash.runState === 'running') {
-        sourceRef.current?.cancel();
-        setDash((prev) => markCancelling(prev));
+        controlRef.current?.cancel();
+        setCancelRequested(true);
       }
       return;
     }
@@ -299,11 +324,11 @@ export function BackupDashboard({
           if (resolved.reason === 'auto') {
             pushLog('info', 'last full reconcile is over 30 days old — upgrading to a reconcile run');
           }
-          sourceRef.current?.runNow(resolved.kind);
+          controlRef.current?.runNow(resolved.kind);
         })();
         return;
       }
-      sourceRef.current?.runNow(kind);
+      controlRef.current?.runNow(kind);
     }
   });
 
@@ -436,7 +461,7 @@ export function BackupDashboard({
       {disconnected ? (
         <Box marginTop={1}>
           <Text color="yellow">
-            Lost the daemon connection — the run may still be going. Reopen this screen to re-attach.
+            Lost the daemon connection — the run may still be going. Reconnecting automatically…
           </Text>
         </Box>
       ) : null}
