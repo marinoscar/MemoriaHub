@@ -32,7 +32,7 @@ import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowActionExecutor } from '../actions/workflow-action.executor';
-import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
+import { WorkflowRunNotificationService } from '../../notification-producers/workflow-run-notification.service';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { ActionOutcome } from '../actions/action-executor.types';
 import { revalidateItemMatches } from '../execution/item-revalidation.util';

@@ -39,6 +39,7 @@ import type { NotificationType } from '@prisma/client';
 import {
   BROADCAST_CRITICAL_EVENT_KEY,
   BROADCAST_EVENT_KEY,
+  eventBrowserTemplateRegistry,
   type BrowserNotificationContent,
   type BrowserNotificationTemplate,
   type NotificationRegistration,
@@ -114,11 +115,12 @@ export const MEMORIAHUB_NOTIFICATION_FOLDS: Readonly<Record<MemoriaHubEventKey, 
 // Dedup keys
 // ---------------------------------------------------------------------------
 // PLATFORM-ADOPTION-SHIM(#576): byte-for-byte copies of `stateDedupKey` and
-// `countedDedupKey` from platform 0.1.0-next.26's `notification-inbox-writer.ts`
-// (not exported by the pinned 0.1.0-next.22). The carry-over stamps copied live
-// rows with them so the platform writer folds into the migrated rows. Replace
-// with the platform imports after the bump (PR #653); the unit test pins the
-// format so a drift fails loudly.
+// `countedDedupKey` from the platform's `notification-inbox-writer.ts`, which
+// `@marinoscar/platform-api/notifications` does not export (checked on
+// 0.1.0-next.27). Only the carry-over uses them: it stamps copied live rows so
+// the platform writer folds into the migrated rows. The unit test pins the
+// format so a drift fails loudly; replace with the platform imports if a later
+// version exports them (seam request: export the dedup-key builders).
 
 const MAX_DEDUP_KEY_LENGTH = 200;
 
@@ -219,7 +221,7 @@ function workflowRunLink(runId: string | null): string {
   return runId && /^[A-Za-z0-9-]{1,64}$/.test(runId) ? `/workflows/runs/${runId}` : '/workflows';
 }
 
-export const MEMORIAHUB_NOTIFICATIONS: readonly NotificationRegistration[] = [
+const DECLARED: readonly NotificationRegistration[] = [
   {
     event: {
       key: MEMORIAHUB_EVENT_KEYS.reviewBursts,
@@ -355,3 +357,22 @@ export const MEMORIAHUB_NOTIFICATIONS: readonly NotificationRegistration[] = [
     }),
   },
 ];
+
+/** The nine registrations, each event carrying the platform `kind` of its fold. */
+export const MEMORIAHUB_NOTIFICATIONS: readonly NotificationRegistration[] = DECLARED.map((registration) => ({
+  ...registration,
+  event: {
+    ...registration.event,
+    kind: MEMORIAHUB_NOTIFICATION_FOLDS[registration.event.key as MemoriaHubEventKey].kind,
+  },
+}));
+
+/**
+ * Renders a registered event's browser template (bell row, toast and push
+ * text) for `data`, or `null` when the event has none. For tests and the
+ * producers' documentation; the platform dispatcher renders on its own.
+ */
+export function renderBrowserNotification(eventKey: string, data: unknown): BrowserNotificationContent | null {
+  const binding = eventBrowserTemplateRegistry.get(eventKey);
+  return binding ? (binding.render as unknown as (d: unknown) => BrowserNotificationContent)(data) : null;
+}

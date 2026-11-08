@@ -61,10 +61,6 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   trash_purge: 'Trash purge',
   trash_empty_evaluate: 'Empty trash evaluate',
   trash_empty_execute_batch: 'Empty trash execute batch',
-  notification_purge: 'Notification purge',
-  // Admin notification broadcasts (issue #488), server-only fan-out
-  broadcast_start: 'Broadcast start',
-  broadcast_chunk: 'Broadcast delivery',
   // Review-queue runs: bursts / duplicates / location suggestions (issue #190)
   review_run_evaluate: 'Review run evaluate',
   review_run_execute_batch: 'Review run execute batch',
@@ -90,9 +86,18 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
  *   dispatches to `RetiredJobTypeHandler` (platform/jobs/retired-job-types.ts),
  *   which succeeds without doing anything, so a row queued before the cutover
  *   drains instead of sitting `pending` for ever.
+ *
+ *   notification_purge, broadcast_start, broadcast_chunk (RETRO-D3): the platform
+ *   notifications slice's purges and broadcast jobs replace them; same no-op rule.
  */
 export const RETIRED_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   job_history_purge: 'Job history purge (retired)',
+  // RETRO-D3 (#576): replaced by the notifications slice's retention purges and its
+  // `admin.broadcast.start` / `admin.broadcast.chunk`; no-op handlers in
+  // platform/notifications/retired-notification-job-types.ts.
+  notification_purge: 'Notification purge (retired)',
+  broadcast_start: 'Broadcast start (retired)',
+  broadcast_chunk: 'Broadcast delivery (retired)',
 };
 
 /** Extra enqueue reasons. Empty: `upload`, `rerun` and `backfill` are built in. */

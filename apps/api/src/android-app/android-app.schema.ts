@@ -16,7 +16,7 @@ import { z } from 'zod';
 //
 // STORAGE. Its own `system_settings` row (`key = 'android_app'`, value
 // `{ trustedApps: [...] }`) rather than a namespace of the `global` row — the
-// same choice the `webPush` row made (notifications/push/push-config.schema.ts):
+// same choice the `webPush` row made (the pre-platform push config schema, RETRO-D3 moved it to the platform):
 // the generic `GET /api/system-settings` never returns it, a save of an
 // unrelated setting can never clobber it, it has its own version counter and
 // audit trail, and it sidesteps the "hand-maintained copies" of the `global`

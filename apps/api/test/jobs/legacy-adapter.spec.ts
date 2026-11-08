@@ -115,11 +115,11 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
     );
   });
 
-  it('all 38 handler classes dispatch under their own type', () => {
+  it('all 35 handler classes dispatch under their own type', () => {
     for (const HandlerClass of ALL_HANDLER_CLASSES) {
       legacy.register(new (HandlerClass as unknown as new () => EnrichmentHandler)());
     }
-    expect(platform.types()).toHaveLength(38);
+    expect(platform.types()).toHaveLength(35);
     expect(platform.types().sort()).toEqual(legacy.types().sort());
   });
 

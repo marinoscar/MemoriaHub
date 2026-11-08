@@ -21,7 +21,7 @@ import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifes
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup', 'notifications'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],
