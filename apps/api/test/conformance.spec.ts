@@ -79,6 +79,7 @@ import '@marinoscar/platform-api/jobs/testing';
 import '@marinoscar/platform-api/notifications/testing';
 import '@marinoscar/platform-api/onboarding/testing';
 import '@marinoscar/platform-api/settings/testing';
+import '@marinoscar/platform-api/sharing/testing';
 import '@marinoscar/platform-api/user-data/testing';
 import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
@@ -105,6 +106,9 @@ import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 // Fills the onboarding step and fact registries the `onboarding` suite reads (AppModule imports it too).
 import '../src/platform/onboarding/onboarding.manifest';
+// The sharing slice's registrations (RETRO-I1); AppModule imports them too.
+import '../src/app-registrations/sharing';
+import { IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
@@ -302,6 +306,21 @@ runPlatformConformance({
     // User data (RETRO-H1, #591): the keep-or-delete decision of every owner model,
     // against the composed schema the purge planner reads at bootstrap.
     userData: { datamodel: composedSchemaDatamodel(join(__dirname, '..', 'src', 'platform', 'user-data'))() },
+
+    // The sharing slice (RETRO-I1, #562). No app file touches the sharing tables directly, the
+    // public link route carries the identity slice's `@Public()` marker, and the three partial
+    // unique indexes are in the installed platform migrations. No model has an `owner_group_id`
+    // and no resource type is registered yet: RETRO-I2 adds both (`media_item`, `album`, the
+    // group-owned models) and updates `groupOwnedModels` and `resourceTypeIds` here.
+    sharing: {
+      schemaPath: join(__dirname, '..', 'prisma', 'schema'),
+      migrationsDir: join(__dirname, '..', 'prisma', 'migrations'),
+      rootModule: AppModule,
+      isPublic: (target) => Reflect.getMetadata(IS_PUBLIC_KEY, target) === true,
+      groupOwnedModels: {},
+      resourceTypeIds: [],
+      minRoutes: 100,
+    },
 
     doctorReadOnly: {
       fixture: doctorConformanceFixture,

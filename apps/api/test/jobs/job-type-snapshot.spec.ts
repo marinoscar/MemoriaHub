@@ -151,3 +151,28 @@ describe('job type snapshot: the notification types RETRO-D3 retired', () => {
     expect(platform.serverOnlyTypes().sort()).toEqual([...EXPECTED_RETIRED_NOTIFICATION_TYPES].sort());
   });
 });
+
+// RETRO-I1 (#562): the sharing slice's one job type. A platform slice type, so it
+// is not in the app's handler fixture above; pinned here through the app's own
+// `SHARING_JOBS` adapter, which is the path that registers it at boot.
+describe('job type snapshot: the sharing slice (RETRO-I1)', () => {
+  it('pins sharing.grants.prune, registered server-only through SharingJobsAdapter', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { GrantsPruneHandler, GRANTS_PRUNE_JOB_TYPE, resolveSharingModuleOptions } = require('@marinoscar/platform-api/sharing');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { SharingJobsAdapter } = require('../../src/platform/sharing/sharing-jobs.adapter');
+
+    expect(GRANTS_PRUNE_JOB_TYPE).toBe('sharing.grants.prune');
+
+    const platform = new JobHandlerRegistry();
+    const adapter = new SharingJobsAdapter(platform, {} as never, {} as never);
+    const decorator = () => (() => undefined) as never;
+    const options = resolveSharingModuleOptions({
+      host: { access: { requirePermissions: decorator, requireAuthenticated: decorator } },
+    });
+    new GrantsPruneHandler({} as never, options, adapter).onModuleInit();
+
+    expect(platform.types()).toEqual(['sharing.grants.prune']);
+    expect(platform.serverOnlyTypes()).toEqual(['sharing.grants.prune']);
+  });
+});
