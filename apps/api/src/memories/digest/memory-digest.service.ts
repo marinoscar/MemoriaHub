@@ -47,7 +47,7 @@
 // -----------------------------------------------------------------------------
 // FIRE-AND-FORGET SENDS
 // -----------------------------------------------------------------------------
-// `EmailService.sendEmail` never throws — it returns a result — and a failed
+// `AppEmailSender.sendEmail` never throws — it returns a result — and a failed
 // send is counted and logged, never rethrown. A provider outage must not fail
 // the job, because a retry would re-send to everyone the first pass already
 // reached. Same contract as the circle-invitation / membership-confirmation
@@ -57,14 +57,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MemoryType, Prisma } from '@prisma/client';
 
-import { EmailService } from '../../email/email.service';
+import { AppEmailSender } from '../../platform/email/app-email.sender';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
 import { MemoriesSettingsValue } from '../../settings/registry/namespaces/system/memories';
 import type { AppSystemSettingsDocument as SystemSettingsValue } from '../../settings/app-settings.types';
 import { isMemoriesEnabled } from '../../settings/feature-gates';
-import { MemoryDigestItemData } from '../../email/types/email.types';
+import type { MemoryDigestItemData } from '../../email-templates';
 import {
   isMemoryHiddenByPreferences,
   resolveMemoryPreferences,
@@ -183,7 +183,7 @@ export class MemoryDigestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
-    private readonly email: EmailService,
+    private readonly email: AppEmailSender,
     private readonly thumbnails: MediaThumbnailService,
   ) {}
 
@@ -193,10 +193,11 @@ export class MemoryDigestService {
 
   /**
    * Evaluate every deployment-wide gate (2–5) against an already-read settings
-   * blob. Pure, so both the task and the handler can call it and neither can
-   * disagree with the other about whether the digest is live.
+   * blob and the already-read email readiness ({@link emailReady}). Pure, so
+   * both the task and the handler can call it and neither can disagree with the
+   * other about whether the digest is live.
    */
-  evaluateGlobalGate(settings: SystemSettingsValue): DigestGlobalGate {
+  evaluateGlobalGate(settings: SystemSettingsValue, emailReady: boolean): DigestGlobalGate {
     const memories = resolveMemoriesSettings(settings.memories);
 
     if (!isMemoriesEnabled(settings)) {
@@ -208,7 +209,7 @@ export class MemoryDigestService {
     if (memories.digest.frequency === 'off') {
       return { ok: false, reason: 'frequency_off', settings: memories };
     }
-    if (!this.emailConfigured(settings)) {
+    if (!emailReady) {
       return { ok: false, reason: 'email_unconfigured', settings: memories };
     }
     return { ok: true, reason: 'ok', settings: memories };
@@ -217,17 +218,17 @@ export class MemoryDigestService {
   /**
    * True when the deployment can actually deliver mail.
    *
-   * Mirrors `EmailService.sendEmail`'s own precondition exactly. Checking it up
-   * front is what makes "email not configured ⇒ the digest task no-ops and
-   * in-app memories are unaffected" (epic failure matrix) true at the CRON
-   * level rather than only at the send: without it, a deployment with the
-   * feature on but no SMTP configured would queue a job per circle per period
-   * forever, each one doing real query work before discovering it has nowhere
-   * to send.
+   * The platform email settings (`email` row, RETRO-D2) read through
+   * `AppEmailSender.isConfigured`, which is exactly the precondition its
+   * `sendEmail` applies. Checking it up front is what makes "email not
+   * configured ⇒ the digest task no-ops and in-app memories are unaffected"
+   * (epic failure matrix) true at the CRON level rather than only at the send:
+   * without it, a deployment with the feature on but no transport configured
+   * would queue a job per circle per period forever, each one doing real query
+   * work before discovering it has nowhere to send. Never throws.
    */
-  private emailConfigured(settings: SystemSettingsValue): boolean {
-    const email = settings.email;
-    return Boolean(email && email.enabled && email.provider && email.fromAddress);
+  emailReady(): Promise<boolean> {
+    return this.email.isConfigured();
   }
 
   /** Rolling window for a frequency, minus the one-tick tolerance. */
@@ -333,7 +334,7 @@ export class MemoryDigestService {
     };
 
     const settings = await this.systemSettings.getSettings();
-    const gate = this.evaluateGlobalGate(settings);
+    const gate = this.evaluateGlobalGate(settings, await this.emailReady());
     if (!gate.ok) {
       result.skippedReason = 'gate';
       this.logger.debug(

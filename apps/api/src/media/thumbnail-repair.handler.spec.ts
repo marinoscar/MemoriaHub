@@ -1,7 +1,9 @@
 /**
  * Unit tests for ThumbnailRepairHandler.
  *
- * Verifies: handler type constant; onModuleInit registers with the registry;
+ * Verifies (a native platform JobHandler, RETRO-C3 #585): handler type, label,
+ * profile and server-only shape (no node pair); onModuleInit registers with the
+ * platform registry;
  * empty candidate set is a no-op; the cheap resync path is chosen when the
  * StorageObject already carries _processing.thumbnail (no attempts bump); the
  * reprocess path persists the attempts counter BEFORE calling
@@ -12,44 +14,28 @@
  * dependencies are fully mocked.
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
-import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import type { EnrichmentJob } from '@prisma/client';
+import { systemJob } from '../../test/helpers/platform-job';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return systemJob('thumbnail_repair', {
     id: 'job-thumb-repair-1',
-    type: 'thumbnail_repair',
-    mediaItemId: null,
-    circleId: null,
-    status: 'running' as any,
-    reason: 'backfill' as any,
+    status: 'running',
+    reason: 'backfill',
     priority: 100,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
     attempts: 1,
-    lastError: null,
     startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
     ...overrides,
-  } as EnrichmentJob;
+  });
 }
 
 function makeCandidateRow(objectId: string, mediaItemId = `media-for-${objectId}`) {
@@ -80,10 +66,9 @@ function makeStorageObject(id: string, metadata: Record<string, unknown> | null 
 
 describe('ThumbnailRepairHandler', () => {
   let handler: ThumbnailRepairHandler;
-  let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let mockSync: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
   let mockRecovery: jest.Mocked<Pick<StorageProcessingRecoveryService, 'reprocessObjectNow'>>;
-  let mockThumbnailNodePersistService: jest.Mocked<Pick<ThumbnailNodePersistService, 'persistThumbnail'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -99,24 +84,16 @@ describe('ThumbnailRepairHandler', () => {
       reprocessObjectNow: jest.fn().mockResolvedValue(undefined),
     };
 
-    mockThumbnailNodePersistService = {
-      persistThumbnail: jest.fn().mockResolvedValue(undefined),
-    };
-
     mockPrisma = createMockPrismaService();
     mockPrisma.$queryRaw.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ThumbnailRepairHandler,
-        { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+        { provide: JobHandlerRegistry, useValue: mockRegistry },
         { provide: MediaMetadataSyncService, useValue: mockSync },
         { provide: StorageProcessingRecoveryService, useValue: mockRecovery },
         { provide: PrismaService, useValue: mockPrisma },
-        {
-          provide: ThumbnailNodePersistService,
-          useValue: mockThumbnailNodePersistService,
-        },
       ],
     }).compile();
 
@@ -138,7 +115,7 @@ describe('ThumbnailRepairHandler', () => {
   });
 
   describe('onModuleInit', () => {
-    it('registers itself in the EnrichmentHandlerRegistry on init', () => {
+    it('registers itself in the platform JobHandlerRegistry on init', () => {
       handler.onModuleInit();
       expect(mockRegistry.register).toHaveBeenCalledWith(handler);
     });
@@ -337,42 +314,19 @@ describe('ThumbnailRepairHandler', () => {
   });
 
   // =========================================================================
-  // nodeResultSchema / persistNodeResult (distributed node path)
+  // server-only (RETRO-C3): the parity-only node pair is gone
   // =========================================================================
-  //
-  // See the nodeResultSchema doc comment on ThumbnailRepairHandler: wired for
-  // interface parity with ThumbnailRegenHandler, though this global sweep job
-  // type has no single mediaItemId in practice under the current claim model.
 
-  describe('nodeResultSchema / persistNodeResult', () => {
-    it('exposes a nodeResultSchema', () => {
-      expect(handler.nodeResultSchema).toBeDefined();
+  describe('platform contract', () => {
+    it('declares a label and the 15-minute, 2-attempt profile', () => {
+      expect(handler.label).toBe('Thumbnail repair sweep');
+      expect(handler.profile).toEqual({ maxRuntimeMs: 900_000, maxAttempts: 2 });
     });
 
-    it('parses a valid result payload and delegates to ThumbnailNodePersistService.persistThumbnail', async () => {
-      const job = makeJob({ mediaItemId: 'media-1' });
-      const result = {
-        storageKey: 'thumbnails/some-object-id.jpg',
-        width: 400,
-        height: 300,
-        bytes: 12345,
-      };
-
-      await handler.persistNodeResult(job, result);
-
-      expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledTimes(1);
-      expect(mockThumbnailNodePersistService.persistThumbnail).toHaveBeenCalledWith(
-        job,
-        result,
-      );
-    });
-
-    it('rejects an invalid result payload without calling persistThumbnail', async () => {
-      const job = makeJob({ mediaItemId: 'media-1' });
-      const invalidResult = { storageKey: 'thumbnails/x.jpg', width: 0, height: 300, bytes: 12345 };
-
-      await expect(handler.persistNodeResult(job, invalidResult)).rejects.toThrow();
-      expect(mockThumbnailNodePersistService.persistThumbnail).not.toHaveBeenCalled();
+    it('carries neither member of the node pair (server-only, derived)', () => {
+      const shape = handler as unknown as Record<string, unknown>;
+      expect(shape['nodeResultSchema']).toBeUndefined();
+      expect(shape['persistNodeResult']).toBeUndefined();
     });
   });
 });

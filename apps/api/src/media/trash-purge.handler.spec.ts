@@ -13,7 +13,7 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { TrashPurgeHandler } from './trash-purge.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { MediaService } from './media.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -57,7 +57,7 @@ function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
 
 describe('TrashPurgeHandler', () => {
   let handler: TrashPurgeHandler;
-  let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
   let mockMediaService: jest.Mocked<Pick<MediaService, 'purgeMediaItemsBatched'>>;
   let mockPrisma: MockPrismaService;
@@ -80,7 +80,7 @@ describe('TrashPurgeHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TrashPurgeHandler,
-        { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+        { provide: JobHandlerRegistry, useValue: mockRegistry },
         { provide: AppSystemSettingsService, useValue: mockSettings },
         { provide: MediaService, useValue: mockMediaService },
         { provide: PrismaService, useValue: mockPrisma },
@@ -109,7 +109,7 @@ describe('TrashPurgeHandler', () => {
   // =========================================================================
 
   describe('onModuleInit', () => {
-    it('registers itself in the EnrichmentHandlerRegistry on init', () => {
+    it('registers itself in the JobHandlerRegistry on init', () => {
       handler.onModuleInit();
       expect(mockRegistry.register).toHaveBeenCalledWith(handler);
     });
@@ -129,7 +129,7 @@ describe('TrashPurgeHandler', () => {
     it('reads retentionDays from storage.trash.retentionDays setting', async () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
-      await handler.process(makeJob());
+      await handler.process();
 
       expect(mockSettings.getSettingValue).toHaveBeenCalledWith('storage.trash.retentionDays');
     });
@@ -139,7 +139,7 @@ describe('TrashPurgeHandler', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
       // Should not throw; purgeMediaItemsBatched should NOT be called (no items)
-      await expect(handler.process(makeJob())).resolves.toBeUndefined();
+      await expect(handler.process()).resolves.toBeUndefined();
 
       expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -155,7 +155,7 @@ describe('TrashPurgeHandler', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
       const before = Date.now();
-      await handler.process(makeJob());
+      await handler.process();
       const after = Date.now();
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
@@ -175,7 +175,7 @@ describe('TrashPurgeHandler', () => {
     it('does NOT call purgeMediaItemsBatched when no expired items are found', async () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
-      await handler.process(makeJob());
+      await handler.process();
 
       expect(mockMediaService.purgeMediaItemsBatched).not.toHaveBeenCalled();
     });
@@ -185,7 +185,7 @@ describe('TrashPurgeHandler', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue(expiredItems as any);
       mockMediaService.purgeMediaItemsBatched.mockResolvedValue({ deleted: 2, failedIds: [] });
 
-      await handler.process(makeJob());
+      await handler.process();
 
       expect(mockMediaService.purgeMediaItemsBatched).toHaveBeenCalledWith(['item-old-1', 'item-old-2']);
     });
@@ -194,20 +194,20 @@ describe('TrashPurgeHandler', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([{ id: 'item-1' }] as any);
       mockMediaService.purgeMediaItemsBatched.mockResolvedValue({ deleted: 1, failedIds: [] });
 
-      await expect(handler.process(makeJob())).resolves.toBeUndefined();
+      await expect(handler.process()).resolves.toBeUndefined();
     });
 
     it('propagates errors thrown by purgeMediaItemsBatched (worker records lastError and retries)', async () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([{ id: 'item-1' }] as any);
       mockMediaService.purgeMediaItemsBatched.mockRejectedValue(new Error('S3 unavailable'));
 
-      await expect(handler.process(makeJob())).rejects.toThrow('S3 unavailable');
+      await expect(handler.process()).rejects.toThrow('S3 unavailable');
     });
 
     it('propagates errors thrown by prisma.mediaItem.findMany', async () => {
       mockPrisma.mediaItem.findMany.mockRejectedValue(new Error('DB connection lost'));
 
-      await expect(handler.process(makeJob())).rejects.toThrow('DB connection lost');
+      await expect(handler.process()).rejects.toThrow('DB connection lost');
     });
 
     it('uses custom retentionDays from settings', async () => {
@@ -215,7 +215,7 @@ describe('TrashPurgeHandler', () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
       const before = Date.now();
-      await handler.process(makeJob());
+      await handler.process();
       const after = Date.now();
 
       const [call] = (mockPrisma.mediaItem.findMany as jest.Mock).mock.calls;
@@ -228,8 +228,7 @@ describe('TrashPurgeHandler', () => {
     it('global job fields: mediaItemId and circleId are null', async () => {
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
 
-      const job = makeJob({ mediaItemId: null, circleId: null });
-      await handler.process(job);
+      await handler.process();
 
       // Should still work — global job ignores these fields
       expect(mockPrisma.mediaItem.findMany).toHaveBeenCalledTimes(1);

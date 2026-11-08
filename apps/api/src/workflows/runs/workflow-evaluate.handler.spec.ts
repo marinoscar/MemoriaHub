@@ -20,7 +20,7 @@
 import { WorkflowRunStatus, WorkflowRunItemStatus, EnrichmentJob } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { WorkflowEvaluateHandler } from './workflow-evaluate.handler';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowRunService } from './workflow-run.service';
@@ -104,7 +104,7 @@ function rows(n: number, startIndex = 0) {
 describe('WorkflowEvaluateHandler', () => {
   let handler: WorkflowEvaluateHandler;
   let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let compiler: jest.Mocked<Pick<WorkflowConditionCompiler, 'compile'>>;
   let runService: jest.Mocked<Pick<WorkflowRunService, 'shouldBypassApproval' | 'enqueueExecuteBatches'>>;
@@ -120,7 +120,7 @@ describe('WorkflowEvaluateHandler', () => {
     };
 
     handler = new WorkflowEvaluateHandler(
-      registry as unknown as EnrichmentHandlerRegistry,
+      registry as unknown as JobHandlerRegistry,
       prisma as unknown as PrismaService,
       systemSettings as unknown as AppSystemSettingsService,
       compiler as unknown as WorkflowConditionCompiler,

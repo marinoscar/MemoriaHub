@@ -30,6 +30,9 @@
 // on pg_dump and pg_restore, the restore server-only and the backup node-eligible, system-scope
 // permissions, the `database-backups/` prefix with deployment scope, and every registered
 // carry-over binding `$1` (MemoriaHub's Android releases carry is required).
+// `email` (`@marinoscar/platform-api/email/testing`, RETRO-D2): the platform templates
+// are registered, every sampled template (the platform's plus this app's three) renders
+// a complete document with its data escaped, and no email settings shape carries a secret.
 //
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
@@ -44,6 +47,7 @@ import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marin
 import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
+import '@marinoscar/platform-api/email/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
 import '@marinoscar/platform-api/jobs/testing';
@@ -59,7 +63,10 @@ import { APP_CREDENTIAL_OWNERS } from '../src/platform/credentials/credential-pu
 import '../src/app-registrations/permission-manifest';
 import '../src/app-registrations/ownership-manifest';
 import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-backup';
+// Configures email rendering and registers this app's templates (the `email` suite renders them).
+import '../src/platform/email/email.config';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
+import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 
 runPlatformConformance({
@@ -118,6 +125,9 @@ runPlatformConformance({
 
     // Database backup and restore (RETRO-D4, #580).
     dbBackup: { requiredCarryOverIds: [...MEMORIAHUB_REQUIRED_CARRY_OVER_IDS] },
+    // The email slice (RETRO-D2, #570). `samples` adds this app's three templates to the
+    // rendering check, with hostile text in every field the escaping must catch.
+    email: { samples: EMAIL_TEMPLATE_SAMPLES },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no

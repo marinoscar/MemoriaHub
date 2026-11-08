@@ -24,11 +24,11 @@
  * standalone module function so drift behavior is controlled per test.
  */
 
-import { EnrichmentJob, WorkflowRunItemStatus, WorkflowRunStatus } from '@prisma/client';
+import { WorkflowRunItemStatus, WorkflowRunStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { workflowExecuteBatchResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { WorkflowExecuteBatchHandler } from './workflow-execute-batch.handler';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowActionExecutor } from '../actions/workflow-action.executor';
@@ -48,12 +48,12 @@ const RUN_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
 const ACTOR_ID = randomUUID();
 
-function makeJob(payload: Record<string, unknown>): EnrichmentJob {
+function makeJob(payload: Record<string, unknown>): Job {
   return {
     id: randomUUID(),
     type: 'workflow_execute_batch',
-    mediaItemId: null,
-    circleId: CIRCLE_ID,
+    subjectType: 'circle',
+    subjectId: CIRCLE_ID,
     status: 'running',
     reason: 'rerun',
     priority: 100,
@@ -71,7 +71,7 @@ function makeJob(payload: Record<string, unknown>): EnrichmentJob {
     claimedByNodeId: null,
     leaseExpiresAt: null,
     executor: 'server',
-  } as unknown as EnrichmentJob;
+  } as unknown as Job;
 }
 
 function makeRun(overrides: Record<string, unknown> = {}) {
@@ -101,7 +101,7 @@ function compiledStub(): CompiledWorkflow {
 describe('WorkflowExecuteBatchHandler', () => {
   let handler: WorkflowExecuteBatchHandler;
   let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let compiler: jest.Mocked<Pick<WorkflowConditionCompiler, 'compile'>>;
   let executor: jest.Mocked<Pick<WorkflowActionExecutor, 'execute' | 'clearRunCache'>>;
 
@@ -115,7 +115,7 @@ describe('WorkflowExecuteBatchHandler', () => {
     };
 
     handler = new WorkflowExecuteBatchHandler(
-      registry as unknown as EnrichmentHandlerRegistry,
+      registry as unknown as JobHandlerRegistry,
       prisma as unknown as PrismaService,
       compiler as unknown as WorkflowConditionCompiler,
       executor as unknown as WorkflowActionExecutor,

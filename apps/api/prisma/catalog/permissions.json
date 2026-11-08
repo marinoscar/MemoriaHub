@@ -239,16 +239,6 @@
       "scope": "system"
     },
     {
-      "name": "email_settings:read",
-      "description": "View email provider configuration and test connectivity",
-      "scope": "system"
-    },
-    {
-      "name": "email_settings:write",
-      "description": "Configure email provider credentials, set active provider, and send test emails",
-      "scope": "system"
-    },
-    {
       "name": "storage_settings:read",
       "description": "View storage provider configuration and test connectivity",
       "scope": "system"
@@ -307,8 +297,6 @@
       "face_settings:write",
       "geo_settings:read",
       "geo_settings:write",
-      "email_settings:read",
-      "email_settings:write",
       "storage_settings:read",
       "storage_settings:write",
       "push:read",

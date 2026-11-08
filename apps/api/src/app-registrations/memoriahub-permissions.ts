@@ -29,8 +29,9 @@
 // `user_settings:*` is the platform's. Its default grants (org_admin,
 // contributor, viewer) are the same.
 //
-// REMOVED BY SLICE: email_settings:* (D2), ai_settings:* (E1), storage_settings:*
-// and storage:* (D1), push:* and broadcasts:* (D3); db_backup:* moved to the db-backup slice (D4). Their ids
+// REMOVED BY SLICE: email_settings:* (D2, done: the platform email routes check
+// system_settings:read|write), ai_settings:* (E1), storage_settings:*
+// and storage:* (D1), db_backup:* (D4), push:* and broadcasts:* (D3). Their ids
 // are permanent: the web cards and the CLI use the strings exactly.
 // =============================================================================
 
@@ -174,18 +175,6 @@ export const MEMORIAHUB_PERMISSIONS = {
   GEO_SETTINGS_WRITE: {
     id: 'geo_settings:write',
     description: 'Configure geo provider credentials and active reverse-geocoding provider',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  EMAIL_SETTINGS_READ: {
-    id: 'email_settings:read',
-    description: 'View email provider configuration and test connectivity',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  EMAIL_SETTINGS_WRITE: {
-    id: 'email_settings:write',
-    description: 'Configure email provider credentials, set active provider, and send test emails',
     scope: 'system',
     defaultGrants: ['admin'],
   },

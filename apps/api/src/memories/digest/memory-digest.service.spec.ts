@@ -7,7 +7,7 @@
  * NEVER receives one, a member whose own preference filter empties the list
  * receives nothing, and a provider failure is counted rather than thrown.
  *
- * NOTHING HERE CAN SEND MAIL OR TOUCH A NETWORK: EmailService is a jest mock,
+ * NOTHING HERE CAN SEND MAIL OR TOUCH A NETWORK: AppEmailSender is a jest mock,
  * Prisma is a mock, and the storage/thumbnail layer is a stub. The only real
  * code that runs is this service, the preference resolver it reuses from #307,
  * and the token codec.
@@ -17,7 +17,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MemoryType } from '@prisma/client';
 
 import { MemoryDigestService } from './memory-digest.service';
-import { EmailService } from '../../email/email.service';
+import { AppEmailSender, isEmailConfigured } from '../../platform/email/app-email.sender';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { verifyDigestImageToken, verifyDigestUnsubscribeToken } from './digest-token.util';
@@ -70,7 +70,7 @@ function circleRow(members = [USER_A, USER_B]): any {
 describe('MemoryDigestService', () => {
   let service: MemoryDigestService;
   let prisma: any;
-  let email: { sendEmail: jest.Mock };
+  let email: { sendEmail: jest.Mock; isConfigured: jest.Mock };
   let settings: { getSettings: jest.Mock };
 
   beforeAll(() => {
@@ -85,15 +85,20 @@ describe('MemoryDigestService', () => {
       job: { findFirst: jest.fn().mockResolvedValue(null) },
       userSettings: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    email = { sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'x' }) };
     settings = { getSettings: jest.fn().mockResolvedValue(settingsWith()) };
+    // The fixture's `email` key stands in for the platform `email` settings row
+    // (RETRO-D2): readiness is derived from it with the sender's own predicate.
+    email = {
+      sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'x' }),
+      isConfigured: jest.fn(async () => isEmailConfigured((await settings.getSettings()).email ?? {})),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: settings },
-        { provide: EmailService, useValue: email },
+        { provide: AppEmailSender, useValue: email },
         {
           provide: MediaThumbnailService,
           useValue: {

@@ -28,16 +28,17 @@
 //   * JOBS_WORKER_CONCURRENCY is 1 (the platform default is 2). Every concurrent
 //     job buffers a decoded image; the bulk-import tuning guide says to raise it
 //     deliberately.
-//   * JOBS_SYSTEM_MODE_EXTRA_TYPES always carries `thumbnail_repair` and
-//     `workflow_execute_batch`: both are node-eligible handlers that the
-//     `system` worker mode has always claimed on the server too (a global sweep;
-//     a DB-bound batch that must run with no fleet). Operator extras are added.
+//   * JOBS_SYSTEM_MODE_EXTRA_TYPES always carries `workflow_execute_batch`: a
+//     node-eligible, DB-bound batch the `system` worker mode has always claimed
+//     on the server too, so workflows run with no fleet. Operator extras are
+//     added. (`thumbnail_repair` was pinned here until RETRO-C3 made it
+//     server-only: the platform derives it into the system claim set now.)
 // =============================================================================
 
 import { Logger } from '@nestjs/common';
 
 /** Node-eligible types the `system` worker mode has always run on the server. */
-export const SYSTEM_MODE_PINNED_TYPES: readonly string[] = ['thumbnail_repair', 'workflow_execute_batch'];
+export const SYSTEM_MODE_PINNED_TYPES: readonly string[] = ['workflow_execute_batch'];
 
 /** The old queue's default concurrency (the platform's is 2). */
 export const LEGACY_DEFAULT_WORKER_CONCURRENCY = '1';
@@ -118,7 +119,7 @@ export function legacyJobsEnv(
 
   if (!isSet(out['JOBS_WORKER_CONCURRENCY'])) out['JOBS_WORKER_CONCURRENCY'] = LEGACY_DEFAULT_WORKER_CONCURRENCY;
 
-  // The extra system-mode types: the always-pinned two plus whatever the operator named.
+  // The extra system-mode types: the always-pinned one plus whatever the operator named.
   const extras = new Set<string>(SYSTEM_MODE_PINNED_TYPES);
   const named = env['JOBS_SYSTEM_MODE_EXTRA_TYPES'] ?? env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'] ?? '';
   if (!isSet(env['JOBS_SYSTEM_MODE_EXTRA_TYPES']) && isSet(env['ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES'])) {

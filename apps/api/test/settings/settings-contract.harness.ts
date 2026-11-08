@@ -131,6 +131,9 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     notificationDeliveries: { enabled: true, days: 90 },
     auditEvents: { enabled: false, days: 365 },
     aiRuns: { enabled: true, days: 90 },
+    // MemoriaHub's run-history policies (RETRO-C7), after the platform's four.
+    workflowRuns: { enabled: true, days: 30 },
+    reviewRuns: { enabled: true, days: 30 },
   },
   reviewRuns: { runHistoryRetentionDays: 30 },
   notifications: {

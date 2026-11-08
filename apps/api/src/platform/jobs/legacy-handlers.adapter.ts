@@ -50,9 +50,14 @@ import { videoJobTimeoutMs } from './legacy-env';
 //     `RateLimitError(retryAfterMs)`, because the queue defers a job on that
 //     class and nothing else.
 //   * the provider throttle keys (`auto_tagging` / `video_auto_tagging` ->
-//     `tagging`, `geocode` -> `geocode`, `face_detection` -> `face`) are
-//     registered with the platform `ProviderThrottleService`, which replaces the
-//     app's gate.
+//     `tagging`, `geocode` -> `geocode`) are registered with the platform
+//     `ProviderThrottleService`, which replaces the app's gate.
+//
+// CONVERTED (no longer here): RETRO-C3 (#585) made `face_detection`,
+// `video_face_detection`, `face_auto_archive_sweep`, `metadata_extraction`,
+// `thumbnail_regen` and `thumbnail_repair` native `JobHandler`s; they register
+// with `JobHandlerRegistry` themselves (and `face_detection` its own `face`
+// throttle key), never through `EnrichmentHandlerRegistry`.
 //
 // The orchestration (claim, lease, retry, deferral, settle) is the platform's;
 // none of it is reimplemented here.
@@ -64,12 +69,14 @@ export const LEGACY_THROTTLE_KEYS: Readonly<Record<string, string>> = {
   // Video tagging calls the SAME configured tagging provider, so it shares the photo path's gate.
   video_auto_tagging: 'tagging',
   geocode: 'geocode',
-  face_detection: 'face',
 };
 
-/** The video job types: download + ffmpeg + per-frame provider calls legitimately exceed 10 minutes. */
+/**
+ * The video job types still on the adapter: download + ffmpeg + per-frame
+ * provider calls legitimately exceed 10 minutes. (`video_face_detection` is
+ * native since RETRO-C3 and declares the same profile itself.)
+ */
 export const VIDEO_JOB_TYPES: ReadonlySet<string> = new Set([
-  'video_face_detection',
   'social_media_detection',
   'video_auto_tagging',
 ]);

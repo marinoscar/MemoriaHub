@@ -2,9 +2,10 @@
  * Unit tests for FaceAutoArchiveSweepHandler.
  *
  * Covers:
- *  - Registers itself with the EnrichmentHandlerRegistry on module init.
- *  - Exposes type 'face_auto_archive_sweep'.
- *  - job.circleId null -> warns and no-ops (never reads settings or queries).
+ *  - Registers itself with the platform JobHandlerRegistry on module init.
+ *  - Exposes type 'face_auto_archive_sweep', a label and a server-only profile.
+ *  - A job that is not about a circle throws; a circle deleted since the job
+ *    was queued no-ops (never reads settings or queries).
  *  - features.faceAutoArchive=false -> no-op (no archived-pool query).
  *  - No archived reference faces in the circle -> no-op (no live scan).
  *  - Hides matched live faces per batch with hiddenReason='auto_archive_match'
@@ -13,9 +14,9 @@
  *    id of the first page as the cursor.
  */
 
-import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
+import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { circleJob } from '../../test/helpers/platform-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceMatchingService } from './face-matching.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -25,31 +26,13 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'face_auto_archive_sweep',
-    mediaItemId: null,
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.backfill,
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return circleJob('face_auto_archive_sweep', 'circle-1', {
+    status: 'running',
+    reason: 'backfill',
     priority: 100,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
     ...overrides,
-  } as EnrichmentJob;
+  });
 }
 
 function makeSettings(faceAutoArchive: boolean, matchThreshold = 0.45) {
@@ -72,6 +55,9 @@ describe('FaceAutoArchiveSweepHandler', () => {
   beforeEach(() => {
     mockRegistry = { register: jest.fn() };
     mockPrisma = createMockPrismaService();
+    (mockPrisma.circle.findUnique as jest.Mock).mockImplementation(async ({ where }: { where: { id: string } }) =>
+      where.id === 'circle-1' ? { id: 'circle-1' } : null,
+    );
     mockMatchingService = {
       findLiveMatchesAgainstArchived: jest.fn().mockResolvedValue([]),
       archiveMaxCandidates: 5000,
@@ -81,7 +67,7 @@ describe('FaceAutoArchiveSweepHandler', () => {
     };
 
     handler = new FaceAutoArchiveSweepHandler(
-      mockRegistry as unknown as EnrichmentHandlerRegistry,
+      mockRegistry as unknown as JobHandlerRegistry,
       mockPrisma as unknown as PrismaService,
       mockMatchingService as unknown as FaceMatchingService,
       mockSystemSettings as unknown as AppSystemSettingsService,
@@ -89,7 +75,7 @@ describe('FaceAutoArchiveSweepHandler', () => {
     );
   });
 
-  it('registers itself with the EnrichmentHandlerRegistry on module init', () => {
+  it('registers itself with the platform JobHandlerRegistry on module init', () => {
     handler.onModuleInit();
 
     expect(mockRegistry.register).toHaveBeenCalledWith(handler);
@@ -99,12 +85,28 @@ describe('FaceAutoArchiveSweepHandler', () => {
     expect(handler.type).toBe('face_auto_archive_sweep');
   });
 
+  it('declares a label, the 10-minute profile and no node pair (server-only)', () => {
+    expect(handler.label).toBe('Face auto-archive sweep');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 600_000, maxAttempts: 3 });
+    expect((handler as unknown as Record<string, unknown>)['nodeResultSchema']).toBeUndefined();
+    expect((handler as unknown as Record<string, unknown>)['persistNodeResult']).toBeUndefined();
+  });
+
   // -------------------------------------------------------------------------
   // Guard: missing circleId
   // -------------------------------------------------------------------------
 
-  it('warns and no-ops when job.circleId is null (never reads settings)', async () => {
-    const job = makeJob({ circleId: null });
+  it('throws for a job that is not about a circle (never reads settings)', async () => {
+    const job = makeJob({ subjectType: null, subjectId: null });
+
+    await expect(handler.process(job)).rejects.toThrow('not about a circle');
+
+    expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
+    expect(mockPrisma.face.findMany).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the circle no longer exists (never reads settings)', async () => {
+    const job = makeJob({ subjectId: 'circle-gone' });
 
     await expect(handler.process(job)).resolves.toBeUndefined();
 
