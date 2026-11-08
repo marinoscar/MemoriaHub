@@ -18,8 +18,8 @@
     "test:ci": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js --ci --testPathIgnorePatterns='test/db/migrations\\.spec\\.ts$' 'test/db/migration-v6\\.spec\\.ts$' 'test/export/scan-export\\.spec\\.ts$' 'test/sync/sync-engine-date-range\\.spec\\.ts$'"
   },
   "dependencies": {
-    "@marinoscar/platform-cli": "0.1.0-next.21",
-    "@marinoscar/platform-infra": "0.1.0-next.21",
+    "@marinoscar/platform-cli": "0.1.0-next.22",
+    "@marinoscar/platform-infra": "0.1.0-next.22",
     "@memoriahub/enrichment-compute": "0.1.0",
     "better-sqlite3": "^12.10.0",
     "boxen": "^5.1.2",
