@@ -91,14 +91,15 @@ describe('adminSections', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
       // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry
-      // cards, RETRO-H5 (#609) the Alerts card.
-      expect(operations.cards.slice(-6).map((card) => card.title)).toEqual([
+      // cards, RETRO-H5 (#609) the Alerts card, RETRO-H2 (#596) the organization data export card.
+      expect(operations.cards.slice(-7).map((card) => card.title)).toEqual([
         'Maintenance',
         'About',
         'Telemetry',
         'Telemetry Explorer',
         'Telemetry Dashboard',
         'Alerts',
+        'Organization data export',
       ]);
       expect(broadcasts).toMatchObject({
         title: 'Broadcasts',
@@ -278,10 +279,30 @@ describe('adminSections', () => {
     });
   });
 
-  describe('alerts card (RETRO-H5, #609)', () => {
-    it('appends the packaged card last in Operations, on alerts:read, with no feature gate', () => {
+  describe('organization data export card (RETRO-H2, #596)', () => {
+    it('is appended to Operations after Alerts, on org_members:read, with no feature gate', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
-      const last = operations.cards[operations.cards.length - 1];
+      const index = operations.cards.findIndex((card) => card.path === '/admin/settings/data-export');
+      expect(operations.cards[index - 1]?.path).toBe('/admin/settings/alerts');
+      const card = operations.cards[index]!;
+      expect([card.permission, card.feature]).toEqual(['org_members:read', undefined]);
+    });
+
+    it('is visible to an org_members:read holder and hidden otherwise', () => {
+      const titles = (sections: ReturnType<typeof visibleAdminSections>) =>
+        sections.flatMap((section) => section.cards.map((card) => card.title));
+      expect(titles(visibleAdminSections(allowOnly('org_members:read')))).toContain('Organization data export');
+      expect(titles(visibleAdminSections(allowOnly('alerts:read')))).not.toContain('Organization data export');
+    });
+  });
+
+  describe('alerts card (RETRO-H5, #609)', () => {
+    it('appends the packaged card in Operations, on alerts:read, with no feature gate', () => {
+      const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
+      // Appended after the telemetry cards; later slices (RETRO-H2) append after it.
+      const index = operations.cards.findIndex((card) => card.path === '/admin/settings/alerts');
+      expect(operations.cards[index - 1]?.path).toBe('/admin/settings/telemetry/dashboard');
+      const last = operations.cards[index];
       expect([last.title, last.path, last.permission, last.feature]).toEqual([
         'Alerts',
         '/admin/settings/alerts',
