@@ -37,6 +37,8 @@ Web Application Foundation with React UI + Node API + PostgreSQL. Production-gra
     android/                # Android app: TWA shell + native Media Sync (Kotlin), app ID memoriahub.marin.cr
       identity.properties   # Identity source of truth (mirrored by apps/web/src/utils/androidIdentity.ts)
       version.properties    # versionName + versionCode (versionCode only increases)
+  packages/
+    shared/                 # Product identity: identity.json (@app/shared)
   docs/                     # Documentation (specs/, runbooks/)
   infra/                    # Infrastructure configuration
     compose/

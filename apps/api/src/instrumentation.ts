@@ -10,6 +10,7 @@ import {
   SEMRESATTRS_DEPLOYMENT_ENVIRONMENT,
 } from '@opentelemetry/semantic-conventions';
 import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
+import { resolveServiceName } from './common/otel/service-name';
 
 // Enable OTEL diagnostics in development
 if (process.env.NODE_ENV === 'development' && process.env.OTEL_DEBUG === 'true') {
@@ -25,7 +26,7 @@ export function initializeOtel(): NodeSDK | null {
   }
 
   const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318';
-  const serviceName = process.env.OTEL_SERVICE_NAME || 'enterprise-app-api';
+  const serviceName = resolveServiceName();
 
   const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: serviceName,
