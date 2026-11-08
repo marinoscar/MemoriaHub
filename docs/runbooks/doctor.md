@@ -18,7 +18,7 @@ Every check that queries the database depends on `db.connection`. When it fails,
 | Check | A `warn`/`fail` usually means | Where to fix |
 |---|---|---|
 | `memoriahub.core.pgvector` | The `vector` extension or the `media_item_embedding` table is missing; semantic search is unavailable | Use `pgvector/pgvector` Postgres and run migrations |
-| `memoriahub.core.pg-client-version` | `pg_dump` in the API image is older than the server (`fail`: database backup and restore can never succeed), or unreadable (`warn`: backup and restore unavailable, nothing else affected) | Rebuild the API image with a matching `postgresql-client` |
+| `backup.pg-client` (platform; was `memoriahub.core.pg-client-version` until RETRO-D4) | `pg_dump` in the API image is older than the server (`fail`: database backup and restore can never succeed), or unreadable (`warn`: backup and restore unavailable, nothing else affected) | Rebuild the API image with a matching `postgresql-client` |
 | `memoriahub.storage.active-provider` / `.live-test` | No enabled credential for the active provider / the bucket cannot be reached. The live test is a **read-only** probe; it no longer writes a test object, so "Test connection" on the Storage Providers page is still the way to prove writes | Admin, Settings, Storage Providers |
 | `memoriahub.ai.search` / `.tagging` / `.embedding` | The provider key or model is wrong. These three make a real, tiny request (a few tokens) | Admin, Settings, AI |
 | `memoriahub.ai.flag-consistency`, `memoriahub.face.flag-consistency` | A feature flag and its provider disagree (on with no provider is a `fail`; a provider with the flag off is a `warn`) | Admin, Settings, Tagging / Face |
