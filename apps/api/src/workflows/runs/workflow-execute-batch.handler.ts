@@ -1,14 +1,17 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode, Span } from '@opentelemetry/api';
 import {
-  EnrichmentJob,
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import {
   Prisma,
   WorkflowRunItemStatus,
   WorkflowRunStatus,
 } from '@prisma/client';
 import { workflowExecuteBatchResultSchema } from '@memoriahub/enrichment-compute/dto';
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowActionExecutor } from '../actions/workflow-action.executor';
@@ -16,6 +19,11 @@ import { WorkflowAction, WorkflowActionContext } from '../actions/action-executo
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { revalidateItemMatches } from '../execution/item-revalidation.util';
 import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
+import {
+  runJobPayload,
+  vetoDeleteWhileRunActive,
+  type RunJobInput,
+} from '../../platform/jobs/run-engine-jobs';
 
 /** Payload shape for a `workflow_execute_batch` job. */
 interface WorkflowExecuteBatchPayload {
@@ -65,12 +73,23 @@ const tracer = trace.getTracer('workflows');
  * `job.payload`, exactly as `process()` does. The point is posture completeness
  * (an `ENRICHMENT_WORKER_MODE=off` fleet-only deployment must still execute
  * workflows), not CPU offload. The type is ALSO kept server-claimable in
- * `system` mode (see systemModeEligibleTypes) so a `system`-mode deployment
- * keeps working; `FOR UPDATE SKIP LOCKED` makes both claim paths safe.
+ * `system` mode (`JOBS_SYSTEM_MODE_EXTRA_TYPES`, pinned by
+ * `platform/jobs/legacy-env.ts`) so a `system`-mode deployment keeps working;
+ * the platform claim is `FOR UPDATE SKIP LOCKED`, so both claim paths are safe.
+ *
+ * A native platform `JobHandler` (RETRO-C7, #604): the only node-eligible type
+ * of the three run engines. `canDelete` refuses to delete a pending batch of a
+ * run that is still `running`: without it the run never drains and never
+ * finalizes.
  */
 @Injectable()
-export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleInit {
+export class WorkflowExecuteBatchHandler implements JobHandler, OnModuleInit {
   readonly type = 'workflow_execute_batch';
+
+  readonly label = 'Workflow execute batch';
+
+  /** Up to `workflows.batchSize` items, each a few DB writes: 10 minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
 
   /**
    * Node-eligibility (distributed workers): the shape a node submits via
@@ -82,7 +101,7 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
   private readonly logger = new Logger(WorkflowExecuteBatchHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly compiler: WorkflowConditionCompiler,
     private readonly executor: WorkflowActionExecutor,
@@ -93,13 +112,33 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    const payload = job.payload as unknown as WorkflowExecuteBatchPayload | null;
-    if (!payload?.runId || !Array.isArray(payload.itemIds)) {
+  async process(job: RunJobInput): Promise<void> {
+    const payload = this.readPayload(job);
+    if (!payload) {
       this.logger.warn(`workflow_execute_batch job ${job.id} missing payload; skipping`);
       return;
     }
     await this.runBatchSpan('workflow.execute_batch', payload);
+  }
+
+  /** Refuses to delete a pending batch of a run that is still running. */
+  canDelete(job: Job): Promise<string | null> {
+    return vetoDeleteWhileRunActive(job, {
+      engine: 'workflow run',
+      activeStatuses: [WorkflowRunStatus.running],
+      readRunStatus: async (runId) =>
+        (await this.prisma.workflowRun.findUnique({ where: { id: runId }, select: { status: true } }))
+          ?.status ?? null,
+    });
+  }
+
+  /** The trusted `{ runId, itemIds }` from the job row, or null when malformed. */
+  private readPayload(job: Pick<RunJobInput, 'payload'>): WorkflowExecuteBatchPayload | null {
+    const payload = runJobPayload<WorkflowExecuteBatchPayload>(job);
+    if (typeof payload?.runId !== 'string' || payload.runId === '' || !Array.isArray(payload.itemIds)) {
+      return null;
+    }
+    return { runId: payload.runId, itemIds: payload.itemIds.filter((id): id is string => typeof id === 'string') };
   }
 
   /**
@@ -113,13 +152,13 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
    * stale node result can never bypass the guard), `move_to_circle`'s
    * cross-circle dedup + both-circle permission checks, counters, and run
    * finalization. Late submissions after lease expiry are already 409-rejected
-   * by the shared job-scoped guard in NodesService.assertJobHeldByNode, so no
+   * by the nodes slice's job-scoped lease guard, so no
    * extra staleness check is needed here. A throw routes the job through the
    * shared failure/retry state machine, exactly as an in-process throw would.
    */
-  async persistNodeResult(job: EnrichmentJob, _result: unknown): Promise<void> {
-    const payload = job.payload as unknown as WorkflowExecuteBatchPayload | null;
-    if (!payload?.runId || !Array.isArray(payload.itemIds)) {
+  async persistNodeResult(job: Job, _result: unknown): Promise<void> {
+    const payload = this.readPayload(job);
+    if (!payload) {
       this.logger.warn(
         `workflow_execute_batch job ${job.id} missing payload; skipping node persist`,
       );
@@ -410,6 +449,7 @@ export class WorkflowExecuteBatchHandler implements EnrichmentHandler, OnModuleI
       });
       this.executor.clearRunCache(runId);
 
+      // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome})
       // Terminal — fire-and-forget notification (epic #240, issue #247).
       // Inside the `fin.count > 0` guard, so ONLY the batch that won the
       // conditional finalize notifies; a loser produces nothing. The producer

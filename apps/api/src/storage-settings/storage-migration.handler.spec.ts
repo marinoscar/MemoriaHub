@@ -22,8 +22,8 @@ import {
   EnrichmentJob,
   JobReason,
   MhLegacyJobStatus,
-  StorageMigrationItemStatus,
-  StorageMigrationStatus,
+  MhLegacyStorageMigrationItemStatus,
+  MhLegacyStorageMigrationStatus,
   StorageObjectStatus,
 } from '@prisma/client';
 import { StorageMigrationHandler } from './storage-migration.handler';
@@ -71,7 +71,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
     id: 'run-1',
     sourceProvider: 's3',
     targetProvider: 'r2',
-    status: StorageMigrationStatus.running,
+    status: MhLegacyStorageMigrationStatus.running,
     totalCount: 5,
     migratedCount: 0,
     failedCount: 0,
@@ -90,7 +90,7 @@ function makeItem(overrides: Record<string, unknown> = {}) {
     id: 'item-1',
     runId: 'run-1',
     objectId: 'obj-1',
-    status: StorageMigrationItemStatus.pending,
+    status: MhLegacyStorageMigrationItemStatus.pending,
     jobId: 'job-mig-1',
     newStorageKey: null,
     lastError: null,
@@ -234,8 +234,8 @@ describe('StorageMigrationHandler', () => {
 
   describe('process() — idempotent: item already completed', () => {
     it('returns immediately without downloading or uploading', async () => {
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(
-        makeItem({ status: StorageMigrationItemStatus.completed }) as any,
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(
+        makeItem({ status: MhLegacyStorageMigrationItemStatus.completed }) as any,
       );
 
       await handler.process(makeJob());
@@ -251,9 +251,9 @@ describe('StorageMigrationHandler', () => {
 
   describe('process() — cancelled run', () => {
     it('marks item as skipped and increments skippedCount without copying bytes', async () => {
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique
-        .mockResolvedValueOnce(makeRun({ status: StorageMigrationStatus.cancelled }) as any)
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique
+        .mockResolvedValueOnce(makeRun({ status: MhLegacyStorageMigrationStatus.cancelled }) as any)
         // Second call from maybeFinalizeRun
         .mockResolvedValue(null as any);
 
@@ -277,11 +277,11 @@ describe('StorageMigrationHandler', () => {
 
   describe('process() — happy path', () => {
     beforeEach(() => {
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(makeObject() as any);
-      mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
-      mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationItem.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationRun.update.mockResolvedValue({} as any);
       mockPrisma.storageObject.update.mockResolvedValue({} as any);
     });
 
@@ -326,10 +326,10 @@ describe('StorageMigrationHandler', () => {
     it('marks the migration item as completed', async () => {
       await handler.process(makeJob());
 
-      expect(mockPrisma.storageMigrationItem.update).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyStorageMigrationItem.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: StorageMigrationItemStatus.completed,
+            status: MhLegacyStorageMigrationItemStatus.completed,
           }),
         }),
       );
@@ -338,7 +338,7 @@ describe('StorageMigrationHandler', () => {
     it('increments migratedCount on the run', async () => {
       await handler.process(makeJob());
 
-      expect(mockPrisma.storageMigrationRun.update).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyStorageMigrationRun.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             migratedCount: { increment: 1 },
@@ -354,11 +354,11 @@ describe('StorageMigrationHandler', () => {
 
   describe('process() — verification failure', () => {
     it('throws when dest.exists() returns false (worker will retry)', async () => {
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(makeObject() as any);
-      mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
-      mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationItem.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationRun.update.mockResolvedValue({} as any);
 
       destProvider.exists.mockResolvedValue(false);
 
@@ -366,11 +366,11 @@ describe('StorageMigrationHandler', () => {
     });
 
     it('does NOT repoint the StorageObject when verification fails', async () => {
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(makeObject() as any);
-      mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
-      mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationItem.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationRun.update.mockResolvedValue({} as any);
 
       destProvider.exists.mockResolvedValue(false);
 
@@ -390,11 +390,11 @@ describe('StorageMigrationHandler', () => {
         storageProvider: 'r2',
         bucket: 'dest-bucket', // matches destProvider.getBucket()
       });
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(alreadyOnTarget as any);
-      mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
-      mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationItem.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationRun.update.mockResolvedValue({} as any);
 
       await handler.process(makeJob());
 
@@ -407,18 +407,18 @@ describe('StorageMigrationHandler', () => {
         storageProvider: 'r2',
         bucket: 'dest-bucket',
       });
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(alreadyOnTarget as any);
-      mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
-      mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationItem.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationRun.update.mockResolvedValue({} as any);
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.storageMigrationItem.update).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyStorageMigrationItem.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: StorageMigrationItemStatus.completed,
+            status: MhLegacyStorageMigrationItemStatus.completed,
           }),
         }),
       );
@@ -435,11 +435,11 @@ describe('StorageMigrationHandler', () => {
       // Make download throw to simulate a copy failure
       sourceProvider.download.mockRejectedValue(copyError);
 
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(makeObject() as any);
-      mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
-      mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationItem.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationRun.update.mockResolvedValue({} as any);
 
       // Simulate terminal attempt: attempts >= MAX_ATTEMPTS (default 3).
       // The worker charges attempts at CLAIM time, so a job on its final
@@ -451,16 +451,16 @@ describe('StorageMigrationHandler', () => {
       // Domain-level failure should have been recorded via $transaction
       expect(mockPrisma.$transaction).toHaveBeenCalled();
       // The item should be marked failed
-      expect(mockPrisma.storageMigrationItem.update).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyStorageMigrationItem.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: StorageMigrationItemStatus.failed,
+            status: MhLegacyStorageMigrationItemStatus.failed,
             lastError: 'S3 connection refused',
           }),
         }),
       );
       // The run's failedCount should be incremented
-      expect(mockPrisma.storageMigrationRun.update).toHaveBeenCalledWith(
+      expect(mockPrisma.mhLegacyStorageMigrationRun.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             failedCount: { increment: 1 },
@@ -473,11 +473,11 @@ describe('StorageMigrationHandler', () => {
       const copyError = new Error('transient error');
       sourceProvider.download.mockRejectedValue(copyError);
 
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
-      mockPrisma.storageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(makeItem() as any);
+      mockPrisma.mhLegacyStorageMigrationRun.findUnique.mockResolvedValue(makeRun() as any);
       mockPrisma.storageObject.findUnique.mockResolvedValue(makeObject() as any);
-      mockPrisma.storageMigrationItem.update.mockResolvedValue({} as any);
-      mockPrisma.storageMigrationRun.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationItem.update.mockResolvedValue({} as any);
+      mockPrisma.mhLegacyStorageMigrationRun.update.mockResolvedValue({} as any);
 
       // Non-terminal attempt under claim-time charging: a claimed job always
       // has attempts >= 1; use the last retryable value (2 < 3 → retry left).
@@ -497,8 +497,8 @@ describe('StorageMigrationHandler', () => {
       });
       expect(hasFailedCountTx).toBe(false);
 
-      // storageMigrationRun.update should not have been called with failedCount on non-terminal
-      const runUpdateCalls = mockPrisma.storageMigrationRun.update.mock.calls;
+      // mhLegacyStorageMigrationRun.update should not have been called with failedCount on non-terminal
+      const runUpdateCalls = mockPrisma.mhLegacyStorageMigrationRun.update.mock.calls;
       const hasFailedCountUpdate = runUpdateCalls.some((args: any[]) =>
         args[0]?.data?.failedCount !== undefined,
       );
@@ -512,7 +512,7 @@ describe('StorageMigrationHandler', () => {
 
   describe('process() — item not found', () => {
     it('returns without throwing when item does not exist', async () => {
-      mockPrisma.storageMigrationItem.findUnique.mockResolvedValue(null as any);
+      mockPrisma.mhLegacyStorageMigrationItem.findUnique.mockResolvedValue(null as any);
 
       await expect(handler.process(makeJob())).resolves.toBeUndefined();
       expect(sourceProvider.download).not.toHaveBeenCalled();

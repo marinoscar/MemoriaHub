@@ -79,10 +79,6 @@ export const PERMISSIONS = {
   GEO_SETTINGS_READ: 'geo_settings:read',
   GEO_SETTINGS_WRITE: 'geo_settings:write',
 
-  // Email Provider Settings (Admin only)
-  EMAIL_SETTINGS_READ: 'email_settings:read',
-  EMAIL_SETTINGS_WRITE: 'email_settings:write',
-
   // Web Push (VAPID) configuration (Admin only, epic #481). Separate from
   // system_settings:* because generating/rotating key material has a real
   // blast radius: every existing push subscriber goes dark on rotation.

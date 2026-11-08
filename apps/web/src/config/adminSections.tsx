@@ -48,6 +48,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
 import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
+import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
 import {
   settingsPageTitle,
   visibleSettingsSections,
@@ -92,11 +93,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         description: 'Configure the outbound email provider (AWS SES or SMTP) and test delivery.',
         Icon: EmailIcon,
         path: '/admin/settings/email',
-        // RETRO-B5 (#621): the page reads only `GET /api/email-settings`, which
-        // `email-settings.controller.ts` gates on `email_settings:read`. The
-        // card used to declare `system_settings:read`, a string that controller
-        // never checks.
-        permission: 'email_settings:read',
+        // RETRO-D2 (#570): the page is the platform's, and the platform
+        // `email-settings.controller` gates `GET /api/email-settings` on
+        // `system_settings:read` (saving and the test send need
+        // `system_settings:write`, which the page gates internally).
+        permission: 'system_settings:read',
       },
       {
         title: 'Web Push',
@@ -249,14 +250,9 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/nodes',
         permission: 'jobs:read',
       },
-      {
-        title: 'Database Backup',
-        description:
-          'Schedule and run PostgreSQL dumps to object storage; browse, download, and delete backups.',
-        Icon: StorageIcon,
-        path: '/admin/settings/db-backup',
-        permission: 'db_backup:read',
-      },
+      // RETRO-D4 (#580): the packaged Database Backup card, at the position the app's own card had.
+      // `db_backup:read` is the string `GET /api/admin/db-backup/*` enforces.
+      ...dbBackupAdminSections.operations,
       {
         title: 'Public Sharing',
         description: 'View and manage all public share links; revoke or set expirations in bulk.',

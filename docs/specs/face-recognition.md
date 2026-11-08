@@ -215,6 +215,16 @@ Backfill skips items already in `processed` or `no_faces` status unless `force: 
 
 For queue mechanics (worker polling, atomic claim, retry, concurrency), see **[docs/specs/enrichment-queue.md](enrichment-queue.md)**.
 
+**Job handlers (RETRO-C3, #585).** `face_detection`, `video_face_detection` and `face_auto_archive_sweep` are native platform `JobHandler`s (`apps/api/src/face/*.handler.ts`) registered with `JobHandlerRegistry`:
+
+| Type | Label | Profile | Eligibility |
+|---|---|---|---|
+| `face_detection` | Face detection (photo) | 5 min, 3 attempts | node-eligible; throttle bucket `face` |
+| `video_face_detection` | Face detection (video) | 20 min (`ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` for one release), 3 attempts | node-eligible |
+| `face_auto_archive_sweep` | Face auto-archive sweep | 10 min, 3 attempts | server-only (subject `circle`) |
+
+The handler reads the media item from `job.subjectId` (`subjectType: 'media_item'`) and the circle from `job.payload.circleId` (falling back to the media item's own circle); a media item deleted since the job was queued settles it as a no-op. `persistNodeResult` writes Face rows, matches people and marks the status row from the node's DTO: no download and no second CompreFace call. The node's video frame thumbnails land under the data plane's default key (one key per job cannot name one frame per cluster) and are recorded from the cluster's `frameThumbnailKey`.
+
 ### processMediaItem — 12 Steps
 
 `FaceDetectionService.processMediaItem` in `apps/api/src/face/face-detection.service.ts`:

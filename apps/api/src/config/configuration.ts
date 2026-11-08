@@ -57,6 +57,12 @@ export default () => {
   // translated for one release by `legacyJobsEnv` (deprecation warning per variable; JOBS_* wins).
   ...jobsConfiguration(legacyJobsEnv()),
 
+  // The db-backup slice (RETRO-D4, #580): whether this process schedules backups.
+  // Same meaning as before the slice: anything but `false` schedules.
+  dbBackup: {
+    scheduleEnabled: process.env.DB_BACKUP_SCHEDULE_ENABLED !== 'false',
+  },
+
   // Observability
   otel: {
     enabled: process.env.OTEL_ENABLED === 'true',

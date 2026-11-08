@@ -21,8 +21,6 @@
 
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
-import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
 import type { DoctorCheck as PlatformDoctorCheck } from '@marinoscar/platform-api/doctor';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AppSystemSettings } from '../settings/app-settings.types';
@@ -35,8 +33,6 @@ import type { SocialMediaOcrService } from '../social-media/social-media-ocr.ser
 import type { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import type { AndroidAppService } from '../android-app/android-app.service';
 import type { AndroidReleaseService } from '../android-app/releases/android-release.service';
-import { __setSpawnForTests } from '../db-backup/pg-dump.util';
-import { __resetPgVersionCacheForTests } from '../db-backup/pg-version.util';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -68,7 +64,6 @@ const OLD_STATUS: Record<string, OldStatus> = { pass: 'ok', warn: 'warning', fai
 /** New check id (without the `memoriahub.` prefix) -> the key the old report used. */
 const KEY_BY_ID: Record<string, string> = {
   'core.pgvector': 'core.pgvector',
-  'core.pg-client-version': 'core.pgClientVersion',
   'core.app-url': 'core.appUrl',
   'auth.jwt': 'auth.jwt',
   'auth.google-oauth': 'auth.googleOauth',
@@ -128,42 +123,6 @@ function mockNoWorkerNodes(prisma: MockPrismaService): void {
   (prisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
   (prisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue([]);
   (prisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
-}
-
-/**
- * ChildProcess stand-in for the LOW-LEVEL `--version` probe (issue #364's
- * `readPgClientMajor`, consumed here via `core.pgClientVersion`) — matches
- * `pg-dump.util.spec.ts`'s helper. `pg-version.util.ts` has no Nest provider
- * of its own (see doctor.service.ts's import comment), so there is no DI seam
- * to mock it through; faking the low-level spawn is the only seam available,
- * and it's also the only way to get a deterministic answer regardless of
- * whatever `pg_dump` happens to be on the host running these tests.
- */
-function makeFakeVersionChild() {
-  const child = new EventEmitter() as EventEmitter & {
-    stdout: PassThrough;
-    stderr: PassThrough;
-    stdin: PassThrough;
-    kill: jest.Mock;
-  };
-  child.stdout = new PassThrough();
-  child.stderr = new PassThrough();
-  child.stdin = new PassThrough();
-  child.kill = jest.fn();
-  return child;
-}
-
-/** Installs a fake low-level spawn that answers `<binary> --version` with the
- * given stdout text and exit code — used to control `readPgClientMajor()`. */
-function installClientVersionSpawn(output: string, exitCode = 0): void {
-  __setSpawnForTests((() => {
-    const child = makeFakeVersionChild();
-    setImmediate(() => {
-      if (output) child.stdout.write(output);
-      child.emit('close', exitCode, null);
-    });
-    return child;
-  }) as never);
 }
 
 function healthyQueryRawHandlers(): Array<[string, unknown]> {
@@ -399,12 +358,11 @@ describe('MemoriaHub Doctor checks', () => {
       );
     });
 
-    it('runs the 30 kept checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice retired)', async () => {
+    it('runs the 29 kept checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice retired, and core.pgClientVersion, replaced by the db-backup slice backup.pg-client)', async () => {
       const report = await service.runDiagnostics();
 
       expect(report.checks.map((c) => c.key)).toEqual([
         'core.pgvector',
-        'core.pgClientVersion',
         'core.appUrl',
         'auth.jwt',
         'auth.googleOauth',
@@ -494,7 +452,7 @@ describe('MemoriaHub Doctor checks', () => {
       expect(findCheck(report, 'geo.reverseProvider').status).toBe('error');
       expect(findCheck(report, 'geo.reverseProvider').message).toContain('geo down');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(30);
+      expect(report.summary.total).toBe(29);
     });
   });
 
@@ -1051,91 +1009,6 @@ describe('MemoriaHub Doctor checks', () => {
 
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'core.pgvector').status).toBe('ok');
-    });
-  });
-
-  // =========================================================================
-  // 7. core.pgClientVersion — issue #364
-  // =========================================================================
-
-  describe('core.pgClientVersion', () => {
-    beforeEach(() => {
-      process.env = healthyEnv();
-      mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
-      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
-      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
-        provider: 's3',
-        enabled: true,
-      });
-      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
-      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockNoWorkerNodes(mockPrisma);
-      // The memo is keyed by resolved binary path and lives for the whole
-      // file (module state is not reset between tests) — without this, a
-      // prior test's probe (real or faked) would answer this one too.
-      __resetPgVersionCacheForTests();
-    });
-
-    afterEach(() => {
-      __setSpawnForTests(null);
-      __resetPgVersionCacheForTests();
-    });
-
-    /** Layers a `server_version_num` handler in FRONT of the generic 'SELECT 1'
-     * fallback — same ordering discipline `face.pgvector`'s handler comment
-     * above documents, since the more specific needle must win the substring
-     * match. */
-    function withServerVersion(num: number | null): void {
-      mockQueryRawByText(mockPrisma, [
-        ['_prisma_migrations', [{ n: 0 }]],
-        ['pg_extension', [{ ok: 1 }]],
-        ['to_regclass', [{ t: 'media_item_embedding' }]],
-        ['server_version_num', num === null ? [] : [{ num }]],
-        ['SELECT 1', [{ '?column?': 1 }]],
-      ]);
-    }
-
-    it('is status:warning ("unavailable", not error) when pg_dump is unreadable', async () => {
-      installClientVersionSpawn('', 1); // non-zero exit -> unparseable/null client major
-      withServerVersion(170010);
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'core.pgClientVersion');
-
-      expect(check.status).toBe('warning');
-      expect(check.message).toContain('Database backup and restore are unavailable');
-    });
-
-    it('is status:error when the client is older than the server', async () => {
-      installClientVersionSpawn('pg_dump (PostgreSQL) 16.4');
-      withServerVersion(170010); // server major 17
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'core.pgClientVersion');
-
-      expect(check.status).toBe('error');
-      expect(check.message).toContain('16.x');
-      expect(check.message).toContain('17.x');
-    });
-
-    it('is status:ok when the client major is >= the server major', async () => {
-      installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
-      withServerVersion(170010);
-
-      const report = await service.runDiagnostics();
-      expect(findCheck(report, 'core.pgClientVersion').status).toBe('ok');
-    });
-
-    it('is status:warning (deliberately NOT a second error) when the server major cannot be read but the client is fine — db.connection (host core) already reports that failure', async () => {
-      installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
-      withServerVersion(null);
-
-      const report = await service.runDiagnostics();
-      const check = findCheck(report, 'core.pgClientVersion');
-
-      expect(check.status).toBe('warning');
     });
   });
 

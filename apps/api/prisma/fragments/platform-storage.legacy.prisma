@@ -23,60 +23,71 @@ model StorageProviderCredential {
   @@map("storage_provider_credentials")
 }
 
-enum StorageMigrationStatus {
+// RETRO-A5b (#653): platform 0042_add_storage_migrations (next.27) creates its
+// own storage_migration_runs / storage_migration_items and the enum
+// StorageMigrationItemStatus. MemoriaHub's legacy copies were renamed by
+// 20261108160000_rename_legacy_storage_migration_tables and are read here under
+// MhLegacy* names until RETRO-D1 moves the admin storage-migration API onto the
+// platform's routes and drops them.
+
+enum MhLegacyStorageMigrationStatus {
   pending
   running
   completed
   failed
   cancelled
+
+  @@map("MhLegacyStorageMigrationStatus")
 }
 
-enum StorageMigrationItemStatus {
+enum MhLegacyStorageMigrationItemStatus {
   pending
   copying
   verified
   completed
   failed
   skipped
+
+  @@map("MhLegacyStorageMigrationItemStatus")
 }
 
-model StorageMigrationRun {
-  id             String                 @id @default(uuid()) @db.Uuid
-  sourceProvider String                 @map("source_provider")
-  targetProvider String                 @map("target_provider")
-  status         StorageMigrationStatus @default(pending)
-  totalCount     Int                    @default(0) @map("total_count")
-  migratedCount  Int                    @default(0) @map("migrated_count")
-  failedCount    Int                    @default(0) @map("failed_count")
-  skippedCount   Int                    @default(0) @map("skipped_count")
-  startedAt      DateTime?              @map("started_at") @db.Timestamptz
-  finishedAt     DateTime?              @map("finished_at") @db.Timestamptz
-  lastError      String?                @map("last_error")
-  createdById    String?                @map("created_by_id") @db.Uuid
-  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz
+model MhLegacyStorageMigrationRun {
+  id             String                         @id @default(uuid()) @db.Uuid
+  sourceProvider String                         @map("source_provider")
+  targetProvider String                         @map("target_provider")
+  status         MhLegacyStorageMigrationStatus @default(pending)
+  totalCount     Int                            @default(0) @map("total_count")
+  migratedCount  Int                            @default(0) @map("migrated_count")
+  failedCount    Int                            @default(0) @map("failed_count")
+  skippedCount   Int                            @default(0) @map("skipped_count")
+  startedAt      DateTime?                      @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?                      @map("finished_at") @db.Timestamptz
+  lastError      String?                        @map("last_error")
+  createdById    String?                        @map("created_by_id") @db.Uuid
+  createdAt      DateTime                       @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
-  items StorageMigrationItem[]
+  items MhLegacyStorageMigrationItem[]
 
-  @@map("storage_migration_runs")
+  @@map("mh_legacy_storage_migration_runs")
 }
 
-model StorageMigrationItem {
-  id            String                     @id @default(uuid()) @db.Uuid
-  runId         String                     @map("run_id") @db.Uuid
-  objectId      String                     @map("object_id") @db.Uuid
-  status        StorageMigrationItemStatus @default(pending)
-  jobId         String?                    @map("job_id") @db.Uuid
-  newStorageKey String?                    @map("new_storage_key")
-  lastError     String?                    @map("last_error")
-  createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime                   @updatedAt @map("updated_at") @db.Timestamptz
+model MhLegacyStorageMigrationItem {
+  id            String                             @id @default(uuid()) @db.Uuid
+  runId         String                             @map("run_id") @db.Uuid
+  objectId      String                             @map("object_id") @db.Uuid
+  status        MhLegacyStorageMigrationItemStatus @default(pending)
+  jobId         String?                            @map("job_id") @db.Uuid
+  newStorageKey String?                            @map("new_storage_key")
+  lastError     String?                            @map("last_error")
+  createdAt     DateTime                           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime                           @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  run    StorageMigrationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  object StorageObject       @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  run    MhLegacyStorageMigrationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  object StorageObject               @relation("MhLegacyStorageMigrationItemObject", fields: [objectId], references: [id], onDelete: Cascade)
 
   @@unique([runId, objectId])
   @@index([status])
-  @@map("storage_migration_items")
+  @@map("mh_legacy_storage_migration_items")
 }

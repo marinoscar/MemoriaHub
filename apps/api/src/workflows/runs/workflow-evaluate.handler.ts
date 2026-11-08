@@ -1,21 +1,28 @@
-import { ENRICHMENT_MAX_ATTEMPTS } from '../../platform/jobs/queue-limits';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
-  EnrichmentJob,
   Prisma,
   WorkflowRun,
   WorkflowRunItemStatus,
   WorkflowRunStatus,
 } from '@prisma/client';
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
 import { WorkflowRunService } from './workflow-run.service';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import {
+  runJobPayload,
+  vetoDeleteWhileRunActive,
+  type RunJobInput,
+} from '../../platform/jobs/run-engine-jobs';
 
 /** Payload shape for a `workflow_evaluate` job. */
 interface WorkflowEvaluatePayload {
@@ -40,15 +47,27 @@ const tracer = trace.getTracer('workflows');
  *   - 0 matches         → completed
  *   - bypass eligible   → running (+ execute batches)
  *   - otherwise         → awaiting_approval
+ *
+ * A native platform `JobHandler` (RETRO-C7, #604). SERVER-ONLY: no
+ * node-result pair (a keyset scan over the database has nothing to offload).
+ * The run id is `payload.runId`; the circle is the job's subject, but the run
+ * row carries it, so the handler never reads the subject. `canDelete` refuses
+ * to delete a pending job of a run still `evaluating`: it is the only thing that
+ * would move the run on.
  */
 @Injectable()
-export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit {
+export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
   readonly type = 'workflow_evaluate';
+
+  readonly label = 'Workflow evaluate';
+
+  /** A keyset scan bounded by `workflows.maxItemsPerRun`: 15 minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(WorkflowEvaluateHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly compiler: WorkflowConditionCompiler,
@@ -60,13 +79,14 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    const payload = job.payload as unknown as WorkflowEvaluatePayload | null;
+  async process(job: RunJobInput): Promise<void> {
+    const payload = runJobPayload<WorkflowEvaluatePayload>(job);
     if (!payload?.runId) {
       this.logger.warn(`workflow_evaluate job ${job.id} missing runId payload; skipping`);
       return;
     }
     const runId = payload.runId;
+    const maxItems = payload.maxItems ?? null;
 
     const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
     // Idempotent no-op: run gone, or already past evaluation.
@@ -85,7 +105,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
       },
       async (span) => {
         try {
-          await this.runEvaluation(job, run, payload);
+          await this.runEvaluation(job, run, { runId, maxItems });
           span.setStatus({ code: SpanStatusCode.OK });
         } catch (err) {
           span.setStatus({
@@ -113,8 +133,19 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
     });
   }
 
+  /** Refuses to delete a pending job whose run is still being evaluated. */
+  canDelete(job: Job): Promise<string | null> {
+    return vetoDeleteWhileRunActive(job, {
+      engine: 'workflow run',
+      activeStatuses: [WorkflowRunStatus.evaluating],
+      readRunStatus: async (runId) =>
+        (await this.prisma.workflowRun.findUnique({ where: { id: runId }, select: { status: true } }))
+          ?.status ?? null,
+    });
+  }
+
   private async runEvaluation(
-    job: EnrichmentJob,
+    job: RunJobInput,
     run: WorkflowRun,
     payload: WorkflowEvaluatePayload,
   ): Promise<void> {
@@ -213,6 +244,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
           matchedCount: 0,
         });
         this.logTransition(run, WorkflowRunStatus.completed, { matchedCount: 0 });
+        // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome=completed})
         // Terminal (0 matches) — fire-and-forget notification (issue #247).
         this.runNotifications.notifyRunFinishedAsync(runId);
         return;
@@ -255,6 +287,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
           })
           .catch(() => undefined);
         this.logTransition(run, WorkflowRunStatus.failed, { error: message });
+        // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome=failed})
         // Terminal failure (retries exhausted) — notify (issue #247).
         this.runNotifications.notifyRunFinishedAsync(runId);
       }
@@ -303,7 +336,7 @@ export class WorkflowEvaluateHandler implements EnrichmentHandler, OnModuleInit 
   }
 
   private maxAttempts(): number {
-    return ENRICHMENT_MAX_ATTEMPTS;
+    return this.profile.maxAttempts;
   }
 
   private async audit(

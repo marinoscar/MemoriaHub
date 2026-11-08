@@ -16,7 +16,8 @@ import '../../src/app-registrations/permission-manifest';
 //
 // The only permissions an administrator may GAIN are the ones the identity and
 // settings slices introduce (organizations, members, invites, org settings),
-// which did not exist before.
+// which did not exist before. The only ones it may LOSE are those of a slice
+// whose platform routes check a platform permission instead (RETIRED_BY_SLICE).
 
 const OLD_MATRIX: Record<'admin' | 'contributor' | 'viewer', string[]> = {
   admin: [
@@ -101,6 +102,13 @@ const NEW_PLATFORM_PERMISSIONS = [
   'organizations:write',
 ];
 
+/** Permissions a slice adoption retired: the platform's routes check another string. */
+const RETIRED_BY_SLICE: Record<string, string> = {
+  // RETRO-D2 (#570): /api/email-settings checks system_settings:read|write.
+  'email_settings:read': 'system_settings:read',
+  'email_settings:write': 'system_settings:write',
+};
+
 function grants(role: string): string[] {
   return permissionRegistry
     .list()
@@ -120,7 +128,11 @@ describe('role permission matrix', () => {
 
   it('an administrator (admin + org_admin) keeps every permission and gains only the new platform ones', () => {
     const now = new Set([...grants('admin'), ...grants('org_admin')]);
-    for (const permission of OLD_MATRIX.admin) expect(now).toContain(permission);
+    for (const permission of OLD_MATRIX.admin) {
+      // A retired permission's capability is held through its replacement.
+      expect(now).toContain(RETIRED_BY_SLICE[permission] ?? permission);
+    }
+    for (const retired of Object.keys(RETIRED_BY_SLICE)) expect(now).not.toContain(retired);
     const gained = [...now].filter((permission) => !OLD_MATRIX.admin.includes(permission)).sort();
     expect(gained).toEqual(NEW_PLATFORM_PERMISSIONS);
   });

@@ -55,7 +55,9 @@ The global admin backfill endpoint (`POST /api/admin/metadata/backfill`) is the 
 
 ### 3.1 Enrichment Job Type: `metadata_extraction`
 
-`metadata_extraction` is a new job type in the `enrichment_jobs` queue. It is handled by `MetadataExtractionHandler` (`apps/api/src/metadata/metadata.handler.ts`), which self-registers with `EnrichmentHandlerRegistry` via `onModuleInit`. The worker dispatches the job to `MetadataExtractionService.processMediaItem` (`apps/api/src/metadata/metadata.service.ts`).
+`metadata_extraction` is a job type on the platform queue (`jobs`, since RETRO-C1). It is handled by `MetadataExtractionHandler` (`apps/api/src/metadata/metadata.handler.ts`), a native platform `JobHandler` since RETRO-C3 (#585): it self-registers with `JobHandlerRegistry` via `onModuleInit`, is labelled "Metadata extraction" and declares the profile `{ maxRuntimeMs: 300_000, maxAttempts: 3 }`. The subject is the media item (`subjectType: 'media_item'`); a media item that no longer exists settles the job as a no-op. The worker dispatches the job to `MetadataExtractionService.processMediaItem` (`apps/api/src/metadata/metadata.service.ts`).
+
+**Node-eligible:** a worker node submits `{ exif, probe }` and `persistNodeResult` runs only the persist half (`persistMetadata`): it adds the geocode entry server-side from the exif GPS (that needs the server's configured geo provider), and the read-merge-write of `storage_objects.metadata` runs under the platform `JobScope` (the job's organization), outside any provider call.
 
 **Priority conventions:**
 

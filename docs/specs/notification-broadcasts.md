@@ -169,7 +169,7 @@ Both handlers implement the optional `EnrichmentHandler.canDelete(job)`, consult
 
 ## 10. The Email Channel
 
-`BroadcastDeliveryService` calls `EmailService.sendEmail(recipient.email, 'broadcast', data)`. The `broadcast` template (`broadcast.email.ts`) is a pure function of its input:
+`BroadcastDeliveryService` calls `AppEmailSender.sendEmail(recipient.email, 'broadcast', data)` (RETRO-D2). The `broadcast` template (the platform's, `@marinoscar/platform-api/email`) is a pure function of its input:
 
 - The body is **HTML-escaped**, never interpreted; blank-line-separated blocks become paragraphs (single newlines inside a block are joined with a space).
 - A critical broadcast appends the notice that it "was marked important by an administrator and is sent to everyone, regardless of notification preferences".

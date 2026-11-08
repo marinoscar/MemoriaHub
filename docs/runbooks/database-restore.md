@@ -7,6 +7,8 @@ Related: [Database Backup spec](../specs/database-backup.md), [Maintenance Mode 
 
 > **Status note:** the in-app restore endpoints (`POST /api/admin/db-backup/runs/:id/restore`, `POST /api/admin/db-backup/runs/:id/rollback`) are issue #344 and have merged — see the [Database Backup spec §5](../specs/database-backup.md#5-restore-and-rollback-344) for the full API contract. The manual procedure in §3 remains equally authoritative: it is the ground truth the in-app path automates, it is code-independent, and it is the only path when the application itself is unreachable — nothing below has been softened or superseded by #344 landing.
 
+> **Since RETRO-D4 ([#580](https://github.com/marinoscar/MemoriaHub/issues/580))** backups and the in-app restore are the platform slice `@marinoscar/platform-api/db-backup` (see the [spec §0](../specs/database-backup.md#0-since-retro-d4-platform-slice--memoriahub-registrations)). Two consequences for this runbook: **(1)** every command that connects to the database to dump or restore carries BOTH `--enable-row-security` and `PGOPTIONS='-c app.rls_bypass=on'` (the commands below do): row-level security is forced on `storage_objects` and the platform org tables, and without the pair a dump silently contains no rows of them and a restore can refuse to load them; the startup option needs a direct connection (not a transaction-mode pooler). **(2)** New archives live under `database-backups/memoriahub/YYYY/MM/`; archives written before the cutover stay under `db-backups/`. The cutover procedure itself is [§11](#11-cutover-to-the-platform-slice-retro-d4).
+
 ## Table of Contents
 
 1. [Obtaining the artifact](#1-obtaining-the-artifact)
@@ -19,6 +21,7 @@ Related: [Database Backup spec](../specs/database-backup.md), [Maintenance Mode 
 8. [Deployment prerequisites](#8-deployment-prerequisites)
 9. [Verification and bring-up](#9-verification-and-bring-up)
 10. [Quick-reference: full incident sequence](#10-quick-reference-full-incident-sequence)
+11. [Cutover to the platform slice (RETRO-D4)](#11-cutover-to-the-platform-slice-retro-d4)
 
 ---
 
@@ -36,7 +39,7 @@ curl -sS -o db-backup.dump "<signed-url-from-the-admin-ui>"
 
 ### 1.2 Directly from the storage provider (app is down)
 
-When the app itself is unreachable, go straight to the storage provider. Backups live under the `db-backups/` prefix, key format `db-backups/<utc-timestamp>-<runId>.dump` (e.g. `db-backups/2026-08-09T02-00-00-000Z-3f1a...dump`), so a raw bucket listing is chronologically sortable even with no database to query.
+When the app itself is unreachable, go straight to the storage provider. Since RETRO-D4 backups live under `database-backups/memoriahub/YYYY/MM/` (list that prefix first; the year/month folders sort chronologically). Archives taken before the cutover live under the `db-backups/` prefix, key format `db-backups/<utc-timestamp>-<runId>.dump` (e.g. `db-backups/2026-08-09T02-00-00-000Z-3f1a...dump`). Either way a raw bucket listing is chronologically sortable even with no database to query; the commands below use `db-backups/`, substitute `database-backups/memoriahub/` for a newer archive.
 
 ```bash
 # AWS S3 example — list, then fetch the newest
@@ -152,14 +155,15 @@ This runs against a **new, empty database** — the live `memoriahub` database i
 ### Step 2 — Restore into the scratch database, in parallel
 
 ```bash
-pg_restore \
+PGOPTIONS='-c app.rls_bypass=on' pg_restore \
   -h <db-host> -p <db-port> -U <db-user> \
   -d "memoriahub_restore_<suffix>" \
   -j <N> \
-  --no-owner --no-acl \
+  --no-owner --no-acl --enable-row-security \
   <file>
 ```
 
+- `PGOPTIONS='-c app.rls_bypass=on'` + `--enable-row-security` — the pair the backup engine uses (since RETRO-D4). Tables that FORCE row-level security accept rows only through the bypass; the option goes in the environment, never argv. With a SUPERUSER or `BYPASSRLS` role the policies do not apply anyway, and the pair is harmless.
 - `-j <N>` — see §2.3. This is the step that legitimately takes hours on a large library; the app is unaffected while it runs.
 - `--no-owner --no-acl` — the dump was produced with these same flags (see the [spec](../specs/database-backup.md)), so ownership and GRANTs are re-established by the restore target's own role rather than baked in from the source — required for a restore onto a different host/role than the one the backup was taken from, and harmless when restoring onto the same host.
 - You will be prompted for a password unless you export `PGPASSWORD` first, or use a `~/.pgpass` file:
@@ -288,11 +292,11 @@ Sometimes you don't want to swap anything into production — you just want to l
 ```bash
 createdb -h <db-host> -p <db-port> -U <db-user> memoriahub_inspect
 
-pg_restore \
+PGOPTIONS='-c app.rls_bypass=on' pg_restore \
   -h <db-host> -p <db-port> -U <db-user> \
   -d memoriahub_inspect \
   -j <N> \
-  --no-owner --no-acl \
+  --no-owner --no-acl --enable-row-security \
   <file>
 
 # Now query/export whatever you need, e.g.:
@@ -331,7 +335,7 @@ Running current application code against an older schema produces confusing, oft
    (Point `DATABASE_URL`/the individual `POSTGRES_*` env vars at the restored database — the same connection details you used for the restore itself.) This applies every migration that exists in your current codebase but not yet in the restored database's `_prisma_migrations` table, rolling the schema **forward** to match the code you're about to run.
 3. Only then start (or resume traffic to) the API.
 
-**Note on backup-catalog continuity:** the scratch-and-rename procedure in §3 swaps in the *entire* restored database, `database_backup_runs` included — so after a hand-run restore, your backup history table only contains rows up to the moment the restored backup was taken. Any backups that ran *after* that timestamp (and before the incident) are gone from the catalog, even though their files may still exist in storage under `db-backups/` (worth checking manually if you need them — see §1.2). This is a genuine information loss specific to the manual path: the in-app restore carries the backup catalog across the swap for exactly this reason (`DatabaseRestoreService.exportCatalog`/`reinsertCatalog` — see the [spec §5.8](../specs/database-backup.md#58-two-things-the-swap-introduces-both-handled)), which the manual procedure here cannot replicate — there is no code running server-side to do that bookkeeping when you're driving `pg_restore` and `psql` by hand.
+**Note on backup-catalog continuity:** the scratch-and-rename procedure in §3 swaps in the *entire* restored database, `database_backup_runs` included — so after a hand-run restore, your backup history table only contains rows up to the moment the restored backup was taken. Any backups that ran *after* that timestamp (and before the incident) are gone from the catalog, even though their files may still exist in storage under `database-backups/memoriahub/` or `db-backups/` (worth checking manually if you need them — see §1.2). This is a genuine information loss specific to the manual path: the in-app restore carries the backup catalog (and, since RETRO-D4, every registered `RestoreCarryOver`: MemoriaHub's Android releases) across the swap for exactly this reason (see the [spec §5.8](../specs/database-backup.md#58-two-things-the-swap-introduces-both-handled) and [§0](../specs/database-backup.md#0-since-retro-d4-platform-slice--memoriahub-registrations)), which the manual procedure here cannot replicate — there is no code running server-side to do that bookkeeping when you're driving `pg_restore` and `psql` by hand.
 
 ---
 
@@ -398,6 +402,10 @@ Then exercise the app as a real user would — load the gallery, open a media it
 For an admin who has already read this document once and just needs the command sequence during an active incident:
 
 ```bash
+# A manual DUMP, should you need one (the pair is mandatory, see the note at the top):
+#   PGOPTIONS='-c app.rls_bypass=on' pg_dump -Fc --no-owner --no-acl --enable-row-security \
+#     -h <db-host> -p <db-port> -U <db-user> -d memoriahub > manual.dump
+
 # 0. Get and verify the artifact (§1)
 sha256sum db-backup.dump   # compare to recorded checksumSha256
 pg_restore --list db-backup.dump | head -20   # must succeed cleanly
@@ -407,8 +415,8 @@ createdb -h <db-host> -p <db-port> -U <db-user> "memoriahub_restore_<suffix>"
 
 # 2. Parallel restore (§3 Step 2) — the long step, hours on a large library
 export PGPASSWORD='<your-postgres-password>'
-pg_restore -h <db-host> -p <db-port> -U <db-user> \
-  -d "memoriahub_restore_<suffix>" -j <N> --no-owner --no-acl db-backup.dump
+PGOPTIONS='-c app.rls_bypass=on' pg_restore -h <db-host> -p <db-port> -U <db-user> \
+  -d "memoriahub_restore_<suffix>" -j <N> --no-owner --no-acl --enable-row-security db-backup.dump
 
 # 3. Verify BEFORE touching the live database (§3 Step 3) — extension, tables,
 #    row counts, indexes, migration name. Do not proceed on any failure.
@@ -445,4 +453,31 @@ cd infra/compose && docker compose -f base.compose.yml -f prod.compose.yml up -d
 
 ## Verification status
 
-**This procedure has NOT been executed end-to-end against a scratch database as of this writing** — the environment this runbook was authored in has no Docker and no PostgreSQL available to run it against. The commands above are written directly from the actual `pg_dump`/`pg_restore` invocations the backup engine uses (`apps/api/src/db-backup/pg-dump.util.ts` — see the [spec](../specs/database-backup.md) for the exact flags), standard documented PostgreSQL database-rename semantics, and this repository's actual `infra/compose/prod.compose.yml` restart policy — but they have not been run in anger. Before relying on this runbook for a real incident, run the full sequence in §10 at least once against a disposable/scratch environment and correct anything that doesn't work exactly as written.
+**This procedure has NOT been executed end-to-end against a scratch database as of this writing** — the environment this runbook was authored in has no Docker and no PostgreSQL available to run it against. The commands above are written directly from the actual `pg_dump`/`pg_restore` invocations the backup engine uses (the platform slice's `pg-dump.util.ts` since RETRO-D4, `apps/api/src/db-backup/pg-dump.util.ts` before it — see the [spec](../specs/database-backup.md) for the exact flags), standard documented PostgreSQL database-rename semantics, and this repository's actual `infra/compose/prod.compose.yml` restart policy — but they have not been run in anger. Before relying on this runbook for a real incident, run the full sequence in §10 at least once against a disposable/scratch environment and correct anything that doesn't work exactly as written.
+
+---
+
+## 11. Cutover to the platform slice (RETRO-D4)
+
+Run once per deployment, when the release carrying RETRO-D4 ([#580](https://github.com/marinoscar/MemoriaHub/issues/580)) is deployed. Nothing here is destructive; every step is idempotent.
+
+1. **Drain.** Before upgrading, make sure no backup or restore is in flight: `/admin/settings/db-backup` shows no `pending`/`running` run and no restore in progress (or `SELECT id, status, restore_status FROM mh_legacy_database_backup_runs WHERE status IN ('pending','running') OR restore_status IN ('restoring','verifying','swapping');` returns nothing). Run `trigger` values (`manual`, `scheduled`, `pre_restore`) are the same on both sides.
+2. **Deploy** (the usual `update.sh`: `prisma migrate deploy`, seed). This PR adds no migration.
+3. **Dry run the data transform**, then apply it:
+   ```bash
+   npm run db-backup:migrate-legacy -- --dry-run
+   npm run db-backup:migrate-legacy -- --apply
+   ```
+   It rewrites `databaseBackup` into the platform shape (keeping the original under the `global` row's `mhLegacyDatabaseBackup` key) and copies every pre-cutover run that has an archive into `database_backup_runs` under its original id, so those archives stay listed, downloadable, restorable and subject to retention. It refuses while a legacy run is in flight. Re-running is safe.
+4. **Verify.** `/admin/settings/db-backup` lists the old runs; download one; Doctor shows `backup.pg-client`, `backup.rls-bypass` and `backup.schedule` green (`backup.rls-bypass` warns if the API's connection cannot carry the startup option: a pooler). Take a manual backup: its key starts `database-backups/memoriahub/`, and `pg_restore --list` on it succeeds.
+5. **Rehearse the RLS proof** on a restored copy (the one used for the RETRO-A5 baseline rehearsal is ideal): take a platform backup, restore it into a scratch database with §3 Step 2, and compare `SELECT count(*)` of `storage_objects`, `media_items` and `faces` between source and scratch, counted as a superuser (policies do not apply to one) or over a connection started with `PGOPTIONS='-c app.rls_bypass=on'`. Non-zero, equal counts prove the flags.
+
+**Restoring a pre-cutover archive** (a `db-backups/` one) through the in-app flow: its `_prisma_migrations` predates the platform migrations, so the schema gate answers `blocked`. Re-send with `overrideSchemaCheck: true`; after the swap the API restarts on the older schema, so run `npm run prisma:migrate` and then `npm run db-backup:migrate-legacy -- --apply` again (the restored database has the old settings shape and, if the archive predates RETRO-A5, an old run table). The `memoriahub-extensions` gate must pass (pgvector installable on the cluster).
+
+**Rollback of the release.** Revert the PR. The app's own backup code returns and reads `mh_legacy_database_backup_runs`, which the transform never modified. Put the old settings value back first (the reverted code reads `storageProvider: ''` as a pin to a provider named `''`):
+```sql
+UPDATE system_settings
+SET value = jsonb_set(value, '{databaseBackup}', value->'mhLegacyDatabaseBackup'), version = version + 1, updated_at = now()
+WHERE key = 'global' AND value ? 'mhLegacyDatabaseBackup';
+```
+Archives the platform wrote under `database-backups/memoriahub/` are not listed by the old code but remain restorable by hand with §3 (they carry the RLS pair already).

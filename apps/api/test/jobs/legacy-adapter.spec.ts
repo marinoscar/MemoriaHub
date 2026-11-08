@@ -186,8 +186,8 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
   });
 
   describe('execution profile', () => {
-    it('the three video types get the 20-minute profile; everything else takes the deployment default', () => {
-      for (const type of ['video_face_detection', 'social_media_detection', 'video_auto_tagging', 'geocode', 'trash_purge']) {
+    it('the video types still on the adapter get the 20-minute profile; everything else takes the deployment default', () => {
+      for (const type of ['social_media_detection', 'video_auto_tagging', 'geocode', 'trash_purge']) {
         const handler = register({ type });
         if (VIDEO_JOB_TYPES.has(type)) {
           expect(handler!.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: expect.any(Number) });
@@ -204,7 +204,8 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
       expect(throttle.resolveKey('auto_tagging')).toBe('tagging');
       expect(throttle.resolveKey('video_auto_tagging')).toBe('tagging');
       expect(throttle.resolveKey('geocode')).toBe('geocode');
-      expect(throttle.resolveKey('face_detection')).toBe('face');
+      // face_detection is native since RETRO-C3 and registers its own `face` key.
+      expect(Object.keys(LEGACY_THROTTLE_KEYS)).not.toContain('face_detection');
     });
 
     it('leaves every other type unthrottled', () => {

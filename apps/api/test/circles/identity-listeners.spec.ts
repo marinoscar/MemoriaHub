@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { CircleRole } from '@prisma/client';
 
 import { CircleIdentityListeners } from '../../src/circles/identity-listeners';
-import { EmailService } from '../../src/email/email.service';
+import { AppEmailSender } from '../../src/platform/email/app-email.sender';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock';
 
@@ -44,7 +44,7 @@ describe('CircleIdentityListeners', () => {
       providers: [
         CircleIdentityListeners,
         { provide: PrismaService, useValue: prisma },
-        { provide: EmailService, useValue: email },
+        { provide: AppEmailSender, useValue: email },
       ],
     }).compile();
     listeners = module.get(CircleIdentityListeners);

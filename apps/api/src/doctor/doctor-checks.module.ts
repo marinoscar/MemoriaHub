@@ -45,7 +45,6 @@ import { AndroidMediaSyncDoctorCheck } from './checks/android/media-sync.doctor-
 import { AndroidReleasesDoctorCheck } from './checks/android/releases.doctor-check';
 import { AndroidUploadPathDoctorCheck } from './checks/android/upload-path.doctor-check';
 import { AppUrlDoctorCheck } from './checks/core/app-url.doctor-check';
-import { PgClientVersionDoctorCheck } from './checks/core/pg-client-version.doctor-check';
 import { PgvectorDoctorCheck } from './checks/core/pgvector.doctor-check';
 import { FaceDetectionDoctorCheck } from './checks/face/detection.doctor-check';
 import { FaceFlagConsistencyDoctorCheck } from './checks/face/flag-consistency.doctor-check';
@@ -60,11 +59,14 @@ import { ActiveStorageProviderDoctorCheck } from './checks/storage/active-provid
 import { StorageLiveTestDoctorCheck } from './checks/storage/live-test.doctor-check';
 import { WorkflowsStateDoctorCheck } from './checks/workflows/state.doctor-check';
 
-/** The 32 `memoriahub.*` checks (35 minus the 3 the host core retired). */
+/**
+ * The 29 `memoriahub.*` checks: the 35 documented ones minus the 3 the host core retired, the 2 the
+ * jobs slice retired (RETRO-C1) and `core.pg-client-version`, which the db-backup slice's
+ * `backup.pg-client` replaced (RETRO-D4).
+ */
 export const MEMORIAHUB_DOCTOR_CHECKS = [
   // core
   PgvectorDoctorCheck,
-  PgClientVersionDoctorCheck,
   AppUrlDoctorCheck,
   // auth
   JwtDoctorCheck,

@@ -15,8 +15,8 @@ import {
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import {
-  StorageMigrationItemStatus,
-  StorageMigrationStatus,
+  MhLegacyStorageMigrationItemStatus,
+  MhLegacyStorageMigrationStatus,
   StorageObjectStatus,
   JobReason,
 } from '@prisma/client';
@@ -537,9 +537,9 @@ export class StorageSettingsService {
     }
 
     // Block concurrent runs
-    const activeRun = await this.prisma.storageMigrationRun.findFirst({
+    const activeRun = await this.prisma.mhLegacyStorageMigrationRun.findFirst({
       where: {
-        status: { in: [StorageMigrationStatus.pending, StorageMigrationStatus.running] },
+        status: { in: [MhLegacyStorageMigrationStatus.pending, MhLegacyStorageMigrationStatus.running] },
       },
     });
     if (activeRun) {
@@ -562,11 +562,11 @@ export class StorageSettingsService {
     const totalCount = objects.length;
 
     // Create the run row
-    const run = await this.prisma.storageMigrationRun.create({
+    const run = await this.prisma.mhLegacyStorageMigrationRun.create({
       data: {
         sourceProvider,
         targetProvider,
-        status: StorageMigrationStatus.pending,
+        status: MhLegacyStorageMigrationStatus.pending,
         totalCount,
         createdById: userId,
       },
@@ -574,10 +574,10 @@ export class StorageSettingsService {
 
     // Short-circuit: no objects to migrate → complete immediately
     if (totalCount === 0) {
-      await this.prisma.storageMigrationRun.update({
+      await this.prisma.mhLegacyStorageMigrationRun.update({
         where: { id: run.id },
         data: {
-          status: StorageMigrationStatus.completed,
+          status: MhLegacyStorageMigrationStatus.completed,
           finishedAt: new Date(),
         },
       });
@@ -587,17 +587,17 @@ export class StorageSettingsService {
 
     // Create StorageMigrationItem rows in a single createMany call.
     // @@unique([runId, objectId]) prevents duplicates if this is somehow called twice.
-    await this.prisma.storageMigrationItem.createMany({
+    await this.prisma.mhLegacyStorageMigrationItem.createMany({
       data: objects.map(o => ({
         runId: run.id,
         objectId: o.id,
-        status: StorageMigrationItemStatus.pending,
+        status: MhLegacyStorageMigrationItemStatus.pending,
       })),
       skipDuplicates: true,
     });
 
     // Reload items to get their generated IDs (createMany doesn't return records in Prisma)
-    const items = await this.prisma.storageMigrationItem.findMany({
+    const items = await this.prisma.mhLegacyStorageMigrationItem.findMany({
       where: { runId: run.id },
       select: { id: true, objectId: true },
     });
@@ -626,7 +626,7 @@ export class StorageSettingsService {
     // individual and we don't want one failure to roll back all updates.
     for (const { itemId, jobId } of enqueuedJobs) {
       try {
-        await this.prisma.storageMigrationItem.update({
+        await this.prisma.mhLegacyStorageMigrationItem.update({
           where: { id: itemId },
           data: { jobId },
         });
@@ -654,7 +654,7 @@ export class StorageSettingsService {
    * which may lag if a crash skipped an increment).
    */
   async getMigrationRun(runId: string) {
-    const run = await this.prisma.storageMigrationRun.findUnique({
+    const run = await this.prisma.mhLegacyStorageMigrationRun.findUnique({
       where: { id: runId },
     });
     if (!run) {
@@ -662,7 +662,7 @@ export class StorageSettingsService {
     }
 
     // Recompute counts from the item rows (authoritative source)
-    const countsByStatus = await this.prisma.storageMigrationItem.groupBy({
+    const countsByStatus = await this.prisma.mhLegacyStorageMigrationItem.groupBy({
       by: ['status'],
       where: { runId },
       _count: { id: true },
@@ -673,12 +673,12 @@ export class StorageSettingsService {
       byStatus[row.status] = row._count.id;
     }
 
-    const migratedCount = byStatus[StorageMigrationItemStatus.completed] ?? 0;
-    const failedCount = byStatus[StorageMigrationItemStatus.failed] ?? 0;
+    const migratedCount = byStatus[MhLegacyStorageMigrationItemStatus.completed] ?? 0;
+    const failedCount = byStatus[MhLegacyStorageMigrationItemStatus.failed] ?? 0;
     const skippedCount =
-      (byStatus[StorageMigrationItemStatus.skipped] ?? 0) +
+      (byStatus[MhLegacyStorageMigrationItemStatus.skipped] ?? 0) +
       // 'verified' is a transient state that may appear in older items
-      (byStatus[StorageMigrationItemStatus.verified] ?? 0);
+      (byStatus[MhLegacyStorageMigrationItemStatus.verified] ?? 0);
 
     return {
       id: run.id,
@@ -706,7 +706,7 @@ export class StorageSettingsService {
     const skip = (page - 1) * pageSize;
 
     const [items, total] = await Promise.all([
-      this.prisma.storageMigrationRun.findMany({
+      this.prisma.mhLegacyStorageMigrationRun.findMany({
         orderBy: { createdAt: 'desc' },
         skip,
         take: pageSize,
@@ -725,7 +725,7 @@ export class StorageSettingsService {
           createdAt: true,
         },
       }),
-      this.prisma.storageMigrationRun.count(),
+      this.prisma.mhLegacyStorageMigrationRun.count(),
     ]);
 
     return {
@@ -751,7 +751,7 @@ export class StorageSettingsService {
    * provides the safety net — cancelled items are skipped without byte copies.
    */
   async cancelMigration(runId: string) {
-    const run = await this.prisma.storageMigrationRun.findUnique({
+    const run = await this.prisma.mhLegacyStorageMigrationRun.findUnique({
       where: { id: runId },
     });
     if (!run) {
@@ -759,17 +759,17 @@ export class StorageSettingsService {
     }
 
     if (
-      run.status !== StorageMigrationStatus.pending &&
-      run.status !== StorageMigrationStatus.running
+      run.status !== MhLegacyStorageMigrationStatus.pending &&
+      run.status !== MhLegacyStorageMigrationStatus.running
     ) {
       throw new BadRequestException(
         `Cannot cancel a run with status "${run.status}"; only pending or running runs can be cancelled`,
       );
     }
 
-    const updated = await this.prisma.storageMigrationRun.update({
+    const updated = await this.prisma.mhLegacyStorageMigrationRun.update({
       where: { id: runId },
-      data: { status: StorageMigrationStatus.cancelled, finishedAt: new Date() },
+      data: { status: MhLegacyStorageMigrationStatus.cancelled, finishedAt: new Date() },
     });
 
     // Best-effort: delete pending enrichment jobs for this run.

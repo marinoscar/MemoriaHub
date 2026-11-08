@@ -112,7 +112,8 @@ jest.mock('fs', () => {
 import { Readable } from 'stream';
 import { promises as fsPromises } from 'fs';
 import { tmpdir } from 'os';
-import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
+import type { Job } from '@marinoscar/platform-api/jobs';
+import { mediaItemJob } from '../../test/helpers/platform-job';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { VideoFaceDetectionService } from './video-face-detection.service';
 import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
@@ -121,31 +122,14 @@ import { prepareImageForProcessing } from '../storage/processing/image-orientati
 // Test-scoped factory helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return mediaItemJob('video_face_detection', 'media-video-1', 'circle-1', {
     id: 'job-video-1',
-    type: 'video_face_detection',
-    mediaItemId: 'media-video-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.upload,
-    priority: 0,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
+    status: 'running',
     attempts: 1,
-    lastError: null,
     startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
     ...overrides,
-  };
+  });
 }
 
 /** Build a minimal MediaItem row with one StorageObject. */
@@ -371,6 +355,7 @@ describe('VideoFaceDetectionHandler', () => {
 
     handler = new VideoFaceDetectionHandler(
       mockRegistry as any,
+      mockPrisma as any,
       videoFaceDetectionService,
     );
   });
@@ -592,15 +577,34 @@ describe('VideoFaceDetectionHandler', () => {
   // Missing mediaItemId guard
   // -------------------------------------------------------------------------
 
-  describe('missing mediaItemId', () => {
-    it('throws immediately without touching storage when mediaItemId is null', async () => {
-      const job = makeJob({ mediaItemId: null });
+  describe('subject guard', () => {
+    it('throws immediately without touching storage when the job is not about a media item', async () => {
+      const job = makeJob({ subjectType: null, subjectId: null });
 
-      await expect(handler.process(job)).rejects.toThrow(
-        'video_face_detection job missing mediaItemId',
-      );
+      await expect(handler.process(job)).rejects.toThrow('not about a media item');
 
       expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();
+    });
+
+    it('settles as a no-op, without a download, when the media item no longer exists', async () => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+
+      await expect(handler.process(makeJob())).resolves.toBeUndefined();
+
+      expect(mockObjectStorageProvider.download).not.toHaveBeenCalled();
+      expect(mockCore.markProcessing).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('platform contract', () => {
+    it('declares a label and the 20-minute, 3-attempt video profile', () => {
+      expect(handler.label).toBe('Face detection (video)');
+      expect(handler.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: 3 });
+    });
+
+    it('stays node-eligible (both members of the node pair)', () => {
+      expect(handler.nodeResultSchema).toBeDefined();
+      expect(typeof handler.persistNodeResult).toBe('function');
     });
   });
 

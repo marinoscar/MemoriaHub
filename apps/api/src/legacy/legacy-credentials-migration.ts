@@ -20,8 +20,9 @@
 //   - The legacy rows are never modified or deleted, so reverting the release restores the old readers.
 //   - The non-secret half (baseUrl, enabled) goes to the settings document with SET-IF-ABSENT: a value
 //     an admin already saved after cut-over is never overwritten.
-//   - Only `face` and `geo` can be applied here. `storage`, `smtp`, `ses` and `push_vapid` have plans
-//     (dry run) so RETRO-D1/D2/D3 reuse them; their apply is refused until that slice switches its reader.
+//   - `face`, `geo` (RETRO-B4) and `smtp`, `ses` (RETRO-D2, applied by `scripts/migrate-email-settings.ts`)
+//     can be applied. `storage` and `push_vapid` have plans (dry run) so RETRO-D1/D3 reuse them; their
+//     apply is refused until that slice switches its reader.
 // =============================================================================
 
 import { deriveHint } from '@marinoscar/platform-api/credentials';
@@ -30,7 +31,7 @@ export const MIGRATION_PURPOSES = ['face', 'geo', 'storage', 'smtp', 'ses', 'pus
 export type MigrationPurpose = (typeof MIGRATION_PURPOSES)[number];
 
 /** Purposes whose reader already uses the credential store, so `--apply` is allowed. */
-export const APPLICABLE_PURPOSES: readonly MigrationPurpose[] = ['face', 'geo'];
+export const APPLICABLE_PURPOSES: readonly MigrationPurpose[] = ['face', 'geo', 'smtp', 'ses'];
 
 /** One legacy secret and where it goes. */
 export interface LegacyItem {
@@ -92,13 +93,17 @@ export type Decrypt = (ciphertext: string) => string;
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** Build the plan: read the legacy rows, decrypt in memory, compare with what is stored. Writes nothing. */
+/**
+ * Build the plan: read the legacy rows, decrypt in memory, compare with what is stored. Writes nothing.
+ * With `onlyIfAbsent`, a target that already holds ANY secret is left alone (set-if-absent).
+ */
 export async function buildPlan(
   purposes: readonly MigrationPurpose[],
   source: LegacySource,
   credentials: CredentialStore,
   settings: SettingsStore,
   decrypt: Decrypt,
+  options: { onlyIfAbsent?: boolean } = {},
 ): Promise<Plan> {
   const entries: PlanEntry[] = [];
   const undecryptable: string[] = [];
@@ -133,7 +138,9 @@ export async function buildPlan(
       const stored = await credentials.getSecret(item.target.purpose, item.target.name);
       entries.push({
         item,
-        status: stored === plaintext ? 'unchanged' : 'write',
+        // `onlyIfAbsent` (the email carry-over, RETRO-D2): a secret an admin already stored
+        // after cut-over is kept, never replaced by the legacy one.
+        status: stored === plaintext || (options.onlyIfAbsent && stored !== null) ? 'unchanged' : 'write',
         hint: deriveHint(plaintext),
         settingsKeys,
       });
@@ -175,7 +182,7 @@ export async function applyPlan(
   if (blocked.length > 0) {
     throw new Error(
       `Refusing to apply: ${blocked.join(', ')} not applicable yet (its reader still uses the legacy store; ` +
-        'RETRO-D1 storage, RETRO-D2 smtp/ses, RETRO-D3 push_vapid run their own migration).',
+        'RETRO-D1 storage, RETRO-D3 push_vapid run their own migration).',
     );
   }
   if (plan.undecryptable.length > 0) {

@@ -1,10 +1,19 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
-import { EnrichmentJob, TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
-import { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../../enrichment/enrichment-handler.registry';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import { TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaService } from '../media.service';
+import {
+  runJobPayload,
+  vetoDeleteWhileRunActive,
+  type RunJobInput,
+} from '../../platform/jobs/run-engine-jobs';
 
 /** Payload shape for a `trash_empty_execute_batch` job. */
 interface TrashEmptyExecuteBatchPayload {
@@ -30,22 +39,28 @@ const tracer = trace.getTracer('trash-empty');
  *   - Atomic counters ({ increment }) and a race-safe finalize (updateMany
  *     guarded on status='running', so only the last batch to drain wins).
  *
- * SERVER-ONLY by omission: this handler deliberately does NOT declare the
- * `nodeResultSchema` / `persistNodeResult` node pair, because purging requires
- * storage credentials a distributed worker node never holds. Consequently
- * EnrichmentHandlerRegistry.serverOnlyTypes() auto-classifies it server-only AND
- * systemModeEligibleTypes() auto-includes it in `system` mode — so no
- * enrichment-job.worker.ts edit is needed (unlike workflow_execute_batch, which
- * is special-cased there precisely because it CARRIES the node pair).
+ * A native platform `JobHandler` (RETRO-C7, #604). SERVER-ONLY by omission: this
+ * handler deliberately does NOT declare the `nodeResultSchema` /
+ * `persistNodeResult` node pair, because purging requires storage credentials a
+ * distributed worker node never holds. The platform registry therefore derives
+ * it server-only and the `system` worker mode runs it (unlike
+ * workflow_execute_batch, which is pinned into `JOBS_SYSTEM_MODE_EXTRA_TYPES`
+ * precisely because it CARRIES the node pair). `canDelete` refuses to delete a
+ * pending batch of a run that is still `running`.
  */
 @Injectable()
-export class TrashEmptyExecuteBatchHandler implements EnrichmentHandler, OnModuleInit {
+export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
   readonly type = 'trash_empty_execute_batch';
+
+  readonly label = 'Empty trash execute batch';
+
+  /** 200 items: a batched hard-delete of rows and objects. 15 minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(TrashEmptyExecuteBatchHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
   ) {}
@@ -54,12 +69,13 @@ export class TrashEmptyExecuteBatchHandler implements EnrichmentHandler, OnModul
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    const payload = job.payload as unknown as TrashEmptyExecuteBatchPayload | null;
-    if (!payload?.runId || !Array.isArray(payload.itemIds)) {
+  async process(job: RunJobInput): Promise<void> {
+    const raw = runJobPayload<TrashEmptyExecuteBatchPayload>(job);
+    if (typeof raw?.runId !== 'string' || raw.runId === '' || !Array.isArray(raw.itemIds)) {
       this.logger.warn(`trash_empty_execute_batch job ${job.id} missing payload; skipping`);
       return;
     }
+    const payload: TrashEmptyExecuteBatchPayload = { runId: raw.runId, itemIds: raw.itemIds };
     await tracer.startActiveSpan(
       'trash_empty.execute_batch',
       {
@@ -85,6 +101,17 @@ export class TrashEmptyExecuteBatchHandler implements EnrichmentHandler, OnModul
         }
       },
     );
+  }
+
+  /** Refuses to delete a pending batch of a run that is still running. */
+  canDelete(job: Job): Promise<string | null> {
+    return vetoDeleteWhileRunActive(job, {
+      engine: 'empty-trash run',
+      activeStatuses: [TrashEmptyRunStatus.running],
+      readRunStatus: async (runId) =>
+        (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId }, select: { status: true } }))
+          ?.status ?? null,
+    });
   }
 
   private async executeBatch(payload: TrashEmptyExecuteBatchPayload): Promise<void> {
@@ -187,6 +214,7 @@ export class TrashEmptyExecuteBatchHandler implements EnrichmentHandler, OnModul
     });
 
     if (fin.count > 0) {
+      // metrics: RETRO-T3 (app.runs.finished{engine=trash_empty,outcome})
       this.logger.log({
         event: 'trash_empty_run.finalized',
         runId,

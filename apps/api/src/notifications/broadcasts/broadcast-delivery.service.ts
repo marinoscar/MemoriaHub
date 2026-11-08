@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { EmailService } from '../../email/email.service';
-import { EmailSendResult } from '../../email/types/email.types';
+import type { EmailSendResult } from '@marinoscar/platform-api/email';
+
+import { AppEmailSender } from '../../platform/email/app-email.sender';
 import { NotificationsService } from '../notifications.service';
 import {
   BroadcastChannel,
@@ -45,7 +46,8 @@ export interface BroadcastDeliveryResult {
 //           mandatory. The committed row is dispatched to Web Push and the
 //           SSE stream by the existing channel layer — `skipPush` narrows
 //           push away when the broadcast did not select it.
-//   email — EmailService.sendEmail('broadcast'), a no-op result when email is
+//   email — AppEmailSender.sendEmail('broadcast'), the platform's `broadcast`
+//           template (RETRO-D2), a no-op result when email is
 //           disabled deployment-wide. Never throws.
 //
 // NEVER THROWS for a delivery problem (both primitives are best-effort); a
@@ -55,7 +57,7 @@ export interface BroadcastDeliveryResult {
 export class BroadcastDeliveryService {
   constructor(
     private readonly notifications: NotificationsService,
-    private readonly email: EmailService,
+    private readonly email: AppEmailSender,
     private readonly config: ConfigService,
   ) {}
 

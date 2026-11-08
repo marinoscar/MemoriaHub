@@ -25,7 +25,7 @@ import { LocationInferenceModule } from './location-inference/location-inference
 import { ReviewRunsModule } from './review-runs/review-runs.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
-import { EmailModule } from './email/email.module';
+import { emailModule } from './platform/email/email.config';
 import { StorageSettingsModule } from './storage-settings/storage-settings.module';
 import { ShareModule } from './share/share.module';
 import { SocialMediaModule } from './social-media/social-media.module';
@@ -36,7 +36,6 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
 import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
 import { MemoriesModule } from './memories/memories.module';
-import { DbBackupModule } from './db-backup/db-backup.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
 import { doctorModule } from './doctor/doctor.config';
@@ -52,6 +51,7 @@ import { settingsModule } from './platform/settings/settings.config';
 import { credentialsModules } from './platform/credentials/credentials.config';
 import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
+import { dbBackupModule } from './platform/db-backup/db-backup.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -133,7 +133,11 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     ReviewRunsModule,
     MetadataModule,
     GeoModule,
-    EmailModule,
+    // The platform email slice (RETRO-D2): transports, the `email` settings row and
+    // `/api/email-settings`, the template registry (with this app's three templates,
+    // registered by `app-registrations/email.ts`) and the Doctor check `email.config`.
+    // Senders import `AppEmailModule`, which re-exports this same object.
+    emailModule,
     StorageSettingsModule,
     ShareModule,
     SocialMediaModule,
@@ -144,7 +148,9 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     NotificationsReconcileModule,
     BroadcastsModule,
     MemoriesModule,
-    DbBackupModule,
+    // Database backup and restore (RETRO-D4, #580): @marinoscar/platform-api/db-backup, with
+    // MemoriaHub's restore gate, carry-over and legacy prefix (app-registrations/db-backup.ts).
+    dbBackupModule,
     MediaSyncModule,
     AndroidAppModule,
   ],

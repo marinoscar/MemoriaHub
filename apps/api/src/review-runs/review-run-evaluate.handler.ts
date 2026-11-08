@@ -1,19 +1,26 @@
-import { ENRICHMENT_MAX_ATTEMPTS } from '../platform/jobs/queue-limits';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
-  EnrichmentJob,
   Prisma,
   ReviewRun,
   ReviewRunItemStatus,
   ReviewRunStatus,
 } from '@prisma/client';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReviewRunService } from './review-run.service';
 import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
 import { ReviewRunCursor } from './review-run-subject.strategy';
+import {
+  runJobPayload,
+  vetoDeleteWhileRunActive,
+  type RunJobInput,
+} from '../platform/jobs/run-engine-jobs';
 
 /** Payload shape for a `review_run_evaluate` job. */
 export interface ReviewRunEvaluatePayload {
@@ -41,18 +48,28 @@ const tracer = trace.getTracer('review-run');
  * indexes on `review_run_items`, so a retried attempt re-materializes
  * idempotently rather than double-counting.
  *
- * SERVER-ONLY by omission: no `nodeResultSchema` / `persistNodeResult` pair, so
- * EnrichmentHandlerRegistry auto-classifies it server-only and includes it in
- * `system` mode — no enrichment-job.worker.ts edit needed.
+ * A native platform `JobHandler` (RETRO-C7, #604). SERVER-ONLY by omission: no
+ * `nodeResultSchema` / `persistNodeResult` pair, so the platform registry
+ * derives it server-only and the `system` worker mode runs it. `canDelete`
+ * refuses to delete a pending job of a run still `evaluating`.
+ *
+ * `process` takes the structural `RunJobInput` rather than `Job` so the
+ * deprecated `location_suggestion_run_evaluate` shim (RETRO-C6) can keep
+ * delegating its legacy row unchanged.
  */
 @Injectable()
-export class ReviewRunEvaluateHandler implements EnrichmentHandler, OnModuleInit {
+export class ReviewRunEvaluateHandler implements JobHandler, OnModuleInit {
   readonly type = 'review_run_evaluate';
+
+  readonly label = 'Review run evaluate';
+
+  /** A keyset scan over one circle's review queue: 15 minutes, three attempts. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(ReviewRunEvaluateHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly runService: ReviewRunService,
     private readonly subjects: ReviewRunSubjectRegistry,
@@ -62,8 +79,8 @@ export class ReviewRunEvaluateHandler implements EnrichmentHandler, OnModuleInit
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    const payload = job.payload as unknown as ReviewRunEvaluatePayload | null;
+  async process(job: RunJobInput): Promise<void> {
+    const payload = runJobPayload<ReviewRunEvaluatePayload>(job);
     if (!payload?.runId) {
       this.logger.warn(`review_run_evaluate job ${job.id} missing runId payload; skipping`);
       return;
@@ -103,7 +120,18 @@ export class ReviewRunEvaluateHandler implements EnrichmentHandler, OnModuleInit
     );
   }
 
-  private async runEvaluation(job: EnrichmentJob, run: ReviewRun): Promise<void> {
+  /** Refuses to delete a pending job whose run is still being evaluated. */
+  canDelete(job: Job): Promise<string | null> {
+    return vetoDeleteWhileRunActive(job, {
+      engine: 'review run',
+      activeStatuses: [ReviewRunStatus.evaluating],
+      readRunStatus: async (runId) =>
+        (await this.prisma.reviewRun.findUnique({ where: { id: runId }, select: { status: true } }))?.status ??
+        null,
+    });
+  }
+
+  private async runEvaluation(job: RunJobInput, run: ReviewRun): Promise<void> {
     const runId = run.id;
     const strategy = this.subjects.get(run.subjectType);
 
@@ -144,6 +172,7 @@ export class ReviewRunEvaluateHandler implements EnrichmentHandler, OnModuleInit
           where: { id: runId },
           data: { status: ReviewRunStatus.completed, finishedAt: new Date() },
         });
+        // metrics: RETRO-T3 (app.runs.finished{engine=review,outcome=completed})
         this.logTransition(run, ReviewRunStatus.completed, { matchedCount: 0 });
         return;
       }
@@ -171,6 +200,7 @@ export class ReviewRunEvaluateHandler implements EnrichmentHandler, OnModuleInit
             },
           })
           .catch(() => undefined);
+        // metrics: RETRO-T3 (app.runs.finished{engine=review,outcome=failed})
         this.logTransition(run, ReviewRunStatus.failed, { error: message });
       }
       throw err;
@@ -178,7 +208,7 @@ export class ReviewRunEvaluateHandler implements EnrichmentHandler, OnModuleInit
   }
 
   private maxAttempts(): number {
-    return ENRICHMENT_MAX_ATTEMPTS;
+    return this.profile.maxAttempts;
   }
 
   private logTransition(

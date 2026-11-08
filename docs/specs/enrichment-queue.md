@@ -19,6 +19,8 @@
 > | Node plane (distributed-nodes.md) | Paused for legacy nodes until RETRO-C2: the server's worker runs every job. |
 >
 > Conversion of the handlers to native `JobHandler`s is RETRO-C3 to C8; the adapter and this facade are deleted by RETRO-C11.
+>
+> **Native since RETRO-C3 (#585):** `face_detection`, `video_face_detection`, `face_auto_archive_sweep`, `metadata_extraction`, `thumbnail_regen` and `thumbnail_repair` implement the platform `JobHandler` directly (`process(job: Job)`, a `label`, an explicit `profile`) and register with `JobHandlerRegistry` from `onModuleInit`, not through `EnrichmentHandlerRegistry`. Table in [section 15](#15-registered-handlers-reference).
 
 ---
 
@@ -301,7 +303,7 @@ Because each loop processes exactly one job at a time and there is no batch barr
 The worker resolves its operating mode via `resolveWorkerMode()` (exported from `enrichment-job.worker.ts`):
 
 - **`all`** — claim every registered handler type (classic single-box posture; the default).
-- **`system`** — start the pool but claim ONLY server-only job types: handlers without the `nodeResultSchema`/`persistNodeResult` pair (`EnrichmentHandlerRegistry.serverOnlyTypes()` — burst_detection, duplicate_detection_batch, job_history_purge, face_auto_archive_sweep, storage_insights, location_inference, trash_purge, storage_migration) **plus `thumbnail_repair`**, which carries a nodeResultSchema for interface parity but is a global sweep job that is not end-to-end node-claimable. All media compute is left for external worker nodes — the recommended posture when a distributed node fleet is running. `ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES` (comma-separated) appends additional *registered* types to the set; unknown entries are dropped with a warning.
+- **`system`** — start the pool but claim ONLY server-only job types: handlers without the `nodeResultSchema`/`persistNodeResult` pair (`JobHandlerRegistry.serverOnlyTypes()` — burst_detection, duplicate_detection_batch, job_history_purge, face_auto_archive_sweep, storage_insights, location_inference, trash_purge, storage_migration, and since RETRO-C3 `thumbnail_repair`, which no longer carries a parity-only node schema). All media compute is left for external worker nodes — the recommended posture when a distributed node fleet is running. `ENRICHMENT_SYSTEM_MODE_EXTRA_TYPES` (comma-separated) appends additional *registered* types to the set; unknown entries are dropped with a warning.
 - **`off`** — `onApplicationBootstrap` returns early and **no loops start** — the pool is never created. Useful in test environments and CI to prevent background jobs from interfering with tests.
 
 An explicit `ENRICHMENT_WORKER_MODE` value wins (an unrecognized value warns once and is treated as `all`). When the mode var is unset, the **legacy** boolean switches decide:
@@ -850,7 +852,22 @@ For the full provider rate-limit classification matrix and OOM/crash recovery ru
 
 ## 15. Registered Handlers Reference
 
-The following handlers are registered in the current production codebase. Each implements `EnrichmentHandler`, self-registers via `onModuleInit`, and appears automatically in the `/admin/jobs` dashboard.
+The following handlers are registered in the current production codebase. Each self-registers via `onModuleInit` and appears automatically in the `/admin/jobs` dashboard. Most still implement `EnrichmentHandler` (through the C1 adapter); the media/face group below is native.
+
+### Native platform handlers (RETRO-C3, #585)
+
+| Type | Label | Profile (`maxRuntimeMs`, `maxAttempts`) | Eligibility | Notes |
+|---|---|---|---|---|
+| `face_detection` | Face detection (photo) | 300 000, 3 | node-eligible | Throttle bucket `face`; persist writes Face rows only (no second CompreFace call) |
+| `video_face_detection` | Face detection (video) | 1 200 000 (`ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` for one release), 3 | node-eligible | Social-media-flagged, `face.video.enabled=false` and over-`VIDEO_ENRICHMENT_MAX_BYTES` items are skipped before any download; no `deriveOutputKey` (one key per job, a video has a frame per cluster) |
+| `face_auto_archive_sweep` | Face auto-archive sweep | 600 000, 3 | server-only | Subject `circle`; whole-circle KNN over `faces.embedding_vec` |
+| `metadata_extraction` | Metadata extraction | 300 000, 3 | node-eligible | Persist adds the geocode entry server-side (needs the server's geo provider) |
+| `thumbnail_regen` | Thumbnail regeneration | 600 000, 3 | node-eligible | `deriveOutputKey`: `thumbnails/<sourceObjectId>-<version>.jpg`, version derived from the job id (idempotent per job, new per regeneration) |
+| `thumbnail_repair` | Thumbnail repair sweep | 900 000, 2 | server-only | The parity-only node schema is gone; the system worker mode now derives it instead of pinning it |
+
+A media-item job whose media item no longer exists (or a circle job whose circle is gone) settles as a no-op; a job about the wrong subject fails. The short `storage_objects` writes of the metadata and thumbnail persist paths run under the platform `JobScope` (the job's organization). Contract tests: `apps/api/test/jobs/media-face.conformance.spec.ts`.
+
+### Handlers on the legacy adapter
 
 | Handler type | Module | Scope | Scheduled by | Notes |
 |---|---|---|---|---|

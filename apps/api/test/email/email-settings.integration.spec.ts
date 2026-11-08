@@ -1,309 +1,129 @@
 /**
- * Integration tests for the email settings endpoints:
- *   GET/PUT   /api/email-settings
- *   POST      /api/email-settings/test
+ * The platform email routes as MemoriaHub mounts them (RETRO-D2, #570):
+ *   GET/PUT   /api/email-settings        system_settings:read / :write
+ *   POST      /api/email-settings/test   system_settings:write, to the CALLER's own address
  *
- * Mirrors apps/api/test/settings/system-settings.integration.spec.ts's
- * full-app-boot supertest pattern (createTestApp with a mocked PrismaService).
- *
- * SECRETS_ENCRYPTION_KEY is set for the whole file (like
- * apps/api/src/geo/geo-settings.service.spec.ts) since PUT with a new
- * smtpPassword exercises the real encrypt/decrypt round-trip.
+ * The routes are `@marinoscar/platform-api/email`'s; this suite proves they are
+ * mounted once in the app's graph, gated on the platform permission strings,
+ * read the platform `email` row (not the legacy `global.email` block), and
+ * never return a secret.
  */
 
 import request from 'supertest';
-import {
-  TestContext,
-  createTestApp,
-  closeTestApp,
-} from '../helpers/test-app.helper';
+import { TestContext, createTestApp, closeTestApp } from '../helpers/test-app.helper';
 import { resetPrismaMock } from '../mocks/prisma.mock';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
-import {
-  createMockAdminUser,
-  createMockViewerUser,
-  authHeader,
-} from '../helpers/auth-mock.helper';
-import { SystemSettingsService } from '@marinoscar/platform-api/settings';
-import { EmailService } from '../../src/email/email.service';
-import { encryptSecret, decryptSecret } from '../../src/legacy/legacy-secret-cipher';
-import { EmailSmtpSecretStore } from '../../src/email/email-smtp-secret.store';
+import { createMockAdminUser, createMockViewerUser, authHeader } from '../helpers/auth-mock.helper';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
-describe('Email Settings Integration', () => {
+describe('Email settings (platform slice) integration', () => {
   let context: TestContext;
   let originalKey: string | undefined;
 
   beforeAll(async () => {
     originalKey = process.env['SECRETS_ENCRYPTION_KEY'];
     process.env['SECRETS_ENCRYPTION_KEY'] = VALID_KEY;
-
     context = await createTestApp({ useMockDatabase: true });
   });
 
   afterAll(async () => {
     await closeTestApp(context);
-
-    if (originalKey === undefined) {
-      delete process.env['SECRETS_ENCRYPTION_KEY'];
-    } else {
-      process.env['SECRETS_ENCRYPTION_KEY'] = originalKey;
-    }
+    if (originalKey === undefined) delete process.env['SECRETS_ENCRYPTION_KEY'];
+    else process.env['SECRETS_ENCRYPTION_KEY'] = originalKey;
   });
 
-  beforeEach(async () => {
+  beforeEach(() => {
     resetPrismaMock();
     setupBaseMocks();
-
-    // SystemSettingsService caches getSettings() results in-process for 5s.
-    // Force a fresh read on every test so each test's mocked DB state is honored.
-    const settingsService = context.module.get(SystemSettingsService);
-    (settingsService as any).settingsCache = null;
-    // Same for the SMTP secret store (the ciphertext lives outside the settings namespace).
-    (context.module.get(EmailSmtpSecretStore) as any).cache = null;
-    (context.prismaMock.$queryRaw as jest.Mock).mockResolvedValue([{ id: 'settings-1' }]);
   });
 
-  /** Seed the mocked systemSettings row with a given `email` block. */
-  function seedEmailSettings(email: Record<string, unknown> | null) {
-    context.prismaMock.systemSettings.findUnique.mockResolvedValue({
-      id: 'settings-1',
-      key: 'global',
-      value: {
-        ui: { allowUserThemeOverride: true },
-        features: {},
-        email,
-      },
-      version: 1,
-      updatedAt: new Date(),
-      updatedByUserId: null,
-      updatedByUser: null,
-    } as any);
+  /** Serve `row` for the platform `email` row and the base fixture for every other key. */
+  function seedEmailRow(row: Record<string, unknown> | null, legacy?: Record<string, unknown>) {
+    const findUnique = context.prismaMock.systemSettings.findUnique as jest.Mock;
+    const base = findUnique.getMockImplementation();
+    findUnique.mockImplementation(async (args: { where: { key?: string } }) => {
+      if (args?.where?.key === 'email') {
+        return row ? { id: 'email-row', key: 'email', value: row, version: 3, updatedAt: new Date(), updatedByUserId: null } : null;
+      }
+      if (legacy && args?.where?.key === 'global') {
+        return { id: 'global-row', key: 'global', value: { email: legacy }, version: 1, updatedAt: new Date(), updatedByUserId: null };
+      }
+      return base ? base(args) : null;
+    });
   }
 
-  // ---------------------------------------------------------------------------
-  // GET /api/email-settings
-  // ---------------------------------------------------------------------------
-
   describe('GET /api/email-settings', () => {
-    it('returns 401 without auth', async () => {
-      await request(context.app.getHttpServer())
-        .get('/api/email-settings')
-        .expect(401);
+    it('401 without auth', async () => {
+      await request(context.app.getHttpServer()).get('/api/email-settings').expect(401);
     });
 
-    it('returns 403 for a non-admin (viewer)', async () => {
+    it('403 for a viewer (no system_settings:read)', async () => {
       const viewer = await createMockViewerUser(context);
-
-      await request(context.app.getHttpServer())
-        .get('/api/email-settings')
-        .set(authHeader(viewer.accessToken))
-        .expect(403);
+      await request(context.app.getHttpServer()).get('/api/email-settings').set(authHeader(viewer.accessToken)).expect(403);
     });
 
-    it('returns 200 with masked settings for an admin, never containing the raw password', async () => {
+    it('200 for an admin: the platform row, transports folded from the flat fields, no secret', async () => {
       const admin = await createMockAdminUser(context);
-      const ciphertext = encryptSecret('super-secret-smtp-password');
-      seedEmailSettings({
-        provider: 'smtp',
-        enabled: true,
-        fromAddress: 'noreply@example.com',
-        fromName: 'MemoriaHub',
-        smtpHost: 'smtp.example.com',
-        smtpPort: 587,
-        smtpUseTls: true,
-        smtpUsername: 'smtp-user',
-        smtpPassword: ciphertext,
-      });
+      seedEmailRow(
+        {
+          provider: 'smtp',
+          enabled: true,
+          fromAddress: 'family@example.test',
+          transports: { smtp: { host: 'smtp.example.test', port: 587, useTls: true, username: 'mailer@example.test' } },
+        },
+        // The legacy block (with its inline ciphertext) must NOT be what the page reads.
+        { provider: 'ses', smtpPassword: 'v1:legacy-ciphertext' },
+      );
 
       const response = await request(context.app.getHttpServer())
         .get('/api/email-settings')
         .set(authHeader(admin.accessToken))
         .expect(200);
 
-      const bodyStr = JSON.stringify(response.body);
-      expect(bodyStr).not.toContain('smtpPassword');
-      expect(bodyStr).not.toContain(ciphertext);
-      expect(bodyStr).not.toContain('super-secret-smtp-password');
-
-      expect(response.body.data ?? response.body).toMatchObject({
-        provider: 'smtp',
-        enabled: true,
-        fromAddress: 'noreply@example.com',
-      });
+      const body = response.body.data ?? response.body;
+      expect(body).toMatchObject({ provider: 'smtp', enabled: true, fromAddress: 'family@example.test' });
+      expect(body.transports.smtp).toMatchObject({ host: 'smtp.example.test', port: 587 });
+      const raw = JSON.stringify(response.body);
+      expect(raw).not.toContain('legacy-ciphertext');
+      expect(raw).not.toMatch(/"(smtpPassword|password|secretAccessKey)"\s*:\s*"/);
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // PUT /api/email-settings
-  // ---------------------------------------------------------------------------
 
   describe('PUT /api/email-settings', () => {
-    beforeEach(() => {
-      seedEmailSettings(null);
-    });
-
-    it('returns 401 without auth', async () => {
-      await request(context.app.getHttpServer())
-        .put('/api/email-settings')
-        .send({ provider: 'smtp', enabled: true })
-        .expect(401);
-    });
-
-    it('returns 403 for a non-admin (viewer)', async () => {
+    it('403 for a viewer', async () => {
       const viewer = await createMockViewerUser(context);
-
       await request(context.app.getHttpServer())
         .put('/api/email-settings')
         .set(authHeader(viewer.accessToken))
         .send({ provider: 'smtp', enabled: true })
         .expect(403);
-    });
-
-    it('returns 200 for an admin and never echoes a raw password back', async () => {
-      const admin = await createMockAdminUser(context);
-
-      const response = await request(context.app.getHttpServer())
-        .put('/api/email-settings')
-        .set(authHeader(admin.accessToken))
-        .send({
-          provider: 'smtp',
-          enabled: true,
-          smtpHost: 'smtp.example.com',
-          smtpPort: 587,
-          smtpUsername: 'smtp-user',
-          smtpPassword: 'brand-new-plaintext-password',
-          fromAddress: 'noreply@example.com',
-        })
-        .expect(200);
-
-      const bodyStr = JSON.stringify(response.body);
-      expect(bodyStr).not.toContain('smtpPassword');
-      expect(bodyStr).not.toContain('brand-new-plaintext-password');
-
-      // The ciphertext goes to the secret store (a jsonb_set of the `global` row), never through the
-      // settings namespace; it must round-trip, and the settings PATCH must not carry it.
-      const settingsPatch = context.prismaMock.systemSettings.update.mock.calls.slice(-1)[0][0];
-      expect(settingsPatch.data.value.email).not.toHaveProperty('smtpPassword');
-      const secretCall = (context.prismaMock.$queryRaw as jest.Mock).mock.calls.slice(-1)[0];
-      const persistedCiphertext = (secretCall[0].values as unknown[]).find((v) => {
-        if (typeof v !== 'string') return false;
-        try {
-          decryptSecret(v);
-          return true;
-        } catch {
-          return false;
-        }
-      }) as string;
-      expect(persistedCiphertext).toBeDefined();
-      expect(persistedCiphertext).not.toBe('brand-new-plaintext-password');
-      expect(decryptSecret(persistedCiphertext)).toBe('brand-new-plaintext-password');
-    });
-
-    it('preserves the stored password when smtpPassword is omitted from the request', async () => {
-      const admin = await createMockAdminUser(context);
-      const existingCiphertext = encryptSecret('already-stored-password');
-      seedEmailSettings({
-        provider: 'smtp',
-        enabled: true,
-        fromAddress: 'noreply@example.com',
-        smtpHost: 'smtp.example.com',
-        smtpPassword: existingCiphertext,
-      });
-
-      await request(context.app.getHttpServer())
-        .put('/api/email-settings')
-        .set(authHeader(admin.accessToken))
-        .send({
-          provider: 'smtp',
-          enabled: true,
-          smtpHost: 'smtp.example.com',
-          fromAddress: 'noreply@example.com',
-        })
-        .expect(200);
-
-      // Omitting the password touches neither the secret store nor the settings namespace: the
-      // stored ciphertext is carried forward by the platform write as an unmodelled key.
-      expect(context.prismaMock.$queryRaw).not.toHaveBeenCalled();
-      const patchCall = context.prismaMock.systemSettings.update.mock.calls.slice(-1)[0][0];
-      expect(patchCall.data.value.email.smtpPassword).toBe(existingCiphertext);
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // POST /api/email-settings/test
-  // ---------------------------------------------------------------------------
-
   describe('POST /api/email-settings/test', () => {
-    it('returns 403 for a non-admin (viewer)', async () => {
+    it('403 for a viewer', async () => {
       const viewer = await createMockViewerUser(context);
-
       await request(context.app.getHttpServer())
         .post('/api/email-settings/test')
         .set(authHeader(viewer.accessToken))
-        .send({ recipient: 'someone@example.com' })
+        .send({})
         .expect(403);
     });
 
-    it('returns {ok:true, messageId} when the underlying send succeeds', async () => {
+    it('reports a disabled configuration as a result, not an error, and sends nothing', async () => {
       const admin = await createMockAdminUser(context);
-      const emailService = context.module.get(EmailService);
-      jest.spyOn(emailService, 'sendEmail').mockResolvedValue({
-        success: true,
-        messageId: 'test-message-1',
-      });
+      seedEmailRow({ provider: 'smtp', enabled: false, fromAddress: 'family@example.test' });
 
       const response = await request(context.app.getHttpServer())
         .post('/api/email-settings/test')
         .set(authHeader(admin.accessToken))
-        .send({ recipient: 'someone@example.com' })
-        // 201, not 200: this endpoint documents `@ApiResponse({ status: 200 })`
-        // but carries no `@HttpCode`, so Nest's POST default applies. Every
-        // `POST /test` connectivity endpoint in the codebase (email, face, geo,
-        // storage-settings) has the same doc/behaviour mismatch, so this asserts
-        // the consistent real behaviour rather than changing four controllers'
-        // status codes from inside a test-repair change. Tracked in issue #220.
-        .expect(201);
+        .send({});
 
+      expect(response.status).toBeLessThan(300);
       const body = response.body.data ?? response.body;
-      expect(body.ok).toBe(true);
-      expect(body.messageId).toBe('test-message-1');
-    });
-
-    it('returns {ok:false, error} when the underlying send fails (feature disabled)', async () => {
-      const admin = await createMockAdminUser(context);
-      const emailService = context.module.get(EmailService);
-      jest.spyOn(emailService, 'sendEmail').mockResolvedValue({
-        success: false,
-        error: 'email_disabled',
-      });
-
-      const response = await request(context.app.getHttpServer())
-        .post('/api/email-settings/test')
-        .set(authHeader(admin.accessToken))
-        .send({ recipient: 'someone@example.com' })
-        // 201, not 200: this endpoint documents `@ApiResponse({ status: 200 })`
-        // but carries no `@HttpCode`, so Nest's POST default applies. Every
-        // `POST /test` connectivity endpoint in the codebase (email, face, geo,
-        // storage-settings) has the same doc/behaviour mismatch, so this asserts
-        // the consistent real behaviour rather than changing four controllers'
-        // status codes from inside a test-repair change. Tracked in issue #220.
-        .expect(201);
-
-      const body = response.body.data ?? response.body;
-      expect(body.ok).toBe(false);
-      expect(body.error).toBe('email_disabled');
-    });
-
-    it('returns 400 for an invalid recipient email', async () => {
-      const admin = await createMockAdminUser(context);
-
-      await request(context.app.getHttpServer())
-        .post('/api/email-settings/test')
-        .set(authHeader(admin.accessToken))
-        .send({ recipient: 'not-an-email' })
-        .expect(400);
+      expect(body.success).toBe(false);
+      expect(String(body.error)).toMatch(/disabled/i);
     });
   });
 });

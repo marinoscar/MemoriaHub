@@ -10,8 +10,7 @@ import { ReviewRunService } from './review-run.service';
 import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
 import { ReviewRunEvaluateHandler } from './review-run-evaluate.handler';
 import { ReviewRunExecuteBatchHandler } from './review-run-execute-batch.handler';
-import { ReviewRunHistoryPurgeHandler } from './review-run-history-purge.handler';
-import { ReviewRunHistoryPurgeTask } from './review-run-history-purge.task';
+import { ReviewRunsRetentionHandler } from './review-runs-retention.handler';
 import { BurstGroupReviewStrategy } from './strategies/burst-group.strategy';
 import { DuplicateGroupReviewStrategy } from './strategies/duplicate-group.strategy';
 import { LocationSuggestionReviewStrategy } from './strategies/location-suggestion.strategy';
@@ -25,7 +24,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * dependency is genuinely mutual: the strategies here wrap `BurstService` /
  * `DuplicateService` primitives, while those services' threshold endpoints call
  * `ReviewRunService.createRun`. MediaModule (MediaThumbnailService), SettingsModule
- * (AppSystemSettingsService, read by ReviewRunHistoryPurgeHandler for the retention
+ * (AppSystemSettingsService, read by ReviewRunsRetentionHandler for the retention
  * window) and the rest are plain imports — none of them import this module.
  *
  * The location-suggestion strategy deliberately does NOT depend on
@@ -52,14 +51,13 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     LocationSuggestionReviewStrategy,
     ReviewRunEvaluateHandler,
     ReviewRunExecuteBatchHandler,
-    ReviewRunHistoryPurgeHandler,
-    ReviewRunHistoryPurgeTask,
+    ReviewRunsRetentionHandler,
   ],
   exports: [
     ReviewRunService,
     ReviewRunEvaluateHandler,
     ReviewRunExecuteBatchHandler,
-    ReviewRunHistoryPurgeHandler,
+    ReviewRunsRetentionHandler,
   ],
 })
 export class ReviewRunsModule {}
