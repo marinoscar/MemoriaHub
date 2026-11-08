@@ -132,6 +132,15 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'every read; aggregate activation metrics (`GET /api/admin/onboarding/metrics`). Served by the ' +
           'platform onboarding slice.',
       },
+      {
+        name: 'Exports',
+        description:
+          'Download your data (RETRO-H2): the export sources the caller may use, queued exports (`export.run`) ' +
+          'and a short-lived signed download per finished file. Sources: the platform\'s `user-data` and ' +
+          '`org-data` (`org_members:read`) and MemoriaHub\'s media, albums, memories and people (`media:read`). ' +
+          'Original files, hashes, storage keys and face embeddings are never exported. Served by the platform ' +
+          'exports slice.',
+      },
     ],
   },
   {

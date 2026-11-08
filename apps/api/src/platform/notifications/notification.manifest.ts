@@ -33,6 +33,7 @@ import {
   DB_BACKUP_NOTIFICATIONS,
   IDENTITY_NOTIFICATIONS,
 } from '../../notifications-registry/platform-slice.notifications';
+import { EXPORTS_NOTIFICATIONS } from '../../notifications-registry/exports.notifications';
 
 const GROUPS: readonly (readonly NotificationRegistration[])[] = [
   BROADCASTS_NOTIFICATIONS,
@@ -45,6 +46,9 @@ const GROUPS: readonly (readonly NotificationRegistration[])[] = [
   // The alerts slice's two events (RETRO-H5, #609): `alerts.alert_fired` /
   // `alerts.alert_resolved`, to the holders of `alerts:read`.
   ALERTS_NOTIFICATIONS,
+  // The exports slice's two events (RETRO-H2, #596): `export.ready` / `export.failed`, to the
+  // user who asked for the export; bell and Web Push, linking to `/settings/data-export`.
+  EXPORTS_NOTIFICATIONS,
 ];
 
 // Their email templates (idempotent), bound before the events are registered.
