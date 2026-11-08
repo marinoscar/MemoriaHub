@@ -49,6 +49,7 @@ import {
 import { MhLegacyJobStatus, MhLegacyNodeStatus } from '@prisma/client';
 import { z } from 'zod';
 import { NodesService } from './nodes.service';
+import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentClaimService } from '../enrichment/enrichment-claim.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
@@ -155,6 +156,7 @@ describe('NodesService — result/failure ingestion', () => {
           provide: VideoAutoTaggingService,
           useValue: { buildVideoPrompt: jest.fn().mockReturnValue({ system: 's', prompt: 'p' }) },
         },
+        { provide: GeoGoogleCredentialResolver, useValue: { resolveApiKey: jest.fn().mockResolvedValue(null) } },
       ],
     }).compile();
 

@@ -81,6 +81,7 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     },
   },
   face: {
+    providers: { compreface: { baseUrl: null, enabled: true } },
     features: { detection: { provider: null, model: null } },
     video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
     autoArchive: { matchThreshold: 0.45 },
@@ -111,7 +112,7 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     maxDurationSeconds: 300,
     maxSizeBytes: 500_000_000,
   },
-  geo: { reverseProvider: 'offline', forwardSearchEnabled: false },
+  geo: { reverseProvider: 'offline', forwardSearchEnabled: false, google: { enabled: true, baseUrl: null } },
   email: {
     provider: null,
     enabled: false,

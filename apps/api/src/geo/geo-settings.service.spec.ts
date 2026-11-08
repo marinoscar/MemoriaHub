@@ -1,59 +1,41 @@
 /**
- * Unit tests for GeoSettingsService.
+ * Unit tests for GeoSettingsService (credential store edition, RETRO-B4 #617).
  *
- * Tests:
- *   - getSettings masks credential to last4 (never exposes encryptedKey or plaintext)
- *   - upsertCredential encrypts apiKey + stores last4; rejects unknown providers
+ *   - the Google key is the platform credential `geo_provider/google`; the legacy table is never touched
+ *   - getSettings keeps the wire shape (configured / enabled / last4 / baseUrl) and never returns a secret
+ *   - upsertCredential writes the secret to the store and the non-secret half to the `geo` settings
  *   - setActiveReverseProvider rejects 'google' without an enabled credential (400)
- *   - deleteCredential removes the row; throws 404 when not found
- *   - testProvider delegates to the correct provider
- *
- * SECRETS_ENCRYPTION_KEY is set to a valid test value so encrypt/decrypt round-trips work.
+ *   - deleteCredential removes the secret; 404 when none
+ *   - testProvider resolves the key through the resolver
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { CredentialsService } from '@marinoscar/platform-api/credentials';
 import { GeoSettingsService } from './geo-settings.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { GoogleGeoLocationProvider } from '../media/geo/google-geo-location.provider';
 import { OfflineGeoLocationProvider } from '../media/geo/offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from '../media/geo/nominatim-geo-location.provider';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { encryptSecret } from '../common/crypto/secret-cipher';
+import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { FakeCredentials } from '../../test/helpers/fake-credentials';
 
-const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+const PURPOSE = 'geo_provider';
 
 describe('GeoSettingsService', () => {
   let service: GeoSettingsService;
-  let mockPrisma: MockPrismaService;
+  let creds: FakeCredentials;
+  let geo: Record<string, unknown>;
   let mockSystemSettings: { getSettings: jest.Mock; patchSettings: jest.Mock };
   let mockGoogle: { reverseGeocodeWithKey: jest.Mock };
   let mockOffline: { reverseGeocode: jest.Mock };
   let mockNominatim: { reverseGeocode: jest.Mock };
-  let originalKey: string | undefined;
-
-  beforeAll(() => {
-    originalKey = process.env['SECRETS_ENCRYPTION_KEY'];
-    process.env['SECRETS_ENCRYPTION_KEY'] = VALID_KEY;
-  });
-
-  afterAll(() => {
-    if (originalKey === undefined) {
-      delete process.env['SECRETS_ENCRYPTION_KEY'];
-    } else {
-      process.env['SECRETS_ENCRYPTION_KEY'] = originalKey;
-    }
-  });
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    creds = new FakeCredentials();
+    geo = {};
     mockSystemSettings = {
-      getSettings: jest.fn().mockResolvedValue({}),
+      getSettings: jest.fn(async () => ({ geo })),
       patchSettings: jest.fn().mockResolvedValue(undefined),
     };
     mockGoogle = { reverseGeocodeWithKey: jest.fn() };
@@ -63,397 +45,169 @@ describe('GeoSettingsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GeoSettingsService,
-        { provide: PrismaService, useValue: mockPrisma },
+        GeoGoogleCredentialResolver,
+        { provide: CredentialsService, useValue: creds },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: GoogleGeoLocationProvider, useValue: mockGoogle },
         { provide: OfflineGeoLocationProvider, useValue: mockOffline },
         { provide: NominatimGeoLocationProvider, useValue: mockNominatim },
       ],
     }).compile();
-
-    service = module.get<GeoSettingsService>(GeoSettingsService);
+    service = module.get(GeoSettingsService);
   });
-
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
-  // -------------------------------------------------------------------------
-  // getSettings
-  // -------------------------------------------------------------------------
 
   describe('getSettings', () => {
-    it('never exposes encryptedKey in the response', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
+    it('reports configured:false, enabled:false and no last4 without a credential', async () => {
+      const result = await service.getSettings();
+      expect(result.providers).toEqual([
+        { provider: 'google', configured: false, enabled: false, last4: null, baseUrl: null },
+      ]);
+    });
+
+    it('reports configured:true with last4 from the store hint and the non-secret settings', async () => {
+      creds.seed(PURPOSE, 'google', 'AIza-test-5678');
+      geo = { google: { enabled: false, baseUrl: 'https://maps.example.test' } };
+
+      const result = await service.getSettings();
+
+      expect(result.providers[0]).toEqual({
         provider: 'google',
-        enabled: true,
-        last4: 'abcd',
-        baseUrl: null,
-        encryptedKey: 'some-cipher-text',
-      } as any);
-
-      const result = await service.getSettings();
-
-      const str = JSON.stringify(result);
-      expect(str).not.toContain('encryptedKey');
-      expect(str).not.toContain('some-cipher-text');
+        configured: true,
+        enabled: false,
+        last4: '5678',
+        baseUrl: 'https://maps.example.test',
+      });
     });
 
-    it('returns configured:true and last4 when credential exists', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
-        provider: 'google',
-        enabled: true,
-        last4: '1234',
-        baseUrl: null,
-      } as any);
-
+    it('maps a short secret (fully masked hint) to last4:null', async () => {
+      creds.seed(PURPOSE, 'google', 'abc');
       const result = await service.getSettings();
-
-      const googleProvider = result.providers.find((p) => p.provider === 'google');
-      expect(googleProvider).toBeDefined();
-      expect(googleProvider!.configured).toBe(true);
-      expect(googleProvider!.last4).toBe('1234');
+      expect(result.providers[0].last4).toBeNull();
     });
 
-    it('returns configured:false and last4:null when no credential', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
-
-      const result = await service.getSettings();
-
-      const googleProvider = result.providers.find((p) => p.provider === 'google');
-      expect(googleProvider!.configured).toBe(false);
-      expect(googleProvider!.last4).toBeNull();
+    it('never exposes the secret anywhere in the response', async () => {
+      creds.seed(PURPOSE, 'google', 'AIza-super-secret-5678');
+      const json = JSON.stringify(await service.getSettings());
+      expect(json).not.toContain('AIza-super-secret');
+      expect(json).not.toMatch(/encryptedKey|apiKey/);
     });
 
-    it('returns activeReverseProvider from system settings', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({ geo: { reverseProvider: 'nominatim' } });
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
+    it('returns activeReverseProvider from system settings, defaulting to offline', async () => {
+      geo = { reverseProvider: 'nominatim' };
+      expect((await service.getSettings()).activeReverseProvider).toBe('nominatim');
 
-      const result = await service.getSettings();
-
-      expect(result.activeReverseProvider).toBe('nominatim');
-    });
-
-    it('defaults activeReverseProvider to "offline" when not set', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({});
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
-
-      // Override env to ensure deterministic default
+      geo = {};
       const saved = process.env['GEO_PROVIDER'];
       delete process.env['GEO_PROVIDER'];
-
       const result = await service.getSettings();
-
       if (saved !== undefined) process.env['GEO_PROVIDER'] = saved;
-
       expect(result.activeReverseProvider).toBe('offline');
     });
   });
 
-  // -------------------------------------------------------------------------
-  // upsertCredential
-  // -------------------------------------------------------------------------
-
   describe('upsertCredential', () => {
-    it('stores last4 (final 4 chars of apiKey)', async () => {
-      const upserted = {
-        provider: 'google',
-        encryptedKey: 'cipher',
-        last4: '5678',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-1',
-      };
-      mockPrisma.geoProviderCredential.upsert.mockResolvedValue(upserted as any);
-
+    it('writes the key to the credential store with the actor, never to settings', async () => {
       await service.upsertCredential('google', { apiKey: 'AIza-test-5678' }, 'user-1');
 
-      const call = mockPrisma.geoProviderCredential.upsert.mock.calls[0][0];
-      expect(call.create.last4).toBe('5678');
+      expect(creds.setSecret).toHaveBeenCalledWith(PURPOSE, 'google', 'AIza-test-5678', { updatedByUserId: 'user-1' });
+      const patch = JSON.stringify(mockSystemSettings.patchSettings.mock.calls);
+      expect(patch).not.toContain('AIza-test-5678');
     });
 
-    it('encrypts the apiKey (does not store plaintext)', async () => {
-      const plainApiKey = 'AIza-test-9999';
-      mockPrisma.geoProviderCredential.upsert.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: 'cipher',
-        last4: '9999',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-1',
-      } as any);
-
-      await service.upsertCredential('google', { apiKey: plainApiKey }, 'user-1');
-
-      const call = mockPrisma.geoProviderCredential.upsert.mock.calls[0][0];
-      expect(call.create.encryptedKey).not.toBe(plainApiKey);
-      expect(typeof call.create.encryptedKey).toBe('string');
-    });
-
-    it('does not expose encryptedKey in the return value', async () => {
-      mockPrisma.geoProviderCredential.upsert.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: 'secret-cipher-text',
-        last4: 'abcd',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-1',
-      } as any);
-
-      const result = await service.upsertCredential(
-        'google',
-        { apiKey: 'AIza-test-abcd' },
-        'user-1',
-      );
-
-      expect(JSON.stringify(result)).not.toContain('encryptedKey');
-      expect(JSON.stringify(result)).not.toContain('secret-cipher-text');
-    });
-
-    it('returns configured:true', async () => {
-      mockPrisma.geoProviderCredential.upsert.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: 'cipher',
-        last4: '1234',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-1',
-      } as any);
-
-      const result = await service.upsertCredential('google', { apiKey: 'test-1234' }, 'u1');
-
-      expect(result.configured).toBe(true);
-    });
-
-    it('passes baseUrl through when provided', async () => {
-      mockPrisma.geoProviderCredential.upsert.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: 'cipher',
-        last4: '0000',
-        baseUrl: 'https://custom.example.com',
-        enabled: true,
-        updatedByUserId: 'user-1',
-      } as any);
-
-      await service.upsertCredential(
-        'google',
-        { apiKey: 'AIza-0000', baseUrl: 'https://custom.example.com' },
-        'user-1',
-      );
-
-      const call = mockPrisma.geoProviderCredential.upsert.mock.calls[0][0];
-      expect(call.create.baseUrl).toBe('https://custom.example.com');
-    });
-
-    it('throws BadRequestException for unsupported provider', async () => {
-      await expect(
-        service.upsertCredential('unsupported', { apiKey: 'test' }, 'user-1'),
-      ).rejects.toThrow(BadRequestException);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // setActiveReverseProvider
-  // -------------------------------------------------------------------------
-
-  describe('setActiveReverseProvider', () => {
-    it('calls patchSettings with the selected provider', async () => {
-      await service.setActiveReverseProvider('offline', 'user-1');
-
+    it('patches baseUrl (overwrite) and enabled (only when sent) into geo.google', async () => {
+      await service.upsertCredential('google', { apiKey: 'k-abcd1234', baseUrl: 'https://x.example.test', enabled: false }, 'user-1');
       expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ geo: { reverseProvider: 'offline' } }),
+        { geo: { google: { baseUrl: 'https://x.example.test', enabled: false } } },
         'user-1',
       );
+
+      mockSystemSettings.patchSettings.mockClear();
+      await service.upsertCredential('google', { apiKey: 'k-abcd1234' }, 'user-1');
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith({ geo: { google: { baseUrl: null } } }, 'user-1');
     });
 
-    it('accepts "nominatim" without credential check', async () => {
-      await expect(
-        service.setActiveReverseProvider('nominatim', 'user-1'),
-      ).resolves.toEqual({ reverseProvider: 'nominatim' });
-
-      expect(mockPrisma.geoProviderCredential.findUnique).not.toHaveBeenCalled();
+    it('returns the same shape as before: last4, no secret', async () => {
+      geo = { google: { enabled: true, baseUrl: null } };
+      const result = await service.upsertCredential('google', { apiKey: 'AIza-test-5678' }, 'user-1');
+      expect(result).toEqual({ provider: 'google', configured: true, enabled: true, last4: '5678', baseUrl: null });
+      expect(JSON.stringify(result)).not.toContain('AIza-test');
     });
 
-    it('returns { reverseProvider } on success', async () => {
-      const result = await service.setActiveReverseProvider('offline', 'user-1');
-
-      expect(result).toEqual({ reverseProvider: 'offline' });
-    });
-
-    describe('setting google without an enabled credential', () => {
-      it('throws BadRequestException when credential is absent', async () => {
-        mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
-
-        await expect(
-          service.setActiveReverseProvider('google', 'user-1'),
-        ).rejects.toThrow(BadRequestException);
-      });
-
-      it('throws BadRequestException when credential is disabled', async () => {
-        mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
-          provider: 'google',
-          encryptedKey: encryptSecret('some-key'),
-          enabled: false,
-          last4: 'abcd',
-          baseUrl: null,
-        } as any);
-
-        await expect(
-          service.setActiveReverseProvider('google', 'user-1'),
-        ).rejects.toThrow(BadRequestException);
-      });
-
-      it('does not call patchSettings when validation fails', async () => {
-        mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
-
-        await expect(
-          service.setActiveReverseProvider('google', 'user-1'),
-        ).rejects.toThrow(BadRequestException);
-
-        expect(mockSystemSettings.patchSettings).not.toHaveBeenCalled();
-      });
-    });
-
-    it('accepts "google" when credential exists and is enabled', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: encryptSecret('AIza-valid'),
-        enabled: true,
-        last4: 'alid',
-        baseUrl: null,
-      } as any);
-
-      await expect(
-        service.setActiveReverseProvider('google', 'user-1'),
-      ).resolves.toEqual({ reverseProvider: 'google' });
+    it('rejects an unsupported provider without writing', async () => {
+      await expect(service.upsertCredential('bing', { apiKey: 'k' }, 'u')).rejects.toBeInstanceOf(BadRequestException);
+      expect(creds.setSecret).not.toHaveBeenCalled();
     });
   });
-
-  // -------------------------------------------------------------------------
-  // deleteCredential
-  // -------------------------------------------------------------------------
 
   describe('deleteCredential', () => {
-    it('deletes the credential when it exists', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: 'cipher',
-        last4: 'abcd',
-        baseUrl: null,
-        enabled: true,
-      } as any);
-      mockPrisma.geoProviderCredential.delete.mockResolvedValue({} as any);
-
+    it('deletes the stored secret and resets the non-secret settings', async () => {
+      creds.seed(PURPOSE, 'google', 'AIza-test-5678');
       await service.deleteCredential('google', 'user-1');
-
-      expect(mockPrisma.geoProviderCredential.delete).toHaveBeenCalledWith({
-        where: { provider: 'google' },
-      });
+      expect(creds.deleteSecret).toHaveBeenCalledWith(PURPOSE, 'google');
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith({ geo: { google: { baseUrl: null, enabled: true } } }, 'user-1');
     });
 
-    it('throws NotFoundException when credential does not exist', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
-
-      await expect(service.deleteCredential('google', 'user-1')).rejects.toThrow(
-        NotFoundException,
-      );
+    it('throws NotFoundException when no credential exists', async () => {
+      await expect(service.deleteCredential('google', 'u')).rejects.toBeInstanceOf(NotFoundException);
+      expect(creds.deleteSecret).not.toHaveBeenCalled();
     });
 
-    it('throws BadRequestException for unsupported provider', async () => {
-      await expect(service.deleteCredential('unsupported', 'user-1')).rejects.toThrow(
-        BadRequestException,
-      );
+    it('throws BadRequestException for an unsupported provider', async () => {
+      await expect(service.deleteCredential('bing', 'u')).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
-  // -------------------------------------------------------------------------
-  // testProvider
-  // -------------------------------------------------------------------------
+  describe('setActiveReverseProvider', () => {
+    it('accepts google when an enabled credential exists', async () => {
+      creds.seed(PURPOSE, 'google', 'k-12345678');
+      await expect(service.setActiveReverseProvider('google', 'u')).resolves.toEqual({ reverseProvider: 'google' });
+      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith({ geo: { reverseProvider: 'google' } }, 'u');
+    });
+
+    it('rejects google without a credential and does not patch', async () => {
+      await expect(service.setActiveReverseProvider('google', 'u')).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockSystemSettings.patchSettings).not.toHaveBeenCalled();
+    });
+
+    it('rejects google when the provider is switched off', async () => {
+      creds.seed(PURPOSE, 'google', 'k-12345678');
+      geo = { google: { enabled: false, baseUrl: null } };
+      await expect(service.setActiveReverseProvider('google', 'u')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('accepts nominatim without a credential check', async () => {
+      await service.setActiveReverseProvider('nominatim', 'u');
+      expect(creds.getSecret).not.toHaveBeenCalled();
+    });
+  });
 
   describe('testProvider', () => {
-    it('calls the google provider and returns ok:true with a sample', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue({
-        provider: 'google',
-        encryptedKey: encryptSecret('AIza-test-key'),
-        enabled: true,
-        last4: 'tkey',
-        baseUrl: null,
-      } as any);
-      mockGoogle.reverseGeocodeWithKey.mockResolvedValue({
-        country: 'Costa Rica',
-        locality: 'San José',
-        placeName: 'San José, Costa Rica',
-      });
+    const sample = { country: 'CR', locality: 'San Jose', placeName: 'Place A' };
 
-      const result = await service.testProvider({ provider: 'google' });
-
-      expect(result.ok).toBe(true);
-      expect(result).toHaveProperty('sample');
-      expect((result as any).sample.country).toBe('Costa Rica');
+    it('calls google with the stored key and returns a sample', async () => {
+      creds.seed(PURPOSE, 'google', 'k-12345678');
+      mockGoogle.reverseGeocodeWithKey.mockResolvedValue(sample);
+      const r = await service.testProvider({ provider: 'google', lat: 1, lng: 2 } as never);
+      expect(mockGoogle.reverseGeocodeWithKey).toHaveBeenCalledWith(1, 2, 'k-12345678');
+      expect(r).toEqual({ ok: true, sample });
     });
 
-    it('returns ok:false for google when credential is absent', async () => {
-      mockPrisma.geoProviderCredential.findUnique.mockResolvedValue(null);
-
-      const result = await service.testProvider({ provider: 'google' });
-
-      expect(result.ok).toBe(false);
-      expect((result as any).error).toBeTruthy();
+    it('returns ok:false when google has no usable credential', async () => {
+      const r = await service.testProvider({ provider: 'google' } as never);
+      expect(r).toEqual({ ok: false, error: 'Google credential not configured or disabled' });
+      expect(mockGoogle.reverseGeocodeWithKey).not.toHaveBeenCalled();
     });
 
-    it('calls the offline provider and returns ok:true', async () => {
-      mockOffline.reverseGeocode.mockResolvedValue({
-        country: 'Costa Rica',
-        locality: 'La Fortuna',
-        placeName: 'La Fortuna, CR',
-      });
-
-      const result = await service.testProvider({ provider: 'offline' });
-
-      expect(mockOffline.reverseGeocode).toHaveBeenCalled();
-      expect(result.ok).toBe(true);
+    it('routes nominatim and offline', async () => {
+      mockNominatim.reverseGeocode.mockResolvedValue(sample);
+      mockOffline.reverseGeocode.mockResolvedValue(sample);
+      expect((await service.testProvider({ provider: 'nominatim' } as never)).ok).toBe(true);
+      expect((await service.testProvider({ provider: 'offline' } as never)).ok).toBe(true);
     });
 
-    it('calls nominatim and returns ok:true', async () => {
-      mockNominatim.reverseGeocode.mockResolvedValue({
-        country: 'Germany',
-        locality: 'Berlin',
-        placeName: 'Berlin, Germany',
-      });
-
-      const result = await service.testProvider({ provider: 'nominatim' });
-
-      expect(mockNominatim.reverseGeocode).toHaveBeenCalled();
-      expect(result.ok).toBe(true);
-    });
-
-    it('returns ok:false when provider returns null', async () => {
-      mockOffline.reverseGeocode.mockResolvedValue(null);
-
-      const result = await service.testProvider({ provider: 'offline' });
-
-      expect(result.ok).toBe(false);
-    });
-
-    it('returns ok:false when provider throws', async () => {
-      mockOffline.reverseGeocode.mockRejectedValue(new Error('Provider exploded'));
-
-      const result = await service.testProvider({ provider: 'offline' });
-
-      expect(result.ok).toBe(false);
-      expect((result as any).error).toBe('Provider exploded');
-    });
-
-    it('uses the provided lat/lng override', async () => {
-      mockOffline.reverseGeocode.mockResolvedValue({
-        country: 'X',
-        locality: 'Y',
-        placeName: 'Y, X',
-      });
-
-      await service.testProvider({ provider: 'offline', lat: 1.23, lng: 4.56 });
-
-      expect(mockOffline.reverseGeocode).toHaveBeenCalledWith(1.23, 4.56);
+    it('returns ok:false with the error message when a provider throws', async () => {
+      mockOffline.reverseGeocode.mockRejectedValue(new Error('boom'));
+      expect(await service.testProvider({ provider: 'offline' } as never)).toEqual({ ok: false, error: 'boom' });
     });
   });
 });

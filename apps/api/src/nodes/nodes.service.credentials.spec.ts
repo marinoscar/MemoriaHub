@@ -50,7 +50,9 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
-import { encryptSecret } from '../common/crypto/secret-cipher';
+import { CredentialsService } from '@marinoscar/platform-api/credentials';
+import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
+import { FakeCredentials } from '../../test/helpers/fake-credentials';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
@@ -95,6 +97,7 @@ describe('NodesService.getJobCredentials', () => {
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockAutoTaggingService: { buildPrompt: jest.Mock };
   let mockVideoAutoTaggingService: { buildVideoPrompt: jest.Mock };
+  let fakeCredentials: FakeCredentials;
   let originalKey: string | undefined;
   let originalGeoProviderEnv: string | undefined;
 
@@ -116,6 +119,7 @@ describe('NodesService.getJobCredentials', () => {
     delete process.env['GEO_PROVIDER'];
 
     mockPrisma = createMockPrismaService();
+    fakeCredentials = new FakeCredentials();
     mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
     mockAiSettingsService = {
       resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'anthropic-test-key', baseUrl: undefined }),
@@ -144,6 +148,9 @@ describe('NodesService.getJobCredentials', () => {
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: AutoTaggingService, useValue: mockAutoTaggingService },
         { provide: VideoAutoTaggingService, useValue: mockVideoAutoTaggingService },
+        // The REAL resolver over an in-memory credential store: the geocode key path is the one under test.
+        GeoGoogleCredentialResolver,
+        { provide: CredentialsService, useValue: fakeCredentials },
       ],
     }).compile();
 
@@ -236,7 +243,7 @@ describe('NodesService.getJobCredentials', () => {
       (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([{ person: { name: 'Alice' } }]);
     });
 
-    it('returns AutoTaggingJobCredentials with a decrypted apiKey, resolved provider/model, and the shared prompt', async () => {
+    it('returns AutoTaggingJobCredentials with the stored apiKey, resolved provider/model, and the shared prompt', async () => {
       const result = await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID);
 
       expect(result).toEqual({
@@ -508,13 +515,9 @@ describe('NodesService.getJobCredentials', () => {
       }
     });
 
-    it('returns GeocodeJobCredentials for provider=google with a decrypted apiKey', async () => {
+    it('returns GeocodeJobCredentials for provider=google with the stored apiKey', async () => {
       mockSystemSettings.getSettings.mockResolvedValue({ geo: { reverseProvider: 'google' } });
-      (mockPrisma.geoProviderCredential.findUnique as jest.Mock).mockResolvedValue({
-        provider: 'google',
-        encryptedKey: encryptSecret('google-plaintext-key'),
-        enabled: true,
-      });
+      fakeCredentials.seed('geo_provider', 'google', 'google-plaintext-key');
 
       const result = await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID);
 
@@ -530,7 +533,7 @@ describe('NodesService.getJobCredentials', () => {
 
     it('falls back to offline when google is active but no credential row exists', async () => {
       mockSystemSettings.getSettings.mockResolvedValue({ geo: { reverseProvider: 'google' } });
-      (mockPrisma.geoProviderCredential.findUnique as jest.Mock).mockResolvedValue(null);
+      // no geo_provider/google credential stored
 
       const result = await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID);
 
@@ -538,12 +541,10 @@ describe('NodesService.getJobCredentials', () => {
     });
 
     it('falls back to offline when google is active but the credential is disabled', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({ geo: { reverseProvider: 'google' } });
-      (mockPrisma.geoProviderCredential.findUnique as jest.Mock).mockResolvedValue({
-        provider: 'google',
-        encryptedKey: encryptSecret('unused'),
-        enabled: false,
+      mockSystemSettings.getSettings.mockResolvedValue({
+        geo: { reverseProvider: 'google', google: { enabled: false, baseUrl: null } },
       });
+      fakeCredentials.seed('geo_provider', 'google', 'unused');
 
       const result = await service.getJobCredentials(USER_ID, NODE_ID, JOB_ID);
 

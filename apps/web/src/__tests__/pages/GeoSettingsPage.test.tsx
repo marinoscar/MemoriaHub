@@ -353,6 +353,20 @@ describe('GeoSettingsPage', () => {
 
       expect(screen.getByLabelText(/new api key/i)).toBeInTheDocument();
     });
+
+    it('is write-only: a saved key shows as a masked hint and the input stays empty', () => {
+      mockUseGeoSettings.mockReturnValue(
+        makeGeoSettingsMock({
+          providers: [{ provider: 'google', configured: true, enabled: true, last4: '5678', baseUrl: null }],
+        }) as ReturnType<typeof useGeoSettings>,
+      );
+      render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+
+      const input = screen.getByLabelText(/new api key/i) as HTMLInputElement;
+      expect(input.type).toBe('password');
+      expect(input.value).toBe('');
+      expect(document.body.textContent).toContain('5678');
+    });
   });
 
   // -------------------------------------------------------------------------

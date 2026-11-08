@@ -1,3 +1,4 @@
+import { GeoLocationModule } from '../media/geo/geo-location.module';
 import { Module } from '@nestjs/common';
 import { NodesService } from './nodes.service';
 import { NodeBackupQueryService } from './node-backup-query.service';
@@ -42,6 +43,8 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     AiModule,
     
     TaggingModule,
+    // Google key for the transient geocode credential (RETRO-B4)
+    GeoLocationModule,
     // Global module providing NodeCredentialService (nod_ bearer tokens) —
     // kept separate + @Global so JwtAuthGuard can inject it in every module
     // context, mirroring the PatModule wiring.

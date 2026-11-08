@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CredentialsModule } from '../platform/credentials/credentials.config';
 import { FaceSettingsController } from './face-settings.controller';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
@@ -31,7 +32,7 @@ import { ProfileModule } from '../profile/profile.module';
  * cycle is closed and no forwardRef is needed.
  */
 @Module({
-  imports: [StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule, ProfileModule],
+  imports: [CredentialsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule, ProfileModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,

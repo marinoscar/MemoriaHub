@@ -2,8 +2,12 @@
 // Face Settings Service
 // =============================================================================
 //
-// Manages face provider credentials and detection feature configuration.
-// Mirrors AiSettingsService patterns; see apps/api/src/ai/ai-settings.service.ts.
+// Manages face provider configuration and the detection feature selection.
+//
+// RETRO-B4 (#617): a provider's SECRET (none today: CompreFace is keyless) is the platform
+// credential `face_provider/<provider>`; its non-secret half (`baseUrl`, `enabled`) is the
+// `face.providers.<provider>` settings namespace. The legacy `face_provider_credentials` table is
+// no longer read or written (it is moved by `npm run credentials:migrate-legacy` and dropped later).
 // =============================================================================
 
 import {
@@ -12,10 +16,11 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { CredentialsService } from '@marinoscar/platform-api/credentials';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
 import { FaceProviderCredentials } from './providers/face-provider.interface';
-import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
+import { FACE_PROVIDER_CREDENTIAL_PURPOSE } from '../platform/credentials/credential-purposes.manifest';
+import { hintToLast4 } from '../platform/credentials/hint';
 import {
   UpsertFaceCredentialsDto,
   TestFaceProviderDto,
@@ -28,7 +33,7 @@ export class FaceSettingsService {
   private readonly logger = new Logger(FaceSettingsService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly credentials: CredentialsService,
     private readonly registry: FaceProviderRegistry,
     private readonly systemSettings: AppSystemSettingsService,
   ) {}
@@ -39,87 +44,53 @@ export class FaceSettingsService {
 
   /** Return face settings summary (no plaintext keys, no ciphertext) */
   async getSettings() {
-    const creds = await this.prisma.faceProviderCredential.findMany({
-      select: {
-        provider: true,
-        last4: true,
-        baseUrl: true,
-        enabled: true,
-        updatedAt: true,
-      },
-      orderBy: { provider: 'asc' },
-    });
-
     const sysSettings = await this.systemSettings.getSettings();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const face = (sysSettings as any).face;
 
-    const configuredProviderKeys = new Set(creds.map(c => c.provider));
-
-    // Providers with a DB credential row
-    const dbProviders = creds.map(c => {
-      let capabilities: object | undefined;
-      let requiresCredentials: boolean | undefined;
-      try {
-        const reg = this.registry.get(c.provider);
-        capabilities = reg.capabilities;
-        requiresCredentials = reg.requiresCredentials;
-      } catch {
-        // Provider not in registry — skip capabilities
-      }
-      return {
-        provider: c.provider,
-        configured: true,
-        enabled: c.enabled,
-        requiresCredentials: requiresCredentials ?? true,
-        last4: c.last4 || null,
-        baseUrl: c.baseUrl ?? null,
-        updatedAt: c.updatedAt,
-        ...(capabilities !== undefined && { capabilities }),
-      };
+    const providers = this.registry.keys().map(key => {
+      const reg = this.registry.get(key);
+      const stored = this.providerSettings(face, key);
+      return { key, reg, stored };
     });
 
-    // Registry providers with no DB row — split by requiresCredentials
-    const unconfiguredKeys = this.registry
-      .keys()
-      .filter(k => !configuredProviderKeys.has(k));
+    const described = await Promise.all(
+      providers.map(p => this.credentials.describe(FACE_PROVIDER_CREDENTIAL_PURPOSE, p.key)),
+    );
 
-    const keylessProviders = unconfiguredKeys
-      .filter(k => !this.registry.get(k).requiresCredentials)
-      .map(k => {
-        const reg = this.registry.get(k);
-        // For keyless providers with no DB row, expose the effective baseUrl
-        // so the UI can display/edit it. compreface resolves via
-        // FACE_COMPREFACE_URL env or its hard-coded docker-network default.
-        const effectiveBaseUrl =
-          k === 'compreface'
-            ? (process.env.FACE_COMPREFACE_URL ?? 'http://compreface-core:3000')
-            : null;
-        return {
-          provider: k,
+    const configured: Array<Record<string, unknown>> = [];
+    const knownProviders: Array<Record<string, unknown>> = [];
+    providers.forEach((p, i) => {
+      const info = described[i];
+      const keyless = !p.reg.requiresCredentials;
+      if (keyless || info) {
+        configured.push({
+          provider: p.key,
           configured: true,
-          enabled: true,
-          requiresCredentials: false,
+          enabled: p.stored?.enabled ?? true,
+          requiresCredentials: p.reg.requiresCredentials,
+          last4: hintToLast4(info?.hint),
+          // The stored override, else the effective default so the UI can show/edit it
+          // (CompreFace resolves via FACE_COMPREFACE_URL or its docker-network default).
+          baseUrl: p.stored?.baseUrl ?? this.defaultBaseUrl(p.key),
+          ...(info && { updatedAt: info.updatedAt }),
+          capabilities: p.reg.capabilities,
+        });
+      } else {
+        knownProviders.push({
+          provider: p.key,
+          configured: false,
+          enabled: false,
+          requiresCredentials: true,
           last4: null,
-          baseUrl: effectiveBaseUrl,
-          capabilities: reg.capabilities,
-        };
-      });
-
-    const knownProviders = unconfiguredKeys
-      .filter(k => this.registry.get(k).requiresCredentials)
-      .map(k => ({
-        provider: k,
-        configured: false,
-        enabled: false,
-        requiresCredentials: true,
-        last4: null,
-        baseUrl: null,
-        capabilities: this.registry.get(k).capabilities,
-      }));
+          baseUrl: null,
+          capabilities: p.reg.capabilities,
+        });
+      }
+    });
 
     return {
-      providers: [...dbProviders, ...keylessProviders],
+      providers: configured,
       knownProviders,
       features: face?.features ?? {
         detection: { provider: null, model: null },
@@ -137,41 +108,48 @@ export class FaceSettingsService {
     dto: UpsertFaceCredentialsDto,
     userId: string,
   ) {
-    // apiKey is optional — CompreFace is a keyless provider; a credential row
-    // for it, if present at all, stores only an optional baseUrl override.
-    const rawKey = dto.apiKey ?? '';
-    const last4 = rawKey ? rawKey.slice(-4) : '';
-    const encryptedKey = encryptSecret(rawKey);
+    this.registry.get(provider); // throws for an unknown provider key
+    if (provider !== 'compreface') {
+      throw new BadRequestException(`Face provider "${provider}" has no settings slot`);
+    }
 
-    const cred = await this.prisma.faceProviderCredential.upsert({
-      where: { provider },
-      create: {
-        provider,
-        encryptedKey,
-        last4,
-        baseUrl: dto.baseUrl ?? null,
-        enabled: dto.enabled ?? true,
+    // apiKey is optional: CompreFace is keyless, so there is usually no secret at all. A blank key
+    // PRESERVES a stored one (the credential store's rule); removing it is deleteCredential.
+    const rawKey = dto.apiKey ?? '';
+    if (rawKey) {
+      await this.credentials.setSecret(FACE_PROVIDER_CREDENTIAL_PURPOSE, provider, rawKey, {
         updatedByUserId: userId,
-      },
-      update: {
-        encryptedKey,
-        last4,
-        baseUrl: dto.baseUrl ?? null,
-        ...(dto.enabled !== undefined && { enabled: dto.enabled }),
-        updatedByUserId: userId,
-      },
-    });
+      });
+    }
+    // baseUrl is overwritten (null clears it); enabled only when sent: the legacy upsert's rule.
+    await this.systemSettings.patchSettings(
+      {
+        face: {
+          providers: {
+            [provider]: { baseUrl: dto.baseUrl ?? null, ...(dto.enabled !== undefined && { enabled: dto.enabled }) },
+          },
+        },
+      } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+      userId,
+    );
+
+    const [info, settings] = await Promise.all([
+      this.credentials.describe(FACE_PROVIDER_CREDENTIAL_PURPOSE, provider),
+      this.systemSettings.getSettings(),
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stored = this.providerSettings((settings as any).face, provider);
 
     this.logger.log(
-      `Face credential upserted for provider "${provider}" by user ${userId}`,
+      `Face provider settings upserted for provider "${provider}" by user ${userId}`,
     );
 
     return {
-      provider: cred.provider,
+      provider,
       configured: true,
-      enabled: cred.enabled,
-      last4: cred.last4 || null,
-      baseUrl: cred.baseUrl ?? null,
+      enabled: stored?.enabled ?? true,
+      last4: hintToLast4(info?.hint),
+      baseUrl: stored?.baseUrl ?? null,
     };
   }
 
@@ -179,20 +157,28 @@ export class FaceSettingsService {
   // deleteCredential
   // ---------------------------------------------------------------------------
 
-  /** Delete credential for a face provider */
+  /** Delete the stored override (secret and settings) for a face provider */
   async deleteCredential(provider: string, userId: string) {
-    const existing = await this.prisma.faceProviderCredential.findUnique({
-      where: { provider },
-    });
-    if (!existing) {
+    const info = await this.credentials.describe(FACE_PROVIDER_CREDENTIAL_PURPOSE, provider);
+    const settings = await this.systemSettings.getSettings();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stored = this.providerSettings((settings as any).face, provider);
+    const hasOverride = !!stored && (stored.baseUrl !== null || stored.enabled === false);
+    if (!info && !hasOverride) {
       throw new NotFoundException(
         `No credential configured for face provider: ${provider}`,
       );
     }
 
-    await this.prisma.faceProviderCredential.delete({ where: { provider } });
+    if (info) await this.credentials.deleteSecret(FACE_PROVIDER_CREDENTIAL_PURPOSE, provider);
+    if (provider === 'compreface') {
+      await this.systemSettings.patchSettings(
+        { face: { providers: { compreface: { baseUrl: null, enabled: true } } } } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        userId,
+      );
+    }
     this.logger.log(
-      `Face credential deleted for provider "${provider}" by user ${userId}`,
+      `Face provider settings deleted for provider "${provider}" by user ${userId}`,
     );
   }
 
@@ -216,23 +202,9 @@ export class FaceSettingsService {
     // Validate the provider key — registry.get throws for unknown providers.
     const provider = this.registry.get(providerKey);
 
-    const cred = await this.prisma.faceProviderCredential.findUnique({
-      where: { provider: providerKey },
-    });
-
-    let creds: FaceProviderCredentials;
-    if (cred && cred.enabled) {
-      creds = {
-        apiKey: decryptSecret(cred.encryptedKey),
-        baseUrl: cred.baseUrl ?? undefined,
-      };
-    } else if (cred) {
-      // Row exists but provider is disabled — pass empty key
-      creds = { apiKey: '', baseUrl: cred.baseUrl ?? undefined };
-    } else {
-      // No credential row — use static list without key
-      creds = { apiKey: '' };
-    }
+    // Works without a configured credential: a missing or disabled one yields an empty key.
+    const resolved = await this.resolveCredentials(providerKey).catch((): FaceProviderCredentials => ({}));
+    const creds: FaceProviderCredentials = { apiKey: '', ...resolved };
 
     return provider.listModels(creds);
   }
@@ -279,35 +251,51 @@ export class FaceSettingsService {
     // Validate that the provider key is known — registry.get throws for unknown keys.
     const provider = this.registry.get(providerKey);
 
+    const settings = await this.systemSettings.getSettings();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stored = this.providerSettings((settings as any).face, providerKey);
+
     if (!provider.requiresCredentials) {
-      // Keyless provider: optionally read a stored baseUrl override from DB.
-      const cred = await this.prisma.faceProviderCredential.findUnique({
-        where: { provider: providerKey },
-      });
-      if (cred && cred.enabled && cred.baseUrl) {
-        return { baseUrl: cred.baseUrl };
+      // Keyless provider: optionally read a stored baseUrl override from settings.
+      if (stored && stored.enabled && stored.baseUrl) {
+        return { baseUrl: stored.baseUrl };
       }
-      // No row or no custom baseUrl — provider uses env/default fallback.
+      // No custom baseUrl — provider uses env/default fallback.
       return {};
     }
 
-    const cred = await this.prisma.faceProviderCredential.findUnique({
-      where: { provider: providerKey },
-    });
-    if (!cred) {
+    const apiKey = await this.credentials.getSecret(FACE_PROVIDER_CREDENTIAL_PURPOSE, providerKey);
+    if (apiKey === null) {
       throw new BadRequestException(
         `Face provider "${providerKey}" is not configured`,
       );
     }
-    if (!cred.enabled) {
+    if (stored && !stored.enabled) {
       throw new BadRequestException(
         `Face provider "${providerKey}" is disabled`,
       );
     }
-    const apiKey = decryptSecret(cred.encryptedKey);
     return {
       apiKey,
-      baseUrl: cred.baseUrl ?? undefined,
+      baseUrl: stored?.baseUrl ?? undefined,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // helpers
+  // ---------------------------------------------------------------------------
+
+  private providerSettings(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    face: any,
+    providerKey: string,
+  ): { baseUrl: string | null; enabled: boolean } | undefined {
+    return face?.providers?.[providerKey];
+  }
+
+  private defaultBaseUrl(providerKey: string): string | null {
+    return providerKey === 'compreface'
+      ? (process.env.FACE_COMPREFACE_URL ?? 'http://compreface-core:3000')
+      : null;
   }
 }
