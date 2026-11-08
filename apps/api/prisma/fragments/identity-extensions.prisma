@@ -48,6 +48,6 @@ extend model User {
 }
 
 extend model StorageObject {
-  mediaItem      MediaItem?
-  migrationItems StorageMigrationItem[]
+  mediaItem            MediaItem?
+  legacyMigrationItems MhLegacyStorageMigrationItem[] @relation("MhLegacyStorageMigrationItemObject")
 }
