@@ -125,7 +125,13 @@ export class PgLegacySource implements LegacySource {
   }
 
   private async storage(): Promise<LegacyItem[]> {
-    const active = String((await this.settings.get(['storage', 'activeProvider'])) ?? process.env['STORAGE_PROVIDER'] ?? 's3');
+    // The platform's `storage.provider` once RETRO-D1's settings carry-over wrote it, else the legacy one.
+    const active = String(
+      (await this.settings.get(['storage', 'provider'])) ??
+        (await this.settings.get(['storage', 'activeProvider'])) ??
+        process.env['STORAGE_PROVIDER'] ??
+        's3',
+    );
     const res = await this.client.query<{ id: string; provider: string; encrypted_key: string }>(
       `SELECT id::text AS id, provider, encrypted_key FROM storage_provider_credentials ORDER BY provider`,
     );
@@ -137,7 +143,9 @@ export class PgLegacySource implements LegacySource {
         label: `storage_provider_credentials/${row.provider}`,
         ciphertext: row.encrypted_key,
         target: isActive ? { purpose: 'storage', name: 'default' } : null,
-        ...(isActive ? {} : { note: `not the active provider (${active}); the platform keeps one storage secret, RETRO-D1 decides` }),
+        ...(isActive
+          ? {}
+          : { note: `not the active provider (${active}); the platform's S3 drivers share one secret (storage/default)` }),
       };
     });
   }

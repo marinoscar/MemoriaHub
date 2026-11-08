@@ -159,7 +159,7 @@ describe('legacy credential migration', () => {
     await expect(applyPlan(plan, creds, settings, decryptSecret)).rejects.toThrow(/Round trip failed.*row-geo-1/);
   });
 
-  it('plans storage and push_vapid but refuses to apply them (smtp and ses apply since RETRO-D2)', async () => {
+  it('applies the active storage provider secret and skips an inactive one (RETRO-D1)', async () => {
     const storage: LegacyItem = {
       purpose: 'storage',
       rowId: 'row-s3',
@@ -170,7 +170,21 @@ describe('legacy credential migration', () => {
     const inactive: LegacyItem = { ...storage, rowId: 'row-r2', label: 'storage_provider_credentials/r2', target: null, note: 'not the active provider' };
     const plan = await buildPlan(['storage'], source([storage, inactive]), creds, settings, decryptSecret);
     expect(plan.entries.map((e) => e.status)).toEqual(['write', 'skipped']);
-    await expect(applyPlan(plan, creds, settings, decryptSecret)).rejects.toThrow(/storage not applicable yet/);
+    const result = await applyPlan(plan, creds, settings, decryptSecret);
+    expect(result).toMatchObject({ written: 1, skipped: 1 });
+    expect(await creds.getSecret('storage', 'default')).toBe('aws-secret-key-1111');
+  });
+
+  it('still refuses to apply push_vapid (RETRO-D3)', async () => {
+    const push: LegacyItem = {
+      purpose: 'push_vapid',
+      rowId: 'system_settings.webPush#privateKeyEncrypted',
+      label: 'system_settings.webPush privateKeyEncrypted',
+      ciphertext: encryptSecret('vapid-private-key'),
+      target: { purpose: 'push_vapid', name: 'default' },
+    };
+    const plan = await buildPlan(['push_vapid'], source([push]), creds, settings, decryptSecret);
+    await expect(applyPlan(plan, creds, settings, decryptSecret)).rejects.toThrow(/push_vapid not applicable yet/);
     expect(creds.rows.size).toBe(0);
   });
   it('with onlyIfAbsent keeps a secret already stored (the email carry-over, RETRO-D2)', async () => {
