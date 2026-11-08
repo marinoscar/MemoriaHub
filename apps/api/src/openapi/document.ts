@@ -78,6 +78,7 @@ function applyNodeCredentialScheme(document: OpenAPIObject, mutable: MutableDocu
   document.components.securitySchemes[SECURITY_SCHEMES.NODE_CREDENTIAL] = {
     type: 'http',
     scheme: 'bearer',
+    bearerFormat: 'JWT',
     description:
       'Worker-node credential (`nod_…`) from `POST /api/node-credentials`. Accepted **only** on ' +
       '`/api/nodes/*` — it cannot reach media, settings, or admin routes even when its owner is ' +
