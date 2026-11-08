@@ -13,6 +13,7 @@
     "api:test": "npm -w apps/api test",
     "web:test": "npm -w apps/web test",
     "credentials:migrate-legacy": "npm -w apps/api run credentials:migrate-legacy --",
+    "db-backup:migrate-legacy": "npm -w apps/api run db-backup:migrate-legacy --",
     "audit:triage": "node scripts/audit-triage.mjs",
     "openapi:dump": "npm run openapi:dump --workspace=api -- ../../openapi.json",
     "openapi:lint": "spectral lint openapi.json --ruleset .spectral.yaml --fail-severity=error",
