@@ -107,8 +107,8 @@ self.addEventListener('message', (event) => {
 // carries its circle as `?c=<circleId>`, which the page applies on arrival.
 // The icon and badge stay in step with `NOTIFICATION_ICON` /
 // `NOTIFICATION_BADGE` in `pwa/manifest.ts`.
-registerNotificationServiceWorkerHandlers(self, {
-  icon: '/icons/icon-192.png',
-  badge: '/icons/badge-72.png',
-});
+const PUSH_ICON = '/icons/icon-192.png';
+const PUSH_BADGE = '/icons/badge-72.png';
+
+registerNotificationServiceWorkerHandlers(self, { icon: PUSH_ICON, badge: PUSH_BADGE });
 
