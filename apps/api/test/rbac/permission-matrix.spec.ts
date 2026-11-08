@@ -92,6 +92,12 @@ const OLD_MATRIX: Record<'admin' | 'contributor' | 'viewer', string[]> = {
 };
 
 const NEW_PLATFORM_PERMISSIONS = [
+  // The AI slice (RETRO-E1, #595): ai_config:* for admin, ai:use and org_ai_config:* for org_admin.
+  'ai:use',
+  'ai_config:read',
+  'ai_config:write',
+  'org_ai_config:read',
+  'org_ai_config:write',
   'org_invites:read',
   'org_invites:write',
   'org_members:read',
@@ -101,6 +107,15 @@ const NEW_PLATFORM_PERMISSIONS = [
   'organizations:read',
   'organizations:write',
 ];
+
+/**
+ * Permissions a slice adoption granted to a non-admin role. `ai:use` (RETRO-E1, #595): the
+ * platform grants it to `contributor` (never to `viewer`, platform issue #499). Nothing in
+ * MemoriaHub checks it yet: the app's AI features run server-side under the deployment key.
+ */
+const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
+  contributor: ['ai:use'],
+};
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */
 const RETIRED_BY_SLICE: Record<string, string> = {
@@ -118,8 +133,8 @@ function grants(role: string): string[] {
 }
 
 describe('role permission matrix', () => {
-  it('contributor is exactly what it was', () => {
-    expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor].sort());
+  it('contributor is exactly what it was, plus the slice grants', () => {
+    expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor, ...(GAINED_BY_SLICE.contributor ?? [])].sort());
   });
 
   it('viewer is exactly what it was', () => {

@@ -157,6 +157,13 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     name: 'AI & Enrichment',
     tags: [
       {
+        name: 'AI',
+        description:
+          'The platform AI slice (RETRO-E1): public AI config, responses (and their stream), runs, ' +
+          'embeddings, images, audio, realtime, keys, features and usage. Every route but ' +
+          '`GET /api/ai/config` sits behind the kill switch and `ai:use`.',
+      },
+      {
         name: 'Tagging',
         description: 'Per-item AI auto-tagging status and reruns.',
       },
@@ -359,6 +366,13 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
         description:
           'AI provider credentials (encrypted at rest), connectivity tests, model listing, and which ' +
           'provider/model serves each AI feature.',
+      },
+      {
+        name: 'AI Administration',
+        description:
+          'The platform AI slice (RETRO-E1): the deployment AI policy and kill switch, provider keys, the ' +
+          'model catalogue, organization keys and usage (`/api/admin/ai/*`). Not behind the kill ' +
+          'switch, so an administrator can always turn AI back on.',
       },
       {
         name: 'Face Settings',

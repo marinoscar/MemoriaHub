@@ -25,7 +25,7 @@ import type { DoctorCheck as PlatformDoctorCheck } from '@marinoscar/platform-ap
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AppSystemSettings } from '../settings/app-settings.types';
 import type { AiSettingsService } from '../ai/ai-settings.service';
-import type { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
+import type { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import type { FaceSettingsService } from '../face/face-settings.service';
 import type { GeoSettingsService } from '../geo/geo-settings.service';
 import type { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';

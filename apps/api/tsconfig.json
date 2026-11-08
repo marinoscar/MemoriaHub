@@ -16,6 +16,9 @@
     "paths": {
       "@marinoscar/platform-api/*": [
         "../../node_modules/@marinoscar/platform-api/dist/*/index.d.ts"
+      ],
+      "@marinoscar/platform-ai-providers/*": [
+        "../../node_modules/@marinoscar/platform-ai-providers/dist/*/index.d.ts"
       ]
     },
     "incremental": true,

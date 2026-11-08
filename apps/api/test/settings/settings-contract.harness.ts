@@ -9,6 +9,7 @@
 // services before RETRO-B3 and runs against the platform settings slice after.
 // =============================================================================
 
+import { AI_SYSTEM_SETTINGS } from '@marinoscar/platform-api/ai';
 import { NotificationType } from '@prisma/client';
 
 import { buildSettingsHarness as build, type SettingsHarness } from './settings-contract.subject';
@@ -61,7 +62,10 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     memories: false,
     locationGrouping: false,
   },
+  // Since RETRO-E1 (#595) `ai` is the platform AI slice's namespace: its own defaults (the kill
+  // switch off, key policy, provider slots, ...) plus MemoriaHub's `features`, unchanged.
   ai: {
+    ...(AI_SYSTEM_SETTINGS.defaults as Record<string, unknown>),
     features: {
       search: { provider: null, model: null },
       tagging: { provider: null, model: null },
