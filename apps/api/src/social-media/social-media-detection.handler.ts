@@ -20,17 +20,48 @@
 //       the system tags + clear source; then fan out downstream video enrichment
 //       (video_face_detection) that was withheld while classification was pending.
 //   8. On error: mark failed + rethrow so the worker retries.
+//
+// A native platform `JobHandler` (RETRO-C5, #594). The subject is the media item
+// (`job.subjectType === 'media_item'`); a media item that no longer exists
+// settles the job as a no-op on both paths.
+//
+// NODE-ELIGIBLE (derived from the pair `nodeResultSchema` + `persistNodeResult`):
+// a node runs Tier 1 (its own ffprobe + filename) and Tier 2 OCR against the
+// presigned original and submits the verdict; `persistNodeResult` writes
+// `media_social_status`, the tags and the source column, and on a CLEAN verdict
+// fans out the withheld video enrichment. A DETECTED verdict stops the chain.
+//
+// THE FAN-OUT. `MediaEnrichmentService.enqueueVideoPostDetectionEnrichment`
+// enqueues `video_face_detection` (and `video_auto_tagging` when enabled)
+// through the C1 facade, which writes through the platform `JobsService` with
+// the job's organization. It runs AFTER the clean-status transaction commits,
+// never inside it, and the queue's dedup (one pending/running job per type and
+// subject) makes a retried or re-delivered CLEAN fan out once.
+//
+// THE PRE-FLIGHT (size cap, duration cap, landscape gate) lives in `process`,
+// the server half: an over-cap video is decided CLEAN there without a byte
+// downloaded. A node that claims the job does not run it (it computes only the
+// verdict); keeping an over-cap video away from a node claim needs the item
+// marked skipped at enqueue time, which belongs with the node executor
+// (RETRO-C10). Until then the node plane is paused (RETRO-C2) and every job
+// runs here.
 // =============================================================================
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, MediaSocialStatusType, MediaTagSource, MediaType } from '@prisma/client';
+import { JobReason, MediaSocialStatusType, MediaTagSource, MediaType } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } from '@memoriahub/enrichment-compute/dto';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
+import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
@@ -67,9 +98,31 @@ const ALL_SOCIAL_TAG_NAMES = [SOCIAL_TAG, 'TikTok', 'Instagram', 'Facebook'];
 const VIDEO_ENRICHMENT_MAX_BYTES = (): number =>
   parseInt(process.env['VIDEO_ENRICHMENT_MAX_BYTES'] ?? '0', 10);
 
+/** What the persist half needs of a job: its id, its media item and why it was queued. */
+export interface SocialMediaJobContext {
+  readonly id: string;
+  readonly mediaItemId: string;
+  /** The enqueue reason, which sets the priority of the withheld video jobs. */
+  readonly reason: JobReason;
+}
+
+/** The platform job's reason as the legacy enum the fan-out takes (the strings are the same). */
+function toJobReason(reason: Job['reason']): JobReason {
+  const value = String(reason);
+  return value === JobReason.rerun || value === JobReason.backfill ? (value as JobReason) : JobReason.upload;
+}
+
 @Injectable()
-export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleInit {
+export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
   readonly type = 'social_media_detection';
+  readonly label = 'Social media detection';
+  /**
+   * A video download (legacy re-probe or OCR), ffprobe and up to a few OCR
+   * frames: 20 minutes by default, the same video bucket as video face
+   * detection, still overridable for one release through
+   * ENRICHMENT_VIDEO_JOB_TIMEOUT_MS.
+   */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: videoJobTimeoutMs(), maxAttempts: 3 };
 
   /**
    * Node-eligibility (distributed workers): the payload a node submits via
@@ -84,7 +137,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
   private readonly logger = new Logger(SocialMediaDetectionHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly detector: SocialMediaDetectorService,
@@ -101,10 +154,14 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
   // process
   // ---------------------------------------------------------------------------
 
-  async process(job: EnrichmentJob): Promise<void> {
-    if (!job.mediaItemId) {
-      throw new Error('social_media_detection job missing mediaItemId');
-    }
+  async process(platformJob: Job): Promise<void> {
+    const context = await resolveMediaItemJob(this.prisma, platformJob, this.logger);
+    if (!context) return;
+    const job: SocialMediaJobContext = {
+      id: platformJob.id,
+      mediaItemId: context.mediaItemId,
+      reason: toJobReason(platformJob.reason),
+    };
     const mediaItemId = job.mediaItemId;
 
     // --- 1. Load MediaItem ---
@@ -449,7 +506,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
   // ---------------------------------------------------------------------------
 
   async persistSocialMedia(
-    job: EnrichmentJob,
+    job: SocialMediaJobContext,
     result: SocialMediaDetectionResult,
     preloadedMediaItem?: {
       id: string;
@@ -460,10 +517,6 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
       socialMediaSource: string | null;
     },
   ): Promise<void> {
-    if (!job.mediaItemId) {
-      throw new Error('social_media_detection job missing mediaItemId');
-    }
-
     const mediaItem =
       preloadedMediaItem ??
       (await this.prisma.mediaItem.findUnique({
@@ -518,11 +571,17 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
   /**
    * Persist a node-computed social_media_detection result (already validated
    * against nodeResultSchema by the ingestion endpoint; re-parsed here for
-   * type narrowing, mirroring DuplicateDetectionHandler's precedent).
+   * type narrowing, mirroring DuplicateDetectionHandler's precedent). A media
+   * item deleted since the job was claimed settles as a no-op.
    */
-  async persistNodeResult(job: EnrichmentJob, result: unknown): Promise<void> {
+  async persistNodeResult(job: Job, result: unknown): Promise<void> {
     const parsed = socialMediaDetectionResultSchema.parse(result);
-    await this.persistSocialMedia(job, parsed);
+    const context = await resolveMediaItemJob(this.prisma, job, this.logger);
+    if (!context) return;
+    await this.persistSocialMedia(
+      { id: job.id, mediaItemId: context.mediaItemId, reason: toJobReason(job.reason) },
+      parsed,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -540,6 +599,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
     const platformTag = PLATFORM_TAG[result.platform];
     if (platformTag) tagNames.push(platformTag);
 
+    // metrics: RETRO-T3 (app.media.social.classified{platform})
     await this.prisma.$transaction(async (tx) => {
       for (const name of tagNames) {
         const tag = await tx.tag.upsert({
@@ -604,6 +664,7 @@ export class SocialMediaDetectionHandler implements EnrichmentHandler, OnModuleI
     previousSource: string | null,
     matchedRule: string | null = null,
   ): Promise<void> {
+    // metrics: RETRO-T3 (app.media.social.classified{platform}: clean)
     await this.prisma.$transaction(async (tx) => {
       await tx.mediaSocialStatus.upsert({
         where: { mediaItemId },
