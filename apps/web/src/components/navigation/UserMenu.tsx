@@ -20,6 +20,18 @@ import { useAuthedImage } from '../../hooks/useAuthedImage';
 import { usePermissions } from '../../hooks/usePermissions';
 
 /**
+ * PLATFORM-ADOPTION-SHIM(RETRO-F1 #571, seam gap SHELL-USER-MENU): the app's
+ * own avatar menu, bound into `ShellAppBar`'s `userMenu` slot instead of the
+ * packaged `ShellUserMenu`, for two reasons the package cannot express yet:
+ *   1. the avatar `src` is the raw `user.profileImageUrl` there, but an
+ *      uploaded MemoriaHub avatar lives behind the authenticated
+ *      `/api/users/:id/avatar` byte proxy (`useAuthedImage`), so it would
+ *      render broken;
+ *   2. `ShellUserMenu` always lists the navigation destinations, while this
+ *      menu is account scope only (below). It reads no breakpoint.
+ * Delete it once `ShellUserMenu` takes an avatar source and can omit the
+ * destination rows.
+ *
  * The avatar menu is ACCOUNT scope only.
  *
  * The circle switcher and "Manage Circles" used to live here; they moved to the
