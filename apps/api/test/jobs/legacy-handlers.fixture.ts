@@ -27,7 +27,7 @@ import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhance
 import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
 import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
 import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-execute-batch.handler';
-import { ReviewRunHistoryPurgeHandler } from '../../src/review-runs/review-run-history-purge.handler';
+import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-retention.handler';
 import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
 import { StorageInsightsHandler } from '../../src/insights/storage-insights.handler';
 import { StorageMigrationHandler } from '../../src/storage-settings/storage-migration.handler';
@@ -41,7 +41,7 @@ import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.h
 import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
-import { WorkflowHistoryPurgeHandler } from '../../src/workflows/runs/workflow-history-purge.handler';
+import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
 
 /** Every handler class the app registers, one per job type. */
 export const ALL_HANDLER_CLASSES = [
@@ -68,7 +68,7 @@ export const ALL_HANDLER_CLASSES = [
   PictureEnhancementPurgeHandler,
   ReviewRunEvaluateHandler,
   ReviewRunExecuteBatchHandler,
-  ReviewRunHistoryPurgeHandler,
+  ReviewRunsRetentionHandler,
   SocialMediaDetectionHandler,
   StorageInsightsHandler,
   StorageMigrationHandler,
@@ -82,7 +82,7 @@ export const ALL_HANDLER_CLASSES = [
   WorkflowEvaluateHandler,
   WorkflowEvaluateItemHandler,
   WorkflowExecuteBatchHandler,
-  WorkflowHistoryPurgeHandler,
+  WorkflowRunsRetentionHandler,
 ];
 
 /** The 38 permanent type strings. */
@@ -146,5 +146,13 @@ export const EXPECTED_NODE_ELIGIBLE_TYPES = [
 export const EXPECTED_CAN_DELETE_TYPES = [
   'broadcast_chunk',
   'broadcast_start',
+  // RETRO-C7: a pending evaluate/execute-batch job of an active run is the
+  // only thing that moves the run on.
+  'review_run_evaluate',
+  'review_run_execute_batch',
+  'trash_empty_evaluate',
+  'trash_empty_execute_batch',
+  'workflow_evaluate',
+  'workflow_execute_batch',
 ];
 
