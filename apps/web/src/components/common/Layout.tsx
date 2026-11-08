@@ -2,6 +2,7 @@ import { ShellProviders } from '@marinoscar/platform-web/shell/headless';
 import { ShellLayout } from '@marinoscar/platform-web/shell/ui';
 import type { ShellMainVariant } from '@marinoscar/platform-web/shell/headless';
 import { MaintenanceBanner } from '@marinoscar/platform-web/host/ui';
+import { OnboardingProvider } from '@marinoscar/platform-web/onboarding/headless';
 import { AppBar } from '../navigation/AppBar';
 import { NavigationRail } from '../navigation/NavigationRail';
 import { BottomNav } from '../navigation/BottomNav';
@@ -9,6 +10,9 @@ import { TimezonePrompt } from '../settings/TimezonePrompt';
 import { NotificationPermissionBanner } from '@marinoscar/platform-web/notifications/ui';
 import { usePushSubscriptionSync } from '@marinoscar/platform-web/notifications/headless';
 import { AndroidUpdateBanner } from './AndroidUpdateBanner';
+import { OnboardingBanner } from '../onboarding/OnboardingBanner';
+import { OnboardingWelcome } from '../onboarding/OnboardingWelcome';
+import { APP_NAME } from '../../constants/app';
 import { useCircleLinkParam } from '../../hooks/useCircleLinkParam';
 import { APP_NAVIGATION } from '../../config/shell';
 import { APP_SHELL_PROVIDERS } from '../../platform/shellProviders';
@@ -33,7 +37,9 @@ interface LayoutProps {
  *
  * The chrome is chosen by MOUNTING in the package. This file fills its slots:
  * the AppBar, rail and bottom-bar bindings, the shell-wide banners above the
- * page and the time-zone prompt. A page that owns the whole content area (the
+ * page, the time-zone prompt and first-run onboarding (RETRO-H3, #599: the
+ * provider around the shell, so the banner, the welcome dialog and the user
+ * menu's "Getting started" item share one `GET /api/onboarding`). A page that owns the whole content area (the
  * map) asks for it with `useShellMainVariant('full-bleed')`: no padding and no
  * banners, without remounting the shell.
  *
@@ -58,35 +64,47 @@ export function Layout({ mainVariant }: LayoutProps) {
   useCircleLinkParam();
 
   return (
-    <ShellProviders providers={APP_SHELL_PROVIDERS}>
-      <ShellLayout
-        navigation={APP_NAVIGATION}
-        mainVariant={mainVariant}
-        appBar={<AppBar />}
-        rail={<NavigationRail />}
-        bottomNav={<BottomNav />}
-        // Each renders NOTHING on an ordinary day; the full-bleed variant
-        // drops them all.
-        banners={
-          <>
-            {/* Issue #348. Nothing for non-admins, nothing outside a window. */}
-            <MaintenanceBanner />
-            <NotificationPermissionBanner
-              config={pushSync.config}
-              capability={pushSync.capability}
-              onRequestPermission={() => void pushSync.requestPermission()}
-              isRequestingPermission={pushSync.isRequestingPermission}
-            />
-            {/* Issue #515: only inside the app's TWA, when the installed build
-                is older than the hosted release. */}
-            <AndroidUpdateBanner />
-          </>
-        }
-        // Renders only when `AuthProvider` detected a time-zone mismatch
-        // (issue #444). Mounted here because this is the highest themed point
-        // below the auth provider that owns the state.
-        overlays={<TimezonePrompt />}
-      />
-    </ShellProviders>
+    <OnboardingProvider appName={APP_NAME}>
+      <ShellProviders providers={APP_SHELL_PROVIDERS}>
+        <ShellLayout
+          navigation={APP_NAVIGATION}
+          mainVariant={mainVariant}
+          appBar={<AppBar />}
+          rail={<NavigationRail />}
+          bottomNav={<BottomNav />}
+          // Each renders NOTHING on an ordinary day; the full-bleed variant
+          // drops them all.
+          banners={
+            <>
+              {/* Issue #348. Nothing for non-admins, nothing outside a window. */}
+              <MaintenanceBanner />
+              <NotificationPermissionBanner
+                config={pushSync.config}
+                capability={pushSync.capability}
+                onRequestPermission={() => void pushSync.requestPermission()}
+                isRequestingPermission={pushSync.isRequestingPermission}
+              />
+              {/* Issue #515: only inside the app's TWA, when the installed build
+                  is older than the hosted release. */}
+              <AndroidUpdateBanner />
+              {/* RETRO-H3 (#599): "N of M required steps left", administrator
+                  first; nothing once done, dismissed, or for an established
+                  account. */}
+              <OnboardingBanner />
+            </>
+          }
+          // Renders only when `AuthProvider` detected a time-zone mismatch
+          // (issue #444). Mounted here because this is the highest themed point
+          // below the auth provider that owns the state.
+          // The one-time welcome (RETRO-H3, #599) is the second overlay.
+          overlays={
+            <>
+              <TimezonePrompt />
+              <OnboardingWelcome />
+            </>
+          }
+        />
+      </ShellProviders>
+    </OnboardingProvider>
   );
 }

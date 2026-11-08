@@ -229,6 +229,26 @@
       "scope": "org"
     },
     {
+      "name": "system:factory_reset",
+      "description": "Factory reset: delete every other user and all application data, keeping configuration and backups",
+      "scope": "system"
+    },
+    {
+      "name": "orgs:offboard",
+      "description": "Offboard an organization: delete it with all its data, members and invitations",
+      "scope": "system"
+    },
+    {
+      "name": "alerts:read",
+      "description": "View alert rules, incidents and the firing summary",
+      "scope": "system"
+    },
+    {
+      "name": "alerts:write",
+      "description": "Create, edit and delete alert rules; test them; acknowledge incidents",
+      "scope": "system"
+    },
+    {
       "name": "media:read",
       "description": "Read own media items",
       "scope": "org"
@@ -347,6 +367,10 @@
       "telemetry:query",
       "organizations:read",
       "organizations:write",
+      "system:factory_reset",
+      "orgs:offboard",
+      "alerts:read",
+      "alerts:write",
       "media:read_any",
       "media:write_any",
       "media:delete_any",

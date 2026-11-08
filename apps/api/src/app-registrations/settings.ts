@@ -32,6 +32,7 @@
 // =============================================================================
 
 import { AI_SYSTEM_SETTINGS } from '@marinoscar/platform-api/ai';
+import { ONBOARDING_USER_SETTINGS } from '@marinoscar/platform-api/onboarding';
 import type {
   SettingsDefaultsOverride,
   SystemSettingsNamespace,
@@ -68,6 +69,7 @@ import { TIMEZONE_USER_SETTINGS } from '../settings/registry/namespaces/user/tim
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { MEMORIAHUB_AI_SETTINGS_EXTENSION } from '../platform/ai/ai-settings.extension';
 import { TELEMETRY_SYSTEM_SETTINGS } from '../platform/telemetry/telemetry.system-settings';
+import { MEMORIAHUB_ONBOARDING_SETTINGS_EXTENSION } from '../platform/onboarding/onboarding.settings';
 
 /** MemoriaHub's system namespaces, in order (the platform's `maintenance` is registered by the host). */
 export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] = [
@@ -135,11 +137,19 @@ export const APP_USER_SETTINGS_NAMESPACES: readonly UserSettingsNamespace[] = [
   MEMORIES_USER_SETTINGS,
   TIMEZONE_USER_SETTINGS,
   MEMORIAHUB_NOTIFICATIONS_USER_SETTINGS,
+  // RETRO-H3 (#599): the platform onboarding slice's UI state (welcomeSeenAt, checklistDismissedAt,
+  // adminDismissedAt, skipped), declared by `@marinoscar/platform-api/onboarding` and extended below
+  // by `MEMORIAHUB_ONBOARDING_SETTINGS_EXTENSION`. Its merge refuses a `skipped` id that is not a
+  // registered, skippable step (`platform/onboarding/onboarding.manifest.ts`).
+  ONBOARDING_USER_SETTINGS,
 ] as unknown as readonly UserSettingsNamespace[];
 
 /** Fields this app stores in a platform-declared user namespace that the platform lacks. */
 export const APP_USER_SETTINGS_EXTENSIONS: readonly UserSettingsNamespaceExtension[] = [
   NAVIGATION_USER_SETTINGS_EXTENSION,
+  // RETRO-H3 (#599): `onboarding.establishedAt`, the one-time mark that keeps the welcome dialog and
+  // the banner from nagging an account that was already active before onboarding shipped.
+  MEMORIAHUB_ONBOARDING_SETTINGS_EXTENSION,
 ];
 
 // `ai` is the platform AI slice's since RETRO-E1 (#595): the platform declares and augments it, and

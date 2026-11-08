@@ -28,6 +28,9 @@ const ALLOWLIST: Record<string, string> = {
   'platform/ai/ai-host.module.ts':
     "retention and admin-aggregate: the AI slice's AI_SYSTEM_PRISMA port (the two AI retention purges, " +
     'the deployment-wide usage report and the catalogue sync usage row)',
+  'platform/user-data/user-data-host.module.ts':
+    "purge, admin-aggregate and the slice's own reasons: the user-data slice's USER_DATA_DB port " +
+    '(the user purge, the factory reset and organization offboarding, each statement owner-filtered)',
   'media/thumbnail-repair.handler.ts':
     'media-housekeeping: the global thumbnail_repair sweep finds and counts repair attempts across organizations',
 };

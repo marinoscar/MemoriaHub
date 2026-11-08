@@ -17,18 +17,20 @@
 //                 old /api/ai/* admin routes; an administrator holds both pairs.
 //   - `telemetry` telemetry:read, telemetry:write, telemetry:query (system, admin) (RETRO-T2, #625)
 //   - `notifications` push:*, broadcasts:* (system, admin), org_broadcasts:* (org, org_admin) (RETRO-D3)
+//   - `alerts`    alerts:read, alerts:write (system, admin) (RETRO-H5, #609)
+//   - `user-data` system:factory_reset, orgs:offboard (system, admin only; never implied by
+//                 system_settings:write) (RETRO-H1, #591)
 //   - `storage`   storage:read (org: every member), storage:write (org: org_admin, contributor, and
 //                 `viewer` through `platformGrants`, below), storage:delete_any (system, admin),
 //                 storage_config:read|write (system, admin) (RETRO-D1, #563)
-// Not listed on purpose: `nodes`, `sharing`, `user-data`,
-// `webhooks` and `alerts` are not mounted.
+// Not listed on purpose: `nodes`, `sharing` and `webhooks` are not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';
 
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'storage'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'storage'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],

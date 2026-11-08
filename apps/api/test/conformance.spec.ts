@@ -44,17 +44,31 @@
 // `ai-orchestration-boundary` (no orchestration library anywhere) run; the five suites that boot
 // the AI runtime against an app fixture are wired and opted out with their reasons (RETRO-E4).
 //
+// `alerts` (`@marinoscar/platform-api/alerts/testing`, RETRO-H5): the routes' permissions, the
+// starter rules, the open-incident index and the evaluation invariants (see the entry below).
+//
+// `user-data` (`@marinoscar/platform-api/user-data/testing`, RETRO-H1): every owner model
+// (a user-owned registry entry with an `ownerField`) is kept with a reason or deleted in a
+// registered category that `everything` reaches; every hint and scope names what exists; the
+// relation-ordered delete plan exists for the composed schema.
+//
+// `onboarding` (`@marinoscar/platform-api/onboarding/testing`, RETRO-H3): the step and fact
+// registries are consistent, every step's permission is registered, each fact resolves once and no
+// step's `evaluate` reads anything.
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
 // `{ data }` envelope and the exception filter are global exactly once each.
 // =============================================================================
 
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
 
 import '@marinoscar/platform-api/ai/testing';
+import '@marinoscar/platform-api/alerts/testing';
 import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
@@ -63,8 +77,11 @@ import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
 import '@marinoscar/platform-api/jobs/testing';
 import '@marinoscar/platform-api/notifications/testing';
+import '@marinoscar/platform-api/onboarding/testing';
 import '@marinoscar/platform-api/settings/testing';
 import '@marinoscar/platform-api/storage/testing';
+import '@marinoscar/platform-api/user-data/testing';
+import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
@@ -81,11 +98,25 @@ import { MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS } from '../src/platform/storage/stor
 import '../src/platform/email/email.config';
 // Registers the notification channels and events the `notifications` suite reads (RETRO-D3).
 import '../src/platform/notifications/notification.manifest';
+// Registers the alerts slice's metrics and MemoriaHub's two rule kinds (RETRO-H5).
+import '../src/app-registrations/alerts';
+// Fills the user-data registries (categories, scopes, model hints, factory reset steps).
+import '../src/platform/user-data/user-data.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
+// Fills the onboarding step and fact registries the `onboarding` suite reads (AppModule imports it too).
+import '../src/platform/onboarding/onboarding.manifest';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
+
+// The platform's raw-SQL index list (`@marinoscar/platform-db/raw-sql-indexes.json`): the
+// alerts suite requires the one-open-incident index of migration `0040_add_alerts` on it.
+const PLATFORM_RAW_SQL_INDEX_NAMES: string[] = (
+  JSON.parse(
+    readFileSync(join(REPO_ROOT, 'node_modules', '@marinoscar', 'platform-db', 'raw-sql-indexes.json'), 'utf8'),
+  ) as { indexes: { name: string }[] }
+).indexes.map((index) => index.name);
 
 runPlatformConformance({
   sourceRoots: [join(__dirname, '..', 'src')],
@@ -150,6 +181,12 @@ runPlatformConformance({
     email: { samples: EMAIL_TEMPLATE_SAMPLES },
     // The notifications slice's registrations (RETRO-D3, #576). No file is allowlisted.
     notifications: { afterCommitAllowlist: [] },
+
+    // The alerts slice (RETRO-H5, #609): every `/api/admin/alerts` route authenticated with exactly
+    // `alerts:read` (GET) or `alerts:write`, the built-in kinds registered, every starter rule valid
+    // and seeded disabled, the one-open-incident index on the raw-SQL list, no transaction around a
+    // dispatch, the node-event listener doing no I/O, two evaluations leaving one incident.
+    alerts: { rawSqlIndexNames: PLATFORM_RAW_SQL_INDEX_NAMES },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no
@@ -235,6 +272,30 @@ runPlatformConformance({
         'brokered-key node path (PLATFORM-ADOPTION-SHIM(#1083), EnterpriseAppBase #1083 unreleased; RETRO-C4).',
     },
 
+    // The onboarding slice (RETRO-H3, #599): the registries are well formed, every step's permission
+    // is one this app registers, and one derivation, for a caller holding every permission against a
+    // spied data port, resolves each fact once and reads nothing while evaluating. The samples stand
+    // in for MemoriaHub's six facts, which read Prisma and the settings service (app providers the
+    // suite's probe does not have). Floor: 9 MemoriaHub steps plus the platform's kept built-ins.
+    onboarding: {
+      permissions: permissionRegistry.list(),
+      factSamples: {
+        'memoriahub.media_counts': { addedByUser: 0 },
+        'memoriahub.album_counts': { addedByUser: 0 },
+        'memoriahub.circle_membership': { collaboratorCircles: 1, otherMembers: 0, pendingInvites: 0 },
+        'memoriahub.people_named': { named: 0 },
+        'memoriahub.devices': { syncDevices: 0, activeTokens: 0 },
+        'memoriahub.feature_readiness': {
+          storageReady: false,
+          faceRecognition: false,
+          autoTagging: false,
+          taggingProviderReady: false,
+          memories: false,
+        },
+      },
+      minSteps: 15,
+    },
+
     // Rule 3 of the Doctor check contract (RETRO-B1b, #602): every registered
     // check is read-only. Suite id: `doctor-read-only`. The checks are DISCOVERED
     // from the booted app's registry; the floor is a vacuity guard, not a list.
@@ -242,6 +303,10 @@ runPlatformConformance({
     // connection" service (it writes a sentinel object), so a check holding it
     // is a regression. The AI, face and geo settings services stay allowed: see
     // the live-probe row of docs/platform-adoption/local-exceptions.md.
+    // User data (RETRO-H1, #591): the keep-or-delete decision of every owner model,
+    // against the composed schema the purge planner reads at bootstrap.
+    userData: { datamodel: composedSchemaDatamodel(join(__dirname, '..', 'src', 'platform', 'user-data'))() },
+
     doctorReadOnly: {
       fixture: doctorConformanceFixture,
       minChecks: 30,
