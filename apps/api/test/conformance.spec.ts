@@ -55,6 +55,11 @@
 // `onboarding` (`@marinoscar/platform-api/onboarding/testing`, RETRO-H3): the step and fact
 // registries are consistent, every step's permission is registered, each fact resolves once and no
 // step's `evaluate` reads anything.
+// `webhooks` (`@marinoscar/platform-api/webhooks/testing`, RETRO-H4): every route of the three
+// webhook controllers enforces exactly its tier's permission, deliveries verify with
+// `verifyWebhookSignature`, the SSRF guard refuses non-public targets at create and at send, the
+// signing secret never leaves create/rotate, nothing makes an HTTP request outside the delivery job,
+// and endpoints never cross owners, scopes or organizations. It drives the slice over in-memory ports.
 //
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
@@ -81,6 +86,7 @@ import '@marinoscar/platform-api/onboarding/testing';
 import '@marinoscar/platform-api/settings/testing';
 import '@marinoscar/platform-api/user-data/testing';
 import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
+import '@marinoscar/platform-api/webhooks/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
@@ -188,6 +194,10 @@ runPlatformConformance({
     // global JWT guard (every route declares its own @Auth()/@Public()) and no
     // global throttler. If one is ever added, list it here with a reason.
     host: { rootModule: AppModule },
+
+    // The webhooks slice (RETRO-H4, #603). No extra blocked ranges: the platform's list
+    // (loopback, private, link-local, metadata, CGNAT, multicast, IPv4-mapped) covers this app.
+    webhooks: {},
 
     // The AI slice (RETRO-E1, #595). The two static suites run.
     //   - ai-no-sdk-leak: no provider SDK is imported anywhere in the app trees (`providerDirs: []`,

@@ -119,6 +119,14 @@ const NEW_PLATFORM_PERMISSIONS = [
   // The user-data slice (RETRO-H1, #591): system scope, admin only; never implied by system_settings:write.
   'orgs:offboard',
   'system:factory_reset',
+  // The webhooks slice (RETRO-H4, #603): webhooks:* (every org role), org_webhooks:* (org_admin),
+  // system_webhooks:* (admin).
+  'org_webhooks:read',
+  'org_webhooks:write',
+  'system_webhooks:read',
+  'system_webhooks:write',
+  'webhooks:read',
+  'webhooks:write',
 ];
 
 /**
@@ -127,7 +135,11 @@ const NEW_PLATFORM_PERMISSIONS = [
  * MemoriaHub checks it yet: the app's AI features run server-side under the deployment key.
  */
 const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
-  contributor: ['ai:use'],
+  // `webhooks:read|write` (RETRO-H4, #603): a member's own webhook endpoints (`/api/webhooks`);
+  // the platform grants them to every org role. What an endpoint receives is still gated by the
+  // event's own permission (`media:read`), re-checked for the owner at every fan-out.
+  contributor: ['ai:use', 'webhooks:read', 'webhooks:write'],
+  viewer: ['webhooks:read', 'webhooks:write'],
 };
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */
@@ -150,8 +162,8 @@ describe('role permission matrix', () => {
     expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor, ...(GAINED_BY_SLICE.contributor ?? [])].sort());
   });
 
-  it('viewer is exactly what it was', () => {
-    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer].sort());
+  it('viewer is exactly what it was, plus the slice grants', () => {
+    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, ...(GAINED_BY_SLICE.viewer ?? [])].sort());
   });
 
   it('an administrator (admin + org_admin) keeps every permission and gains only the new platform ones', () => {

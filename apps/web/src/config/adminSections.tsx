@@ -52,6 +52,7 @@ import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
 // RETRO-T2 (#625): the telemetry slice's three cards (data only; no page reaches the main chunk).
 import { telemetryAdminCards } from '@marinoscar/platform-web/telemetry/ui';
+import { webhooksAdminSections } from '@marinoscar/platform-web/webhooks/ui';
 // RETRO-H5 (#609): the alerts slice's card (data only; the page is lazy in App.tsx).
 import { alertsAdminCards } from '@marinoscar/platform-web/alerts/ui';
 // RETRO-H1 (#591): the user-data slice's factory reset card, in the pinned-last Danger Zone group.
@@ -328,6 +329,12 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // read route of `/api/admin/alerts` enforces; writes (`alerts:write`) are gated inside the page.
       // No `feature`: node and queue rules work with telemetry switched off.
       ...alertsAdminCards,
+      // RETRO-H4 (#603): the packaged Webhooks card (the deployment's endpoints), appended.
+      // `system_webhooks:read` is the string `GET /api/admin/webhooks` enforces; writes need
+      // `system_webhooks:write`, gated inside the page. The organization card
+      // (`webhooksAdminSections.organizations`, `feature: 'orgs'`) is not spread, like the other
+      // organization cards: no organization page is routed in single-organization mode.
+      ...webhooksAdminSections.operations,
     ],
   },
   // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to

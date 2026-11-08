@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode, Span } from '@opentelemetry/api';
 import {
   JobHandlerRegistry,
@@ -19,6 +19,7 @@ import { WorkflowAction, WorkflowActionContext } from '../actions/action-executo
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { revalidateItemMatches } from '../execution/item-revalidation.util';
 import { WorkflowRunNotificationService } from '../../notification-producers/workflow-run-notification.service';
+import { MemoriaHubWebhooks } from '../../platform/webhooks/memoriahub-webhooks.service';
 import {
   runJobPayload,
   vetoDeleteWhileRunActive,
@@ -106,6 +107,8 @@ export class WorkflowExecuteBatchHandler implements JobHandler, OnModuleInit {
     private readonly compiler: WorkflowConditionCompiler,
     private readonly executor: WorkflowActionExecutor,
     private readonly runNotifications: WorkflowRunNotificationService,
+    // Webhooks (RETRO-H4, #603). Optional so unit tests that build the handler by hand need no stub.
+    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
   ) {}
 
   onModuleInit(): void {
@@ -456,6 +459,8 @@ export class WorkflowExecuteBatchHandler implements JobHandler, OnModuleInit {
       // additionally skips on_media_enriched micro-runs, which also terminate
       // through this exact path.
       this.runNotifications.notifyRunFinishedAsync(runId);
+      // Webhook `workflows.run.completed` (RETRO-H4, #603), same won-the-finalize guard; never throws.
+      await this.webhookEvents?.workflowRunFinished(runId);
     }
   }
 

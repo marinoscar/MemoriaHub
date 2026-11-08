@@ -214,6 +214,36 @@
       "scope": "system"
     },
     {
+      "name": "webhooks:read",
+      "description": "View your own webhook endpoints and their deliveries",
+      "scope": "org"
+    },
+    {
+      "name": "webhooks:write",
+      "description": "Create, change, delete, rotate and test your own webhook endpoints",
+      "scope": "org"
+    },
+    {
+      "name": "org_webhooks:read",
+      "description": "View the active organization's webhook endpoints and their deliveries",
+      "scope": "org"
+    },
+    {
+      "name": "org_webhooks:write",
+      "description": "Create, change, delete, rotate and test the active organization's webhook endpoints",
+      "scope": "org"
+    },
+    {
+      "name": "system_webhooks:read",
+      "description": "View the deployment's webhook endpoints and their deliveries",
+      "scope": "system"
+    },
+    {
+      "name": "system_webhooks:write",
+      "description": "Create, change, delete, rotate and test the deployment's webhook endpoints",
+      "scope": "system"
+    },
+    {
       "name": "alerts:read",
       "description": "View alert rules, incidents and the firing summary",
       "scope": "system"
@@ -366,6 +396,8 @@
       "organizations:write",
       "system:factory_reset",
       "orgs:offboard",
+      "system_webhooks:read",
+      "system_webhooks:write",
       "alerts:read",
       "alerts:write",
       "storage:delete_any",
@@ -387,6 +419,8 @@
       "user_settings:read",
       "user_settings:write",
       "ai:use",
+      "webhooks:read",
+      "webhooks:write",
       "storage:read",
       "storage:write",
       "media:read",
@@ -400,6 +434,8 @@
     "viewer": [
       "user_settings:read",
       "user_settings:write",
+      "webhooks:read",
+      "webhooks:write",
       "storage:read",
       "media:read",
       "media:write",
@@ -422,6 +458,10 @@
       "org_settings:write",
       "org_broadcasts:read",
       "org_broadcasts:write",
+      "webhooks:read",
+      "webhooks:write",
+      "org_webhooks:read",
+      "org_webhooks:write",
       "storage:read",
       "storage:write",
       "media:read",

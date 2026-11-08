@@ -88,6 +88,14 @@ Drift for mapped modules comes from the slice view; `n/a (no slice)` means the m
 
 Slices adopted with no prior MemoriaHub module (no row above, nothing deleted): **alerts** (RETRO-H5, #609) is mounted in `src/platform/alerts/` with MemoriaHub's two rule kinds and five default rules; `NodeStaleOfflineTask` (app, until C2) still produces the offline state of legacy nodes, and `EnrichmentFailureNotificationListener` stays (the in-app inbox; alerts are the operator channel). Runbook: [alerts.md](../runbooks/alerts.md).
 
+### Harvested slices (no MemoriaHub predecessor)
+
+Platform slices MemoriaHub mounts without an app module they replace (epic RETRO-H, #584). Nothing is deleted; each adds a binding under `src/platform/<slice>/`.
+
+| Slice | Plan | Binding | Notes |
+|---|---|---|---|
+| `webhooks` | H4 (#603) | `src/platform/webhooks/` (`webhooks.config.ts`, `webhooks-host.module.ts`, `memoriahub-webhook-events.ts`, `memoriahub-webhooks.service.ts`) | `WebhooksModule.forRoot`; seven MemoriaHub events (keys permanent), raised after commit through `MemoriaHubWebhooks` (media batched 100 ids / 60 s); `WEBHOOKS_SYSTEM_PRISMA` over `forSystem` until RETRO-D1 (local-exceptions row). Web: the packaged `WebhooksPage` at `/settings/webhooks` and `/admin/settings/webhooks`. Spec: [webhooks-memoriahub.md](../specs/webhooks-memoriahub.md). |
+
 ## Web: apps/web/src
 
 `components` and `pages` are split into one row per sub-directory (and `pages (root files)`); every other top-level directory has one row.
@@ -246,7 +254,7 @@ Platform slices MemoriaHub never had a module for; there is nothing to classify 
 Counts come from [drift-baseline.md](drift-baseline.md) (sections "Migrations" and "Prisma models"); the database transform itself is RETRO-A5 (#587) and the baseline runbook is `docs/runbooks/database-baseline.md` in EAB.
 
 - Prisma models: 24 of 46 base models are present in MemoriaHub; 73 models in total; 50 are MemoriaHub-only (domain, moved to `@marinoscar/memoriahub-db` in J3).
-- Base models missing from MemoriaHub (arrive with their slices): organizations, memberships, groups, grants, jobs, credentials, webhooks, alerts, AI platform tables.
+- Base models missing from MemoriaHub (arrive with their slices): organizations, memberships, groups, grants, jobs, credentials, webhooks, alerts, AI platform tables. (`webhook_endpoints` / `webhook_deliveries` came with platform `0039_add_webhooks`; RETRO-H4 (#603) mounts the slice that uses them.)
 - Shared models with differing fields (`User`, `Notification`, `DatabaseBackupRun`, `DeviceCode`, `WorkerNode`, ...) are listed in the report and handled by the owning slice issue.
 
 ## Summary

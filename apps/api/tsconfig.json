@@ -19,6 +19,9 @@
       ],
       "@marinoscar/platform-ai-providers/*": [
         "../../node_modules/@marinoscar/platform-ai-providers/dist/*/index.d.ts"
+      ],
+      "@marinoscar/platform-contract/*": [
+        "../../node_modules/@marinoscar/platform-contract/dist/cjs/*/index.d.ts"
       ]
     },
     "incremental": true,
