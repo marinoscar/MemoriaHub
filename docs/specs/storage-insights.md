@@ -193,6 +193,8 @@ Metric computation is performed by the `storage_insights` enrichment handler. Th
 
 ### Handler Registration
 
+> **Since RETRO-C8 ([#608](https://github.com/marinoscar/MemoriaHub/issues/608)).** `StorageInsightsHandler` is a native platform `JobHandler` (`@marinoscar/platform-api/jobs`): it registers with `JobHandlerRegistry`, declares `label: 'Storage insights'` and the profile `{ maxRuntimeMs: 900_000, maxAttempts: 3 }`, and stays server-only. The job is global (no subject), so the platform dedup keeps one active row. `GET /api/admin/insights` reads `refresh.state` from the newest platform `jobs` row of type `storage_insights` (`pending` / `running` / `failed`, else `idle`). Enqueue is unchanged (cron priority 100, manual refresh priority 0, through the `EnrichmentJobService` facade until RETRO-C9). Where this document says `enrichment_jobs` or `EnrichmentJobWorker`, read the platform `jobs` table and worker. The snippet below is the pre-C8 shape, kept for history.
+
 `StorageInsightsHandler` follows the standard self-registration pattern:
 
 ```typescript

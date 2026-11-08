@@ -27,14 +27,19 @@
  * Timing: we use jest fake timers to control the 1.5s success setTimeout.
  */
 
+import { createRequire } from 'node:module';
 import { jest } from '@jest/globals';
 import React from 'react';
 
 // ---------------------------------------------------------------------------
 // Fake os module — must be declared BEFORE the mocks that import os
 // ---------------------------------------------------------------------------
+// The rest of `os` stays real: the platform TUI module graph (loaded through tui/ink.tsx) reads
+// other exports of it (homedir, ...) when it loads.
+const realOs = createRequire(import.meta.url)('node:os') as Record<string, unknown>;
 jest.unstable_mockModule('os', () => {
   const mod = {
+    ...realOs,
     hostname: jest.fn(() => 'test-host'),
     platform: jest.fn(() => 'linux'),
   };

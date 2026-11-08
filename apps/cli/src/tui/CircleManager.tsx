@@ -8,10 +8,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import { ApiClient, type Circle } from '../api.js';
 import { saveConfig, type CliConfig } from '../config.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,7 +98,7 @@ export function CircleManager({ config, onConfigChange, onBack }: CircleManagerP
   // ---- Loading ----
   if (loadState === 'loading') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Circles</Text>
         <Box marginTop={1}>
           <Text dimColor>Loading circles…</Text>
@@ -111,7 +110,7 @@ export function CircleManager({ config, onConfigChange, onBack }: CircleManagerP
   // ---- Error ----
   if (loadState === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">Circles — Error</Text>
         <Box marginTop={1}>
           <Text color="red">{errorMsg}</Text>
@@ -125,7 +124,7 @@ export function CircleManager({ config, onConfigChange, onBack }: CircleManagerP
 
   // ---- Ready ----
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Circles ({circles.length})</Text>
 
       {circles.length === 0 ? (

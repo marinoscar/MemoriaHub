@@ -31,6 +31,17 @@ describe('translateLegacyArgs', () => {
     });
   });
 
+  describe('menu (ALIAS)', () => {
+    it('rewrites a lone `menu` to a bare invocation, which opens the platform TUI', () => {
+      const plan = t(['menu']);
+      expect(plan.argv).toEqual([]);
+      expect(plan.applied).toContain('menu');
+    });
+    it('leaves `menu` with other arguments to the app command', () => {
+      expect(t(['menu', '--help']).argv).toEqual(['menu', '--help']);
+    });
+  });
+
   describe('node-group (PORT)', () => {
     it('routes every node invocation to the 1.3 command, flags intact', () => {
       const argv = ['node', 'start', '--daemon', '--face-provider', 'compreface', '--types', 'a,b', '--poll', '5'];

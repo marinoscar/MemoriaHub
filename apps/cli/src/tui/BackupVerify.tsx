@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 
 import { getDb } from '../db/database.js';
@@ -28,7 +28,6 @@ import {
   type VerifyStartedPayload,
   type VerifySummary,
 } from '../backup/verify.js';
-import { BOX_BORDER } from './theme.js';
 
 export interface BackupVerifyProps {
   onBack: () => void;
@@ -160,7 +159,7 @@ export function BackupVerify({ onBack }: BackupVerifyProps): React.ReactElement 
 
   if (!root) {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">MemoriaHub — Verify Backup</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow">No backup root is configured on this machine.</Text>
@@ -175,7 +174,7 @@ export function BackupVerify({ onBack }: BackupVerifyProps): React.ReactElement 
   const pct = total > 0 ? Math.floor((done / total) * 100) : 0;
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">MemoriaHub — Verify Backup</Text>
       <Text dimColor>{root}</Text>
 

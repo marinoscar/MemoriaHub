@@ -1,0 +1,13 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  Menu › File Tools                                                                               │
+│  Offline local-file utilities — no server connection required                                    │
+│                                                                                                  │
+│  > 1. Convert videos to MP4 ▸                                                                    │
+│    2. Organize folder by date…                                                                   │
+│    3. Find/Clean Screenshots ▸                                                                   │
+│    4. Date Inference ▸                                                                           │
+│                                                                                                  │
+│  [1-9] jump   [↑/↓] move   [Enter] select   [Esc] back                                           │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

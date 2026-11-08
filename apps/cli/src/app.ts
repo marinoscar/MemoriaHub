@@ -24,7 +24,11 @@ import { readVersion } from './version.js';
 import { APP_DEPLOY_CHECKS } from './extensions/deploy-checks.js';
 import { APP_DEPLOY_STEPS } from './extensions/deploy-steps.js';
 import { APP_ENV_SPEC } from './extensions/env-spec.js';
-import { LEGACY_TUI_SCREEN } from './extensions/legacy-tui-screen.js';
+import { APP_TUI_MENU, PLATFORM_HIDDEN_SCREENS } from './tui/menu.js';
+import { APP_TUI_MENU_ROOT } from './tui/menu-slots.js';
+import { APP_TUI_SCREENS } from './tui/screens.js';
+import { APP_TUI_SELECTIONS, APP_TUI_STATE_LOADERS } from './tui/app-state.js';
+import { BRAND_HEX } from './brand.js';
 
 // =============================================================================
 // MemoriaHub's CLI, composed on the platform engine  (issue #577, RETRO-F3)
@@ -119,7 +123,14 @@ export const APP_CLI_OPTIONS: CreateCliOptions = {
   },
   version: readVersion(),
   extraCommands: APP_COMMAND_FACTORIES.map(register),
-  tuiScreens: [LEGACY_TUI_SCREEN],
+  // The TUI: MemoriaHub's menu tree, screens, header chip and shared data (RETRO-F4, #582).
+  tuiScreens: [...APP_TUI_SCREENS],
+  tuiMenu: [...APP_TUI_MENU],
+  tuiHiddenScreens: [...PLATFORM_HIDDEN_SCREENS],
+  tuiMenuRoot: APP_TUI_MENU_ROOT,
+  tuiSelections: [...APP_TUI_SELECTIONS],
+  tuiStateLoaders: [...APP_TUI_STATE_LOADERS],
+  tuiTheme: { brand: BRAND_HEX },
   deploySteps: [...APP_DEPLOY_STEPS],
   deployChecks: [...APP_DEPLOY_CHECKS],
   envSpecFragments: [APP_ENV_SPEC],

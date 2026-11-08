@@ -17,6 +17,7 @@
 
 import { jest } from '@jest/globals';
 import * as fs from 'fs';
+import { createRequire } from 'node:module';
 import * as osActual from 'os';
 import * as path from 'path';
 import React from 'react';
@@ -34,7 +35,12 @@ interface SpawnSyncReturn {
 
 const spawnSyncMock = jest.fn<(...args: unknown[]) => SpawnSyncReturn>();
 
+// Only `spawnSync` is replaced: the platform TUI module graph (loaded through tui/ink.tsx) reads
+// other exports of `child_process` (spawn, ...) when it loads.
+const realChildProcess = createRequire(import.meta.url)('node:child_process') as Record<string, unknown>;
 jest.unstable_mockModule('node:child_process', () => ({
+  ...realChildProcess,
+  default: { ...realChildProcess, spawnSync: spawnSyncMock },
   spawnSync: spawnSyncMock,
 }));
 

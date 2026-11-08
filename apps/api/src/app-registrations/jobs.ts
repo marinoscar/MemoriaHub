@@ -36,27 +36,23 @@ import { WORKFLOW_RUNS_RETENTION_POLICY } from '../workflows/runs/workflow-runs.
 /**
  * The job types the legacy handlers serve, and the label each shows. A native
  * handler declares its own `label` and is not listed (RETRO-C3: the six
- * media/face types).
+ * media/face types; RETRO-C5: the five dedup/burst/social types; RETRO-C8:
+ * memory_generation, memory_digest and storage_insights; RETRO-D3 retired
+ * broadcast_start, broadcast_chunk and notification_purge, listed below).
  */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   // Media enrichment (per-item compute)
   auto_tagging: 'Auto-tagging',
   video_auto_tagging: 'Video auto-tagging',
   geocode: 'Geocoding',
-  duplicate_detection: 'Duplicate detection',
-  duplicate_detection_batch: 'Duplicate detection (batch)',
-  duplicate_confidence_backfill: 'Duplicate confidence backfill',
-  social_media_detection: 'Social media detection',
   location_inference: 'Location inference',
   // Deprecated aliases kept so already-queued rows still render a friendly label;
   // superseded by review_run_* below (issue #190).
   location_suggestion_run_evaluate: 'Location suggestion run evaluate',
   location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
-  burst_detection: 'Burst detection',
   picture_enhancement: 'AI picture enhancer',
   picture_enhancement_purge: 'AI picture enhancer purge',
   // Storage / system
-  storage_insights: 'Storage insights',
   storage_migration: 'Storage migration',
   trash_purge: 'Trash purge',
   trash_empty_evaluate: 'Empty trash evaluate',
@@ -70,9 +66,6 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   workflow_evaluate_item: 'Workflow evaluate (item)',
   workflow_execute_batch: 'Workflow execute batch',
   workflow_history_purge: 'Workflow history purge',
-  // Memories (epic #300)
-  memory_generation: 'Memory generation',
-  memory_digest: 'Memory email digest',
   // Location Grouping (issue #373)
   location_group_rebuild: 'Location Group Rebuild',
 };
@@ -107,6 +100,9 @@ export const APP_JOB_REASONS: readonly JobReasonDefinition[] = [];
 export const APP_RETENTION_POLICIES: readonly RetentionPolicyDefinition[] = [
   WORKFLOW_RUNS_RETENTION_POLICY,
   REVIEW_RUNS_RETENTION_POLICY,
+  // RETRO-C8's `appNotifications` policy is gone since RETRO-D3 (#576): the
+  // platform's `retention.notifications` / `retention.notificationDeliveries`
+  // purge the platform inbox and delivery log.
 ];
 
 let registered = false;

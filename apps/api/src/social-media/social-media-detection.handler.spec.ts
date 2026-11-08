@@ -81,10 +81,10 @@ jest.mock('fs', () => {
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { promises as fsPromises } from 'fs';
+import type { Job } from '@marinoscar/platform-api/jobs';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import {
-  EnrichmentJob,
   JobReason,
-  MhLegacyJobStatus,
   MediaSocialStatusType,
   MediaTagSource,
   MediaType,
@@ -93,10 +93,9 @@ import {
   socialMediaDetectionResultSchema,
   type SocialMediaDetectionResult,
 } from '@memoriahub/enrichment-compute/dto';
-import { SocialMediaDetectionHandler } from './social-media-detection.handler';
+import { SocialMediaDetectionHandler, type SocialMediaJobContext } from './social-media-detection.handler';
 import { SocialMediaDetectorService, type VideoDetectionInput } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
@@ -106,36 +105,20 @@ import {
   mockPrismaTransaction,
 } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { circleJob, mediaItemJob } from '../../test/helpers/platform-job';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'social_media_detection',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.upload,
-    priority: 10,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 1,
-    lastError: null,
-    startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
+/** A platform job about media-1 (circle-1), as the enqueue facade writes it. */
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return mediaItemJob('social_media_detection', 'media-1', 'circle-1', { priority: 10, attempts: 1, ...overrides });
+}
+
+/** What the persist half receives: the job id, its media item and the enqueue reason. */
+function makeCtx(overrides: Partial<SocialMediaJobContext> = {}): SocialMediaJobContext {
+  return { id: 'job-1', mediaItemId: 'media-1', reason: JobReason.upload, ...overrides };
 }
 
 /** A MediaItem row shaped as SocialMediaDetectionHandler.process selects it. */
@@ -204,8 +187,10 @@ describe('SocialMediaDetectionHandler', () => {
   let mockOcr: { recognizeVideo: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
   let mockMediaEnrichment: { enqueueVideoPostDetectionEnrichment: jest.Mock };
+  let mockRegistry: { register: jest.Mock };
 
   beforeEach(async () => {
+    mockRegistry = { register: jest.fn() };
     jest.clearAllMocks();
     delete process.env['SOCIAL_MEDIA_DETECTION_ENABLED'];
 
@@ -236,7 +221,7 @@ describe('SocialMediaDetectionHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SocialMediaDetectionHandler,
-        EnrichmentHandlerRegistry,
+        { provide: JobHandlerRegistry, useValue: mockRegistry },
         SocialMediaDetectorService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
@@ -254,13 +239,16 @@ describe('SocialMediaDetectionHandler', () => {
   // -------------------------------------------------------------------------
   // type / registration
   // -------------------------------------------------------------------------
-  it("has type 'social_media_detection' and registers itself", async () => {
+  it("has type 'social_media_detection', its label and profile, and registers itself", async () => {
     expect(handler.type).toBe('social_media_detection');
+    expect(handler.label).toBe('Social media detection');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: 3 });
+    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
   });
 
-  it('throws synchronously when job.mediaItemId is null', async () => {
-    await expect(handler.process(makeJob({ mediaItemId: null }))).rejects.toThrow(
-      'social_media_detection job missing mediaItemId',
+  it('throws for a job that is not about a media item', async () => {
+    await expect(handler.process(circleJob('social_media_detection'))).rejects.toThrow(
+      'not about a media item',
     );
   });
 
@@ -268,16 +256,12 @@ describe('SocialMediaDetectionHandler', () => {
   // Early-return guards: non-video / deleted / missing / no storageObject
   // -------------------------------------------------------------------------
   describe('early-return guards', () => {
-    it('marks not_processed and does nothing else when the MediaItem does not exist', async () => {
+    it('settles as a no-op (no status row) when the MediaItem no longer exists', async () => {
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
 
       await handler.process(makeJob());
 
-      expect(mockPrisma.mediaSocialStatus.upsert).toHaveBeenCalledWith({
-        where: { mediaItemId: 'media-1' },
-        create: { mediaItemId: 'media-1', status: MediaSocialStatusType.not_processed, lastError: null },
-        update: { status: MediaSocialStatusType.not_processed },
-      });
+      expect(mockPrisma.mediaSocialStatus.upsert).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
       expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).not.toHaveBeenCalled();
       expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
@@ -1313,24 +1297,18 @@ describe('SocialMediaDetectionHandler', () => {
         };
       }
 
-      it('throws when job.mediaItemId is missing', async () => {
-        await expect(
-          handler.persistSocialMedia(makeJob({ mediaItemId: null }), makeCleanResult()),
-        ).rejects.toThrow('social_media_detection job missing mediaItemId');
-      });
-
       it('throws when the MediaItem cannot be found and no preloaded item was supplied', async () => {
         mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
 
         await expect(
-          handler.persistSocialMedia(makeJob(), makeDetectedResult()),
+          handler.persistSocialMedia(makeCtx(), makeDetectedResult()),
         ).rejects.toThrow('MediaItem media-1 not found');
       });
 
       it('re-fetches the MediaItem when no preloaded item is supplied (node persist path)', async () => {
         mockPrisma.mediaItem.findUnique.mockResolvedValue(makeMediaItem() as any);
 
-        await handler.persistSocialMedia(makeJob(), makeCleanResult());
+        await handler.persistSocialMedia(makeCtx(), makeCleanResult());
 
         expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith({
           where: { id: 'media-1' },
@@ -1346,13 +1324,13 @@ describe('SocialMediaDetectionHandler', () => {
       });
 
       it('does NOT re-fetch the MediaItem when a preloaded item is supplied (in-process path)', async () => {
-        await handler.persistSocialMedia(makeJob(), makeCleanResult(), makeMediaItem() as any);
+        await handler.persistSocialMedia(makeCtx(), makeCleanResult(), makeMediaItem() as any);
 
         expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
       });
 
       it('applies tags + status + source for a detected verdict', async () => {
-        await handler.persistSocialMedia(makeJob(), makeDetectedResult(), makeMediaItem() as any);
+        await handler.persistSocialMedia(makeCtx(), makeDetectedResult(), makeMediaItem() as any);
 
         const tagNames = mockPrisma.tag.upsert.mock.calls.map((c: any[]) => c[0].create.name);
         expect(tagNames).toEqual(['Social Media', 'TikTok']);
@@ -1366,7 +1344,7 @@ describe('SocialMediaDetectionHandler', () => {
       it('throws when a detected verdict is missing platform/detectionMethod', async () => {
         await expect(
           handler.persistSocialMedia(
-            makeJob(),
+            makeCtx(),
             makeDetectedResult({ platform: null }),
             makeMediaItem() as any,
           ),
@@ -1376,7 +1354,7 @@ describe('SocialMediaDetectionHandler', () => {
       it('strips stale tags, clears source, and fans out for a clean verdict on a previously-flagged item', async () => {
         const previouslyFlagged = makeMediaItem({ socialMediaSource: 'tiktok' });
 
-        await handler.persistSocialMedia(makeJob({ reason: JobReason.rerun }), makeCleanResult(), previouslyFlagged as any);
+        await handler.persistSocialMedia(makeCtx({ reason: JobReason.rerun }), makeCleanResult(), previouslyFlagged as any);
 
         expect(mockPrisma.mediaTag.deleteMany).toHaveBeenCalled();
         expect(mockPrisma.mediaItem.update).toHaveBeenCalledWith({
@@ -1391,7 +1369,7 @@ describe('SocialMediaDetectionHandler', () => {
 
       it('passes through matchedRule (e.g. a pre-flight skip reason) to the clean status row', async () => {
         await handler.persistSocialMedia(
-          makeJob(),
+          makeCtx(),
           makeCleanResult({ matchedRule: 'skip-duration-cap' }),
           makeMediaItem() as any,
         );
@@ -1427,6 +1405,38 @@ describe('SocialMediaDetectionHandler', () => {
         const bad = { verdict: 'maybe', score: 0.5 };
         await expect(handler.persistNodeResult(makeJob(), bad)).rejects.toThrow();
         expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
+      });
+
+      it('settles as a no-op when the MediaItem no longer exists', async () => {
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
+        await handler.persistNodeResult(makeJob(), {
+          verdict: 'clean', score: 0, ocrText: null, platform: null, detectionMethod: null, matchedRule: null, confidence: 0,
+        });
+        expect(mockPrisma.mediaSocialStatus.upsert).not.toHaveBeenCalled();
+        expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).not.toHaveBeenCalled();
+      });
+
+      it('fans out a CLEAN node verdict with the job reason, after the status write', async () => {
+        mockPrisma.mediaItem.findUnique.mockResolvedValue(makeMediaItem() as any);
+        const order: string[] = [];
+        (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
+          const out = typeof arg === 'function' ? await arg(mockPrisma) : arg;
+          order.push('status committed');
+          return out;
+        });
+        mockMediaEnrichment.enqueueVideoPostDetectionEnrichment.mockImplementation(async () => {
+          order.push('fan-out');
+        });
+
+        await handler.persistNodeResult(makeJob({ reason: 'backfill' }), {
+          verdict: 'clean', score: 0, ocrText: null, platform: null, detectionMethod: null, matchedRule: null, confidence: 0,
+        });
+
+        expect(order).toEqual(['status committed', 'fan-out']);
+        expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'media-1' }),
+          JobReason.backfill,
+        );
       });
     });
   });

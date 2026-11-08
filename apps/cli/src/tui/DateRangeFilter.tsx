@@ -25,7 +25,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import TextInput from 'ink-text-input';
 
 import {
@@ -33,7 +33,6 @@ import {
   describeRange,
   type DateRange,
 } from '../sync/date-range.js';
-import { BOX_BORDER, GLYPHS } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -128,11 +127,11 @@ export function DateRangeFilter({
   });
 
   const fieldMarker = (field: FocusField): string =>
-    focus === field ? GLYPHS.arrow : ' ';
+    focus === field ? '→' : ' ';
 
   return (
     <Box
-      borderStyle={BOX_BORDER}
+      borderStyle="round"
       borderColor="cyan"
       flexDirection="column"
       paddingX={2}
@@ -172,10 +171,10 @@ export function DateRangeFilter({
       {/* Live preview / validation */}
       <Box marginTop={1}>
         {errorText ? (
-          <Text color="red">{GLYPHS.cross} {errorText}</Text>
+          <Text color="red">{'✖'} {errorText}</Text>
         ) : (
           <Text color="green">
-            {GLYPHS.check} Syncing: <Text bold>{previewText}</Text>
+            {'✔'} Syncing: <Text bold>{previewText}</Text>
           </Text>
         )}
       </Box>

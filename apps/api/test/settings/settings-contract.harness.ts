@@ -134,6 +134,8 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     // MemoriaHub's run-history policies (RETRO-C7), after the platform's four.
     workflowRuns: { enabled: true, days: 30 },
     reviewRuns: { enabled: true, days: 30 },
+    // MemoriaHub's notification purge (RETRO-C8).
+    appNotifications: { enabled: true, days: 30 },
   },
   reviewRuns: { runHistoryRetentionDays: 30 },
   // The notifications slice's deployment policy (RETRO-D3): absent channels means every channel on.

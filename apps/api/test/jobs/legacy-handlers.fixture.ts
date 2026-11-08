@@ -46,7 +46,9 @@ import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-
  * Since RETRO-C3 (#585) six of them are native platform `JobHandler`s
  * (`face_detection`, `video_face_detection`, `face_auto_archive_sweep`,
  * `metadata_extraction`, `thumbnail_regen`, `thumbnail_repair`) that register
- * with `JobHandlerRegistry` themselves. They keep `type`, the node pair and
+ * with `JobHandlerRegistry` themselves; RETRO-C5 (#594) added the five
+ * dedup/burst/social types (`duplicate_detection`, `duplicate_detection_batch`,
+ * `duplicate_confidence_backfill`, `burst_detection`, `social_media_detection`). They keep `type`, the node pair and
  * `canDelete` as plain members, so the snapshot reads the same facts off them.
  */
 export const ALL_HANDLER_CLASSES = [

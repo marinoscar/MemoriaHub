@@ -1,7 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { DuplicateGroupStatus, EnrichmentJob, Prisma } from '@prisma/client';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { DuplicateGroupStatus, Prisma } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../prisma/prisma.service';
 import { DuplicateDetectionService } from './duplicate-detection.service';
 
@@ -28,18 +32,23 @@ const PAGE_SIZE = 500;
  * uncomputable and the column stays NULL), and recomputes each one's
  * tightest-pair CLIP similarity from its live members.
  *
+ * A native platform `JobHandler` (RETRO-C5, #594): a global job (no subject).
+ *
  * SERVER-ONLY by omission: no `nodeResultSchema` / `persistNodeResult` pair —
  * the computation is a pure pgvector query with no media bytes to stream, so
  * there is nothing for a distributed node to do.
  */
 @Injectable()
-export class DuplicateConfidenceBackfillHandler implements EnrichmentHandler, OnModuleInit {
+export class DuplicateConfidenceBackfillHandler implements JobHandler, OnModuleInit {
   readonly type = 'duplicate_confidence_backfill';
+  readonly label = 'Duplicate confidence backfill';
+  /** A keyset pass over every pending group, one pgvector query each: a 30-minute ceiling, retried once. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 2 };
 
   private readonly logger = new Logger(DuplicateConfidenceBackfillHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly detection: DuplicateDetectionService,
   ) {}
@@ -48,7 +57,7 @@ export class DuplicateConfidenceBackfillHandler implements EnrichmentHandler, On
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
+  async process(job: Job): Promise<void> {
     const payload = (job.payload as unknown as DuplicateConfidenceBackfillPayload | null) ?? {};
     const limit = typeof payload.limit === 'number' && payload.limit > 0 ? payload.limit : null;
 

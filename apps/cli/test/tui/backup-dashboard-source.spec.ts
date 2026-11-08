@@ -4,28 +4,35 @@
  * Unit tests for the pure state helpers in tui/backup-dashboard-source.ts:
  * initial state, snapshot parsing/hydration, the shared event reducer used by
  * both the attached (daemon IPC) and embedded (in-process BackupEngine)
- * sources, and the attach-vs-embedded selection logic.
+ * sources, the attach-vs-embedded selection logic, and (RETRO-F4, #582) the platform
+ * dashboard pieces: the reducer, the embedded feed and the controls.
  *
  * Plain-function tests — no Ink, no sockets, no engine. Mirrors
  * test/tui/node-dashboard-source.spec.ts.
  */
 
+import { jest } from '@jest/globals';
+
 import { BACKUP_EV, BackupTypedEmitter } from '../../src/backup/events.js';
+import type { DaemonClient, DaemonMessage } from '../../src/node/ipc-client.js';
 import {
   MAX_LOG,
   MAX_RUNS,
   appendBackupLog,
   applyPendingLag,
+  backupDashboardReducer,
   checkpointAgeMs,
+  createBackupSource,
   currentBytesPerSec,
-  EmbeddedBackupSource,
+  embeddedBackupControl,
+  embeddedBackupFeed,
   hydrateFromBackupSnapshot,
   initialBackupDashboardState,
   markCancelling,
   parseBackupSnapshot,
+  probeBackupDaemon,
   reduceBackupEvent,
   selectBackupSource,
-  type BackupDashboardSource,
   type BackupSnapshot,
 } from '../../src/tui/backup-dashboard-source.js';
 
@@ -452,64 +459,87 @@ describe('reduceBackupEvent', () => {
 // ---------------------------------------------------------------------------
 
 describe('selectBackupSource', () => {
-  const fakeAttached = (): BackupDashboardSource =>
-    ({
-      mode: 'attached',
-      snapshot: null,
-      onEvent: () => {},
-      onDisconnect: () => {},
-      refreshStatus: async () => null,
-      runNow: () => {},
-      cancel: () => {},
-      setRate: () => {},
-      close: () => {},
-    }) as BackupDashboardSource;
+  const snapshot: BackupSnapshot = {
+    configured: true,
+    running: null,
+    lastRun: null,
+    checkpoint: null,
+    counters: null,
+    rate: null,
+  };
 
-  it('attaches when a daemon is running', async () => {
-    const source = await selectBackupSource({
-      isDaemonRunning: async () => true,
-      createAttached: async () => fakeAttached(),
-    });
-    expect(source.mode).toBe('attached');
+  it('attaches when a daemon is running and has a backup root bound', async () => {
+    const choice = await selectBackupSource({ isDaemonRunning: async () => true, probe: async () => snapshot });
+    expect(choice).toEqual({ mode: 'attached', snapshot });
   });
 
   it('falls back to embedded when no daemon is running', async () => {
-    let created = false;
-    const source = await selectBackupSource({
-      isDaemonRunning: async () => false,
-      createAttached: async () => {
-        created = true;
-        return fakeAttached();
-      },
-    });
-    expect(source.mode).toBe('embedded');
-    expect(source).toBeInstanceOf(EmbeddedBackupSource);
-    expect(created).toBe(false);
+    const probe = jest.fn(async () => snapshot);
+    const choice = await selectBackupSource({ isDaemonRunning: async () => false, probe });
+    expect(choice.mode).toBe('embedded');
+    expect(probe).not.toHaveBeenCalled();
   });
 
   it('falls back to embedded when the daemon vanishes between probe and connect', async () => {
-    const source = await selectBackupSource({
+    const choice = await selectBackupSource({
       isDaemonRunning: async () => true,
-      createAttached: async () => {
+      probe: async () => {
         throw new Error('ECONNREFUSED');
       },
     });
-    expect(source.mode).toBe('embedded');
+    expect(choice.mode).toBe('embedded');
   });
 
-  it('falls back to embedded when the daemon has no bound backup root', async () => {
-    const source = await selectBackupSource({
-      isDaemonRunning: async () => true,
-      createAttached: async () => {
-        throw new Error('the running daemon has no backup root bound');
+  it('falls back to embedded when the daemon has no bound backup root (the probe answers null)', async () => {
+    const choice = await selectBackupSource({ isDaemonRunning: async () => true, probe: async () => null });
+    expect(choice.mode).toBe('embedded');
+  });
+});
+
+describe('probeBackupDaemon', () => {
+  function client(reply: DaemonMessage | Error): { client: DaemonClient; sent: Record<string, unknown>[]; closed: () => boolean } {
+    const sent: Record<string, unknown>[] = [];
+    let closed = false;
+    return {
+      sent,
+      closed: () => closed,
+      client: {
+        send: (cmd) => void sent.push(cmd),
+        onMessage: () => undefined,
+        onClose: () => undefined,
+        waitFor: async () => {
+          if (reply instanceof Error) throw reply;
+          return reply;
+        },
+        close: () => void (closed = true),
       },
-    });
-    expect(source.mode).toBe('embedded');
+    };
+  }
+
+  it('asks for the status and returns the snapshot of a configured daemon', async () => {
+    const fake = client({ kind: 'backup-status', configured: true, running: null, lastRun: null, checkpoint: null, counters: null, rate: null });
+    const snap = await probeBackupDaemon('/tmp/x.sock', 100, (async () => fake.client) as never);
+    expect(snap?.configured).toBe(true);
+    expect(fake.sent).toEqual([{ cmd: 'backup-status' }]);
+    expect(fake.closed()).toBe(true);
+  });
+
+  it('returns null for a daemon with no backup root bound, for silence and for nothing listening', async () => {
+    const unbound = client({ kind: 'backup-status', configured: false });
+    expect(await probeBackupDaemon('/tmp/x.sock', 100, (async () => unbound.client) as never)).toBeNull();
+    const silent = client(new Error('timed out'));
+    expect(await probeBackupDaemon('/tmp/x.sock', 100, (async () => silent.client) as never)).toBeNull();
+    expect(silent.closed()).toBe(true);
+    expect(
+      await probeBackupDaemon('/tmp/x.sock', 100, (async () => {
+        throw new Error('ENOENT');
+      }) as never),
+    ).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// EmbeddedBackupSource
+// The platform dashboard pieces: reducer, embedded feed, controls
 // ---------------------------------------------------------------------------
 
 /** Minimal stand-in for a BackupEngine: typed emitter + a cancel() flag. */
@@ -520,47 +550,76 @@ class FakeEngine extends BackupTypedEmitter {
   }
 }
 
-describe('EmbeddedBackupSource', () => {
-  it('buffers events emitted before onEvent subscribes, then flushes them', () => {
-    const source = new EmbeddedBackupSource();
+describe('backupDashboardReducer', () => {
+  it('starts from the initial state, or from the seed of the source it replaces', () => {
+    const reducer = backupDashboardReducer();
+    expect(reducer.initial()).toEqual(initialBackupDashboardState());
+    expect(reducer.initial()).not.toBe(reducer.initial());
+    const seed = { ...initialBackupDashboardState(), runState: 'running' as const };
+    expect(backupDashboardReducer(seed).initial()).toBe(seed);
+  });
+
+  it('folds an event with the reducer and parses a frame', () => {
+    const reducer = backupDashboardReducer();
+    const started = reducer.reduce(reducer.initial(), { ev: BACKUP_EV.RUN_STARTED, payload: { runId: 'r1', kind: 'incremental', trigger: 'manual' }, atMs: 5 });
+    expect(started.runState).toBe('running');
+    expect(reducer.parseEvent({ ev: BACKUP_EV.RUN_STARTED, payload: {} })).toMatchObject({ ev: BACKUP_EV.RUN_STARTED });
+    expect(reducer.parseEvent(42)).toBeUndefined();
+  });
+
+  it('hydrates from a daemon backup-status snapshot', () => {
+    const reducer = backupDashboardReducer();
+    const hydrated = reducer.hydrate(reducer.initial(), {
+      configured: true,
+      running: { trigger: 'scheduled', startedAt: '2026-01-01T00:00:00.000Z' },
+      lastRun: null,
+      checkpoint: null,
+      counters: null,
+      rate: { concurrency: 3, maxMbps: 0 },
+    });
+    expect(hydrated.runState).toBe('running');
+    expect(hydrated.rate).toEqual({ concurrency: 3, maxMbps: 0 });
+  });
+});
+
+describe('embeddedBackupFeed', () => {
+  it('reports the engine events through a dashboard source, and detaches on stop', async () => {
     const engine = new FakeEngine();
-    source.attachEngine(engine);
+    const source = createBackupSource(embeddedBackupFeed(engine));
+    await source.start();
+    expect(source.getState().mode).toBe('embedded');
+    expect(source.getState().connected).toBe(true);
 
-    engine.emit(BACKUP_EV.RUN_STARTED, { runId: 'r1' });
-    const seen: Array<[string, unknown]> = [];
-    source.onEvent((ev, payload) => seen.push([ev, payload]));
-    expect(seen).toEqual([[BACKUP_EV.RUN_STARTED, { runId: 'r1' }]]);
+    engine.emit(BACKUP_EV.RUN_STARTED, { runId: 'r1', kind: 'incremental', trigger: 'manual' });
+    expect(source.getState().runState).toBe('running');
 
+    source.stop();
     engine.emit(BACKUP_EV.RUN_FINISHED, {
       status: 'completed',
       stats: { itemsDownloaded: 0, itemsSkipped: 0, sidecarsWritten: 0, bytesDownloaded: 0, errors: 0 },
     });
-    expect(seen).toHaveLength(2);
+    expect(source.getState().runState).toBe('running'); // detached: no longer follows
   });
+});
 
-  it('runNow delegates to the registered starter, and only when idle', () => {
-    const source = new EmbeddedBackupSource();
+describe('embeddedBackupControl', () => {
+  it('runNow delegates to the starter, and only when no engine is running', () => {
     const kinds: string[] = [];
-    source.setStarter((kind) => kinds.push(kind));
-
-    source.runNow();
-    source.runNow('reconcile');
+    let engine: FakeEngine | null = null;
+    const control = embeddedBackupControl({ start: (k) => kinds.push(k), engine: () => engine });
+    control.runNow();
+    control.runNow('reconcile');
     expect(kinds).toEqual(['incremental', 'reconcile']);
-    expect(source.hasEngine).toBe(false);
+    engine = new FakeEngine();
+    control.runNow();
+    expect(kinds).toHaveLength(2); // one run at a time, mirroring BackupHost
   });
 
-  it('close() cancels the in-process run — nothing outlives the UI', () => {
-    const source = new EmbeddedBackupSource();
+  it('cancel() cancels the in-process run; setRate is a no-op for an embedded run', () => {
     const engine = new FakeEngine();
-    source.attachEngine(engine);
-    expect(source.hasEngine).toBe(true);
-
-    source.close();
+    const control = embeddedBackupControl({ start: () => undefined, engine: () => engine });
+    control.cancel();
     expect(engine.cancelled).toBe(true);
-    expect(source.hasEngine).toBe(false);
-  });
-
-  it('refreshStatus resolves null (no daemon to ask)', async () => {
-    await expect(new EmbeddedBackupSource().refreshStatus()).resolves.toBeNull();
+    expect(() => control.setRate({ concurrency: 4 })).not.toThrow();
   });
 });

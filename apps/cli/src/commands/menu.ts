@@ -1,21 +1,17 @@
 import { Command } from 'commander';
 
-import { readVersion } from '../version.js';
-
 /**
- * `menu` — explicit entry to the full MemoriaHub terminal UI (requires a TTY).
+ * `menu` — kept so `memoriahub menu` and `memoriahub --help` read as they did.
  *
- * A bare `memoriahub` opens the platform's menu, which has a "MemoriaHub menu"
- * entry that lands in the same place. This command is the direct route and
- * behaves exactly as it did on 1.3.
- * PLATFORM-ADOPTION-SHIM(RETRO-F4): the legacy TUI is re-hosted by RETRO-F4.
+ * The terminal UI is the platform TUI and opens for a bare `memoriahub` in a real
+ * terminal. `run.ts` rewrites a lone `menu` to that bare invocation
+ * (extensions/legacy-flags.ts, rule `menu`), so this action only runs when the
+ * word is reached some other way, where it points at the bare command.
  */
 export function menuCommand(): Command {
   return new Command('menu')
     .description('Launch the interactive terminal UI (requires a TTY)')
-    .action(async () => {
-      // Dynamic import keeps ink/React out of every headless code path.
-      const { launchTui } = await import('../tui/app.js');
-      await launchTui({ currentVersion: readVersion() });
+    .action(() => {
+      process.stdout.write('Run `memoriahub` with no arguments to open the interactive menu (requires a TTY).\n');
     });
 }

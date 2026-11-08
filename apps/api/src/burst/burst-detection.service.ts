@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { EnrichmentJob, MediaType, BurstGroupStatus, JobReason } from '@prisma/client';
+import { MediaType, BurstGroupStatus, JobReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
@@ -9,6 +9,7 @@ import {
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { computeAndPersistVisualHash } from '../storage/processing/hash-backfill.util';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
+import type { MediaJobContext } from '../platform/jobs/media-item-job';
 
 /**
  * Hamming distance between two 64-bit perceptual hashes (bigint form).
@@ -46,7 +47,12 @@ export class BurstDetectionService {
     private readonly duplicateDetectionService: DuplicateDetectionService,
   ) {}
 
-  async processMediaItem(job: EnrichmentJob): Promise<void> {
+  /**
+   * Group one photo with its burst neighbours. `job` is what the native
+   * `burst_detection` handler resolved (`MediaJobContext`, RETRO-C5): its id for
+   * log lines and the media item it is about.
+   */
+  async processMediaItem(job: Pick<MediaJobContext, 'id' | 'mediaItemId'>): Promise<void> {
     const mediaItemId = job.mediaItemId;
     if (!mediaItemId) {
       this.logger.warn(`burst_detection job ${job.id} has no mediaItemId; skipping`);
@@ -223,6 +229,7 @@ export class BurstDetectionService {
 
     let targetGroupId: string;
 
+    // metrics: RETRO-T3 (app.media.bursts.grouped)
     if (existingGroupIds.length === 0) {
       // All linked neighbors are ungrouped — create a new group
       const earliestCapturedAt = [item.capturedAt, ...linkedCandidates.map((c) => c.capturedAt)]

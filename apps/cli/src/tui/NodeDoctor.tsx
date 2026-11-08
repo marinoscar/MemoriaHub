@@ -41,7 +41,7 @@
  */
 
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 
 import { ApiClient } from '../api.js';
@@ -55,7 +55,6 @@ import {
   type CapabilityRowSummary,
   type HealthLevel,
 } from '../node/doctor-summary.js';
-import { BOX_BORDER } from './theme.js';
 import {
   DOCTOR_STEP_ORDER,
   DOCTOR_STEP_LABELS,
@@ -237,7 +236,7 @@ export function NodeDoctor({ config, onBack, variant = 'screen' }: NodeDoctorPro
 
   return (
     <Box
-      borderStyle={BOX_BORDER}
+      borderStyle="round"
       borderColor="cyan"
       flexDirection="column"
       paddingX={2}

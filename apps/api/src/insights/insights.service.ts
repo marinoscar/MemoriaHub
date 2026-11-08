@@ -3,12 +3,12 @@
 // =============================================================================
 //
 // Computes and caches a global storage-metrics snapshot across all circles.
-// Computation is driven by the enrichment queue (StorageInsightsHandler) to
+// Computation is driven by the platform job queue (StorageInsightsHandler, native since RETRO-C8) to
 // provide retries, restart-survival, and visibility in the jobs dashboard.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, InsightsSnapshot, JobReason, MhLegacyJobStatus } from '@prisma/client';
+import { Prisma, InsightsSnapshot, JobReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { EnrichmentJob } from '@prisma/client';
@@ -168,7 +168,8 @@ export class InsightsService {
   // ---------------------------------------------------------------------------
   //
   // Returns the in-flight/last-known state of the storage_insights job by
-  // querying the most recent enrichment job row of this type.
+  // querying the most recent platform `jobs` row of this type (RETRO-C8, #608:
+  // a global job, so the type alone identifies it).
   // ---------------------------------------------------------------------------
 
   async getRefreshState(): Promise<RefreshState> {
@@ -182,13 +183,13 @@ export class InsightsService {
     }
 
     switch (job.status) {
-      case MhLegacyJobStatus.pending:
+      case 'pending':
         return { state: 'pending', jobId: job.id, lastError: null };
-      case MhLegacyJobStatus.running:
+      case 'running':
         return { state: 'running', jobId: job.id, lastError: null };
-      case MhLegacyJobStatus.failed:
+      case 'failed':
         return { state: 'failed', jobId: job.id, lastError: job.lastError };
-      case MhLegacyJobStatus.succeeded:
+      case 'succeeded':
       default:
         return { state: 'idle', jobId: null, lastError: null };
     }

@@ -29,12 +29,11 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import { spawn, spawnSync } from 'node:child_process';
 import * as path from 'node:path';
 
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props + local types
@@ -196,7 +195,7 @@ export function NodeInstallDeps({ onBack }: NodeInstallDepsProps): React.ReactEl
 
   if (step === 'menu') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         {header}
         <Box flexDirection="column" marginTop={1}>
           {!isLinux && (
@@ -231,7 +230,7 @@ export function NodeInstallDeps({ onBack }: NodeInstallDepsProps): React.ReactEl
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         {header}
         <Text dimColor>{title}</Text>
         {step === 'running' && (
@@ -242,7 +241,7 @@ export function NodeInstallDeps({ onBack }: NodeInstallDepsProps): React.ReactEl
       </Box>
 
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor={step === 'done' ? (ok ? 'cyan' : 'red') : 'cyan'}
         flexDirection="column"
         paddingX={2}
