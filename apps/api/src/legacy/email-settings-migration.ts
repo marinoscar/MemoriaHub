@@ -140,7 +140,7 @@ export function dropRejectedFields(target: EmailRowValue): { value: EmailRowValu
     for (const key of path.slice(0, -1)) node = isRecord(node?.[key as string]) ? (node![key as string] as Record<string, unknown>) : undefined;
     if (!node) break;
     delete node[path[path.length - 1] as string];
-    rejected.push(path.join('.'));
+    rejected.push(path.map(String).join('.'));
     result = probe();
   }
   return { value, rejected };
@@ -207,7 +207,7 @@ export async function applyEmailSettingsPlan(plan: EmailSettingsPlan, row: Email
   const parsed = emailSettingsSchema.safeParse({ provider: null, enabled: false, ...plan.merged });
   if (!parsed.success) {
     throw new Error(
-      `Refusing to write the email row: ${parsed.error.issues.map((i) => i.path.join('.') || '(root)').join(', ')} invalid.`,
+      `Refusing to write the email row: ${parsed.error.issues.map((i: { path: PropertyKey[] }) => i.path.map(String).join('.') || '(root)').join(', ')} invalid.`,
     );
   }
   // `provider` and `enabled` are required by the platform row; a legacy block
