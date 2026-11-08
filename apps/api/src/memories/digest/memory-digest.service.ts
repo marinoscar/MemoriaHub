@@ -47,7 +47,7 @@
 // -----------------------------------------------------------------------------
 // FIRE-AND-FORGET SENDS
 // -----------------------------------------------------------------------------
-// `AppEmailSender.sendEmail` never throws — it returns a result — and a failed
+// `NotificationsService.notifyNow` never throws — it returns a result — and a failed
 // send is counted and logged, never rethrown. A provider outage must not fail
 // the job, because a retry would re-send to everyone the first pass already
 // reached. Same contract as the circle-invitation / membership-confirmation
@@ -57,7 +57,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MemoryType, Prisma } from '@prisma/client';
 
-import { AppEmailSender } from '../../platform/email/app-email.sender';
+import { EmailSettingsService } from '@marinoscar/platform-api/email';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
+
+import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../../notifications-registry/memoriahub-email.notifications';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
@@ -183,7 +186,8 @@ export class MemoryDigestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
-    private readonly email: AppEmailSender,
+    private readonly emailSettings: EmailSettingsService,
+    private readonly notifications: NotificationsService,
     private readonly thumbnails: MediaThumbnailService,
   ) {}
 
@@ -218,9 +222,9 @@ export class MemoryDigestService {
   /**
    * True when the deployment can actually deliver mail.
    *
-   * The platform email settings (`email` row, RETRO-D2) read through
-   * `AppEmailSender.isConfigured`, which is exactly the precondition its
-   * `sendEmail` applies. Checking it up front is what makes "email not
+   * The platform email settings (`email` row, RETRO-D2): enabled, a provider and
+   * a from address, which is exactly the precondition the platform email
+   * channel applies before it sends. Checking it up front is what makes "email not
    * configured ⇒ the digest task no-ops and in-app memories are unaffected"
    * (epic failure matrix) true at the CRON level rather than only at the send:
    * without it, a deployment with the feature on but no transport configured
@@ -228,7 +232,10 @@ export class MemoryDigestService {
    * work before discovering it has nowhere to send. Never throws.
    */
   emailReady(): Promise<boolean> {
-    return this.email.isConfigured();
+    return this.emailSettings.get().then(
+      (settings) => Boolean(settings.enabled && settings.provider && settings.fromAddress),
+      () => false,
+    );
   }
 
   /** Rolling window for a frequency, minus the one-tick tolerance. */
@@ -423,7 +430,11 @@ export class MemoryDigestService {
         continue;
       }
 
-      const sendResult = await this.email.sendEmail(user.email, 'memory-digest', {
+      // The `memories.digest` event (email only, bound to the `memory-digest`
+      // template) through the platform dispatcher, awaited so the job's tally is
+      // per recipient. The dispatcher applies the user's own preference for the
+      // event on top of `emailDigestOptOut` above; it never throws.
+      const sendResult = await this.notifications.notifyNow(MEMORIAHUB_EMAIL_EVENT_KEYS.memoriesDigest, user.id, {
         circleName: circle.name,
         recipientName: user.displayName,
         memories: visible.map((c) => this.toItemData(c, appUrl)),
@@ -434,10 +445,10 @@ export class MemoryDigestService {
         unsubscribeUrl: this.unsubscribeUrl(appUrl, user.id),
       });
 
-      if (sendResult.success) {
-        result.sent += 1;
-      } else {
+      if (sendResult.rateLimited) {
         result.failed += 1;
+      } else {
+        result.sent += 1;
       }
     }
 

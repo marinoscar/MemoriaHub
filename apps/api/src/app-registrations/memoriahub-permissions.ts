@@ -31,7 +31,8 @@
 //
 // REMOVED BY SLICE: email_settings:* (D2, done: the platform email routes check
 // system_settings:read|write), ai_settings:* (E1), storage_settings:*
-// and storage:* (D1), db_backup:* (D4), push:* and broadcasts:* (D3). Their ids
+// and storage:* (D1), db_backup:* (D4), push:* and broadcasts:* (D3, done: the notifications
+// slice declares them, plus the org-scoped org_broadcasts:* granted to org_admin). Their ids
 // are permanent: the web cards and the CLI use the strings exactly.
 // =============================================================================
 
@@ -187,30 +188,6 @@ export const MEMORIAHUB_PERMISSIONS = {
   STORAGE_SETTINGS_WRITE: {
     id: 'storage_settings:write',
     description: 'Configure storage provider credentials, set active provider, run migrations',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  PUSH_READ: {
-    id: 'push:read',
-    description: 'Admin: view Web Push (VAPID) configuration',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  PUSH_WRITE: {
-    id: 'push:write',
-    description: 'Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  BROADCASTS_READ: {
-    id: 'broadcasts:read',
-    description: 'Admin: view notification broadcasts and audience size',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  BROADCASTS_WRITE: {
-    id: 'broadcasts:write',
-    description: 'Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts',
     scope: 'system',
     defaultGrants: ['admin'],
   },

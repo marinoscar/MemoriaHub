@@ -10,6 +10,8 @@
 | **Code** | `apps/api/src/notifications/broadcasts/`, `apps/api/src/email/templates/broadcast.email.ts`, `apps/web/src/pages/Admin/BroadcastsPage.tsx`, `apps/web/src/components/admin/{BroadcastComposer,BroadcastDetailDialog}.tsx`, `apps/web/src/{services/broadcasts.ts,hooks/useBroadcasts.ts}` |
 | **Builds on** | [Notification Center](notifications.md), [Browser Notifications, Web Push and the Live Stream](browser-notifications.md) |
 
+> **Since RETRO-D3 ([#576](https://github.com/marinoscar/MemoriaHub/issues/576)): the platform's broadcasts.** `/api/admin/broadcasts/*`, the composer page and the fan-out are `BroadcastsModule` of `@marinoscar/platform-api/notifications` (job types `admin.broadcast.start` / `admin.broadcast.chunk`, table `notification_broadcasts`; permissions `broadcasts:*` and, per organization, `org_broadcasts:*`). The app's `broadcast_start` / `broadcast_chunk` handlers and `BroadcastFailureListener` are deleted; the two type strings are retired no-ops. The carry-over copies legacy broadcasts ([runbook](../runbooks/notifications-cutover.md)). The rest of this document is the original design.
+
 An administrator composes one announcement and sends it now or on a schedule to **every active user**, over any combination of the inbox, Web Push and email. This spec documents what the code in this repository does. It was ported from EnterpriseAppBase; here it rides on MemoriaHub's `enrichment_jobs` queue and Notification Center rather than EAB's registry.
 
 ---

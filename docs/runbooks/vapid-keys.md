@@ -7,6 +7,8 @@
 | **Where** | Admin UI, `/admin/settings/push` (Settings hub, General section, card "Web Push") |
 | **Design** | [Browser Notifications, Web Push and the Live Stream](../specs/browser-notifications.md) |
 
+> **Since RETRO-D3 ([#576](https://github.com/marinoscar/MemoriaHub/issues/576)).** `/admin/settings/push` is the platform's `PushConfigPage` and the private key lives in the platform credential store (purpose `push_vapid`). After the upgrade, `npm run credentials:migrate-legacy --workspace=api -- --purpose push_vapid --apply` moves the existing key pair there, so existing browsers keep their subscriptions ([notifications cutover runbook](notifications-cutover.md)). The procedure below is unchanged in intent; button labels may differ.
+
 Web Push needs a VAPID key pair: the server signs every push with the private key, and each browser subscribes against the public key. In MemoriaHub the pair is created, stored, rotated and removed **entirely from the admin UI**. There are **no environment variables** for it, by design: storage, AI, Web Push and SMTP are runtime-configured so there is one source of truth, and there is no environment fallback to fall back to. The only deployment prerequisite is `SECRETS_ENCRYPTION_KEY`, which encrypts the private key at rest.
 
 ---

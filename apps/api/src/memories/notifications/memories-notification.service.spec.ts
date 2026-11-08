@@ -8,17 +8,16 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MemoryType, NotificationType } from '@prisma/client';
+import { MemoryType } from '@prisma/client';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
+import { createPlatformNotificationsMock, type RecordedNotification } from '../../../test/mocks/platform-notifications.mock';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NotificationsService } from '../../notifications/notifications.service';
 import {
   MEMORIES_READY_LINK,
   MEMORIES_READY_WINDOW_MS,
   MemoriesNotificationService,
 } from './memories-notification.service';
-
-type UpsertArg = Parameters<NotificationsService['upsertCountedEvent']>[0];
 
 describe('MemoriesNotificationService', () => {
   let service: MemoriesNotificationService;
@@ -26,10 +25,8 @@ describe('MemoriesNotificationService', () => {
     circle: { findUnique: jest.Mock };
     memory: { findMany: jest.Mock };
   };
-  let notifications: {
-    upsertCountedEvent: jest.Mock;
-    primePreferences: jest.Mock;
-  };
+  let platform: ReturnType<typeof createPlatformNotificationsMock>;
+  let notifications: { upsertCountedEvent: jest.Mock };
 
   const SINCE = new Date('2026-08-09T06:00:00.000Z');
 
@@ -43,24 +40,23 @@ describe('MemoriesNotificationService', () => {
       },
       memory: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    notifications = {
-      upsertCountedEvent: jest.fn().mockResolvedValue(undefined),
-      primePreferences: jest.fn().mockResolvedValue(undefined),
-    };
+    platform = createPlatformNotificationsMock();
+    notifications = { upsertCountedEvent: platform.mock.notifyCounted };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoriesNotificationService,
         { provide: PrismaService, useValue: prisma },
-        { provide: NotificationsService, useValue: notifications },
+        { provide: NotificationsService, useValue: platform.mock },
       ],
     }).compile();
 
     service = module.get(MemoriesNotificationService);
   });
 
-  function args(index = 0): UpsertArg {
-    return notifications.upsertCountedEvent.mock.calls[index]![0] as UpsertArg;
+  /** The platform `notifyCounted` call, with the `memories.ready` template applied. */
+  function args(index = 0): RecordedNotification {
+    return platform.calls('notifyCounted')[index]!;
   }
 
   it('writes ONE counted row per member for a batch of memories', async () => {
@@ -75,23 +71,20 @@ describe('MemoriesNotificationService', () => {
     // single row via `increment`, they do not fan out into six calls.
     expect(notifications.upsertCountedEvent).toHaveBeenCalledTimes(3);
     expect(args().increment).toBe(6);
-    expect(args().type).toBe(NotificationType.memories_ready);
+    expect(args().eventKey).toBe('memories.ready');
     expect(args().windowMs).toBe(MEMORIES_READY_WINDOW_MS);
     expect(args().link).toBe(MEMORIES_READY_LINK);
-    expect(args().reunreadOnIncrement).toBe(true);
-    expect(new Set(notifications.upsertCountedEvent.mock.calls.map((c) => c[0].userId))).toEqual(
+    expect(new Set(platform.calls('notifyCounted').map((c) => c.userId))).toEqual(
       new Set(['u1', 'u2', 'u3']),
     );
   });
 
-  it('partitions by circle: matchData is mirrored in data', async () => {
+  it('partitions by circle: the platform scope is the circle', async () => {
     await service.recordGenerated({ circleId: 'circle-a', createdCount: 2, since: SINCE });
 
-    // Every matchData key MUST also appear in `data`, or the row this call
-    // creates would not be found (and incremented) by the next one.
-    expect(args().matchData).toEqual({ circleId: 'circle-a' });
-    expect(args().data).toMatchObject({ circleId: 'circle-a' });
     expect(args().circleId).toBe('circle-a');
+    expect(args().matchData).toBeUndefined();
+    expect(args().data).toMatchObject({ circleId: 'circle-a', circleName: 'Familia' });
   });
 
   it('pluralizes the title against the RESULTING count, not the increment', async () => {
@@ -139,14 +132,8 @@ describe('MemoriesNotificationService', () => {
     await service.recordGenerated({ circleId: 'circle-a', createdCount: 3, since: SINCE });
 
     expect(notifications.upsertCountedEvent).toHaveBeenCalledTimes(3);
-    expect(args().body).toBeNull();
-  });
-
-  it('warms preferences once for the whole membership', async () => {
-    await service.recordGenerated({ circleId: 'circle-a', createdCount: 2, since: SINCE });
-
-    expect(notifications.primePreferences).toHaveBeenCalledTimes(1);
-    expect(notifications.primePreferences).toHaveBeenCalledWith(['u1', 'u2', 'u3']);
+    expect(args().body).toBe('');
+    expect(args().data).not.toHaveProperty('topTitle');
   });
 
   it('produces nothing when the run created nothing', async () => {

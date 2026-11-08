@@ -7,13 +7,13 @@ import { AppBar } from '../navigation/AppBar';
 import { NavigationRail } from '../navigation/NavigationRail';
 import { BottomNav } from '../navigation/BottomNav';
 import { TimezonePrompt } from '../settings/TimezonePrompt';
-import { NotificationPermissionBanner } from '../notifications/NotificationPermissionBanner';
+import { NotificationPermissionBanner } from '@marinoscar/platform-web/notifications/ui';
+import { usePushSubscriptionSync } from '@marinoscar/platform-web/notifications/headless';
 import { AndroidUpdateBanner } from './AndroidUpdateBanner';
 import { OnboardingBanner } from '../onboarding/OnboardingBanner';
 import { OnboardingWelcome } from '../onboarding/OnboardingWelcome';
 import { APP_NAME } from '../../constants/app';
-import { usePushSubscriptionSync } from '../../hooks/usePushSubscriptionSync';
-import { useNotificationClickHandling } from '../../hooks/useNotificationClickHandling';
+import { useCircleLinkParam } from '../../hooks/useCircleLinkParam';
 import { APP_NAVIGATION } from '../../config/shell';
 import { APP_SHELL_PROVIDERS } from '../../platform/shellProviders';
 
@@ -55,13 +55,13 @@ interface LayoutProps {
  * `__tests__/config/breakpointGates.test.ts` fails on a new read.
  */
 export function Layout({ mainVariant }: LayoutProps) {
-  // Browser notifications (issue #486, epic #481). Mounted ONCE, here, because
-  // this shell only renders for an authenticated user: auto-prompts for
-  // permission when push is on, keeps this device's push subscription
-  // registered, and routes clicks on OS notifications to mark-read + circle
-  // switch + navigate.
+  // Browser notifications (issue #486; the platform slice since RETRO-D3).
+  // Mounted ONCE, here, because this shell only renders for an authenticated
+  // user: auto-prompts for permission when push is on and keeps this device's
+  // push subscription registered. A notification link's `?c=<circleId>` switches
+  // the active circle, whichever way it was opened.
   const pushSync = usePushSubscriptionSync();
-  useNotificationClickHandling();
+  useCircleLinkParam();
 
   return (
     <OnboardingProvider appName={APP_NAME}>

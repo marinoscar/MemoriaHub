@@ -96,8 +96,14 @@ const NEW_PLATFORM_PERMISSIONS = [
   'ai:use',
   'ai_config:read',
   'ai_config:write',
+  // The alerts slice (RETRO-H5, #609): system scope, admin only. (The list is sorted.)
+  'alerts:read',
+  'alerts:write',
   'org_ai_config:read',
   'org_ai_config:write',
+  // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
+  'org_broadcasts:read',
+  'org_broadcasts:write',
   'org_invites:read',
   'org_invites:write',
   'org_members:read',

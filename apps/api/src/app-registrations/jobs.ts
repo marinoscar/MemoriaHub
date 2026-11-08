@@ -30,7 +30,6 @@ import {
   type RetentionPolicyDefinition,
 } from '@marinoscar/platform-api/jobs';
 
-import { APP_NOTIFICATIONS_RETENTION_POLICY } from '../notifications/notifications.retention';
 import { REVIEW_RUNS_RETENTION_POLICY } from '../review-runs/review-runs.retention';
 import { WORKFLOW_RUNS_RETENTION_POLICY } from '../workflows/runs/workflow-runs.retention';
 
@@ -38,8 +37,8 @@ import { WORKFLOW_RUNS_RETENTION_POLICY } from '../workflows/runs/workflow-runs.
  * The job types the legacy handlers serve, and the label each shows. A native
  * handler declares its own `label` and is not listed (RETRO-C3: the six
  * media/face types; RETRO-C5: the five dedup/burst/social types; RETRO-C8:
- * memory_generation, memory_digest, storage_insights, broadcast_start,
- * broadcast_chunk and the notification_purge retention handler).
+ * memory_generation, memory_digest and storage_insights; RETRO-D3 retired
+ * broadcast_start, broadcast_chunk and notification_purge, listed below).
  */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   // Media enrichment (per-item compute)
@@ -80,9 +79,18 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
  *   dispatches to `RetiredJobTypeHandler` (platform/jobs/retired-job-types.ts),
  *   which succeeds without doing anything, so a row queued before the cutover
  *   drains instead of sitting `pending` for ever.
+ *
+ *   notification_purge, broadcast_start, broadcast_chunk (RETRO-D3): the platform
+ *   notifications slice's purges and broadcast jobs replace them; same no-op rule.
  */
 export const RETIRED_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   job_history_purge: 'Job history purge (retired)',
+  // RETRO-D3 (#576): replaced by the notifications slice's retention purges and its
+  // `admin.broadcast.start` / `admin.broadcast.chunk`; no-op handlers in
+  // platform/notifications/retired-notification-job-types.ts.
+  notification_purge: 'Notification purge (retired)',
+  broadcast_start: 'Broadcast start (retired)',
+  broadcast_chunk: 'Broadcast delivery (retired)',
 };
 
 /** Extra enqueue reasons. Empty: `upload`, `rerun` and `backfill` are built in. */
@@ -92,7 +100,9 @@ export const APP_JOB_REASONS: readonly JobReasonDefinition[] = [];
 export const APP_RETENTION_POLICIES: readonly RetentionPolicyDefinition[] = [
   WORKFLOW_RUNS_RETENTION_POLICY,
   REVIEW_RUNS_RETENTION_POLICY,
-  APP_NOTIFICATIONS_RETENTION_POLICY,
+  // RETRO-C8's `appNotifications` policy is gone since RETRO-D3 (#576): the
+  // platform's `retention.notifications` / `retention.notificationDeliveries`
+  // purge the platform inbox and delivery log.
 ];
 
 let registered = false;

@@ -53,7 +53,7 @@ import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
-import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
+import { UploadNotificationService } from '../notification-producers/upload-notification.service';
 import { MediaTouchService } from './media-touch.service';
 import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source';
 

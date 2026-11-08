@@ -94,6 +94,26 @@
       "scope": "system"
     },
     {
+      "name": "broadcasts:read",
+      "description": "View notification broadcasts and their delivery history",
+      "scope": "system"
+    },
+    {
+      "name": "broadcasts:write",
+      "description": "Compose, schedule, cancel and send notification broadcasts",
+      "scope": "system"
+    },
+    {
+      "name": "push:read",
+      "description": "View Web Push (VAPID) configuration",
+      "scope": "system"
+    },
+    {
+      "name": "push:write",
+      "description": "Generate, rotate, enable/disable and remove Web Push VAPID keys",
+      "scope": "system"
+    },
+    {
       "name": "ai_config:read",
       "description": "View the deployment-wide AI platform policy",
       "scope": "system"
@@ -172,6 +192,26 @@
       "name": "org_settings:write",
       "description": "Modify the active organization's settings overrides",
       "scope": "org"
+    },
+    {
+      "name": "org_broadcasts:read",
+      "description": "View the active organization's notification broadcasts",
+      "scope": "org"
+    },
+    {
+      "name": "org_broadcasts:write",
+      "description": "Compose, schedule, cancel and send notification broadcasts to the active organization",
+      "scope": "org"
+    },
+    {
+      "name": "alerts:read",
+      "description": "View alert rules, incidents and the firing summary",
+      "scope": "system"
+    },
+    {
+      "name": "alerts:write",
+      "description": "Create, edit and delete alert rules; test them; acknowledge incidents",
+      "scope": "system"
     },
     {
       "name": "storage:read",
@@ -287,26 +327,6 @@
       "name": "storage_settings:write",
       "description": "Configure storage provider credentials, set active provider, run migrations",
       "scope": "system"
-    },
-    {
-      "name": "push:read",
-      "description": "Admin: view Web Push (VAPID) configuration",
-      "scope": "system"
-    },
-    {
-      "name": "push:write",
-      "description": "Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys",
-      "scope": "system"
-    },
-    {
-      "name": "broadcasts:read",
-      "description": "Admin: view notification broadcasts and audience size",
-      "scope": "system"
-    },
-    {
-      "name": "broadcasts:write",
-      "description": "Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts",
-      "scope": "system"
     }
   ],
   "rolePermissions": {
@@ -323,6 +343,10 @@
       "db_backup:read",
       "db_backup:write",
       "db_backup:restore",
+      "broadcasts:read",
+      "broadcasts:write",
+      "push:read",
+      "push:write",
       "ai_config:read",
       "ai_config:write",
       "telemetry:read",
@@ -330,6 +354,8 @@
       "telemetry:query",
       "organizations:read",
       "organizations:write",
+      "alerts:read",
+      "alerts:write",
       "storage:delete_any",
       "media:read_any",
       "media:write_any",
@@ -343,11 +369,7 @@
       "geo_settings:read",
       "geo_settings:write",
       "storage_settings:read",
-      "storage_settings:write",
-      "push:read",
-      "push:write",
-      "broadcasts:read",
-      "broadcasts:write"
+      "storage_settings:write"
     ],
     "contributor": [
       "user_settings:read",
@@ -386,6 +408,8 @@
       "org_invites:write",
       "org_settings:read",
       "org_settings:write",
+      "org_broadcasts:read",
+      "org_broadcasts:write",
       "storage:read",
       "storage:write",
       "media:read",
