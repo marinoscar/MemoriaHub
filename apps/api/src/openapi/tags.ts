@@ -118,6 +118,12 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'Client-visible feature flags for the calling user. Authentication only, no permission, so ' +
           'non-admin members can resolve gated UI affordances without a 403.',
       },
+      {
+        name: 'User data',
+        description:
+          'The Danger Zone: what the caller holds per category, and deleting their own data by scope with a ' +
+          'typed confirmation (`user.data.purge`). Served by the platform user-data slice (RETRO-H1).',
+      },
     ],
   },
   {
@@ -508,6 +514,18 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
       {
         name: 'Admin: AI Picture Enhancer',
         description: 'Readiness status for the AI Picture Enhancer: feature flag, provider, model, and credential.',
+      },
+      {
+        name: 'Factory reset',
+        description:
+          'Return the deployment to a fresh install: every other user and all application data deleted, ' +
+          'configuration and backups kept (`admin.factory_reset`, `system:factory_reset`). Platform user-data slice (RETRO-H1).',
+      },
+      {
+        name: 'Organization offboarding',
+        description:
+          'Delete an organization with its data, members and invitations (`org.offboard`, `orgs:offboard`). ' +
+          'Multi-organization deployments only. Platform user-data slice (RETRO-H1).',
       },
     ],
   },
