@@ -1260,7 +1260,7 @@ function serviceCmd(): Command {
         process.exit(1);
       }
 
-      // process.argv[1] is the installed CLI entry (dist/index.js) both for a
+      // process.argv[1] is the installed CLI entry (dist/cli.js) both for a
       // global install and a repo checkout.
       const entry = path.resolve(process.argv[1]);
       const unit = [

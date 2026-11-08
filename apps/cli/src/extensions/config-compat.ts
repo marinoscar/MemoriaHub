@@ -84,6 +84,11 @@ export function migrateLegacyConfig(dir: string = configDir()): MigrationResult 
   }
 }
 
+/** Where the platform CLI keeps its config: `$HOME/.memoriahub` (it ignores MEMORIAHUB_STATE_DIR). */
+export function platformConfigDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return path.join(env['HOME'] || os.homedir(), '.memoriahub');
+}
+
 /** Fields that only the app's commands own; the platform's `login` does not write them. */
 const PLATFORM_FIELDS = new Set(['serverUrl', 'token', 'expiresAt', 'tokenId', 'tokenName', 'updatedAt']);
 
