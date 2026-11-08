@@ -1,0 +1,32 @@
+Usage: memoriahub convert [options] [path...]
+
+Convert video files (MOV, MTS, AVI, WMV, …) to MP4 (requires ffmpeg)
+
+Arguments:
+  path                       Video files and/or folders to convert (omit to use
+                             --all)
+
+Options:
+  --all                      Convert videos in all registered enabled folders
+                             (default: false)
+  --dry-run                  Preview what would be converted without running
+                             ffmpeg (default: false)
+  -r, --recursive            Descend into sub-directories (when auto-registering
+                             a folder) (default: false)
+  --concurrency <n>          Number of concurrent conversions
+  --formats <list>           Comma-separated extensions to convert (default: all
+                             non-MP4 videos)
+  --keep-originals           Keep each source file alongside the new MP4
+                             (default) (default: false)
+  --delete-original          Delete each source file after its MP4 is written
+                             (default: false)
+  --move-originals-to <dir>  Move each source file into <dir> after its MP4 is
+                             written
+  --overwrite                Overwrite an existing target .mp4 instead of
+                             skipping it (default: false)
+  --reencode                 Force a full H.264 re-encode (skip the lossless
+                             remux fast-path) (default: false)
+  --crf <n>                  Quality for re-encode (lower = better, default 20)
+  --json                     Emit the summary as JSON instead of a table
+                             (default: false)
+  -h, --help                 display help for command

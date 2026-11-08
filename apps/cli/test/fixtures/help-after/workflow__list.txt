@@ -1,0 +1,7 @@
+Usage: memoriahub workflow list [options]
+
+List workflows in a circle
+
+Options:
+  -c, --circle <id>  Circle ID (defaults to the active circle)
+  -h, --help         display help for command

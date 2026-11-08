@@ -1,0 +1,11 @@
+Usage: memoriahub circles [options] [command]
+
+Manage the active circle for uploads
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  list            List your circles on the server
+  use <id>        Set the active circle for uploads
+  help [command]  display help for command

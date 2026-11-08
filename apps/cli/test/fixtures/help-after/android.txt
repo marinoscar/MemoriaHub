@@ -1,0 +1,38 @@
+Usage: memoriahub android [options] [command]
+
+Build, sign, version and publish the Android app
+
+Options:
+  --repo <path>            MemoriaHub checkout to use (else
+                           MEMORIAHUB_REPO_ROOT, else the nearest ancestor with
+                           apps/android)
+  -h, --help               display help for command
+
+Commands:
+  doctor [options]         Check the JDK, Android SDK, Gradle wrapper, keystore
+                           and login; --fix installs what it can
+  keystore                 Manage the release signing keystore
+                           (~/.memoriahub/android)
+  version [options]        Show or change apps/android/version.properties (every
+                           change also increments versionCode)
+  build [options]          Build and sign the APK into dist/android/ with a
+                           sidecar metadata JSON
+  publish [options] [apk]  Upload a built APK (default: the newest in
+                           dist/android) to the logged-in server
+  releases [options]       List the server's releases (current marked *);
+                           `releases current <id>` makes one current (rollback)
+  release [options]        Pre-check, then bump → build → publish as current →
+                           commit version.properties
+  help [command]           display help for command
+
+Environment:
+  MEMORIAHUB_REPO_ROOT     checkout to use when --repo is not given
+  MEMORIAHUB_GRADLE_ARGS   extra arguments appended to every Gradle run (e.g. "--no-daemon --max-workers=1")
+  GRADLE_OPTS, JAVA_HOME   passed to Gradle unchanged
+  ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_PASSWORD   keystore passwords for `keystore init|import`
+
+First release on a fresh machine:
+  memoriahub login
+  memoriahub android doctor --fix --yes
+  memoriahub android keystore init        # then BACK UP ~/.memoriahub/android/
+  memoriahub android release --bump patch --notes "…"

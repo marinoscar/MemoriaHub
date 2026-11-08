@@ -1,0 +1,9 @@
+Usage: memoriahub status [options]
+
+Show sync status: folder overview or recent run history
+
+Options:
+  --runs      Show recent sync run history instead of folder overview (default:
+              false)
+  --json      Output structured JSON (default: false)
+  -h, --help  display help for command

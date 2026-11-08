@@ -1,0 +1,10 @@
+Usage: memoriahub jobs|queue [options]
+
+Live job queue dashboard (server load, ETA)
+
+Options:
+  --interval <sec>  Polling interval in seconds (default: "5")
+  --once            Print one snapshot and exit (no Ink TUI)
+  --json            Print raw JSON and exit
+  --window <days>   Window for history stats in days (default: "7")
+  -h, --help        display help for command

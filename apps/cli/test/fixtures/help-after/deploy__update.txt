@@ -1,0 +1,77 @@
+Usage: memoriahub deploy update [options]
+
+Bring this server up to the latest revision
+
+Options:
+  --root <path>             Deployment directory (rank 1: an explicit path)
+  --apps-root <path>        Directory holding the deployments (rank 3 walks up
+                            inside it) (default: "/opt/infra/apps")
+  --name <app>              Which deployment to act on, by name
+  --ref <ref>               Branch, tag or commit to move to
+  --force                   Rebuild even when the revision has not changed
+  --no-cache                Rebuild images without the layer cache
+  --non-interactive         Never prompt; fail listing anything unresolved
+  --answer <key=value>      Supply one environment answer; repeat for more
+                            (default: {})
+  --answers-file <path>     Read answers from a KEY=value file (like .env)
+  --skip-seed               Do not re-run the database seed
+  --skip-proxy              Do not touch the reverse proxy
+  --create-database         Create the database if it does not exist (no prompt)
+  --app-db-user <name>      Name of the dedicated application database role
+                            (default: <app>_app)
+  --admin-user <name>       Administrative database login that provisions the
+                            role (password: $MEMORIAHUB_DB_ADMIN_PASSWORD or
+                            DB_ADMIN_PASSWORD in the answers file; never a flag)
+  --skip-role-provisioning  Create no role; POSTGRES_USER must already be an
+                            ordinary role
+  --allow-superuser         Run the API as a superuser/BYPASSRLS login anyway
+                            (tenant isolation OFF)
+  --rotate-app-password     Generate a new password for the application role
+  --provision-app-role      Consent: create the role when the database login is
+                            a superuser (no prompt)
+  --transfer-ownership      Consent: change the owner of an existing database's
+                            objects to the role (no prompt)
+  --allow-reduced-role      Consent: accept a role the server would not give
+                            CREATEROLE/createrole_self_grant
+  --show-credentials        Print the generated application login once at the
+                            end (never journaled)
+  --skip-renewal            Do not schedule certificate renewal
+  --skip-oauth-check        Do not run the post-deploy OAuth sign-in smoke
+  --proxy-container <name>  Name of the shared proxy container (default: as
+                            recorded, else proxy-nginx)
+  --proxy-mode <mode>       How the shared proxy runs: container or host
+                            (default: as recorded, else detected)
+  --app-version <version>   Release version to deploy (default: a patch bump of
+                            the current one)
+  --no-version-bump         Deploy the current version: no write, no commit, no
+                            push
+  --maintenance             Serve a 503 from before the build until just after
+                            restart, instead of whatever the
+                            stop/migrate/restart window looks like underneath
+  --json                    Print a machine-readable result on stdout
+  -h, --help                display help for command
+
+Examples:
+  memoriahub deploy update
+  memoriahub deploy update --ref v1.4.0
+  memoriahub deploy update --maintenance
+
+Exits 0 without doing anything when the revision has not moved, so it
+is safe to run from cron.
+
+The seed RE-RUNS by default. It is idempotent, and it is the only way
+permissions added by a new release reach an existing deployment —
+without it the feature ships and the permission does not exist, which
+surfaces as a confusing 403. Pass --skip-seed to opt out.
+
+There is no automatic roll-back: a partly-applied migration cannot be
+undone by checking out the old code. On failure the previous revision
+and the command to redeploy it are printed.
+
+--maintenance forces MAINTENANCE_MODE on in the deployment's .env from
+just before the build until just after the restart, recreating the api
+container each time so it takes effect — the environment break-glass is
+the only layer this CLI can use without an admin session. A failure
+before the window closes leaves the deployment in maintenance mode; the
+next update (with or without this flag) clears a leftover window on its
+own.

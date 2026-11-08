@@ -1,0 +1,34 @@
+Usage: memoriahub deploy doctor [options]
+
+Check that this server meets the prerequisites
+
+Options:
+  --root <path>             Deployment directory (rank 1: an explicit path)
+  --apps-root <path>        Directory holding the deployments (rank 3 walks up
+                            inside it) (default: "/opt/infra/apps")
+  --name <app>              Which deployment to act on, by name
+  --proxy-root <path>       Shared reverse proxy directory (default:
+                            "/opt/infra/proxy")
+  --port <port>             Loopback port the proxy forwards to (default:
+                            "3535")
+  --domain <domain>         Public domain; enables the DNS and TLS checks
+  --proxy-container <name>  Name of the shared proxy container (default: as
+                            recorded, else proxy-nginx)
+  --proxy-mode <mode>       How the shared proxy runs: container or host
+                            (default: as recorded, else detected)
+  --repo <url>              Repository whose access to check (default: the
+                            recorded one, then this checkout's origin)
+  --json                    Print a machine-readable report on stdout
+  --no-color                Disable colour even on a terminal
+  -h, --help                display help for command
+
+Examples:
+  memoriahub deploy doctor
+  memoriahub deploy doctor --domain app.example.com
+  memoriahub deploy doctor --json | jq '.checks[] | select(.status=="fail")'
+
+Exit codes:
+  0  every required check passed (warnings do not fail the run)
+  6  a required check failed; nothing was changed
+
+Nothing is installed, written or started. It is safe to run at any time.

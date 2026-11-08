@@ -1,0 +1,35 @@
+Usage: memoriahub init [options]
+
+Create infra/compose/.env so this checkout can be started
+
+Options:
+  --force                Update an existing .env in place, keeping the values
+                         already in it
+  --non-interactive      Never prompt: generate the secrets, take every default,
+                         leave OAuth blank
+  --admin-email <email>  Set INITIAL_ADMIN_EMAIL without being asked for it
+  --all                  Review every variable, not only the ones that must be
+                         answered
+  --repo-root <path>     Repository root (default: this directory or a parent)
+  -h, --help             display help for command
+
+Examples:
+  memoriahub init
+  memoriahub init --admin-email you@example.com
+  memoriahub init --non-interactive
+  memoriahub init --force
+
+What it writes:
+  infra/compose/.env, at mode 0600, and nothing else. The questions and
+  the defaults come from infra/compose/.env.example, which is never
+  modified. JWT_SECRET, COOKIE_SECRET and SECRETS_ENCRYPTION_KEY are
+  generated with the CSPRNG and never asked for.
+
+Google OAuth is REQUIRED. The API does not start without
+GOOGLE_CLIENT_ID; it is the only way to log in.
+
+Exit codes:
+  0  the file was written
+  2  a .env already exists (re-run with --force), or a value is missing
+     that an unattended run cannot supply
+  6  this is not a checkout of the repository, or the template is gone

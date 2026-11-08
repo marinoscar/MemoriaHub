@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node stop [options]
+
+Stop a running worker node (IPC → SIGTERM → server-side deregister)
+
+Options:
+  -h, --help  display help for command

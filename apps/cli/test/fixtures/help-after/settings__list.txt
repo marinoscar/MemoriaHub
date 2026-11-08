@@ -1,0 +1,6 @@
+Usage: memoriahub settings list [options]
+
+Print all settings and their current values
+
+Options:
+  -h, --help  display help for command

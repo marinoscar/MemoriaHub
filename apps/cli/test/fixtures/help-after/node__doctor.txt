@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node doctor [options]
+
+Diagnose worker-node capabilities, connectivity, and models
+
+Options:
+  -h, --help  display help for command

@@ -1,0 +1,8 @@
+Usage: memoriahub settings reset [options]
+
+Factory-reset the CLI: removes config, database, and all local state
+(irreversible)
+
+Options:
+  --yes       Confirm the reset without an interactive prompt
+  -h, --help  display help for command

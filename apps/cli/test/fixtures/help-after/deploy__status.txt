@@ -1,0 +1,28 @@
+Usage: memoriahub deploy status [options]
+
+Report whether the deployment on this server is healthy
+
+Options:
+  --root <path>       Deployment directory (rank 1: an explicit path)
+  --apps-root <path>  Directory holding the deployments (rank 3 walks up inside
+                      it) (default: "/opt/infra/apps")
+  --name <app>        Which deployment to act on, by name
+  --port <port>       Loopback port the proxy forwards to (default: "3535")
+  --domain <domain>   Public domain; adds an external HTTPS check
+  --json              Print a machine-readable report on stdout
+  --no-color          Disable colour even on a terminal
+  -h, --help          display help for command
+
+Examples:
+  memoriahub deploy status
+  memoriahub deploy status --domain app.example.com
+  memoriahub deploy status --json || alert 'deployment unhealthy'
+
+Exit codes:
+  0  serving, and the schema is current
+  1  installed but unhealthy
+  2  nothing is installed at --root
+
+Note that /api/health/ready only proves SELECT 1 succeeded, so it
+passes against an empty database. Migration state is reported
+separately, and a green probe alone is not treated as proof.

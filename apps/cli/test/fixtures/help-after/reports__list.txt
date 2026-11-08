@@ -1,0 +1,7 @@
+Usage: memoriahub reports list [options]
+
+List the available reports
+
+Options:
+  --json      Output structured JSON (default: false)
+  -h, --help  display help for command

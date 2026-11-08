@@ -1,0 +1,23 @@
+Usage: memoriahub backup [options] [command]
+
+Local media backup to a folder on this machine (node-based)
+
+Options:
+  -h, --help                 display help for command
+
+Commands:
+  init [options]             Initialize a local backup root on this machine
+  run [options]              Run an incremental backup sync into the configured
+                             backup root
+  status [options]           Show backup status: local catalog, running daemon,
+                             and server
+  verify [options]           Verify the local backup root against the catalog
+                             (existence, size, sha256)
+  prune [options]            List (and with --yes permanently delete)
+                             quarantined backup files
+  restore [options]          Restore a backup root back into a MemoriaHub server
+  schedule [options] [cron]  Manage the automatic backup schedule (cron is
+                             computed server-side)
+  set-rate [options]         Set backup throttle knobs (persisted; applied live
+                             to a running daemon)
+  help [command]             display help for command

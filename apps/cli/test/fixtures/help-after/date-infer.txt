@@ -1,0 +1,14 @@
+Usage: memoriahub date-infer [options] [command]
+
+Infer missing capture dates from filenames (diagnose report or write via
+ExifTool)
+
+Options:
+  -h, --help                      display help for command
+
+Commands:
+  diagnose [options] [folder...]  Report-only: show which files have no capture
+                                  date and what would be inferred
+  apply [options] [folder...]     Infer AND write missing capture dates into
+                                  each file via ExifTool
+  help [command]                  display help for command

@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.4.0
+Usage: memoriahub node list [options]
+
+List registered worker nodes (best-effort)
+
+Options:
+  -h, --help  display help for command

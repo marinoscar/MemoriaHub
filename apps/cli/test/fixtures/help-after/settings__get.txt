@@ -1,0 +1,9 @@
+Usage: memoriahub settings get [options] <key>
+
+Get the current value of a setting
+
+Arguments:
+  key         Setting key
+
+Options:
+  -h, --help  display help for command

@@ -1,0 +1,13 @@
+Usage: memoriahub backup prune [options]
+
+List (and with --yes permanently delete) quarantined backup files
+
+Options:
+  --yes                Actually delete the quarantined files (default: dry run)
+  --older-than <days>  Only entries quarantined more than N days ago
+  --json               Emit the listing as JSON
+  -h, --help           display help for command
+
+A reconcile run moves files the server no longer lists into <root>/_quarantine/
+instead of deleting them. This command is the ONLY way those bytes are removed.
+Without --yes it prints what WOULD be deleted and exits.

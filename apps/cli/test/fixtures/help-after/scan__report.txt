@@ -1,0 +1,7 @@
+Usage: memoriahub scan report [options] [id]
+
+Re-render a stored scan report (default: latest)
+
+Options:
+  --json      Emit the report as JSON (default: false)
+  -h, --help  display help for command

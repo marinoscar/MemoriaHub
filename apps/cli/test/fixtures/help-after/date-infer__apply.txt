@@ -1,0 +1,16 @@
+Usage: memoriahub date-infer apply [options] [folder...]
+
+Infer AND write missing capture dates into each file via ExifTool
+
+Arguments:
+  folder             Paths to folders to scan (omit to use --all)
+
+Options:
+  --all              Scan all registered enabled folders (default: false)
+  -r, --recursive    Descend into sub-directories (when auto-registering a
+                     folder) (default: false)
+  --concurrency <n>  Number of concurrent workers
+  --json             Emit the summary as JSON instead of a table (default:
+                     false)
+  --format <fmt>     Report format: xlsx or csv (default: "xlsx")
+  -h, --help         display help for command
