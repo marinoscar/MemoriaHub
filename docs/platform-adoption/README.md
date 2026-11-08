@@ -16,6 +16,18 @@ Rule for every contributor: platform code is never edited here. When a platform 
 
 The reports were generated at EAB `59e377cbebb60e711fe4d7b0d818715f23af8a59` and MemoriaHub `928ea684fe95329d4a81e1e4b47ba3c54354e919` on 2026-11-08. Scratch paths in them are replaced by placeholders.
 
+## Platform pin
+
+All seven `@marinoscar/platform-*` packages (`contract`, `api`, `web`, `db`, `cli`, `infra`, `ai-providers`) are pinned to the exact version `0.1.0-next.21`, published on the npm `next` dist-tag. Never use `latest`, a caret, a tilde or a range: the program tracks prereleases and a range would let installs drift. The rollback tag `MonoRepo` stays at `928ea684fe95329d4a81e1e4b47ba3c54354e919`.
+
+To bump, change the version in every `package.json` that lists a platform package (root, `apps/api`, `apps/web`, `apps/cli`) to the same new value in one commit, run `npm install` to refresh `package-lock.json`, then run the three checks:
+
+| Command | What it enforces |
+|---|---|
+| `npm run check:platform-pin` | Every platform entry is one identical exact version, the lockfile resolves to it, and the root `overrides` keeps `platform-contract` to a single copy |
+| `npm run check:single-instance` | Nest, React, MUI, Zod and the OpenTelemetry API each resolve to one copy on disk |
+| `npm run check:platform-imports` | No deep imports into platform internals; only documented subpath exports (ESLint, zero warnings) |
+
 ## Rollback
 
 The tag `MonoRepo` points at `928ea684fe95329d4a81e1e4b47ba3c54354e919`, the start of the program. Resetting to it undoes the whole retrofit; per-slice rollback is a revert of that slice's PR. See the Rollback section of #555.
