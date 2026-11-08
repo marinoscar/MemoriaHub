@@ -26,7 +26,7 @@ import {
 } from '../helpers/auth-mock.helper';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { EmailService } from '../../src/email/email.service';
-import { encryptSecret, decryptSecret } from '../../src/common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../../src/legacy/legacy-secret-cipher';
 import { EmailSmtpSecretStore } from '../../src/email/email-smtp-secret.store';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';

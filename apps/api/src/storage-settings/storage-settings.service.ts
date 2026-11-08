@@ -23,7 +23,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
 import {
   KNOWN_STORAGE_PROVIDERS,
   getStorageProviderDescriptor,

@@ -10,7 +10,7 @@ import { AiSettingsService } from './ai-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderRegistry } from './providers/ai-provider.registry';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { encryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret } from '../legacy/legacy-secret-cipher';
 import { composePatchSystemSettingsSchema } from '@marinoscar/platform-api/settings';
 import '../settings/registry';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -697,8 +697,8 @@ describe('AiSettingsService', () => {
   // ---------------------------------------------------------------------------
   describe('testEmbedding', () => {
     const encryptAndSetup = (apiKey = 'sk-embed-key-1234') => {
-      const { encryptSecret: enc } = jest.requireActual<typeof import('../common/crypto/secret-cipher')>(
-        '../common/crypto/secret-cipher',
+      const { encryptSecret: enc } = jest.requireActual<typeof import('../legacy/legacy-secret-cipher')>(
+        '../legacy/legacy-secret-cipher',
       );
       const encryptedValue = enc(apiKey);
       mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({

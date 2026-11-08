@@ -62,7 +62,7 @@ describe('download tokens', () => {
     try {
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { deriveSubKey } = require('../../common/crypto/secret-cipher');
+        const { deriveSubKey } = require('../../legacy/legacy-secret-cipher');
         const key = deriveSubKey(DOWNLOAD_TOKEN_KEY_PURPOSE);
         const signed = signDownloadToken(key, { releaseId: RELEASE, userId: USER, expiresAt: NOW + 60 });
         expect(verifyDownloadToken(key, signed, NOW).ok).toBe(true);

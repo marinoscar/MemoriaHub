@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import { decryptSecret } from '../../common/crypto/secret-cipher';
+import { decryptSecret } from '../../legacy/legacy-secret-cipher';
 import { EmailSmtpSecretStore } from '../email-smtp-secret.store';
 import { EmailProvider } from './email-provider.interface';
 import { EmailMessage, EmailSendResult } from '../types/email.types';

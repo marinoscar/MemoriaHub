@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
 import { EmailService } from './email.service';
 import { SesEmailProvider } from './providers/ses-email.provider';
 import { UpdateEmailSettingsDto } from './dto/update-email-settings.dto';

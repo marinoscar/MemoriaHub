@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiProviderRegistry } from './providers/ai-provider.registry';
-import { encryptSecret, decryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
 import {
   UpsertAiCredentialsDto,
   TestAiProviderDto,

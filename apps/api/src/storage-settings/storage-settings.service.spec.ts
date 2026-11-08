@@ -23,7 +23,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { encryptSecret } from '../common/crypto/secret-cipher';
+import { encryptSecret } from '../legacy/legacy-secret-cipher';
 import { Readable } from 'stream';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 

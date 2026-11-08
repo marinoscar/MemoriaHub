@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { PrismaService } from '../../prisma/prisma.service';
-import { decryptSecret } from '../../common/crypto/secret-cipher';
+import { decryptSecret } from '../../legacy/legacy-secret-cipher';
 import { EmailProvider } from './email-provider.interface';
 import { EmailMessage, EmailSendResult } from '../types/email.types';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';

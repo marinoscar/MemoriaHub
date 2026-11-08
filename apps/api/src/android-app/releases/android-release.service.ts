@@ -15,7 +15,7 @@ import {
 import type { Multipart, MultipartFile } from '@fastify/multipart';
 import { Prisma, type MhLegacyAndroidAppRelease } from '@prisma/client';
 
-import { deriveSubKey } from '../../common/crypto/secret-cipher';
+import { deriveSubKey } from '../../legacy/legacy-secret-cipher';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { StorageProvider } from '../../storage/providers/storage-provider.interface';
 import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';

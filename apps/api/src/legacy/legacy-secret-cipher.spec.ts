@@ -28,7 +28,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret, decryptSecret } = require('./secret-cipher');
+        const { encryptSecret, decryptSecret } = require('./legacy-secret-cipher');
         const plaintext = 'sk-my-super-secret-api-key-12345';
         const ciphertext = encryptSecret(plaintext);
         const result = decryptSecret(ciphertext);
@@ -41,7 +41,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret, decryptSecret } = require('./secret-cipher');
+        const { encryptSecret, decryptSecret } = require('./legacy-secret-cipher');
         const plaintext = '';
         const ciphertext = encryptSecret(plaintext);
         expect(decryptSecret(ciphertext)).toBe(plaintext);
@@ -53,7 +53,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret, decryptSecret } = require('./secret-cipher');
+        const { encryptSecret, decryptSecret } = require('./legacy-secret-cipher');
         const plaintext = 'hola 😀 日本語 "quotes" \'apostrophe\'';
         expect(decryptSecret(encryptSecret(plaintext))).toBe(plaintext);
       });
@@ -66,7 +66,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret } = require('./secret-cipher');
+        const { encryptSecret } = require('./legacy-secret-cipher');
         const plaintext = 'my-plaintext-value';
         const ciphertext = encryptSecret(plaintext);
         expect(ciphertext).not.toBe(plaintext);
@@ -78,7 +78,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret } = require('./secret-cipher');
+        const { encryptSecret } = require('./legacy-secret-cipher');
         const plaintext = 'same-text';
         const ct1 = encryptSecret(plaintext);
         const ct2 = encryptSecret(plaintext);
@@ -93,7 +93,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret, decryptSecret } = require('./secret-cipher');
+        const { encryptSecret, decryptSecret } = require('./legacy-secret-cipher');
         const ciphertext = encryptSecret('original plaintext');
 
         // Decode, mutate a byte in the auth tag region (bytes 12-27), re-encode
@@ -110,7 +110,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret, decryptSecret } = require('./secret-cipher');
+        const { encryptSecret, decryptSecret } = require('./legacy-secret-cipher');
         const ciphertext = encryptSecret('another secret value');
 
         const buf = Buffer.from(ciphertext, 'base64');
@@ -131,7 +131,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret } = require('./secret-cipher');
+        const { encryptSecret } = require('./legacy-secret-cipher');
         expect(() => encryptSecret('anything')).toThrow('SECRETS_ENCRYPTION_KEY');
       });
     });
@@ -141,7 +141,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { decryptSecret } = require('./secret-cipher');
+        const { decryptSecret } = require('./legacy-secret-cipher');
         expect(() => decryptSecret('anypayload')).toThrow('SECRETS_ENCRYPTION_KEY');
       });
     });
@@ -155,7 +155,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret } = require('./secret-cipher');
+        const { encryptSecret } = require('./legacy-secret-cipher');
         expect(() => encryptSecret('test')).toThrow('SECRETS_ENCRYPTION_KEY');
       });
     });
@@ -167,7 +167,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret } = require('./secret-cipher');
+        const { encryptSecret } = require('./legacy-secret-cipher');
         expect(() => encryptSecret('test')).toThrow('SECRETS_ENCRYPTION_KEY');
       });
     });
@@ -179,7 +179,7 @@ describe('secret-cipher', () => {
 
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { encryptSecret, decryptSecret } = require('./secret-cipher');
+        const { encryptSecret, decryptSecret } = require('./legacy-secret-cipher');
 
         const plaintext = 'cached-key-test';
         const ct = encryptSecret(plaintext);
