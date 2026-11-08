@@ -69,6 +69,12 @@ const UserDangerZonePage = lazy(() =>
 const FactoryResetPage = lazy(() =>
   import('@marinoscar/platform-web/user-data/ui').then((m) => ({ default: m.FactoryResetPage })),
 );
+// RETRO-H2 (#596): the exports slice's "Download your data" page (`/api/exports`): every source
+// the caller may use (the platform's `user-data`, `org-data` for `org_members:read`, and
+// MemoriaHub's media, albums, memories and people), the request dialog and the recent exports.
+const DataExportPage = lazy(() =>
+  import('@marinoscar/platform-web/exports/ui').then((m) => ({ default: m.DataExportPage })),
+);
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
@@ -222,6 +228,10 @@ function AppRoutes() {
                 {/* RETRO-H3 (#599): the user steps of `GET /api/onboarding`, which needs
                     only `user_settings:read` (every role). */}
                 <Route path="/settings/getting-started" element={<GettingStartedPage />} />
+                {/* RETRO-H2 (#596): "Download your data". Ungated like its siblings: every source
+                    is checked by the API (`user-data` on `user_settings:read`, MemoriaHub's on
+                    `media:read`, both held by every role); the `export.ready` notification links here. */}
+                <Route path="/settings/data-export" element={<DataExportPage />} />
                 {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
@@ -501,6 +511,17 @@ function AppRoutes() {
                   element={
                     <RequirePermission permission="system:factory_reset" fallback={<Navigate to="/" replace />}>
                       <FactoryResetPage />
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H2 (#596). `org_members:read`, the exact string the exports service checks
+                    for the platform `org-data` source (an organization's rows). Same packaged page
+                    as `/settings/data-export`: its dialog lists `org-data` for this holder. */}
+                <Route
+                  path="/admin/settings/data-export"
+                  element={
+                    <RequirePermission permission="org_members:read" fallback={<Navigate to="/" replace />}>
+                      <DataExportPage />
                     </RequirePermission>
                   }
                 />

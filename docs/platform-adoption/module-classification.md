@@ -248,6 +248,7 @@ Platform slices MemoriaHub never had a module for; there is nothing to classify 
 | Slice | Binding | Plan | Notes |
 |---|---|---|---|
 | onboarding | `apps/api/src/platform/onboarding/`, web `platform/onboarding/` + `components/onboarding/` | H3 (#599) | `OnboardingModule.forRoot` with the platform steps minus `admin.storage` (until D1) and `admin.ai` (until E2), nine permanent `memoriahub.*` steps, six facts, the `first_upload` milestone and the `onboarding.establishedAt` field. Spec: [docs/specs/onboarding.md](../specs/onboarding.md). |
+| exports | `apps/api/src/platform/exports/`, `app-registrations/exports.ts`, web route `/settings/data-export` and `/admin/settings/data-export` (packaged `DataExportPage`) | H2 (#596) | `ExportsModule.forRoot` with the platform `user-data` / `org-data` re-registered without storage keys (shim, #596) and four permanent MemoriaHub sources (`memoriahub-media`, `-albums`, `-memories`, `-people`, `media:read`); files through MemoriaHub's storage providers until D1. Spec: [docs/specs/memoriahub-exports.md](../specs/memoriahub-exports.md). |
 
 ## Migrations and models
 

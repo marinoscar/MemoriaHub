@@ -55,6 +55,7 @@ import {
   DB_BACKUP_NOTIFICATIONS,
   IDENTITY_NOTIFICATIONS,
 } from '../../notifications-registry/platform-slice.notifications';
+import { EXPORTS_NOTIFICATIONS } from '../../notifications-registry/exports.notifications';
 
 /** The MemoriaHub events a member may forward to their own webhook endpoints (RETRO-H4, #603). */
 export const WEBHOOK_FORWARDABLE_EVENT_KEYS: readonly string[] = [
@@ -88,6 +89,9 @@ const GROUPS: readonly (readonly NotificationRegistration[])[] = [
   // The sharing slice's two events (RETRO-I1, #562): `groups.invitation` and
   // `sharing.shared_with_you`. Neither fires until groups and grants exist (RETRO-I2..I5).
   SHARING_NOTIFICATIONS,
+  // The exports slice's two events (RETRO-H2, #596): `export.ready` / `export.failed`, to the
+  // user who asked for the export; bell and Web Push, linking to `/settings/data-export`.
+  EXPORTS_NOTIFICATIONS,
 ];
 
 // Their email templates (idempotent), bound before the events are registered.

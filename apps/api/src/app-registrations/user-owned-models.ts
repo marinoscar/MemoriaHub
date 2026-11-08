@@ -38,6 +38,8 @@ export const APP_USER_OWNED_MODELS: readonly UserOwnedModelDef<Prisma.ModelName>
     ownerField: 'userId',
     purge: 'delete',
     export: 'include',
+    // RETRO-H2 (#596): the derived avatar's object key never leaves the server.
+    exportOmit: ['avatarStorageKey'],
     rationale: "The user's profile-picture state and person link; meaningless without the user.",
   },
   {
