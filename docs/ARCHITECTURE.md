@@ -1779,7 +1779,7 @@ apps/web/src/
     │   └── ThemeContext.test.tsx
     ├── pages/
     │   ├── LoginPage.test.tsx
-    │   ├── UserSettingsPage.test.tsx
+    │   ├── UserSettingsHubPage.test.tsx
     │   └── SystemSettingsPage.test.tsx
     └── services/
         └── api.test.ts

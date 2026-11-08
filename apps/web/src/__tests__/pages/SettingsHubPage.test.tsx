@@ -3,7 +3,10 @@
  *
  * Mocking strategy:
  *   - usePermissions is module-mocked to control admin/permission state.
- *   - react-router-dom useNavigate is mocked to track navigation calls.
+ *   - navigation is observed through the real router (`LocationProbe`): since
+ *     RETRO-B5 (#621) the page is a binding over the packaged `SettingsHub`,
+ *     which navigates with its own `useNavigate`, so a module mock of the app's
+ *     `react-router-dom` import cannot see it.
  *
  * The page renders a grid of cards grouped by section. Visibility of each card
  * depends on hasPermission(card.permission). The page redirects non-admins to /.
@@ -21,23 +24,21 @@ vi.mock('../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
-});
 
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
+import { useLocation } from 'react-router-dom';
 import SettingsHubPage from '../../pages/Admin/SettingsHubPage';
 import { usePermissions } from '../../hooks/usePermissions';
 
 const mockUsePermissions = vi.mocked(usePermissions);
+
+/** Renders the router's current pathname, so a test can assert a navigation. */
+function LocationProbe() {
+  return <div data-testid="location">{useLocation().pathname}</div>;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -268,79 +269,121 @@ describe('SettingsHubPage', () => {
 
     it('navigates to /admin/settings/ai when AI Providers card is clicked', async () => {
       const user = userEvent.setup();
-      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(
+        <>
+          <SettingsHubPage />
+          <LocationProbe />
+        </>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
 
       // Click the card title — it is inside the CardActionArea which handles the click
       await user.click(screen.getByText('AI Providers'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/ai');
+        expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/ai');
       });
     });
 
     it('navigates to /admin/settings/tagging when Tagging & Descriptions card is clicked', async () => {
       const user = userEvent.setup();
-      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(
+        <>
+          <SettingsHubPage />
+          <LocationProbe />
+        </>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
 
       await user.click(screen.getByText('Tagging & Descriptions'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/tagging');
+        expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/tagging');
       });
     });
 
     it('navigates to /admin/settings/face when Face Recognition card is clicked', async () => {
       const user = userEvent.setup();
-      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(
+        <>
+          <SettingsHubPage />
+          <LocationProbe />
+        </>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
 
       await user.click(screen.getByText('Face Recognition'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/face');
+        expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/face');
       });
     });
 
     it('navigates to /admin/settings/bursts when Bursts card is clicked', async () => {
       const user = userEvent.setup();
-      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(
+        <>
+          <SettingsHubPage />
+          <LocationProbe />
+        </>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
 
       await user.click(screen.getByText('Bursts & Similar Pictures'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/bursts');
+        expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/bursts');
       });
     });
 
     it('navigates to /admin/settings/geo when Geo Location card is clicked', async () => {
       const user = userEvent.setup();
-      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(
+        <>
+          <SettingsHubPage />
+          <LocationProbe />
+        </>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
 
       await user.click(screen.getByText('Geo Location'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/geo');
+        expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/geo');
       });
     });
 
     it('navigates to /admin/settings/jobs/insights when Job Queue Insights card is clicked', async () => {
       const user = userEvent.setup();
-      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(
+        <>
+          <SettingsHubPage />
+          <LocationProbe />
+        </>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
 
       await user.click(screen.getByText('Job Queue Insights'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/jobs/insights');
+        expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/jobs/insights');
       });
     });
 
     it('navigates to /admin/settings/archiving when Archiving & Deletion card is clicked', async () => {
       const user = userEvent.setup();
-      render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(
+        <>
+          <SettingsHubPage />
+          <LocationProbe />
+        </>,
+        { wrapperOptions: { user: mockAdminUser } },
+      );
 
       await user.click(screen.getByText('Archiving & Deletion'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/admin/settings/archiving');
+        expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/archiving');
       });
     });
   });

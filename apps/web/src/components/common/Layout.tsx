@@ -57,7 +57,7 @@ export function Layout({ fullBleed = false }: LayoutProps) {
   //   2. `BottomNav`'s `down('sm')`                    — the EXACT complement
   //   3. `AppBar`'s `isTabletUp` (`up('sm')`)          — search pill + upload label
   //   4. `AppBar`'s `isCompactWindow` (`down('sm')`)   — admin drill-down top bar
-  //   5. `SettingsHubPage`'s `isCompactWindow`         — must agree with (4)
+  //   5. the packaged `SettingsHub`'s `isCompactWindow` (both hubs) — must agree with (4)
   // plus `<main>`'s `pb` below, which clears the bottom bar and so is only
   // needed where the bottom bar exists.
   //
