@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { BurstGroupStatus, DuplicateGroupStatus, EnrichmentJob, MediaType, Prisma } from '@prisma/client';
+import { BurstGroupStatus, DuplicateGroupStatus, MediaType, Prisma } from '@prisma/client';
 import { computeVisualHash, hammingDistance } from '@memoriahub/enrichment-compute/dhash';
 import { VISUAL_EMBEDDING_MODEL_TAG } from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,6 +7,7 @@ import { StorageProviderResolver } from '../storage/providers/storage-provider.r
 import { streamToBuffer } from '../storage/processing/processors/stream-utils';
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import type { MediaJobContext } from '../platform/jobs/media-item-job';
 
 const DEFAULT_DEDUP_CONFIG = {
   similarityThreshold: 0.96,
@@ -138,10 +139,15 @@ export class DuplicateDetectionService {
 
   /**
    * Persist a compute result for the job's media item, then run matching and
-   * union-find grouping. Entry point for the (follow-up) node result-ingestion
-   * path; the in-process path composes the same internals via processMediaItem.
+   * union-find grouping. Entry point for the node result-ingestion path
+   * (`DuplicateDetectionHandler.persistNodeResult`): it never recomputes the
+   * embedding; the in-process path composes the same internals via
+   * processMediaItem.
    */
-  async persistDuplicate(job: EnrichmentJob, result: DuplicateComputeResult): Promise<void> {
+  async persistDuplicate(
+    job: Pick<MediaJobContext, 'id' | 'mediaItemId'>,
+    result: DuplicateComputeResult,
+  ): Promise<void> {
     if (!job.mediaItemId) {
       this.logger.warn(`persistDuplicate: job ${job.id} has no mediaItemId; skipping`);
       return;
@@ -419,6 +425,7 @@ export class DuplicateDetectionService {
     // compute (download/CLIP/KNN/hash scan) stayed outside to keep the lock
     // hold-time minimal.
     // -----------------------------------------------------------------
+    // metrics: RETRO-T3 (app.media.duplicates.grouped)
     await this.prisma.$transaction(async (tx) => {
       const lockRows = await tx.$queryRaw<
         { burst_group_id: string | null; burst_status: string | null }[]

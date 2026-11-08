@@ -37,25 +37,20 @@ import { WORKFLOW_RUNS_RETENTION_POLICY } from '../workflows/runs/workflow-runs.
 /**
  * The job types the legacy handlers serve, and the label each shows. A native
  * handler declares its own `label` and is not listed (RETRO-C3: the six
- * media/face types; RETRO-C8: memory_generation, memory_digest,
- * storage_insights, broadcast_start, broadcast_chunk and the notification_purge
- * retention handler).
+ * media/face types; RETRO-C5: the five dedup/burst/social types; RETRO-C8:
+ * memory_generation, memory_digest, storage_insights, broadcast_start,
+ * broadcast_chunk and the notification_purge retention handler).
  */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   // Media enrichment (per-item compute)
   auto_tagging: 'Auto-tagging',
   video_auto_tagging: 'Video auto-tagging',
   geocode: 'Geocoding',
-  duplicate_detection: 'Duplicate detection',
-  duplicate_detection_batch: 'Duplicate detection (batch)',
-  duplicate_confidence_backfill: 'Duplicate confidence backfill',
-  social_media_detection: 'Social media detection',
   location_inference: 'Location inference',
   // Deprecated aliases kept so already-queued rows still render a friendly label;
   // superseded by review_run_* below (issue #190).
   location_suggestion_run_evaluate: 'Location suggestion run evaluate',
   location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
-  burst_detection: 'Burst detection',
   picture_enhancement: 'AI picture enhancer',
   picture_enhancement_purge: 'AI picture enhancer purge',
   // Storage / system

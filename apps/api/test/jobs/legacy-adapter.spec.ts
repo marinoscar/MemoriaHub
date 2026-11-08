@@ -187,7 +187,9 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
 
   describe('execution profile', () => {
     it('the video types still on the adapter get the 20-minute profile; everything else takes the deployment default', () => {
-      for (const type of ['social_media_detection', 'video_auto_tagging', 'geocode', 'trash_purge']) {
+      // social_media_detection left this list in RETRO-C5: native, it declares the profile itself.
+      expect(VIDEO_JOB_TYPES.has('social_media_detection')).toBe(false);
+      for (const type of ['video_auto_tagging', 'geocode', 'trash_purge']) {
         const handler = register({ type });
         if (VIDEO_JOB_TYPES.has(type)) {
           expect(handler!.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: expect.any(Number) });

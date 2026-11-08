@@ -852,7 +852,7 @@ For the full provider rate-limit classification matrix and OOM/crash recovery ru
 
 ## 15. Registered Handlers Reference
 
-The following handlers are registered in the current production codebase. Each self-registers via `onModuleInit` and appears automatically in the `/admin/jobs` dashboard. Most still implement `EnrichmentHandler` (through the C1 adapter); the media/face group below is native.
+The following handlers are registered in the current production codebase. Each self-registers via `onModuleInit` and appears automatically in the `/admin/jobs` dashboard. Most still implement `EnrichmentHandler` (through the C1 adapter); the media/face group (RETRO-C3) and the dedup/burst/social group (RETRO-C5) below are native.
 
 ### Native platform handlers (RETRO-C3, #585)
 
@@ -866,6 +866,18 @@ The following handlers are registered in the current production codebase. Each s
 | `thumbnail_repair` | Thumbnail repair sweep | 900 000, 2 | server-only | The parity-only node schema is gone; the system worker mode now derives it instead of pinning it |
 
 A media-item job whose media item no longer exists (or a circle job whose circle is gone) settles as a no-op; a job about the wrong subject fails. The short `storage_objects` writes of the metadata and thumbnail persist paths run under the platform `JobScope` (the job's organization). Contract tests: `apps/api/test/jobs/media-face.conformance.spec.ts`.
+
+### Native platform handlers (RETRO-C5, #594)
+
+| Type | Label | Profile (`maxRuntimeMs`, `maxAttempts`) | Eligibility | Notes |
+|---|---|---|---|---|
+| `duplicate_detection` | Duplicate detection | 300 000, 3 | node-eligible | Node submits `{ model, embedding (512-d), dHash }`; persist writes the embedding row and the hash, then KNN + union-find grouping (never recomputes the embedding); upload priority 10 |
+| `duplicate_detection_batch` | Duplicate detection (batch) | 1 800 000, 3 | server-only | Subject `circle`, payload `{ mediaItemIds }` (100 per job, `skipDedup`), priority 100; a gone circle is a no-op |
+| `duplicate_confidence_backfill` | Duplicate confidence backfill | 1 800 000, 2 | server-only | Global; keyset pass over pending groups with `confidence IS NULL` |
+| `burst_detection` | Burst detection | 300 000, 3 | server-only | Reads timeline neighbours mid-computation; upload priority 5 (before dedup's 10); evicts its members from duplicate groups (burst wins) |
+| `social_media_detection` | Social media detection | 1 200 000 (`ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` for one release), 3 | node-eligible | The video gate below; persist writes status/tags/source and, on CLEAN, fans out the withheld video jobs after the status transaction commits |
+
+Priorities stay in each enqueue call, never in registration order. The burst-wins invariant is proven on a real database in `apps/api/test/jobs/burst-wins.db.spec.ts`; contract tests: `apps/api/test/jobs/dedup-burst-social.conformance.spec.ts`.
 
 ### Native housekeeping handlers (RETRO-C8, #608)
 
@@ -886,13 +898,11 @@ A circle job whose circle is gone settles as a no-op; a job about the wrong subj
 |---|---|---|---|---|
 | `face_detection` | `FaceModule` | per media item | upload event + rerun + backfill | Per-circle opt-in; see [face-recognition.md](face-recognition.md) |
 | `auto_tagging` | `TaggingModule` | per media item | upload event + rerun + backfill | Per-circle opt-in; see [auto-tagging.md](auto-tagging.md) |
-| `burst_detection` | `BurstModule` | per media item | upload event + rerun + backfill | Per-circle opt-in; see [burst-detection.md](burst-detection.md) |
 | `metadata_extraction` | `MediaModule` | per media item | rerun + backfill only (no upload enqueue) | No per-circle opt-in; see [metadata-rerun.md](metadata-rerun.md) |
 | `storage_insights` | `InsightsModule` | global (`mediaItemId: null`) | hourly cron (`InsightsRefreshTask`) | Interval-gated; manual via `POST /api/admin/insights/refresh`; see [storage-insights.md](storage-insights.md) |
 | `trash_purge` | `MediaModule` | global (`mediaItemId: null`) | hourly cron (`TrashPurgeTask`) | Hard-deletes trashed `media_items` past `storage.trash.retentionDays` cutoff; see [archive-trash.md](archive-trash.md) |
 | `job_history_purge` | `EnrichmentModule` | global (`mediaItemId: null`) | nightly cron (`JobHistoryPurgeTask`, midnight) | Batch-deletes terminal `enrichment_jobs` rows (`succeeded`/`failed`) with `finishedAt` older than `jobs.history.retentionDays`; 5 000-row batches; pending/running rows never deleted; gated by `jobs.history.purgeEnabled`; see [job-insights.md](job-insights.md) |
 | `notification_purge` | `NotificationsReconcileModule` | global (`mediaItemId: null`) | nightly cron (`NotificationPurgeTask`, midnight) | Batch-deletes `notifications` rows the user has already RESOLVED — `dismissed_at` or `read_at` older than `notifications.retentionDays` — in 5 000-row batches; **unread rows are never deleted by age**, the deliberate asymmetry with `job_history_purge` above; gated by `notifications.purgeEnabled` (re-checked in the handler, not only the cron) |
-| `social_media_detection` | `SocialMediaModule` | per media item (video only) | upload event (videos, when enabled) + rerun + backfill | Gate for `video_face_detection` — see "Gate-then-fan-out pattern" below; two-tier (ffprobe metadata/filename + on-server OCR) classifier for TikTok/Instagram/Facebook re-shares; see [social-media-detection.md](social-media-detection.md) |
 
 ### Gate-then-fan-out pattern (video enrichment)
 
