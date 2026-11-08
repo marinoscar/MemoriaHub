@@ -55,7 +55,7 @@ The API remains the sole source of truth for the job queue, the sole writer to P
 | Setting class | Where it's set | Applies to | Restart required? |
 |---|---|---|---|
 | API worker-mode, retry/backoff, timeouts, storage-recovery, thumbnail-repair | API's `.env` (`infra/compose/.env`) | The API process (its in-process worker, the always-on lease reaper) | Yes (API restart) |
-| Worker-container identity, tuning, face provider, image | `.env.worker` passed to `docker-compose.worker.yml` | Each `memoriahub-worker` container replica | Yes (container restart) |
+| Worker-container identity, tuning, face provider, image | `.env.worker` passed to the worker bundle (`infra/compose/worker.compose.yml` + `app.worker.*` overlays) | Each `worker` container replica | Yes (container restart) |
 | Feature toggles (`features.*`), per-feature tuning (`burst.*`, `dedup.*`, `face.*`, `jobs.stuckThresholdMinutes`, etc.) | Admin UI (`/admin/settings/*`), persisted in `system_settings` (Postgres JSONB) | Whole deployment, read live on next job/request | No — takes effect on the next relevant call |
 | Node credential (`nod_` token) | Admin UI `/admin/settings/nodes` → Node Credentials, or `memoriahub node enroll` | One worker's `MEMORIAHUB_TOKEN` | No (until rotated) |
 
@@ -162,17 +162,17 @@ Two settings live in the admin UI / `system_settings` JSONB, not the API's `.env
 
 ## 3. Worker-Container Settings
 
-Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart (or `docker compose ... up -d` re-apply) is required for a change to take effect. Full walkthrough: [Worker Node Setup & Troubleshooting — Quick Start](worker-node-setup.md#quick-start-container-bundle-recommended).
+Set in `.env.worker`, passed to the worker bundle (`infra/compose/worker.compose.yml` with the `app.worker.*` overlays). A container restart (or `docker compose ... up -d` re-apply) is required for a change to take effect. Full walkthrough: [Worker Node Setup & Troubleshooting — Quick Start](worker-node-setup.md#quick-start-container-bundle-recommended).
 
 ### 3.1 `MEMORIAHUB_*` — worker identity and tuning
 
 | Setting | Default | Range / values | What it controls | When to change |
 |---|---|---|---|---|
-| `MEMORIAHUB_URL` | *(required)* | URL | Base URL of the API this worker connects to (e.g. `https://your-domain/api`). | Always set. |
+| `MEMORIAHUB_URL` | *(required)* | URL | Base URL of the API this worker connects to (e.g. `https://your-domain/api`). In the container bundle, set `MEMORIAHUB_SERVER_URL` in `.env.worker` instead: the bundle passes it to the worker as `MEMORIAHUB_URL`. | Always set. |
 | `MEMORIAHUB_TOKEN` | *(required)* | `nod_...` or `pat_...` | Bearer credential. A `nod_` node credential (minted at `/admin/settings/nodes`) is preferred — least-privilege, `/api/nodes/*`-only, non-expiring, individually revocable. A PAT also works for back-compat. | Always set; prefer `nod_` for any long-running/unattended worker. |
 | `MEMORIAHUB_NODE_NAME` | `worker` (compose default) | string | Display name for this host/replica. Registration is idempotent per `(owner, name)` — a restart re-attaches to the same node record. | **Must be unique per host/replica** — two containers sharing a name fight over job leases (`job not owned by this node`). |
 | `MEMORIAHUB_NODE_ID` | *(unset)* | UUID | Resume an existing node registration explicitly. | Normally left unset; register-or-reattach resolves it via `MEMORIAHUB_NODE_NAME`. |
-| `MEMORIAHUB_CONCURRENCY` | `2` (bundle default in `docker-compose.worker.yml`); CLI-native default is now core/RAM-aware (2–4 on a capable host) instead of a flat `1`, when neither this env var, `--concurrency`, nor persisted node config set an explicit value | integer ≥ 1 | Jobs this replica processes simultaneously. | Keep at 1–2 on memory-constrained hosts / AI-bound work; raise on beefier machines (see §6d). |
+| `MEMORIAHUB_CONCURRENCY` | `2` (bundle default in `app.worker.memoriahub.compose.yml`); CLI-native default is now core/RAM-aware (2–4 on a capable host) instead of a flat `1`, when neither this env var, `--concurrency`, nor persisted node config set an explicit value | integer ≥ 1 | Jobs this replica processes simultaneously. | Keep at 1–2 on memory-constrained hosts / AI-bound work; raise on beefier machines (see §6d). |
 | `MEMORIAHUB_ELIGIBLE_TYPES` | *(unset — advertises everything the local capability probe supports)* | CSV of job-type names | Restricts which job types this node claims. | Narrow if you want a worker dedicated to one job type (e.g. only `face_detection`). |
 | `MEMORIAHUB_POLL_INTERVAL_MS` | `5000` | ms | Claim-loop poll interval when idle. | Rarely changed. |
 | `MEMORIAHUB_FACE_PROVIDER` | `compreface` (both CLI-native and the bundle — the only accepted value) | `compreface` | Which face-detection provider this node uses locally; any other value is a startup error, not a silent fallback. | Rarely changed — CompreFace is the sole provider (issue #113 removed the Human WASM alternative). Only relevant if pointing at a non-default sidecar. |
@@ -181,12 +181,12 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 | `MEMORIAHUB_HEADLESS` | *(image entrypoint always headless regardless)* | `1` | Implies `--headless`: drains in-flight jobs and exits WITHOUT deregistering on `SIGTERM` (so a restart re-attaches instead of accumulating a new node record). | N/A for the published image; relevant only for a custom entrypoint. |
 | `MODELS_DIR` | `~/.memoriahub/models` (CLI-native; the image already bakes models at `/app/models`, distinct from the API-side `MODELS_DIR` default of `./data/models` used for its own CLIP model copy) | path | Overrides where model resolution looks for the CLIP model file (face detection is served by the CompreFace sidecar, not a model file — see §4). | Only to point at a different/mounted model directory (e.g. an air-gapped install). |
 
-### 3.2 Bundle/compose knobs (`docker-compose.worker.yml` / `.env.worker`)
+### 3.2 Bundle/compose knobs (`infra/compose/worker.compose.yml` and `app.worker.*` overlays / `.env.worker`)
 
 | Setting | Default | What it controls |
 |---|---|---|
 | `COMPREFACE_PROCESSES` | `2` | `UWSGI_PROCESSES` for the bundled `compreface-core` sidecar. Rule of thumb: `cores − 2`, capped around 6. Measured impact: bumping from 1→6 processes on an 8-core/32GB host cut `face_detection` job time from ~17–20s to ~2–3s (~8x). |
-| `WORKER_VERSION` | `latest` | Image tag for `ghcr.io/marinoscar/memoriahub-worker`. Pin to a specific version (e.g. `cli-1.2.4`) for reproducibility and to guarantee compute parity with a known server CLI version. |
+| `WORKER_VERSION` | `latest` | Image tag for `ghcr.io/marinoscar/memoriahub-worker`, used only when `WORKER_IMAGE` is empty or unset: the `.env.worker.example` template sets `WORKER_IMAGE=ghcr.io/marinoscar/memoriahub-worker:latest`, so to pin a version set `WORKER_IMAGE` to the full reference instead. Pin to a specific version (e.g. `cli-1.2.4`) for reproducibility and to guarantee compute parity with a known server CLI version. |
 | `WORKER_STOP_GRACE` | `180s` | `stop_grace_period` — SIGTERM drain budget on `docker compose down`/stop. A job killed past this is requeued by the server's lease reaper (≤ `ENRICHMENT_LEASE_MS`, default 30 min), so this need not cover a full 20-minute video job. |
 
 ### 3.3 Memory/perf knobs on the worker itself
@@ -204,7 +204,7 @@ Set in `.env.worker`, passed to `docker-compose.worker.yml`. A container restart
 
 ### 3.4 Per-replica rules (repeated here because getting this wrong is the single most common fleet misconfiguration)
 
-- **Every replica needs a distinct `MEMORIAHUB_NODE_NAME`.** Whether scaled via `--scale memoriahub-worker=N` or run on separate machines, two containers sharing an identity fight over job leases (`job not owned by this node`).
+- **Every replica needs a distinct `MEMORIAHUB_NODE_NAME`.** Whether scaled via `--scale worker=N` or run on separate machines, two containers sharing an identity fight over job leases (`job not owned by this node`).
 - **Never share the `/data` state volume between replicas.** It holds a pidfile and a Unix-domain-socket IPC channel that assume a single running instance.
 
 ### 3.5 Memory & OOM hardening

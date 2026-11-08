@@ -26,6 +26,26 @@ How the baseline treats the deviations: `docs/runbooks/database-baseline.md` in 
 |---|---|---|---|
 | Platform-schema stub + legacy fragments (RETRO-A4) | `apps/api/prisma/platform-schema-stub/base.prisma`; `apps/api/prisma/fragments/platform-*.legacy.prisma` (header `PLATFORM-ADOPTION-SHIM`); `db:compose` passes `--platform-schema prisma/platform-schema-stub` | The stub holds only the `generator`/`datasource` blocks so no platform model is composed yet; the legacy fragments hold the models a platform slice will replace | Stub: RETRO-B2 (composes the real platform schema). Fragments: identity B2, settings B2/B3, credentials B4/E3, jobs C1, nodes C2, storage D1, notifications D3, db-backup D4, android D5 |
 
+## Infra deviations (RETRO-F2, #566)
+
+These are not code shims and not database deviations: each is an overlay or a file in `infra/` that differs from the platform default on purpose. The reason is the important part; the removal condition says when the row can go.
+
+| Deviation | Where | Why | Removed by |
+|---|---|---|---|
+| Production web container listens on 5173 (the platform's convention), not 80 | `infra/compose/app.prod.web-listen.compose.yml` | The generated `nginx.conf` proxies to `web:5173` in every mode; `apps/web/Dockerfile`'s production stage serves on 80. The overlay rewrites `listen 80;` at start-up and fails if the line changed. | Move `apps/web/nginx.conf` and the Dockerfile `EXPOSE` to 5173 (an `apps/` change; then delete the overlay). |
+| `geolocation=(self)` in Permissions-Policy (platform default `()`) | `infra/nginx/app.d/permissions-policy.conf` | `LocationPickerMap` and `MapControls` call `navigator.geolocation`. | Not removed: this is the app's permission. |
+| Server-level `client_max_body_size 10g` | `infra/nginx/app.d/server/body-size.conf` | `POST /api/storage/objects` (single-request upload) accepts up to `MAX_FILE_SIZE` = 10 GiB. A lower nginx default would cap it at 1 MB. The part-upload and APK routes narrow their own limits. | Retire the single-request upload path, then narrow the server limit to the two large routes. |
+| Stack agent disabled | `infra/compose/app.vps.no-stack-agent.compose.yml` | The app does not use the Docker-socket holder; the hand-written VPS files never ran it. | Not removed: revisit if the admin UI needs to redeploy telemetry. |
+| Worker variables renamed for the MemoriaHub CLI | `infra/compose/app.worker.memoriahub.compose.yml` | The generated `worker.compose.yml` names the platform engine's variables (`MEMORIAHUB_SERVER_URL`, `MEMORIAHUB_HEAP_LIMIT_MB`, ...). The worker CLI reads `MEMORIAHUB_URL`, `MEMORIAHUB_HEADLESS=1`, `MEMORIAHUB_STATE_DIR`, and so on. The bundle's service is named `worker`, not `memoriahub-worker`. | A seam request to the platform: the worker template takes the app's variable names from the identity. Until then, the overlay. |
+| Worker build target `worker` | `infra/compose/app.worker.build.compose.yml` | The generated `worker.build.compose.yml` builds the `production` target; `apps/cli/Dockerfile` has only `worker`. | Add the platform target name to the app's Dockerfile, or a seam request. |
+| `workerImage` set in the identity | `packages/shared/identity.json` | Without it the platform renders the `ghcr.io/OWNER/REPO-worker` placeholder. | Not removed: the identity value. |
+| App environment variables restored in `app.env.example` | `infra/compose/app.env.example` | The generated template dropped about 40 MemoriaHub variables (`ENRICHMENT_*`, `FACE_*`, `GEO_*`, `DEVICE_PAT_TTL_DAYS`, the S3 keys, `DB_CONNECTION_LIMIT`, ...). The app reads them, not the platform's `JOBS_*` names. | Move the enrichment queue onto the platform jobs slice (then the `ENRICHMENT_*` names go). |
+| Legacy deploy files kept | `infra/nginx/nginx.prod.conf`, root `docker-compose.worker.yml` and `docker-compose.worker.build.yml` | Existing VPS stacks created by `infra/deploy/install.sh` mount `repo/infra/nginx/nginx.prod.conf`, and fleet operators run the root worker bundle; deleting them would break the next `update.sh` / `git pull`. New installs use the generated files. | RETRO-F3 (`memoriahub deploy` replaces `infra/deploy/*.sh`), after production is migrated. |
+| Uptrace stack removed | `infra/compose/otel.compose.yml` and `infra/otel/uptrace.yml` (deleted) | The generated collector config replaced the Uptrace exporter, so the Uptrace stack could not work any more. Telemetry is GreptimeDB through the platform telemetry fragment. | Not applicable: retired. |
+| Memory limits and heap | `infra/compose/app.prod.memory-limits.compose.yml` | The platform's prod limit (512M) is too small for a bulk import. | Not removed: the app's sizing. |
+| pgvector images for devdb and test | `infra/compose/app.devdb.pgvector.compose.yml`, `app.test.pgvector.compose.yml` | The platform images lack the `vector` extension the migrations need. | A platform choice of image per mode, or keep the overlays. |
+| CompreFace and the models volume | `infra/compose/app.compreface.compose.yml`, `app.models-volume.compose.yml`, `app.worker.compreface.compose.yml` | Face recognition and the CLIP model are MemoriaHub services. | Not applicable: app services. |
+
 ## Standing constraints
 
 Rules that hold for the whole program and are not exceptions:

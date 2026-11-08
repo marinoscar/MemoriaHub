@@ -41,21 +41,21 @@ The containerized worker bundle described in the Quick Start immediately below s
 
 ## Quick Start: Container Bundle (Recommended)
 
-The fastest, most consistent way to add compute to the enrichment fleet is the pre-built worker container image (`ghcr.io/marinoscar/memoriahub-worker`) plus the root-level `docker-compose.worker.yml` bundle — not the native `node install-deps` path described in §2 onward, which remains available for a machine that can't or shouldn't run Docker (see that section's own note below). This is the recommended path for anything beyond a single ad-hoc laptop: it needs no native dependency installation on the host at all, since ffmpeg, the npm native compute libraries, tesseract's OCR language data, and the CLIP model file are all baked into the image at build time, and the bundle also runs a `compreface-core` sidecar for face detection (see below).
+The fastest, most consistent way to add compute to the enrichment fleet is the pre-built worker container image (`ghcr.io/marinoscar/memoriahub-worker`) plus the worker bundle in `infra/compose/` (`worker.compose.yml` with the `app.worker.*` overlays) — not the native `node install-deps` path described in §2 onward, which remains available for a machine that can't or shouldn't run Docker (see that section's own note below). This is the recommended path for anything beyond a single ad-hoc laptop: it needs no native dependency installation on the host at all, since ffmpeg, the npm native compute libraries, tesseract's OCR language data, and the CLIP model file are all baked into the image at build time, and the bundle also runs a `compreface-core` sidecar for face detection (see below).
 
 ### Steps
 
 1. **Mint a node credential.** In the web UI, go to `/admin/settings/nodes` → Node Credentials → Create. Copy the raw `nod_`-prefixed token shown — it is displayed only once. This is a durable, `/api/nodes/*`-only credential (never valid for media/settings/admin endpoints); a Personal Access Token also still works here for back-compat, but a node credential is the least-privilege option and is what this quick start assumes. See the [Distributed Nodes spec §13](specs/distributed-nodes.md#13-durable-node-credentials-nod_-tokens) for the full credential model.
-2. **Copy the compose bundle to the host.** From the repo root, copy `docker-compose.worker.yml` and `.env.worker.example` (renamed to `.env.worker`) to the machine that will run the worker(s).
-3. **Configure `.env.worker`.** At minimum set `MEMORIAHUB_URL` (your API's base URL, e.g. `https://your-domain/api`), `MEMORIAHUB_TOKEN` (the `nod_` token from step 1), and a per-host `MEMORIAHUB_NODE_NAME` (must be unique per machine — see the per-replica identity note below).
+2. **Get the bundle on the host.** Check out this repository on the machine that will run the worker(s) (or copy `infra/compose/`), and in `infra/compose` copy `.env.worker.example` to `.env.worker`.
+3. **Configure `.env.worker`.** At minimum set `MEMORIAHUB_SERVER_URL` (your API's base URL, e.g. `https://your-domain/api`; the bundle passes it to the worker as `MEMORIAHUB_URL`), `MEMORIAHUB_TOKEN` (the `nod_` token from step 1), and a per-host `MEMORIAHUB_NODE_NAME` (must be unique per machine — see the per-replica identity note below).
 4. **Start the bundle.**
    ```bash
-   docker compose -f docker-compose.worker.yml --env-file .env.worker up -d
+   cd infra/compose && docker compose -f worker.compose.yml -f app.worker.compreface.compose.yml -f app.worker.memoriahub.compose.yml --env-file .env.worker up -d
    ```
-   This starts a health-gated `compreface-core` sidecar (see below) and one `memoriahub-worker` service instance.
+   This starts a health-gated `compreface-core` sidecar (see below) and one `worker` service instance.
 5. **Scale as needed.**
    ```bash
-   docker compose -f docker-compose.worker.yml --env-file .env.worker up -d --scale memoriahub-worker=N
+   cd infra/compose && docker compose -f worker.compose.yml -f app.worker.compreface.compose.yml -f app.worker.memoriahub.compose.yml --env-file .env.worker up -d --scale worker=N
    ```
 
 ### `MEMORIAHUB_*` environment reference
@@ -93,11 +93,11 @@ rather than a full download to disk.
 
 ### The bundled CompreFace sidecar
 
-`docker-compose.worker.yml` runs a health-gated, multi-process `compreface-core` (`exadel/compreface-core:1.2.0-mobilenet`) alongside the worker service; the worker's `depends_on` waits for `condition: service_healthy` before starting. `UWSGI_PROCESSES` defaults to `${COMPREFACE_PROCESSES:-2}` in the bundle — raise it in `.env.worker` on a host with more cores to get real parallelism across concurrent face-detection jobs (see §5.2 below for the equivalent core-aware sizing guidance on the native install path).
+`app.worker.compreface.compose.yml` runs a health-gated, multi-process `compreface-core` (`exadel/compreface-core:1.2.0-mobilenet`) alongside the worker service; the worker's `depends_on` waits for `condition: service_healthy` before starting. `UWSGI_PROCESSES` defaults to `${COMPREFACE_PROCESSES:-2}` in the bundle — raise it in `.env.worker` on a host with more cores to get real parallelism across concurrent face-detection jobs (see §5.2 below for the equivalent core-aware sizing guidance on the native install path).
 
 ### Per-replica identity
 
-**Each replica registers as its own node.** Whether you scale via `--scale memoriahub-worker=N` or run the bundle on several separate machines, every running worker container needs a distinct identity — set a unique `MEMORIAHUB_NODE_NAME` per host/replica. Two containers sharing one node identity will fight over job leases (`job not owned by this node` errors), the same failure mode §7's "Each machine = its own node registration" note describes for the native path.
+**Each replica registers as its own node.** Whether you scale via `--scale worker=N` or run the bundle on several separate machines, every running worker container needs a distinct identity — set a unique `MEMORIAHUB_NODE_NAME` per host/replica. Two containers sharing one node identity will fight over job leases (`job not owned by this node` errors), the same failure mode §7's "Each machine = its own node registration" note describes for the native path.
 
 **Do NOT share the `/data` state volume between replicas.** The state directory holds a pidfile and a Unix-domain-socket IPC channel that assume a single running instance; two containers pointed at the same volume will collide on both. Give each replica its own volume/mount.
 
@@ -109,7 +109,7 @@ Registration is idempotent: re-registering under the same name re-attaches to th
 
 The worker image is published multi-arch (amd64 + arm64) and tagged with the exact CLI version that built it (`cli-<version>`) — pulling a specific tag guarantees the same compute stack (and therefore the same embeddings) as a server running that CLI version, per the parity guarantees in [distributed-nodes.md §7.3](specs/distributed-nodes.md#73-four-mechanisms-to-guarantee-parity--as-built). The CLIP model file and the tesseract OCR data are baked into the image at `/app/models` at build time, so a freshly-started container is air-gap friendly — nothing needs to be downloaded from Hugging Face/GitHub at startup. Face detection is served by the bundled `compreface-core` sidecar, not a baked-in model file — see [The bundled CompreFace sidecar](#the-bundled-compreface-sidecar) above.
 
-For a local source build instead of the published `ghcr.io` image, use `docker-compose.worker.build.yml` as an overlay.
+For a local source build instead of the published `ghcr.io` image, add `-f app.worker.build.compose.yml` and pass `--build`.
 
 ### Pairing with the API
 
@@ -188,7 +188,7 @@ These install automatically as part of a normal `memoriahub` install (curl insta
 
 ## 5. Setting Up CompreFace for a Native Install
 
-> **Advanced / legacy path.** This section covers configuring CompreFace by hand for a native (non-container) node install. The container bundle's `docker-compose.worker.yml` already runs a health-gated, multi-process `compreface-core` sidecar and points the worker at it automatically (`MEMORIAHUB_FACE_PROVIDER=compreface`) — see [Quick Start: Container Bundle (Recommended)](#quick-start-container-bundle-recommended) above. Read on only if you're setting up a native install or want to understand what the bundle automates.
+> **Advanced / legacy path.** This section covers configuring CompreFace by hand for a native (non-container) node install. The container bundle's `app.worker.compreface.compose.yml` already runs a health-gated, multi-process `compreface-core` sidecar and points the worker at it automatically (`MEMORIAHUB_FACE_PROVIDER=compreface`) — see [Quick Start: Container Bundle (Recommended)](#quick-start-container-bundle-recommended) above. Read on only if you're setting up a native install or want to understand what the bundle automates.
 
 CompreFace is the sole face-recognition provider, server-side and node-side (issue #113 removed the previously-available Human WASM and AWS Rekognition alternatives). `MEMORIAHUB_FACE_PROVIDER`/`--face-provider` default to `compreface` and accept no other value — there is no in-process fallback provider a node can run instead, so a node that wants `face_detection`/`video_face_detection` eligibility must have a reachable `compreface-core` sidecar. This section walks through setting one up by hand for a native (non-container) install.
 
