@@ -8,7 +8,7 @@ Since RETRO-D1 ([#563](https://github.com/marinoscar/MemoriaHub/issues/563)) Mem
 |---|---|---|
 | The active driver (`s3`, `r2`, `s3compatible`, `local`) | `storage.provider` in the `global` system-settings row | Admin → Settings → Object Storage (`/admin/settings/storage`) |
 | Each driver's non-secret settings (bucket, region, endpoint, account id, access key id, path style; the local root) | `storage.drivers.<id>` | same page |
-| The S3-family secret access key | credential store, purpose `storage`, name `default` (encrypted with `SECRETS_ENCRYPTION_KEY`) | same page (write-only field) |
+| Each S3-family driver's secret access key | credential store, purpose `storage`, name = the driver id (`storage/s3`, `storage/r2`, `storage/s3compatible`), encrypted with `SECRETS_ENCRYPTION_KEY`. The shared `storage/default` slot is read only as a fallback while a driver's own is empty | same page: the active driver's write-only field, and one write-only field per other configured driver ("other drivers' credentials"), saved without switching |
 | Storage Insights cadence, Trash retention | `storage.insights`, `storage.trash` (MemoriaHub's fields in the same namespace) | System Settings |
 | Deployment limits | `MAX_FILE_SIZE`, `ALLOWED_MIME_TYPES`, `SIGNED_URL_EXPIRY`, `STORAGE_PART_SIZE` | environment |
 
@@ -28,7 +28,7 @@ docker compose ... exec api npm run storage:migrate-settings --workspace=api -- 
 It is idempotent and set-if-absent: a value an administrator saved since is never overwritten, and a second run reports nothing to write. It does three things:
 
 1. **Settings.** `storage.provider` from `storage.activeProvider` (else `STORAGE_PROVIDER`, else `s3`); `storage.drivers.<id>` from each `storage_provider_credentials` row (an R2 row's endpoint gives the account id; a row with an endpoint keeps path-style addressing), else from the `S3_*` variables for a provider with no row; `storage.drivers.local.rootDir` from `BACKUP_LOCAL_PATH`.
-2. **Secret.** The active provider's secret access key from its legacy row into `storage/default` (decrypted with the legacy cipher, re-encrypted by the credential store, read back and compared), else `AWS_SECRET_ACCESS_KEY` when the provider had no row. An undecryptable row stops the run and nothing is written.
+2. **Secrets, one per driver.** EVERY S3-family provider's secret access key from its legacy row into that driver's own address (`s3` into `storage/s3`, `r2` into `storage/r2`; decrypted with the legacy cipher, re-encrypted by the credential store, read back and compared), set-if-absent; `AWS_SECRET_ACCESS_KEY` for a provider configured from the `S3_*` variables (no row). So a deployment with objects on S3 and on R2 under different key pairs keeps reading both. `storage/default` is not written. An undecryptable row stops the run and nothing is written.
 3. **Report.** `storage_objects` per recorded provider and every warning.
 
 Then open `/admin/settings/storage`, press **Test connection**, and look at the Doctor's `storage.config` and `storage.bucket` checks.
@@ -37,9 +37,8 @@ Then open `/admin/settings/storage`, press **Test connection**, and look at the 
 
 | Warning | Meaning | Action |
 |---|---|---|
-| objects live on two S3-family providers with different access keys | The platform's three S3 drivers share ONE secret (`storage/default`). Objects recorded on the other S3-family provider cannot be read with it. | Before the upgrade (or before removing the old provider), run the copy-only migration so every object is on one provider; or give both buckets one key pair. Until then those objects answer "not found". |
 | `"x"` names no platform driver | A credential row or object rows name an id no driver registers. | Fix the provider at `/admin/settings/storage`. Rows recorded on an unknown id are read through the active driver. |
-| the active provider has no legacy secret | Neither a credential row nor `AWS_SECRET_ACCESS_KEY` carried one. | Enter the secret access key on the page. |
+| provider `"x"` (n objects) has no legacy secret | An S3-family provider that holds objects (or the active one) had neither a credential row with a secret nor, for an environment-configured provider, `AWS_SECRET_ACCESS_KEY`. Its rows cannot be read until it has one. | Enter that driver's secret access key on the page (its own field; no switch needed). |
 | a credential row is disabled | Its settings were carried over all the same. | Nothing, unless you meant to drop it. |
 
 ## The `local` driver
@@ -63,7 +62,6 @@ MemoriaHub's own migration (`/api/storage-settings/migrate*`, job `storage_migra
 | Symptom | Cause | Fix |
 |---|---|---|
 | `503 Object storage is not configured` | The active driver's settings or secret are incomplete. | Fill them in at `/admin/settings/storage`; the message names the missing fields. Run the carry-over if you upgraded. |
-| Old photos answer "not found" after the upgrade, new ones work | Their rows record a provider whose settings or secret did not carry over (see the warnings). | Run the carry-over dry run and read its warnings; enter the missing driver settings; migrate objects off a second S3-family provider. |
+| Old photos answer "not found" after the upgrade, new ones work | Their rows record a provider whose settings or secret did not carry over (see the warnings). | Run the carry-over dry run and read its warnings; enter the missing driver settings and that driver's own secret on the page. |
 | Uploads stay `processing` | Post-upload processing is the `storage.object.process` queue job now; no worker runs it, or the queue is backlogged. | Check `/admin/settings/jobs` for that type; the job retries and, on giving up, marks the object `failed`. |
-| Thumbnails re-download on every visit | The platform's upload carries no `Cache-Control`, so thumbnails lost their `immutable` header (keys are still content-addressed). | Known gap; a CDN or bucket rule can set it. |
 | A probe object under `__memoriahub_conn_test__/` | Left by a failed connection test of the old page. | Delete it by hand; the platform's test writes `storage-config-test/`. |
