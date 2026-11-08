@@ -159,7 +159,7 @@ describe('legacy credential migration', () => {
     await expect(applyPlan(plan, creds, settings, decryptSecret)).rejects.toThrow(/Round trip failed.*row-geo-1/);
   });
 
-  it('plans storage, smtp, ses and push_vapid but refuses to apply them', async () => {
+  it('plans storage and push_vapid but refuses to apply them (smtp and ses apply since RETRO-D2)', async () => {
     const storage: LegacyItem = {
       purpose: 'storage',
       rowId: 'row-s3',
