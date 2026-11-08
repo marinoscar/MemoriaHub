@@ -1,13 +1,11 @@
 # Notifications cutover to the platform slice (RETRO-D3, #576)
 
-MemoriaHub's notification center (the bell, the inbox, Web Push, the live stream, broadcasts, the policy and per-user preferences) moves onto `@marinoscar/platform-api/notifications`. The move has two phases because the pinned platform version cannot hold MemoriaHub's inbox yet.
+MemoriaHub's notification center (the bell, the inbox, Web Push, the live stream, broadcasts, the policy and per-user preferences) runs on `@marinoscar/platform-api/notifications` and `@marinoscar/platform-web/notifications`. The move had two phases.
 
-| Phase | Ships | State after deploy |
+| Phase | Shipped | State after deploy |
 |---|---|---|
-| 1 (this change) | The nine event keys and their renderers (`apps/api/src/notifications-registry/memoriahub.notifications.ts`), the manifest (`apps/api/src/platform/notifications/notification.manifest.ts`, not imported at runtime), the `notifications` conformance suite, and the carry-over (`npm run notifications:migrate-legacy`) | **No behaviour change.** The app's own slice still serves `/api/notifications`, push, the stream and broadcasts from the `mh_legacy_*` tables. Nothing to do after deploy. |
-| 2 (after the 0.1.0-next.27 bump, PR #653) | `NotificationsModule.forRoot` + `BroadcastsModule` mounted, producers on `notifyState` / `notifyCounted` / `notify`, the app slice deleted, the platform web components | The platform serves everything; the carry-over below runs in the cutover window. |
-
-Why phase 2 needs the bump: platform 0.1.0-next.22's inbox has no `data`, `dismissed_at`, `updated_at`, scope or dedup columns, no STATE or COUNTED writes, no dismiss routes and no settings `onWrite` hook. Those arrive in 0.1.0-next.26/27 (platform migration `0041_notifications_state_counted`). See [local exceptions](../platform-adoption/local-exceptions.md) for the shim each one removes.
+| 1 | The nine event keys and their renderers (`apps/api/src/notifications-registry/memoriahub.notifications.ts`), the manifest, the `notifications` conformance suite, and the carry-over (`npm run notifications:migrate-legacy`) | No behaviour change: the app's own slice still served everything from the `mh_legacy_*` tables. |
+| 2 (platform 0.1.0-next.27, migrations `0041`/`0042` installed) | `NotificationsModule.forRoot` + `BroadcastsModule` mounted with the manifest; producers on `notifyState` / `notifyCounted` / `notify`; email sends on `notifyAddress` / `notifyNow` (`AppEmailSender` deleted); `DB_BACKUP_NOTIFIER` and `IDENTITY_NOTIFIER` on `NotificationsService`; the platform settings namespaces with their `onWrite` dismiss hooks; the packaged bell, inbox store, stream, push sync, service-worker handlers and admin pages; `apps/api/src/notifications/` deleted; RETRO-C8's `retention.appNotifications` policy removed; `notification_purge`, `broadcast_start` and `broadcast_chunk` retired as no-op job types | **The platform serves everything from its own (empty) tables.** Until the carry-over below runs, users see an empty bell and inbox, existing browsers are not subscribed, the admin policy and per-user preferences read as defaults (a user's legacy preferences are read-repaired in memory), and broadcast history is not listed. Run the carry-over in the deploy window. |
 
 ## The event keys (permanent)
 
@@ -27,23 +25,23 @@ Why phase 2 needs the bump: platform 0.1.0-next.22's inbox has no `data`, `dismi
 
 A key is never renamed: a user who muted the old key would silently start receiving the new one, and their history would be orphaned.
 
-## The carry-over (phase 2 cutover window)
+## The carry-over (operator action, right after the phase-2 deploy)
 
 ```bash
 npm run notifications:migrate-legacy --workspace=api                 # dry run: counts per table and per type, the settings plan
 npm run credentials:migrate-legacy --workspace=api -- --purpose push_vapid            # dry run of the VAPID key move
-# after the phase-2 release is deployed and no legacy broadcast is scheduled or sending:
-npm run credentials:migrate-legacy --workspace=api -- --purpose push_vapid --apply    # phase 2 enables push_vapid there
+# after the phase-2 release is deployed (maintenance window recommended):
+npm run credentials:migrate-legacy --workspace=api -- --purpose push_vapid --apply
 npm run notifications:migrate-legacy --workspace=api -- --apply
 ```
 
 What `--apply` does, in one transaction, idempotent (keyed on the legacy row id), never modifying a `mh_legacy_*` table:
 
 1. **Push subscriptions** are copied with the same endpoint, keys and failure count (`platform = 'browser'`). With the same VAPID key pair (moved into the credential store by the credentials command; the `webPush` row's `enabled`, `publicKey` and `subject` are read by the platform as they are), no browser re-subscribes.
-2. **Broadcasts** are copied (`critical` -> `admin.broadcast_critical`, channel `inbox` -> `browser`, audience = everyone). It refuses while a legacy broadcast is `scheduled` or `sending`: cancel it or let it finish first.
+2. **Broadcasts** are copied (`critical` -> `admin.broadcast_critical`, channel `inbox` -> `browser`, audience = everyone). It refuses while a legacy broadcast is `scheduled` or `sending`. Phase 2 retired the legacy `broadcast_start` / `broadcast_chunk` handlers, so such a broadcast no longer progresses: cancel it in SQL (`UPDATE mh_legacy_notification_broadcasts SET status = 'canceled', canceled_at = now() WHERE status IN ('scheduled','sending')`) and re-create it on `/admin/settings/broadcasts`. Drain or cancel scheduled broadcasts before deploying to avoid this.
 3. **Inbox** rows keep their title, link, read and dismissed state, `data` (with `count` and `countAtRead`) and timestamps. Each live review-queue or counted row gets the key the platform writer folds into, so after the cutover a circle with 929 pending duplicate groups is still one row and the next upload grows the same counted row. Of several live upload windows for one circle, only the newest keeps the key; the others are retired exactly as the platform retires a closed window.
 4. **Deliveries** are copied with their event key (recipient label `carried over (pre-platform)`).
-5. **Policy**: `pushEnabled` -> `channels.push.enabled`, `disabledTypes` -> `disabledEvents` plus `jobs.job_failed` (MemoriaHub's own `media.enrichment_failed` roll-up stays the one bell per failure), `retentionDays` / `purgeEnabled` -> `retention.notifications` and `retention.notificationDeliveries` (only while absent). The original stays under `mhLegacyNotifications` in the `global` row.
+5. **Policy**: `pushEnabled` -> `channels.push.enabled`, `disabledTypes` -> `disabledEvents` plus `jobs.job_failed` (MemoriaHub's own `media.enrichment_failed` roll-up stays the one bell per failure), RETRO-C8's `retention.appNotifications` when stored, else `retentionDays` / `purgeEnabled`, -> `retention.notifications` and `retention.notificationDeliveries` (only while absent; without either the platform defaults apply: 180 and 90 days). The original stays under `mhLegacyNotifications` in the `global` row.
 6. **Preferences**: a muted type (or "all off") mutes `browser` and `push` for its event; a push-only mute mutes `push`. `workflowMicroRuns: true` moves to `memoriahubNotifications.workflowMicroRuns`. The originals are kept, per user, in the `system_settings` row `mh_legacy_notification_preferences`.
 
 ## Verify
@@ -54,8 +52,13 @@ What `--apply` does, in one transaction, idempotent (keyed on the legacy row id)
 
 ## Behaviour changes to expect
 
-- The platform inbox purge (`notifications.inbox.purge`) deletes rows by age whether read or not; MemoriaHub never aged out an unread row.
-- Broadcast jobs are the platform's `admin.broadcast.start` / `admin.broadcast.chunk`; legacy `broadcast_start` / `broadcast_chunk` rows must be drained before the window.
+- **Retention.** The platform inbox purge (`notifications.inbox.purge`, `retention.notifications`) deletes a plain event row (workflow run finished, share expiring, broadcast) by age whether read or not; a STATE or COUNTED row (review queues, uploads, enrichment failures, memories) only once read or dismissed, never while unread, as before. MemoriaHub never aged out any unread row. The default window is 180 days (MemoriaHub's was 30 after resolution); the carry-over keeps the stored window. RETRO-C8's `retention.appNotifications` is no longer read.
+- **Inbox page.** `/notifications` has no circle filter and its "Mark all as read" / "Dismiss all" act on every circle (the platform list has no scope filter). `DELETE /api/notifications/:id` is gone (dismiss instead). A circle's notification opens with `?c=<circleId>`, which switches circle on arrival, from the bell, the inbox page or a push.
+- **Preferences.** Per event and per channel (in-app, push) on `/settings/notifications`; the workflow micro-run opt-in is a separate card (`memoriahubNotifications.workflowMicroRuns`, off by default).
+- **Email.** Circle invitation, membership confirmation and the memory digest are notification events (`circles.invitation`, `circles.membership_confirmed`, `memories.digest`), on by default; a user who turns one off in their preferences stops receiving it.
+- **New notifications.** Database backup failures and completed restores now notify `db_backup:read` holders (`db_backup.restore_completed` is mandatory). The identity events (`user.welcome`, `allowlist.invitation`, `security.role_changed`) are declared but default off.
+- **Review-queue reconcile** also drains the row of a member demoted to viewer or removed from the circle.
+- **Broadcast jobs** are the platform's `admin.broadcast.start` / `admin.broadcast.chunk`; the legacy `broadcast_start`, `broadcast_chunk` and `notification_purge` job types are retired no-ops (a queued row succeeds without doing anything).
 
 ## Rollback
 
