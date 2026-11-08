@@ -20,7 +20,7 @@ import { renderTuiMenu, renderTuiRoute, cleanup } from '@marinoscar/platform-cli
 import { BUILTIN_TUI_SCREENS } from '@marinoscar/platform-cli/tui';
 
 import { APP_CLI_OPTIONS } from '../../src/app.js';
-import { APP_TUI_MENU } from '../../src/tui/menu.js';
+import { APP_TUI_MENU, PLATFORM_HIDDEN_SCREENS } from '../../src/tui/menu.js';
 import { APP_TUI_SCREENS } from '../../src/tui/screens.js';
 
 const PHASE = process.env['TUI_SNAPSHOT_PHASE'] ?? 'after';
@@ -45,7 +45,12 @@ function save(name: string, frame: string | undefined): void {
 }
 
 const SCREENS = [
-  ...BUILTIN_TUI_SCREENS.map((s) => ({ route: s.route, order: s.order, label: s.route === 'deploy' ? 'Deploy  (this server)' : s.route })),
+  ...BUILTIN_TUI_SCREENS.map((s) => ({
+    route: s.route,
+    order: s.order,
+    label: s.route === 'deploy' ? 'Deploy  (this server)' : s.route,
+    hidden: (PLATFORM_HIDDEN_SCREENS as readonly string[]).includes(s.route),
+  })),
   ...APP_TUI_SCREENS.map((s) => ({ route: s.route, order: s.order, label: s.label })),
 ];
 

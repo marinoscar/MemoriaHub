@@ -6,7 +6,6 @@ import { createCli } from '@marinoscar/platform-cli';
 import { resetCliForTests, runPlatformConformance } from '@marinoscar/platform-cli/testing';
 
 import { APP_CLI_OPTIONS } from '../src/app.js';
-import { APP_TUI_MENU } from '../src/tui/menu.js';
 import { backupDashboardReducer } from '../src/tui/backup-dashboard-source.js';
 import { jobsDashboardReducer } from '../src/tui/jobs-dashboard-source.js';
 import { nodeDashboardReducer } from '../src/tui/node-dashboard-source.js';
@@ -63,10 +62,6 @@ runPlatformConformance({
           events: [],
         },
       ],
-      // The parked platform screens live in a section nobody can see (menu.ts); the reachability check
-      // would rightly flag it, so it runs over the tree without that section. (The check-level `skip`
-      // of the tui suite cannot be used yet: the runner reads any `skip` key as a skip of the whole suite.)
-      nodes: APP_TUI_MENU.filter((node) => node.id !== 'platform-parked' && node.parent !== 'platform-parked'),
     },
   },
 });

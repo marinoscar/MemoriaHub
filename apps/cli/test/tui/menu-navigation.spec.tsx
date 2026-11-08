@@ -26,11 +26,16 @@ import { ApiClient } from '../../src/api.js';
 import { saveConfig } from '../../src/config.js';
 import { FolderRepo } from '../../src/repo/folders.js';
 import { CIRCLE_SELECTION, getAppDb } from '../../src/tui/app-state.js';
-import { APP_TUI_MENU } from '../../src/tui/menu.js';
+import { APP_TUI_MENU, PLATFORM_HIDDEN_SCREENS } from '../../src/tui/menu.js';
 import { APP_TUI_SCREENS } from '../../src/tui/screens.js';
 
 const SCREENS = [
-  ...BUILTIN_TUI_SCREENS.map((s) => ({ route: s.route, order: s.order, label: s.route === 'deploy' ? 'Deploy  (this server)' : s.route })),
+  ...BUILTIN_TUI_SCREENS.map((s) => ({
+    route: s.route,
+    order: s.order,
+    label: s.route === 'deploy' ? 'Deploy  (this server)' : s.route,
+    hidden: (PLATFORM_HIDDEN_SCREENS as readonly string[]).includes(s.route),
+  })),
   ...APP_TUI_SCREENS.map((s) => ({ route: s.route, order: s.order, label: s.label })),
 ];
 

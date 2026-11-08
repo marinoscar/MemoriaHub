@@ -11,8 +11,8 @@
  * with the vocabulary of the platform tree: a "submenu" is a section, an "action" an
  * entry, the 1.3 action id is the entry's route, and the breadcrumb root reads
  * `Home` instead of `Menu` (documented in docs/platform-adoption/tui-parity.md).
- * The platform adds a `Deploy` entry at the root and parks its own login, invoke,
- * status, jobs, node and logout screens out of sight.
+ * The platform adds a `Deploy` entry at the root; its own login, invoke, status,
+ * jobs, node and logout screens are hidden (`tuiHiddenScreens`).
  */
 import {
   BUILTIN_TUI_SCREENS,
@@ -27,12 +27,17 @@ import {
   type TuiMenuTreeSection,
 } from '@marinoscar/platform-cli/tui';
 
-import { APP_TUI_MENU, PLATFORM_PARKED_ROUTES, reportRoute } from '../src/tui/menu.js';
+import { APP_TUI_MENU, PLATFORM_HIDDEN_SCREENS, reportRoute } from '../src/tui/menu.js';
 import { APP_TUI_SCREENS } from '../src/tui/screens.js';
 import { REPORTS } from '../src/reports/registry.js';
 
 const SCREENS = [
-  ...BUILTIN_TUI_SCREENS.map((s) => ({ route: s.route, order: s.order, label: s.route === 'deploy' ? 'Deploy  (this server)' : s.route })),
+  ...BUILTIN_TUI_SCREENS.map((s) => ({
+    route: s.route,
+    order: s.order,
+    label: s.route === 'deploy' ? 'Deploy  (this server)' : s.route,
+    hidden: (PLATFORM_HIDDEN_SCREENS as readonly string[]).includes(s.route),
+  })),
   ...APP_TUI_SCREENS.map((s) => ({ route: s.route, order: s.order, label: s.label })),
 ];
 
@@ -134,8 +139,7 @@ describe('menu tree (platform helpers)', () => {
     it('keeps the platform login, invoke, status, jobs, node and logout screens out of the menu in both states', () => {
       for (const loggedIn of [false, true]) {
         const shown = routes(visible('root', loggedIn));
-        for (const parked of PLATFORM_PARKED_ROUTES) expect(shown).not.toContain(parked);
-        expect(visible('platform-parked', loggedIn)).toHaveLength(0);
+        for (const hidden of PLATFORM_HIDDEN_SCREENS) expect(shown).not.toContain(hidden);
       }
     });
   });

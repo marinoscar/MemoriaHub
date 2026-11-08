@@ -43,8 +43,13 @@ function entry(
   return { kind: 'entry', id, ...(parent ? { parent } : {}), label, order, route, ...extra };
 }
 
-/** Screens the platform ships that MemoriaHub's menu does not show (see PLATFORM_PARKED_ROUTES). */
-export const PLATFORM_PARKED_ROUTES = ['login', 'invoke', 'status', 'jobs', 'node', 'logout'] as const;
+/**
+ * The platform's own screens MemoriaHub's menu does not show: its Login keeps the app fields of the
+ * config file (`memoriahub-login`), its node group is the 1.3 one until RETRO-C10, and its job
+ * monitor is its own (`jobs-monitor`). `createCli({ tuiHiddenScreens })` keeps them off the root
+ * menu; they stay routable, but no entry opens them. `deploy` stays listed.
+ */
+export const PLATFORM_HIDDEN_SCREENS = ['login', 'invoke', 'status', 'jobs', 'node', 'logout'] as const;
 
 /**
  * Root order: Login (logged out only), then the 1.3 root rows, then the platform's
@@ -126,15 +131,4 @@ export const APP_TUI_MENU: readonly TuiMenuNode[] = [
   }),
 
   entry('help', undefined, 'Help', 9, 'help', { loggedOut: true }),
-
-  // PLATFORM-ADOPTION-SHIM(RETRO-F4): the platform's own login, invoke, status, jobs, node and
-  // logout screens are not part of MemoriaHub's menu (its Login keeps the app fields of the config
-  // file, its node group is the 1.3 one until RETRO-C10, its jobs monitor is its own). The platform
-  // cannot hide a built-in, and a screen no entry opens is listed at the root, so each is parked in
-  // a section nobody can see: logged out the entry is hidden (no `loggedOut`), logged in
-  // `hideWhenLoggedIn` hides it. Removed when the platform can hide a built-in screen.
-  section('platform-parked', undefined, 'Platform', 98),
-  ...PLATFORM_PARKED_ROUTES.map((route, index) =>
-    entry(`parked-${route}`, 'platform-parked', route, index + 1, route, { loggedOut: false, hideWhenLoggedIn: true }),
-  ),
 ];
