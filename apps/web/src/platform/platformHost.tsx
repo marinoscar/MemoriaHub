@@ -104,6 +104,43 @@ export async function appGetBlob(
   return { blob: await response.blob(), headers: response.headers };
 }
 
+/**
+ * `POST` a JSON body and read a binary answer (the telemetry explorer's export, RETRO-T2 #625):
+ * the same `fetch`, bearer token, one refresh-and-retry on a 401 and maintenance recogniser as
+ * {@link appGetBlob}.
+ *
+ * PLATFORM-ADOPTION-SHIM(#597): removed with `appPlatformApi` (RETRO-F1/B2).
+ */
+export async function appPostBlob(
+  path: string,
+  body?: unknown,
+  options?: PlatformRequestOptions,
+): Promise<PlatformBlobResponse> {
+  const send = () => {
+    const token = api.getAccessToken();
+    return fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      credentials: 'include',
+      signal: options?.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options?.headers ?? {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  };
+  let response = await send();
+  if (response.status === 401 && (await api.refreshToken())) response = await send();
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const block = readMaintenanceBlock(response.status, errorBody);
+    if (block) reportMaintenanceBlock(block);
+    throw new ApiError(errorBody.message || 'Request failed', response.status, errorBody.code, errorBody.details);
+  }
+  return { blob: await response.blob(), headers: response.headers };
+}
+
 /** The `PlatformApiClient` over this app's HTTP client. Built ONCE, at module scope. */
 export const appPlatformApi: PlatformApiClient = {
   get: (path, options) => api.get(path, toRequestInit(options)),
@@ -113,6 +150,7 @@ export const appPlatformApi: PlatformApiClient = {
   delete: (path, options) => api.delete(path, toRequestInit(options)),
   postSse: appPostSse,
   getBlob: appGetBlob,
+  postBlob: appPostBlob,
 };
 
 /** This app's {@link PlatformWebHost}, memoised. Must run inside the auth provider. */

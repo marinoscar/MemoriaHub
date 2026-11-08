@@ -53,6 +53,7 @@ import { credentialsModules } from './platform/credentials/credentials.config';
 import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
+import { telemetryModule } from './platform/telemetry/telemetry.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -157,6 +158,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     dbBackupModule,
     MediaSyncModule,
     AndroidAppModule,
+    // Telemetry (RETRO-T2, #625): @marinoscar/platform-api/telemetry. The settings page, the
+    // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
+    // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.
+    telemetryModule,
   ],
   providers: [
     // Global validation pipe (Zod)

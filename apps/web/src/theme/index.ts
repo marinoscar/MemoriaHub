@@ -7,11 +7,14 @@
  */
 import type { Theme } from '@mui/material/styles';
 import { createShellTheme } from '@marinoscar/platform-web/shell/headless';
+// The telemetry pages' status and chart-series tokens (RETRO-T2, #625), derived from
+// this palette where the app sets none.
+import { withTelemetryTokens } from '@marinoscar/platform-web/telemetry/headless';
 import { lightPalette } from './light';
 import { darkPalette } from './dark';
 
-export const lightTheme: Theme = createShellTheme('light', { palette: lightPalette });
-export const darkTheme: Theme = createShellTheme('dark', { palette: darkPalette });
+export const lightTheme: Theme = createShellTheme('light', { palette: lightPalette, extend: withTelemetryTokens });
+export const darkTheme: Theme = createShellTheme('dark', { palette: darkPalette, extend: withTelemetryTokens });
 
 /** What `ShellRoot` / `ShellThemeProvider` resolve the viewer's mode against. */
 export const APP_THEMES = { light: lightTheme, dark: darkTheme };

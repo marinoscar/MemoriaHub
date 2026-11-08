@@ -9,7 +9,7 @@
 //   system (app list): ui, features, ai, autoTagging, face, storage, burst, dedup,
 //                      locationInference, locationGrouping, socialMedia, geo, email,
 //                      reviewRuns, notifications, pictureEnhancement, backup, workflows,
-//                      memories
+//                      memories, telemetry (the platform telemetry slice's declaration, RETRO-T2)
 //   system (platform): maintenance (registered by the host core), jobs and retention (the jobs slice, RETRO-C1),
 //                      databaseBackup (the db-backup slice, RETRO-D4)
 //   user   (app list): search, notifications, memories, timezone
@@ -63,6 +63,7 @@ import { SEARCH_USER_SETTINGS, type SearchPreferencesValue } from '../settings/r
 import { TIMEZONE_USER_SETTINGS } from '../settings/registry/namespaces/user/timezone';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { MEMORIAHUB_AI_SETTINGS_EXTENSION } from '../platform/ai/ai-settings.extension';
+import { TELEMETRY_SYSTEM_SETTINGS } from '../platform/telemetry/telemetry.system-settings';
 
 /** MemoriaHub's system namespaces, in order (the platform's `maintenance` is registered by the host). */
 export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] = [
@@ -88,6 +89,9 @@ export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] 
   BACKUP_SYSTEM_SETTINGS,
   WORKFLOWS_SYSTEM_SETTINGS,
   MEMORIES_SYSTEM_SETTINGS,
+  // The platform telemetry slice's policy (RETRO-T2, #625): the package ships the schema, the
+  // defaults (OFF) and the merge; the declaration is the host's (`telemetry.system-settings.ts`).
+  TELEMETRY_SYSTEM_SETTINGS as unknown as SystemSettingsNamespace,
   // `databaseBackup` is the db-backup slice's since RETRO-D4 (#580): settings/registry/system-settings.manifest.ts.
 ] as unknown as readonly SystemSettingsNamespace[];
 
