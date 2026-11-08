@@ -34,6 +34,13 @@
 // are registered, every sampled template (the platform's plus this app's three) renders
 // a complete document with its data escaped, and no email settings shape carries a secret.
 //
+// `notifications` (`@marinoscar/platform-api/notifications/testing`, RETRO-D3 phase 1):
+// the platform channels and the platform's own events are registered, every event that
+// declares email has a bound template, no `notify*()` sits inside a `$transaction`, and
+// the Web Push shapes carry no secret. The registrations come from
+// `src/platform/notifications/notification.manifest.ts` (MemoriaHub's nine events); the
+// slice itself is mounted after the 0.1.0-next.27 bump.
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -51,6 +58,7 @@ import '@marinoscar/platform-api/email/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
 import '@marinoscar/platform-api/jobs/testing';
+import '@marinoscar/platform-api/notifications/testing';
 import '@marinoscar/platform-api/settings/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
@@ -65,6 +73,8 @@ import '../src/app-registrations/ownership-manifest';
 import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-backup';
 // Configures email rendering and registers this app's templates (the `email` suite renders them).
 import '../src/platform/email/email.config';
+// Registers the notification channels and events the `notifications` suite reads (RETRO-D3).
+import '../src/platform/notifications/notification.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
@@ -128,6 +138,8 @@ runPlatformConformance({
     // The email slice (RETRO-D2, #570). `samples` adds this app's three templates to the
     // rendering check, with hostile text in every field the escaping must catch.
     email: { samples: EMAIL_TEMPLATE_SAMPLES },
+    // The notifications slice's registrations (RETRO-D3, #576). No file is allowlisted.
+    notifications: { afterCommitAllowlist: [] },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no
