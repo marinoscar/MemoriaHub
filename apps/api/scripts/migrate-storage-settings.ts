@@ -17,9 +17,11 @@
 //                `storage.drivers.<id>` (from the `storage_provider_credentials` rows, else the S3_*
 //                variables; `drivers.local.rootDir` from BACKUP_LOCAL_PATH). Set-if-absent: a value an
 //                administrator saved since is never overwritten.
-//   2. secret    the active provider's secret access key into the credential store (`storage/default`):
+//   2. secrets   EVERY S3-family provider's secret access key into ITS OWN credential address
+//                `storage/<driverId>` (`storage/s3`, `storage/r2`; platform 0.1.0-next.28, EAB #1124):
 //                the RETRO-B4 `storage` purpose (legacy cipher -> credential store, round-trip checked),
-//                set-if-absent; else AWS_SECRET_ACCESS_KEY when the provider had no credential row.
+//                set-if-absent; AWS_SECRET_ACCESS_KEY for a provider that had no credential row. So a
+//                deployment with objects on two providers with different key pairs keeps reading both.
 //   3. report    `storage_objects` per recorded provider, and every conflict (see the warnings).
 //
 // The legacy table `storage_provider_credentials` and the old `activeProvider` key are read, never
@@ -38,7 +40,6 @@ import { decryptSecret } from '../src/legacy/legacy-secret-cipher';
 import { applyPlan, buildPlan, formatPlan } from '../src/legacy/legacy-credentials-migration';
 import { PgLegacySource, PgSettingsStore } from '../src/legacy/legacy-credentials-pg';
 import {
-  S3_FAMILY_DRIVER_IDS,
   loadStorageSettingsInput,
   planStorageSettings,
   writeStorageSettingsPlan,
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     for (const line of plan.changes) console.log(`  change  ${line}`);
     for (const line of plan.warnings) console.log(`  WARNING ${line}`);
 
-    // 2. secret
+    // 2. secrets, one credential address per driver
     const credentials = new CredentialsService(prisma as never);
     const settingsStore = new PgSettingsStore(client);
     const source = new PgLegacySource(client, settingsStore);
@@ -88,17 +89,19 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const isS3Family = (S3_FAMILY_DRIVER_IDS as readonly string[]).includes(plan.provider);
-    const activeRow = input.rows.find((row) => row.provider === plan.provider);
+    // AWS_SECRET_ACCESS_KEY: the secret of each S3-family driver configured from the environment.
     const envSecret = (process.env['AWS_SECRET_ACCESS_KEY'] ?? '').trim();
-    const useEnvSecret = isS3Family && !activeRow?.hasSecret && envSecret !== '';
-    const storedSecret = await credentials.getSecret('storage', 'default');
-    if (useEnvSecret) {
-      console.log(
-        storedSecret
-          ? '  secret  storage/default already stored; AWS_SECRET_ACCESS_KEY is not used'
-          : `  secret  storage/default from AWS_SECRET_ACCESS_KEY hint=${deriveHint(envSecret)}`,
-      );
+    const envWrites: string[] = [];
+    if (envSecret !== '') {
+      for (const id of plan.envSecretDrivers) {
+        const stored = await credentials.getSecret('storage', id);
+        if (stored) {
+          console.log(`  secret  storage/${id} already stored; AWS_SECRET_ACCESS_KEY is not used`);
+        } else {
+          envWrites.push(id);
+          console.log(`  secret  storage/${id} from AWS_SECRET_ACCESS_KEY hint=${deriveHint(envSecret)}`);
+        }
+      }
     }
 
     if (!apply) {
@@ -110,12 +113,12 @@ async function main(): Promise<void> {
     console.log(`settings: ${wrote ? 'written' : 'unchanged'}`);
     const result = await applyPlan(secretPlan, credentials, settingsStore, decryptSecret, (line) => console.log(`  ${line}`));
     console.log(`secret: written ${result.written}, unchanged ${result.unchanged}, skipped ${result.skipped}`);
-    if (useEnvSecret && !storedSecret && result.written === 0) {
-      await credentials.setSecret('storage', 'default', envSecret, { label: 'Storage secret access key' });
-      if ((await credentials.getSecret('storage', 'default')) !== envSecret) {
-        throw new Error('Round trip failed for storage/default (from AWS_SECRET_ACCESS_KEY).');
+    for (const id of envWrites) {
+      await credentials.setSecret('storage', id, envSecret, { label: `Storage secret access key (${id})` });
+      if ((await credentials.getSecret('storage', id)) !== envSecret) {
+        throw new Error(`Round trip failed for storage/${id} (from AWS_SECRET_ACCESS_KEY).`);
       }
-      console.log(`secret: storage/default written from AWS_SECRET_ACCESS_KEY hint=${deriveHint(envSecret)}`);
+      console.log(`secret: storage/${id} written from AWS_SECRET_ACCESS_KEY hint=${deriveHint(envSecret)}`);
     }
     console.log('Done. Check /admin/settings/storage ("Test connection") and the Doctor storage checks.');
   } finally {

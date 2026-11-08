@@ -11,9 +11,14 @@
 //   BACKUP_LOCAL_PATH                 credential row, and the local provider's root
 //
 // The platform reads `storage.provider`, `storage.drivers.<id>` (non-secret settings, validated by
-// each driver) and the credential store (`storage/default` for the S3 family). This module computes
-// the settings half; the secret half is the RETRO-B4 credential migration's `storage` purpose
-// (`legacy-credentials-migration.ts`), which `scripts/migrate-storage-settings.ts` runs alongside.
+// each driver) and the credential store. Since platform 0.1.0-next.28 (EAB #1124) every S3-family
+// driver keeps its secret at its OWN address `storage/<driverId>` (falling back to the shared
+// `storage/default` only while its own is empty), so each legacy provider's secret is carried to its
+// own driver and a deployment with objects on two providers with different key pairs keeps reading
+// both. This module computes the settings half and says which drivers take
+// `AWS_SECRET_ACCESS_KEY`; the secret half of the credential rows is the RETRO-B4 credential
+// migration's `storage` purpose (`legacy-credentials-migration.ts`, per driver), which
+// `scripts/migrate-storage-settings.ts` runs alongside.
 //
 // RULES (each is tested):
 //   - Dry run by default; `--apply` is explicit.
@@ -24,9 +29,8 @@
 //   - `storage_provider_credentials` is read, never modified (rollback keeps working); it is dropped
 //     in a later release.
 //   - No secret is read here. The access key id is not a secret.
-//   - Conflicts are WARNINGS with the counts an operator needs: the S3 family shares ONE secret
-//     (`storage/default`), so two S3-family providers holding objects with different access keys
-//     cannot both be served (seam gap, docs/platform-adoption/local-exceptions.md).
+//   - Conflicts are WARNINGS with the counts an operator needs: a provider id no driver serves, and
+//     an S3-family driver that holds objects (or is active) but has no legacy secret to carry.
 // =============================================================================
 
 import type { Client } from 'pg';
@@ -72,6 +76,11 @@ export interface StorageSettingsPlan {
   writeProvider: boolean;
   /** Per driver, the fields that would be written (set-if-absent). */
   drivers: Record<string, Record<string, unknown>>;
+  /**
+   * The S3-family drivers whose settings come from the `S3_*` / `AWS_ACCESS_KEY_ID` environment (no
+   * credential row): `AWS_SECRET_ACCESS_KEY`, when set, is their secret (`storage/<driverId>`).
+   */
+  envSecretDrivers: string[];
   /** Human-readable lines: what changes. */
   changes: string[];
   /** Human-readable lines: what an operator must look at. */
@@ -80,7 +89,7 @@ export interface StorageSettingsPlan {
   changed: boolean;
 }
 
-/** The S3-family driver ids the platform ships (they share one secret address). */
+/** The S3-family driver ids the platform ships (each keeps its secret at `storage/<driverId>`). */
 export const S3_FAMILY_DRIVER_IDS = ['s3', 'r2', 's3compatible'] as const;
 /** Every driver id this deployment registers. */
 export const KNOWN_DRIVER_IDS = [...S3_FAMILY_DRIVER_IDS, 'local'] as const;
@@ -155,9 +164,11 @@ export function planStorageSettings(input: StorageSettingsInput): StorageSetting
     accessKeyId: input.env.AWS_ACCESS_KEY_ID,
   };
   const envHasS3 = [envS3.bucket, envS3.accessKeyId].some((v) => text(v) !== '');
+  const envSecretDrivers: string[] = [];
   for (const id of new Set([provider, ...Object.keys(input.objectCounts)])) {
     if ((S3_FAMILY_DRIVER_IDS as readonly string[]).includes(id) && !rowIds.has(id) && envHasS3) {
       desired[id] = s3FamilySettingsOf(id, envS3);
+      envSecretDrivers.push(id);
       changes.push(`drivers.${id}: from the S3_* / AWS_ACCESS_KEY_ID environment (no credential row)`);
     }
   }
@@ -181,35 +192,31 @@ export function planStorageSettings(input: StorageSettingsInput): StorageSetting
     }
   }
 
-  // The S3 family shares ONE secret: warn when objects live on two of its drivers with different keys.
-  const s3WithObjects = S3_FAMILY_DRIVER_IDS.filter((id) => (input.objectCounts[id] ?? 0) > 0);
-  if (s3WithObjects.length > 1) {
-    const keys = new Set(s3WithObjects.map((id) => text((desired[id] ?? {})['accessKeyId'] as string)));
-    if (keys.size > 1) {
-      warnings.push(
-        `objects live on ${s3WithObjects.map((id) => `${id} (${input.objectCounts[id]})`).join(' and ')} with DIFFERENT access keys, ` +
-          `but the platform's S3 drivers share one secret (storage/default, the "${provider}" one). The objects on the other ` +
-          'provider stay unreadable until they are migrated: run the copy-only migration (/admin/settings/storage) BEFORE ' +
-          'removing the old provider, or keep both on one key pair.',
-      );
-    }
-  }
   for (const [id, count] of Object.entries(input.objectCounts)) {
     if (count > 0 && !(KNOWN_DRIVER_IDS as readonly string[]).includes(id)) {
       warnings.push(`${count} storage_objects rows record provider "${id}", which no driver serves; they are read through the active driver`);
     }
   }
-  const secretless = [provider].filter(
-    (id) => (S3_FAMILY_DRIVER_IDS as readonly string[]).includes(id) && !input.rows.some((r) => r.provider === id && r.hasSecret) && text(input.env.AWS_SECRET_ACCESS_KEY) === '',
-  );
-  for (const id of secretless) {
-    warnings.push(`the active provider "${id}" has no legacy secret (no credential row, no AWS_SECRET_ACCESS_KEY); enter it at /admin/settings/storage`);
+  // Every S3-family driver that will serve rows (it holds objects, or takes new uploads) needs its own
+  // secret: a credential row with one, else AWS_SECRET_ACCESS_KEY for an environment-backed driver.
+  const envSecret = text(input.env.AWS_SECRET_ACCESS_KEY) !== '';
+  const serving = new Set([provider, ...Object.keys(input.objectCounts).filter((id) => (input.objectCounts[id] ?? 0) > 0)]);
+  for (const id of S3_FAMILY_DRIVER_IDS) {
+    if (!serving.has(id)) continue;
+    const hasRowSecret = input.rows.some((r) => r.provider === id && r.hasSecret);
+    if (!hasRowSecret && !(envSecretDrivers.includes(id) && envSecret)) {
+      warnings.push(
+        `the ${id === provider ? 'active ' : ''}provider "${id}"${(input.objectCounts[id] ?? 0) > 0 ? ` (${input.objectCounts[id]} objects)` : ''} ` +
+          `has no legacy secret (no credential row with one, no AWS_SECRET_ACCESS_KEY); enter it at /admin/settings/storage`,
+      );
+    }
   }
 
   return {
     provider,
     writeProvider: !hasProvider,
     drivers,
+    envSecretDrivers,
     changes,
     warnings,
     changed: !hasProvider || Object.keys(drivers).length > 0,
