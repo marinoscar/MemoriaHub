@@ -82,9 +82,11 @@ export interface MemoriaHubAlertTables {
   systemSettings: SystemSettingsDelegate;
 }
 
+// PLATFORM-ADOPTION-SHIM(#609): the evaluation context types `db` as the slice's own
+// tables; app kinds read the app's through this cast (local-exceptions.md).
 /**
- * The app tables behind `ctx.db`. PLATFORM-ADOPTION-SHIM(#609): the context
- * declares only the slice's own tables; at runtime it is the full client.
+ * The app tables behind `ctx.db`: the context declares only the slice's own
+ * tables; at runtime it is the full client.
  *
  * @throws Error when the client lacks a delegate (a test double, a wrong binding).
  */
