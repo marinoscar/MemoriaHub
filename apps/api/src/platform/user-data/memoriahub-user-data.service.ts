@@ -43,13 +43,15 @@ export const MEDIA_PURGE_PAGE = 500;
 export const STORAGE_PURGE_PAGE = 1000;
 
 /**
- * Key prefixes the factory reset's storage sweep never touches, beyond the
- * storage key-prefix registry's `survivesFactoryReset` ones: the legacy Android
- * releases (`mh_legacy_android_app_releases`, written outside `storage_objects`
- * but listed for safety) and the legacy database backups (`db-backups/`, also
- * registered by `app-registrations/db-backup.ts`).
+ * Key prefixes the factory reset's storage sweep never touches, on top of the
+ * storage key-prefix registry's `survivesFactoryReset` ones (which the db-backup
+ * slice and `app-registrations/db-backup.ts` fill when they are loaded): the
+ * database backups, current (`database-backups/`) and legacy (`db-backups/`), and
+ * the legacy Android releases (`android-releases/`, written outside
+ * `storage_objects`, listed for safety). Spelled out so the sweep can never
+ * depend on import order to keep a backup.
  */
-export const MEMORIAHUB_SURVIVING_PREFIXES = ['android-releases/', 'db-backups/'] as const;
+export const MEMORIAHUB_SURVIVING_PREFIXES = ['database-backups/', 'db-backups/', 'android-releases/'] as const;
 
 /** A storage-object row with what is needed to delete its bytes. */
 export interface StoredObjectRow {
