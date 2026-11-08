@@ -110,6 +110,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   'telemetry:query',
   'telemetry:read',
   'telemetry:write',
+  // The user-data slice (RETRO-H1, #591): system scope, admin only; never implied by system_settings:write.
+  'orgs:offboard',
+  'system:factory_reset',
 ];
 
 /**
@@ -153,7 +156,7 @@ describe('role permission matrix', () => {
     }
     for (const retired of Object.keys(RETIRED_BY_SLICE)) expect(now).not.toContain(retired);
     const gained = [...now].filter((permission) => !OLD_MATRIX.admin.includes(permission)).sort();
-    expect(gained).toEqual(NEW_PLATFORM_PERMISSIONS);
+    expect(gained).toEqual([...NEW_PLATFORM_PERMISSIONS].sort());
   });
 
   it('no role is granted a permission of the other scope', () => {
