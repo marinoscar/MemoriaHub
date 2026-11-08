@@ -61,12 +61,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
+import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import type {
   AiProvider,
   AiProviderCredentials,
   AnalyzeImageInputImage,
-} from '../ai/providers/ai-provider.interface';
+} from '../ai-port/legacy-ai-provider.types';
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';

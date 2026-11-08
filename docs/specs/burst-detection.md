@@ -268,7 +268,7 @@ If all checks pass, the listener calls `EnrichmentJobService.enqueue` with `type
 
 ### 5.5 BurstDetectionHandler
 
-`BurstDetectionHandler` implements `EnrichmentHandler` and self-registers via `onModuleInit`. Its `process(job)` method delegates to `BurstDetectionService.processMediaItem(job)`.
+`BurstDetectionHandler` is a native platform `JobHandler` (RETRO-C5, #594): it self-registers with `JobHandlerRegistry` in `onModuleInit`, carries the label "Burst detection" and the profile `{ maxRuntimeMs: 300_000, maxAttempts: 3 }`, and is **server-only** (no `nodeResultSchema`/`persistNodeResult` pair: grouping reads the item's neighbours across the circle's timeline mid-computation, so there is no self-contained result a node could compute from the original's bytes). Its `process(job)` resolves the media-item subject (`resolveMediaItemJob`; a media item deleted since the job was queued settles as a no-op) and delegates to `BurstDetectionService.processMediaItem(context)`. The upload priority stays 5, set in the enqueue call. The burst-wins invariant below is proven against a real database on the native handlers in `apps/api/test/jobs/burst-wins.db.spec.ts`, in both orders.
 
 **`BurstDetectionService.processMediaItem` — step by step:**
 

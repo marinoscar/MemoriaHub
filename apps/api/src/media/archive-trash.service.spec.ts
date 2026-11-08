@@ -35,7 +35,7 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
+import { UploadNotificationService } from '../notification-producers/upload-notification.service';
 import { MediaTouchService } from './media-touch.service';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { randomUUID } from 'crypto';

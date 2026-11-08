@@ -2,7 +2,8 @@
 // The database backup slice's host ports (RETRO-D4, #580)
 // =============================================================================
 //
-//   DB_BACKUP_NOTIFIER        -> MemoriaHubDbBackupNotifier (log and drop until RETRO-D3)
+//   DB_BACKUP_NOTIFIER        -> NotificationsService       (the platform dispatcher, RETRO-D3; events
+//                                                            in notifications-registry/platform-slice.notifications.ts)
 //   DB_BACKUP_MAINTENANCE     -> MaintenanceModeService     (the host core's in-memory override,
 //                                                            which the restore swap sets)
 //   DB_BACKUP_METRICS         -> AppMetricsService          (`app.backup.*`, the host core's)
@@ -30,10 +31,10 @@ import {
   DeploymentModeService,
   MaintenanceModeService,
 } from '@marinoscar/platform-api/host';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { MediaProcessingModule } from '../../media-processing/media-processing.module';
 import { MemoriaHubBackupTarget } from './memoriahub-backup.target';
-import { MemoriaHubDbBackupNotifier } from './db-backup-notifier.adapter';
 import { DbBackupSystemDataAdapter } from './db-backup-system-data.adapter';
 
 @Global()
@@ -41,7 +42,7 @@ import { DbBackupSystemDataAdapter } from './db-backup-system-data.adapter';
   imports: [MediaProcessingModule],
   providers: [
     MemoriaHubBackupTarget,
-    { provide: DB_BACKUP_NOTIFIER, useClass: MemoriaHubDbBackupNotifier },
+    { provide: DB_BACKUP_NOTIFIER, useExisting: NotificationsService },
     { provide: DB_BACKUP_MAINTENANCE, useExisting: MaintenanceModeService },
     { provide: DB_BACKUP_METRICS, useExisting: AppMetricsService },
     { provide: DB_BACKUP_DEPLOYMENT_MODE, useExisting: DeploymentModeService },

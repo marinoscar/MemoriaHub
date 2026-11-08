@@ -90,7 +90,7 @@ describe('settings contract', () => {
       ['email', { email: { fromName: 'Family' } }, (s) => s.email.fromName, 'Family'],
       ['jobs', { jobs: { history: { retentionDays: 14 } } }, (s) => s.jobs.history.retentionDays, 14],
       ['reviewRuns', { reviewRuns: { runHistoryRetentionDays: 10 } }, (s) => s.reviewRuns.runHistoryRetentionDays, 10],
-      ['notifications', { notifications: { retentionDays: 90 } }, (s) => s.notifications.retentionDays, 90],
+      ['notifications', { notifications: { browserEnabled: false } }, (s) => s.notifications.browserEnabled, false],
       ['pictureEnhancement', { pictureEnhancement: { maxBatchSize: 50 } }, (s) => s.pictureEnhancement.maxBatchSize, 50],
       ['memories', { memories: { trips: { minDays: 3 } } }, (s) => s.memories.trips.minDays, 3],
       ['databaseBackup', { databaseBackup: { retentionCount: 14 } }, (s) => s.databaseBackup.retentionCount, 14],
@@ -134,16 +134,16 @@ describe('settings contract', () => {
       expect(custom.features).toMatchObject({ someFutureFlag: true, memories: true });
     });
 
-    it('PATCH replaces an array wholesale (socialMedia.ocrLanguages, notifications.disabledTypes)', async () => {
+    it('PATCH replaces an array wholesale (socialMedia.ocrLanguages, notifications.disabledEvents)', async () => {
       await h.system.patch({ socialMedia: { ocrLanguages: ['eng', 'spa'] } });
       const after = await h.system.patch({ socialMedia: { ocrLanguages: ['fra'] } });
       expect(after.socialMedia.ocrLanguages).toEqual(['fra']);
 
-      await h.system.patch({ notifications: { disabledTypes: ['upload_completed', 'share_expiring'] } });
-      const second = await h.system.patch({ notifications: { disabledTypes: ['share_expiring'] } });
-      expect(second.notifications.disabledTypes).toEqual(['share_expiring']);
-      const cleared = await h.system.patch({ notifications: { disabledTypes: [] } });
-      expect(cleared.notifications.disabledTypes).toEqual([]);
+      await h.system.patch({ notifications: { disabledEvents: ['media.upload_completed', 'shares.expiring'] } });
+      const second = await h.system.patch({ notifications: { disabledEvents: ['shares.expiring'] } });
+      expect(second.notifications.disabledEvents).toEqual(['shares.expiring']);
+      const cleared = await h.system.patch({ notifications: { disabledEvents: [] } });
+      expect(cleared.notifications.disabledEvents).toEqual([]);
     });
 
     it('an explicit null clears a nullable email field', async () => {
@@ -200,7 +200,6 @@ describe('settings contract', () => {
       ['face.autoArchive.matchThreshold below 0.30', { face: { autoArchive: { matchThreshold: 0.2 } } }],
       ['geo.reverseProvider not an enum member', { geo: { reverseProvider: 'bing' } }],
       ['email.smtpPort 0', { email: { smtpPort: 0 } }],
-      ['notifications.disabledTypes unknown type', { notifications: { disabledTypes: ['nope'] } }],
       ['pictureEnhancement.maxBatchSize above 200', { pictureEnhancement: { maxBatchSize: 201 } }],
       ['databaseBackup.timeOfDay not HH:mm', { databaseBackup: { timeOfDay: '25:00' } }],
       ['databaseBackup.dayOfMonth above 28', { databaseBackup: { dayOfMonth: 29 } }],
@@ -313,53 +312,73 @@ describe('settings contract', () => {
       });
     });
 
-    describe('notifications (absent means enabled)', () => {
-      it('merges per type id, and null resets a type to its default', async () => {
-        await h.user.patch(userId, { notifications: { types: { upload_completed: false } } });
-        const s = await h.user.patch(userId, { notifications: { types: { share_expiring: false } } });
-        expect(s.notifications.types).toEqual({ upload_completed: false, share_expiring: false });
-        const reset = await h.user.patch(userId, { notifications: { types: { upload_completed: null } } });
-        expect(reset.notifications.types).toEqual({ share_expiring: false });
-      });
-
-      it('merges the top-level fields and the push block field-wise', async () => {
-        await h.user.patch(userId, { notifications: { enabled: false, workflowMicroRuns: true } });
-        await h.user.patch(userId, { notifications: { push: { enabled: false, types: { enrichment_failed: false } } } });
-        const s = await h.user.patch(userId, { notifications: { push: { types: { enrichment_failed: null } } } });
-        expect(s.notifications).toEqual({ enabled: false, workflowMicroRuns: true, push: { enabled: false } });
-        const cleared = await h.user.patch(userId, { notifications: { push: null } });
-        expect(cleared.notifications).toEqual({ enabled: false, workflowMicroRuns: true });
+    describe('notifications: the platform namespace (RETRO-D3, absent means the event default)', () => {
+      it('merges per channel and per event, and null resets an event to its default', async () => {
+        await h.user.patch(userId, { notifications: { browser: { 'media.upload_completed': false } } });
+        const s = await h.user.patch(userId, { notifications: { push: { 'shares.expiring': false } } });
+        expect(s.notifications).toEqual({
+          browser: { 'media.upload_completed': false },
+          push: { 'shares.expiring': false },
+        });
+        const reset = await h.user.patch(userId, { notifications: { browser: { 'media.upload_completed': null } } });
+        expect(reset.notifications).toEqual({ push: { 'shares.expiring': false } });
       });
 
       it('null clears the whole namespace back to absent', async () => {
-        await h.user.patch(userId, { notifications: { enabled: false } });
+        await h.user.patch(userId, { notifications: { browser: { 'memories.ready': false } } });
         const s = await h.user.patch(userId, { notifications: null });
         expect(s.notifications ?? undefined).toBeUndefined();
         expect(h.user.raw(userId).notifications).toBeUndefined();
       });
 
-      it('rejects an unknown type and an unknown key', () => {
-        expect(h.user.validatePatch({ notifications: { types: { nope: false } } }).success).toBe(false);
-        expect(h.user.validatePatch({ notifications: { surprise: true } }).success).toBe(false);
+      it('rejects an unregistered channel and the pre-platform shape', () => {
+        expect(h.user.validatePatch({ notifications: { carrier_pigeon: { 'memories.ready': false } } }).success).toBe(false);
+        expect(h.user.validatePatch({ notifications: { types: { upload_completed: false } } }).success).toBe(false);
       });
 
-      it('disabling a type dismisses its live rows and invalidates the preference cache; re-enabling dismisses nothing', async () => {
-        await h.user.patch(userId, { notifications: { types: { upload_completed: false } } });
-        const [dismissedFor, dismissedTypes] = h.notifications.dismissTypesForUser.mock.calls[0];
-        expect(dismissedFor).toBe(userId);
-        expect(dismissedTypes).toEqual(expect.arrayContaining(['upload_completed']));
-        expect(h.notifications.invalidatePreferences).toHaveBeenCalledWith(userId);
+      it('turning an event off for the inbox dismisses its live rows inside the settings write (onWrite)', async () => {
+        const raw = h.db.prisma.$executeRaw as jest.Mock;
+        raw.mockClear();
+        await h.user.patch(userId, { notifications: { browser: { 'media.upload_completed': false } } });
+        expect(raw).toHaveBeenCalled();
+        expect(JSON.stringify(raw.mock.calls[0])).toContain('media.upload_completed');
+      });
+    });
 
-        h.notifications.dismissTypesForUser.mockClear();
-        await h.user.patch(userId, { notifications: { types: { upload_completed: null } } });
-        expect(h.notifications.dismissTypesForUser).not.toHaveBeenCalled();
-        expect(h.notifications.invalidatePreferences).toHaveBeenCalledWith(userId);
+    describe('a row still in the pre-platform notifications shape (before the carry-over)', () => {
+      const legacy = { types: { upload_completed: false }, push: { enabled: false }, workflowMicroRuns: true };
+
+      it('reads in the platform shape without writing', async () => {
+        h.user.seed(userId, { theme: 'system', notifications: legacy });
+        const s = await h.user.get(userId);
+        expect(s.notifications.browser).toEqual({ 'media.upload_completed': false });
+        expect(s.notifications.push['memories.ready']).toBe(false);
+        expect(s.memoriahubNotifications).toEqual({ workflowMicroRuns: true });
+        expect(h.user.raw(userId).notifications).toEqual(legacy);
       });
 
-      it('turning every notification off dismisses every type', async () => {
-        await h.user.patch(userId, { notifications: { enabled: false } });
-        const [, types] = h.notifications.dismissTypesForUser.mock.calls[0];
-        expect(types.length).toBeGreaterThan(5);
+      it('is repaired on the next write (the write succeeds) and the original is kept', async () => {
+        h.user.seed(userId, { theme: 'system', notifications: legacy });
+        const s = await h.user.patch(userId, { theme: 'dark' });
+        expect(s.theme).toBe('dark');
+        expect(h.user.raw(userId).notifications.browser).toEqual({ 'media.upload_completed': false });
+        expect(h.user.raw(userId).memoriahubNotifications).toEqual({ workflowMicroRuns: true });
+        expect(h.db.system.get('mh_legacy_notification_preferences')?.value).toEqual({ [userId]: legacy });
+      });
+    });
+
+    describe('memoriahubNotifications (workflowMicroRuns, absent means false)', () => {
+      it('stores, keeps and clears workflowMicroRuns', async () => {
+        const on = await h.user.patch(userId, { memoriahubNotifications: { workflowMicroRuns: true } });
+        expect(on.memoriahubNotifications).toEqual({ workflowMicroRuns: true });
+        const other = await h.user.patch(userId, { theme: 'dark' });
+        expect(other.memoriahubNotifications).toEqual({ workflowMicroRuns: true });
+        const cleared = await h.user.patch(userId, { memoriahubNotifications: { workflowMicroRuns: null } });
+        expect(cleared.memoriahubNotifications ?? undefined).toBeUndefined();
+      });
+
+      it('rejects an unknown key', () => {
+        expect(h.user.validatePatch({ memoriahubNotifications: { surprise: true } }).success).toBe(false);
       });
     });
 

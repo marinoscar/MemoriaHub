@@ -13,6 +13,9 @@
 //   smtp         SMTP_CREDENTIAL_PURPOSE_DEF
 //   email_ses    SES_CREDENTIAL_PURPOSE_DEF
 //   push_vapid   PUSH_VAPID_CREDENTIAL_PURPOSE_DEF
+//   telemetry_greptime  the telemetry slice's GreptimeDB `reader` and `admin` passwords (RETRO-T2,
+//                       #625); the app declares it because the slice reaches the store through its
+//                       TELEMETRY_CREDENTIAL_STORE port. `GREPTIME_*` is only the deployment default.
 //
 // App purposes (owned by this app; the conformance suite is told `appOwners`):
 //   face_provider  face recognition provider keys, name = provider key (`compreface`)
@@ -25,6 +28,7 @@ import { registerCredentialPurpose, type CredentialPurposeDef } from '@marinosca
 import { SES_CREDENTIAL_PURPOSE_DEF, SMTP_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/email';
 import { PUSH_VAPID_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/notifications';
 import { STORAGE_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/storage';
+import { TELEMETRY_GREPTIME_CREDENTIAL_PURPOSE } from '@marinoscar/platform-api/telemetry';
 
 export const FACE_PROVIDER_CREDENTIAL_PURPOSE = 'face_provider';
 export const GEO_PROVIDER_CREDENTIAL_PURPOSE = 'geo_provider';
@@ -45,6 +49,13 @@ export const GEO_PROVIDER_CREDENTIAL_PURPOSE_DEF: CredentialPurposeDef = {
   tiers: ['system'],
 };
 
+export const TELEMETRY_GREPTIME_CREDENTIAL_PURPOSE_DEF: CredentialPurposeDef = {
+  purpose: TELEMETRY_GREPTIME_CREDENTIAL_PURPOSE,
+  owner: 'telemetry',
+  label: 'GreptimeDB reader and admin passwords',
+  tiers: ['system'],
+};
+
 export const MEMORIAHUB_CREDENTIAL_PURPOSE_DEFS: readonly CredentialPurposeDef[] = [
   STORAGE_CREDENTIAL_PURPOSE_DEF,
   SMTP_CREDENTIAL_PURPOSE_DEF,
@@ -52,6 +63,7 @@ export const MEMORIAHUB_CREDENTIAL_PURPOSE_DEFS: readonly CredentialPurposeDef[]
   PUSH_VAPID_CREDENTIAL_PURPOSE_DEF,
   FACE_PROVIDER_CREDENTIAL_PURPOSE_DEF,
   GEO_PROVIDER_CREDENTIAL_PURPOSE_DEF,
+  TELEMETRY_GREPTIME_CREDENTIAL_PURPOSE_DEF,
 ];
 
 let registered = false;

@@ -12,8 +12,8 @@
 // registry before bootstrap freezes it.
 //
 // NOT GLOBAL: the transports reach the plaintext `CredentialsService` reader,
-// so every consumer imports the ONE `emailModule` object (or `AppEmailModule`,
-// which re-exports it) and shows up in a diff. It needs `SettingsModule.forRoot()`
+// so every consumer imports the ONE `emailModule` object (the notifications
+// slice and the memory digest) and shows up in a diff. It needs `SettingsModule.forRoot()`
 // (the row store), `PlatformHostModule` (`PLATFORM_PRISMA`, `AUDIT_SINK`) and the
 // credential store, all mounted by `app.module.ts`. The credential purposes
 // (`smtp`, `email_ses`) are registered by

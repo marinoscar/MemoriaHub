@@ -73,6 +73,15 @@ const PLATFORM_REPLACEMENT_IDS = [
   'storage.bucket',
 ];
 
+/** The telemetry slice's five checks (RETRO-T2, #625), under the `telemetry` category. */
+const TELEMETRY_CHECK_IDS = [
+  'telemetry.export',
+  'telemetry.connection',
+  'telemetry.reachable',
+  'telemetry.tables',
+  'telemetry.freshness',
+];
+
 describe('Platform Doctor (Integration)', () => {
   let context: TestContext;
   const server = () => context.app.getHttpServer();
@@ -94,7 +103,7 @@ describe('Platform Doctor (Integration)', () => {
   it('registers all 27 memoriahub checks plus the platform replacements after app.init()', () => {
     const ids = context.module.get(DoctorCheckRegistry).list().map((check) => check.id);
 
-    for (const id of [...MEMORIAHUB_CHECK_IDS, ...PLATFORM_REPLACEMENT_IDS]) {
+    for (const id of [...MEMORIAHUB_CHECK_IDS, ...PLATFORM_REPLACEMENT_IDS, ...TELEMETRY_CHECK_IDS]) {
       expect(ids).toContain(id);
     }
     expect(new Set(ids).size).toBe(ids.length);
@@ -125,7 +134,8 @@ describe('Platform Doctor (Integration)', () => {
     const report = response.body.data;
     const checks = JSON.stringify(report);
     for (const id of MEMORIAHUB_CHECK_IDS) expect(checks).toContain(id);
-    for (const category of ['core', 'auth', 'storage', 'ai', 'face', 'geo', 'jobs', 'nodes', 'workflows', 'android']) {
+    for (const id of TELEMETRY_CHECK_IDS) expect(checks).toContain(id);
+    for (const category of ['core', 'auth', 'storage', 'ai', 'face', 'geo', 'jobs', 'nodes', 'workflows', 'android', 'telemetry']) {
       expect(checks).toContain(`"${category}"`);
     }
   });

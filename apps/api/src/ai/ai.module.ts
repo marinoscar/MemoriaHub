@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AiSettingsController } from './ai-settings.controller';
 import { AiSettingsService } from './ai-settings.service';
-import { AiProviderRegistry } from './providers/ai-provider.registry';
+import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 
 @Module({
   imports: [],

@@ -94,6 +94,66 @@
       "scope": "system"
     },
     {
+      "name": "broadcasts:read",
+      "description": "View notification broadcasts and their delivery history",
+      "scope": "system"
+    },
+    {
+      "name": "broadcasts:write",
+      "description": "Compose, schedule, cancel and send notification broadcasts",
+      "scope": "system"
+    },
+    {
+      "name": "push:read",
+      "description": "View Web Push (VAPID) configuration",
+      "scope": "system"
+    },
+    {
+      "name": "push:write",
+      "description": "Generate, rotate, enable/disable and remove Web Push VAPID keys",
+      "scope": "system"
+    },
+    {
+      "name": "ai_config:read",
+      "description": "View the deployment-wide AI platform policy",
+      "scope": "system"
+    },
+    {
+      "name": "ai_config:write",
+      "description": "Change whether AI is enabled, the key policy, per-provider configuration and the deployment-wide defaults",
+      "scope": "system"
+    },
+    {
+      "name": "ai:use",
+      "description": "Call AI models using a saved key",
+      "scope": "org"
+    },
+    {
+      "name": "org_ai_config:read",
+      "description": "View this organization's AI keys, usage and AI policy overrides",
+      "scope": "org"
+    },
+    {
+      "name": "org_ai_config:write",
+      "description": "Set or remove this organization's AI provider keys and tighten its AI policy",
+      "scope": "org"
+    },
+    {
+      "name": "telemetry:read",
+      "description": "View telemetry settings and status",
+      "scope": "system"
+    },
+    {
+      "name": "telemetry:write",
+      "description": "Change telemetry settings",
+      "scope": "system"
+    },
+    {
+      "name": "telemetry:query",
+      "description": "Run SQL, export and use the AI assistant against telemetry",
+      "scope": "system"
+    },
+    {
       "name": "org_members:read",
       "description": "View the members of the organization and their organization roles",
       "scope": "org"
@@ -131,6 +191,16 @@
     {
       "name": "org_settings:write",
       "description": "Modify the active organization's settings overrides",
+      "scope": "org"
+    },
+    {
+      "name": "org_broadcasts:read",
+      "description": "View the active organization's notification broadcasts",
+      "scope": "org"
+    },
+    {
+      "name": "org_broadcasts:write",
+      "description": "Compose, schedule, cancel and send notification broadcasts to the active organization",
       "scope": "org"
     },
     {
@@ -239,33 +309,13 @@
       "scope": "system"
     },
     {
-      "name": "storage_config:read",
-      "description": "View the object-storage configuration and the masked status of its stored secret key",
+      "name": "storage_settings:read",
+      "description": "View storage provider configuration and test connectivity",
       "scope": "system"
     },
     {
-      "name": "storage_config:write",
-      "description": "Change the object-storage provider, bucket, endpoint and credential, test a configuration, and provision a bucket",
-      "scope": "system"
-    },
-    {
-      "name": "push:read",
-      "description": "Admin: view Web Push (VAPID) configuration",
-      "scope": "system"
-    },
-    {
-      "name": "push:write",
-      "description": "Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys",
-      "scope": "system"
-    },
-    {
-      "name": "broadcasts:read",
-      "description": "Admin: view notification broadcasts and audience size",
-      "scope": "system"
-    },
-    {
-      "name": "broadcasts:write",
-      "description": "Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts",
+      "name": "storage_settings:write",
+      "description": "Configure storage provider credentials, set active provider, run migrations",
       "scope": "system"
     }
   ],
@@ -283,6 +333,15 @@
       "db_backup:read",
       "db_backup:write",
       "db_backup:restore",
+      "broadcasts:read",
+      "broadcasts:write",
+      "push:read",
+      "push:write",
+      "ai_config:read",
+      "ai_config:write",
+      "telemetry:read",
+      "telemetry:write",
+      "telemetry:query",
       "organizations:read",
       "organizations:write",
       "storage:delete_any",
@@ -297,16 +356,13 @@
       "face_settings:write",
       "geo_settings:read",
       "geo_settings:write",
-      "storage_config:read",
-      "storage_config:write",
-      "push:read",
-      "push:write",
-      "broadcasts:read",
-      "broadcasts:write"
+      "storage_settings:read",
+      "storage_settings:write"
     ],
     "contributor": [
       "user_settings:read",
       "user_settings:write",
+      "ai:use",
       "storage:read",
       "storage:write",
       "media:read",
@@ -321,7 +377,6 @@
       "user_settings:read",
       "user_settings:write",
       "storage:read",
-      "storage:write",
       "media:read",
       "media:write",
       "media:delete",
@@ -332,12 +387,17 @@
     "org_admin": [
       "user_settings:read",
       "user_settings:write",
+      "ai:use",
+      "org_ai_config:read",
+      "org_ai_config:write",
       "org_members:read",
       "org_members:write",
       "org_invites:read",
       "org_invites:write",
       "org_settings:read",
       "org_settings:write",
+      "org_broadcasts:read",
+      "org_broadcasts:write",
       "storage:read",
       "storage:write",
       "media:read",

@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiProviderRegistry } from './providers/ai-provider.registry';
+import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
 import {
   UpsertAiCredentialsDto,

@@ -15,7 +15,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler } from '../compiler/workflow-condition.compiler';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
-import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
+import { WorkflowRunNotificationService } from '../../notification-producers/workflow-run-notification.service';
 import { WorkflowRunService } from './workflow-run.service';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 import {

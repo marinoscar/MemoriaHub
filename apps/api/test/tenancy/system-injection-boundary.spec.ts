@@ -25,6 +25,9 @@ const ALLOWLIST: Record<string, string> = {
     'the stranded-object count and the migration planner (admin-aggregate)',
   'platform/db-backup/db-backup-system-data.adapter.ts':
     "doctor: the db-backup slice's DB_BACKUP_SYSTEM_DATA port: the backup.rls-bypass check's read-only row counts",
+  'platform/ai/ai-host.module.ts':
+    "retention and admin-aggregate: the AI slice's AI_SYSTEM_PRISMA port (the two AI retention purges, " +
+    'the deployment-wide usage report and the catalogue sync usage row)',
   'media/thumbnail-repair.handler.ts':
     'media-housekeeping: the global thumbnail_repair sweep finds and counts repair attempts across organizations',
 };

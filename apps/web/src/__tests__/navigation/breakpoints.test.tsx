@@ -21,12 +21,16 @@ import { renderShell } from '../utils/shell-harness';
 
 vi.mock('@marinoscar/platform-web/host/ui', () => ({ MaintenanceBanner: () => null }));
 vi.mock('../../components/navigation/AppBar', () => ({ AppBar: () => <header /> }));
-vi.mock('../../components/notifications/NotificationPermissionBanner', () => ({
+vi.mock('@marinoscar/platform-web/notifications/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/platform-web/notifications/ui')>()),
   NotificationPermissionBanner: () => null,
 }));
 vi.mock('../../components/common/AndroidUpdateBanner', () => ({ AndroidUpdateBanner: () => null }));
 vi.mock('../../components/settings/TimezonePrompt', () => ({ TimezonePrompt: () => null }));
-vi.mock('../../hooks/usePushSubscriptionSync', () => ({
+vi.mock('@marinoscar/platform-web/notifications/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/platform-web/notifications/headless')>()),
+  // The real provider needs the identity AuthProvider; the shell only wraps with it.
+  NotificationProvider: ({ children }: { children: React.ReactNode }) => children,
   usePushSubscriptionSync: () => ({
     config: null,
     capability: 'unsupported',
@@ -34,7 +38,7 @@ vi.mock('../../hooks/usePushSubscriptionSync', () => ({
     isRequestingPermission: false,
   }),
 }));
-vi.mock('../../hooks/useNotificationClickHandling', () => ({ useNotificationClickHandling: vi.fn() }));
+vi.mock('../../hooks/useCircleLinkParam', () => ({ useCircleLinkParam: vi.fn() }));
 vi.mock('../../hooks/useReviewQueues', () => ({
   useReviewQueues: () => ({ entries: [], counts: null, totalPending: 0, isLoading: false, anyEnabled: true }),
 }));

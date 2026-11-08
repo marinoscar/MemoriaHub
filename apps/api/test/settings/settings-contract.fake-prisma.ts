@@ -115,6 +115,8 @@ export function createFakeSettingsDb(): FakeSettingsDb {
         return users.get(args.where.id);
       }),
     },
+    // The notifications namespaces' `onWrite` dismissals (RETRO-D3) run raw SQL in the write's transaction.
+    $executeRaw: jest.fn(async () => 0),
     $transaction: jest.fn(async (fn: (tx: any) => Promise<unknown>) => fn(prisma)),
   };
 

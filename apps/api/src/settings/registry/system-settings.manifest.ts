@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Which `system_settings` namespaces this deployment has, and in what order (append, never
-// insert). The platform's own: `maintenance`, `jobs`, `retention`, `databaseBackup` and `storage`, registered here before the host core's
+// insert). The platform's own: `maintenance`, `jobs`, `retention`, `databaseBackup`, `notifications` and `storage`, registered here before the host core's
 // `ensureSystemSettingsNamespaces` would register it, so the order is this one. MemoriaHub's:
 // `app-registrations/settings.ts`.
 // =============================================================================
@@ -19,6 +19,7 @@ import { STORAGE_SYSTEM_SETTINGS } from '@marinoscar/platform-api/storage';
 // driver registry): MemoriaHub's `local` driver (RETRO-D1).
 import '../../app-registrations/storage';
 import { JOBS_SYSTEM_SETTINGS, RETENTION_SYSTEM_SETTINGS } from '@marinoscar/platform-api/jobs';
+import { NOTIFICATIONS_SYSTEM_SETTINGS } from '@marinoscar/platform-api/notifications';
 import {
   assembleSystemSettingsNamespaces,
   registerSystemSettingsNamespaces,
@@ -40,6 +41,9 @@ export const PLATFORM_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespa
   // shape (`storageProvider: null`, `restoreRollbackMode: 'pre_restore_dump'`) is rewritten by
   // `scripts/migrate-db-backup-settings.ts`; until then the platform reads it field by field.
   DATABASE_BACKUP_SYSTEM_SETTINGS as SystemSettingsNamespace,
+  // NotificationsModule (RETRO-D3): the deployment policy, its org layer, and dismiss-on-disable
+  // (`onWrite`, inside the settings transaction).
+  NOTIFICATIONS_SYSTEM_SETTINGS as SystemSettingsNamespace,
   // StorageModule (RETRO-D1, #563): `provider` and the `drivers` record, extended with MemoriaHub's
   // `insights` and `trash` (app-registrations/settings.ts). Same key as MemoriaHub's old namespace;
   // `scripts/migrate-storage-settings.ts` copies the old `activeProvider` and the legacy credential

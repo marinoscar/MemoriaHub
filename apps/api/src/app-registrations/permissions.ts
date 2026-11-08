@@ -11,9 +11,14 @@
 //   - `jobs`      jobs:read, jobs:write
 //   - `db-backup` db_backup:read, db_backup:write, db_backup:restore (RETRO-D4, #580; same ids and
 //                 grants as MemoriaHub's former declarations: system scope, admin only)
-// Not listed on purpose: `storage` (RETRO-D1 mounts the slice, but MemoriaHub declares its ids itself
-// to keep `storage:write` for `viewer`: memoriahub-permissions.ts) and `notifications`, which
-// collides with MemoriaHub's own (legacy) declarations of the same ids until D3 adopts that slice; `nodes`, `ai`, `telemetry`, `sharing`, `user-data`,
+//   - `ai`        ai_config:read, ai_config:write (system, admin), ai:use (org: org_admin and
+//                 contributor, the platform's grants), org_ai_config:read|write (org, org_admin)
+//                 (RETRO-E1, #595). MemoriaHub's own ai_settings:* stay until RETRO-E4 retires the
+//                 old /api/ai/* admin routes; an administrator holds both pairs.
+//   - `telemetry` telemetry:read, telemetry:write, telemetry:query (system, admin) (RETRO-T2, #625)
+// Not listed on purpose: `storage` and `notifications` collide with
+// MemoriaHub's own (legacy) declarations of the same ids until RETRO-D1 and
+// D3 adopt those slices; `nodes`, `sharing`, `user-data`,
 // `webhooks` and `alerts` are not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';
@@ -21,7 +26,7 @@ import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifes
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],

@@ -70,6 +70,34 @@ export default () => {
     serviceName: resolveServiceName(),
   },
 
+  // GreptimeDB, the telemetry store's SQL read side (RETRO-T2, #625). THE DEPLOYMENT DEFAULT only:
+  // a connection saved at /admin/settings/telemetry (the `telemetry_connection` row plus the
+  // `telemetry_greptime` passwords in the credential store) is used wholly in its place, with no
+  // restart. The platform's `TelemetryConnectionService` is the one reader of this block. `reader*`
+  // runs the explorer, dashboard and assistant queries; `admin*` only the retention DDL. The writer
+  // login and the HTTP port are the collector's, never the API's. Credentials default to ''.
+  greptime: {
+    host: (process.env.GREPTIME_HOST || '').trim(),
+    pgPort: parseInt(process.env.GREPTIME_PG_PORT || '4003', 10),
+    database: process.env.GREPTIME_DB || 'public',
+    readerUser: process.env.GREPTIME_READER_USER || '',
+    readerPassword: process.env.GREPTIME_READER_PASSWORD || '',
+    adminUser: process.env.GREPTIME_ADMIN_USER || '',
+    adminPassword: process.env.GREPTIME_ADMIN_PASSWORD || '',
+    available: Boolean(
+      (process.env.GREPTIME_HOST || '').trim() && process.env.GREPTIME_READER_USER && process.env.GREPTIME_READER_PASSWORD,
+    ),
+  },
+
+  // The VPS stack-agent sidecar (RETRO-T2, #625): deployment infrastructure, read only by the
+  // telemetry slice's `StackAgentClient` (never logged). Either missing means the telemetry
+  // services section reports `not_configured`, the normal state here (MemoriaHub runs no agent:
+  // `infra/compose/app.vps.no-stack-agent.compose.yml`).
+  stackAgent: {
+    url: (process.env.STACK_AGENT_URL || '').trim(),
+    token: (process.env.STACK_AGENT_TOKEN || '').trim(),
+  },
+
   // Storage deployment limits (RETRO-D1, #563). The object store itself (driver,
   // bucket, region, endpoint, keys, the local root) is runtime configuration: the
   // `storage` system-settings namespace and the credential store, edited at

@@ -5,8 +5,6 @@
  */
 
 import { AutoTaggingHandler } from '../../src/tagging/auto-tagging.handler';
-import { BroadcastChunkHandler } from '../../src/notifications/broadcasts/handlers/broadcast-chunk.handler';
-import { BroadcastStartHandler } from '../../src/notifications/broadcasts/handlers/broadcast-start.handler';
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
 import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
 import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
@@ -22,7 +20,6 @@ import { LocationSuggestionRunExecuteBatchHandler } from '../../src/location-inf
 import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';
 import { MemoryGenerationHandler } from '../../src/memories/memory-generation.handler';
 import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
-import { NotificationsRetentionHandler } from '../../src/notifications/notifications-retention.handler';
 import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
 import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
 import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
@@ -49,13 +46,13 @@ import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-
  * Since RETRO-C3 (#585) six of them are native platform `JobHandler`s
  * (`face_detection`, `video_face_detection`, `face_auto_archive_sweep`,
  * `metadata_extraction`, `thumbnail_regen`, `thumbnail_repair`) that register
- * with `JobHandlerRegistry` themselves. They keep `type`, the node pair and
+ * with `JobHandlerRegistry` themselves; RETRO-C5 (#594) added the five
+ * dedup/burst/social types (`duplicate_detection`, `duplicate_detection_batch`,
+ * `duplicate_confidence_backfill`, `burst_detection`, `social_media_detection`). They keep `type`, the node pair and
  * `canDelete` as plain members, so the snapshot reads the same facts off them.
  */
 export const ALL_HANDLER_CLASSES = [
   AutoTaggingHandler,
-  BroadcastChunkHandler,
-  BroadcastStartHandler,
   BurstDetectionHandler,
   DuplicateConfidenceBackfillHandler,
   DuplicateDetectionHandler,
@@ -71,7 +68,6 @@ export const ALL_HANDLER_CLASSES = [
   MemoryDigestHandler,
   MemoryGenerationHandler,
   MetadataExtractionHandler,
-  NotificationsRetentionHandler,
   PictureEnhancementHandler,
   PictureEnhancementPurgeHandler,
   ReviewRunEvaluateHandler,
@@ -93,11 +89,9 @@ export const ALL_HANDLER_CLASSES = [
   WorkflowRunsRetentionHandler,
 ];
 
-/** The 38 permanent type strings. */
+/** The 35 permanent type strings with an app handler (RETRO-D3 retired three more: see below). */
 export const EXPECTED_JOB_TYPES = [
   'auto_tagging',
-  'broadcast_chunk',
-  'broadcast_start',
   'burst_detection',
   'duplicate_confidence_backfill',
   'duplicate_detection',
@@ -113,7 +107,6 @@ export const EXPECTED_JOB_TYPES = [
   'memory_digest',
   'memory_generation',
   'metadata_extraction',
-  'notification_purge',
   'picture_enhancement',
   'picture_enhancement_purge',
   'review_run_evaluate',
@@ -157,8 +150,6 @@ export const EXPECTED_NODE_ELIGIBLE_TYPES = [
 
 /** Types whose handler vetoes an admin delete of a non-terminal row. */
 export const EXPECTED_CAN_DELETE_TYPES = [
-  'broadcast_chunk',
-  'broadcast_start',
   // RETRO-C7: a pending evaluate/execute-batch job of an active run is the
   // only thing that moves the run on.
   'review_run_evaluate',
@@ -169,3 +160,8 @@ export const EXPECTED_CAN_DELETE_TYPES = [
   'workflow_execute_batch',
 ];
 
+/**
+ * RETRO-D3 (#576): the platform notifications slice replaced these; they still
+ * dispatch, as no-ops (`platform/notifications/retired-notification-job-types.ts`).
+ */
+export const EXPECTED_RETIRED_NOTIFICATION_TYPES = ['broadcast_chunk', 'broadcast_start', 'notification_purge'];

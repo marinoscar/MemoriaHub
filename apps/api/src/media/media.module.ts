@@ -4,7 +4,7 @@ import { MediaProcessingModule } from '../media-processing/media-processing.modu
 import { CirclesModule } from '../circles/circles.module';
 import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { NotificationsModule } from '../notifications/notifications.module';
+import { NotificationProducersModule } from '../notification-producers/notification-producers.module';
 import { MediaTouchModule } from './media-touch.module';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
 import { MediaController } from './media.controller';
@@ -69,13 +69,12 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * MediaThumbnailRerunController (per-item retry). MediaProcessingModule does not
  * depend on MediaModule, so this does not introduce a cycle.
  *
- * Imports NotificationsModule so UploadNotificationService resolves inside
- * MediaService (the `upload_completed` producer, epic #240 / issue #247).
- * NotificationsModule imports NOTHING, so this edge cannot close a cycle —
- * that is exactly why #246's review-queue reconcile, which needs MediaService,
- * was put in the separate NotificationsReconcileModule rather than in
- * NotificationsModule. Both edges point the same way:
- *   NotificationsReconcileModule -> MediaModule -> NotificationsModule
+ * Imports NotificationProducersModule so UploadNotificationService resolves
+ * inside MediaService (the `media.upload_completed` producer, epic #240 /
+ * issue #247; platform notifications since RETRO-D3). That module imports
+ * NOTHING, so this edge cannot close a cycle — which is why the review-queue
+ * reconcile, which needs MediaService, lives in NotificationReconcileModule:
+ *   NotificationReconcileModule -> MediaModule -> NotificationProducersModule
  */
 @Module({
   imports: [
@@ -85,7 +84,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     GeoLocationModule,
     
     EnrichmentModule,
-    NotificationsModule,
+    NotificationProducersModule,
     MediaTouchModule,
     // Location Grouping (issue #373) — MediaService.bulkUpdateMedia and
     // MediaMetadataSyncService both need the canonical-name resolver.

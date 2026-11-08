@@ -7,7 +7,7 @@
  * bell and the sidebar badge. It holds exactly ONE page of at most
  * `NOTIFICATION_PANEL_PAGE_SIZE` rows and polls a single integer every 60s.
  * That is deliberately the wrong shape for a full inbox: this page needs
- * arbitrary pages, a `status` filter and an optional `circleId` filter.
+ * arbitrary pages and a `status` filter.
  *
  * So the two coexist with a strict division of labour:
  *

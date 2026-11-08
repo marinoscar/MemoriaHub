@@ -4,8 +4,8 @@ import { Readable } from 'stream';
 import { autoTaggingResultSchema, type AutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiSettingsService } from '../ai/ai-settings.service';
-import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
-import type { AiProvider, AiProviderCredentials } from '../ai/providers/ai-provider.interface';
+import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
+import type { AiProvider, AiProviderCredentials } from '../ai-port/legacy-ai-provider.types';
 import {
   STORAGE_PROVIDER,
   StorageProvider,

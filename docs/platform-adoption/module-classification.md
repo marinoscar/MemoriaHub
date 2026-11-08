@@ -42,7 +42,7 @@ Drift for mapped modules comes from the slice view; `n/a (no slice)` means the m
 
 | Module | Files | Drift | Category | Target | Plan | Upstream (EAB) | Notes |
 |---|---|---|---|---|---|---|---|
-| `ai` | 10 | 0% / +12/-76 | backport | ai | E1 (#595), E2 (#601), E3 (#605), C4 (#590) | [EAB#1082](https://github.com/marinoscar/EnterpriseAppBase/issues/1082) (`enhanceImage`, `transcribeAudio`, `forSystem`); `embedText` already in the slice | Workaround: image edit and transcription ride the app-side AI feature registry (E2) until the seam ships; `ai_provider_credentials` re-encrypted into platform deployment keys (E3). |
+| `ai` | 10 | 0% / +12/-76 | backport | ai | E1 (#595), E2 (#601), E3 (#605), C4 (#590) | [EAB#1082](https://github.com/marinoscar/EnterpriseAppBase/issues/1082) (`enhanceImage`, `transcribeAudio`, `forSystem`); `embedText` already in the slice | Workaround: image edit and transcription ride the app-side AI feature registry (E2) until the seam ships; `ai_provider_credentials` re-encrypted into platform deployment keys (E3). E1 (#595): the slice is mounted (`platform/ai/ai.config.ts`), no provider SDK is imported or declared in `apps/`, and the call sites run on the legacy adapter `src/ai-port/` over the platform provider adapters until E2. |
 | `allowlist` | 8 | 28.6% / +10/-36 | noise | identity (`allowlist`) | B2 (#611) | - | Package covers it; delete on adoption. |
 | `android-app` | 22 | n/a | noise | android-app | D5 (#586) | - | EAB harvested this slice from MemoriaHub; remaining diff is identity and ordering. |
 | `auth` | 31 | 7.7% / +504/-1174 | noise | identity (`auth`) | B2 (#611) | - | Google OAuth, JWT, refresh rotation. `returnTo` state already in the slice. |

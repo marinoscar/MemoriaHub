@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { AiSettingsService } from '../../ai/ai-settings.service';
-import { AiProviderRegistry } from '../../ai/providers/ai-provider.registry';
-import { ChatMessage } from '../../ai/providers/ai-provider.interface';
+import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
+import { ChatMessage } from '../../ai-port/legacy-ai-provider.types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchService } from '../search.service';
 import { buildSearchMediaToolDef } from './search-tool-schema';

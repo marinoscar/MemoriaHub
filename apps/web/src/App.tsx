@@ -17,6 +17,7 @@ import { InstallPrompt, MaintenanceGate, UpdatePrompt } from '@marinoscar/platfo
 // `virtual:pwa-register/react` exists only in this app's bundler (vite-plugin-pwa),
 // so the packaged `UpdatePrompt` takes the hook as a prop.
 import { useRegisterSW } from 'virtual:pwa-register/react';
+import './platform/notifications';
 import { AppPlatformHostProvider } from './platform/platformHost';
 // The packaged identity UI (RETRO-B2, #611): sign-in, callback, device
 // activation, access tokens, users and allowlist, behind the identity guards.
@@ -32,6 +33,11 @@ import { IdentityWebAdaptersProvider } from '@marinoscar/platform-web/identity/h
 import { appIdentityAdapters } from './platform/identityAdapters';
 import { JobsWebAdaptersProvider } from '@marinoscar/platform-web/jobs/headless';
 import { appJobsAdapters } from './platform/jobsAdapters';
+// The packaged telemetry slice (RETRO-T2, #625): the route guard, the adapters
+// provider and this app's auth-gated binding of `GET /api/telemetry/config`.
+import { RequireTelemetryEnabled, TelemetryWebAdaptersProvider } from '@marinoscar/platform-web/telemetry/headless';
+import { appTelemetryAdapters } from './platform/telemetryAdapters';
+import { AppTelemetryConfigProvider } from './platform/TelemetryConfigBinding';
 import { APP_NAME } from './constants/app';
 
 // Pages (lazy loaded)
@@ -62,9 +68,16 @@ const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 const EmailSettingsPage = lazy(() =>
   import('@marinoscar/platform-web/email/ui').then((m) => ({ default: m.EmailSettingsPage })),
 );
-const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
-const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
-const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
+// RETRO-D3 (#576): the notifications slice's admin pages.
+const PushConfigPage = lazy(() =>
+  import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.PushConfigPage })),
+);
+const NotificationPolicyPage = lazy(() =>
+  import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.NotificationSettingsPage })),
+);
+const BroadcastsPage = lazy(() =>
+  import('@marinoscar/platform-web/notifications/ui').then((m) => ({ default: m.BroadcastsPage })),
+);
 const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
 // The platform's Jobs and Job Insights pages (RETRO-C1, #575); the Jobs one is a thin binding that adds
 // the app's "Repair missing thumbnails" action to the page toolbar.
@@ -125,6 +138,12 @@ const EnhancementBatchPage = lazy(() => import('./pages/Enhancements/Enhancement
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));
 const MemoriesPage = lazy(() => import('./pages/Memories/MemoriesPage'));
 const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'));
+// RETRO-T2 (#625): the telemetry slice's three pages, each from its own package
+// entry so a lazy route keeps its own chunk (the `telemetry/ui` barrel would put
+// all three, the charts and the SQL editor in one).
+const TelemetrySettingsPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/settings-page'));
+const TelemetryExplorerPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/explorer-page'));
+const TelemetryDashboardPage = lazy(() => import('@marinoscar/platform-web/telemetry/ui/dashboard-page'));
 
 // Test login page (development only)
 const TestLoginPage = import.meta.env.PROD
@@ -456,6 +475,43 @@ function AppRoutes() {
                     </RequirePermission>
                   }
                 />
+                {/* RETRO-T2 (#625): the telemetry slice's three pages, each guarded
+                    on the exact string its card declares and the telemetry
+                    controllers enforce: `telemetry:read` for the settings page
+                    (saving needs `telemetry:write`, which the PAGE gates),
+                    `telemetry:query` for the Explorer and the Dashboard. The
+                    settings page is NOT behind `RequireTelemetryEnabled` (it is
+                    where telemetry is switched on); the two query pages are, as
+                    their cards carry `feature: 'telemetry'`. Nested paths, not
+                    tabs: the longest-prefix title resolver names them. */}
+                <Route
+                  path="/admin/settings/telemetry"
+                  element={
+                    <RequirePermission permission="telemetry:read" fallback={<Navigate to="/" replace />}>
+                      <TelemetrySettingsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/telemetry/explorer"
+                  element={
+                    <RequirePermission permission="telemetry:query" fallback={<Navigate to="/" replace />}>
+                      <RequireTelemetryEnabled loading={<LoadingSpinner />}>
+                        <TelemetryExplorerPage />
+                      </RequireTelemetryEnabled>
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/telemetry/dashboard"
+                  element={
+                    <RequirePermission permission="telemetry:query" fallback={<Navigate to="/" replace />}>
+                      <RequireTelemetryEnabled loading={<LoadingSpinner />}>
+                        <TelemetryDashboardPage />
+                      </RequireTelemetryEnabled>
+                    </RequirePermission>
+                  }
+                />
                 {/* Legacy admin route redirects */}
                 <Route path="/admin/users" element={<Navigate to="/admin/settings/users" replace />} />
                 <Route path="/admin/ai-settings" element={<Navigate to="/admin/settings/ai" replace />} />
@@ -537,15 +593,22 @@ export default function App() {
         {/* The platform host (RETRO-B1, #597): the transport and viewer every
             packaged page and hook reads. Inside the auth provider (it reads the
             signed-in user's permissions), above the router outlet. */}
+        {/* RETRO-T2 (#625): the one `GET /api/telemetry/config` answer the
+            `telemetry` settings feature, the route guard and the settings page
+            read; fetched only once signed in. */}
+        <AppTelemetryConfigProvider>
         <AppPlatformHostProvider>
           <IdentityWebAdaptersProvider adapters={appIdentityAdapters}>
             <JobsWebAdaptersProvider adapters={appJobsAdapters}>
-              <CircleProvider>
-                <AppRoutes />
-              </CircleProvider>
+              <TelemetryWebAdaptersProvider adapters={appTelemetryAdapters}>
+                <CircleProvider>
+                  <AppRoutes />
+                </CircleProvider>
+              </TelemetryWebAdaptersProvider>
             </JobsWebAdaptersProvider>
           </IdentityWebAdaptersProvider>
         </AppPlatformHostProvider>
+        </AppTelemetryConfigProvider>
       </AuthProvider>
     </ShellRoot>
   );

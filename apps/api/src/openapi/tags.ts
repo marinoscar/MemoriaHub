@@ -157,6 +157,13 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     name: 'AI & Enrichment',
     tags: [
       {
+        name: 'AI',
+        description:
+          'The platform AI slice (RETRO-E1): public AI config, responses (and their stream), runs, ' +
+          'embeddings, images, audio, realtime, keys, features and usage. Every route but ' +
+          '`GET /api/ai/config` sits behind the kill switch and `ai:use`.',
+      },
+      {
         name: 'Tagging',
         description: 'Per-item AI auto-tagging status and reruns.',
       },
@@ -361,6 +368,13 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'provider/model serves each AI feature.',
       },
       {
+        name: 'AI Administration',
+        description:
+          'The platform AI slice (RETRO-E1): the deployment AI policy and kill switch, provider keys, the ' +
+          'model catalogue, organization keys and usage (`/api/admin/ai/*`). Not behind the kill ' +
+          'switch, so an administrator can always turn AI back on.',
+      },
+      {
         name: 'Face Settings',
         description: 'Face-recognition provider configuration, connectivity tests, and biometric erasure.',
       },
@@ -373,7 +387,7 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
         description: 'Transactional email provider (SES or SMTP), masked credentials, and test sends.',
       },
       {
-        name: 'Push Settings',
+        name: 'Push Configuration',
         description:
           'Web Push (VAPID) key pair: generate, rotate, enable/disable, remove, and a diagnostic ' +
           "test send to the caller's own devices. The private key is never returned.",
@@ -419,6 +433,13 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'On-demand configuration health sweep across every subsystem (`GET /api/admin/doctor`) and ' +
           'the redacted support bundle. Read-only; nothing is persisted. Served by the platform Doctor ' +
           '(RETRO-B1b).',
+      },
+      {
+        name: 'Telemetry',
+        description:
+          'The platform telemetry slice (RETRO-T2): the `telemetry` policy and runtime export gate, the ' +
+          'GreptimeDB connection, the read-only SQL explorer, schema and export, the dashboard and the ' +
+          'assistant (`/api/admin/telemetry/*`, `GET /api/telemetry/config`). Guarded by `telemetry:*`.',
       },
       {
         name: 'Admin: Storage Insights',

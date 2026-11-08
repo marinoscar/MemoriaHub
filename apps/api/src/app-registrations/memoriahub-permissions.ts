@@ -204,28 +204,4 @@ export const MEMORIAHUB_PERMISSIONS = {
     scope: 'system',
     defaultGrants: ['admin'],
   },
-  PUSH_READ: {
-    id: 'push:read',
-    description: 'Admin: view Web Push (VAPID) configuration',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  PUSH_WRITE: {
-    id: 'push:write',
-    description: 'Admin: generate, rotate, enable/disable and test Web Push (VAPID) keys',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  BROADCASTS_READ: {
-    id: 'broadcasts:read',
-    description: 'Admin: view notification broadcasts and audience size',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  BROADCASTS_WRITE: {
-    id: 'broadcasts:write',
-    description: 'Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
 } as const satisfies Record<string, PermissionDeclaration>;

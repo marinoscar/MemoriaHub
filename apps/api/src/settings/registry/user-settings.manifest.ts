@@ -6,6 +6,7 @@
 // `theme` and `profile` are core fields the platform composes ahead of these.
 // =============================================================================
 
+import { NOTIFICATIONS_USER_SETTINGS } from '@marinoscar/platform-api/notifications';
 import {
   DATA_TABLES_USER_SETTINGS,
   NAVIGATION_USER_SETTINGS,
@@ -23,6 +24,9 @@ import {
 export const PLATFORM_USER_SETTINGS_NAMESPACES: readonly UserSettingsNamespace[] = [
   DATA_TABLES_USER_SETTINGS as UserSettingsNamespace,
   NAVIGATION_USER_SETTINGS as UserSettingsNamespace,
+  // NotificationsModule (RETRO-D3): per-channel, per-event preferences; `onWrite` dismisses the
+  // live rows of an event the user turned off, inside the settings transaction.
+  NOTIFICATIONS_USER_SETTINGS as UserSettingsNamespace,
 ];
 
 /** The final, ordered list this deployment registers. */

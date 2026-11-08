@@ -1,71 +1,30 @@
 /**
- * NotificationBell — AppBar bell + unread badge (issue #249).
+ * NotificationBell — the AppBar bell (RETRO-D3, #576): the packaged
+ * `NotificationBell` (`@marinoscar/platform-web/notifications/ui`) over the
+ * shell's `NotificationProvider`, with this app's footer, a link to the full
+ * inbox at `/notifications`.
  *
- * Reads the shared `useNotifications` store, so the count here and the count
- * on any other surface (#250's sidebar entry / `/notifications` page) come
- * from ONE 60s poller, not one per mount.
- *
- * A11Y: `aria-label` embeds the unread count so a screen reader announces
- * "Notifications, 3 unread" rather than just "Notifications" — the badge digit
- * itself is decorative markup a reader would otherwise read out of context.
+ * The bell owns the badge (its accessible name carries the unread count), the
+ * recent list with a count chip on a folded row, mark-read and dismiss, and the
+ * live stream. A row's link carries its circle (`?c=<circleId>`, written by the
+ * event templates), so opening it switches the active circle first:
+ * `useCircleLinkParam` in the shell layout.
  */
 
-import { useCallback, useRef, useState } from 'react';
-import { Badge, IconButton, Tooltip } from '@mui/material';
-import NotificationsIcon from '@mui/icons-material/Notifications';
-import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
-import { useNotifications } from '../../hooks/useNotifications';
-import { NotificationPanel } from './NotificationPanel';
-
-/** Minimum comfortable touch target (WCAG 2.5.5 / Material). */
-const TOUCH_TARGET = 44;
+import { Button } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
+import { NotificationBell as PlatformNotificationBell } from '@marinoscar/platform-web/notifications/ui';
 
 export function NotificationBell() {
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement | null>(null);
-  const { unreadCount, refreshList } = useNotifications();
-
-  const handleOpen = useCallback(() => {
-    setOpen(true);
-    // The list is fetched on demand, not polled — a closed bell costs only the
-    // unread-count integer per minute.
-    void refreshList();
-  }, [refreshList]);
-
-  const handleClose = useCallback(() => setOpen(false), []);
-
-  const label =
-    unreadCount > 0
-      ? `Notifications, ${unreadCount} unread`
-      : 'Notifications, no unread';
-
   return (
-    <>
-      <Tooltip title="Notifications">
-        <IconButton
-          ref={anchorRef}
-          color="inherit"
-          onClick={handleOpen}
-          aria-label={label}
-          aria-haspopup="dialog"
-          aria-expanded={open ? 'true' : undefined}
-          sx={{ flexShrink: 0, width: TOUCH_TARGET, height: TOUCH_TARGET }}
-        >
-          <Badge
-            badgeContent={unreadCount}
-            color="error"
-            max={99}
-            overlap="circular"
-            // The digit is presentational; the accessible name on the button
-            // above already carries the count.
-            slotProps={{ badge: { 'aria-hidden': true } }}
-          >
-            {unreadCount > 0 ? <NotificationsIcon /> : <NotificationsNoneIcon />}
-          </Badge>
-        </IconButton>
-      </Tooltip>
-
-      <NotificationPanel open={open} anchorEl={anchorRef.current} onClose={handleClose} />
-    </>
+    <PlatformNotificationBell
+      slots={{
+        footer: ({ close }) => (
+          <Button component={RouterLink} to="/notifications" onClick={close} fullWidth size="small">
+            View all notifications
+          </Button>
+        ),
+      }}
+    />
   );
 }

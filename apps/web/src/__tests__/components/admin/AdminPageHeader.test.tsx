@@ -182,6 +182,8 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
       return source.includes('<AdminPageHeader') || source.includes('<AdminBackLink');
     });
 
-    expect(adopters.length).toBeGreaterThanOrEqual(20);
+    // 19 since RETRO-D3 (#576): the Web Push, Notifications policy and
+    // Broadcasts pages are the platform notifications slice's packaged pages.
+    expect(adopters.length).toBeGreaterThanOrEqual(19);
   });
 });

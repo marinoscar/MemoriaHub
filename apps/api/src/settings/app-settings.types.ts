@@ -5,7 +5,7 @@
 // WHY THIS IS NOT JUST `SystemSettingsValue`. The platform types the document from the
 // `SystemSettingsNamespaces` interface, which every slice's declaration file AUGMENTS with its own
 // namespace. Six of this app's namespaces are TEMPORARY copies of a namespace whose slice MemoriaHub
-// adopts later (`ai`, `storage`, `notifications`, `email`), stored under the
+// adopts later (`ai`, `storage`, `email`), stored under the
 // SAME key but in MemoriaHub's own shape. Augmenting the interface for those keys would declare a
 // property twice with different types as soon as the program also sees the platform's declaration
 // (any import of `@marinoscar/platform-api/manifest` does): TS2717, and which declaration wins then
@@ -14,12 +14,14 @@
 // So those keys are NOT augmented, and the app reads the document through this type instead
 // (`AppSystemSettingsService.getSettings()` and `readKnownValue()` are typed with it). Each slice
 // adoption removes a key's entry here and augments the interface instead.
-// PLATFORM-ADOPTION-SHIM: RETRO-E1 (ai), D3 (notifications), D2 (email). `storage` is the storage
-// slice's since RETRO-D1, extended with MemoriaHub's `insights` and `trash`.
-// `jobs` and `retention` are the jobs slice's (RETRO-C1), `databaseBackup` the db-backup slice's (RETRO-D4).
+// PLATFORM-ADOPTION-SHIM: D2 (email). `ai` is the platform AI slice's since RETRO-E1 (#595); `ai`
+// below is MemoriaHub's view of it (its `features` extension). `storage` is the storage slice's since
+// RETRO-D1, extended with MemoriaHub's `insights` and `trash`.
+// `jobs` and `retention` are the jobs slice's (RETRO-C1), `databaseBackup` the db-backup slice's (RETRO-D4),
+// `notifications` the notifications slice's (RETRO-D3).
 // =============================================================================
 
-import type { AiSettingsValue } from './registry/namespaces/system/ai';
+import type { AiSettingsValue } from '../platform/ai/ai-settings.extension';
 import type { AutoTaggingSettingsValue } from './registry/namespaces/system/auto-tagging';
 import type { BackupSettingsValue } from './registry/namespaces/system/backup';
 import type { BurstSettingsValue } from './registry/namespaces/system/burst';
@@ -33,7 +35,6 @@ import type { SystemSettingsNamespaces } from '@marinoscar/platform-api/settings
 import type { LocationGroupingSettingsValue } from './registry/namespaces/system/location-grouping';
 import type { LocationInferenceSettingsValue } from './registry/namespaces/system/location-inference';
 import type { MemoriesSettingsValue } from './registry/namespaces/system/memories';
-import type { NotificationsSettingsValue } from './registry/namespaces/system/notifications';
 import type { PictureEnhancementSettingsValue } from './registry/namespaces/system/picture-enhancement';
 import type { ReviewRunsSettingsValue } from './registry/namespaces/system/review-runs';
 import type { SocialMediaSettingsValue } from './registry/namespaces/system/social-media';
@@ -69,7 +70,7 @@ export interface AppSystemSettingsDocument {
   jobs: SystemSettingsNamespaces['jobs'];
   retention: RetentionSettingsValue;
   reviewRuns: ReviewRunsSettingsValue;
-  notifications: NotificationsSettingsValue;
+  notifications: SystemSettingsNamespaces['notifications'];
   pictureEnhancement: PictureEnhancementSettingsValue;
   backup: BackupSettingsValue;
   workflows: WorkflowsSettingsValue;

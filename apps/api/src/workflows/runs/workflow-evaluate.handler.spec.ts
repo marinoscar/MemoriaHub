@@ -24,7 +24,7 @@ import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowRunService } from './workflow-run.service';
-import { WorkflowRunNotificationService } from '../../notifications/producers/workflow-run-notification.service';
+import { WorkflowRunNotificationService } from '../../notification-producers/workflow-run-notification.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';

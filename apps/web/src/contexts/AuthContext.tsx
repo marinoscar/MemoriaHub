@@ -6,7 +6,7 @@ import {
   type AuthContextValue as IdentityAuthContextValue,
 } from '@marinoscar/platform-web/identity/headless';
 import { api } from '../services/api';
-import { removePushSubscription } from '../services/pushSubscription';
+import { removePushSubscription } from '@marinoscar/platform-web/notifications/headless';
 import { User } from '../types';
 import {
   useTimezoneAutoDetect,

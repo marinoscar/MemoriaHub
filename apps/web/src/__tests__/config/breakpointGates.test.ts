@@ -47,10 +47,7 @@ const ALLOWED_READS: Readonly<Record<string, string>> = {
   'components/search/TopbarSearch.tsx': WHY.searchPill,
   'hooks/useContextPaneVisible.ts': WHY.contextPane,
 
-  'components/admin/BroadcastComposer.tsx': WHY.dialog,
-  'components/admin/BroadcastDetailDialog.tsx': WHY.dialog,
   'components/media/MediaDetailDrawer.tsx': WHY.dialog,
-  'components/notifications/NotificationPanel.tsx': WHY.dialog,
   'components/search/SearchPanel.tsx': WHY.dialog,
 
   'components/media/MediaGallery.tsx': WHY.media,

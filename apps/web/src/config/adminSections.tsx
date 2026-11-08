@@ -49,6 +49,8 @@ import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
 import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
+// RETRO-T2 (#625): the telemetry slice's three cards (data only; no page reaches the main chunk).
+import { telemetryAdminCards } from '@marinoscar/platform-web/telemetry/ui';
 import {
   settingsPageTitle,
   visibleSettingsSections,
@@ -306,6 +308,12 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/about',
         permission: 'system_settings:read',
       },
+      // RETRO-T2 (#625): the packaged Telemetry, Telemetry Explorer and Telemetry Dashboard cards,
+      // appended. Each carries the exact string the telemetry controllers enforce: `telemetry:read`
+      // for the settings page (saving needs `telemetry:write`, gated inside the page; no `feature`,
+      // it is where telemetry is switched on), `telemetry:query` plus `feature: 'telemetry'` for the
+      // Explorer and the Dashboard (`config/settingsFeatures.ts` resolves the feature).
+      ...telemetryAdminCards,
     ],
   },
 ];

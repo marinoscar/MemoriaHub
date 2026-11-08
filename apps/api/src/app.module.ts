@@ -12,6 +12,7 @@ import { MediaProcessingModule } from './media-processing/media-processing.modul
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
 import { AiModule } from './ai/ai.module';
+import { aiModule } from './platform/ai/ai.config';
 import { FaceModule } from './face/face.module';
 import { EnrichmentModule } from './enrichment/enrichment.module';
 import { SearchModule } from './search/search.module';
@@ -31,9 +32,8 @@ import { SocialMediaModule } from './social-media/social-media.module';
 import { EnhancementModule } from './enhancement/enhancement.module';
 import { NodesModule } from './nodes/nodes.module';
 import { WorkflowsModule } from './workflows/workflows.module';
-import { NotificationsModule } from './notifications/notifications.module';
-import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
-import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
+import { BroadcastsModule, notificationsModule } from './platform/notifications/notifications.config';
+import { NotificationReconcileModule } from './notification-producers/notification-reconcile.module';
 import { MemoriesModule } from './memories/memories.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
@@ -53,6 +53,7 @@ import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { StorageConfigModule, storageModule } from './platform/storage/storage.config';
 import { LocalStorageDownloadModule } from './platform-extensions/storage/local-storage-download.module';
+import { telemetryModule } from './platform/telemetry/telemetry.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -124,6 +125,9 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     MediaModule,
     CirclesModule,
     AiModule,
+    // The platform AI slice (RETRO-E1, #595). `AiModule` above is MemoriaHub's legacy AI settings
+    // module (the old /api/ai/* admin routes and the provider registry), kept until RETRO-E2/E4.
+    aiModule,
     FaceModule,
     EnrichmentModule,
     SearchModule,
@@ -144,22 +148,30 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // The platform email slice (RETRO-D2): transports, the `email` settings row and
     // `/api/email-settings`, the template registry (with this app's three templates,
     // registered by `app-registrations/email.ts`) and the Doctor check `email.config`.
-    // Senders import `AppEmailModule`, which re-exports this same object.
+    // Sends go through the notifications slice's email channel (RETRO-D3).
     emailModule,
     ShareModule,
     SocialMediaModule,
     EnhancementModule,
     NodesModule,
     WorkflowsModule,
-    NotificationsModule,
-    NotificationsReconcileModule,
+    // The platform notifications slice (RETRO-D3, #576): the inbox, the SSE
+    // stream, Web Push, the policy and preferences, broadcasts and the delivery
+    // log. MemoriaHub's events are `platform/notifications/notification.manifest.ts`;
+    // its producers are `notification-producers/`.
+    notificationsModule,
     BroadcastsModule,
+    NotificationReconcileModule,
     MemoriesModule,
     // Database backup and restore (RETRO-D4, #580): @marinoscar/platform-api/db-backup, with
     // MemoriaHub's restore gate, carry-over and legacy prefix (app-registrations/db-backup.ts).
     dbBackupModule,
     MediaSyncModule,
     AndroidAppModule,
+    // Telemetry (RETRO-T2, #625): @marinoscar/platform-api/telemetry. The settings page, the
+    // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
+    // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.
+    telemetryModule,
   ],
   providers: [
     // Global validation pipe (Zod)
