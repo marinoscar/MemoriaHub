@@ -16,20 +16,25 @@ import { ExportsHostModule } from './exports-host.module';
 // (`exports/users/...`, `exports/orgs/...`, registered by `forRoot`), downloads are signed URLs
 // valid `downloadUrlTtlSeconds`, files are deleted after `retentionDays`.
 //
-// SOURCES, in dialog order:
-//   user-data            the platform's: the caller's own rows of every user-owned model the
+// SOURCES, in dialog order (all registered by `app-registrations/exports.ts`):
+//   user-data            the platform's, re-registered with MemoriaHub's extra redaction
+//                        (no storage key, bucket or object metadata in `storage_object`;
+//                        `memoriahub-platform-sources.ts`, PLATFORM-ADOPTION-SHIM(#596)):
+//                        the caller's own rows of every user-owned model the
 //                        registry (`app-registrations/user-owned-models.ts`) marks
 //                        `export: 'include'`. Media, albums, tags, people and circles are
 //                        `exclude` there (shared circle content); faces and the embedding
 //                        tables have no user key, so they are never in the registry at all.
-//   org-data             the platform's (`org_members:read`): the active organization's rows.
+//   org-data             the platform's (`org_members:read`): the active organization's rows,
+//                        with the same redaction.
 //   memoriahub-media, memoriahub-albums, memoriahub-memories, memoriahub-people
 //                        MemoriaHub's (`memoriahub-export.sources.ts`, `media:read`).
 //
 // `datamodel` is the generated client's runtime datamodel; it omits `Unsupported` columns (the
-// embedding vectors), which therefore never export. The app sources are registered AFTER
-// `forRoot`, so `user-data` stays the first (default) source in the dialog, and before the
-// application is created (the registry freezes at bootstrap).
+// embedding vectors), which therefore never export. `platformSources` is OFF for both platform
+// sources: `forRoot` registers only the writers, and every source is registered right after it
+// (user-data first: the dialog default), before the application is created (the registry
+// freezes at bootstrap).
 //
 // Ports: `ExportsHostModule` (bypass client, notifier, and the storage shim until RETRO-D1).
 // =============================================================================
@@ -47,7 +52,8 @@ export const exportsModule = ExportsModule.forRoot({
   downloadUrlTtlSeconds: EXPORT_DOWNLOAD_URL_TTL_SECONDS,
   maxInFlightPerSubject: 3,
   pageSize: 500,
-  platformSources: { userData: true, orgData: true },
+  // Re-registered with MemoriaHub's redaction by `registerMemoriaHubExportSources` (#596 shim).
+  platformSources: { userData: false, orgData: false },
 });
 
 registerMemoriaHubExportSources();
