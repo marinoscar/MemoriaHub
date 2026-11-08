@@ -17,7 +17,9 @@ describe('credential purposes manifest', () => {
     expect(registered.get('geo_provider')).toMatchObject({ owner: 'memoriahub-geo' });
   });
 
-  it('does not register AI provider keys (RETRO-E3)', () => {
+  it('registers the platform AI key purpose for the system and org tiers (RETRO-E3)', () => {
+    const registered = new Map(credentialPurposeRegistry.list().map((d) => [d.purpose, d]));
+    expect(registered.get('ai')).toMatchObject({ owner: 'ai', tiers: ['system', 'org'] });
     expect(MEMORIAHUB_CREDENTIAL_PURPOSE_DEFS.map((d) => d.purpose)).not.toContain('ai_provider');
   });
 
