@@ -1,0 +1,65 @@
+// =============================================================================
+// The media/face job types on the booted app (RETRO-C3, #585)
+// =============================================================================
+//
+// Boots the real module graph (mocked Prisma, no database) and asserts on the
+// registry the worker consults: the six media/face types are the NATIVE handler
+// classes, registered by themselves and not through the legacy adapter, and the
+// server-only set the `system` worker mode claims is derived from them exactly
+// as the issue specifies. Literal type strings on purpose: a rename must fail here.
+// =============================================================================
+
+import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platform-api/jobs';
+
+import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
+import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sweep.handler';
+import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
+import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler';
+import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
+import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
+import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
+import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
+
+const NATIVE: Array<[string, new (...args: never[]) => unknown]> = [
+  ['face_detection', FaceDetectionHandler],
+  ['video_face_detection', VideoFaceDetectionHandler],
+  ['face_auto_archive_sweep', FaceAutoArchiveSweepHandler],
+  ['metadata_extraction', MetadataExtractionHandler],
+  ['thumbnail_regen', ThumbnailRegenHandler],
+  ['thumbnail_repair', ThumbnailRepairHandler],
+];
+
+describe('media/face job handlers on the booted app (RETRO-C3)', () => {
+  let context: TestContext;
+  let registry: JobHandlerRegistry;
+
+  beforeAll(async () => {
+    context = await createTestApp();
+    registry = context.app.get(JobHandlerRegistry);
+  }, 120_000);
+
+  afterAll(async () => {
+    await closeTestApp(context);
+  });
+
+  it.each(NATIVE)('%s dispatches to the native handler class', (type, HandlerClass) => {
+    expect(registry.get(type)).toBeInstanceOf(HandlerClass);
+  });
+
+  it('none of the six goes through the legacy adapter', () => {
+    const legacy = context.app.get(EnrichmentHandlerRegistry).types();
+    for (const [type] of NATIVE) expect(legacy).not.toContain(type);
+  });
+
+  it('derives face_auto_archive_sweep and thumbnail_repair as server-only, not the other four', () => {
+    const serverOnly = registry.serverOnlyTypes();
+    expect(serverOnly).toEqual(expect.arrayContaining(['face_auto_archive_sweep', 'thumbnail_repair']));
+    for (const type of ['face_detection', 'video_face_detection', 'metadata_extraction', 'thumbnail_regen']) {
+      expect(serverOnly).not.toContain(type);
+    }
+  });
+
+  it('keeps face_detection on the face provider throttle bucket', () => {
+    expect(context.app.get(ProviderThrottleService).resolveKey('face_detection')).toBe('face');
+  });
+});
