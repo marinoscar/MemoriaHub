@@ -1,0 +1,11 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub workflow run [options] <id>
+
+Start a run for a workflow
+
+Arguments:
+  id               Workflow ID to run
+
+Options:
+  --max-items <n>  Optional cap on the number of items processed
+  -h, --help       display help for command

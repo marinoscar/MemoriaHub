@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub menu [options]
+
+Launch the interactive terminal UI (requires a TTY)
+
+Options:
+  -h, --help  display help for command

@@ -1,0 +1,9 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub node logs [options]
+
+Print (or tail) the worker-node JSONL log
+
+Options:
+  -n, --lines <n>  Number of trailing lines to print (default: "50")
+  --follow         Keep tailing the log as new lines are written
+  -h, --help       display help for command

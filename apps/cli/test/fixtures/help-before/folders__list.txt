@@ -1,0 +1,8 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub folders list [options]
+
+List all registered folders
+
+Options:
+  --json      Output as JSON array (default: false)
+  -h, --help  display help for command

@@ -1,0 +1,16 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub node register [options]
+
+Register this machine as a worker node
+
+Options:
+  --name <name>                 Human-friendly node name (default: hostname)
+  --concurrency <n>             Simultaneous jobs to process (default: "2")
+  --types <csv>                 Comma-separated job types (default: all
+                                supported)
+  --face-provider <compreface>  Face-detection provider this node uses
+                                (default: compreface)
+  --compreface-url <url>        Base URL of a locally-running compreface-core
+                                sidecar (only used with --face-provider
+                                compreface)
+  -h, --help                    display help for command

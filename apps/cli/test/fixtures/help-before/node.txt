@@ -1,0 +1,33 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub node [options] [command]
+
+Run this machine as a worker node that processes the enrichment queue
+
+Options:
+  -h, --help              display help for command
+
+Commands:
+  register [options]      Register this machine as a worker node
+  enroll [options]        Log in and mint a durable node credential, storing it
+                          as this CLI's token (enrollment without hand-copying
+                          a soon-to-expire PAT)
+  start [options]         Run the worker-node loop (claim → compute → submit)
+  stop                    Stop a running worker node (IPC → SIGTERM →
+                          server-side deregister)
+  status                  Show this machine's node config and current
+                          capabilities
+  logs [options]          Print (or tail) the worker-node JSONL log
+  set-concurrency <n>     Adjust worker concurrency — live via IPC when
+                          running, else saved to config
+  heap-snapshot           Write a V8 heap snapshot from the running worker
+                          daemon (memory-leak diagnosis)
+  service                 Manage the systemd user service that keeps the worker
+                          node always on
+  list                    List registered worker nodes (best-effort)
+  doctor                  Diagnose worker-node capabilities, connectivity, and
+                          models
+  install-deps [options]  Install every dependency this machine needs to become
+                          a worker node (ffmpeg, native compute libraries,
+                          tesseract OCR data, Docker + compreface-core) — Linux
+                          only
+  help [command]          display help for command

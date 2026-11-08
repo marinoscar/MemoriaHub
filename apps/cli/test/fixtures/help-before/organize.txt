@@ -1,0 +1,19 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub organize [options] [folder...]
+
+Move files into YEAR/MM - Month/ folders by EXIF capture date (undated →
+NODATE/)
+
+Arguments:
+  folder             Paths to folders to organize (omit to use --all)
+
+Options:
+  --all              Organize all registered enabled folders (default: false)
+  --dry-run          Preview the moves without touching any files (default:
+                     false)
+  -r, --recursive    Descend into sub-directories (when auto-registering a
+                     folder) (default: false)
+  --concurrency <n>  Number of concurrent workers
+  --json             Emit the summary as JSON instead of a table (default:
+                     false)
+  -h, --help         display help for command

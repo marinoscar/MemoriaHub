@@ -1,0 +1,7 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub node service uninstall [options]
+
+Stop, disable, and remove the systemd user service
+
+Options:
+  -h, --help  display help for command

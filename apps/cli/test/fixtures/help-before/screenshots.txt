@@ -1,0 +1,30 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub screenshots [options] [folder...]
+
+Find files with 'screenshot' in the name (case-insensitive); list, move, or
+delete matches
+
+Arguments:
+  folder             Paths to folders to scan (omit to use --all)
+
+Options:
+  --all              Scan all registered enabled folders (default: false)
+  --dry-run          Preview matches/moves/deletes without touching any files
+                     (default: false)
+  -r, --recursive    Descend into sub-directories (when auto-registering a
+                     folder) (default: false)
+  --concurrency <n>  Number of concurrent workers
+  --move-to <dir>    Move every matched screenshot into <dir>
+  --delete           Permanently delete every matched screenshot (default:
+                     false)
+  --json             Emit the summary as JSON instead of a table (default:
+                     false)
+  -h, --help         display help for command
+
+Examples:
+  $ memoriahub screenshots ~/Photos                       # list screenshots found in a folder
+  $ memoriahub screenshots ~/Photos -r                    # ...and its sub-folders
+  $ memoriahub screenshots --all --move-to ~/Screenshots   # move screenshots out of every registered folder
+  $ memoriahub screenshots ~/Photos --delete --dry-run     # preview what --delete would remove
+  $ memoriahub screenshots ~/Photos --delete               # permanently delete matches (no prompt — dry-run first!)
+

@@ -1,0 +1,17 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub backup run [options]
+
+Run an incremental backup sync into the configured backup root
+
+Options:
+  --concurrency <n>  Concurrent download workers (default: backup.concurrency
+                     setting, 2)
+  --max-mbps <x>     Aggregate bandwidth cap in Mbps; 0 = unlimited (default:
+                     backup.maxMbps setting, 0)
+  --page-size <n>    Change-feed page size (default: backup.pageSize setting,
+                     100)
+  --json             Emit NDJSON events instead of human output
+  --strict           Exit non-zero when any item failed
+  --reconcile        Force a full reconcile pass (manifest diff + quarantine)
+  --embedded         Force the in-process engine even when a daemon is running
+  -h, --help         display help for command

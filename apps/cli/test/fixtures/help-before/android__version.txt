@@ -1,0 +1,12 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub android version [options]
+
+Show or change apps/android/version.properties (every change also increments
+versionCode)
+
+Options:
+  --bump <part>  patch, minor or major (versionCode += 1)
+  --set <x.y.z>  Set versionName (versionCode += 1)
+  --code <n>     Set versionCode explicitly (must increase)
+  --json         Print { versionName, versionCode } as JSON
+  -h, --help     display help for command

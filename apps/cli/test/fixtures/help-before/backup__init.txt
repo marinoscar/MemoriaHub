@@ -1,0 +1,18 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub backup init [options]
+
+Initialize a local backup root on this machine
+
+Options:
+  --dest <dir>        Backup root directory (created if missing)
+  --node-name <name>  Worker-node name when registering (default:
+                      backup-<hostname>)
+  --circles <ids>     Comma-separated circle IDs to back up (default: all your
+                      circles)
+  -h, --help          display help for command
+
+The backup catalog is written to <dest>/.memoriahub/backup.db — a plain SQLite
+file you can inspect directly with any sqlite3 client (e.g. `sqlite3 <dest>/.memoriahub/backup.db "SELECT count(*) FROM items"`).
+
+Re-running init against the same --dest re-binds and refreshes the root without
+touching the existing catalog. Only one backup root per machine is supported.

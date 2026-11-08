@@ -1,0 +1,13 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub workflow [options] [command]
+
+List and run Media Workflow Automation workflows
+
+Options:
+  -h, --help          display help for command
+
+Commands:
+  list [options]      List workflows in a circle
+  run [options] <id>  Start a run for a workflow
+  runs <id>           List recent runs for a workflow
+  help [command]      display help for command

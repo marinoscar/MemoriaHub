@@ -1,0 +1,24 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub node install-deps [options]
+
+Install every dependency this machine needs to become a worker node (ffmpeg,
+native compute libraries, tesseract OCR data, Docker + compreface-core) — Linux
+only
+
+Options:
+  --dry-run                   Announce what would be installed/run without
+                              making any changes
+  --skip-compreface           Skip Docker and the compreface-core sidecar setup
+  --compreface-port <port>    Port to expose the compreface-core sidecar on
+                              (default: "3000")
+  --compreface-processes <n>  UWSGI_PROCESSES for the compreface-core sidecar
+                              (parallel face inference workers); defaults to a
+                              core-aware value (cores - 2, capped at 6)
+  --compreface-memory <size>  docker --memory cap for the compreface-core
+                              sidecar (e.g. 4g); omitted → no cap
+  --compreface-cpus <n>       docker --cpus cap for the compreface-core sidecar
+                              (e.g. 4); omitted → no cap
+  --compreface-recreate       Remove and recreate the compreface-core container
+                              even if it is already running, so new
+                              process/restart/resource settings take effect
+  -h, --help                  display help for command

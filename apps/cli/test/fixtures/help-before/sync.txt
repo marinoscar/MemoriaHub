@@ -1,0 +1,23 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub sync [options] [folder...]
+
+Incremental sync: skip already-uploaded files, process new/changed files
+
+Arguments:
+  folder             Paths to folders to sync (omit to use --all)
+
+Options:
+  --all              Sync all registered enabled folders (default: false)
+  --dry-run          Show what would be uploaded without actually uploading
+                     (default: false)
+  -r, --recursive    Descend into sub-directories (when auto-registering a
+                     folder) (default: false)
+  --concurrency <n>  Number of concurrent upload workers
+  --circle <id>      Target circle ID (overrides active circle in config)
+  --scan <id>        Reconcile against a prior scan (id or "latest") and report
+                     changes since then
+  --from <date>      Only sync media captured on/after this date (YYYY-MM-DD,
+                     local, inclusive)
+  --to <date>        Only sync media captured on/before this date (YYYY-MM-DD,
+                     local, inclusive)
+  -h, --help         display help for command

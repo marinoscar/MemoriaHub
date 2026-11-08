@@ -1,0 +1,8 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub backup status [options]
+
+Show backup status: local catalog, running daemon, and server
+
+Options:
+  --json      Emit the merged status report as JSON
+  -h, --help  display help for command

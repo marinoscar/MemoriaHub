@@ -1,0 +1,13 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub android release [options]
+
+Pre-check, then bump → build → publish as current → commit version.properties
+
+Options:
+  --bump <part>       patch, minor or major (without it the current version is
+                      released if it is newer)
+  --notes <text>      Release notes
+  --server-url <url>  Default server URL baked into the app (default: the
+                      logged-in server)
+  --no-commit         Do not commit version.properties
+  -h, --help          display help for command

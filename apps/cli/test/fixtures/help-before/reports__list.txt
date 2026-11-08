@@ -1,0 +1,8 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub reports list [options]
+
+List the available reports
+
+Options:
+  --json      Output structured JSON (default: false)
+  -h, --help  display help for command

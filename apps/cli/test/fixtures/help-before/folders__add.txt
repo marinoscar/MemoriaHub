@@ -1,0 +1,12 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub folders add [options] <path>
+
+Add a folder to the managed registry
+
+Arguments:
+  path             Path to the folder to register
+
+Options:
+  -r, --recursive  Watch sub-directories recursively (default: false)
+  --disabled       Add the folder in disabled state (default: false)
+  -h, --help       display help for command

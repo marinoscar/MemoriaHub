@@ -1,0 +1,14 @@
+MemoriaHub CLI v1.3.4
+Usage: memoriahub android doctor [options]
+
+Check the JDK, Android SDK, Gradle wrapper, keystore and login; --fix installs
+what it can
+
+Options:
+  --fix       Install the JDK (apt, Debian/Ubuntu) and the Android SDK
+              packages; prints the plan first
+  -y, --yes   Run the --fix plan without asking
+  --dry-run   Print the --fix plan and execute nothing
+  --json      Print the report as JSON on stdout: { ok, checks: [{ id, label,
+              status, detail, fix? }] }
+  -h, --help  display help for command
