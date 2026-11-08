@@ -312,7 +312,7 @@ export class NotificationsService {
    */
   async markRead(userId: string, id: string): Promise<void> {
     const affected = await this.prisma.$executeRaw(Prisma.sql`
-      UPDATE notifications
+      UPDATE mh_legacy_notifications
       SET read_at = COALESCE(read_at, now()),
           updated_at = now(),
           data = CASE
@@ -344,7 +344,7 @@ export class NotificationsService {
    */
   async dismiss(userId: string, id: string): Promise<void> {
     const affected = await this.prisma.$executeRaw(Prisma.sql`
-      UPDATE notifications
+      UPDATE mh_legacy_notifications
       SET dismissed_at = COALESCE(dismissed_at, now()),
           read_at = COALESCE(read_at, now()),
           updated_at = now()
@@ -403,7 +403,7 @@ export class NotificationsService {
 
     const [withCount, withoutCount] = await this.prisma.$transaction(async (tx) => {
       const a = await tx.$executeRaw(Prisma.sql`
-        UPDATE notifications
+        UPDATE mh_legacy_notifications
         SET read_at = now(),
             updated_at = now(),
             data = jsonb_set(data, '{countAtRead}', data->'count')
@@ -444,7 +444,7 @@ export class NotificationsService {
     // referencing expression, which Prisma's typed `updateMany` cannot express.
     // updated_at set explicitly — see markAllRead().
     const updated = await this.prisma.$executeRaw(Prisma.sql`
-      UPDATE notifications
+      UPDATE mh_legacy_notifications
       SET dismissed_at = now(),
           read_at = COALESCE(read_at, now()),
           updated_at = now()
@@ -656,7 +656,7 @@ export class NotificationsService {
               WHEN data->>'count' ~ '^[0-9]+$' THEN (data->>'count')::int
               ELSE 0
             END AS count
-          FROM notifications
+          FROM mh_legacy_notifications
           WHERE user_id = ${input.userId}::uuid
             AND type::text = ${String(input.type)}
             -- IS NOT DISTINCT FROM, not plain equality: enrichment_failed rows
@@ -680,7 +680,7 @@ export class NotificationsService {
             : Prisma.empty;
 
           await tx.$executeRaw(Prisma.sql`
-            UPDATE notifications
+            UPDATE mh_legacy_notifications
             SET title = ${title},
                 body = ${input.body ?? null},
                 link = ${input.link ?? null},
@@ -755,7 +755,7 @@ export class NotificationsService {
 
     try {
       const resolved = await this.prisma.$executeRaw(Prisma.sql`
-        UPDATE notifications
+        UPDATE mh_legacy_notifications
         SET dismissed_at = now(),
             read_at = COALESCE(read_at, now()),
             updated_at = now()
@@ -787,7 +787,7 @@ export class NotificationsService {
 
     try {
       return await this.prisma.$executeRaw(Prisma.sql`
-        UPDATE notifications
+        UPDATE mh_legacy_notifications
         SET dismissed_at = now(),
             read_at = COALESCE(read_at, now()),
             updated_at = now()
@@ -819,7 +819,7 @@ export class NotificationsService {
 
     try {
       const updated = await this.prisma.$executeRaw(Prisma.sql`
-        UPDATE notifications
+        UPDATE mh_legacy_notifications
         SET read_at = NULL,
             updated_at = now()
         WHERE id = ANY(${rows.map((r) => r.id)}::uuid[])
@@ -878,7 +878,7 @@ export class NotificationsService {
     if (types.length === 0) return 0;
 
     return tx.$executeRaw(Prisma.sql`
-      UPDATE notifications
+      UPDATE mh_legacy_notifications
       SET dismissed_at = now(),
           read_at = COALESCE(read_at, now()),
           updated_at = now()
@@ -921,12 +921,12 @@ export class NotificationsService {
     let total = 0;
     for (;;) {
       const affected = await tx.$executeRaw(Prisma.sql`
-        UPDATE notifications
+        UPDATE mh_legacy_notifications
         SET dismissed_at = now(),
             read_at = COALESCE(read_at, now()),
             updated_at = now()
         WHERE id IN (
-          SELECT id FROM notifications
+          SELECT id FROM mh_legacy_notifications
           WHERE dismissed_at IS NULL
             AND type::text = ANY(${eligible}::text[])
           LIMIT ${GLOBAL_DISMISS_BATCH_SIZE}

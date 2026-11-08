@@ -147,7 +147,7 @@ const REQUIRED_TABLES = [
   'users',
   'circles',
   'media_items',
-  'database_backup_runs',
+  'mh_legacy_database_backup_runs',
   '_prisma_migrations',
 ];
 
@@ -1318,7 +1318,7 @@ export class DatabaseRestoreService {
         for (const row of rows) {
           try {
             await live.query(
-              `INSERT INTO database_backup_runs (
+              `INSERT INTO mh_legacy_database_backup_runs (
                  id, status, trigger, started_at, finished_at, last_heartbeat_at,
                  bytes_written, size_bytes, storage_provider, storage_key, bucket,
                  format, checksum_sha256, db_version, app_version, migration_name,
@@ -1326,7 +1326,7 @@ export class DatabaseRestoreService {
                  restore_status, restore_error, restored_at, restored_by_id,
                  restore_scratch_db, restore_old_db, swapped_at
                ) VALUES (
-                 $1::uuid, $2::"DatabaseBackupStatus", $3::"DatabaseBackupTrigger",
+                 $1::uuid, $2::"MhLegacyDatabaseBackupStatus", $3::"MhLegacyDatabaseBackupTrigger",
                  $4, $5, $6, $7::bigint, $8::bigint, $9, $10, $11,
                  $12, $13, $14, $15, $16, $17, $18,
                  (SELECT id FROM users WHERE id = $19::uuid),
@@ -1393,10 +1393,10 @@ export class DatabaseRestoreService {
           if (!row.preRestoreBackupId) continue;
           await live
             .query(
-              `UPDATE database_backup_runs
+              `UPDATE mh_legacy_database_backup_runs
                   SET pre_restore_backup_id = $2::uuid
                 WHERE id = $1::uuid
-                  AND EXISTS (SELECT 1 FROM database_backup_runs r WHERE r.id = $2::uuid)`,
+                  AND EXISTS (SELECT 1 FROM mh_legacy_database_backup_runs r WHERE r.id = $2::uuid)`,
               [row.id, row.preRestoreBackupId],
             )
             .catch(() => {});

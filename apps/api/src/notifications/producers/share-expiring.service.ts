@@ -180,7 +180,7 @@ export class ShareExpiringService {
   ): Promise<boolean> {
     const rows = await this.prisma.$queryRaw<Array<{ exists: number }>>(Prisma.sql`
       SELECT 1 AS exists
-      FROM notifications
+      FROM mh_legacy_notifications
       WHERE user_id = ${userId}::uuid
         AND type::text = ${String(NotificationType.share_expiring)}
         AND data @> ${JSON.stringify({ shareId, notifiedFor })}::jsonb
