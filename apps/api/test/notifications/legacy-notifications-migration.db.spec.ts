@@ -228,7 +228,7 @@ describe('legacy notifications carry-over (db)', () => {
     const inbox = Object.fromEntries((await q(`SELECT * FROM notifications`)).map((r) => [r.id as string, r]));
     expect(inbox[ids.reviewLive]).toMatchObject({
       event_key: 'review.duplicates', title: '929 duplicate groups ready to review in Circle A', body: '',
-      link: '/duplicates', scope_id: CIRCLE, dismissed_at: null,
+      link: `/duplicates?c=${CIRCLE}`, scope_id: CIRCLE, dismissed_at: null,
       data: { count: 929, countAtRead: 900 }, dedup_key: `state:review.duplicates:${CIRCLE}`,
     });
     expect(inbox[ids.reviewLive]!.read_at).not.toBeNull();

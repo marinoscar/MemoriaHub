@@ -29,7 +29,8 @@
 //      legacy broadcast is `scheduled` or `sending`: cancel it or let it finish.
 //   3. inbox               `mh_legacy_notifications` -> `notifications`:
 //      `type` -> `event_key` (LEGACY_NOTIFICATION_TYPE_TO_EVENT_KEY), `body` NULL ->
-//      '', `circle_id` -> `scope_id`, `data` (with `count` / `countAtRead`),
+//      '', `circle_id` -> `scope_id` and `?c=<circle_id>` on the link (the web
+//      switches circle from it), `data` (with `count` / `countAtRead`),
 //      `read_at`, `dismissed_at`, `created_at`, `updated_at` kept. A STATE or
 //      COUNTED row gets the platform dedup key of its fold; of several LIVE rows
 //      sharing a key (older upload windows) only the most recently updated keeps
@@ -66,6 +67,7 @@ import { NotificationType } from '@prisma/client';
 import {
   LEGACY_NOTIFICATION_TYPE_TO_EVENT_KEY,
   memoriahubDedupKey,
+  withCircle,
 } from '../notifications-registry/memoriahub.notifications';
 
 /** The minimal client the carry-over needs (a `pg.Client` or `PoolClient`). */
@@ -298,7 +300,9 @@ export function planInboxRows(rows: readonly LegacyInboxRow[], takenLive: Readon
       eventKey,
       title: row.title,
       body: row.body ?? '',
-      link: row.link,
+      // The web switched to the row's circle before navigating; the platform
+      // bell navigates to the link, so the circle travels in it (`?c=`).
+      link: row.link && row.link.startsWith('/') ? withCircle(row.link, row.circle_id) : row.link,
       data: row.data ?? null,
       readAt: row.read_at,
       dismissedAt: row.dismissed_at,

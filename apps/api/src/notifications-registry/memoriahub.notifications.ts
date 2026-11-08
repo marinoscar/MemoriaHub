@@ -195,13 +195,25 @@ function template(render: (data: unknown) => BrowserNotificationContent): Browse
 
 const YOUR_CIRCLE = 'your circle';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A circle-agnostic route plus `?c=<circleId>`: the web shell switches the
+ * active circle from it before the page renders (`useCircleLinkParam`), which
+ * is how a notification about another circle opens in the right one.
+ */
+export function withCircle(path: string, circleId: unknown): string {
+  if (typeof circleId !== 'string' || !UUID.test(circleId)) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}c=${circleId}`;
+}
+
 function reviewTemplate(noun: readonly [string, string], verb: string, link: string): BrowserNotificationTemplate {
   return template((data) => {
     const count = num(data, 'count') ?? 0;
     return {
       title: `${count} ${plural(count, noun[0], noun[1])} ${verb} in ${str(data, 'circleName') ?? YOUR_CIRCLE}`,
       body: '',
-      link,
+      link: withCircle(link, str(data, 'circleId')),
     };
   });
 }
@@ -283,7 +295,7 @@ const DECLARED: readonly NotificationRegistration[] = [
           ? `${uploader} added ${count} ${plural(count, 'photo', 'photos')} to ${circle}`
           : `${count} ${plural(count, 'item', 'items')} uploaded to ${circle}`,
         body: '',
-        link: '/',
+        link: withCircle('/', str(data, 'circleId')),
       };
     }),
   },
@@ -352,7 +364,7 @@ const DECLARED: readonly NotificationRegistration[] = [
       return {
         title: `${count} new ${plural(count, 'memory', 'memories')} in ${str(data, 'circleName') ?? YOUR_CIRCLE}`,
         body: str(data, 'topTitle') ?? '',
-        link: '/memories',
+        link: withCircle('/memories', str(data, 'circleId')),
       };
     }),
   },

@@ -18,6 +18,7 @@ import {
   memoriahubDedupKey,
   relativeExpiry,
   stateDedupKey,
+  withCircle,
 } from './memoriahub.notifications';
 
 const CIRCLE = '00000000-0000-4000-8000-000000000001';
@@ -106,6 +107,15 @@ describe('MemoriaHub notification registry', () => {
     expect(render('shares.expiring', { targetName: 'Album X', notifiedFor: 'not-a-date' }).title).toBe(
       "A public share of 'Album X' expires soon",
     );
+  });
+
+  it('carries the circle in the link (?c=) so the web opens the row in its circle', () => {
+    expect(render('review.bursts', { count: 2, circleId: CIRCLE }).link).toBe(`/bursts?c=${CIRCLE}`);
+    expect(render('media.upload_completed', { count: 2, circleId: CIRCLE }).link).toBe(`/?c=${CIRCLE}`);
+    expect(render('memories.ready', { count: 2, circleId: CIRCLE }).link).toBe(`/memories?c=${CIRCLE}`);
+    // Not a uuid: no parameter (the platform keeps links root-relative either way).
+    expect(render('review.bursts', { count: 2, circleId: 'x&y=1' }).link).toBe('/bursts');
+    expect(withCircle('/a?b=1', CIRCLE)).toBe(`/a?b=1&c=${CIRCLE}`);
   });
 
   it('renders a row written before its fields existed', () => {
