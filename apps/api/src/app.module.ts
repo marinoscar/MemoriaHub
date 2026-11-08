@@ -57,6 +57,7 @@ import { alertsModules } from './platform/alerts/alerts.config';
 import { userDataModule } from './platform/user-data/user-data.config';
 import { onboardingModule } from './platform/onboarding/onboarding.config';
 import { MemoriaHubWebhooksModule } from './platform/webhooks/webhooks.config';
+import { sharingModule } from './platform/sharing/sharing.config';
 import { exportsModule } from './platform/exports/exports.config';
 
 import configuration from './config/configuration';
@@ -190,6 +191,11 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // jobs, the SSRF egress guard, the `webhook` notification channel), plus MemoriaHub's
     // events and the global `MemoriaHubWebhooks` its write paths raise them through.
     MemoriaHubWebhooksModule,
+    // Sharing (RETRO-I1, #562): @marinoscar/platform-api/sharing, single-organization mode.
+    // `/api/groups`, `/api/grants`, `/api/grants/links` and the public `/api/public/links/current`
+    // are live and empty: circles and public shares keep deciding access until RETRO-I2..I5
+    // (mapping: docs/platform-adoption/circles-to-groups.md). Binding: `platform/sharing/`.
+    sharingModule,
     // Data export (RETRO-H2, #596): @marinoscar/platform-api/exports. "Download your data"
     // (`/api/exports`, the `export.run` / `export.purge` jobs, the daily expiry cron): the
     // platform's `user-data` and `org-data` sources plus MemoriaHub's media, albums, memories and
