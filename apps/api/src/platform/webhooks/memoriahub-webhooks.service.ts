@@ -68,7 +68,7 @@ const SEPARATOR = '|';
 export class MemoriaHubWebhooks implements OnApplicationShutdown {
   private readonly logger = new Logger(MemoriaHubWebhooks.name);
   private readonly batcher: WebhookBatcher<MediaEntry>;
-  private subscriptions: { at: number; patterns: string[][] } | null = null;
+  private subscriptions: { at: number; patterns: Promise<string[][]> } | null = null;
 
   constructor(
     private readonly webhooks: WebhooksService,
@@ -231,19 +231,22 @@ export class MemoriaHubWebhooks implements OnApplicationShutdown {
     });
   }
 
-  /** Whether any enabled endpoint (any scope) subscribes to `eventKey`. Cached; fails open. */
+  /** Whether any enabled endpoint (any scope) subscribes to `eventKey`. Cached (one read in flight at a time); fails open. */
   async anySubscriber(eventKey: string): Promise<boolean> {
     try {
       const now = Date.now();
       if (!this.subscriptions || now - this.subscriptions.at > SUBSCRIPTION_CACHE_MS) {
         const system = forSystem(this.prisma, WEBHOOKS_SYSTEM_ACCESS_REASON) as unknown as PrismaService;
-        const rows = await system.webhookEndpoint.findMany({
-          where: { enabled: true },
-          select: { eventKeys: true },
+        const patterns = system.webhookEndpoint
+          .findMany({ where: { enabled: true }, select: { eventKeys: true } })
+          .then((rows) => rows.map((row) => row.eventKeys));
+        this.subscriptions = { at: now, patterns };
+        // A failed read is not cached: the next call retries.
+        patterns.catch(() => {
+          if (this.subscriptions?.patterns === patterns) this.subscriptions = null;
         });
-        this.subscriptions = { at: now, patterns: rows.map((row) => row.eventKeys) };
       }
-      return this.subscriptions.patterns.some((patterns) => isSubscribed(patterns, eventKey));
+      return (await this.subscriptions.patterns).some((patterns) => isSubscribed(patterns, eventKey));
     } catch (error) {
       this.logger.debug(`Webhook subscription lookup failed; emitting anyway: ${message(error)}`);
       return true;
