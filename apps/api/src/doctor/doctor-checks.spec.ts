@@ -1,35 +1,41 @@
 /**
- * Unit tests for DoctorService.
+ * Unit tests for the MemoriaHub Doctor checks (RETRO-B1b, #602).
  *
- * Verifies the on-demand configuration health sweep: report structure
- * (sections/summary/timing), exception normalization for checks whose
- * dependency throws, per-check timeout handling, feature-off → skipped
- * semantics, feature-flag/provider consistency checks, and the pgvector
- * missing-extension/table error path.
+ * Ported from the old `DoctorService` spec. The 32 checks that stayed in the app
+ * are instantiated here with the same mocked services the old service used, and
+ * run through a small harness (`runDiagnostics`) that reports them in the OLD
+ * shape (section/key, ok|warning|error|skipped, message, actionItem), so the
+ * status-ladder assertions below are the ones that guarded the old code:
  *
- * No database required — PrismaService and all injected settings/admin
- * services are fully mocked.
+ *   old key                  new check id
+ *   core.pgvector            memoriahub.core.pgvector      (etc.: see KEY_BY_ID)
+ *
+ * Retired checks (core.database, core.migrations, core.secretsKey) are covered
+ * by the platform host core's own checks, not here.
+ *
+ * Out of scope here (platform-owned): the report envelope, per-check timeout,
+ * exception normalisation and dependency skipping (platform Doctor service).
+ *
+ * No database required: PrismaService and every injected service are mocked.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { DoctorService } from './doctor.service';
-import { DoctorCheck, DoctorReport } from './doctor.types';
-import { PrismaService } from '../prisma/prisma.service';
-import { SystemSettingsService, ResolvedSettings } from '../settings/system-settings/system-settings.service';
-import { AiSettingsService } from '../ai/ai-settings.service';
-import { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
-import { FaceSettingsService } from '../face/face-settings.service';
-import { GeoSettingsService } from '../geo/geo-settings.service';
-import { StorageSettingsService } from '../storage-settings/storage-settings.service';
-import { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
-import { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
-import { VisualEmbeddingService } from '../dedup/visual-embedding.service';
-import { AndroidAppService } from '../android-app/android-app.service';
-import { AndroidReleaseService } from '../android-app/releases/android-release.service';
+import type { DoctorCheck as PlatformDoctorCheck } from '@marinoscar/platform-api/doctor';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { SystemSettingsService, ResolvedSettings } from '../settings/system-settings/system-settings.service';
+import type { AiSettingsService } from '../ai/ai-settings.service';
+import type { AiProviderRegistry } from '../ai/providers/ai-provider.registry';
+import type { FaceSettingsService } from '../face/face-settings.service';
+import type { GeoSettingsService } from '../geo/geo-settings.service';
+import type { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import type { EnrichmentAdminService } from '../enrichment/enrichment-admin.service';
+import type { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
+import type { VisualEmbeddingService } from '../dedup/visual-embedding.service';
+import type { AndroidAppService } from '../android-app/android-app.service';
+import type { AndroidReleaseService } from '../android-app/releases/android-release.service';
 import { __setSpawnForTests } from '../db-backup/pg-dump.util';
 import { __resetPgVersionCacheForTests } from '../db-backup/pg-version.util';
 import {
@@ -37,17 +43,68 @@ import {
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
 
+import { MEMORIAHUB_DOCTOR_CHECKS } from './doctor-checks.module';
+
 // ---------------------------------------------------------------------------
-// Helpers
+// Harness: run the registered checks and report them in the old shape
 // ---------------------------------------------------------------------------
 
-/** Flattens report.sections[].checks[] and returns the check by key. */
+type OldStatus = 'ok' | 'warning' | 'error' | 'skipped';
+
+interface DoctorCheck {
+  key: string;
+  status: OldStatus;
+  message: string;
+  actionItem?: string;
+}
+
+interface DoctorReport {
+  summary: { ok: number; warning: number; error: number; skipped: number; total: number };
+  checks: DoctorCheck[];
+}
+
+const OLD_STATUS: Record<string, OldStatus> = { pass: 'ok', warn: 'warning', fail: 'error', skip: 'skipped' };
+
+/** New check id (without the `memoriahub.` prefix) -> the key the old report used. */
+const KEY_BY_ID: Record<string, string> = {
+  'core.pgvector': 'core.pgvector',
+  'core.pg-client-version': 'core.pgClientVersion',
+  'core.app-url': 'core.appUrl',
+  'auth.jwt': 'auth.jwt',
+  'auth.google-oauth': 'auth.googleOauth',
+  'auth.admin-bootstrap': 'auth.adminBootstrap',
+  'storage.active-provider': 'storage.activeProvider',
+  'storage.live-test': 'storage.liveTest',
+  'ai.search': 'ai.search',
+  'ai.tagging': 'ai.tagging',
+  'ai.embedding': 'ai.embedding',
+  'ai.flag-consistency': 'ai.flagConsistency',
+  'ai.social-media': 'ai.socialMedia',
+  'ai.duplicate-detection': 'ai.duplicateDetection',
+  'ai.picture-enhancer': 'ai.pictureEnhancer',
+  'ai.video-tagging': 'ai.videoTagging',
+  'face.detection': 'face.detection',
+  'face.flag-consistency': 'face.flagConsistency',
+  'face.pgvector': 'face.pgvector',
+  'geo.reverse-provider': 'geo.reverseProvider',
+  'jobs.worker-enabled': 'jobs.workerEnabled',
+  'jobs.queue-health': 'jobs.queueHealth',
+  'jobs.burst-config': 'jobs.burstConfig',
+  'nodes.registered-count': 'nodes.registeredCount',
+  'nodes.heartbeat-freshness': 'nodes.heartbeatFreshness',
+  'nodes.stale-leases': 'nodes.staleLeases',
+  'nodes.capability-health': 'nodes.capabilityHealth',
+  'workflows.state': 'workflows.state',
+  'android.assetlinks': 'android.assetlinks',
+  'android.releases': 'android.releases',
+  'android.media-sync': 'android.mediaSync',
+  'android.upload-path': 'android.uploadPath',
+};
+
 function findCheck(report: DoctorReport, key: string): DoctorCheck {
-  for (const section of report.sections) {
-    const check = section.checks.find((c) => c.key === key);
-    if (check) return check;
-  }
-  throw new Error(`Check not found: ${key}`);
+  const check = report.checks.find((c) => c.key === key);
+  if (!check) throw new Error(`Check not found: ${key}`);
+  return check;
 }
 
 /** Routes prisma.$queryRaw calls to a canned result based on substring match
@@ -203,14 +260,15 @@ const HEALTHY_STATS = {
 // Test suite
 // ---------------------------------------------------------------------------
 
-describe('DoctorService', () => {
-  let service: DoctorService;
+describe('MemoriaHub Doctor checks', () => {
+  let service: { runDiagnostics: () => Promise<DoctorReport> };
   let mockPrisma: MockPrismaService;
   let mockSystemSettings: jest.Mocked<Pick<SystemSettingsService, 'getSettings'>>;
   let mockAiSettings: jest.Mocked<Pick<AiSettingsService, 'testProvider' | 'testEmbedding'>>;
   let mockFaceSettings: jest.Mocked<Pick<FaceSettingsService, 'testProvider'>>;
   let mockGeoSettings: jest.Mocked<Pick<GeoSettingsService, 'testProvider'>>;
-  let mockStorageSettings: jest.Mocked<Pick<StorageSettingsService, 'testConnection'>>;
+  let mockStorageProvider: { exists: jest.Mock; getBucket: jest.Mock };
+  let mockStorageResolver: { getProviderFor: jest.Mock };
   let mockEnrichmentAdmin: jest.Mocked<Pick<EnrichmentAdminService, 'getStats'>>;
   let mockSocialMediaOcr: jest.Mocked<Pick<SocialMediaOcrService, 'getStatus'>>;
   let mockVisualEmbeddingService: jest.Mocked<Pick<VisualEmbeddingService, 'isAvailable'>>;
@@ -219,13 +277,74 @@ describe('DoctorService', () => {
   let mockAndroidReleases: jest.Mocked<Pick<AndroidReleaseService, 'current' | 'resolveUploadTarget'>>;
   const ORIGINAL_ENV = { ...process.env };
 
-  beforeEach(async () => {
+  /**
+   * Builds each check with the constructor parameters it declares, matched BY
+   * TYPE through Nest's `design:paramtypes` metadata, and runs them all.
+   */
+  function buildHarness(): { runDiagnostics: () => Promise<DoctorReport> } {
+    const tokens: Array<[string, unknown]> = [
+      ['DoctorCheckRegistry', { register: jest.fn() }],
+      ['PrismaService', mockPrisma as unknown as PrismaService],
+      ['SystemSettingsService', mockSystemSettings],
+      ['AiSettingsService', mockAiSettings],
+      ['AiProviderRegistry', mockAiProviderRegistry as unknown as AiProviderRegistry],
+      ['FaceSettingsService', mockFaceSettings],
+      ['GeoSettingsService', mockGeoSettings],
+      ['StorageProviderResolver', mockStorageResolver as unknown as StorageProviderResolver],
+      ['EnrichmentAdminService', mockEnrichmentAdmin],
+      ['SocialMediaOcrService', mockSocialMediaOcr],
+      ['VisualEmbeddingService', mockVisualEmbeddingService],
+      ['AndroidAppService', mockAndroidApp],
+      ['AndroidReleaseService', mockAndroidReleases],
+    ];
+    const byName = new Map(tokens);
+
+    const instances: PlatformDoctorCheck[] = MEMORIAHUB_DOCTOR_CHECKS.map((Check) => {
+      const paramTypes: Array<{ name: string }> = Reflect.getMetadata('design:paramtypes', Check) ?? [];
+      const args = paramTypes.map((type) => {
+        if (!byName.has(type.name)) throw new Error(`${Check.name}: no test double for ${type.name}`);
+        return byName.get(type.name);
+      });
+      return new (Check as new (...a: unknown[]) => PlatformDoctorCheck)(...args);
+    });
+
+    return {
+      async runDiagnostics(): Promise<DoctorReport> {
+        const checks: DoctorCheck[] = await Promise.all(
+          instances.map(async (instance) => {
+            // The platform service turns a throw into a `fail`; mirror that guard.
+            const outcome = await instance
+              .run()
+              .catch((err: unknown) => ({ status: 'fail' as const, detail: err instanceof Error ? err.message : String(err), remedy: undefined }));
+            const key = KEY_BY_ID[instance.id.replace(/^memoriahub\./, '')];
+            if (!key) throw new Error(`Unmapped check id ${instance.id}`);
+            return {
+              key,
+              status: OLD_STATUS[outcome.status],
+              message: outcome.detail,
+              ...(outcome.remedy ? { actionItem: outcome.remedy } : {}),
+            };
+          }),
+        );
+        const summary = { ok: 0, warning: 0, error: 0, skipped: 0, total: 0 };
+        for (const c of checks) {
+          summary[c.status] += 1;
+          summary.total += 1;
+        }
+        return { summary, checks };
+      },
+    };
+  }
+
+  beforeEach(() => {
     mockPrisma = createMockPrismaService();
     mockSystemSettings = { getSettings: jest.fn() };
     mockAiSettings = { testProvider: jest.fn(), testEmbedding: jest.fn() };
     mockFaceSettings = { testProvider: jest.fn() };
     mockGeoSettings = { testProvider: jest.fn() };
-    mockStorageSettings = { testConnection: jest.fn() };
+    // Read-only storage probe: `exists()` on a key that is never written.
+    mockStorageProvider = { exists: jest.fn().mockResolvedValue(false), getBucket: jest.fn().mockReturnValue('my-bucket') };
+    mockStorageResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
     mockEnrichmentAdmin = { getStats: jest.fn() };
     mockSocialMediaOcr = { getStatus: jest.fn() };
     mockVisualEmbeddingService = { isAvailable: jest.fn().mockReturnValue(true) };
@@ -253,25 +372,7 @@ describe('DoctorService', () => {
     (mockPrisma.mediaSyncDevice.count as jest.Mock).mockResolvedValue(0);
     (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([]);
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        DoctorService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: SystemSettingsService, useValue: mockSystemSettings },
-        { provide: AiSettingsService, useValue: mockAiSettings },
-        { provide: AiProviderRegistry, useValue: mockAiProviderRegistry },
-        { provide: FaceSettingsService, useValue: mockFaceSettings },
-        { provide: GeoSettingsService, useValue: mockGeoSettings },
-        { provide: StorageSettingsService, useValue: mockStorageSettings },
-        { provide: EnrichmentAdminService, useValue: mockEnrichmentAdmin },
-        { provide: SocialMediaOcrService, useValue: mockSocialMediaOcr },
-        { provide: VisualEmbeddingService, useValue: mockVisualEmbeddingService },
-        { provide: AndroidAppService, useValue: mockAndroidApp },
-        { provide: AndroidReleaseService, useValue: mockAndroidReleases },
-      ],
-    }).compile();
-
-    service = module.get<DoctorService>(DoctorService);
+    service = buildHarness();
   });
 
   afterEach(() => {
@@ -280,10 +381,10 @@ describe('DoctorService', () => {
   });
 
   // =========================================================================
-  // 1. Happy-ish path / report structure
+  // 1. Happy-ish path: every kept check is registered and the healthy fixture is clean
   // =========================================================================
 
-  describe('report structure (all-healthy fixture)', () => {
+  describe('all-healthy fixture', () => {
     beforeEach(() => {
       process.env = healthyEnv();
       mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
@@ -297,70 +398,24 @@ describe('DoctorService', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
     });
 
-    it('returns sections in the documented order: core, auth, storage, ai, face, geo, jobs, nodes, workflows, android', async () => {
+    it('has no failing checks when everything is configured and healthy', async () => {
       const report = await service.runDiagnostics();
-
-      expect(report.sections.map((s) => s.key)).toEqual([
-        'core',
-        'auth',
-        'storage',
-        'ai',
-        'face',
-        'geo',
-        'jobs',
-        'nodes',
-        'workflows',
-        'android',
-      ]);
-    });
-
-    it('produces a summary whose ok+warning+error+skipped sums to total', async () => {
-      const report = await service.runDiagnostics();
-
-      const { ok, warning, error, skipped, total } = report.summary;
-      expect(ok + warning + error + skipped).toBe(total);
-      expect(total).toBeGreaterThan(0);
-    });
-
-    it('has no error checks when everything is configured and healthy', async () => {
-      const report = await service.runDiagnostics();
-
       expect(report.summary.error).toBe(0);
+      expect(report.summary.ok + report.summary.warning + report.summary.error + report.summary.skipped).toBe(
+        report.summary.total,
+      );
     });
 
-    it('returns computedAt as a string and durationMs as a number', async () => {
+    it('runs the 32 kept checks (the 35 documented ones minus the 3 the host core retired)', async () => {
       const report = await service.runDiagnostics();
 
-      expect(typeof report.computedAt).toBe('string');
-      expect(typeof report.durationMs).toBe('number');
-    });
-
-    it('gives every individual check a numeric durationMs', async () => {
-      const report = await service.runDiagnostics();
-
-      for (const section of report.sections) {
-        for (const check of section.checks) {
-          expect(typeof check.durationMs).toBe('number');
-          expect(check.durationMs).toBeGreaterThanOrEqual(0);
-        }
-      }
-    });
-
-    it('includes all 35 documented checks across the 10 sections', async () => {
-      const report = await service.runDiagnostics();
-
-      const allKeys = report.sections.flatMap((s) => s.checks.map((c) => c.key));
-      expect(allKeys).toEqual([
-        'core.database',
-        'core.migrations',
+      expect(report.checks.map((c) => c.key)).toEqual([
         'core.pgvector',
         'core.pgClientVersion',
-        'core.secretsKey',
         'core.appUrl',
         'auth.jwt',
         'auth.googleOauth',
@@ -393,102 +448,78 @@ describe('DoctorService', () => {
         'android.uploadPath',
       ]);
     });
-  });
 
-  // =========================================================================
-  // 2. Thrown exception is normalized to 'error'
-  // =========================================================================
-
-  describe('exception normalization', () => {
-    beforeEach(() => {
-      process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
-      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
-      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
-        provider: 's3',
-        enabled: true,
-      });
-      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
-      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
-    });
-
-    it('normalizes a thrown BadRequestException to a status:error check without rejecting the whole run', async () => {
-      mockStorageSettings.testConnection.mockRejectedValue(new BadRequestException('no creds'));
-
+    it('gives every ported check a remedy on warn/fail (platform contract rule 2)', async () => {
+      process.env = healthyEnv({ APP_URL: undefined });
       const report = await service.runDiagnostics();
-
-      const check = findCheck(report, 'storage.liveTest');
-      expect(check.status).toBe('error');
-      expect(check.message).toContain('no creds');
-    });
-
-    it('still completes the rest of the report when one dependency throws', async () => {
-      mockStorageSettings.testConnection.mockRejectedValue(new BadRequestException('no creds'));
-
-      const report = await service.runDiagnostics();
-
-      // Unrelated checks are unaffected.
-      expect(findCheck(report, 'core.database').status).toBe('ok');
-      expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(35);
-    });
-  });
-
-  // =========================================================================
-  // 3. Per-check timeout
-  // =========================================================================
-
-  describe('per-check timeout', () => {
-    it('resolves the hung check as status:error with a timeout message after 10s, while the rest of the report completes', async () => {
-      process.env = healthyEnv();
-      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
-      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
-      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
-      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({
-        provider: 's3',
-        enabled: true,
-      });
-      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
-      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
-      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
-
-      // Geo provider test hangs forever — never resolves or rejects.
-      mockGeoSettings.testProvider.mockReturnValue(new Promise(() => {}));
-
-      jest.useFakeTimers();
-      try {
-        const reportPromise = service.runDiagnostics();
-        await jest.advanceTimersByTimeAsync(10_000);
-        const report = await reportPromise;
-
-        const hungCheck = findCheck(report, 'geo.reverseProvider');
-        expect(hungCheck.status).toBe('error');
-        expect(hungCheck.message.toLowerCase()).toContain('timed out');
-
-        // The rest of the report still completed normally.
-        expect(findCheck(report, 'core.database').status).toBe('ok');
-        expect(findCheck(report, 'ai.search').status).toBe('ok');
-        expect(report.summary.total).toBe(35);
-      } finally {
-        jest.useRealTimers();
+      for (const c of report.checks) {
+        if (c.status === 'warning' || c.status === 'error') expect(c.actionItem).toBeTruthy();
       }
     });
   });
 
   // =========================================================================
-  // 4. Feature-off → skipped (fresh-install fixture)
+  // 2. storage.liveTest is a READ-ONLY probe now
+  // =========================================================================
+
+  describe('storage.liveTest (read-only probe)', () => {
+    beforeEach(() => {
+      process.env = healthyEnv();
+      mockSystemSettings.getSettings.mockResolvedValue(makeHealthySettings());
+      mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
+      (mockPrisma.user.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.storageProviderCredential.findFirst as jest.Mock).mockResolvedValue({ provider: 's3', enabled: true });
+      mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
+      mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
+      mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
+      mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
+      mockNoWorkerNodes(mockPrisma);
+    });
+
+    it('passes with a HEAD-style exists() probe and never writes an object', async () => {
+      const check = findCheck(await service.runDiagnostics(), 'storage.liveTest');
+      expect(check.status).toBe('ok');
+      expect(check.message).toContain('my-bucket');
+      expect(mockStorageResolver.getProviderFor).toHaveBeenCalledWith('s3');
+      expect(mockStorageProvider.exists).toHaveBeenCalledTimes(1);
+      // The provider double offers no write method at all.
+      expect(Object.keys(mockStorageProvider).sort()).toEqual(['exists', 'getBucket']);
+    });
+
+    it('is error with the cause when the provider cannot be resolved', async () => {
+      mockStorageResolver.getProviderFor.mockRejectedValue(new BadRequestException('no creds'));
+      const check = findCheck(await service.runDiagnostics(), 'storage.liveTest');
+      expect(check.status).toBe('error');
+      expect(check.message).toContain('no creds');
+      expect(check.actionItem).toContain('Storage Providers');
+    });
+
+    it('is error when the bucket cannot be reached', async () => {
+      mockStorageProvider.exists.mockRejectedValue(new Error('AccessDenied'));
+      const check = findCheck(await service.runDiagnostics(), 'storage.liveTest');
+      expect(check.status).toBe('error');
+      expect(check.message).toContain('AccessDenied');
+    });
+
+    it('a failing live provider test does not stop the other checks from running', async () => {
+      mockGeoSettings.testProvider.mockRejectedValue(new Error('geo down'));
+      const report = await service.runDiagnostics();
+      expect(findCheck(report, 'geo.reverseProvider').status).toBe('error');
+      expect(findCheck(report, 'geo.reverseProvider').message).toContain('geo down');
+      expect(findCheck(report, 'ai.search').status).toBe('ok');
+      expect(report.summary.total).toBe(32);
+    });
+  });
+
+  // =========================================================================
+  // 3. Feature-off -> skipped (fresh-install fixture)
   // =========================================================================
 
   describe('feature-off produces skipped checks (fresh install)', () => {
     beforeEach(() => {
       // Fresh install: env fully healthy, but no AI/face providers configured
-      // and all feature flags off — this must not raise any error checks.
+      // and all feature flags off. This must not raise any failing check.
       process.env = healthyEnv();
       mockSystemSettings.getSettings.mockResolvedValue(makeSettings()); // all features false, all providers null
       mockQueryRawByText(mockPrisma, healthyQueryRawHandlers());
@@ -497,7 +528,6 @@ describe('DoctorService', () => {
         provider: 's3',
         enabled: true,
       });
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
@@ -509,33 +539,27 @@ describe('DoctorService', () => {
     });
 
     it('marks ai.search as skipped when no search provider/model is configured', async () => {
-      const report = await service.runDiagnostics();
-      expect(findCheck(report, 'ai.search').status).toBe('skipped');
+      expect(findCheck(await service.runDiagnostics(), 'ai.search').status).toBe('skipped');
     });
 
     it('marks ai.tagging as skipped when no tagging provider/model is configured', async () => {
-      const report = await service.runDiagnostics();
-      expect(findCheck(report, 'ai.tagging').status).toBe('skipped');
+      expect(findCheck(await service.runDiagnostics(), 'ai.tagging').status).toBe('skipped');
     });
 
     it('marks ai.embedding as skipped when no embedding provider/model is configured', async () => {
-      const report = await service.runDiagnostics();
-      expect(findCheck(report, 'ai.embedding').status).toBe('skipped');
+      expect(findCheck(await service.runDiagnostics(), 'ai.embedding').status).toBe('skipped');
     });
 
     it('marks face.detection as skipped when face recognition is disabled', async () => {
-      const report = await service.runDiagnostics();
-      expect(findCheck(report, 'face.detection').status).toBe('skipped');
+      expect(findCheck(await service.runDiagnostics(), 'face.detection').status).toBe('skipped');
     });
 
     it('marks jobs.burstConfig as skipped when burst detection is disabled', async () => {
-      const report = await service.runDiagnostics();
-      expect(findCheck(report, 'jobs.burstConfig').status).toBe('skipped');
+      expect(findCheck(await service.runDiagnostics(), 'jobs.burstConfig').status).toBe('skipped');
     });
 
     it('produces zero error checks for a fresh-install configuration', async () => {
-      const report = await service.runDiagnostics();
-      expect(report.summary.error).toBe(0);
+      expect((await service.runDiagnostics()).summary.error).toBe(0);
     });
 
     it('does not call out to AI/face provider test methods when unconfigured', async () => {
@@ -544,10 +568,6 @@ describe('DoctorService', () => {
       expect(mockFaceSettings.testProvider).not.toHaveBeenCalled();
     });
   });
-
-  // =========================================================================
-  // 5. Flag inconsistency matrix
-  // =========================================================================
 
   // =========================================================================
   // ai.videoTagging (epic #452, issue #457)
@@ -568,7 +588,6 @@ describe('DoctorService', () => {
         provider: 's3',
         enabled: true,
       });
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -739,7 +758,6 @@ describe('DoctorService', () => {
         provider: 's3',
         enabled: true,
       });
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -811,7 +829,6 @@ describe('DoctorService', () => {
         provider: 's3',
         enabled: true,
       });
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -866,7 +883,6 @@ describe('DoctorService', () => {
         provider: 's3',
         enabled: true,
       });
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -948,7 +964,6 @@ describe('DoctorService', () => {
         provider: 's3',
         enabled: true,
       });
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -1005,9 +1020,6 @@ describe('DoctorService', () => {
     });
   });
 
-  // =========================================================================
-  // 6. pgvector missing → error
-  // =========================================================================
 
   describe('core.pgvector', () => {
     beforeEach(() => {
@@ -1022,7 +1034,6 @@ describe('DoctorService', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
     });
 
@@ -1079,7 +1090,6 @@ describe('DoctorService', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
       // The memo is keyed by resolved binary path and lives for the whole
@@ -1138,7 +1148,7 @@ describe('DoctorService', () => {
       expect(findCheck(report, 'core.pgClientVersion').status).toBe('ok');
     });
 
-    it('is status:warning (deliberately NOT a second error) when the server major cannot be read but the client is fine — core.database already reports that failure', async () => {
+    it('is status:warning (deliberately NOT a second error) when the server major cannot be read but the client is fine — db.connection (host core) already reports that failure', async () => {
       installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
       withServerVersion(null);
 
@@ -1146,21 +1156,6 @@ describe('DoctorService', () => {
       const check = findCheck(report, 'core.pgClientVersion');
 
       expect(check.status).toBe('warning');
-    });
-
-    it('appears exactly once in the rendered "core" SECTION — proves it was added to that section\'s checkKeys, not merely to the internal check catalog', async () => {
-      installClientVersionSpawn('pg_dump (PostgreSQL) 17.10');
-      withServerVersion(170010);
-
-      const report = await service.runDiagnostics();
-      const coreSection = report.sections.find((s) => s.key === 'core');
-      expect(coreSection).toBeDefined();
-
-      const matches = coreSection!.checks.filter(
-        (c) => c.key === 'core.pgClientVersion',
-      );
-      expect(matches).toHaveLength(1);
-      expect(matches[0].status).toBe('ok');
     });
   });
 
@@ -1213,7 +1208,6 @@ describe('DoctorService', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
     });
@@ -1324,7 +1318,6 @@ describe('DoctorService', () => {
         provider: 's3',
         enabled: true,
       });
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockAiSettings.testProvider.mockResolvedValue({ ok: true } as any);
@@ -1480,7 +1473,6 @@ describe('DoctorService', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       (mockPrisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
       // One online node with a fresh heartbeat so nodes.heartbeatFreshness stays
@@ -1637,7 +1629,6 @@ describe('DoctorService', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
       mockWorkflowRunCounts();
@@ -1814,18 +1805,14 @@ describe('DoctorService', () => {
       mockAiSettings.testEmbedding.mockResolvedValue({ ok: true, dimensions: 1536 } as any);
       mockFaceSettings.testProvider.mockResolvedValue({ ok: true } as any);
       mockGeoSettings.testProvider.mockResolvedValue({ ok: true, sample: {} } as any);
-      mockStorageSettings.testConnection.mockResolvedValue({ ok: true, bucket: 'my-bucket' } as any);
       mockEnrichmentAdmin.getStats.mockResolvedValue(HEALTHY_STATS as any);
       mockNoWorkerNodes(mockPrisma);
     });
 
-    it('is the last section, labelled "Android app", with the four checks in order', async () => {
+    it('registers the four android checks, in order', async () => {
       const report = await service.runDiagnostics();
-      const section = report.sections.find((s) => s.key === 'android')!;
 
-      expect(report.sections[report.sections.length - 1].key).toBe('android');
-      expect(section.label).toBe('Android app');
-      expect(section.checks.map((c) => c.key)).toEqual([
+      expect(report.checks.filter((c) => c.key.startsWith('android.')).map((c) => c.key)).toEqual([
         'android.assetlinks',
         'android.releases',
         'android.mediaSync',
@@ -1833,27 +1820,23 @@ describe('DoctorService', () => {
       ]);
     });
 
-    it('skips the three device-scoped checks with no paired device; the section is ok', async () => {
+    it('skips the three device-scoped checks with no paired device', async () => {
       const report = await service.runDiagnostics();
-      const section = report.sections.find((s) => s.key === 'android')!;
 
       expect(findCheck(report, 'android.assetlinks').status).toBe('skipped');
       expect(findCheck(report, 'android.releases').status).toBe('skipped');
       expect(findCheck(report, 'android.mediaSync').status).toBe('skipped');
       expect(findCheck(report, 'android.uploadPath').status).toBe('ok');
-      expect(section.status).toBe('ok');
     });
 
-    it('takes the worst check status as the section status', async () => {
+    it('reports the releases warning and the upload-path error independently', async () => {
       (mockPrisma.mediaSyncDevice.count as jest.Mock).mockResolvedValue(1);
       mockAndroidReleases.resolveUploadTarget.mockRejectedValue(new Error('boom'));
 
       const report = await service.runDiagnostics();
-      const section = report.sections.find((s) => s.key === 'android')!;
 
       expect(findCheck(report, 'android.releases').status).toBe('warning');
       expect(findCheck(report, 'android.uploadPath').status).toBe('error');
-      expect(section.status).toBe('error');
     });
 
     // -----------------------------------------------------------------------

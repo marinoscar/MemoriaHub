@@ -25,7 +25,6 @@
 // =============================================================================
 
 import { Global, Injectable, Module } from '@nestjs/common';
-import { DoctorCheckRegistry, EgressRegistry, SupportBundleRegistry } from '@marinoscar/platform-api/doctor';
 import { DEFAULT_MAINTENANCE_MESSAGE } from '@marinoscar/platform-api/host';
 import { SystemSettingsService as PlatformSystemSettingsService } from '@marinoscar/platform-api/settings';
 
@@ -48,7 +47,7 @@ export class HostSystemSettingsShim {
    * `MAINTENANCE_SYSTEM_SETTINGS.storedSchema`; normalise it in the B3 data step.
    */
   async getMaintenancePolicy() {
-    const stored = (await this.settings.getSettings()).maintenance;
+    const stored = (await this.settings.getSettings({ readOnly: true })).maintenance;
     const message = stored?.message ? stored.message : DEFAULT_MAINTENANCE_MESSAGE;
     return {
       enabled: stored?.enabled ?? false,
@@ -61,7 +60,7 @@ export class HostSystemSettingsShim {
 
   /** The Doctor `core.deployment-mode` check asks whether scheduled backups are on. */
   async getDatabaseBackupPolicy() {
-    return (await this.settings.getSettings()).databaseBackup;
+    return (await this.settings.getSettings({ readOnly: true })).databaseBackup;
   }
 
   /** `MaintenanceModeService.setMaintenance` writes a partial `maintenance` patch. */
@@ -76,15 +75,7 @@ export class HostSystemSettingsShim {
   providers: [
     HostSystemSettingsShim,
     { provide: PlatformSystemSettingsService, useExisting: HostSystemSettingsShim },
-    DoctorCheckRegistry,
-    SupportBundleRegistry,
-    EgressRegistry,
   ],
-  exports: [
-    PlatformSystemSettingsService,
-    DoctorCheckRegistry,
-    SupportBundleRegistry,
-    EgressRegistry,
-  ],
+  exports: [PlatformSystemSettingsService],
 })
 export class HostCorePortsModule {}

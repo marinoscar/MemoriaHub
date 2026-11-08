@@ -395,10 +395,11 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'on-demand insights/ETA aggregate.',
       },
       {
-        name: 'Admin: Doctor',
+        name: 'Doctor',
         description:
-          'On-demand configuration health sweep across every subsystem, running live provider ' +
-          'connectivity checks. Nothing is persisted.',
+          'On-demand configuration health sweep across every subsystem (`GET /api/admin/doctor`) and ' +
+          'the redacted support bundle. Read-only; nothing is persisted. Served by the platform Doctor ' +
+          '(RETRO-B1b).',
       },
       {
         name: 'Admin: Storage Insights',

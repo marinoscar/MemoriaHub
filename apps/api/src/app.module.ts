@@ -44,7 +44,8 @@ import { MemoriesModule } from './memories/memories.module';
 import { DbBackupModule } from './db-backup/db-backup.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
-import { DoctorModule } from './doctor/doctor.module';
+import { doctorModule } from './doctor/doctor.config';
+import { DoctorChecksModule } from './doctor/doctor-checks.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { TestAuthModule } from './test-auth/test-auth.module';
 
@@ -127,7 +128,10 @@ export function testOnlyModules(): NonNullable<DynamicModule['imports']> {
     SearchModule,
     TaggingModule,
     InsightsModule,
-    DoctorModule,
+    // The platform Doctor (RETRO-B1b, #602): `GET /api/admin/doctor` and the
+    // support bundle. Global; provides the check registry.
+    doctorModule,
+    DoctorChecksModule,
     BurstModule,
     DedupModule,
     LocationGroupsModule,
