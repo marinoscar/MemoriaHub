@@ -54,6 +54,7 @@ import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
+import { onboardingModule } from './platform/onboarding/onboarding.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -162,6 +163,12 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
     // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.
     telemetryModule,
+    // First-run onboarding (RETRO-H3, #599): @marinoscar/platform-api/onboarding. `GET /api/onboarding`
+    // (the Get started and Setup guide checklists, derived on every read) and
+    // `GET /api/admin/onboarding/metrics`, over the platform's steps plus MemoriaHub's media steps
+    // (`platform/onboarding/`). Last among the feature modules: it reads the Doctor and the settings,
+    // owns no table, and stores only the user's intent in the `onboarding` user-settings namespace.
+    onboardingModule,
   ],
   providers: [
     // Global validation pipe (Zod)
