@@ -99,6 +99,10 @@ const NEW_PLATFORM_PERMISSIONS = [
   // The alerts slice (RETRO-H5, #609): system scope, admin only. (The list is sorted.)
   'alerts:read',
   'alerts:write',
+  // The sharing slice (RETRO-I1, #562): org scope; groups:admin and sharing:admin via org_admin.
+  'groups:admin',
+  'groups:read',
+  'groups:write',
   'org_ai_config:read',
   'org_ai_config:write',
   // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
@@ -119,6 +123,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   // The user-data slice (RETRO-H1, #591): system scope, admin only; never implied by system_settings:write.
   'orgs:offboard',
   'system:factory_reset',
+  'sharing:admin',
+  'sharing:read',
+  'sharing:write',
 ];
 
 /**
@@ -127,7 +134,10 @@ const NEW_PLATFORM_PERMISSIONS = [
  * MemoriaHub checks it yet: the app's AI features run server-side under the deployment key.
  */
 const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
-  contributor: ['ai:use'],
+  // RETRO-I1 (#562): the sharing slice's org grants. Nothing in MemoriaHub checks them yet: the
+  // slice's own routes are mounted but empty until circles become groups (RETRO-I2..I5).
+  contributor: ['ai:use', 'groups:read', 'groups:write', 'sharing:read', 'sharing:write'],
+  viewer: ['groups:read', 'sharing:read'],
 };
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */
@@ -150,8 +160,8 @@ describe('role permission matrix', () => {
     expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor, ...(GAINED_BY_SLICE.contributor ?? [])].sort());
   });
 
-  it('viewer is exactly what it was', () => {
-    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer].sort());
+  it('viewer is exactly what it was, plus the slice grants', () => {
+    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, ...(GAINED_BY_SLICE.viewer ?? [])].sort());
   });
 
   it('an administrator (admin + org_admin) keeps every permission and gains only the new platform ones', () => {
