@@ -32,8 +32,8 @@ import { MEMORIAHUB_ONBOARDING_STEP_DEFS, MEMORIAHUB_ONBOARDING_STEP_IDS } from 
 //
 // `admin.email` IS MemoriaHub's "email ready" step (the issue's `memoriahub.email_ready`, "platform step
 // if present"): the email slice is the platform's since RETRO-D2, and so is its Doctor check
-// `email.config`. `admin.push` stays registered; it is omitted until its Doctor check `push.vapid` is
-// registered (the notifications slice, RETRO-D3). `admin.org-invite` needs a data-port member this
+// `email.config`. `admin.push` is the platform's too: its Doctor check `push.vapid` is registered by the
+// notifications slice (RETRO-D3), and `/admin/settings/push` is that slice's page. `admin.org-invite` needs a data-port member this
 // single-organization app does not bind, so it is never shown.
 //
 // IMPORTED BY `onboarding.config.ts` (and so by `app.module.ts`). The stored `onboarding` namespace's

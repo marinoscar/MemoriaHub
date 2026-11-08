@@ -71,7 +71,9 @@ describe('MemoriaHub onboarding registry', () => {
     const ids = onboardingStepRegistry.list().map((s) => s.id);
     expect(EXCLUDED_PLATFORM_STEP_IDS).toEqual([ONBOARDING_STEP_IDS.STORAGE, ONBOARDING_STEP_IDS.AI]);
     for (const excluded of EXCLUDED_PLATFORM_STEP_IDS) expect(ids).not.toContain(excluded);
-    expect(ids).toEqual(expect.arrayContaining([ONBOARDING_STEP_IDS.EMAIL, ONBOARDING_STEP_IDS.ACCESS]));
+    expect(ids).toEqual(
+      expect.arrayContaining([ONBOARDING_STEP_IDS.EMAIL, ONBOARDING_STEP_IDS.ACCESS, ONBOARDING_STEP_IDS.PUSH, ONBOARDING_STEP_IDS.BACKUP]),
+    );
   });
 
   it('registers the six MemoriaHub facts and the platform facts', () => {
