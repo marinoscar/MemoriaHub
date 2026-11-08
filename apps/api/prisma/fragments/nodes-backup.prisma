@@ -1,0 +1,102 @@
+// =============================================================================
+// Local Media Backup via Worker Nodes (issue #310, epic #308)
+// =============================================================================
+//
+// Prisma-schema foundation only — no service/API/CLI logic lands in this
+// change. A worker node can run a local backup feed that pulls a circle
+// owner's media down to local disk. NodeBackupConfig is the per-node
+// schedule/scope/checkpoint; NodeBackupRun is one execution attempt's
+// progress/outcome, mirroring the WorkerNode job-run pattern already used
+// elsewhere (e.g. StorageMigrationRun, TrashEmptyRun).
+
+enum NodeBackupRunKind {
+  incremental
+  reconcile
+}
+
+enum NodeBackupRunStatus {
+  running
+  completed
+  failed
+  aborted
+  stale
+}
+
+// Per-node backup configuration; at most one row per WorkerNode (1:1).
+// circleIds empty = ALL circles the node owner belongs to. The checkpoint
+// columns track the cursor position of the last successfully-acknowledged
+// item in the incremental media_items (updated_at, id) scan (see the
+// media_items updatedAt+id index above), so the next run resumes rather
+// than rescanning the whole library.
+model NodeBackupConfig {
+  id      String  @id @default(uuid()) @db.Uuid
+  nodeId  String  @unique @map("node_id") @db.Uuid
+  enabled Boolean @default(true)
+
+  // Schedule
+  scheduleCron String?   @map("schedule_cron") // cron expression; null = manual-trigger only
+  timezone     String? // IANA timezone name the cron is evaluated in
+  nextRunAt    DateTime? @map("next_run_at") @db.Timestamptz(6)
+
+  // Scope
+  circleIds String[] @map("circle_ids") @db.Uuid // empty = ALL circles the owner belongs to
+
+  // Checkpoint (incremental scan cursor)
+  checkpointUpdatedAt DateTime? @map("checkpoint_updated_at") @db.Timestamptz(6)
+  checkpointId        String?   @map("checkpoint_id") @db.Uuid
+  itemsAcked          BigInt    @default(0) @map("items_acked")
+  bytesAcked          BigInt    @default(0) @map("bytes_acked")
+
+  // Run history summary
+  lastRunAt          DateTime? @map("last_run_at") @db.Timestamptz(6)
+  lastCompletedRunAt DateTime? @map("last_completed_run_at") @db.Timestamptz(6)
+  lastReconcileAt    DateTime? @map("last_reconcile_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  node WorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nextRunAt])
+  @@map("node_backup_configs")
+}
+
+// One row per backup run attempt for a node. kind='incremental' scans only
+// media_items updated since the config's checkpoint; kind='reconcile' is a
+// full re-scan/verification pass. The cursor snapshot columns record the
+// (updatedAt, id) window this specific run covered, independent of the
+// config's live checkpoint (which only advances on ack).
+model NodeBackupRun {
+  id      String              @id @default(uuid()) @db.Uuid
+  nodeId  String              @map("node_id") @db.Uuid
+  kind    NodeBackupRunKind
+  status  NodeBackupRunStatus @default(running)
+  trigger String // 'manual' | 'scheduled'
+
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  lastAckAt  DateTime? @map("last_ack_at") @db.Timestamptz(6) // staleness detection
+
+  itemsDownloaded Int    @default(0) @map("items_downloaded")
+  itemsSkipped    Int    @default(0) @map("items_skipped")
+  sidecarsWritten Int    @default(0) @map("sidecars_written")
+  bytesDownloaded BigInt @default(0) @map("bytes_downloaded")
+
+  errorCount Int     @default(0) @map("error_count")
+  lastError  String? @map("last_error")
+  cliVersion String? @map("cli_version")
+
+  // Cursor snapshot for this run's (updatedAt, id) scan window.
+  cursorStartUpdatedAt DateTime? @map("cursor_start_updated_at") @db.Timestamptz(6)
+  cursorStartId        String?   @map("cursor_start_id") @db.Uuid
+  cursorEndUpdatedAt   DateTime? @map("cursor_end_updated_at") @db.Timestamptz(6)
+  cursorEndId          String?   @map("cursor_end_id") @db.Uuid
+
+  // Relations
+  node WorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, startedAt(sort: Desc)])
+  @@index([status])
+  @@map("node_backup_runs")
+}

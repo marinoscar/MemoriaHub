@@ -2,7 +2,7 @@
 
 Every place where MemoriaHub deviates from `@marinoscar/platform-*` on purpose, and the issue that removes it. Introduced by RETRO-A1 (#568, epic [#555](https://github.com/marinoscar/MemoriaHub/issues/555)). An exception without a row here is a bug.
 
-None yet; A5 (#587) adds the first.
+A4 (#579) adds the first shim row; A5 (#587) adds the first database deviation.
 
 ## How to use this page
 
@@ -24,7 +24,7 @@ How the baseline treats the deviations: `docs/runbooks/database-baseline.md` in 
 
 | Shim | Where | What it does | Removed by |
 |---|---|---|---|
-| (none yet) | | | |
+| Platform-schema stub + legacy fragments (RETRO-A4) | `apps/api/prisma/platform-schema-stub/base.prisma`; `apps/api/prisma/fragments/platform-*.legacy.prisma` (header `PLATFORM-ADOPTION-SHIM`); `db:compose` passes `--platform-schema prisma/platform-schema-stub` | The stub holds only the `generator`/`datasource` blocks so no platform model is composed yet; the legacy fragments hold the models a platform slice will replace | Stub: RETRO-B2 (composes the real platform schema). Fragments: identity B2, settings B2/B3, credentials B4/E3, jobs C1, nodes C2, storage D1, notifications D3, db-backup D4, android D5 |
 
 ## Standing constraints
 

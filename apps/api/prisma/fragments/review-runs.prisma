@@ -1,0 +1,156 @@
+// =============================================================================
+// Review Runs (Bursts / Duplicates / Location Suggestions) — issue #190
+// =============================================================================
+
+// ReviewRun is the single async run record backing every bulk review-queue
+// action: burst resolve/dismiss-by-threshold, duplicate
+// resolve/dismiss-by-threshold, and location-suggestion bulk accept/reject.
+// It replaces the location-suggestion-only LocationSuggestionRun /
+// LocationSuggestionRunItem tables (folded in by migration
+// 20260726010000_review_runs, which also copies their historical rows
+// forward) and generalizes the same evaluate -> chunked execute-batch ->
+// progress-polling -> cancel model already proven by WorkflowRun and
+// TrashEmptyRun. No conditions, no action list, no approval gate — every
+// subject matched at evaluation time (a burst/duplicate group at/above a
+// confidence threshold, or a pending location suggestion) has exactly one
+// action applied to it.
+enum ReviewRunSubject {
+  burst_group
+  duplicate_group
+  location_suggestion
+}
+
+enum ReviewRunAction {
+  resolve_archive
+  resolve_trash
+  dismiss
+  accept
+  reject
+}
+
+enum ReviewRunStatus {
+  evaluating
+  running
+  completed
+  completed_with_errors
+  failed
+  cancelled
+}
+
+enum ReviewRunItemStatus {
+  matched
+  processing
+  applied
+  failed
+  skipped
+}
+
+// One row per bulk review-queue run for a circle. subjectType selects which
+// review queue the run belongs to (burst_group | duplicate_group |
+// location_suggestion); action is the operation applied to every matched
+// subject. threshold is a snapshot (0-100) of the confidence/threshold used
+// at evaluation time. matchedCount is the number of subjects discovered
+// when the run was evaluated; processedCount/succeededCount/failedCount/
+// skippedCount track progress as chunked batch jobs work through the
+// matched set. The concurrency guard (see review-run.service.ts) is per
+// (circleId, subjectType), not per circle — a burst run and a
+// location-accept run may be in flight simultaneously; two burst runs may
+// not.
+//
+// processedCount can legitimately end below matchedCount: if a subject is
+// deleted mid-run (e.g. a DuplicateGroup dropping below the member floor,
+// or a LocationSuggestion cascading away with its media item), its
+// ReviewRunItem row is cascade-deleted too (see ReviewRunItem below), and
+// finalize keys off "no rows remain in matched/processing", never off
+// processedCount === matchedCount — so a vanished subject simply shrinks
+// the work set rather than blocking completion. This mirrors
+// trash_empty_run_items' cascade-on-purge behavior.
+model ReviewRun {
+  id             String           @id @default(uuid()) @db.Uuid
+  circleId       String           @map("circle_id") @db.Uuid
+  subjectType    ReviewRunSubject @map("subject_type")
+  action         ReviewRunAction
+  threshold      Int
+  status         ReviewRunStatus  @default(evaluating)
+  matchedCount   Int              @default(0) @map("matched_count")
+  processedCount Int              @default(0) @map("processed_count")
+  succeededCount Int              @default(0) @map("succeeded_count")
+  failedCount    Int              @default(0) @map("failed_count")
+  skippedCount   Int              @default(0) @map("skipped_count")
+  startedById    String?          @map("started_by_id") @db.Uuid
+  lastError      String?          @map("last_error")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+  startedAt      DateTime?        @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?        @map("finished_at") @db.Timestamptz
+
+  // Relations
+  circle    Circle          @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  startedBy User?           @relation("ReviewRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
+  items     ReviewRunItem[]
+
+  // @@unique([id, subjectType]) is the FK target for ReviewRunItem's
+  // composite (run_id, subject_type) FK below, guaranteeing an item can
+  // never belong to a run of a different subject type than its own. This is
+  // a real, representable Prisma directive (unlike the CHECK constraints
+  // and partial unique indexes on ReviewRunItem, which cannot be expressed
+  // in the schema DSL and are hand-authored as raw SQL in migration
+  // 20260726010000_review_runs).
+  @@unique([id, subjectType])
+  @@index([circleId, subjectType, status])
+  @@index([status, updatedAt])
+  @@map("review_runs")
+}
+
+// Per-subject outcome row within a ReviewRun. Exactly one of burstGroupId /
+// duplicateGroupId / locationSuggestionId is populated per row, matching
+// subjectType — an "exclusive arc", the same pattern already shipped for
+// MediaShare (targetType + mediaItemId/albumId XOR CHECK, see migration
+// 20260628130000_add_media_shares). Prisma's schema DSL cannot express CHECK
+// constraints or partial unique indexes, so the full integrity guarantee is
+// hand-authored as raw SQL in migration 20260726010000_review_runs:
+//   - three real FKs (this file declares them below), each ON DELETE CASCADE,
+//     from burst_group_id / duplicate_group_id / location_suggestion_id to
+//     their respective tables, so a deleted subject cascades its item row away
+//   - CHECK (num_nonnulls(burst_group_id, duplicate_group_id,
+//     location_suggestion_id) = 1) — exactly one subject per row
+//   - three CHECKs binding subject_type to the populated column, e.g.
+//     CHECK ((subject_type = 'burst_group') = (burst_group_id IS NOT NULL))
+//   - a composite FK (run_id, subject_type) REFERENCES review_runs(id,
+//     subject_type) ON DELETE CASCADE, so an item's subjectType can never
+//     disagree with its parent run's
+//   - three partial unique indexes, UNIQUE (run_id, burst_group_id) WHERE
+//     burst_group_id IS NOT NULL (and likewise for the other two), as the
+//     idempotency anchor for batch retries — mirroring the
+//     trash_empty_run_items / workflow_run_items @@unique([runId,
+//     subjectId]) precedent, split three ways because a single column pair
+//     can't serve all three nullable FK columns
+// This is deliberate, documented schema drift — the same precedent as
+// media_items_gallery_idx / media_items_map_locations_idx. See that
+// migration's header comment for the full rationale.
+//
+// ReviewRunItemStatus keeps location-inference's explicit `processing` claim
+// marker: resolving a group or accepting/rejecting a suggestion doesn't
+// delete the underlying subject row, so matched -> processing -> a terminal
+// status is the only crash-safe claim for a retryable batch job.
+model ReviewRunItem {
+  id                   String              @id @default(uuid()) @db.Uuid
+  runId                String              @map("run_id") @db.Uuid
+  subjectType          ReviewRunSubject    @map("subject_type")
+  burstGroupId         String?             @map("burst_group_id") @db.Uuid
+  duplicateGroupId     String?             @map("duplicate_group_id") @db.Uuid
+  locationSuggestionId String?             @map("location_suggestion_id") @db.Uuid
+  status               ReviewRunItemStatus @default(matched)
+  error                String?
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  run                ReviewRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  burstGroup         BurstGroup?         @relation(fields: [burstGroupId], references: [id], onDelete: Cascade)
+  duplicateGroup     DuplicateGroup?     @relation(fields: [duplicateGroupId], references: [id], onDelete: Cascade)
+  locationSuggestion LocationSuggestion? @relation(fields: [locationSuggestionId], references: [id], onDelete: Cascade)
+
+  @@index([runId, status])
+  @@map("review_run_items")
+}

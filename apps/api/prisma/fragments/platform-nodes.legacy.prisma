@@ -1,0 +1,66 @@
+// PLATFORM-ADOPTION-SHIM(RETRO-C2): replaced by @marinoscar/platform-db/schema/jobs.prisma (worker nodes)
+
+// =============================================================================
+// Distributed Worker Nodes
+// =============================================================================
+
+enum NodeStatus {
+  online
+  draining
+  offline
+  disabled
+}
+
+model WorkerNode {
+  id              String     @id @default(uuid()) @db.Uuid
+  name            String
+  hostname        String
+  platform        String
+  cliVersion      String     @map("cli_version")
+  eligibleTypes   String[]   @map("eligible_types")
+  concurrency     Int        @default(1)
+  status          NodeStatus @default(online)
+  // Latest `node doctor` capability summary reported via heartbeat (per-capability ok/warn/error).
+  capabilities    Json?      @db.JsonB
+  registeredAt    DateTime   @default(now()) @map("registered_at") @db.Timestamptz
+  lastHeartbeatAt DateTime?  @map("last_heartbeat_at") @db.Timestamptz
+  createdById     String     @map("created_by_id") @db.Uuid
+
+  // Relations
+  createdBy    User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  claimedJobs  EnrichmentJob[]
+  // Local Media Backup relations (issue #310, epic #308)
+  backupConfig NodeBackupConfig?
+  backupRuns   NodeBackupRun[]
+
+  // Idempotent register-or-reattach: a containerized replica re-registering
+  // under the same (owner, name) re-attaches to its existing row instead of
+  // minting a duplicate. Migration 20260716010000_worker_node_unique_name.
+  @@unique([createdById, name])
+  @@index([status])
+  @@index([createdById])
+  @@map("worker_nodes")
+}
+
+// Durable, least-privilege bearer credential for worker nodes (`nod_` prefix).
+// Authenticates exactly like a PAT but is only accepted on /api/nodes/* routes
+// (enforced by JwtAuthGuard's route allowlist) and may never expire
+// (`expiresAt` NULL = never). Mirrors PersonalAccessToken minus the duration
+// bookkeeping. Migration 20260716020000_add_node_credentials.
+model NodeCredential {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  name        String
+  tokenHash   String    @unique @map("token_hash")
+  tokenPrefix String    @map("token_prefix")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz
+
+  // Relations
+  user User @relation("UserNodeCredentials", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("node_credentials")
+}

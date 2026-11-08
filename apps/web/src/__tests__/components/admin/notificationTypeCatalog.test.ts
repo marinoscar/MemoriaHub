@@ -8,7 +8,7 @@ import {
   notificationTypeInfo,
   notificationTypeLabel,
 } from '../../../components/admin/notificationTypeCatalog';
-// Every API `NotificationType` value (apps/api/prisma/schema.prisma).
+// Every API `NotificationType` value (apps/api/prisma/fragments/platform-notifications.legacy.prisma).
 const EVERY_TYPE = [
   'review_queue_bursts',
   'review_queue_duplicates',

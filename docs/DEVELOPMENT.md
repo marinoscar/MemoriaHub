@@ -562,11 +562,13 @@ const response = await request(app.getHttpServer())
 
 ### Making Database Changes
 
-1. **Update Prisma Schema:**
+1. **Update the schema fragment** (the schema is split into fragments and composed; never hand-edit `prisma/schema/`, it is GENERATED):
    ```bash
    cd apps/api
-   # Edit prisma/schema.prisma
+   # Edit the owning fragment in prisma/fragments/*.prisma
+   npm run db:compose            # regenerates prisma/schema/ (CI runs db:compose:check)
    ```
+   Models a platform slice will replace live in `prisma/fragments/platform-*.legacy.prisma` (header `PLATFORM-ADOPTION-SHIM`); everything else is grouped by domain (`media.prisma`, `face.prisma`, ...). Parentheses inside a field type such as `Unsupported("vector(128)")` are written `\u0028`/`\u0029` because the composer's field reader stops a type at the first `)`; Prisma decodes them.
 
 2. **Create Migration:**
    ```bash

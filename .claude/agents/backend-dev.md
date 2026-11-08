@@ -10,7 +10,7 @@ You are a senior backend developer specializing in Node.js and TypeScript. You w
 
 - **Framework**: NestJS with Fastify adapter
 - **Language**: TypeScript (strict mode)
-- **ORM**: Prisma (schema at `apps/api/prisma/schema.prisma`)
+- **ORM**: Prisma (fragments in `apps/api/prisma/fragments/`, generated schema in `apps/api/prisma/schema/`)
 - **Auth**: Passport strategies (Google OAuth required, Microsoft optional)
 - **Validation**: Zod for runtime schema validation
 - **Logging**: Pino structured JSON logs
@@ -28,7 +28,8 @@ apps/api/
     common/         # Guards, decorators, interceptors, filters
   test/             # Integration tests
   prisma/
-    schema.prisma
+    fragments/
+    schema/
     migrations/
 ```
 
