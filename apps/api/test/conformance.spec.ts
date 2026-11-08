@@ -39,6 +39,11 @@
 // `ai-orchestration-boundary` (no orchestration library anywhere) run; the five suites that boot
 // the AI runtime against an app fixture are wired and opted out with their reasons (RETRO-E4).
 //
+// `user-data` (`@marinoscar/platform-api/user-data/testing`, RETRO-H1): every owner model
+// (a user-owned registry entry with an `ownerField`) is kept with a reason or deleted in a
+// registered category that `everything` reaches; every hint and scope names what exists; the
+// relation-ordered delete plan exists for the composed schema.
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -58,6 +63,8 @@ import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
 import '@marinoscar/platform-api/jobs/testing';
 import '@marinoscar/platform-api/settings/testing';
+import '@marinoscar/platform-api/user-data/testing';
+import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
@@ -71,6 +78,8 @@ import '../src/app-registrations/ownership-manifest';
 import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-backup';
 // Configures email rendering and registers this app's templates (the `email` suite renders them).
 import '../src/platform/email/email.config';
+// Fills the user-data registries (categories, scopes, model hints, factory reset steps).
+import '../src/platform/user-data/user-data.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
@@ -228,6 +237,10 @@ runPlatformConformance({
     // connection" service (it writes a sentinel object), so a check holding it
     // is a regression. The AI, face and geo settings services stay allowed: see
     // the live-probe row of docs/platform-adoption/local-exceptions.md.
+    // User data (RETRO-H1, #591): the keep-or-delete decision of every owner model,
+    // against the composed schema the purge planner reads at bootstrap.
+    userData: { datamodel: composedSchemaDatamodel(join(__dirname, '..', 'src', 'platform', 'user-data'))() },
+
     doctorReadOnly: {
       fixture: doctorConformanceFixture,
       minChecks: 30,
