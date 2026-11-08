@@ -1,6 +1,6 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
-│  MemoriaHub CLI v1.4.0 · Home › File Tools                                                       │
+│  MemoriaHub CLI v<version> · Home › File Tools                                                       │
 │                                                                                                  │
 │  Offline local-file utilities — no server connection required                                    │
 │                                                                                                  │

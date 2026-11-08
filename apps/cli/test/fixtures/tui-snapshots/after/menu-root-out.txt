@@ -1,6 +1,6 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
-│  MemoriaHub CLI v1.4.0 · Menu                                                                    │
+│  MemoriaHub CLI v<version> · Menu                                                                    │
 │                                                                                                  │
 │  Server: https://app.example.test                                                                │
 │                                                                                                  │

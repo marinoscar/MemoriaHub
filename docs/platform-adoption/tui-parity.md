@@ -8,7 +8,7 @@ Issue [#582](https://github.com/marinoscar/MemoriaHub/issues/582) moved MemoriaH
 |---|---|
 | Frames of the 1.3 TUI (root menu, every submenu, the first frame of each network-free screen; 100 columns, logged out and in) | `apps/cli/test/fixtures/tui-snapshots/before` (committed before any change, `test(cli): pin TUI parity snapshots`) |
 | The same frames through the platform TUI | `apps/cli/test/fixtures/tui-snapshots/after`, written by `apps/cli/test/tui/parity-snapshots.spec.tsx` |
-| `diff -rq before after` | every screen frame is identical (factory reset, date range, convert file input, folder picker, folders, app settings, report, login); only the 13 menu frames differ, for the reasons in [Differences](#differences) |
+| `diff -rq before after` | every screen frame is identical (factory reset, date range, convert file input, folder picker, folders, app settings, report, login); only the 14 menu frames differ, for the reasons in [Differences](#differences) |
 | Every 1.3 menu assertion kept | `apps/cli/test/menu-config.spec.ts` (re-pointed at the platform helpers), `apps/cli/test/tui/menu-navigation.spec.tsx` (replaces `home-menu`, `menu-nav`, `backup-menu-nav`) |
 | The platform `tui` conformance suite | `apps/cli/test/conformance.spec.ts`: menu references, lazy screens, no ink import, labels, reducer purity of the three dashboards, every screen at 80/40/24 columns, no colour in monochrome, the login gate |
 | A real terminal | the built CLI in a pty: bare `memoriahub` opens the TUI, `Settings`, `Factory reset`, `File Tools`, `Help`, Esc one level at a time and `q` to quit |

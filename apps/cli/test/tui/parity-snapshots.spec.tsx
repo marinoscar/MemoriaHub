@@ -34,6 +34,9 @@ function strip(s: string): string {
 function save(name: string, frame: string | undefined): void {
   fs.mkdirSync(OUT, { recursive: true });
   const text = strip(frame ?? '')
+    // The header carries the CLI version; keep the frames stable across version bumps.
+    .replace(/(MemoriaHub CLI v)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/g, '$1<version>')
+    .replace(/(Help {2}· v)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/g, '$1<version>')
     .split('\n')
     .map((l) => l.replace(/\s+$/, ''))
     .join('\n');

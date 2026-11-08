@@ -1,6 +1,6 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
-│  MemoriaHub CLI v1.4.0 · Home › Worker Node                                                      │
+│  MemoriaHub CLI v<version> · Home › Worker Node                                                      │
 │                                                                                                  │
 │  Daily operations first; first-run setup below                                                   │
 │                                                                                                  │

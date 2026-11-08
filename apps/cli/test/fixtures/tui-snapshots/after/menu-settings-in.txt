@@ -1,6 +1,6 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
-│  MemoriaHub CLI v1.4.0 · Home › Settings                                                         │
+│  MemoriaHub CLI v<version> · Home › Settings                                                         │
 │                                                                                                  │
 │  Choose an entry. Esc goes up one level.                                                         │
 │                                                                                                  │

@@ -1,6 +1,6 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
-│  MemoriaHub CLI v1.4.0 · Home › File Tools › Date Inference                                      │
+│  MemoriaHub CLI v<version> · Home › File Tools › Date Inference                                      │
 │                                                                                                  │
 │  Choose an entry. Esc goes up one level.                                                         │
 │                                                                                                  │

@@ -1,6 +1,6 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
-│  MemoriaHub CLI v1.4.0 · Home › Scan                                                             │
+│  MemoriaHub CLI v<version> · Home › Scan                                                             │
 │                                                                                                  │
 │  Dry-run preview — reports what a sync would do, without uploading                               │
 │                                                                                                  │
