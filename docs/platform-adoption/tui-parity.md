@@ -106,4 +106,3 @@ Every difference, so the owner can approve or reverse it.
 | `daemonAttachFeed` is read-only and speaks only the platform protocol | The 1.3 daemon needs a `connect` adapter and a command side channel | `tui/legacy-daemon.ts` until RETRO-C10 |
 | A poll feed has no "poll now" | `[r]` on the job monitor | A seeded replacement source |
 | The platform menu has no banner/footnote slot | Banner art, DB path, update banner | Chips and Help |
-| `@marinoscar/platform-web@0.1.0-next.25` is not published (latest `next.24`) | `check:platform-pin` cannot pass with one pin | `apps/web` stays on `next.24`; see the pin commit |
