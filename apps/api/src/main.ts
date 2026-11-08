@@ -9,12 +9,12 @@ import {
 import { Logger } from '@nestjs/common';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
+import { registerStoragePartBodyParser } from '@marinoscar/platform-api/storage';
 import { registerRequestSpanAttributes } from '@marinoscar/platform-api/otel-core';
 import { AppModule } from './app.module';
 import {
   fastifyAdapterOptions,
   MULTIPART_PLUGIN_OPTIONS,
-  registerRawPartBodyParser,
 } from './common/fastify-setup';
 import {
   DOCS_PATH,
@@ -63,7 +63,7 @@ async function bootstrap() {
 
   // Raw, streamed bodies for PUT /api/storage/objects/:id/upload/parts/:n
   // (issue #506). See common/fastify-setup.ts.
-  registerRawPartBodyParser(app.getHttpAdapter().getInstance());
+  registerStoragePartBodyParser(app.getHttpAdapter().getInstance());
 
   // Global prefix for all routes
   app.setGlobalPrefix('api');

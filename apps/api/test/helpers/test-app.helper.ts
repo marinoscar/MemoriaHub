@@ -5,11 +5,11 @@ import {
 } from '@nestjs/platform-fastify';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
+import { registerStoragePartBodyParser } from '@marinoscar/platform-api/storage';
 import { AppModule } from '../../src/app.module';
 import {
   fastifyAdapterOptions,
   MULTIPART_PLUGIN_OPTIONS,
-  registerRawPartBodyParser,
 } from '../../src/common/fastify-setup';
 import { PrismaSystemService } from '../../src/prisma/prisma-system.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -166,7 +166,7 @@ export async function createTestApp(
   await app.register(multipart, MULTIPART_PLUGIN_OPTIONS);
 
   // Same raw part-body parser main.ts registers (issue #506).
-  registerRawPartBodyParser(app.getHttpAdapter().getInstance());
+  registerStoragePartBodyParser(app.getHttpAdapter().getInstance());
 
   app.setGlobalPrefix('api');
   // Note: ZodValidationPipe is already registered globally via APP_PIPE in AppModule
