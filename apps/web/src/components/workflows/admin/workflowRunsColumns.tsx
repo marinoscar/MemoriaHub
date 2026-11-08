@@ -36,7 +36,7 @@ import {
   formatRelativeTime,
   formatCount,
 } from '../../../utils/workflowFormat';
-import type { DataTableColumn } from '../../datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 
 /**
  * Persistence key for the user's column/density choices

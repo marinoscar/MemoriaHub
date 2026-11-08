@@ -1,6 +1,6 @@
 /**
  * The platform's web conformance suites over MemoriaHub's settings registries
- * and live route table (RETRO-B5, #621). `@marinoscar/platform-web/settings/testing`
+ * and live route table (RETRO-B5, #621), and the shell suites (RETRO-F1, #571). `@marinoscar/platform-web/settings/testing`
  * registers the five `settings-*` suites; every expectation is derived from
  * `ADMIN_SECTIONS`, `USER_SETTINGS_SECTIONS`, the text of `App.tsx` and the
  * API's generated permission catalog, never a copy.
@@ -9,6 +9,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import '@marinoscar/platform-web/settings/testing';
+// The shell suites (RETRO-F1, #571): `shell-layout-variants` (the padded /
+// full-bleed `<main>` and the context pane the map and the Collections / Review
+// destinations rely on) and `shell-local-host`.
+import '@marinoscar/platform-web/shell/testing';
 import { runPlatformWebConformance } from '@marinoscar/platform-web/testing';
 import { ADMIN_HUB_PATH, ADMIN_HUB_TITLE, ADMIN_SECTIONS } from '../config/adminSections';
 import {
@@ -41,7 +45,12 @@ runPlatformWebConformance({
       skip:
         'MemoriaHub keeps /settings deliberately unowned by any destination (config/destinations.ts ' +
         'UNOWNED_ROUTES), which this suite and the destination half of settings-card-routes reject; ' +
-        'route ownership is pinned by __tests__/config/destinations.test.ts until RETRO-F1 moves the shell.',
+        'route ownership is pinned by __tests__/config/destinations.test.ts and navigation/reachability.test.tsx.',
+    },
+    'shell-local-host': {
+      skip:
+        'MemoriaHub is a server host: the shell reads permissions from the signed-in AuthProvider and the ' +
+        'rail preference from /user-settings; there is no local (no-API) host to prove.',
     },
     'settings-ai-cards': {
       skip:

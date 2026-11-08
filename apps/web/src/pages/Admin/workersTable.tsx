@@ -27,7 +27,7 @@ import { Box, Chip, Tooltip, Typography } from '@mui/material';
 import HealthyIcon from '@mui/icons-material/CheckCircle';
 import StaleIcon from '@mui/icons-material/Warning';
 import OfflineIcon from '@mui/icons-material/Cancel';
-import type { DataTableColumn } from '../../components/datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 import type {
   AdminNodeCredentialDto,
   NodeHealth,

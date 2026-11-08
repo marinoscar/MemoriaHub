@@ -27,7 +27,7 @@
  */
 
 import { Chip, Tooltip, Typography } from '@mui/material';
-import type { DataTableColumn } from '../../components/datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 import type { DbBackupRunDto, DbBackupRunStatus } from '../../services/dbBackup';
 import { formatBytes, formatDuration, relativeTime } from '../../utils/formatBytes';
 

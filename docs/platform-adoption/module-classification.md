@@ -100,14 +100,14 @@ Drift for mapped modules comes from the slice view; `n/a (no slice)` means the m
 | `components/auth` | 1 | n/a | noise | identity (`ui`) | B2 (#611) | - | Login and guards. |
 | `components/collections` | 1 | n/a | domain | `@marinoscar/memoriahub-web` | J11 (#626) | - |  |
 | `components/common` | 10 | 66.7% / +71/-22 | divergence | shell | F1 (#571) | - | Shared widgets; `scrollableTabsProps` and friends compared in F1. |
-| `components/datatable` | 44 | n/a | noise | `platform-web/datatable` | F1 (#571) | - | 44 files. EAB confirms full DataTable parity (no seam); F1 diffs which side is ahead before deleting. |
+| `components/datatable` | 44 | n/a | noise | `platform-web/datatable` | F1 (#571) | - | Deleted in F1. Parity diff: the platform is ahead (theme tokens, `IndeterminateCheckbox`, zone-aware `exportFilename`, `DataTablePreferencesPort` over the same `user_settings.dataTables` shape); nothing to backport. Every consumer imports `datatable/ui`, `/headless`, `/testing`; the identity adapter binds it too. |
 | `components/device-activation` | 3 | n/a | backport | identity (`ui`) | B2 (#611) | [EAB#1081](https://github.com/marinoscar/EnterpriseAppBase/issues/1081) | Return deep-link UX. |
 | `components/insights` | 5 | n/a | domain | `@marinoscar/memoriahub-web` | J11 (#626) | - |  |
 | `components/locations` | 1 | n/a | domain | `@marinoscar/memoriahub-web` | J11 (#626) | - |  |
 | `components/map` | 8 | n/a | domain | `@marinoscar/memoriahub-web` | J11 (#626) | - |  |
 | `components/media` | 30 | n/a | domain | `@marinoscar/memoriahub-web` | J11 (#626) | - |  |
 | `components/memories` | 9 | n/a | domain | `@marinoscar/memoriahub-web` | J11 (#626) | - |  |
-| `components/navigation` | 6 | 0% / +761/-32 | backport | shell | F1 (#571) | [EAB#1080](https://github.com/marinoscar/EnterpriseAppBase/issues/1080) (SEAM-SHELL) | Nav model and rail preference; shim until the seam ships. |
+| `components/navigation` | 6 | 0% / +761/-32 | backport | shell | F1 (#571) | [EAB#1080](https://github.com/marinoscar/EnterpriseAppBase/issues/1080) (SEAM-SHELL, shipped in 0.1.0-next.22) | F1: `AppBar`, `NavigationRail`, `BottomNav` are thin bindings of `ShellAppBar` / `ShellNavigationRail` / `ShellBottomNav`; `NavContextPane` supplies the two `contextPane` contents; `CircleChip` stays domain; `UserMenu` stays a shim ([local exceptions](local-exceptions.md)). |
 | `components/notifications` | 5 | n/a | noise | notifications (web) | D3 (#576) | - | Bell, toasts, push helpers. |
 | `components/people` | 8 | n/a | domain | `@marinoscar/memoriahub-web` | J11 (#626) | - |  |
 | `components/pwa` | 2 | n/a | noise | host (`ui`) | B1 (#597) | - | `InstallPrompt`, `UpdatePrompt`. |

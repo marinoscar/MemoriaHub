@@ -51,7 +51,8 @@ import {
   importTagLabels,
 } from '../../services/tagLabels';
 import type { TagLabel, ImportResult } from '../../services/tagLabels';
-import { DataTable, type DataTableRowAction } from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   TAG_LABELS_PAGE_SIZE,
   TAG_LABELS_TABLE_ID,

@@ -21,7 +21,7 @@ import { render, mockAdminUser } from '../utils/test-utils';
 import {
   installLayoutStubs,
   resetContainerWidth,
-} from '../../components/datatable/__tests__/testUtils/layoutStubs';
+} from '@marinoscar/platform-web/datatable/testing';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared BEFORE the imports they affect

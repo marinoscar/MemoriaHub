@@ -6,7 +6,7 @@
  *     `db_backup:*` permissions independently.
  *   - `services/dbBackup` and `services/storage-providers` are module-mocked so
  *     no real request is made and each scenario can drive the response shape.
- *   - `components/datatable` is replaced with a minimal list renderer. The real
+ *   - `@marinoscar/platform-web/datatable/ui` is replaced with a minimal list renderer. The real
  *     DataGrid is heavy in jsdom (the JobsPage suite is already flaky for that
  *     reason) and none of these assertions are about grid internals — they are
  *     about the row-action contract the page declares, which the stub exposes
@@ -56,7 +56,7 @@ vi.mock('../../services/storage-providers', () => ({
   getStorageSettings: vi.fn(),
 }));
 
-vi.mock('../../components/datatable', () => ({
+vi.mock('@marinoscar/platform-web/datatable/ui', () => ({
   DataTable: ({ rows, rowActions, rowId }: any) => (
     <div data-testid="datatable">
       {rows.map((row: any) => (

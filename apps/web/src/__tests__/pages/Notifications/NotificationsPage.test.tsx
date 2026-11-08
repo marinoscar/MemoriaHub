@@ -32,7 +32,7 @@ import { render } from '../../utils/test-utils';
 import {
   installLayoutStubs,
   resetContainerWidth,
-} from '../../../components/datatable/__tests__/testUtils/layoutStubs';
+} from '@marinoscar/platform-web/datatable/testing';
 import type { Circle } from '../../../types/circles';
 import type { NotificationItem, NotificationListResponse } from '../../../types/notifications';
 
@@ -72,7 +72,7 @@ import { useCircle } from '../../../hooks/useCircle';
 import { useNotifications } from '../../../hooks/useNotifications';
 import { listNotifications, dismissAllNotifications } from '../../../services/notifications';
 import { api } from '../../../services/api';
-import type { DataTableFilterModel } from '../../../components/datatable';
+import type { DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 
 const mockUseCircle = vi.mocked(useCircle);
 const mockUseNotifications = vi.mocked(useNotifications);

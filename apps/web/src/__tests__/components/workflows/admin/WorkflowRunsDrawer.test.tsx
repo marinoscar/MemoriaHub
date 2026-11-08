@@ -28,7 +28,7 @@ import {
   installLayoutStubs,
   resetContainerWidth,
   VIEWPORT_WIDTH,
-} from '../../../../components/datatable/__tests__/testUtils/layoutStubs';
+} from '@marinoscar/platform-web/datatable/testing';
 import { WorkflowRunsDrawer } from '../../../../components/workflows/admin/WorkflowRunsDrawer';
 import {
   buildWorkflowRunColumns,

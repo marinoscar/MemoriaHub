@@ -34,7 +34,7 @@
  */
 
 import { Chip, Typography } from '@mui/material';
-import type { DataTableColumn } from '../datatable';
+import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 import type { PersonalAccessToken } from '../../types';
 
 /** Persistence key for `user_settings.dataTables['settings-pats']`. */

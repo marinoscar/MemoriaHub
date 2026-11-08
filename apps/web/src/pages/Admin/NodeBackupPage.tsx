@@ -49,7 +49,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useNodeBackup } from '../../hooks/useNodeBackup';
 import { useCircles } from '../../hooks/useCircles';
 import type { NodeBackupRunDto } from '../../services/nodeBackup';
-import { DataTable } from '../../components/datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
 import {
   NODE_BACKUP_RUNS_TABLE_ID,
   buildNodeBackupRunColumns,

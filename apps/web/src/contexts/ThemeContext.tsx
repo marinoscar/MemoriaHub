@@ -1,82 +1,30 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  useMemo,
-  ReactNode,
-  useCallback,
-} from 'react';
-import { Theme, useMediaQuery } from '@mui/material';
-import { lightTheme, darkTheme, ThemeMode } from '../theme';
+/**
+ * The viewer's light / dark / system choice — a binding of the packaged
+ * `ShellThemeProvider` (`@marinoscar/platform-web/shell/ui`, RETRO-F1 #571).
+ *
+ * The provider owns the choice (stored under the same `theme_mode`
+ * localStorage key as before), the `prefers-color-scheme` resolution and the
+ * AppBar's toggle. `useThemeContext` stays as the app's accessor so
+ * `useUserSettings` can apply a stored `theme` setting through `setMode`.
+ */
+import type { ReactNode } from 'react';
+import { ShellThemeProvider } from '@marinoscar/platform-web/shell/ui';
+import { useOptionalShellTheme } from '@marinoscar/platform-web/shell/headless';
+import type { ShellThemeContextValue } from '@marinoscar/platform-web/shell/headless';
+import { APP_THEMES } from '../theme';
 
-interface ThemeContextValue {
-  mode: ThemeMode;
-  theme: Theme;
-  setMode: (mode: ThemeMode) => void;
-  toggleMode: () => void;
-  isDarkMode: boolean;
-}
+export const THEME_STORAGE_KEY = 'theme_mode';
 
-const ThemeContext = createContext<ThemeContextValue | null>(null);
-
-const THEME_STORAGE_KEY = 'theme_mode';
-
-interface ThemeContextProviderProps {
-  children: ReactNode;
-}
-
-export function ThemeContextProvider({ children }: ThemeContextProviderProps) {
-  // Check system preference
-  const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
-
-  // Load saved preference or default to 'system'
-  const [mode, setModeState] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved === 'light' || saved === 'dark' || saved === 'system') {
-      return saved;
-    }
-    return 'system';
-  });
-
-  // Persist mode changes
-  const setMode = useCallback((newMode: ThemeMode) => {
-    setModeState(newMode);
-    localStorage.setItem(THEME_STORAGE_KEY, newMode);
-  }, []);
-
-  // Resolve actual theme based on mode and system preference
-  const isDarkMode = useMemo(() => {
-    if (mode === 'system') {
-      return prefersDarkMode;
-    }
-    return mode === 'dark';
-  }, [mode, prefersDarkMode]);
-
-  const theme = useMemo(() => {
-    return isDarkMode ? darkTheme : lightTheme;
-  }, [isDarkMode]);
-
-  const toggleMode = useCallback(() => {
-    setMode(isDarkMode ? 'light' : 'dark');
-  }, [isDarkMode, setMode]);
-
-  const value: ThemeContextValue = {
-    mode,
-    theme,
-    setMode,
-    toggleMode,
-    isDarkMode,
-  };
-
+export function ThemeContextProvider({ children }: { children: ReactNode }) {
   return (
-    <ThemeContext.Provider value={value}>
+    <ShellThemeProvider themes={APP_THEMES} storageKey={THEME_STORAGE_KEY}>
       {children}
-    </ThemeContext.Provider>
+    </ShellThemeProvider>
   );
 }
 
-export function useThemeContext(): ThemeContextValue {
-  const context = useContext(ThemeContext);
+export function useThemeContext(): ShellThemeContextValue {
+  const context = useOptionalShellTheme();
   if (!context) {
     throw new Error('useThemeContext must be used within a ThemeContextProvider');
   }

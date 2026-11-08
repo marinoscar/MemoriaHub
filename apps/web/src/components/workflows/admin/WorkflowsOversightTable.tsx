@@ -31,7 +31,8 @@ import BlockIcon from '@mui/icons-material/Block';
 import HistoryIcon from '@mui/icons-material/History';
 import { useMemo } from 'react';
 import type { AdminWorkflowListItem } from '../../../services/adminWorkflows';
-import { DataTable, type DataTableRowAction } from '../../datatable';
+import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   WORKFLOWS_OVERSIGHT_TABLE_ID,
   buildWorkflowOversightColumns,
