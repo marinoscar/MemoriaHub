@@ -83,7 +83,7 @@ export class AppSystemSettingsService extends SystemSettingsService {
 
   /**
    * One value of the (cached) settings document by dot path, e.g. `jobs.history.retentionDays`.
-   * PLATFORM-ADOPTION-SHIM(RETRO-C1): kept for the app's older call sites (~20); they move to the
+   * PLATFORM-ADOPTION-SHIM(RETRO-D3): kept for the app's older call sites (~20); they move to the
    * typed `getNamespace('jobs')` as each namespace gets its slice, and this goes with the last one.
    */
   async getSettingValue<T>(path: string): Promise<T | undefined> {

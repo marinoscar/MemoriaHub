@@ -15,7 +15,7 @@ Several platform migrations would fail with "already exists" because MemoriaHub 
    - 7 enum types: `JobStatus`, `JobReason`, `NodeStatus`, `DatabaseBackupStatus`, `DatabaseBackupTrigger`, `NotificationBroadcastStatus`, `NotificationDeliveryStatus`, each to `MhLegacy<Name>`;
    - every index and constraint on those tables (22 constraints, 25 standalone indexes), prefixed `mh_legacy_`. The list was generated from `pg_constraint` / `pg_index` of the migrated database, not written by hand.
 
-   `enrichment_jobs` is **not** renamed: the platform's table is called `jobs`, nothing collides. `NotificationType` is not renamed: the platform's `notifications.type` is text.
+   `enrichment_jobs` was **not** renamed by this migration: the platform's table is called `jobs`, nothing collides (RETRO-C1 later moved its rows into `jobs` and renamed it `enrichment_jobs_legacy`, section 13). `NotificationType` is not renamed: the platform's `notifications.type` is text.
 2. **Keeps the app working** with `@@map("mh_legacy_<table>")` and enum `@@map("MhLegacy<Name>")` in the `apps/api/prisma/fragments/platform-*.legacy.prisma` fragments. Prisma's default index and constraint names derive from the mapped table name, so they equal the renamed ones: no drift. Model names are unchanged, so app code compiles.
 3. **Baselines `--through 2`** (section 5): installs `0003` to `0040` as byte copies, writes `platform.lock`.
 4. **`prisma:migrate`** applies those 38 onto an empty namespace. Platform tables now exist **empty** beside the legacy tables.
@@ -273,3 +273,7 @@ If the production counts of `B3` differ, the likely causes are an object created
 | `B6 verify` prints only the `prisma migrate status` complaint about `20260814000000_add_push_subscriptions` | Expected from the temporary tree (section 5.1) |
 | No output after piping into `head` | The report is on stderr; use `2>&1` and a file |
 | `Connection terminated unexpectedly` from the tool | The cluster died (check its log); restart it and re-run: the dry run changes nothing |
+
+## 13. Changes after RETRO-A5
+
+**RETRO-C1 (#575), migration `20261108040000_cutover_enrichment_jobs_to_jobs`.** One more app-only directory, so a database now has 122 migration directories (82 app-only in `appMigrations`, 40 platform). The migration copies `enrichment_jobs` into the platform `jobs`, folds `mh_legacy_job_stats_rollup` into `job_stats_rollup` and drops it, and renames `enrichment_jobs` to `enrichment_jobs_legacy` (its three foreign keys and two partial indexes are dropped). Expected numbers on a migrated database: `B3 diff` `0 blocking, 391 declared` (61 `memoriahub:legacy-platform-tables`, 330 `memoriahub:domain-schema`), `B4 raw-SQL indexes` over 18 entries (the two `enrichment_jobs_*` partial indexes left the list), `db:check:database` `ok (122 ledger row(s) match the files)`. The deviation statements were regenerated with `scripts/baseline-deviations.mjs` (it now also accepts a table renamed to `<name>_legacy`). Procedure and rehearsal: [jobs-cutover.md](jobs-cutover.md).
