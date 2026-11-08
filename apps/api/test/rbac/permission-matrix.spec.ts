@@ -92,6 +92,9 @@ const OLD_MATRIX: Record<'admin' | 'contributor' | 'viewer', string[]> = {
 };
 
 const NEW_PLATFORM_PERMISSIONS = [
+  // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
+  'org_broadcasts:read',
+  'org_broadcasts:write',
   'org_invites:read',
   'org_invites:write',
   'org_members:read',
