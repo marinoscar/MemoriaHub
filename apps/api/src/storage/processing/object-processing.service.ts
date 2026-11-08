@@ -8,6 +8,8 @@ import { StorageProviderResolver } from '../providers/storage-provider.resolver'
 import { OBJECT_UPLOADED_EVENT, ObjectUploadedEvent } from './events/object-uploaded.event';
 import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from './events/object-processed.event';
 import { OBJECT_PROCESSOR, ObjectProcessor } from './object-processor.interface';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
+import { mediaTypeFromMime } from '../../platform-extensions/telemetry/memoriahub-metrics.manifest';
 
 @Injectable()
 export class ObjectProcessingService {
@@ -23,6 +25,8 @@ export class ObjectProcessingService {
     @Optional()
     @Inject(OBJECT_PROCESSOR)
     processors?: ObjectProcessor | ObjectProcessor[],
+    // App metrics (RETRO-T3, #628): `app.media.processing.duration`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {
     // Handle both single and multi-provider injection
     this.processors = this.normalizeProcessors(processors);
@@ -44,6 +48,12 @@ export class ObjectProcessingService {
   @OnEvent(OBJECT_UPLOADED_EVENT, { async: true })
   async handleObjectUploaded(event: ObjectUploadedEvent): Promise<void> {
     const { object } = event;
+    const startedAt = Date.now();
+    const recordDuration = (outcome: 'ready' | 'failed') =>
+      this.metrics?.record('mediaProcessingDuration', (Date.now() - startedAt) / 1000, {
+        media_type: mediaTypeFromMime(object.mimeType),
+        outcome,
+      });
 
     this.logger.log(`Processing object: ${object.id} (${object.name})`);
 
@@ -53,6 +63,7 @@ export class ObjectProcessingService {
     if (applicableProcessors.length === 0) {
       this.logger.debug(`No processors applicable for object ${object.id}`);
       await this.markReady(object.id, {});
+      recordDuration('ready');
       this.eventEmitter.emit(OBJECT_PROCESSED_EVENT, new ObjectProcessedEvent(object.id));
       return;
     }
@@ -108,8 +119,10 @@ export class ObjectProcessingService {
     // Update final status
     if (hasError) {
       await this.markFailed(object.id, allMetadata);
+      recordDuration('failed');
     } else {
       await this.markReady(object.id, allMetadata);
+      recordDuration('ready');
     }
 
     // Emit processed event so downstream listeners (e.g. MediaMetadataSyncService)
