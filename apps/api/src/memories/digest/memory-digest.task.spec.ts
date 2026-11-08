@@ -103,7 +103,11 @@ describe('MemoryDigestTask', () => {
           provide: AppEmailSender,
           useValue: {
             sendEmail: jest.fn(),
-            isConfigured: jest.fn(async () => isEmailConfigured((await settings.getSettings()).email ?? {})),
+            // Read the settings the sweep just loaded, without a second getSettings call
+            // (the overlap-guard test counts them).
+            isConfigured: jest.fn(async () =>
+              isEmailConfigured((await settings.getSettings.mock.results.at(-1)?.value)?.email ?? {}),
+            ),
           },
         },
         { provide: MediaThumbnailService, useValue: { extractThumbKey: jest.fn() } },
