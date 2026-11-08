@@ -23,7 +23,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import type BetterSqlite3 from 'better-sqlite3';
@@ -46,7 +46,6 @@ import {
 } from '../convert/error-report.js';
 import { FolderRepo } from '../repo/folders.js';
 import { SettingsRepo } from '../repo/settings.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -284,7 +283,7 @@ export function ConvertScreen({
 
   if (state.phase === 'planning') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Convert Videos to MP4</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -306,7 +305,7 @@ export function ConvertScreen({
     const totals = state.planTotals;
     const opts: OriginalDisposition[] = ['keep', 'delete', 'move'];
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Convert Videos to MP4 — Plan</Text>
         <Box marginTop={1} flexDirection="column">
           <Text>
@@ -369,7 +368,7 @@ export function ConvertScreen({
 
   if (state.phase === 'running') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Converting…</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -389,7 +388,7 @@ export function ConvertScreen({
 
   if (state.phase === 'empty') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Convert Videos to MP4</Text>
         <Box marginTop={1}>
           <Text dimColor>No convertible video files found. Nothing to convert.</Text>
@@ -403,7 +402,7 @@ export function ConvertScreen({
 
   if (state.phase === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">Convert failed</Text>
         <Box marginTop={1}>
           <Text color="red">{state.errorMsg ?? 'Unknown error'}</Text>
@@ -418,7 +417,7 @@ export function ConvertScreen({
   // done phase
   const totals = state.finalTotals;
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="green" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="green">Convert complete</Text>
       <Box marginTop={1} flexDirection="column">
         <Text>

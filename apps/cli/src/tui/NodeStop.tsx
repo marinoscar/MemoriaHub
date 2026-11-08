@@ -22,7 +22,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 
 import type { CliConfig } from '../config.js';
@@ -30,7 +30,6 @@ import { ApiClient } from '../api.js';
 import { nodePidPath } from '../paths.js';
 import { readPidFile, isPidAlive } from '../node/daemon.js';
 import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props + local types
@@ -181,7 +180,7 @@ export function NodeStop({ config, onStopped, onBack }: NodeStopProps): React.Re
   });
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Worker Node — Stop</Text>
 
       {step === 'confirm' && (

@@ -7,7 +7,7 @@
  * five upload categories with the 1.3 glyphs, the log kinds, the status line items and
  * the end-of-run panel with its Excel report line and key hints.
  */
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import type { ReactElement } from 'react';
 import {
   RunSummary,

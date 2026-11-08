@@ -11,11 +11,10 @@
 import React, { useState } from 'react';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import TextInput from 'ink-text-input';
 
 import { isConvertibleVideo } from '../convert/plan.js';
-import { BOX_BORDER } from './theme.js';
 
 export interface ConvertFileInputProps {
   onConfirm: (absPath: string) => void;
@@ -59,7 +58,7 @@ export function ConvertFileInput({
   };
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Convert a Single File</Text>
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>Enter the path to a video file to convert to MP4:</Text>

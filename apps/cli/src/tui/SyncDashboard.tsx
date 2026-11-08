@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { SyncEngine } from '../sync/sync-engine.js';
@@ -34,7 +34,6 @@ import { describeRange } from '../sync/date-range.js';
 
 import { ActiveItems, EventLog, MeterLegend, SegmentMeter, StatusLine } from '@marinoscar/platform-cli/tui/ui';
 import { SYNC_LOG_KINDS, SyncSummary, basename, fileLogEvent, syncSegments, type SyncFailure, type SyncLogEvent } from './sync-view.js';
-import { BOX_BORDER } from './theme.js';
 
 /** An upload in flight. */
 interface ActiveFile {
@@ -432,7 +431,7 @@ export function SyncDashboard({
   return (
     <Box flexDirection="column" gap={1}>
       {/* Header */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
         <StatusLine
           title={`MemoriaHub ${dashboardTitle}`}
           items={[
@@ -448,7 +447,7 @@ export function SyncDashboard({
       </Box>
 
       {/* Context meter */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold>Progress</Text>
         <Box marginTop={1}>
           <SegmentMeter segments={segments} total={meterTotal} />
@@ -469,7 +468,7 @@ export function SyncDashboard({
 
       {/* Active uploads */}
       {activeFiles.length > 0 && (
-        <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
           <ActiveItems
             title={`Active uploads (${activeFiles.length})`}
             items={activeFiles.map((f) => ({ id: f.fileId, label: basename(f.path), fraction: f.fraction }))}
@@ -479,7 +478,7 @@ export function SyncDashboard({
 
       {/* Event log */}
       {logEvents.length > 0 && (
-        <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
           <EventLog events={logEvents} kinds={SYNC_LOG_KINDS} title="Recent events" />
         </Box>
       )}

@@ -35,7 +35,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import { useDashboard } from '@marinoscar/platform-cli/tui';
 
@@ -50,7 +50,6 @@ import { startMemoryWatchdog, untunedWatchdogOptions } from '../node/memory-watc
 import { spawnNodeStartDaemon, waitForDaemonReady } from '../node/daemon-launch.js';
 import { isDaemonRunning } from '../node/ipc-client.js';
 import { readPidFile } from '../node/daemon.js';
-import { BOX_BORDER } from './theme.js';
 import { runNodeDoctorSweep, type DoctorSweepState } from './useNodeDoctorSweep.js';
 import {
   summarizeCapabilities,
@@ -634,7 +633,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     const jobsSummary = doctorSweep?.jobReadiness ? summarizeJobReadiness(doctorSweep.jobReadiness) : null;
     const gateSummary = doctorSweep?.startupGate ? summarizeStartupGate(doctorSweep.startupGate) : null;
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Worker Node — Doctor</Text>
         {sweeping && (
           <Box marginTop={1}>
@@ -754,7 +753,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
     <Box flexDirection="column" gap={1}>
 
       {/* Header */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Box flexDirection="row">
           <Text bold color="cyan">MemoriaHub — Worker Node</Text>
           <Text dimColor>  {config.node?.name ?? '(unnamed)'}</Text>
@@ -821,7 +820,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       )}
 
       {/* Counters band */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="row" paddingX={2} paddingY={0} gap={3}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="row" paddingX={2} paddingY={0} gap={3}>
         <Text>In-flight: <Text color="cyan">{inFlight}</Text></Text>
         <Text>Claimed: <Text color="cyan">{dash.counters.claimed}</Text></Text>
         <Text>Succeeded: <Text color="green">{dash.counters.succeeded}</Text></Text>
@@ -830,7 +829,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       </Box>
 
       {/* Per-slot rows */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Text bold color="cyan">Slots</Text>
         {Array.from({ length: slotCount }, (_, i) => {
           const job = active[i];
@@ -857,7 +856,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       </Box>
 
       {/* Task history */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Text bold color="cyan">History (last {HISTORY_ROWS})</Text>
         {recentHistory.length === 0 && <Text dimColor>No completed jobs yet.</Text>}
         {recentHistory.map((h, i) => (
@@ -881,7 +880,7 @@ export function NodeDashboard({ config, onBack, onOpenConfig }: NodeDashboardPro
       </Box>
 
       {/* Log pane (errors / warnings / daemon log tail) */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Text bold color="cyan">Log (errors / heartbeat)</Text>
         {dash.log.length === 0 && <Text dimColor>No errors.</Text>}
         {dash.log.map((e) => (

@@ -14,7 +14,7 @@
  *
  * Loaded lazily by `screens.ts`; importing it pulls ink in.
  */
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import { useCallback, useRef, useState } from 'react';
 import type { ComponentType, ReactElement } from 'react';
 import { useTuiApp, useTuiState, type TuiScreenProps } from '@marinoscar/platform-cli/tui';

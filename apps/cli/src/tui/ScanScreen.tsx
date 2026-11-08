@@ -17,7 +17,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -30,7 +30,6 @@ import { SettingsRepo } from '../repo/settings.js';
 import { exportScan } from '../export/scan-export.js';
 import { exportsDir } from '../paths.js';
 import { ScanReportBody } from './ScanDashboard.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -213,7 +212,7 @@ export function ScanScreen({
 
   if (state.phase === 'loading') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="row" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="row" paddingX={2} paddingY={1}>
         <Text color="cyan"><Spinner type="dots" /></Text>
         <Text dimColor>  Loading latest scan…</Text>
       </Box>
@@ -222,7 +221,7 @@ export function ScanScreen({
 
   if (state.phase === 'running') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Scanning…</Text>
         <Box marginTop={1}>
           <Text color="cyan"><Spinner type="dots" /></Text>
@@ -242,7 +241,7 @@ export function ScanScreen({
 
   if (state.phase === 'empty') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">Scan Report</Text>
         <Box marginTop={1}>
           <Text dimColor>No scans yet. Choose “Scan all folders” to create one.</Text>
@@ -256,7 +255,7 @@ export function ScanScreen({
 
   if (state.phase === 'error') {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="red">Scan failed</Text>
         <Box marginTop={1}>
           <Text color="red">{state.errorMsg ?? 'Unknown error'}</Text>
@@ -271,7 +270,7 @@ export function ScanScreen({
   // report phase — render the report (guard against an unexpected null)
   if (!state.report) {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
         <Text color="cyan"><Spinner type="dots" /></Text>
         <Text dimColor>  Building report…</Text>
       </Box>

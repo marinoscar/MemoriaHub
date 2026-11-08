@@ -22,7 +22,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createRequire } from 'node:module';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import { useDashboard } from '@marinoscar/platform-cli/tui';
 
@@ -33,7 +33,6 @@ import { SettingsRepo } from '../repo/settings.js';
 import { isDaemonRunning } from '../node/ipc-client.js';
 import { executeRun } from '../backup/execute-run.js';
 import { resolveRunKind } from '../backup/reconcile.js';
-import { BOX_BORDER } from './theme.js';
 import {
   MAX_LOG,
   applyPendingLag,
@@ -338,7 +337,7 @@ export function BackupDashboard({
 
   if (!configured) {
     return (
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
         <Text bold color="cyan">MemoriaHub — Backup Dashboard</Text>
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow">No backup root is configured on this machine.</Text>
@@ -357,7 +356,7 @@ export function BackupDashboard({
   const running = dash.runState !== 'idle';
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Box justifyContent="space-between">
         <Text bold color="cyan">MemoriaHub — Backup Dashboard</Text>
         <Text dimColor>

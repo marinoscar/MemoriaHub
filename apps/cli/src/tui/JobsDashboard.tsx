@@ -13,13 +13,12 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import { useDashboard } from '@marinoscar/platform-cli/tui';
 
 import type { ApiClient, JobInsights } from '../api.js';
 import { formatDuration } from '../format-duration.js';
-import { BOX_BORDER } from './theme.js';
 import { renderTui } from './render-tui.js';
 import { createJobsSource, type JobsDashboardData } from './jobs-dashboard-source.js';
 
@@ -123,13 +122,13 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
   if (!data && error) {
     return (
       <Box flexDirection="column" gap={1}>
-        <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
           <Text bold color="cyan">MemoriaHub — Job Queue</Text>
           {loading && (
             <Text color="cyan">  <Spinner type="dots" /></Text>
           )}
         </Box>
-        <Box borderStyle={BOX_BORDER} borderColor="red" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="red" paddingX={2} paddingY={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
         <Box paddingX={2}>
@@ -145,7 +144,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
   if (!data) {
     return (
       <Box flexDirection="column" gap={1}>
-        <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={1}>
+        <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
           <Text bold color="cyan">MemoriaHub — Job Queue</Text>
           <Text color="cyan">  <Spinner type="dots" /></Text>
           <Text dimColor>  Loading…</Text>
@@ -198,7 +197,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
     <Box flexDirection="column" gap={1}>
 
       {/* 1. Header */}
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" paddingX={2} paddingY={0} flexDirection="row">
+      <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={0} flexDirection="row">
         <Text bold color="cyan">MemoriaHub — Job Queue</Text>
         <Text dimColor>  {serverLabel}  window: {windowDays}d</Text>
         <Text dimColor>  {updatedLabel}</Text>
@@ -207,7 +206,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
 
       {/* 2. KPI band */}
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="row"
         paddingX={2}
@@ -240,7 +239,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
 
       {/* 3. Per-type table */}
       <Box
-        borderStyle={BOX_BORDER}
+        borderStyle="round"
         borderColor="cyan"
         flexDirection="column"
         paddingX={2}

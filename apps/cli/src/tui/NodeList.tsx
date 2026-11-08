@@ -18,12 +18,11 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 
 import { ApiClient, ApiError } from '../api.js';
 import type { CliConfig } from '../config.js';
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -168,7 +167,7 @@ export function NodeList({ config, onBack }: NodeListProps): React.ReactElement 
   const now = Date.now();
 
   return (
-    <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
       <Text bold color="cyan">Worker Nodes</Text>
 
       {step === 'loading' && (

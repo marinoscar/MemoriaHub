@@ -27,14 +27,13 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from './ink.js';
 import Spinner from 'ink-spinner';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { BOX_BORDER } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -329,7 +328,7 @@ export function NodeService({ onBack }: NodeServiceProps): React.ReactElement {
   if (screen === 'menu') {
     return (
       <Box flexDirection="column" gap={1}>
-        <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+        <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
           <Text bold color="cyan">Worker Node — Service</Text>
           <Text dimColor>Manage the {SERVICE_UNIT} systemd user unit that keeps the worker node always on.</Text>
         </Box>
@@ -342,7 +341,7 @@ export function NodeService({ onBack }: NodeServiceProps): React.ReactElement {
 
   return (
     <Box flexDirection="column" gap={1}>
-      <Box borderStyle={BOX_BORDER} borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={0}>
         <Text bold color="cyan">Worker Node — Service — {action ? actionLabel(action) : ''}</Text>
         {running && (
           <Box>
@@ -355,7 +354,7 @@ export function NodeService({ onBack }: NodeServiceProps): React.ReactElement {
 
       {report && (
         <Box
-          borderStyle={BOX_BORDER}
+          borderStyle="round"
           borderColor={report.ok ? 'cyan' : 'red'}
           flexDirection="column"
           paddingX={2}
