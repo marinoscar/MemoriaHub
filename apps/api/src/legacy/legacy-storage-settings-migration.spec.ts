@@ -65,14 +65,33 @@ describe('planStorageSettings (RETRO-D1 storage carry-over)', () => {
     expect(plan.drivers['local']).toEqual({ rootDir: '/srv/media' });
   });
 
-  it('warns when objects live on two S3-family providers with different access keys (one shared secret)', () => {
+  it('carries two S3-family providers with different access keys, each with its own settings and no shared-secret warning', () => {
     const plan = planStorageSettings({
       stored: { activeProvider: 'r2' },
-      rows: [row({ provider: 's3', accessKeyId: 'AKIA-ONE' }), row({ provider: 'r2', accessKeyId: 'R2-TWO' })],
+      rows: [
+        row({ provider: 's3', accessKeyId: 'AKIA-ONE', bucket: 'bucket-s3' }),
+        row({ provider: 'r2', accessKeyId: 'R2-TWO', bucket: 'bucket-r2', endpoint: 'https://acct0002.r2.cloudflarestorage.com' }),
+      ],
       env: {},
       objectCounts: { s3: 10, r2: 20 },
     });
-    expect(plan.warnings.join('\n')).toMatch(/share one secret/);
+    expect(plan.drivers['s3']).toMatchObject({ accessKeyId: 'AKIA-ONE', bucket: 'bucket-s3' });
+    expect(plan.drivers['r2']).toMatchObject({ accessKeyId: 'R2-TWO', bucket: 'bucket-r2', accountId: 'acct0002' });
+    expect(plan.envSecretDrivers).toEqual([]);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it('names the environment-backed drivers that take AWS_SECRET_ACCESS_KEY, and warns about a serving driver with no secret', () => {
+    const plan = planStorageSettings({
+      stored: { activeProvider: 's3' },
+      rows: [row({ provider: 'r2', hasSecret: false, endpoint: 'https://acct0003.r2.cloudflarestorage.com' })],
+      env: { S3_BUCKET: 'env-bucket', AWS_ACCESS_KEY_ID: 'AKIAENV', AWS_SECRET_ACCESS_KEY: 'env-secret-1234' },
+      objectCounts: { s3: 4, r2: 6 },
+    });
+    expect(plan.envSecretDrivers).toEqual(['s3']);
+    // `s3` has its secret from the environment; `r2` holds objects and its row carries none.
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toMatch(/provider "r2" \(6 objects\) has no legacy secret/);
   });
 
   it('warns about a provider id no driver serves and about a missing secret', () => {
