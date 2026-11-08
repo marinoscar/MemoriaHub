@@ -68,6 +68,9 @@ const EmailSettingsPage = lazy(() =>
   import('@marinoscar/platform-web/email/ui').then((m) => ({ default: m.EmailSettingsPage })),
 );
 const PushConfigPage = lazy(() => import('./pages/Admin/PushConfigPage'));
+// RETRO-H3 (#599): the onboarding slice's two pages (`@marinoscar/platform-web/onboarding/ui`).
+const SetupGuidePage = lazy(() => import('./platform/onboarding/SetupGuideRoute'));
+const GettingStartedPage = lazy(() => import('./platform/onboarding/GettingStartedRoute'));
 const NotificationPolicyPage = lazy(() => import('./pages/Admin/NotificationPolicyPage'));
 const BroadcastsPage = lazy(() => import('./pages/Admin/BroadcastsPage'));
 const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
@@ -188,6 +191,9 @@ function AppRoutes() {
                 <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
                 <Route path="/settings/memories" element={<MemoriesPreferencesPage />} />
                 <Route path="/settings/search" element={<SearchPreferencesPage />} />
+                {/* RETRO-H3 (#599): the user steps of `GET /api/onboarding`, which needs
+                    only `user_settings:read` (every role). */}
+                <Route path="/settings/getting-started" element={<GettingStartedPage />} />
                 {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
@@ -499,6 +505,16 @@ function AppRoutes() {
                       <RequireTelemetryEnabled loading={<LoadingSpinner />}>
                         <TelemetryDashboardPage />
                       </RequireTelemetryEnabled>
+                    </RequirePermission>
+                  }
+                />
+                {/* RETRO-H3 (#599): the Setup guide, behind `system_settings:read`, the
+                    onboarding slice's `adminPermission` (the admin block and the metrics). */}
+                <Route
+                  path="/admin/settings/setup"
+                  element={
+                    <RequirePermission permission="system_settings:read" fallback={<Navigate to="/" replace />}>
+                      <SetupGuidePage />
                     </RequirePermission>
                   }
                 />

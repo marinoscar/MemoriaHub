@@ -46,6 +46,7 @@ import AndroidIcon from '@mui/icons-material/Android';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
+import { setupGuideSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
 import { jobsAdminSections } from '@marinoscar/platform-web/jobs/ui';
 import { dbBackupAdminSections } from '@marinoscar/platform-web/db-backup/ui';
@@ -127,6 +128,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         path: '/admin/settings/android',
         permission: 'system_settings:read',
       },
+      // RETRO-H3 (#599): the onboarding slice's Setup guide card, appended, as data.
+      // `system_settings:read` is the permission the platform onboarding slice adds the
+      // `admin` block of `GET /api/onboarding` for, and gates `GET /api/admin/onboarding/metrics`
+      // on (its default `adminPermission`; no `onboarding:read` exists).
+      { ...setupGuideSettingsPage.card, Icon: setupGuideSettingsPage.Icon },
     ],
   },
   {

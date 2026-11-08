@@ -112,14 +112,28 @@ describe('adminSections', () => {
     });
   });
 
+  describe('Setup guide card (RETRO-H3, #599)', () => {
+    it('is the onboarding slice\'s card, appended to General after Android app', () => {
+      const general = ADMIN_SECTIONS.find((section) => section.label === 'General')!;
+      const titles = general.cards.map((card) => card.title);
+      expect(titles.indexOf('Setup guide')).toBe(titles.indexOf('Android app') + 1);
+      expect(general.cards[general.cards.length - 1]).toMatchObject({
+        title: 'Setup guide',
+        path: '/admin/settings/setup',
+        // The onboarding slice's adminPermission: the admin block and the metrics.
+        permission: 'system_settings:read',
+      });
+    });
+  });
+
   describe('Android app card (epic #498, issue #516)', () => {
     it('is appended to General after Notifications, gated on the exact API permission', () => {
       const general = ADMIN_SECTIONS.find((section) => section.label === 'General')!;
-      const last = general.cards[general.cards.length - 1];
       const titles = general.cards.map((card) => card.title);
+      const android = general.cards[titles.indexOf('Android app')];
 
       expect(titles.indexOf('Android app')).toBe(titles.indexOf('Notifications') + 1);
-      expect(last).toMatchObject({
+      expect(android).toMatchObject({
         title: 'Android app',
         path: '/admin/settings/android',
         // `GET /api/admin/android-app` and the release list enforce this string.
