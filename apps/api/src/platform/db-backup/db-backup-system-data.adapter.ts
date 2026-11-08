@@ -26,7 +26,7 @@ export class DbBackupSystemDataAdapter implements DbBackupSystemData {
 
   runAsSystem<T>(_reason: 'doctor', fn: (tx: DbBackupSystemTx) => Promise<T>): Promise<T> {
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw(Prisma.sql`SELECT set_config('app.rls_bypass', 'on', true)`);
+      await tx.$queryRaw(Prisma.sql`SELECT set_config('app.rls_bypass', 'on', true)`);
       return fn(tx as unknown as DbBackupSystemTx);
     });
   }

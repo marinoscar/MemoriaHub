@@ -452,7 +452,7 @@ describe('MemoriaHub Doctor checks', () => {
       expect(findCheck(report, 'geo.reverseProvider').status).toBe('error');
       expect(findCheck(report, 'geo.reverseProvider').message).toContain('geo down');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(30);
+      expect(report.summary.total).toBe(29);
     });
   });
 

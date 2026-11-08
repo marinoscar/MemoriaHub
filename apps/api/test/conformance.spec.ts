@@ -26,6 +26,11 @@
 // `credentials` (`@marinoscar/platform-api/credentials/testing`, RETRO-B4): purpose owners, addresses
 // and the no-secret-egress shape of the credential info schemas.
 //
+// `db-backup` (`@marinoscar/platform-api/db-backup/testing`, RETRO-D4): both halves of the RLS pair
+// on pg_dump and pg_restore, the restore server-only and the backup node-eligible, system-scope
+// permissions, the `database-backups/` prefix with deployment scope, and every registered
+// carry-over binding `$1` (MemoriaHub's Android releases carry is required).
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -37,6 +42,7 @@ import { join } from 'node:path';
 import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
 
 import '@marinoscar/platform-api/credentials/testing';
+import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
@@ -52,6 +58,7 @@ import { APP_CREDENTIAL_OWNERS } from '../src/platform/credentials/credential-pu
 // Fills the role, permission and ownership registries the suites read.
 import '../src/app-registrations/permission-manifest';
 import '../src/app-registrations/ownership-manifest';
+import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-backup';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 
@@ -108,6 +115,9 @@ runPlatformConformance({
         'object-processing.service.ts downloads object bytes inside an OBJECT_UPLOADED_EVENT listener; ' +
         'the storage slice (RETRO-D1) moves it into a post-upload processor job. No other listener fails.',
     },
+
+    // Database backup and restore (RETRO-D4, #580).
+    dbBackup: { requiredCarryOverIds: [...MEMORIAHUB_REQUIRED_CARRY_OVER_IDS] },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no

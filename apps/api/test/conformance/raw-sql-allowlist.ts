@@ -6,8 +6,6 @@
 export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'circles/identity-listeners.ts', why: "Per-user transaction advisory lock (pg_advisory_xact_lock) serialising the personal-circle create and the invite claim; the key is the event's user id." },
   { file: 'common/tenancy/default-org-id.ts', why: 'Reads the default organization id once (RETRO-A5 shim, removed by RETRO-D1).' },
-  { file: 'db-backup/database-backup-runner.service.ts', why: 'pg_dump bookkeeping: server version and the single-active-run guard; no user ids.' },
-  { file: 'db-backup/database-restore.service.ts', why: "Restore pre-flight and catalog carry-over over the database's own catalog tables." },
   { file: 'dedup/duplicate-backfill.service.ts', why: 'pgvector candidate queries scoped by circle id; not user data.' },
   { file: 'dedup/duplicate-detection.service.ts', why: 'pgvector KNN queries scoped by circle id; not user data.' },
   { file: 'dedup/duplicate.service.ts', why: 'pgvector similarity queries scoped by circle id; not user data.' },
@@ -27,6 +25,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'memories/curators/theme.curator.ts', why: 'Tag aggregates scoped by circle id.' },
   { file: 'notifications/notifications.service.ts', why: "Counted-event advisory lock and the read-all JSONB snapshot update, both keyed by the caller's user id." },
   { file: 'notifications/producers/share-expiring.service.ts', why: 'Expiry sweep over shares.' },
+  { file: 'platform/db-backup/db-backup-system-data.adapter.ts', why: "The first statement of the db-backup slice's system transaction: set_config('app.rls_bypass', 'on', true) for the read-only backup.rls-bypass Doctor count; no ids (RETRO-D4 shim, replaced by PrismaSystemService.runAsSystem in RETRO-D1)." },
   { file: 'platform/settings/settings-data.adapter.ts', why: "The first statement of an org-scoped transaction: set_config('app.org_id'/'app.user_id', ..., true) for the settings slice's SETTINGS_DATA port (RETRO-B3 shim, replaced by PrismaService.runInOrg in RETRO-D1)." },
   { file: 'prisma/prisma.service.ts', why: 'Connection bootstrap and health probes.' },
   { file: 'search/semantic-search.service.ts', why: 'pgvector KNN scoped by circle id.' },
