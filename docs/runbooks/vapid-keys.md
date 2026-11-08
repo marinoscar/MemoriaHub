@@ -39,7 +39,7 @@ The **Enable web push** card holds the switch and the subject; save applies both
 - **Enable** requires a key pair to exist (otherwise 409: generate first).
 - **Changing the subject** takes effect on the next push; it does not disturb subscriptions.
 
-Two other switches are separate from this page and worth knowing: **Admin, Settings, Notifications** has a deployment-wide "Send web push notifications" kill switch and a "Show browser notifications while the app is open" switch, and per-type suppression (`notifications.pushEnabled`, `browserEnabled`, `disabledTypes`). Turning push off there also hides push from clients (`GET /api/notifications/config` reports `pushEnabled: false`) even though a key pair exists. Each user also has their own push switches on `/settings`.
+Two other switches are separate from this page and worth knowing: **Admin, Settings, Notifications** has a deployment-wide "Send web push notifications" kill switch and a "Show browser notifications while the app is open" switch, and per-type suppression (`notifications.pushEnabled`, `browserEnabled`, `disabledTypes`). Turning push off there also hides push from clients (`GET /api/notifications/config` reports `pushEnabled: false`) even though a key pair exists. Each user also has their own push switches on `/settings/notifications`.
 
 ## 4. Rotate the key pair
 
