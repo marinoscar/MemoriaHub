@@ -6,7 +6,9 @@ import {
   type IdentityUserCreatedEvent,
 } from '@marinoscar/platform-api/identity';
 
-import { AppEmailSender } from '../platform/email/app-email.sender';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
+
+import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../notifications-registry/memoriahub-email.notifications';
 import { PrismaService } from '../prisma/prisma.service';
 
 // =============================================================================
@@ -48,7 +50,7 @@ export class CircleIdentityListeners {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly email: AppEmailSender,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @OnEvent(IDENTITY_EVENTS.USER_CREATED)
@@ -162,7 +164,7 @@ export class CircleIdentityListeners {
       if (!circle) return;
 
       const appUrl = process.env['APP_URL'] || 'http://localhost:3535';
-      this.email.sendEmailAsync(to, 'membership-confirmation', {
+      void this.notifications.notifyAddress(MEMORIAHUB_EMAIL_EVENT_KEYS.membershipConfirmed, to, {
         circleName: circle.name,
         circleDescription: circle.description ?? undefined,
         role,

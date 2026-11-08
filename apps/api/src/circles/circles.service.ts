@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from './circle-membership.service';
-import { AppEmailSender } from '../platform/email/app-email.sender';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
+
+import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../notifications-registry/memoriahub-email.notifications';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { CircleRole } from '@prisma/client';
 import { RequestUser } from '@marinoscar/platform-api/identity';
@@ -31,7 +33,7 @@ export class CirclesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly membership: CircleMembershipService,
-    private readonly email: AppEmailSender,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Base URL for building absolute links in emails. */
@@ -196,7 +198,9 @@ export class CirclesService {
       });
       if (!circle) return;
 
-      this.email.sendEmailAsync(recipientEmail, 'membership-confirmation', {
+      // Detached and after the membership write committed (RETRO-D3): the event's
+      // only channel is email, bound to the `membership-confirmation` template.
+      void this.notifications.notifyAddress(MEMORIAHUB_EMAIL_EVENT_KEYS.membershipConfirmed, recipientEmail, {
         circleName: circle.name,
         circleDescription: circle.description ?? undefined,
         role,
@@ -365,7 +369,7 @@ export class CirclesService {
         `/circles/${circleId}`,
       )}`;
 
-      this.email.sendEmailAsync(recipientEmail, 'circle-invitation', {
+      void this.notifications.notifyAddress(MEMORIAHUB_EMAIL_EVENT_KEYS.circleInvitation, recipientEmail, {
         circleName: circle.name,
         inviterName,
         acceptUrl,
