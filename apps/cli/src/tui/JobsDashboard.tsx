@@ -4,19 +4,24 @@
  * Renders a live-updating TUI showing job queue KPIs, per-type stats,
  * ETA/ETC estimates, and throughput metrics fetched from the server.
  *
+ * The polling is a platform dashboard source (jobs-dashboard-source.ts: reducer + pollFeed,
+ * driven by useDashboard).
+ *
  * Keys:
  *   r       — refresh immediately
  *   q / Esc — quit
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
+import { useDashboard } from '@marinoscar/platform-cli/tui';
 
 import type { ApiClient, JobInsights } from '../api.js';
 import { formatDuration } from '../format-duration.js';
 import { BOX_BORDER } from './theme.js';
 import { renderTui } from './render-tui.js';
+import { createJobsSource, type JobsDashboardData } from './jobs-dashboard-source.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -60,48 +65,37 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
   const { api, intervalMs, windowDays, serverUrl, onBack } = props;
   const { exit } = useApp();
 
-  // Main data state
-  const [data, setData] = useState<JobInsights | null>(null);
+  // The poll runs in a platform DashboardSource (pollFeed): `useDashboard` starts it on
+  // mount and stops it on unmount. `[r]` swaps in a fresh source, seeded with what is on
+  // screen, which polls straight away.
   const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState<number>(0);
+  const seedRef = useRef<JobsDashboardData | undefined>(undefined);
+  const source = useMemo(
+    () =>
+      createJobsSource({
+        api,
+        windowDays,
+        intervalMs,
+        seed: seedRef.current,
+        onFetch: (state) => setLoading(state === 'start'),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [api, windowDays, intervalMs, refreshNonce],
+  );
+  const dashboard = useDashboard(source) ?? source.getState();
+  const data: JobInsights | null = dashboard.insights;
+  const error: string | null = dashboard.error ?? null;
+  const lastUpdated: Date | null = dashboard.receivedAt !== null ? new Date(dashboard.receivedAt) : null;
+  seedRef.current = { insights: dashboard.insights, receivedAt: dashboard.receivedAt };
 
   // Seconds-since-last-update display
   const [secondsAgo, setSecondsAgo] = useState<number>(0);
   const lastUpdatedRef = useRef<Date | null>(null);
-
-  // Stable fetch function via ref so we can call it from useInput too
-  const doFetchRef = useRef<() => Promise<void>>(async () => { /* placeholder */ });
-
-  const doFetch = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    try {
-      const result = await api.getJobInsights(windowDays);
-      setData(result);
-      const now = new Date();
-      setLastUpdated(now);
-      lastUpdatedRef.current = now;
-      setSecondsAgo(0);
-      setError(null);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      // Keep last good data visible
-    } finally {
-      setLoading(false);
-    }
-  }, [api, windowDays]);
-
-  // Keep ref in sync so useInput can call the latest version
-  doFetchRef.current = doFetch;
-
-  // Fetch on mount and on interval
+  lastUpdatedRef.current = lastUpdated;
   useEffect(() => {
-    void doFetch();
-    const timer = setInterval(() => { void doFetch(); }, intervalMs);
-    return () => { clearInterval(timer); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setSecondsAgo(0);
+  }, [dashboard.receivedAt]);
 
   // Seconds-ago ticker
   useEffect(() => {
@@ -120,7 +114,7 @@ export function JobsDashboard(props: JobsDashboardProps): React.ReactElement {
       if (onBack) { onBack(); } else { exit(); }
       return;
     }
-    if (input === 'r') { void doFetchRef.current(); }
+    if (input === 'r') { setRefreshNonce((n) => n + 1); }
   });
 
   // -------------------------------------------------------------------------
