@@ -1,9 +1,9 @@
 import {
-  isMaintenancePayload,
-  reportMaintenance,
-} from './maintenanceState';
+  readMaintenanceBlock,
+  reportMaintenanceBlock,
+} from '@marinoscar/platform-web/host/headless';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
@@ -93,10 +93,12 @@ class ApiService {
   /**
    * Single exit for every non-OK response. Always throws.
    *
-   * Maintenance mode (issue #348): a 503 carrying the API's stable
-   * `{ error: 'maintenance', message, startedAt }` marker is published to the
-   * global maintenance store BEFORE throwing, so the app can take over with a
-   * single maintenance screen instead of every page rendering its own error.
+   * Maintenance mode (issue #348, RETRO-B1 #597): a 503 carrying the platform
+   * host's stable marker (`details.reason === 'MAINTENANCE_MODE'`, recognised by
+   * the packaged `readMaintenanceBlock`) is published to the packaged
+   * maintenance-block store BEFORE throwing, so the packaged `MaintenanceGate`
+   * can take over with a single maintenance screen instead of every page
+   * rendering its own error.
    * It still throws (as `MaintenanceError`, an `ApiError` subclass) so any
    * in-flight caller's `catch`/`finally` runs exactly as it does today — the
    * screen is a takeover, not a replacement for normal error propagation.
@@ -107,11 +109,10 @@ class ApiService {
   private async throwForResponse(response: Response): Promise<never> {
     const error = await response.json().catch(() => ({}));
 
-    if (isMaintenancePayload(response.status, error)) {
-      const message =
-        error.message || 'The application is temporarily down for maintenance.';
-      reportMaintenance({ message, startedAt: error.startedAt ?? null });
-      throw new MaintenanceError(message, error.startedAt ?? null);
+    const block = readMaintenanceBlock(response.status, error);
+    if (block) {
+      reportMaintenanceBlock(block);
+      throw new MaintenanceError(block.message);
     }
 
     throw new ApiError(

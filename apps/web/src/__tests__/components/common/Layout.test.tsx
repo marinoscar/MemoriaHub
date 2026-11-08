@@ -29,6 +29,9 @@ import { Layout } from '../../../components/common/Layout';
 // consistent with itself).
 // ---------------------------------------------------------------------------
 
+vi.mock('@marinoscar/platform-web/host/ui', () => ({
+  MaintenanceBanner: () => null,
+}));
 vi.mock('../../../components/navigation/AppBar', () => ({
   AppBar: vi.fn(() => <div data-testid="mock-appbar">AppBar</div>),
 }));

@@ -46,6 +46,8 @@ import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 import AndroidIcon from '@mui/icons-material/Android';
+import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
 export interface AdminCardDef {
   title: string;
@@ -291,6 +293,33 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         Icon: CampaignOutlinedIcon,
         path: '/admin/settings/broadcasts',
         permission: 'broadcasts:read',
+      },
+      {
+        // RETRO-B1 (#597). `system_settings:read` is the string the platform
+        // host's maintenance controller enforces on `GET /api/admin/maintenance`
+        // (`PlatformHostCoreModule.forRoot`'s `permissions.maintenanceRead`
+        // default). Opening and closing a window needs `system_settings:write`,
+        // which the PAGE gates by disabling its controls. This used to be a tab
+        // of the System page; a settings page is never a tab (Settings UI
+        // Pattern), so it is a card, and the route keeps the packaged
+        // `MAINTENANCE_ADMIN_PATH`.
+        title: 'Maintenance',
+        description:
+          'Take the application out of service for planned work, with a message for anyone who tries to use it.',
+        Icon: BuildCircleOutlinedIcon,
+        path: '/admin/settings/maintenance',
+        permission: 'system_settings:read',
+      },
+      {
+        // RETRO-B1 (#597). `system_settings:read` is the string the platform
+        // host's About controller enforces on `GET /api/admin/about`. Read-only
+        // by nature: there is no `:write` gate to mention.
+        title: 'About',
+        description:
+          'What is running here: version, revision, when it was installed and last updated, and the server it runs on.',
+        Icon: InfoOutlinedIcon,
+        path: '/admin/settings/about',
+        permission: 'system_settings:read',
       },
     ],
   },
