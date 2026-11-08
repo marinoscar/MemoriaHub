@@ -271,6 +271,11 @@ cd infra/compose && docker compose -f base.compose.yml -f dev.compose.yml -f ote
 # Start production mode
 cd infra/compose && docker compose -f base.compose.yml -f prod.compose.yml up
 
+# Platform pin and tooling checks (see docs/platform-adoption/README.md)
+npm run check:platform-pin        # all @marinoscar/platform-* pinned to one exact version
+npm run check:single-instance     # one copy each of Nest, React, MUI, Zod, OpenTelemetry
+npm run check:platform-imports    # no deep imports into platform internals (ESLint)
+
 # Run API tests
 cd apps/api && npm test
 

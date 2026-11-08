@@ -33,6 +33,26 @@ concurrency:
 #      setup-node + `npm ci`) dominates. That is why the counts are 4 and 8
 #      rather than as high as possible — re-measure before changing them.
 jobs:
+  # Repository tooling for the platform adoption (RETRO-A3, #574): the pinned
+  # @marinoscar/platform-* packages, one copy of every singleton, and no app
+  # code reaching into a package's src/dist. No `needs:` — runs concurrently.
+  tooling:
+    name: Repository tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+      - run: npm run check:platform-pin
+      - run: node scripts/check-platform-pin.mjs --self-test
+      - run: npm run check:single-instance
+      - run: npm run check:platform-imports
+
   # Typechecking is separated from the test jobs deliberately: it is pure CPU on
   # already-provisioned inputs, so parking it behind the API suite (as it used to
   # be) added its full duration to the critical path for no reason.

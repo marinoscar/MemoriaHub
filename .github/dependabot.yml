@@ -8,6 +8,11 @@ updates:
       day: "monday"
     open-pull-requests-limit: 10
     groups:
+      # All @marinoscar/platform-* packages move together, one exact version
+      # (scripts/check-platform-pin.mjs). Listed first so it wins over npm-minor.
+      platform-packages:
+        patterns:
+          - "@marinoscar/platform-*"
       # Group minor and patch updates together
       npm-minor:
         patterns:

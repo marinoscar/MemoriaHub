@@ -594,6 +594,10 @@ const response = await request(app.getHttpServer())
 
 **Note:** The project uses individual database environment variables (`POSTGRES_HOST`, `POSTGRES_PORT`, etc.) instead of a single `DATABASE_URL`. The npm scripts (`prisma:*`) automatically construct the connection URL from these variables. See `apps/api/scripts/README.md` for details.
 
+### Platform packages
+
+The seven `@marinoscar/platform-*` packages are pinned to one exact prerelease version (npm `next`, never `latest`). Three checks keep that true, and CI runs them: `npm run check:platform-pin` (one exact version everywhere, lockfile and `overrides` agree), `npm run check:single-instance` (libraries with module-level state, such as Nest, React, MUI, Zod and OpenTelemetry, resolve to a single copy) and `npm run check:platform-imports` (no deep imports into platform internals). Never edit platform code here; see [platform-adoption](platform-adoption/README.md#platform-pin) for how to bump the pin.
+
 ### Adding New API Endpoints
 
 1. Create DTO with Zod schema
