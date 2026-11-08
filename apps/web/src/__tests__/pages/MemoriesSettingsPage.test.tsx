@@ -197,23 +197,7 @@ describe('MemoriesSettingsPage', () => {
     mockUsePermissions.mockReturnValue(adminPermissions() as never);
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock() as never);
     mockUseAiSettings.mockReturnValue(makeAiSettingsMock() as never);
-    mockGetEmailSettings.mockResolvedValue({
-      provider: 'smtp',
-      enabled: true,
-      fromAddress: 'a@b.c',
-      fromName: null,
-      sesRegion: null,
-      sesCredentialAvailable: false,
-      smtp: {
-        host: 'smtp.example.com',
-        port: 587,
-        useTls: true,
-        username: null,
-        passwordConfigured: true,
-        passwordLast4: null,
-      },
-      credentialSource: 'smtp:inline',
-    });
+    mockGetEmailSettings.mockResolvedValue({ provider: 'smtp', enabled: true });
     mockListCircles.mockResolvedValue({
       items: [{ id: 'circle-1', name: 'Marin Family' }] as never,
       total: 1,
@@ -476,23 +460,7 @@ describe('MemoriesSettingsPage', () => {
   // -------------------------------------------------------------------------
   describe('email digest', () => {
     it('warns when no email provider is configured', async () => {
-      mockGetEmailSettings.mockResolvedValue({
-        provider: null,
-        enabled: false,
-        fromAddress: null,
-        fromName: null,
-        sesRegion: null,
-        sesCredentialAvailable: false,
-        smtp: {
-          host: null,
-          port: 587,
-          useTls: true,
-          username: null,
-          passwordConfigured: false,
-          passwordLast4: null,
-        },
-        credentialSource: null,
-      });
+      mockGetEmailSettings.mockResolvedValue({ provider: null, enabled: false });
 
       render(<MemoriesSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
