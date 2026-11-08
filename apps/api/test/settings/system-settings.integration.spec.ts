@@ -13,7 +13,7 @@ import {
   authHeader,
 } from '../helpers/auth-mock.helper';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
-import { SystemSettingsValue } from '@marinoscar/platform-api/settings';
+import type { AppSystemSettingsDocument as SystemSettingsValue } from '../../src/settings/app-settings.types';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { encryptSecret } from '../../src/common/crypto/secret-cipher';
 
