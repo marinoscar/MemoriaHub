@@ -37,6 +37,15 @@ Check that AI still works:
    new, `ai.enabled` and `ai.providers` (which depends on it); both read **skip** while the platform kill
    switch is off, which is expected in this release.
 
+## Key migration (RETRO-E3, release N)
+
+From RETRO-E3 release N the deployment keys move from `ai_provider_credentials` to the platform key
+store. Run `npm run ai:migrate-keys --workspace=api -- --dry-run`, then `--apply`, **before** upgrading
+to the release that drops the old table; the procedure, the report and the rollback are in
+[AI platform migration](ai-platform-migration.md). Until RETRO-E4, keys are changed only through
+`PUT|DELETE /api/admin/ai/providers/:provider/key` (the key buttons on `/admin/settings/ai` answer
+410); "Re-enter the key" in the troubleshooting table below means that route.
+
 ## Do not turn the platform kill switch on yet
 
 `/admin/settings/ai` in this release is still MemoriaHub's own page; the platform's admin pages arrive
