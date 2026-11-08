@@ -54,6 +54,7 @@ import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
 import { alertsModules } from './platform/alerts/alerts.config';
+import { userDataModule } from './platform/user-data/user-data.config';
 import { onboardingModule } from './platform/onboarding/onboarding.config';
 
 import configuration from './config/configuration';
@@ -172,6 +173,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // (`/api/admin/alerts`, `alerts:read|write`), plus MemoriaHub's default rules
     // and its two kinds. Binding: `platform/alerts/alerts.config.ts`.
     ...alertsModules,
+    // User data (RETRO-H1, #591): @marinoscar/platform-api/user-data. The Danger Zone
+    // (`/api/user-data/*`), the admin factory reset and offboarding, with MemoriaHub's
+    // keep-or-delete decisions, delegated purges and reset steps (platform/user-data/).
+    userDataModule,
     // First-run onboarding (RETRO-H3, #599): @marinoscar/platform-api/onboarding. `GET /api/onboarding`
     // (the Get started and Setup guide checklists, derived on every read) and
     // `GET /api/admin/onboarding/metrics`, over the platform's steps plus MemoriaHub's media steps
