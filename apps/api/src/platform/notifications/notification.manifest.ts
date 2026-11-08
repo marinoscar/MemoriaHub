@@ -25,6 +25,8 @@ import {
   type NotificationRegistration,
 } from '@marinoscar/platform-api/notifications';
 
+import { ALERTS_NOTIFICATIONS, registerAlertsEmailTemplates } from '@marinoscar/platform-api/alerts';
+
 import { MEMORIAHUB_EMAIL_NOTIFICATIONS } from '../../notifications-registry/memoriahub-email.notifications';
 import { MEMORIAHUB_NOTIFICATIONS } from '../../notifications-registry/memoriahub.notifications';
 import {
@@ -40,7 +42,13 @@ const GROUPS: readonly (readonly NotificationRegistration[])[] = [
   DB_BACKUP_NOTIFICATIONS,
   MEMORIAHUB_NOTIFICATIONS,
   MEMORIAHUB_EMAIL_NOTIFICATIONS,
+  // The alerts slice's two events (RETRO-H5, #609): `alerts.alert_fired` /
+  // `alerts.alert_resolved`, to the holders of `alerts:read`.
+  ALERTS_NOTIFICATIONS,
 ];
+
+// Their email templates (idempotent), bound before the events are registered.
+registerAlertsEmailTemplates();
 
 registerPlatformNotificationChannels();
 for (const group of GROUPS) {
