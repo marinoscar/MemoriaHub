@@ -11,6 +11,7 @@ import {
   MULTIPART_PLUGIN_OPTIONS,
   registerRawPartBodyParser,
 } from '../../src/common/fastify-setup';
+import { PrismaSystemService } from '../../src/prisma/prisma-system.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { prismaMock } from '../mocks/prisma.mock';
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
@@ -130,6 +131,12 @@ export async function createTestApp(
     builder = builder
       .overrideProvider(PrismaService)
       .useValue(prismaMock)
+      // The system (bypass) pool: the same mock, so a bypass path reads what a test seeded.
+      .overrideProvider(PrismaSystemService)
+      .useValue({
+        asSystem: () => prismaMock,
+        runAsSystem: (_reason: string, fn: (tx: unknown) => unknown) => fn(prismaMock),
+      })
       // PLATFORM-ADOPTION-SHIM(RETRO-D1): no organizations table behind the mock.
       .overrideProvider(DefaultOrgId)
       .useValue({ get: async () => '00000000-0000-4000-8000-0000000000d0' });

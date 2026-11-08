@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Which `system_settings` namespaces this deployment has, and in what order (append, never
-// insert). The platform's own: `maintenance`, `jobs`, `retention` and `databaseBackup`, registered here before the host core's
+// insert). The platform's own: `maintenance`, `jobs`, `retention`, `databaseBackup` and `storage`, registered here before the host core's
 // `ensureSystemSettingsNamespaces` would register it, so the order is this one. MemoriaHub's:
 // `app-registrations/settings.ts`.
 // =============================================================================
@@ -14,6 +14,10 @@ import { DATABASE_BACKUP_SYSTEM_SETTINGS } from '@marinoscar/platform-api/db-bac
 import '../../app-registrations/jobs';
 
 import { MAINTENANCE_SYSTEM_SETTINGS } from '@marinoscar/platform-api/host';
+import { STORAGE_SYSTEM_SETTINGS } from '@marinoscar/platform-api/storage';
+// The storage drivers must be registered before the `storage` namespace is composed (it reads the
+// driver registry): MemoriaHub's `local` driver (RETRO-D1).
+import '../../app-registrations/storage';
 import { JOBS_SYSTEM_SETTINGS, RETENTION_SYSTEM_SETTINGS } from '@marinoscar/platform-api/jobs';
 import {
   assembleSystemSettingsNamespaces,
@@ -36,6 +40,11 @@ export const PLATFORM_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespa
   // shape (`storageProvider: null`, `restoreRollbackMode: 'pre_restore_dump'`) is rewritten by
   // `scripts/migrate-db-backup-settings.ts`; until then the platform reads it field by field.
   DATABASE_BACKUP_SYSTEM_SETTINGS as SystemSettingsNamespace,
+  // StorageModule (RETRO-D1, #563): `provider` and the `drivers` record, extended with MemoriaHub's
+  // `insights` and `trash` (app-registrations/settings.ts). Same key as MemoriaHub's old namespace;
+  // `scripts/migrate-storage-settings.ts` copies the old `activeProvider` and the legacy credential
+  // rows into it.
+  STORAGE_SYSTEM_SETTINGS as unknown as SystemSettingsNamespace,
 ];
 
 /** The final, ordered list this deployment registers. */
