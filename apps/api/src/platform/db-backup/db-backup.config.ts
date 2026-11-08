@@ -39,8 +39,8 @@ import { MemoriaHubBackupTarget } from './memoriahub-backup.target';
 export const dbBackupModule = DbBackupModule.forRoot({
   appName: APP_SLUG,
   appVersion: resolveApiVersion,
-  // PLATFORM-ADOPTION-SHIM(RETRO-SEAM-STORAGE-2): per-run routing over the platform storage slice
-  // (memoriahub-backup.target.ts), until the default target reads the run's recorded location.
+  // PLATFORM-ADOPTION-SHIM(RETRO-SEAM-STORAGE-3): writes honour the `databaseBackup.storageProvider`
+  // pin (memoriahub-backup.target.ts); the default target writes to the active driver only.
   target: { useExisting: MemoriaHubBackupTarget },
   imports: [DbBackupHostModule],
 });

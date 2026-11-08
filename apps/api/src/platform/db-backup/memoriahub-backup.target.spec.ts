@@ -142,6 +142,23 @@ describe('MemoriaHubBackupTarget routing', () => {
     expect(resolver.getProviderFor).toHaveBeenCalledWith('r2', 'old-bucket');
   });
 
+  it('uses the recorded location the engine passes (platform next.28) without looking the run up', async () => {
+    const s3 = fakeProvider('s3');
+    const r2 = fakeProvider('r2');
+    const key = 'database-backups/memoriahub/2026/11/run-b.dump';
+    const { target, resolver, prisma } = buildTarget({ active: { id: 's3', provider: s3 }, byId: { r2 } });
+
+    await target.openRead(key, { provider: 'r2', bucket: 'archive-bucket' });
+    await target.delete(key, { provider: 'r2', bucket: 'archive-bucket' });
+    await target.signedDownloadUrl(key, { expiresInSeconds: 60, filename: 'b.dump' }, { provider: 'r2', bucket: null });
+
+    expect(r2.calls).toEqual([`download:${key}`, `delete:${key}`, `sign:${key}:60:attachment; filename="b.dump"`]);
+    expect(s3.calls).toEqual([]);
+    expect(resolver.getProviderFor).toHaveBeenCalledWith('r2', 'archive-bucket');
+    expect(resolver.getProviderFor).toHaveBeenCalledWith('r2', null);
+    expect(prisma.databaseBackupRun.findFirst).not.toHaveBeenCalled();
+  });
+
   it('falls back to the current provider for a key no run records', async () => {
     const s3 = fakeProvider('s3');
     const { target } = buildTarget({ active: { id: 's3', provider: s3 } });

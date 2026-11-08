@@ -2,32 +2,29 @@
 // The primary backup target: MemoriaHub's own storage providers (RETRO-D4, #580)
 // =============================================================================
 //
-// WHY NOT THE PLATFORM'S DEFAULT TARGET. The slice's default target is an adapter
-// over the platform `STORAGE_PROVIDER`: it writes to the ACTIVE driver and also
-// reads, deletes and signs through it. `BackupTarget.openRead(key)` carries no
-// run context, so the default target cannot reach an archive written to another
-// driver or bucket before a switch. MemoriaHub's archives live on several
-// providers (and the pre-slice ones under `db-backups/`), so this target keeps
-// per-run routing.
+// WHY NOT THE PLATFORM'S DEFAULT TARGET. Since platform 0.1.0-next.28 (EAB
+// #1121) the default `StorageProviderBackupTarget` routes reads, deletes and
+// signed links through the run's recorded location, which was this class's first
+// reason to exist. The one thing it still does not do is WRITE to a provider
+// other than the active one: it writes through `STORAGE_PROVIDER`, so its `id` is
+// always the active driver and the engine refuses (400) a `databaseBackup.storageProvider`
+// pin that names another configured provider. MemoriaHub has always honoured that
+// pin (backups on one provider, media on another), so this target stays.
 //
-// Since RETRO-D1 (#563) it holds no storage stack of its own: it writes through
-// and routes with the platform storage slice (`StorageProviderResolver` over
-// `STORAGE_PROVIDER` and `StorageProviderRouter`).
-//
-// PLATFORM-ADOPTION-SHIM(RETRO-SEAM-STORAGE-2): drop the `target` option of
+// PLATFORM-ADOPTION-SHIM(RETRO-SEAM-STORAGE-3): drop the `target` option of
 // `forRoot` (the default adapter then applies) and delete this file once the
-// platform passes the run's recorded location to `BackupTarget` reads, or routes
-// the default target per run. Consequence until then, documented by the
-// platform: node offload is withheld for an app target (Open decision 2 of #580
-// keeps it off anyway).
+// default target writes to the pinned provider. Consequence until then,
+// documented by the platform: node offload is withheld for an app target (Open
+// decision 2 of #580 keeps it off anyway).
 //
 // WRITES go to the provider `databaseBackup.storageProvider` pins, else the active
 // one (`storage.provider`). `id` is that provider's id (`s3`, `r2`,
 // `local`) and `location` its bucket; the engine records both on the run.
 //
 // READS, DELETES AND SIGNED LINKS resolve the provider RECORDED ON THE RUN
-// (`database_backup_runs.storage_provider` / `bucket`, looked up by the key), never
-// the currently active one: an administrator who switched providers must still be
+// (`database_backup_runs.storage_provider` / `bucket`: the `BackupObjectLocation`
+// the engine passes since next.28, else looked up by the key), never the
+// currently active one: an administrator who switched providers must still be
 // able to download, restore and delete a backup taken before the switch. That is
 // also what keeps the pre-platform archives (`db-backups/...`, carried into
 // `database_backup_runs` by `scripts/migrate-db-backup-settings.ts`) reachable.
@@ -40,6 +37,7 @@
 import { PassThrough, type Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
 import type {
+  BackupObjectLocation,
   BackupSignedUrlOptions,
   BackupSink,
   BackupTarget,
@@ -121,12 +119,12 @@ export class MemoriaHubBackupTarget implements BackupTarget {
     return { stream, done };
   }
 
-  async openRead(key: string): Promise<Readable> {
-    return (await this.providerFor(key)).download(key);
+  async openRead(key: string, location?: BackupObjectLocation): Promise<Readable> {
+    return (await this.providerFor(key, location)).download(key);
   }
 
-  async delete(key: string): Promise<void> {
-    await (await this.providerFor(key)).delete(key);
+  async delete(key: string, location?: BackupObjectLocation): Promise<void> {
+    await (await this.providerFor(key, location)).delete(key);
   }
 
   // The app's providers have no listing; nothing in the engine calls it.
@@ -137,8 +135,12 @@ export class MemoriaHubBackupTarget implements BackupTarget {
     );
   }
 
-  async signedDownloadUrl(key: string, options: BackupSignedUrlOptions): Promise<string> {
-    return (await this.providerFor(key)).getSignedDownloadUrl(key, {
+  async signedDownloadUrl(
+    key: string,
+    options: BackupSignedUrlOptions,
+    location?: BackupObjectLocation,
+  ): Promise<string> {
+    return (await this.providerFor(key, location)).getSignedDownloadUrl(key, {
       expiresIn: options.expiresInSeconds,
       responseContentDisposition: `attachment; filename="${options.filename}"`,
     });
@@ -150,8 +152,12 @@ export class MemoriaHubBackupTarget implements BackupTarget {
     return this.current!;
   }
 
-  /** The provider recorded on the run that owns `key`; the current one when no run records it. */
-  private async providerFor(key: string): Promise<StorageProvider> {
+  /**
+   * The provider recorded on the run that owns `key`: the location the engine passed (next.28),
+   * else the run found by key; the current one when no run records it.
+   */
+  private async providerFor(key: string, location?: BackupObjectLocation): Promise<StorageProvider> {
+    if (location?.provider) return this.resolver.getProviderFor(location.provider, location.bucket);
     const recorded = await this.recordedLocation(key);
     if (recorded) return this.resolver.getProviderFor(recorded.provider, recorded.bucket);
     this.logger.warn(`No backup run records the archive "${key}"; using the current provider "${this.currentId}".`);
