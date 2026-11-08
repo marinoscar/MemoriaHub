@@ -379,10 +379,10 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           "test send to the caller's own devices. The private key is never returned.",
       },
       {
-        name: 'Storage Settings',
+        name: 'Storage Configuration',
         description:
-          'Object-storage providers, connectivity tests, active-provider selection, and copy-only ' +
-          'migration between providers.',
+          'The object-storage driver (S3, R2, S3-compatible or local disk) and its write-only credential, ' +
+          'connection test, bucket provisioning, and copy-only migration between drivers (the platform storage slice).',
       },
     ],
   },

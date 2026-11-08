@@ -9,8 +9,8 @@ import {
 import { thumbnailResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { jobWriteScope, resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
-import { buildThumbnailKey, thumbnailVersionForJob } from '../storage/processing/thumbnail-key.util';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { buildThumbnailKey, thumbnailVersionForJob } from '../media-processing/thumbnail-key.util';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 
 /**
@@ -103,6 +103,6 @@ export class ThumbnailRegenHandler implements JobHandler, OnModuleInit {
     const parsed = thumbnailResultSchema.parse(result);
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
-    await this.thumbnailNodePersistService.persistThumbnail(context, parsed, jobWriteScope(this.jobScope, job));
+    await this.thumbnailNodePersistService.persistThumbnail(context, parsed, jobWriteScope(this.jobScope, job, this.prisma));
   }
 }

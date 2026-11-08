@@ -18,7 +18,7 @@ import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
 import { PrismaService } from '../prisma/prisma.service';
 import { PrismaSystemService } from '../prisma/prisma-system.service';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { systemJob } from '../../test/helpers/platform-job';

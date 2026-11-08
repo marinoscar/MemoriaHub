@@ -432,6 +432,10 @@ export class LocalDiskStorageProvider implements StorageProvider {
     }
     if (corrupt.length > 0) {
       await rm(tmpPath, { force: true });
+      // A part whose bytes no longer match the ETag the client was given is
+      // dropped, so `listUploadedParts` (and the upload status) stops reporting
+      // it and a resuming client re-sends exactly those parts.
+      for (const partNumber of corrupt) await rm(this.partFile(uploadId, partNumber), { force: true });
       throw new MultipartPartsMissingError(corrupt);
     }
     await rename(tmpPath, fullPath);

@@ -9,9 +9,9 @@ import type { AiProvider, AiProviderCredentials } from '../ai/providers/ai-provi
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+} from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';

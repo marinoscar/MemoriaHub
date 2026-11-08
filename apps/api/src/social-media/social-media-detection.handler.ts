@@ -32,10 +32,10 @@ import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } fro
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { downloadToTempFile } from '../storage/processing/processors/stream-utils';
-import { probeVideoFile, extractContainerMetadata } from '../storage/processing/processors/ffprobe.util';
+import { downloadToTempFile } from '../media-processing/processors/stream-utils';
+import { probeVideoFile, extractContainerMetadata } from '../media-processing/processors/ffprobe.util';
 import {
   SocialMediaDetectorService,
   VideoDetectionInput,

@@ -16,8 +16,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PublicMemoryDigestController } from './public-memory-digest.controller';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
-import { STORAGE_PROVIDER } from '../../storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
+import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import {
   signDigestImageToken,

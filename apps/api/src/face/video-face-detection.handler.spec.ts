@@ -76,7 +76,7 @@ jest.mock('sharp', () => {
 
 // Mock prepareImageForProcessing — applied orientation upright, returns the
 // buffer as-is with non-zero dimensions so the handler continues normally.
-jest.mock('../storage/processing/image-orientation.util', () => ({
+jest.mock('../media-processing/image-orientation.util', () => ({
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('frame-prepared'),
     width: 640,
@@ -116,7 +116,7 @@ import type { Job } from '@marinoscar/platform-api/jobs';
 import { mediaItemJob } from '../../test/helpers/platform-job';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { VideoFaceDetectionService } from './video-face-detection.service';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 
 // ---------------------------------------------------------------------------
 // Test-scoped factory helpers

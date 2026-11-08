@@ -31,11 +31,10 @@ import { Prisma } from '@prisma/client';
 import type { MediaJobContext, OrgWriteScope } from '../platform/jobs/media-item-job';
 import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
-import { thumbnailKeyPrefixFor } from '../storage/processing/thumbnail-key.util';
+import { StorageProviderResolver, storedObjectSize } from '../platform/storage/storage-provider.resolver';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
+import { thumbnailKeyPrefixFor } from '../media-processing/thumbnail-key.util';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
-import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 @Injectable()
 export class ThumbnailNodePersistService {
@@ -46,7 +45,6 @@ export class ThumbnailNodePersistService {
     private readonly resolver: StorageProviderResolver,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
     private readonly thumbnailPrune: ThumbnailPruneService,
-    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   /**
@@ -70,7 +68,7 @@ export class ThumbnailNodePersistService {
         id: true,
         deletedAt: true,
         storageObject: {
-          select: { id: true, name: true, uploadedById: true, metadata: true },
+          select: { id: true, name: true, uploadedById: true, metadata: true, orgId: true },
         },
       },
     });
@@ -110,7 +108,7 @@ export class ThumbnailNodePersistService {
       );
     }
 
-    const actualSize = await activeProvider.getObjectSize(result.storageKey);
+    const actualSize = await storedObjectSize(activeProvider, result.storageKey);
     if (actualSize !== null && actualSize !== result.bytes) {
       throw new Error(
         `persistThumbnail: byte-length mismatch for "${result.storageKey}": node reported ` +
@@ -121,7 +119,7 @@ export class ThumbnailNodePersistService {
     // The two `storage_objects` writes run together, in the job's organization
     // when a scope is given (`JobScope`, RETRO-C3); the provider checks above ran
     // OUTSIDE it, so the transaction stays short.
-    const orgId = await this.defaultOrgId.get(); // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+    const orgId = originalObject.orgId; // the source object's organization (RETRO-D1)
     const runWrites: OrgWriteScope = scope ?? ((fn) => fn(this.prisma as unknown as Prisma.TransactionClient));
     const thumbObject = await runWrites(async (tx) => {
       // Upsert the thumbnail's own StorageObject row — mirrors
@@ -141,7 +139,7 @@ export class ThumbnailNodePersistService {
           updatedAt: new Date(),
         },
         create: {
-          orgId, // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+          orgId,
           name: `thumb-${originalObject.name}`,
           size: BigInt(result.bytes),
           mimeType: 'image/jpeg',

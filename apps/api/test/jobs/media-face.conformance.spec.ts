@@ -474,7 +474,8 @@ describe('thumbnail_regen', () => {
 
 function buildThumbnailRepair(): ThumbnailRepairHandler {
   const prisma = { $queryRaw: async () => [] };
-  return new ThumbnailRepairHandler(registry, prisma as never, {} as never, {} as never);
+  const system = { asSystem: () => prisma, runAsSystem: (_r: string, fn: (tx: unknown) => unknown) => fn(prisma) };
+  return new ThumbnailRepairHandler(registry, prisma as never, system as never, {} as never, {} as never);
 }
 
 describe('thumbnail_repair', () => {

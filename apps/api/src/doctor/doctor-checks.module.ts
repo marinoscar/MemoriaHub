@@ -27,7 +27,7 @@ import { DedupModule } from '../dedup/dedup.module';
 import { FaceModule } from '../face/face.module';
 import { GeoModule } from '../geo/geo.module';
 import { SocialMediaModule } from '../social-media/social-media.module';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 
 import { AdminBootstrapDoctorCheck } from './checks/auth/admin-bootstrap.doctor-check';
 import { GoogleOauthDoctorCheck } from './checks/auth/google-oauth.doctor-check';
@@ -55,8 +55,6 @@ import { NodesCapabilityHealthDoctorCheck } from './checks/nodes/capability-heal
 import { NodesHeartbeatDoctorCheck } from './checks/nodes/heartbeat-freshness.doctor-check';
 import { NodesRegisteredDoctorCheck } from './checks/nodes/registered-count.doctor-check';
 import { NodesStaleLeasesDoctorCheck } from './checks/nodes/stale-leases.doctor-check';
-import { ActiveStorageProviderDoctorCheck } from './checks/storage/active-provider.doctor-check';
-import { StorageLiveTestDoctorCheck } from './checks/storage/live-test.doctor-check';
 import { WorkflowsStateDoctorCheck } from './checks/workflows/state.doctor-check';
 
 /**
@@ -73,8 +71,6 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
   GoogleOauthDoctorCheck,
   AdminBootstrapDoctorCheck,
   // storage
-  ActiveStorageProviderDoctorCheck,
-  StorageLiveTestDoctorCheck,
   // ai
   AiSearchDoctorCheck,
   AiTaggingDoctorCheck,
@@ -112,7 +108,7 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
     AiModule,
     FaceModule,
     GeoModule,
-    StorageProvidersModule,
+    MediaProcessingModule,
     SocialMediaModule,
     DedupModule,
     AndroidAppModule,

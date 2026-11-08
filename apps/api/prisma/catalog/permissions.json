@@ -239,13 +239,13 @@
       "scope": "system"
     },
     {
-      "name": "storage_settings:read",
-      "description": "View storage provider configuration and test connectivity",
+      "name": "storage_config:read",
+      "description": "View the object-storage configuration and the masked status of its stored secret key",
       "scope": "system"
     },
     {
-      "name": "storage_settings:write",
-      "description": "Configure storage provider credentials, set active provider, run migrations",
+      "name": "storage_config:write",
+      "description": "Change the object-storage provider, bucket, endpoint and credential, test a configuration, and provision a bucket",
       "scope": "system"
     },
     {
@@ -297,8 +297,8 @@
       "face_settings:write",
       "geo_settings:read",
       "geo_settings:write",
-      "storage_settings:read",
-      "storage_settings:write",
+      "storage_config:read",
+      "storage_config:write",
       "push:read",
       "push:write",
       "broadcasts:read",
@@ -321,6 +321,7 @@
       "user_settings:read",
       "user_settings:write",
       "storage:read",
+      "storage:write",
       "media:read",
       "media:write",
       "media:delete",

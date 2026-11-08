@@ -15,8 +15,8 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+} from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver, deleteStorageKeys } from '../platform/storage/storage-provider.resolver';
 import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { MediaQueryDto } from './dto/media-query.dto';
@@ -2513,7 +2513,7 @@ export class MediaService {
     for (const group of groups.values()) {
       try {
         const provider = await this.resolver.getProviderFor(group.provider, group.bucket);
-        const result = await provider.deleteMany(group.keys);
+        const result = await deleteStorageKeys(provider, group.keys);
         if (result.errors.length > 0) {
           this.logger.warn(
             `purgeMediaItemsBatched: ${result.errors.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,

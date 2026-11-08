@@ -22,7 +22,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { DuplicateDetectionService, DuplicateComputeResult } from './duplicate-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, EnrichmentJob, MediaType } from '@prisma/client';

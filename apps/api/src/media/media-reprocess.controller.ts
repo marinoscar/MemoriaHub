@@ -7,7 +7,7 @@ import { MediaReprocessService } from './media-reprocess.service';
 import {
   StorageProcessingRecoveryService,
   StorageProcessingRecoveryResult,
-} from '../storage/tasks/storage-processing-recovery.service';
+} from '../media-processing/recovery/storage-processing-recovery.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auth } from '@marinoscar/platform-api/identity';

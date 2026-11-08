@@ -34,23 +34,27 @@ const patchSchema = z.object({
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
 
+const DEFAULTS = {
+  insights: { refreshIntervalHours: 4 },
+  trash: { retentionDays: 30 },
+} as const;
+
 export const STORAGE_SYSTEM_SETTINGS_EXTENSION: SystemSettingsNamespaceExtension = {
   key: 'storage',
   storedSchema,
   patchSchema,
   wirePatchSchema: patchSchema,
-  defaults: {
-    insights: { refreshIntervalHours: 4 },
-    trash: { retentionDays: 30 },
-  },
-  // Each sub-object merges field by field (a PATCH of `trash.retentionDays` keeps `insights`).
+  defaults: structuredClone(DEFAULTS) as unknown as Record<string, unknown>,
+  // Each sub-object merges field by field (a PATCH of `trash.retentionDays` keeps `insights`), on
+  // top of the defaults: a stored row written before these keys existed (or by the platform's
+  // storage writes, which know nothing of them) gets them back on the next write, instead of
+  // failing the stored schema.
   merge(current, patch, baseMerge) {
     const merged = baseMerge(current, patch) as Record<string, unknown>;
-    if (!isRecord(patch)) return merged;
     for (const key of ['insights', 'trash'] as const) {
-      if (isRecord(patch[key])) {
-        merged[key] = { ...(isRecord(current[key]) ? current[key] : {}), ...patch[key] };
-      }
+      const stored = isRecord(current[key]) ? current[key] : {};
+      const patched = isRecord(patch) && isRecord(patch[key]) ? patch[key] : {};
+      merged[key] = { ...DEFAULTS[key], ...stored, ...patched };
     }
     return merged;
   },

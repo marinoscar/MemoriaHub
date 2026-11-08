@@ -36,12 +36,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { ObjectsService } from '../storage/objects/objects.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import {
   buildThumbnailKey,
   randomThumbnailVersion,
-} from '../storage/processing/thumbnail-key.util';
+} from '../media-processing/thumbnail-key.util';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
@@ -117,7 +116,6 @@ export class NodesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: EnrichmentHandlerRegistry,
-    private readonly objectsService: ObjectsService,
     private readonly storageProviderResolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly aiSettingsService: AiSettingsService,
@@ -488,7 +486,7 @@ export class NodesService {
    * Best-effort presigned download URL for a claimed job's source object.
    *
    * A worker node is a TRUSTED INTERNAL EXECUTOR, so this uses
-   * ObjectsService.getInternalDownloadUrl — which deliberately skips both the
+   * StorageProviderResolver.getInternalDownloadUrl — which deliberately skips both the
    * `status === 'ready'` gate and the per-user ownership/circle-membership auth
    * check, mirroring how the in-process enrichment worker reads the raw
    * uploaded bytes directly (`provider.download(storageKey)`). This matters
@@ -515,7 +513,7 @@ export class NodesService {
       if (!mediaItem?.storageObjectId) {
         return null;
       }
-      return await this.objectsService.getInternalDownloadUrl(
+      return await this.storageProviderResolver.getInternalDownloadUrl(
         mediaItem.storageObjectId,
       );
     } catch {

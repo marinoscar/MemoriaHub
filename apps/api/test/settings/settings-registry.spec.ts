@@ -29,7 +29,8 @@ const SYSTEM_KEYS = [
   'maintenance', // the platform's, registered first
   'jobs', 'retention', // the jobs slice's (RETRO-C1)
   'databaseBackup', // the db-backup slice's (RETRO-D4)
-  'ui', 'features', 'ai', 'autoTagging', 'face', 'storage', 'burst', 'dedup', 'locationInference',
+  'storage', // the storage slice's (RETRO-D1), extended with MemoriaHub's insights and trash
+  'ui', 'features', 'ai', 'autoTagging', 'face', 'burst', 'dedup', 'locationInference',
   'locationGrouping', 'socialMedia', 'geo', 'email', 'reviewRuns', 'notifications',
   'pictureEnhancement', 'backup', 'workflows', 'memories',
 ];
@@ -51,10 +52,23 @@ describe('settings registry', () => {
 
   it('composes the documented defaults', () => {
     const defaults = composeDefaultSystemSettings() as Record<string, unknown>;
-    const { maintenance: expectedMaintenance, ...expected } = EXPECTED_SYSTEM_DEFAULTS;
+    const { maintenance: expectedMaintenance, storage: expectedStorage, ...expected } = EXPECTED_SYSTEM_DEFAULTS;
     for (const [key, value] of Object.entries(expected)) {
       expect(defaults[key]).toEqual(value);
     }
+    // `storage` (RETRO-D1): the platform composes `provider` and the drivers it knew when its
+    // declaration was evaluated (the S3 family); the read path fills every registered driver
+    // (MemoriaHub's `local` too) and the flat read view, which `GET` proves in the contract spec.
+    expect(defaults['storage']).toEqual({
+      provider: expectedStorage.provider,
+      drivers: {
+        r2: expectedStorage.drivers.r2,
+        s3: expectedStorage.drivers.s3,
+        s3compatible: expectedStorage.drivers.s3compatible,
+      },
+      insights: expectedStorage.insights,
+      trash: expectedStorage.trash,
+    });
     expect(defaults['maintenance']).toMatchObject(expectedMaintenance);
   });
 

@@ -48,7 +48,7 @@ import { withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { PrismaSystemService } from '../prisma/prisma-system.service';
 import { MEDIA_HOUSEKEEPING_REASON } from '../app-registrations/system-access-reasons';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 
 const DEFAULT_BATCH_SIZE = 25;

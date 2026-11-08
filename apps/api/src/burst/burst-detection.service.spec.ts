@@ -24,7 +24,7 @@
 // ---------------------------------------------------------------------------
 // Module-level mock: computeVisualHash only (toSignedInt64 no longer exists)
 // ---------------------------------------------------------------------------
-jest.mock('../storage/processing/visual-hash.util', () => ({
+jest.mock('../media-processing/visual-hash.util', () => ({
   computeVisualHash: jest.fn(),
 }));
 
@@ -32,12 +32,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BurstDetectionService } from './burst-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, EnrichmentJob, JobReason, MhLegacyJobStatus, MediaType } from '@prisma/client';
-import { computeVisualHash } from '../storage/processing/visual-hash.util';
+import { computeVisualHash } from '../media-processing/visual-hash.util';
 import { Readable } from 'stream';
 
 // ---------------------------------------------------------------------------

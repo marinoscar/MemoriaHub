@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
-import { StorageModule } from '../storage/storage.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { CirclesModule } from '../circles/circles.module';
 import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
@@ -17,8 +16,8 @@ import { MediaReprocessController } from './media-reprocess.controller';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
 import { MediaOrientationEditController } from './media-orientation-edit.controller';
 import { MediaOrientationEditService } from './media-orientation-edit.service';
-import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
-import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
+import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
+import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
 import { TrashPurgeHandler } from './trash-purge.handler';
 import { TrashPurgeTask } from './trash-purge.task';
 import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
@@ -37,7 +36,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 /**
  * MediaModule
  *
- * Imports StorageProvidersModule so that STORAGE_PROVIDER resolves inside
+ * Imports MediaProcessingModule so that STORAGE_PROVIDER resolves inside
  * MediaService (used to sign fresh thumbnail and download URLs at read time).
  *
  * Imports CirclesModule so that CircleMembershipService resolves inside
@@ -52,12 +51,12 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *
  * TrashPurgeTask and ThumbnailRepairTask @Cron decorators work via
  * ScheduleModule.forRoot() in AppModule. ThumbnailRepairHandler additionally
- * uses StorageProcessingRecoveryService (exported by StorageModule) and
+ * uses StorageProcessingRecoveryService (exported by MediaProcessingModule) and
  * MediaMetadataSyncService for its reprocess/resync repair paths.
  *
  * Circular-dependency note:
- *   StorageProvidersModule only provides S3StorageProvider — it has no
- *   dependency on MediaModule — so there is no cycle.
+ *   MediaProcessingModule (the storage resolver, the processors and the
+ *   recovery service, RETRO-D1) has no dependency on MediaModule, so there is no cycle.
  *   EnrichmentModule and SettingsModule do not import MediaModule.
  *
  * ThumbnailProcessor and ImageDimensionsProcessor are registered directly here
@@ -65,9 +64,9 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * that MediaReprocessService can receive them via DI.  They are stateless and
  * safe to instantiate as a separate provider scope.
  *
- * Imports StorageModule so StorageProcessingRecoveryService resolves inside
+ * Imports MediaProcessingModule so StorageProcessingRecoveryService resolves inside
  * MediaReprocessController (admin bulk recovery) and
- * MediaThumbnailRerunController (per-item retry). StorageModule does not
+ * MediaThumbnailRerunController (per-item retry). MediaProcessingModule does not
  * depend on MediaModule, so this does not introduce a cycle.
  *
  * Imports NotificationsModule so UploadNotificationService resolves inside
@@ -81,8 +80,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 @Module({
   imports: [
     PrismaModule,
-    StorageProvidersModule,
-    StorageModule,
+    MediaProcessingModule,
     CirclesModule,
     GeoLocationModule,
     

@@ -35,9 +35,9 @@ import { Readable } from 'stream';
 import { MediaOrientationEditService } from './media-orientation-edit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
-import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
@@ -46,10 +46,10 @@ import {
 } from '../../test/mocks/prisma.mock';
 import { createMockStorageProvider } from '../../test/mocks/storage-provider.mock';
 import { RequestUser } from '@marinoscar/platform-api/identity';
-import { applyOrientationTransform } from '../storage/processing/image-orientation.util';
+import { applyOrientationTransform } from '../media-processing/image-orientation.util';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
-jest.mock('../storage/processing/image-orientation.util', () => ({
+jest.mock('../media-processing/image-orientation.util', () => ({
   applyOrientationTransform: jest.fn(),
 }));
 

@@ -3,7 +3,7 @@ import { Injectable, Module } from '@nestjs/common';
 import { bindIdentityExtensionClient } from '../app-registrations/identity';
 import { CirclesModule } from '../circles/circles.module';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { UserAvatarService } from './user-avatar.service';
 import { UserProfileController } from './user-profile.controller';
 
@@ -25,7 +25,7 @@ export class IdentityExtensionBinder {
  * list, roles, allowlist, tokens and device flow are the identity slice's.
  *
  * Imports (profile picture management, issue #354):
- *   - StorageProvidersModule: StorageProviderResolver, for the rendered avatar.
+ *   - MediaProcessingModule: StorageProviderResolver, for the rendered avatar.
  *   - CirclesModule: CircleMembershipService.assertCircleAccess, to validate a
  *     person link against the caller's circle membership.
  *   - SettingsModule: UserSettingsService, the single writer of
@@ -40,7 +40,7 @@ export class IdentityExtensionBinder {
  * before any parametric route.
  */
 @Module({
-  imports: [StorageProvidersModule, CirclesModule, ],
+  imports: [MediaProcessingModule, CirclesModule, ],
   controllers: [UserProfileController],
   providers: [UserAvatarService, IdentityExtensionBinder],
   exports: [UserAvatarService],

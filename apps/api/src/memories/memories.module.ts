@@ -26,7 +26,7 @@ import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AppEmailModule } from '../platform/email/app-email.module';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
 import { MemoryDigestService } from './digest/memory-digest.service';
 import { MemoryDigestHandler } from './digest/memory-digest.handler';
@@ -68,7 +68,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   //
   // #311's digest adds two more one-way edges: AppEmailModule (AppEmailSender, the
   // fire-and-forget send path shared with the circle-invitation mails) and
-  // StorageProvidersModule (StorageProviderResolver, so the public digest-image
+  // MediaProcessingModule (StorageProviderResolver, so the public digest-image
   // route can stream thumbnail bytes the way PublicShareController does).
   // Neither imports MemoriesModule, so no cycle and no forwardRef. The
   // unsubscribe write reuses SettingsModule's UserSettingsService, already
@@ -82,7 +82,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     MediaModule,
     NotificationsModule,
     AppEmailModule,
-    StorageProvidersModule,
+    MediaProcessingModule,
   ],
   // #315's AdminMemoriesController is mounted here rather than in a separate
   // admin module: it needs MemoryBackfillService and MEMORY_GENERATION_JOB_TYPE,

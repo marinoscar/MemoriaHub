@@ -17,10 +17,10 @@ import { Readable } from 'stream';
 import { buildFaceCropThumbnail } from '@memoriahub/enrichment-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { StorageProvider } from '../storage/providers/storage-provider.interface';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { StorageProvider } from '@marinoscar/platform-api/storage';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { UpdateUserProfileDto, UserProfileDto } from './dto/user-profile.dto';
@@ -748,7 +748,7 @@ export class UserAvatarService {
 
     await this.prisma.storageObject.create({
       data: {
-        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+        orgId: await this.defaultOrgId.get(), // single-organization default (common/tenancy/default-org-id.ts)
         name: `avatar-${userId}.jpg`,
         size: BigInt(jpeg.length),
         mimeType: 'image/jpeg',

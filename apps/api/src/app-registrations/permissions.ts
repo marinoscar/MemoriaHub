@@ -11,9 +11,9 @@
 //   - `jobs`      jobs:read, jobs:write
 //   - `db-backup` db_backup:read, db_backup:write, db_backup:restore (RETRO-D4, #580; same ids and
 //                 grants as MemoriaHub's former declarations: system scope, admin only)
-// Not listed on purpose: `storage` and `notifications` collide with
-// MemoriaHub's own (legacy) declarations of the same ids until RETRO-D1 and
-// D3 adopt those slices; `nodes`, `ai`, `telemetry`, `sharing`, `user-data`,
+// Not listed on purpose: `storage` (RETRO-D1 mounts the slice, but MemoriaHub declares its ids itself
+// to keep `storage:write` for `viewer`: memoriahub-permissions.ts) and `notifications`, which
+// collides with MemoriaHub's own (legacy) declarations of the same ids until D3 adopts that slice; `nodes`, `ai`, `telemetry`, `sharing`, `user-data`,
 // `webhooks` and `alerts` are not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';

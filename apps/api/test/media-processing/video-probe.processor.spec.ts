@@ -1,0 +1,437 @@
+/**
+ * Unit tests — VideoProbeProcessor
+ *
+ * An ffprobe binary is not guaranteed in CI.  Generating a real MP4 fixture and
+ * running a real probe is therefore not feasible.  Instead the shared parity
+ * package's ffprobe runner is mocked so the processor's mapping logic
+ * (durationMs/width/height/codec) is fully exercised without any binary
+ * dependency.
+ *
+ * `canProcess` is asserted against a real processor instance — it doesn't
+ * touch ffprobe at all so the mock doesn't affect those assertions.
+ *
+ * NOTE on mock strategy:
+ *   Since issue #219 removed the deprecated `fluent-ffmpeg` dependency, the
+ *   processor reaches ffprobe through `@memoriahub/enrichment-compute/ffmpeg`'s
+ *   `runFfprobe` — a thin `spawn()` wrapper. Only that function is replaced.
+ *   The subpath specifier resolves to the very same module file that
+ *   `dist/cjs/metadata/index.js` requires as `../ffmpeg/index.js`, so one
+ *   `jest.mock()` covers the call site inside the shared package.
+ *
+ *   `runFfprobe` returns a plain parsed object rather than invoking a callback,
+ *   so the setup helpers below resolve/reject a Promise instead of calling back.
+ *   The synthetic fixtures use the shape ffprobe's default (INI-ish) output
+ *   parses to — numeric fields as real NUMBERS, which is exactly why the
+ *   wrapper does not use `-print_format json` (its writer emits them as
+ *   strings, and these values are persisted).
+ */
+
+import { Readable } from 'stream';
+import { VideoProbeProcessor } from '../../src/media-processing/processors/video-probe.processor';
+import { bufferToStream } from '../fixtures/media/image-fixtures';
+import type { FfprobeDataLike } from '@memoriahub/enrichment-compute/metadata';
+
+// ---------------------------------------------------------------------------
+// Module-level mock — must be at the top level so Jest hoists it
+// ---------------------------------------------------------------------------
+
+const mockFfprobeFn = jest.fn();
+
+jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
+  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
+  return {
+    ...actual,
+    runFfprobe: (...args: any[]) => mockFfprobeFn(...args),
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeObject(mimeType = 'video/mp4') {
+  return {
+    id: 'obj-vid-001',
+    mimeType,
+    name: 'clip.mp4',
+    size: BigInt(0),
+    storageKey: 'key',
+    storageProvider: 's3',
+    bucket: 'bucket',
+    status: 'ready',
+    s3UploadId: null,
+    uploadedById: 'user-1',
+    metadata: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any;
+}
+
+function makeGetStream(buf = Buffer.from('fake-video')): () => Promise<Readable> {
+  return () => Promise.resolve(bufferToStream(buf));
+}
+
+function makeSyntheticProbeData(
+  overrides: Partial<FfprobeDataLike> & { chapters?: unknown[] } = {},
+): FfprobeDataLike {
+  return {
+    streams: [
+      {
+        codec_type: 'video',
+        codec_name: 'h264',
+        width: 1920,
+        height: 1080,
+        index: 0,
+      } as any,
+      {
+        codec_type: 'audio',
+        codec_name: 'aac',
+        index: 1,
+      } as any,
+    ],
+    format: {
+      duration: 12.4,
+      filename: '/tmp/fake',
+      nb_streams: 2,
+      format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+      size: '102400',
+      bit_rate: '0',
+    } as any,
+    chapters: [],
+    ...overrides,
+  };
+}
+
+/** Configures the mocked runFfprobe to resolve with the given parsed data. */
+function setupFfprobeSuccess(data: FfprobeDataLike) {
+  mockFfprobeFn.mockResolvedValue(data);
+}
+
+function setupFfprobeError(err: Error) {
+  mockFfprobeFn.mockRejectedValue(err);
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('VideoProbeProcessor', () => {
+  let processor: VideoProbeProcessor;
+
+  beforeEach(() => {
+    processor = new VideoProbeProcessor();
+    mockFfprobeFn.mockReset();
+    setupFfprobeSuccess(makeSyntheticProbeData());
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('processor identity', () => {
+    it('should have name "video-probe"', () => {
+      expect(processor.name).toBe('video-probe');
+    });
+
+    it('should have priority 20', () => {
+      expect(processor.priority).toBe(20);
+    });
+  });
+
+  describe('canProcess', () => {
+    it('should return true for video/mp4', () => {
+      expect(processor.canProcess(makeObject('video/mp4'))).toBe(true);
+    });
+
+    it('should return true for video/quicktime', () => {
+      expect(processor.canProcess(makeObject('video/quicktime'))).toBe(true);
+    });
+
+    it('should return true for video/x-msvideo (AVI)', () => {
+      expect(processor.canProcess(makeObject('video/x-msvideo'))).toBe(true);
+    });
+
+    it('should return false for image/jpeg', () => {
+      expect(processor.canProcess(makeObject('image/jpeg'))).toBe(false);
+    });
+
+    it('should return false for image/png', () => {
+      expect(processor.canProcess(makeObject('image/png'))).toBe(false);
+    });
+
+    it('should return false for application/pdf', () => {
+      expect(processor.canProcess(makeObject('application/pdf'))).toBe(false);
+    });
+
+    it('should return false for audio/mpeg', () => {
+      expect(processor.canProcess(makeObject('audio/mpeg'))).toBe(false);
+    });
+  });
+
+  describe('process — with synthetic ffprobe data', () => {
+    it('should return success:true', async () => {
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
+    it('should map duration to durationMs (rounds to integer ms)', async () => {
+      // synthetic data has duration 12.4 s → 12400 ms
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.durationMs).toBe(12400);
+    });
+
+    it('should extract video stream width', async () => {
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.width).toBe(1920);
+    });
+
+    it('should extract video stream height', async () => {
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.height).toBe(1080);
+    });
+
+    it('should extract codec name', async () => {
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.codec).toBe('h264');
+    });
+
+    it('should use the first stream with codec_type === "video"', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [
+          { codec_type: 'audio', index: 0 } as any,
+          { codec_type: 'video', codec_name: 'hevc', width: 3840, height: 2160, index: 1 } as any,
+        ],
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.codec).toBe('hevc');
+      expect(result.metadata?.width).toBe(3840);
+      expect(result.metadata?.height).toBe(2160);
+    });
+
+    it('should round fractional durations correctly', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({ format: { duration: 3.567 } as any }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.durationMs).toBe(3567);
+    });
+  });
+
+  describe('process — ffprobe error', () => {
+    it('answers success WITHOUT metadata when ffprobe reports an error (optional: the object is not failed)', async () => {
+      setupFfprobeError(new Error('ffprobe: no such file'));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      // The platform marks a row failed on `success: false`; video-probe is optional (RETRO-D1).
+      expect(result.success).toBe(true);
+      expect(result.metadata).toBeUndefined();
+    });
+  });
+
+  describe('process — missing optional fields', () => {
+    it('should omit durationMs when format.duration is absent', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [{ codec_type: 'video', codec_name: 'vp9', width: 640, height: 480, index: 0 } as any],
+        format: {} as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.durationMs).toBeUndefined();
+      expect(result.metadata?.codec).toBe('vp9');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // capturedAt — creation_time tag extraction
+  // -------------------------------------------------------------------------
+
+  describe('process — capturedAt from creation_time', () => {
+    const CREATION_TIME = '2026-06-11T18:13:42.000000Z';
+    const EXPECTED_ISO = new Date(CREATION_TIME).toISOString();
+
+    it('should extract capturedAt from format.tags.creation_time', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { creation_time: CREATION_TIME },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe(EXPECTED_ISO);
+      // Other fields still present
+      expect(result.metadata?.durationMs).toBe(12400);
+      expect(result.metadata?.width).toBe(1920);
+      expect(result.metadata?.height).toBe(1080);
+      expect(result.metadata?.codec).toBe('h264');
+    });
+
+    it('should fall back to video stream tags.creation_time when format tags are absent', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [
+          {
+            codec_type: 'video',
+            codec_name: 'h264',
+            width: 1920,
+            height: 1080,
+            index: 0,
+            tags: { creation_time: CREATION_TIME },
+          } as any,
+        ],
+        // format has no tags
+        format: {
+          duration: 5.0,
+          filename: '/tmp/fake',
+          nb_streams: 1,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '51200',
+          bit_rate: '0',
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe(EXPECTED_ISO);
+    });
+
+    it('should re-encode an Apple local-time tag as a civil timestamp', async () => {
+      // The #443 defect: container creation_time is a real UTC instant, so a
+      // video shot at 20:16 in a UTC-6 zone was stored as 02:16 the NEXT day
+      // and separated from photos taken minutes beside it. Apple writes the
+      // local wall clock plus its true offset, which is exactly what is needed.
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: {
+            creation_time: '2026-06-21T02:16:07.000000Z',
+            'com.apple.quicktime.creationdate': '2026-06-20T20:16:07-0600',
+          },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe('2026-06-20T20:16:07.000Z');
+      expect(result.metadata?.capturedAtOffset).toBe(-360);
+    });
+
+    it('should find the local-time tag on the video stream too', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        streams: [
+          {
+            codec_type: 'video',
+            codec_name: 'h264',
+            width: 1920,
+            height: 1080,
+            index: 0,
+            tags: { 'com.apple.quicktime.creationdate': '2026-06-20T20:16:07+05:30' },
+          } as any,
+        ],
+        format: {
+          duration: 5.0,
+          filename: '/tmp/fake',
+          nb_streams: 1,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '51200',
+          bit_rate: '0',
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata?.capturedAt).toBe('2026-06-20T20:16:07.000Z');
+      expect(result.metadata?.capturedAtOffset).toBe(330);
+    });
+
+    it('should match a capture tag case-insensitively', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { 'Com.Apple.QuickTime.CreationDate': '2026-06-20T20:16:07-0600' },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.capturedAt).toBe('2026-06-20T20:16:07.000Z');
+    });
+
+    it('should omit capturedAtOffset when only a UTC instant is available', async () => {
+      // Unrecoverable by design: no local information exists in the container.
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { creation_time: '2026-06-21T02:16:07.000000Z' },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.metadata?.capturedAt).toBe('2026-06-21T02:16:07.000Z');
+      expect(result.metadata).not.toHaveProperty('capturedAtOffset');
+    });
+
+    it('should omit capturedAt when no creation_time tag exists anywhere', async () => {
+      // Default synthetic data has no creation_time tag
+      setupFfprobeSuccess(makeSyntheticProbeData());
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata).not.toHaveProperty('capturedAt');
+    });
+
+    it('should omit capturedAt when creation_time is an invalid date string', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 12.4,
+          filename: '/tmp/fake',
+          nb_streams: 2,
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          size: '102400',
+          bit_rate: '0',
+          tags: { creation_time: 'not-a-valid-date' },
+        } as any,
+      }));
+
+      const result = await processor.process(makeObject(), makeGetStream());
+      expect(result.success).toBe(true);
+      expect(result.metadata).not.toHaveProperty('capturedAt');
+      // Other fields are still extracted
+      expect(result.metadata?.durationMs).toBe(12400);
+    });
+
+    it('should not throw when creation_time is an invalid date string', async () => {
+      setupFfprobeSuccess(makeSyntheticProbeData({
+        format: {
+          duration: 3.0,
+          tags: { creation_time: '!!garbage!!' },
+        } as any,
+      }));
+
+      await expect(
+        processor.process(makeObject(), makeGetStream()),
+      ).resolves.toMatchObject({ success: true });
+    });
+  });
+});

@@ -3,21 +3,26 @@
 // =============================================================================
 //
 // WHY NOT THE PLATFORM'S DEFAULT TARGET. The slice's default target is an adapter
-// over the platform `STORAGE_PROVIDER`, which reads the platform `storage`
-// settings namespace and credential store. MemoriaHub still runs its own storage
-// stack (`src/storage/providers`: s3 / r2 / local, `storage.activeProvider`, the
-// `storage_provider_credentials` rows) until the storage slice (RETRO-D1) lands,
-// so the platform provider would point at an UNCONFIGURED store. This target
-// keeps the archives exactly where MemoriaHub's backups always went.
+// over the platform `STORAGE_PROVIDER`: it writes to the ACTIVE driver and also
+// reads, deletes and signs through it. `BackupTarget.openRead(key)` carries no
+// run context, so the default target cannot reach an archive written to another
+// driver or bucket before a switch. MemoriaHub's archives live on several
+// providers (and the pre-slice ones under `db-backups/`), so this target keeps
+// per-run routing.
 //
-// PLATFORM-ADOPTION-SHIM(RETRO-D1): when the storage slice is mounted, drop the
-// `target` option of `forRoot` (the default adapter then applies) and delete this
-// file. Consequence until then, documented by the platform: a worker node cannot
-// take backups (node offload is withheld for an app target), which matches Open
-// decision 2 of #580 (node offload stays off).
+// Since RETRO-D1 (#563) it holds no storage stack of its own: it writes through
+// and routes with the platform storage slice (`StorageProviderResolver` over
+// `STORAGE_PROVIDER` and `StorageProviderRouter`).
+//
+// PLATFORM-ADOPTION-SHIM(RETRO-SEAM-STORAGE-2): drop the `target` option of
+// `forRoot` (the default adapter then applies) and delete this file once the
+// platform passes the run's recorded location to `BackupTarget` reads, or routes
+// the default target per run. Consequence until then, documented by the
+// platform: node offload is withheld for an app target (Open decision 2 of #580
+// keeps it off anyway).
 //
 // WRITES go to the provider `databaseBackup.storageProvider` pins, else the active
-// one (`storage.activeProvider`). `id` is that provider's id (`s3`, `r2`,
+// one (`storage.provider`). `id` is that provider's id (`s3`, `r2`,
 // `local`) and `location` its bucket; the engine records both on the run.
 //
 // READS, DELETES AND SIGNED LINKS resolve the provider RECORDED ON THE RUN
@@ -34,7 +39,6 @@
 
 import { PassThrough, type Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type {
   BackupSignedUrlOptions,
   BackupSink,
@@ -45,8 +49,8 @@ import type {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppSystemSettingsService } from '../settings/app-system-settings.service';
-import type { StorageProvider } from '../../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
+import type { StorageProvider } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../storage/storage-provider.resolver';
 
 /** A target id must match the platform's `^[a-z][a-z0-9_-]{0,47}$`; anything else falls back to `s3`. */
 const TARGET_ID_PATTERN = /^[a-z][a-z0-9_-]{0,47}$/;
@@ -69,9 +73,10 @@ export class MemoriaHubBackupTarget implements BackupTarget {
     private readonly resolver: StorageProviderResolver,
     private readonly prisma: PrismaService,
     private readonly settings: AppSystemSettingsService,
-    config: ConfigService,
   ) {
-    this.currentId = normaliseId(config.get<string>('storage.provider', 's3'));
+    // Until the first `refresh()` (the engine calls it before every run) the id is
+    // the platform's default driver; `refresh()` reads the real one.
+    this.currentId = 's3';
   }
 
   /** The id of the provider new archives go to (`s3`, `r2`, `local`). */

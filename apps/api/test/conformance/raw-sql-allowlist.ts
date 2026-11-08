@@ -26,7 +26,6 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'notifications/producers/share-expiring.service.ts', why: 'Expiry sweep over shares.' },
   { file: 'prisma/prisma.service.ts', why: 'Connection bootstrap and health probes.' },
   { file: 'search/semantic-search.service.ts', why: 'pgvector KNN scoped by circle id.' },
-  { file: 'storage-settings/storage-settings.service.ts', why: 'Provider credential row maintenance.' },
   { file: 'tagging/auto-tagging.service.ts', why: 'pgvector embedding upsert keyed by media item id.' },
   { file: 'workflows/runs/workflow-evaluate-item.handler.ts', why: 'Rolling micro-run append with row locks, scoped by workflow id.' },
 ];

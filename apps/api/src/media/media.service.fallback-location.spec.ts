@@ -20,14 +20,14 @@ import {
   createMockPrismaService,
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
-import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
+import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { UploadNotificationService } from '../notifications/producers/upload-notification.service';
 import { MediaTouchService } from './media-touch.service';

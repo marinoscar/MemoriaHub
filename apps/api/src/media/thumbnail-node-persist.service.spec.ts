@@ -19,9 +19,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
-import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import type { EnrichmentJob } from '@prisma/client';
 import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
@@ -77,6 +77,7 @@ function makeMediaItem(overrides: Record<string, unknown> = {}) {
       name: 'photo.jpg',
       uploadedById: 'user-1',
       metadata: null,
+      orgId: '00000000-0000-4000-8000-0000000000d0',
     },
     ...overrides,
   };

@@ -107,6 +107,9 @@ const RETIRED_BY_SLICE: Record<string, string> = {
   // RETRO-D2 (#570): /api/email-settings checks system_settings:read|write.
   'email_settings:read': 'system_settings:read',
   'email_settings:write': 'system_settings:write',
+  // RETRO-D1 (#563): /api/admin/storage-config checks storage_config:read|write.
+  'storage_settings:read': 'storage_config:read',
+  'storage_settings:write': 'storage_config:write',
 };
 
 function grants(role: string): string[] {
@@ -122,8 +125,8 @@ describe('role permission matrix', () => {
     expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor].sort());
   });
 
-  it('viewer is exactly what it was', () => {
-    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer].sort());
+  it('viewer is what it was, plus storage:write (RETRO-D1: the objects API was a bare @Auth(), viewers uploaded)', () => {
+    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, 'storage:write'].sort());
   });
 
   it('an administrator (admin + org_admin) keeps every permission and gains only the new platform ones', () => {
@@ -133,7 +136,10 @@ describe('role permission matrix', () => {
       expect(now).toContain(RETIRED_BY_SLICE[permission] ?? permission);
     }
     for (const retired of Object.keys(RETIRED_BY_SLICE)) expect(now).not.toContain(retired);
-    const gained = [...now].filter((permission) => !OLD_MATRIX.admin.includes(permission)).sort();
+    const replacements = new Set(Object.values(RETIRED_BY_SLICE));
+    const gained = [...now]
+      .filter((permission) => !OLD_MATRIX.admin.includes(permission) && !replacements.has(permission))
+      .sort();
     expect(gained).toEqual(NEW_PLATFORM_PERMISSIONS);
   });
 

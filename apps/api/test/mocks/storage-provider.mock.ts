@@ -6,15 +6,22 @@ import {
   UploadPart,
   SignedUrlOptions,
   StorageUploadOptions,
-} from '../../src/storage/providers';
+} from '@marinoscar/platform-api/storage';
 
 /**
  * Creates a mock storage provider for testing
  * All methods return sensible defaults that can be overridden in tests
  */
-export const createMockStorageProvider = (): jest.Mocked<StorageProvider> => ({
+/** The platform provider plus the two optional extras some MemoriaHub paths use when present. */
+export type MockStorageProvider = jest.Mocked<StorageProvider> & {
+  deleteMany: jest.Mock;
+  getObjectSize: jest.Mock;
+};
+
+export const createMockStorageProvider = (): MockStorageProvider => ({
+  kind: 's3',
   // Behaves like S3/R2: presigned part URLs a client PUTs to directly.
-  supportsPresignedParts: true,
+  partUploadMode: 'presigned',
 
   upload: jest.fn().mockResolvedValue({
     key: 'test-key',

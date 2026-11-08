@@ -35,7 +35,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
 import { EnrichmentJobSettledEvent } from '../../enrichment/events/enrichment-job-settled.event';
-import { ObjectProcessedEvent } from '../../storage/processing/events/object-processed.event';
+import { ObjectProcessedEvent } from '../../media-processing/events/object-processed.event';
 import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
