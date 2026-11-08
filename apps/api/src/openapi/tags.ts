@@ -339,6 +339,14 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'test-send to yourself, schedule, cancel, resume and delete. Delivered by a chunked, ' +
           'resumable background fan-out.',
       },
+      {
+        name: 'Webhooks',
+        description:
+          'Signed (Standard Webhooks) outbound callbacks, from the platform webhooks slice (RETRO-H4): ' +
+          'endpoints per scope (`/api/webhooks` own, `/api/org/webhooks`, `/api/admin/webhooks`), the ' +
+          'event catalog with JSON Schema, secret rotation, test sends and the delivery log with ' +
+          'redelivery. Guarded by `webhooks:*`, `org_webhooks:*` and `system_webhooks:*`.',
+      },
     ],
   },
   {

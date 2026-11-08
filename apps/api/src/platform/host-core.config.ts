@@ -24,8 +24,13 @@
 
 import '../app-registrations/host';
 
-import { PlatformHostCoreModule } from '@marinoscar/platform-api/host';
+import { PlatformHostCoreModule, registerPlatformHostAppMetrics } from '@marinoscar/platform-api/host';
+import { WEBHOOKS_APP_METRICS } from '@marinoscar/platform-api/webhooks';
 
 import { platformHost } from './platform-host';
+
+// The mounted slices' app metrics, registered after the platform's own (RETRO-H4, #603:
+// `app.webhooks.deliveries`, `app.webhooks.delivery.duration`, `app.webhooks.events`).
+registerPlatformHostAppMetrics(WEBHOOKS_APP_METRICS);
 
 export const hostCoreModule = PlatformHostCoreModule.forRoot({ host: platformHost });

@@ -91,14 +91,15 @@ describe('adminSections', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
       const broadcasts = operations.cards.find((card) => card.title === 'Broadcasts');
       // RETRO-B1 (#597) appends Maintenance and About after it, RETRO-T2 (#625) the three telemetry
-      // cards, RETRO-H5 (#609) the Alerts card.
-      expect(operations.cards.slice(-6).map((card) => card.title)).toEqual([
+      // cards, RETRO-H5 (#609) the Alerts card, RETRO-H4 (#603) the Webhooks card.
+      expect(operations.cards.slice(-7).map((card) => card.title)).toEqual([
         'Maintenance',
         'About',
         'Telemetry',
         'Telemetry Explorer',
         'Telemetry Dashboard',
         'Alerts',
+        'Webhooks',
       ]);
       expect(broadcasts).toMatchObject({
         title: 'Broadcasts',
@@ -125,6 +126,20 @@ describe('adminSections', () => {
         // The onboarding slice's adminPermission: the admin block and the metrics.
         permission: 'system_settings:read',
       });
+    });
+  });
+
+  describe('Webhooks card (RETRO-H4, #603)', () => {
+    it('appends the packaged system card to Operations, gated on system_webhooks:read', () => {
+      const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
+      expect(operations.cards.at(-1)).toMatchObject({
+        path: '/admin/settings/webhooks',
+        permission: 'system_webhooks:read',
+      });
+      // The organization card (feature `orgs`) is not spread in single-organization mode.
+      expect(ADMIN_SECTIONS.flatMap((s) => s.cards).map((c) => c.path)).not.toContain(
+        '/admin/settings/organization-webhooks',
+      );
     });
   });
 
@@ -279,9 +294,10 @@ describe('adminSections', () => {
   });
 
   describe('alerts card (RETRO-H5, #609)', () => {
-    it('appends the packaged card last in Operations, on alerts:read, with no feature gate', () => {
+    it('appends the packaged card to Operations (followed only by Webhooks, RETRO-H4), on alerts:read, with no feature gate', () => {
       const operations = ADMIN_SECTIONS.find((section) => section.label === 'Operations')!;
-      const last = operations.cards[operations.cards.length - 1];
+      expect(operations.cards[operations.cards.length - 1].path).toBe('/admin/settings/webhooks');
+      const last = operations.cards[operations.cards.length - 2];
       expect([last.title, last.path, last.permission, last.feature]).toEqual([
         'Alerts',
         '/admin/settings/alerts',

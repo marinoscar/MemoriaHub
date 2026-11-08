@@ -56,6 +56,7 @@ import { telemetryModule } from './platform/telemetry/telemetry.config';
 import { alertsModules } from './platform/alerts/alerts.config';
 import { userDataModule } from './platform/user-data/user-data.config';
 import { onboardingModule } from './platform/onboarding/onboarding.config';
+import { MemoriaHubWebhooksModule } from './platform/webhooks/webhooks.config';
 import { sharingModule } from './platform/sharing/sharing.config';
 
 import configuration from './config/configuration';
@@ -184,6 +185,11 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // (`platform/onboarding/`). Last among the feature modules: it reads the Doctor and the settings,
     // owns no table, and stores only the user's intent in the `onboarding` user-settings namespace.
     onboardingModule,
+    // Webhooks (RETRO-H4, #603): @marinoscar/platform-api/webhooks (endpoints under
+    // /api/webhooks, /api/org/webhooks and /api/admin/webhooks, signed deliveries as queue
+    // jobs, the SSRF egress guard, the `webhook` notification channel), plus MemoriaHub's
+    // events and the global `MemoriaHubWebhooks` its write paths raise them through.
+    MemoriaHubWebhooksModule,
     // Sharing (RETRO-I1, #562): @marinoscar/platform-api/sharing, single-organization mode.
     // `/api/groups`, `/api/grants`, `/api/grants/links` and the public `/api/public/links/current`
     // are live and empty: circles and public shares keep deciding access until RETRO-I2..I5

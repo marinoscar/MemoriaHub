@@ -19,20 +19,23 @@
 //   - `alerts`    alerts:read, alerts:write (system, admin) (RETRO-H5, #609)
 //   - `user-data` system:factory_reset, orgs:offboard (system, admin only; never implied by
 //                 system_settings:write) (RETRO-H1, #591)
+//   - `webhooks`  webhooks:read|write (org: org_admin, contributor, viewer; a member's own endpoints),
+//                 org_webhooks:read|write (org, org_admin), system_webhooks:read|write (system, admin)
+//                 (RETRO-H4, #603)
 //   - `sharing`   groups:read, sharing:read (org: viewer, contributor, org_admin), groups:write,
 //                 sharing:write (org: contributor, org_admin), groups:admin, sharing:admin (org:
 //                 org_admin; a system `admin` holds them through the `org_admin` role the identity
 //                 slice gives it on the default organization) (RETRO-I1, #562)
 // Not listed on purpose: `storage` and `notifications` collide with
 // MemoriaHub's own (legacy) declarations of the same ids until RETRO-D1 and
-// D3 adopt those slices; `nodes` and `webhooks` are not mounted.
+// D3 adopt those slices; `nodes` is not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';
 
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'sharing'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'webhooks', 'sharing'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],

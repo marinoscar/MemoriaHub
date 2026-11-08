@@ -16,6 +16,9 @@
 //   telemetry_greptime  the telemetry slice's GreptimeDB `reader` and `admin` passwords (RETRO-T2,
 //                       #625); the app declares it because the slice reaches the store through its
 //                       TELEMETRY_CREDENTIAL_STORE port. `GREPTIME_*` is only the deployment default.
+//   webhook_signing     an endpoint's signing secret (RETRO-H4, #603), in all three tiers: the
+//                       deployment's and an organization's (WEBHOOK_SIGNING_CREDENTIAL_PURPOSE_DEF) and a
+//                       member's own (WEBHOOK_SIGNING_USER_CREDENTIAL_PURPOSE_DEF, the user registry).
 //
 // App purposes (owned by this app; the conformance suite is told `appOwners`):
 //   face_provider  face recognition provider keys, name = provider key (`compreface`)
@@ -24,11 +27,20 @@
 // NOT HERE: AI provider keys (`ai_provider_credentials`), which belong to RETRO-E3.
 // =============================================================================
 
-import { registerCredentialPurpose, type CredentialPurposeDef } from '@marinoscar/platform-api/credentials';
+import {
+  registerCredentialPurpose,
+  registerUserCredentialPurpose,
+  userCredentialPurposeRegistry,
+  type CredentialPurposeDef,
+} from '@marinoscar/platform-api/credentials';
 import { SES_CREDENTIAL_PURPOSE_DEF, SMTP_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/email';
 import { PUSH_VAPID_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/notifications';
 import { STORAGE_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/storage';
 import { TELEMETRY_GREPTIME_CREDENTIAL_PURPOSE } from '@marinoscar/platform-api/telemetry';
+import {
+  WEBHOOK_SIGNING_CREDENTIAL_PURPOSE_DEF,
+  WEBHOOK_SIGNING_USER_CREDENTIAL_PURPOSE_DEF,
+} from '@marinoscar/platform-api/webhooks';
 
 export const FACE_PROVIDER_CREDENTIAL_PURPOSE = 'face_provider';
 export const GEO_PROVIDER_CREDENTIAL_PURPOSE = 'geo_provider';
@@ -64,6 +76,7 @@ export const MEMORIAHUB_CREDENTIAL_PURPOSE_DEFS: readonly CredentialPurposeDef[]
   FACE_PROVIDER_CREDENTIAL_PURPOSE_DEF,
   GEO_PROVIDER_CREDENTIAL_PURPOSE_DEF,
   TELEMETRY_GREPTIME_CREDENTIAL_PURPOSE_DEF,
+  WEBHOOK_SIGNING_CREDENTIAL_PURPOSE_DEF,
 ];
 
 let registered = false;
@@ -73,6 +86,10 @@ export function registerMemoriaHubCredentialPurposes(): void {
   if (registered) return;
   registered = true;
   for (const def of MEMORIAHUB_CREDENTIAL_PURPOSE_DEFS) registerCredentialPurpose(def);
+  // A member's own tier of the webhook signing secret (RETRO-H4, #603).
+  if (!userCredentialPurposeRegistry.has(WEBHOOK_SIGNING_USER_CREDENTIAL_PURPOSE_DEF.purpose)) {
+    registerUserCredentialPurpose(WEBHOOK_SIGNING_USER_CREDENTIAL_PURPOSE_DEF);
+  }
 }
 
 registerMemoriaHubCredentialPurposes();
