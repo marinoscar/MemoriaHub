@@ -36,7 +36,6 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsReconcileModule } from './notifications/notifications-reconcile.module';
 import { BroadcastsModule } from './notifications/broadcasts/broadcasts.module';
 import { MemoriesModule } from './memories/memories.module';
-import { DbBackupModule } from './db-backup/db-backup.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { AndroidAppModule } from './android-app/android-app.module';
 import { doctorModule } from './doctor/doctor.config';
@@ -52,6 +51,7 @@ import { settingsModule } from './platform/settings/settings.config';
 import { credentialsModules } from './platform/credentials/credentials.config';
 import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
+import { dbBackupModule } from './platform/db-backup/db-backup.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -144,7 +144,9 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     NotificationsReconcileModule,
     BroadcastsModule,
     MemoriesModule,
-    DbBackupModule,
+    // Database backup and restore (RETRO-D4, #580): @marinoscar/platform-api/db-backup, with
+    // MemoriaHub's restore gate, carry-over and legacy prefix (app-registrations/db-backup.ts).
+    dbBackupModule,
     MediaSyncModule,
     AndroidAppModule,
   ],

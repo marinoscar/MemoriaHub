@@ -79,6 +79,21 @@
       "scope": "system"
     },
     {
+      "name": "db_backup:read",
+      "description": "View backup schedule, history and status",
+      "scope": "system"
+    },
+    {
+      "name": "db_backup:write",
+      "description": "Configure the backup schedule and run a backup",
+      "scope": "system"
+    },
+    {
+      "name": "db_backup:restore",
+      "description": "Restore the database from a backup",
+      "scope": "system"
+    },
+    {
       "name": "org_members:read",
       "description": "View the members of the organization and their organization roles",
       "scope": "org"
@@ -262,21 +277,6 @@
       "name": "broadcasts:write",
       "description": "Admin: compose, test-send, schedule, cancel, resume and delete notification broadcasts",
       "scope": "system"
-    },
-    {
-      "name": "db_backup:read",
-      "description": "Admin: read database backup run history and status",
-      "scope": "system"
-    },
-    {
-      "name": "db_backup:write",
-      "description": "Admin: configure and trigger database backups",
-      "scope": "system"
-    },
-    {
-      "name": "db_backup:restore",
-      "description": "Admin: restore the database from a backup",
-      "scope": "system"
     }
   ],
   "rolePermissions": {
@@ -290,6 +290,9 @@
       "allowlist:write",
       "jobs:read",
       "jobs:write",
+      "db_backup:read",
+      "db_backup:write",
+      "db_backup:restore",
       "organizations:read",
       "organizations:write",
       "storage:delete_any",
@@ -311,10 +314,7 @@
       "push:read",
       "push:write",
       "broadcasts:read",
-      "broadcasts:write",
-      "db_backup:read",
-      "db_backup:write",
-      "db_backup:restore"
+      "broadcasts:write"
     ],
     "contributor": [
       "user_settings:read",

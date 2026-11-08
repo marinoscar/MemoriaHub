@@ -12,7 +12,6 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'dedup/duplicate-detection.service.ts', why: 'pgvector KNN queries scoped by circle id; not user data.' },
   { file: 'dedup/duplicate.service.ts', why: 'pgvector similarity queries scoped by circle id; not user data.' },
   { file: 'dedup/visual-embedding.service.ts', why: 'pgvector column reads and writes (Prisma cannot type vector columns), keyed by media item id.' },
-  { file: 'doctor/checks/core/pg-client-version.doctor-check.ts', why: 'Read-only server version probe.' },
   { file: 'doctor/checks/core/pgvector.doctor-check.ts', why: 'Read-only extension probe.' },
   { file: 'doctor/checks/face/pgvector.doctor-check.ts', why: 'Read-only column and index probe.' },
   { file: 'email/email-smtp-secret.store.ts', why: "One jsonb_set on the singleton `global` system_settings row that writes the SMTP ciphertext without clobbering the rest of the document (RETRO-B3 shim, removed by RETRO-D2); the actor id is the authenticated admin." },
