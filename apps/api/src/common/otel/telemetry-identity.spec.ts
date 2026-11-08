@@ -1,5 +1,5 @@
 import { APP_SLUG } from '@app/shared';
-import { resolveServiceName } from './service-name';
+import { resolveServiceName } from './telemetry-identity';
 
 describe('resolveServiceName', () => {
   const original = process.env.OTEL_SERVICE_NAME;

@@ -1,5 +1,5 @@
 import { buildDatabaseUrl } from './database-url.util';
-import { resolveServiceName } from '../common/otel/service-name';
+import { resolveServiceName } from '../common/otel/telemetry-identity';
 
 export default () => {
   // Individual PostgreSQL variables (kept for the `database` config object shape)
