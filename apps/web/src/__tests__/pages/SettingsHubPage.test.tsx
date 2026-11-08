@@ -491,8 +491,8 @@ describe('SettingsHubPage', () => {
       const user = userEvent.setup();
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      // "PostgreSQL" appears only in the Database Backup card's description.
-      await user.type(screen.getByLabelText('Search settings'), 'PostgreSQL');
+      // "what has been taken" appears only in the Database Backup card's description.
+      await user.type(screen.getByLabelText('Search settings'), 'what has been taken');
 
       expect(screen.getByText(/No settings match/)).toBeInTheDocument();
     });

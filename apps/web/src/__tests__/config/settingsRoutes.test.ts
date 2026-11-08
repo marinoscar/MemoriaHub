@@ -59,7 +59,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/jobs': 'jobs:read', // enrichment/enrichment-admin.controller
   '/admin/settings/jobs/insights': 'jobs:read', // enrichment/enrichment-admin.controller
   '/admin/settings/nodes': 'jobs:read', // nodes/nodes-admin.controller
-  '/admin/settings/db-backup': 'db_backup:read', // db-backup/db-backup.controller
+  '/admin/settings/db-backup': 'db_backup:read', // platform db-backup slice: DatabaseBackupController (RETRO-D4)
   '/admin/settings/sharing': 'shares:manage_any', // share/share.service (scope=all)
   '/admin/settings/workflows': 'system_settings:read', // workflows/admin/workflows-admin.controller
   '/admin/settings/doctor': 'system_settings:read', // platform doctor: DEFAULT_DOCTOR_PERMISSION

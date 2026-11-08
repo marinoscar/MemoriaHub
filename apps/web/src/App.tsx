@@ -53,7 +53,7 @@ const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
 const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
 const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
 const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
-const DbBackupPage = lazy(() => import('./pages/Admin/DbBackupPage'));
+const DbBackupPage = lazy(() => import('./platform/db-backup/DbBackupPage'));
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));

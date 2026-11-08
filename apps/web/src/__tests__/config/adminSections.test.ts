@@ -193,9 +193,9 @@ describe('adminSections', () => {
       });
 
       it('does not match on description text, only the title', () => {
-        // "PostgreSQL" appears only in the Database Backup card's
-        // description, never in any card title.
-        const sections = visibleAdminSections(allowAll(), 'PostgreSQL');
+        // "what has been taken" appears only in the (packaged) Database Backup
+        // card's description, never in any card title.
+        const sections = visibleAdminSections(allowAll(), 'what has been taken');
         expect(sections).toEqual([]);
       });
 
