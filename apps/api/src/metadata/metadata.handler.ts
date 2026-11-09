@@ -50,7 +50,7 @@ export class MetadataExtractionHandler implements JobHandler, OnModuleInit {
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
     await withPlatformRateLimits(() =>
-      this.metadataExtractionService.processMediaItem(context, jobWriteScope(this.jobScope, job)),
+      this.metadataExtractionService.processMediaItem(context, jobWriteScope(this.jobScope, job, this.prisma)),
     );
   }
 
@@ -63,7 +63,7 @@ export class MetadataExtractionHandler implements JobHandler, OnModuleInit {
       this.metadataExtractionService.persistMetadata(
         context,
         { exif: parsed.exif, probe: parsed.probe },
-        jobWriteScope(this.jobScope, job),
+        jobWriteScope(this.jobScope, job, this.prisma),
       ),
     );
   }

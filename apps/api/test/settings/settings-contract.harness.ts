@@ -90,8 +90,23 @@ export const EXPECTED_SYSTEM_DEFAULTS = {
     video: { enabled: true, sampleIntervalSeconds: 5, maxFramesPerVideo: 60 },
     autoArchive: { matchThreshold: 0.45 },
   },
+  // The storage slice's namespace (RETRO-D1): the active driver, every registered driver's settings
+  // (the S3 family and MemoriaHub's `local`), the deprecated flat read view of the active one, and
+  // MemoriaHub's `insights` / `trash` extension.
   storage: {
-    activeProvider: 's3',
+    provider: 's3',
+    drivers: {
+      local: { rootDir: '' },
+      r2: { accessKeyId: '', accountId: '', bucket: '', endpoint: '', forcePathStyle: null, region: '' },
+      s3: { accessKeyId: '', bucket: '', endpoint: '', forcePathStyle: null, region: '' },
+      s3compatible: { accessKeyId: '', bucket: '', endpoint: '', forcePathStyle: null, region: '' },
+    },
+    accessKeyId: '',
+    accountId: '',
+    bucket: '',
+    endpoint: '',
+    forcePathStyle: null,
+    region: '',
     insights: { refreshIntervalHours: 4 },
     trash: { retentionDays: 30 },
   },

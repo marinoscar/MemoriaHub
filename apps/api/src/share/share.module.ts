@@ -6,7 +6,7 @@
 import { Module } from '@nestjs/common';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { ShareController } from './share.controller';
 import { PublicShareController } from './public-share.controller';
 import { ShareService } from './share.service';
@@ -22,7 +22,7 @@ import { ShareService } from './share.service';
  * Imports MediaModule so that MediaThumbnailService is available for
  * signing thumbnail URLs in share list previews.
  *
- * Imports StorageProvidersModule so that StorageProviderResolver is available
+ * Imports MediaProcessingModule so that StorageProviderResolver is available
  * for PublicShareController's byte-proxy endpoint.
  *
  * PrismaModule (@Global) and ConfigModule (global) are resolved automatically
@@ -32,7 +32,7 @@ import { ShareService } from './share.service';
   imports: [
     CirclesModule,
     MediaModule,
-    StorageProvidersModule,
+    MediaProcessingModule,
   ],
   controllers: [ShareController, PublicShareController],
   providers: [ShareService],

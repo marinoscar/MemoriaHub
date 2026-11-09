@@ -67,27 +67,26 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
             findUnique: async () => ({
               id: 'media-1',
               deletedAt: null,
-              storageObject: { id: objectId, name: 'photo.jpg', uploadedById: null, metadata: null },
+              storageObject: { id: objectId, name: 'photo.jpg', uploadedById: null, metadata: null, orgId },
             }),
           };
         }
         return Reflect.get(target, prop, receiver);
       },
     });
-    const provider = { exists: async () => true, getObjectSize: async () => 2048, getBucket: () => 'bucket' };
+    const provider = { exists: async () => true, size: async () => 2048, getBucket: () => 'bucket' };
     return new ThumbnailNodePersistService(
       prismaWithItem as never,
       { getActiveProvider: async () => ({ id: 's3', provider }) } as never,
       { syncFromStorageObject: async () => undefined } as never,
       { pruneSupersededThumbnails: async () => undefined } as never,
-      { get: async () => orgId } as never,
     );
   }
 
   it('writes both rows in one transaction that carries the job organization', async () => {
     const objectId = await originalObject();
     const job = mediaItemJob('thumbnail_regen', 'media-1', 'circle-1', { orgId });
-    const scope = jobWriteScope(new JobScope(prisma as never), job)!;
+    const scope = jobWriteScope(new JobScope(prisma as never), job, prisma as never);
     let seenOrg: string | null = null;
     const observed = <R>(fn: (tx: Prisma.TransactionClient) => Promise<R>) =>
       scope(async (tx) => {
@@ -113,16 +112,25 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
     expect(meta._processing['thumbnail']).toEqual({ thumbnailObjectId: thumb!.id, thumbnailStorageKey: storageKey });
   });
 
-  it('a job with no organization gets no scope and writes on the plain client', async () => {
+  it('a job with no organization runs in the default organization (RETRO-D1)', async () => {
     const objectId = await originalObject();
     const job = mediaItemJob('thumbnail_regen', 'media-1', 'circle-1', { orgId: null });
-    expect(jobWriteScope(new JobScope(prisma as never), job)).toBeUndefined();
+    const scope = jobWriteScope(new JobScope(prisma as never), job, prisma as never);
+    let seenOrg: string | null = null;
+    const observed = <R>(fn: (tx: Prisma.TransactionClient) => Promise<R>) =>
+      scope(async (tx) => {
+        const rows = await tx.$queryRaw<Array<{ org: string | null }>>`SELECT current_setting('app.org_id', true) AS org`;
+        seenOrg = rows[0]?.org ?? null;
+        return fn(tx);
+      });
     const storageKey = `thumbnails/${objectId}-fedcba9876543210.jpg`;
 
     await service(objectId).persistThumbnail(
       { id: job.id, mediaItemId: 'media-1', circleId: 'circle-1' },
       { storageKey, width: 400, height: 300, bytes: 2048 },
+      observed,
     );
+    expect(seenOrg).toBe(orgId);
 
     await expect(prisma.storageObject.findUnique({ where: { storageKey } })).resolves.toMatchObject({ orgId });
   });

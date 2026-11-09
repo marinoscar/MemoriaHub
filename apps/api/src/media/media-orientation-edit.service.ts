@@ -8,16 +8,16 @@ import { CircleRole, MediaType, JobReason, MediaFaceStatusType } from '@prisma/c
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
-import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import {
   applyOrientationTransform,
   OrientationOp,
-} from '../storage/processing/image-orientation.util';
+} from '../media-processing/image-orientation.util';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 

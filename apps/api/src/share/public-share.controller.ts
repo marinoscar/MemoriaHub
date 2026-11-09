@@ -13,7 +13,7 @@ import { IncomingMessage } from 'http';
 
 import { Public } from '@marinoscar/platform-api/identity';
 import { ShareService } from './share.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { Readable } from 'stream';
 
 @ApiTags('Public Sharing')

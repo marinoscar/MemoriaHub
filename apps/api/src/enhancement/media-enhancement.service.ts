@@ -8,15 +8,15 @@ import { CircleRole, MediaType, MediaEnhancementBatch, MediaEnhancementStatus, M
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
-import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { isPictureEnhancementEnabled } from '../settings/feature-gates';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
@@ -1373,7 +1373,7 @@ export class MediaEnhancementService {
 
     const newObject = await this.prisma.storageObject.create({
       data: {
-        orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+        orgId: await this.defaultOrgId.get(), // single-organization default (common/tenancy/default-org-id.ts)
         name: enhancedFilename,
         size: BigInt(bytes.length),
         mimeType: 'image/jpeg',

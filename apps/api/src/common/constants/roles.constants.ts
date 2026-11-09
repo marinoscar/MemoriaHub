@@ -37,7 +37,7 @@ export const PERMISSIONS = {
   ALLOWLIST_READ: 'allowlist:read',
   ALLOWLIST_WRITE: 'allowlist:write',
 
-  // Storage
+  // Storage (the platform storage slice's since RETRO-D1)
   STORAGE_READ: 'storage:read',
   STORAGE_WRITE: 'storage:write',
   STORAGE_DELETE_ANY: 'storage:delete_any',
@@ -64,9 +64,10 @@ export const PERMISSIONS = {
   FACE_SETTINGS_READ: 'face_settings:read',
   FACE_SETTINGS_WRITE: 'face_settings:write',
 
-  // Storage Provider Settings (Admin only)
-  STORAGE_SETTINGS_READ: 'storage_settings:read',
-  STORAGE_SETTINGS_WRITE: 'storage_settings:write',
+  // Storage configuration (Admin only; the platform storage slice's since RETRO-D1, which
+  // replaced MemoriaHub's `storage_settings:*`)
+  STORAGE_CONFIG_READ: 'storage_config:read',
+  STORAGE_CONFIG_WRITE: 'storage_config:write',
 
   // Search feature usage
   SEARCH_USE: 'search:use',

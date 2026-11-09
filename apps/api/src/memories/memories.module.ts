@@ -25,7 +25,7 @@ import { AiModule } from '../ai/ai.module';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaModule } from '../media/media.module';
 import { emailModule } from '../platform/email/email.config';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { MemoriesNotificationService } from './notifications/memories-notification.service';
 import { MemoryDigestService } from './digest/memory-digest.service';
 import { MemoryDigestHandler } from './digest/memory-digest.handler';
@@ -63,7 +63,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   // MemoriesNotificationService and the digest send through the platform
   // NotificationsService (RETRO-D3), whose module is global: no import edge.
   // The digest reads the email settings through `emailModule` (one edge, the
-  // ONE email module object) and adds StorageProvidersModule (StorageProviderResolver, so the public digest-image
+  // ONE email module object) and adds MediaProcessingModule (StorageProviderResolver, so the public digest-image
   // route can stream thumbnail bytes the way PublicShareController does).
   // Neither imports MemoriesModule, so no cycle and no forwardRef. The
   // unsubscribe write reuses SettingsModule's UserSettingsService, already
@@ -76,7 +76,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     CirclesModule,
     MediaModule,
     emailModule,
-    StorageProvidersModule,
+    MediaProcessingModule,
   ],
   // #315's AdminMemoriesController is mounted here rather than in a separate
   // admin module: it needs MemoryBackfillService and MEMORY_GENERATION_JOB_TYPE,

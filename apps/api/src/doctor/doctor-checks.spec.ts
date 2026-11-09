@@ -28,7 +28,7 @@ import type { AiSettingsService } from '../ai/ai-settings.service';
 import type { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import type { FaceSettingsService } from '../face/face-settings.service';
 import type { GeoSettingsService } from '../geo/geo-settings.service';
-import type { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import type { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import type { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
 import type { VisualEmbeddingService } from '../dedup/visual-embedding.service';
 import type { AndroidAppService } from '../android-app/android-app.service';
@@ -68,8 +68,6 @@ const KEY_BY_ID: Record<string, string> = {
   'auth.jwt': 'auth.jwt',
   'auth.google-oauth': 'auth.googleOauth',
   'auth.admin-bootstrap': 'auth.adminBootstrap',
-  'storage.active-provider': 'storage.activeProvider',
-  'storage.live-test': 'storage.liveTest',
   'ai.search': 'ai.search',
   'ai.tagging': 'ai.tagging',
   'ai.embedding': 'ai.embedding',
@@ -316,7 +314,7 @@ describe('MemoriaHub Doctor checks', () => {
       current: jest.fn().mockResolvedValue(null),
       resolveUploadTarget: jest
         .fn()
-        .mockResolvedValue({ id: 's3', provider: { supportsPresignedParts: true } } as any),
+        .mockResolvedValue({ id: 's3', provider: { partUploadMode: 'presigned' } } as any),
     };
     (mockPrisma.mediaSyncDevice.count as jest.Mock).mockResolvedValue(0);
     (mockPrisma.mediaSyncDevice.findMany as jest.Mock).mockResolvedValue([]);
@@ -358,7 +356,7 @@ describe('MemoriaHub Doctor checks', () => {
       );
     });
 
-    it('runs the 29 kept checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice retired, and core.pgClientVersion, replaced by the db-backup slice backup.pg-client)', async () => {
+    it('runs the 27 kept checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice retired, core.pgClientVersion, replaced by the db-backup slice backup.pg-client, and the two storage checks, replaced by the storage slice storage.config / storage.bucket)', async () => {
       const report = await service.runDiagnostics();
 
       expect(report.checks.map((c) => c.key)).toEqual([
@@ -367,8 +365,6 @@ describe('MemoriaHub Doctor checks', () => {
         'auth.jwt',
         'auth.googleOauth',
         'auth.adminBootstrap',
-        'storage.activeProvider',
-        'storage.liveTest',
         'ai.search',
         'ai.tagging',
         'ai.embedding',
@@ -404,10 +400,10 @@ describe('MemoriaHub Doctor checks', () => {
   });
 
   // =========================================================================
-  // 2. storage.liveTest is a READ-ONLY probe now
+  // 2. A failing live provider test (the storage live test is the platform's storage.bucket since RETRO-D1)
   // =========================================================================
 
-  describe('storage.liveTest (read-only probe)', () => {
+  describe('live provider tests', () => {
     beforeEach(() => {
       process.env = healthyEnv();
       mockSystemSettings.readKnownValue.mockResolvedValue(makeHealthySettings());
@@ -421,38 +417,13 @@ describe('MemoriaHub Doctor checks', () => {
       mockNoWorkerNodes(mockPrisma);
     });
 
-    it('passes with a HEAD-style exists() probe and never writes an object', async () => {
-      const check = findCheck(await service.runDiagnostics(), 'storage.liveTest');
-      expect(check.status).toBe('ok');
-      expect(check.message).toContain('my-bucket');
-      expect(mockStorageResolver.getProviderFor).toHaveBeenCalledWith('s3');
-      expect(mockStorageProvider.exists).toHaveBeenCalledTimes(1);
-      // The provider double offers no write method at all.
-      expect(Object.keys(mockStorageProvider).sort()).toEqual(['exists', 'getBucket']);
-    });
-
-    it('is error with the cause when the provider cannot be resolved', async () => {
-      mockStorageResolver.getProviderFor.mockRejectedValue(new BadRequestException('no creds'));
-      const check = findCheck(await service.runDiagnostics(), 'storage.liveTest');
-      expect(check.status).toBe('error');
-      expect(check.message).toContain('no creds');
-      expect(check.actionItem).toContain('Storage Providers');
-    });
-
-    it('is error when the bucket cannot be reached', async () => {
-      mockStorageProvider.exists.mockRejectedValue(new Error('AccessDenied'));
-      const check = findCheck(await service.runDiagnostics(), 'storage.liveTest');
-      expect(check.status).toBe('error');
-      expect(check.message).toContain('AccessDenied');
-    });
-
     it('a failing live provider test does not stop the other checks from running', async () => {
       mockGeoSettings.testProvider.mockRejectedValue(new Error('geo down'));
       const report = await service.runDiagnostics();
       expect(findCheck(report, 'geo.reverseProvider').status).toBe('error');
       expect(findCheck(report, 'geo.reverseProvider').message).toContain('geo down');
       expect(findCheck(report, 'ai.search').status).toBe('ok');
-      expect(report.summary.total).toBe(29);
+      expect(report.summary.total).toBe(27);
     });
   });
 
@@ -1822,7 +1793,7 @@ describe('MemoriaHub Doctor checks', () => {
       it('is ok for a provider with presigned parts (S3/R2), naming the provider', async () => {
         mockAndroidReleases.resolveUploadTarget.mockResolvedValue({
           id: 'r2',
-          provider: { supportsPresignedParts: true },
+          provider: { partUploadMode: 'presigned' },
         } as any);
 
         const report = await service.runDiagnostics();
@@ -1836,7 +1807,7 @@ describe('MemoriaHub Doctor checks', () => {
       it('is ok for the local provider through the API part route', async () => {
         mockAndroidReleases.resolveUploadTarget.mockResolvedValue({
           id: 'local',
-          provider: { supportsPresignedParts: false, writePart: jest.fn() },
+          provider: { partUploadMode: 'proxied', uploadPart: jest.fn() },
         } as any);
 
         const report = await service.runDiagnostics();
@@ -1860,13 +1831,13 @@ describe('MemoriaHub Doctor checks', () => {
 
         expect(check.status).toBe('error');
         expect(check.message).toContain('"s3"');
-        expect(check.actionItem).toContain('Storage Providers');
+        expect(check.actionItem).toContain('Admin Settings → Storage');
       });
 
       it('is error when the provider supports neither part path', async () => {
         mockAndroidReleases.resolveUploadTarget.mockResolvedValue({
           id: 'odd',
-          provider: { supportsPresignedParts: false },
+          provider: { partUploadMode: 'proxied' },
         } as any);
 
         const report = await service.runDiagnostics();

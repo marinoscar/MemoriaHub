@@ -13,7 +13,7 @@
 // class is a thin NestJS-injectable wrapper that forwards to the package's
 // pure functions unchanged; per-frame extraction-failure warnings are routed
 // through the package's computeLog seam (wired to NestJS Logger once, at
-// apps/api/src/storage/processing/image-orientation.util.ts import time),
+// apps/api/src/media-processing/image-orientation.util.ts import time),
 // so the observable log behavior is unchanged.
 // =============================================================================
 

@@ -7,19 +7,21 @@
 // booted with them installed. It then runs every check the booted
 // `DoctorCheckRegistry` holds.
 //
-// Two overrides carry the doubles:
+// Three overrides carry the doubles:
 //   - `PrismaService`           what every MemoriaHub service reads through
 //                               (and `PLATFORM_PRISMA`, bound `useExisting`);
-//   - `StorageProviderResolver` MemoriaHub has no `STORAGE_PROVIDER` token on
-//                               the check path: the storage checks resolve the
-//                               active provider through this class.
+//   - `PrismaSystemService`     the bypass client (RETRO-D1): `asSystem` /
+//                               `runAsSystem` hand out the same recording client;
+//   - `StorageProviderResolver` MemoriaHub's view of the platform object store
+//                               (the Android upload-path check resolves through it).
 // Everything else is the real `AppModule` over `createTestApp`'s mocked database.
 // =============================================================================
 
 import type { DoctorConformanceFixture } from '@marinoscar/platform-api/doctor/testing';
 
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
+import { PrismaSystemService } from '../../src/prisma/prisma-system.service';
+import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
 
 export const doctorConformanceFixture: DoctorConformanceFixture = {
@@ -29,10 +31,17 @@ export const doctorConformanceFixture: DoctorConformanceFixture = {
       overrideProviders: [
         { provide: PrismaService, useValue: prisma.client },
         {
+          provide: PrismaSystemService,
+          useValue: {
+            asSystem: () => prisma.client,
+            runAsSystem: (_reason: string, fn: (tx: unknown) => unknown) => fn(prisma.client),
+          },
+        },
+        {
           provide: StorageProviderResolver,
           useValue: {
             getProviderFor: async () => storage.provider,
-            getActiveProvider: async () => storage.provider,
+            getActiveProvider: async () => ({ id: 's3', provider: storage.provider }),
             invalidate: () => undefined,
           },
         },

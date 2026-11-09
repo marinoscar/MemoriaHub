@@ -13,15 +13,15 @@ jest.mock('@memoriahub/enrichment-compute/video', () => ({
   probeRangeSeekSuitability: jest.fn(),
 }));
 
-jest.mock('../../storage/processing/processors/stream-utils', () => ({
+jest.mock('../../media-processing/processors/stream-utils', () => ({
   downloadToTempFile: jest.fn(),
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { VideoInputResolver } from './video-input.service';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
 import { probeRangeSeekSuitability } from '@memoriahub/enrichment-compute/video';
-import { downloadToTempFile } from '../../storage/processing/processors/stream-utils';
+import { downloadToTempFile } from '../../media-processing/processors/stream-utils';
 
 const mockProbe = probeRangeSeekSuitability as jest.Mock;
 const mockDownload = downloadToTempFile as jest.Mock;

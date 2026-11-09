@@ -17,8 +17,8 @@ import { Prisma, type MhLegacyAndroidAppRelease } from '@prisma/client';
 
 import { deriveSubKey } from '../../legacy/legacy-secret-cipher';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { StorageProvider } from '../../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
+import type { StorageProvider } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
 import { AndroidAppService } from '../android-app.service';
 import type { AdminRelease, DownloadLink, PublicRelease } from '../dto/android-release.dto';
 import {
@@ -187,7 +187,7 @@ function storageNotConfigured(provider: string, cause?: string): ServiceUnavaila
   return new ServiceUnavailableException({
     message:
       `Object storage is not configured (active provider "${provider}"). Configure a storage provider at ` +
-      '/admin/settings/storage/providers before uploading an APK.',
+      '/admin/settings/storage before uploading an APK.',
     details: { reason: ANDROID_RELEASE_REASONS.STORAGE_NOT_CONFIGURED, provider, ...(cause ? { cause } : {}) },
   });
 }

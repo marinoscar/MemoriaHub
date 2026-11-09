@@ -88,6 +88,7 @@ import '@marinoscar/platform-api/jobs/testing';
 import '@marinoscar/platform-api/notifications/testing';
 import '@marinoscar/platform-api/onboarding/testing';
 import '@marinoscar/platform-api/settings/testing';
+import '@marinoscar/platform-api/storage/testing';
 import '@marinoscar/platform-api/sharing/testing';
 import '@marinoscar/platform-api/user-data/testing';
 import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
@@ -104,6 +105,7 @@ import { APP_CREDENTIAL_OWNERS } from '../src/platform/credentials/credential-pu
 import '../src/app-registrations/permission-manifest';
 import '../src/app-registrations/ownership-manifest';
 import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-backup';
+import { MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS } from '../src/platform/storage/storage-key-prefix.manifest';
 // Configures email rendering and registers this app's templates (the `email` suite renders them).
 import '../src/platform/email/email.config';
 // Registers the notification channels and events the `notifications` suite reads (RETRO-D3).
@@ -175,18 +177,20 @@ runPlatformConformance({
     // until the issue that pays it enables the suite (with `exempt` for the three platform
     // exemptions only). Measured with the suites on at the cutover: 18 inline findings in 13 cron
     // files (the db-backup one is gone since RETRO-D4: the platform task only enqueues; insights, memories, node-backup, node-prune, notification-reconcile,
-    // share-expiring, storage-cleanup, storage-processing-recovery and workflow crons) and one
-    // listener download (storage/processing/object-processing.service.ts).
+    // share-expiring, storage-processing-recovery and workflow crons; storage-cleanup is gone since
+    // RETRO-D1, the platform's stale-upload cron only enqueues) and one listener download (the old
+    // object-processing listener, gone since RETRO-D1: `onEventNoIo` is on below).
     cronEnqueueOnly: {
       skip:
         'RETRO-C9 (cron remediation) turns the crons that still work inline into enqueue-only ones; ' +
         'until then 13 cron files fail this suite. The queue they enqueue into is the platform\'s since RETRO-C1.',
     },
-    onEventNoIo: {
-      skip:
-        'object-processing.service.ts downloads object bytes inside an OBJECT_UPLOADED_EVENT listener; ' +
-        'the storage slice (RETRO-D1) moves it into a post-upload processor job. No other listener fails.',
-    },
+    // Since RETRO-D1 post-upload processing is the platform's `storage.object.process` job; the
+    // object-processing listener that downloaded bytes is gone.
+    onEventNoIo: { minListenerFiles: 7 }, // 7 since RETRO-D3 removed the broadcast-failure listener
+
+    // Every MemoriaHub writer's key prefix is registered (platform/storage/storage-key-prefix.manifest.ts).
+    storage: { requiredPrefixIds: [...MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS] },
 
     // Database backup and restore (RETRO-D4, #580).
     dbBackup: { requiredCarryOverIds: [...MEMORIAHUB_REQUIRED_CARRY_OVER_IDS] },
@@ -350,7 +354,7 @@ runPlatformConformance({
     doctorReadOnly: {
       fixture: doctorConformanceFixture,
       minChecks: 30,
-      forbiddenServices: [...DOCTOR_FORBIDDEN_SERVICES, 'StorageSettingsService'],
+      forbiddenServices: [...DOCTOR_FORBIDDEN_SERVICES],
     },
   },
 });

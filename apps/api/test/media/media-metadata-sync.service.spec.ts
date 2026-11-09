@@ -22,7 +22,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import {
   ObjectProcessedEvent,
   OBJECT_PROCESSED_EVENT,
-} from '../../src/storage/processing/events/object-processed.event';
+} from '../../src/media-processing/events/object-processed.event';
 import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 

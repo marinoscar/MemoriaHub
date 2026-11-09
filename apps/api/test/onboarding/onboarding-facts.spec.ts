@@ -4,6 +4,7 @@
  * reads key material.
  */
 import type { OnboardingRequestContext } from '@marinoscar/platform-api/onboarding';
+import { StorageConfigService } from '@marinoscar/platform-api/storage';
 
 import {
   ALBUM_COUNTS_FACT,
@@ -27,18 +28,26 @@ function makePrisma() {
     person: { count: jest.fn().mockResolvedValue(1) },
     mediaSyncDevice: { count: jest.fn().mockResolvedValue(0) },
     personalAccessToken: { count: jest.fn().mockResolvedValue(1) },
-    storageProviderCredential: { findFirst: jest.fn().mockResolvedValue(null) },
     aiProviderCredential: { findFirst: jest.fn().mockResolvedValue(null) },
   };
 }
 
-function ctx(prisma: ReturnType<typeof makePrisma>, settings: Record<string, unknown> = {}): OnboardingRequestContext {
+function ctx(
+  prisma: ReturnType<typeof makePrisma>,
+  settings: Record<string, unknown> = {},
+  storage: { configured: boolean } | Error = { configured: false },
+): OnboardingRequestContext {
   const appSettings = { getSettings: jest.fn().mockResolvedValue(settings) };
+  // The storage slice's resolution (RETRO-D1): the active driver's settings and secret are complete.
+  const storageConfig = {
+    resolve: jest.fn(() => (storage instanceof Error ? Promise.reject(storage) : Promise.resolve(storage))),
+  };
   return {
     caller: { id: CALLER, permissions: [], roles: [], activeOrgId: null },
     get: (token: unknown) => {
       if (token === PrismaService) return prisma;
       if (token === AppSystemSettingsService) return appSettings;
+      if (token === StorageConfigService) return storageConfig;
       throw new Error('unexpected token');
     },
   } as unknown as OnboardingRequestContext;
@@ -124,30 +133,29 @@ describe('MemoriaHub onboarding facts', () => {
         taggingProviderReady: false,
         memories: false,
       });
-      // The default provider is s3; no tagging model means no AI credential read at all.
-      expect(prisma.storageProviderCredential.findFirst).toHaveBeenCalledWith({
-        where: { provider: 's3', enabled: true },
-        select: { id: true },
-      });
+      // No tagging model means no AI credential read at all.
       expect(prisma.aiProviderCredential.findFirst).not.toHaveBeenCalled();
     });
 
-    it('reads flags, the local provider and an enabled tagging key, selecting ids only', async () => {
+    it('reports storage not ready when the storage configuration cannot be resolved', async () => {
+      const fact = await FEATURE_READINESS_FACT.resolve(ctx(makePrisma(), {}, new Error('not configured')));
+      expect(fact.storageReady).toBe(false);
+    });
+
+    it('reads flags, the storage resolution and an enabled tagging key, selecting ids only', async () => {
       const prisma = makePrisma();
       prisma.aiProviderCredential.findFirst.mockResolvedValue({ id: 'k' });
       const settings = {
         features: { faceRecognition: true, autoTagging: true, memories: true },
-        storage: { activeProvider: 'local' },
         ai: { features: { tagging: { provider: 'openai', model: 'model-x' } } },
       };
-      await expect(FEATURE_READINESS_FACT.resolve(ctx(prisma, settings))).resolves.toEqual({
+      await expect(FEATURE_READINESS_FACT.resolve(ctx(prisma, settings, { configured: true }))).resolves.toEqual({
         storageReady: true,
         faceRecognition: true,
         autoTagging: true,
         taggingProviderReady: true,
         memories: true,
       });
-      expect(prisma.storageProviderCredential.findFirst).not.toHaveBeenCalled();
       expect(prisma.aiProviderCredential.findFirst).toHaveBeenCalledWith({
         where: { provider: 'openai', enabled: true },
         select: { id: true },

@@ -21,12 +21,10 @@
 // deployment without webhooks pays one cached read per batch and no job rows.
 // The check reads `webhook_endpoints` through the bypass client (reason
 // `webhooks`, the slice's own), because system-scope rows have no organization.
-// PLATFORM-ADOPTION-SHIM(RETRO-D1): `forSystem` over PrismaService until the
-// storage slice brings `PrismaSystemService` (see webhooks-host.module.ts).
+// The bypass client is `PrismaSystemService` (RETRO-D1), named by that reason.
 // =============================================================================
 
 import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
-import { forSystem } from '@marinoscar/platform-api/core';
 import {
   WEBHOOKS_SYSTEM_ACCESS_REASON,
   WebhooksService,
@@ -35,6 +33,7 @@ import {
 import { WorkflowRunStatus, WorkflowTrigger, type MediaType } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { MAX_IDS_PER_EVENT, MEMORIAHUB_WEBHOOK_EVENTS } from './memoriahub-webhook-events';
 import { WebhookBatcher, type WebhookBatch } from './webhook-batcher';
 
@@ -73,6 +72,7 @@ export class MemoriaHubWebhooks implements OnApplicationShutdown {
   constructor(
     private readonly webhooks: WebhooksService,
     private readonly prisma: PrismaService,
+    private readonly system: PrismaSystemService,
   ) {
     this.batcher = new WebhookBatcher<MediaEntry>({
       maxItems: MAX_IDS_PER_EVENT,
@@ -236,8 +236,9 @@ export class MemoriaHubWebhooks implements OnApplicationShutdown {
     try {
       const now = Date.now();
       if (!this.subscriptions || now - this.subscriptions.at > SUBSCRIPTION_CACHE_MS) {
-        const system = forSystem(this.prisma, WEBHOOKS_SYSTEM_ACCESS_REASON) as unknown as PrismaService;
-        const patterns = system.webhookEndpoint
+        const patterns = this.system
+          .asSystem(WEBHOOKS_SYSTEM_ACCESS_REASON)
+          .webhookEndpoint
           .findMany({ where: { enabled: true }, select: { eventKeys: true } })
           .then((rows) => rows.map((row) => row.eventKeys));
         this.subscriptions = { at: now, patterns };

@@ -1,8 +1,11 @@
 /**
- * Local-provider multipart uploads through the API (issue #506).
+ * Local-provider multipart uploads through the API (issue #506; on the platform
+ * storage slice since RETRO-D1, #563).
  *
- * Boots the real app (mocked Prisma) with a REAL LocalDiskStorageProvider on a
- * temp directory, and backs the two tables the upload path touches
+ * The wire contract the Android app and the CLI resume depend on, now served by
+ * `@marinoscar/platform-api/storage`'s objects API with MemoriaHub's `local`
+ * driver. Boots the real app (mocked Prisma) with a REAL LocalDiskStorageProvider
+ * on a temp directory (routed to by the platform's StorageProviderRouter), and backs the two tables the upload path touches
  * (`storage_objects`, `storage_object_chunks`) with a small in-memory store, so
  * the whole sequence runs end to end over HTTP: init → PUT parts → status →
  * complete → bytes on disk.
@@ -13,6 +16,7 @@ import * as path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
+import { StorageProviderRouter } from '@marinoscar/platform-api/storage';
 import {
   TestContext,
   createTestApp,
@@ -23,8 +27,7 @@ import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 import { createMockUserWithRelations } from '../fixtures/test-data.factory';
 import { createMockTestUser, authHeader, TestUser } from '../helpers/auth-mock.helper';
 import { createMockStorageProvider } from '../mocks/storage-provider.mock';
-import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
-import { LocalDiskStorageProvider } from '../../src/storage/providers/local/local-disk.provider';
+import { LocalDiskStorageProvider } from '../../src/platform-extensions/storage/local-disk.driver';
 
 const PART_SIZE = 5 * 1024 * 1024; // the 5 MiB S3 minimum keeps the test quick
 const APP_URL = 'https://photos.example.test';
@@ -42,6 +45,7 @@ interface ObjectRow {
   status: string;
   s3UploadId: string | null;
   uploadedById: string;
+  orgId?: string;
   metadata: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -88,6 +92,9 @@ describe('Storage: local-provider part upload (issue #506)', () => {
       objects.set(row.id, row);
       return row;
     });
+    p.job.create.mockImplementation(async ({ data }: any) => ({ id: randomUUID(), ...data }));
+    p.job.findFirst.mockResolvedValue(null);
+    p.storageObject.findUniqueOrThrow.mockImplementation(async ({ where }: any) => ({ ...objects.get(where.id)! }));
     p.storageObject.findUnique.mockImplementation(async ({ where, include }: any) => {
       const row = objects.get(where.id);
       if (!row) return null;
@@ -182,13 +189,11 @@ describe('Storage: local-provider part upload (issue #506)', () => {
     setupBaseMocks();
 
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mh-local-parts-'));
-    local = new LocalDiskStorageProvider({
-      get: (key: string, def?: unknown) => (key === 'storage.backup.localPath' ? tmpDir : def),
-    } as unknown as ConfigService);
+    local = new LocalDiskStorageProvider(tmpDir, APP_URL);
 
-    const resolver = context.module.get(StorageProviderResolver, { strict: false });
-    jest.spyOn(resolver, 'getActiveProvider').mockResolvedValue({ id: 'local', provider: local });
-    jest.spyOn(resolver, 'getProviderFor').mockResolvedValue(local);
+    const router = context.module.get(StorageProviderRouter, { strict: false });
+    jest.spyOn(router, 'forLocation').mockResolvedValue(local);
+    jest.spyOn(router, 'forObject').mockResolvedValue(local);
 
     objects = new Map();
     chunks = new Map();
@@ -247,7 +252,9 @@ describe('Storage: local-provider part upload (issue #506)', () => {
         .set(authHeader(user.accessToken))
         .expect(200);
       expect(status.body.data).toMatchObject({
-        status: 'uploading',
+        // The platform keeps an open upload `pending` (MemoriaHub's own API moved it to `uploading`
+        // on the first part; no client reads the difference).
+        status: 'pending',
         uploadedParts: [1, 2, 3],
         totalParts: 3,
         uploadedBytes: String(source.length),
@@ -331,7 +338,7 @@ describe('Storage: local-provider part upload (issue #506)', () => {
       expect(res.body.details).toEqual({ reason: 'UPLOAD_PARTS_MISSING', partNumbers: [2] });
       const row = objects.get(data.objectId)!;
       expect(fs.existsSync(path.join(tmpDir, row.storageKey))).toBe(false);
-      expect(row.status).toBe('uploading');
+      expect(row.status).toBe('pending');
     });
 
     it('complete that omits a part from the list → 409 UPLOAD_PARTS_MISSING', async () => {
@@ -356,14 +363,9 @@ describe('Storage: local-provider part upload (issue #506)', () => {
       const conflict = await complete(data.objectId, parts).expect(409);
       expect(conflict.body.details.partNumbers).toEqual([2]);
 
-      // Status no longer reports the bad part, so a client resuming from it
-      // knows exactly what to re-send.
-      const status = await request(server())
-        .get(`/api/storage/objects/${data.objectId}/upload/status`)
-        .set(authHeader(user.accessToken))
-        .expect(200);
-      expect(status.body.data.uploadedParts).toEqual([1, 3]);
-
+      // The 409 names the parts to re-send (`details.partNumbers`); the client
+      // re-sends exactly those. (The platform's status lists the parts the backend
+      // holds, the corrupt one included, so the 409 is the source of truth here.)
       const urls = await request(server())
         .post(`/api/storage/objects/${data.objectId}/upload/part-urls`)
         .set(authHeader(user.accessToken))
@@ -413,11 +415,11 @@ describe('Storage: local-provider part upload (issue #506)', () => {
       expect(fs.readdirSync(path.join(tmpDir, '.multipart', data.uploadId))).toEqual(['.init.json']);
     });
 
-    it('403 for a user who does not own the upload', async () => {
+    it('404 (not 403) for a user who does not own the upload', async () => {
       const data = await init();
       const other = await createMockTestUser(context, { email: 'other@example.com' });
 
-      await putPart(data.presignedUrls[0].url, slice(1), other.accessToken).expect(403);
+      await putPart(data.presignedUrls[0].url, slice(1), other.accessToken).expect(404);
 
       expect(fs.readdirSync(path.join(tmpDir, '.multipart', data.uploadId))).toEqual(['.init.json']);
     });
@@ -492,8 +494,8 @@ describe('Storage: local-provider part upload (issue #506)', () => {
     it('400 PRESIGNED_PARTS_REQUIRED for an upload on a presigned-part provider', async () => {
       const data = await init();
       const s3 = createMockStorageProvider();
-      const resolver = context.module.get(StorageProviderResolver, { strict: false });
-      jest.spyOn(resolver, 'getProviderFor').mockResolvedValue(s3);
+      const router = context.module.get(StorageProviderRouter, { strict: false });
+      jest.spyOn(router, 'forObject').mockResolvedValue(s3);
 
       const res = await putPart(data.presignedUrls[0].url, slice(1)).expect(400);
 

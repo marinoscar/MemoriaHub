@@ -43,7 +43,7 @@ import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-e
 import { WorkflowMicroRunFinalizeTask } from '../../src/workflows/runs/workflow-micro-run-finalize.task';
 import { WorkflowScheduleTask } from '../../src/workflows/runs/workflow-schedule.task';
 import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
-import { ObjectProcessedEvent } from '../../src/storage/processing/events/object-processed.event';
+import { ObjectProcessedEvent } from '../../src/media-processing/events/object-processed.event';
 import { EnrichmentJobSettledEvent } from '../../src/enrichment/events/enrichment-job-settled.event';
 
 // ---------------------------------------------------------------------------

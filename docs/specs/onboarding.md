@@ -24,7 +24,7 @@ A step id is stored in users' `onboarding.skipped` and the activation milestone 
 | `memoriahub.name_people` | user | recommended | a named, live person exists in one of the user's circles | `features.faceRecognition` is on (hidden, not "todo", while off) | `media:write` | `/people` |
 | `memoriahub.connect_device` | user | optional | an active Media Sync device or a live personal access token (the CLI's) | always | `media:write` | `/settings/android-app` |
 | `user.profile`, `user.notifications` | user | optional | the platform's | the platform's | none | the platform's |
-| `memoriahub.storage_ready` | admin | required | the active storage provider is `local` or has an enabled credential | always | `storage_settings:read` | `/admin/settings/storage/providers` |
+| `memoriahub.storage_ready` | admin | required | the platform storage slice resolves the active driver as fully configured (settings and secret) | always | `storage_config:read` | `/admin/settings/storage` |
 | `admin.email` | admin | required | the platform's Doctor check `email.config` passes (this is MemoriaHub's "email ready" step) | always | `system_settings:read` | `/admin/settings/email` |
 | `admin.access` | admin | required | an allowlist entry other than `INITIAL_ADMIN_EMAIL` | always | `allowlist:read` | `/admin/settings/users` |
 | `memoriahub.enable_faces` | admin | recommended | `features.faceRecognition` on AND the Doctor check `memoriahub.face.detection` passes (CompreFace reachable) | the check is registered | `face_settings:read` | `/admin/settings/face` |

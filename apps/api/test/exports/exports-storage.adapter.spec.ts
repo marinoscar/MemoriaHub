@@ -37,11 +37,9 @@ function setup(row: { storageProvider: string; bucket: string | null } | null) {
     getProviderFor: async (id: string, bucket?: string | null) => provider(id, bucket ?? null),
   };
   const findUnique = jest.fn(async () => row);
-  const prisma = {
-    $extends: () => ({ storageObject: { findUnique } }),
-    storageObject: { findUnique },
-  };
-  const adapter = new ExportsStorageAdapter(resolver as never, prisma as never);
+  // The system client (PrismaSystemService.asSystem): the row lookup crosses organizations.
+  const system = { asSystem: jest.fn(() => ({ storageObject: { findUnique } })) };
+  const adapter = new ExportsStorageAdapter(resolver as never, system as never);
   return { adapter, calls, findUnique, setActive: (id: string) => (active = id) };
 }
 

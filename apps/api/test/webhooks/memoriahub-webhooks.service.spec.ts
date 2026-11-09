@@ -17,12 +17,6 @@ import {
 } from '../../src/platform/webhooks/memoriahub-webhooks.service';
 import { WebhookBatcher } from '../../src/platform/webhooks/webhook-batcher';
 
-jest.mock('@marinoscar/platform-api/core', () => {
-  const actual = jest.requireActual('@marinoscar/platform-api/core');
-  // The bypass client is the app's own client in these tests.
-  return { ...actual, forSystem: jest.fn((client: unknown) => client) };
-});
-
 const CIRCLE = '0f8b2c1e-4d5a-4b6c-9e7f-1a2b3c4d5e6f';
 const USER = '3c3c3c3c-4d4d-4e5e-8f6f-7a7a7a7a7a7a';
 
@@ -37,8 +31,10 @@ function setup(eventKeys: string[][] = [['*']]) {
     memory: { findMany: jest.fn(async () => [] as { id: string; type: string }[]) },
     workflowRun: { findUnique: jest.fn(async () => null as unknown) },
   };
-  const service = new MemoriaHubWebhooks(webhooks as never, prisma as never);
-  return { service, webhooks, prisma };
+  // The system client (PrismaSystemService.asSystem) is the app's own mock client in these tests.
+  const system = { asSystem: jest.fn(() => prisma) };
+  const service = new MemoriaHubWebhooks(webhooks as never, prisma as never, system as never);
+  return { service, webhooks, prisma, system };
 }
 
 const item = (n: number) => ({
@@ -163,14 +159,13 @@ describe('MemoriaHubWebhooks: media', () => {
   });
 
   it('enqueues nothing while no enabled endpoint subscribes, and reads the endpoints through the bypass reason', async () => {
-    const { service, webhooks, prisma } = setup([['workflows.*']]);
+    const { service, webhooks, prisma, system } = setup([['workflows.*']]);
     service.mediaCreated(item(1));
     service.mediaTrashed(CIRCLE, ['a']);
     await service.flushPending();
     expect(webhooks.enqueueFanout).not.toHaveBeenCalled();
     expect(prisma.webhookEndpoint.findMany).toHaveBeenCalledTimes(1); // cached across the batches
-    const { forSystem } = jest.requireMock('@marinoscar/platform-api/core');
-    expect(forSystem).toHaveBeenCalledWith(prisma, WEBHOOKS_SYSTEM_ACCESS_REASON);
+    expect(system.asSystem).toHaveBeenCalledWith(WEBHOOKS_SYSTEM_ACCESS_REASON);
   });
 
   it('never throws into the caller, even when the fan-out insert fails', async () => {

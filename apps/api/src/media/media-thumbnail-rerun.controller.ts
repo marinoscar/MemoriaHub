@@ -6,7 +6,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 
 /**
  * POST /api/media/:id/thumbnail/rerun

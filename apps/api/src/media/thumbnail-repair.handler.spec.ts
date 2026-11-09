@@ -17,7 +17,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { PrismaSystemService } from '../prisma/prisma-system.service';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { systemJob } from '../../test/helpers/platform-job';
@@ -94,6 +95,13 @@ describe('ThumbnailRepairHandler', () => {
         { provide: MediaMetadataSyncService, useValue: mockSync },
         { provide: StorageProcessingRecoveryService, useValue: mockRecovery },
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: PrismaSystemService,
+          useValue: {
+            asSystem: () => mockPrisma,
+            runAsSystem: (_reason: string, fn: (tx: unknown) => unknown) => fn(mockPrisma),
+          },
+        },
       ],
     }).compile();
 

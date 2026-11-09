@@ -439,6 +439,8 @@ export const rolePermissionsMap = {
     mockPermissions.userSettingsRead,
     mockPermissions.userSettingsWrite,
     mockPermissions.storageRead,
+    // RETRO-D1: viewers upload (the objects API was a bare @Auth() before the storage slice).
+    mockPermissions.storageWrite,
     mockPermissions.mediaRead,
     // Note: viewer does NOT have shares:manage — intentional
   ],

@@ -14,8 +14,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaThumbnailService } from './media-thumbnail.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import {
   createMockPrismaService,
   MockPrismaService,

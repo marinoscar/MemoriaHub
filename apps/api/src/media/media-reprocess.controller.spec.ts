@@ -16,7 +16,7 @@ import {
   ReprocessFailedBodyDto,
 } from './media-reprocess.controller';
 import { MediaReprocessService } from './media-reprocess.service';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '@marinoscar/platform-api/identity';

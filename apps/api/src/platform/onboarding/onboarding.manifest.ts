@@ -23,7 +23,7 @@ import { MEMORIAHUB_ONBOARDING_STEP_DEFS, MEMORIAHUB_ONBOARDING_STEP_IDS } from 
 //   admin.storage  Its page (`/admin/settings/storage`) and permission (`storage_config:read`) are the
 //                  platform storage slice's, which MemoriaHub does not mount yet (RETRO-D1): no such
 //                  route or permission exists here, so the step could never be shown. MemoriaHub's own
-//                  `memoriahub.storage_ready` (storage_settings:read, /admin/settings/storage/providers)
+//                  `memoriahub.storage_ready` (storage_config:read, /admin/settings/storage)
 //                  takes its place until the storage slice lands and the built-in can be reused.
 //   admin.ai       It checks the PLATFORM AI runtime (`ai.enabled`, `ai.providers`), which no MemoriaHub
 //                  feature calls yet (RETRO-E2), and links to `/admin/settings/ai`, which here is

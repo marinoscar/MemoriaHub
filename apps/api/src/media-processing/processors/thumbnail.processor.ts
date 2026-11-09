@@ -1,0 +1,281 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { StorageObject } from '@prisma/client';
+import { Readable } from 'stream';
+import { tmpdir } from 'os';
+import { join, extname } from 'path';
+import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
+import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
+import {
+  renderThumbnailBuffer,
+  THUMBNAIL_CACHE_CONTROL,
+} from '../thumbnail-render.util';
+import {
+  buildThumbnailKey,
+  THUMBNAIL_KEY_PREFIX,
+  thumbnailVersionFromBytes,
+} from '../thumbnail-key.util';
+import type { ObjectProcessor, ObjectProcessorResult } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
+import { PrismaService } from '../../prisma/prisma.service';
+import { streamToBuffer, streamToTempFile } from './stream-utils';
+
+/**
+ * ThumbnailProcessor — generates a JPEG thumbnail (≤800 px on each side, by
+ * default) for every image and video StorageObject.
+ *
+ * Name:     thumbnail
+ * Priority: 40  (after exif/20, dimensions/25, video-probe/20, geocode/30)
+ * Handles:  image/* and video/* MIME types
+ *
+ * Recursion guard:
+ *   Returns false from canProcess() if object.storageKey starts with
+ *   'thumbnails/', so the newly-created thumbnail StorageObject row never
+ *   enters the pipeline.  Thumbnail objects are also given status 'ready' at
+ *   creation time, so they would never be queued even if the guard were absent.
+ *
+ * Storage key (issue #434):
+ *   `thumbnails/<sourceObjectId>-<sha256(thumbBytes).slice(0,16)>.jpg` — versioned
+ *   and content-addressed, so re-rendering unchanged bytes reuses the same key
+ *   (idempotent upsert) while a destructive overwrite of the ORIGINAL lands at a
+ *   brand-new key. That is what makes the year-long `immutable` Cache-Control on
+ *   thumbnails, and MediaThumbnailService's signed-URL reuse, safe. See
+ *   ../thumbnail-key.util.ts.
+ *
+ * Image path:
+ *   Buffers the stream → sharp resize to ≤THUMBNAIL_MAX_DIM px JPEG → upload → StorageObject.
+ *
+ * Video path:
+ *   1. Streams the download to a temp file with constant memory (buffering the
+ *      whole video in RAM previously OOM'd the process on large MP4s).
+ *   2. Extracts one poster frame via the shared
+ *      `@memoriahub/enrichment-compute/video`'s `extractPosterFrame()`, which
+ *      runs the three-attempt fallback ladder (seek 1 s → seek 0 s →
+ *      `thumbnail` video filter, no seek) against ffmpeg, validating
+ *      each attempt's output is non-empty (ffmpeg can exit 0 without writing
+ *      a frame) and killing (SIGKILL) any attempt that exceeds
+ *      FFMPEG_TIMEOUT_MS so a hung ffmpeg never wedges the pipeline. This is
+ *      the same extraction code a distributed worker node's thumbnail
+ *      compute module falls back to, guaranteeing identical behavior
+ *      whether a video thumbnail is generated in-process or on a node.
+ *   3. Runs the extracted frame through sharp (same resize/quality settings as
+ *      the image path) for consistency.
+ *   4. Uploads → StorageObject.  All temp files cleaned up in finally (the
+ *      input temp file here; the shared extractor manages its own
+ *      per-attempt output temp files internally).
+ *
+ * Shared upload/StorageObject-creation code is factored into
+ * uploadThumbnail() to avoid duplication between the two paths.
+ *
+ * Env vars (read at construction time):
+ *   THUMBNAIL_MAX_DIM  — max width and height in px (default: 800, fit: inside, no enlargement)
+ *   THUMBNAIL_QUALITY  — JPEG quality 1–100 (default: 85)
+ *   FFMPEG_TIMEOUT_MS  — max runtime per frame-extraction attempt in ms (default: 60000)
+ *
+ * Writes (into returned metadata, stored in StorageObject._processing.thumbnail):
+ *   { thumbnailObjectId: string, thumbnailStorageKey: string }
+ *
+ * On any error, returns { success: false, error } — never throws.
+ */
+@Injectable()
+export class ThumbnailProcessor implements ObjectProcessor {
+  private readonly logger = new Logger(ThumbnailProcessor.name);
+
+  readonly name = 'thumbnail';
+  readonly priority = 40;
+
+  private readonly maxDim: number;
+  private readonly quality: number;
+  private readonly ffmpegTimeoutMs: number;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly resolver: StorageProviderResolver,
+  ) {
+    this.maxDim = parseInt(process.env.THUMBNAIL_MAX_DIM ?? '800', 10);
+    this.quality = parseInt(process.env.THUMBNAIL_QUALITY ?? '85', 10);
+    this.ffmpegTimeoutMs = parseInt(process.env.FFMPEG_TIMEOUT_MS ?? '60000', 10);
+  }
+
+  canProcess(object: StorageObject): boolean {
+    // Recursion guard: thumbnail objects live under 'thumbnails/' prefix
+    if (object.storageKey.startsWith(THUMBNAIL_KEY_PREFIX)) {
+      return false;
+    }
+    return object.mimeType.startsWith('image/') || object.mimeType.startsWith('video/');
+  }
+
+  /**
+   * Download a storage object by key.  Exposed so callers that already inject
+   * ThumbnailProcessor (which holds the StorageProvider) can retrieve streams
+   * without needing to inject StorageProvider themselves.
+   */
+  download(storageKey: string): Promise<Readable> {
+    return this.resolver.storageProvider.download(storageKey);
+  }
+
+  async process(
+    object: StorageObject,
+    getStream: () => Promise<Readable>,
+  ): Promise<ObjectProcessorResult> {
+    if (object.mimeType.startsWith('video/')) {
+      return this.processVideo(object, getStream);
+    }
+    return this.processImage(object, getStream);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Image path — unchanged from original implementation
+  // ---------------------------------------------------------------------------
+
+  private async processImage(
+    object: StorageObject,
+    getStream: () => Promise<Readable>,
+  ): Promise<ObjectProcessorResult> {
+    try {
+      const stream = await getStream();
+      const buffer = await streamToBuffer(stream);
+
+      // Shared renderer (issue #203) — rotate, resize, JPEG-encode, with the
+      // ffmpeg transcode fallback for formats sharp's bundled libvips cannot
+      // decode (HEIC, see issue #106). Shared with the AI Picture Enhancer's
+      // staged-result thumbnail so both use identical sizing and quality.
+      const thumbBuffer = await renderThumbnailBuffer(buffer, {
+        maxDim: this.maxDim,
+        quality: this.quality,
+        sourceFilename: object.name || '',
+      });
+
+      return await this.uploadThumbnail(object, thumbBuffer);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`thumbnail(image) failed for object ${object.id}: ${message}`);
+      return { success: false, error: message };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Video path — extract poster frame via ffmpeg, then resize with sharp
+  // ---------------------------------------------------------------------------
+
+  private async processVideo(
+    object: StorageObject,
+    getStream: () => Promise<Readable>,
+  ): Promise<ObjectProcessorResult> {
+    // Use the original file extension so ffmpeg recognises the container format;
+    // fall back to .mp4 when the extension is absent or unknown.
+    const origExt = extname(object.name || '') || '.mp4';
+    const tmpIn = join(tmpdir(), `memoriahub-job-thumb-in-${randomUUID()}${origExt}`);
+
+    try {
+      // 1. Stream the video to a temp file (ffmpeg requires a seekable path)
+      const stream = await getStream();
+      await streamToTempFile(stream, tmpIn);
+
+      // 2. Extract a single poster frame via the shared package's three-attempt
+      //    fallback ladder (seek 1s → seek 0s → `thumbnail` filter). It manages
+      //    its own per-attempt temp output files internally.
+      const frameBuffer = await extractPosterFrame(tmpIn, {
+        ffmpegTimeoutMs: this.ffmpegTimeoutMs,
+      });
+
+      // 3. Run the extracted frame through the same shared renderer as the
+      //    image path (consistent sizing and quality). ffmpeg has already
+      //    applied orientation to the frame, so the renderer's `.rotate()` is
+      //    a no-op here.
+      const thumbBuffer = await renderThumbnailBuffer(frameBuffer, {
+        maxDim: this.maxDim,
+        quality: this.quality,
+      });
+
+      return await this.uploadThumbnail(object, thumbBuffer);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`thumbnail(video) failed for object ${object.id}: ${message}`);
+      return { success: false, error: message };
+    } finally {
+      // Clean up the downloaded input temp file. The output frame's temp
+      // file(s) are owned and cleaned up internally by extractPosterFrame.
+      await fs.unlink(tmpIn).catch(() => {});
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared: upload buffer + create StorageObject row
+  // ---------------------------------------------------------------------------
+
+  private async uploadThumbnail(
+    object: StorageObject,
+    thumbBuffer: Buffer,
+  ): Promise<ObjectProcessorResult> {
+    // Content-addressed, versioned key (issue #434): identical bytes re-render
+    // to the identical key, so an ordinary reprocess stays a no-op upsert,
+    // while a destructive overwrite of the original lands its new thumbnail at
+    // a URL no cache has ever seen. Superseded keys are cleaned up afterwards
+    // by ThumbnailPruneService, once the MediaItem points at the new one.
+    const thumbKey = buildThumbnailKey(object.id, thumbnailVersionFromBytes(thumbBuffer));
+
+    // Resolve the currently active storage provider so the thumbnail lands in
+    // the same provider/bucket that new uploads are routed to.
+    const { id: activeProviderId, provider: activeProvider } =
+      await this.resolver.getActiveProvider();
+
+    // Upload to storage
+    const thumbStream = Readable.from(thumbBuffer);
+    await activeProvider.upload(thumbKey, thumbStream, {
+      mimeType: 'image/jpeg',
+      contentLength: thumbBuffer.length,
+      // Content-addressed key, so the bytes behind it never change (#434). The platform's
+      // `StorageUploadOptions.cacheControl` (0.1.0-next.28) is sent as S3 `CacheControl`.
+      cacheControl: THUMBNAIL_CACHE_CONTROL,
+    });
+
+    // Upsert a StorageObject row directly via Prisma (NOT emitting
+    // OBJECT_UPLOADED_EVENT) so the pipeline never recurses.  status='ready'
+    // means it will never be queued for processing even without the guard.
+    // Using upsert (keyed on the content-addressed storageKey) makes
+    // reprocessing idempotent — unchanged source bytes hash to the same key, so
+    // a repeated run updates the same row instead of violating its uniqueness.
+    const thumbObject = await this.prisma.storageObject.upsert({
+      where: { storageKey: thumbKey },
+      update: {
+        name: `thumb-${object.name}`,
+        size: BigInt(thumbBuffer.length),
+        mimeType: 'image/jpeg',
+        // Refresh provider/bucket too: a reprocess after the active provider
+        // changed uploads the new bytes to the new provider, so the row must
+        // point at it or signing would route to the old (now-empty) provider.
+        storageProvider: activeProviderId,
+        bucket: activeProvider.getBucket(),
+        status: 'ready',
+        metadata: { thumbnailOf: object.id },
+        updatedAt: new Date(),
+      },
+      create: {
+        orgId: object.orgId, // the source object's organization
+        name: `thumb-${object.name}`,
+        size: BigInt(thumbBuffer.length),
+        mimeType: 'image/jpeg',
+        storageKey: thumbKey,
+        storageProvider: activeProviderId,
+        bucket: activeProvider.getBucket(),
+        status: 'ready',
+        uploadedById: object.uploadedById ?? null,
+        metadata: { thumbnailOf: object.id },
+      },
+    });
+
+    this.logger.log(
+      `Thumbnail upserted for StorageObject ${object.id}: ` +
+        `thumb id=${thumbObject.id}, key=${thumbKey}, size=${thumbBuffer.length}B`,
+    );
+
+    return {
+      success: true,
+      metadata: {
+        thumbnailObjectId: thumbObject.id,
+        thumbnailStorageKey: thumbKey,
+      },
+    };
+  }
+}

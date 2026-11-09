@@ -16,9 +16,13 @@
 //                 (RETRO-E1, #595). MemoriaHub's own ai_settings:* stay until RETRO-E4 retires the
 //                 old /api/ai/* admin routes; an administrator holds both pairs.
 //   - `telemetry` telemetry:read, telemetry:write, telemetry:query (system, admin) (RETRO-T2, #625)
+//   - `notifications` push:*, broadcasts:* (system, admin), org_broadcasts:* (org, org_admin) (RETRO-D3)
 //   - `alerts`    alerts:read, alerts:write (system, admin) (RETRO-H5, #609)
 //   - `user-data` system:factory_reset, orgs:offboard (system, admin only; never implied by
 //                 system_settings:write) (RETRO-H1, #591)
+//   - `storage`   storage:read (org: every member), storage:write (org: org_admin, contributor, and
+//                 `viewer` through `platformGrants`, below), storage:delete_any (system, admin),
+//                 storage_config:read|write (system, admin) (RETRO-D1, #563)
 //   - `webhooks`  webhooks:read|write (org: org_admin, contributor, viewer; a member's own endpoints),
 //                 org_webhooks:read|write (org, org_admin), system_webhooks:read|write (system, admin)
 //                 (RETRO-H4, #603)
@@ -26,19 +30,20 @@
 //                 sharing:write (org: contributor, org_admin), groups:admin, sharing:admin (org:
 //                 org_admin; a system `admin` holds them through the `org_admin` role the identity
 //                 slice gives it on the default organization) (RETRO-I1, #562)
-// Not listed on purpose: `storage` and `notifications` collide with
-// MemoriaHub's own (legacy) declarations of the same ids until RETRO-D1 and
-// D3 adopt those slices; `nodes` is not mounted.
+// Not listed on purpose: `nodes` is not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';
 
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'webhooks', 'sharing'],
+  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'webhooks', 'sharing', 'storage'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],
     grants: [],
+    // RETRO-D1: every member uploads (the per-circle role decides where a media item may go), as
+    // before the slice, when the objects API was a bare `@Auth()` and the default role is `viewer`.
+    platformGrants: { 'storage:write': ['viewer'] },
   },
 };
