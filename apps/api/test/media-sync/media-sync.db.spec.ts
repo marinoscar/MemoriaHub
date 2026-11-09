@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { CircleMembershipService } from '../../src/circles/circle-membership.service';
+import { buildOwnerAccessService } from '../helpers/owner-access';
 import { MediaSyncService } from '../../src/media-sync/media-sync.service';
 import { checkinSchema, registerDeviceSchema } from '../../src/media-sync/dto/media-sync.dto';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
@@ -46,7 +46,7 @@ describeMaybeDb('Media Sync (DB_GATED: real PostgreSQL)', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
-    service = new MediaSyncService(prisma, new CircleMembershipService(prisma));
+    service = new MediaSyncService(prisma, buildOwnerAccessService(prisma));
 
     const user = await prisma.user.create({ data: { email: `media-sync-db-${Date.now()}@example.test` } });
     userId = user.id;

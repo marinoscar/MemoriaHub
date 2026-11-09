@@ -8,7 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { PeopleService } from './people.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -67,7 +67,7 @@ function makeFace(overrides: Partial<any> = {}) {
 describe('PeopleService', () => {
   let service: PeopleService;
   let mockPrisma: MockPrismaService;
-  let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockOwnerAccessService: { requireOwnerRole: jest.Mock };
   let mockClusteringService: { clusterUnknownFaces: jest.Mock };
   let mockMatchingService: {
     computePersonCentroid: jest.Mock;
@@ -86,8 +86,8 @@ describe('PeopleService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockCircleMembershipService = {
-      assertCircleAccess: jest.fn().mockResolvedValue(undefined),
+    mockOwnerAccessService = {
+      requireOwnerRole: jest.fn().mockResolvedValue(undefined),
     };
     mockClusteringService = {
       clusterUnknownFaces: jest.fn().mockResolvedValue({ clustersCreated: 2, facesAssigned: 5 }),
@@ -143,7 +143,7 @@ describe('PeopleService', () => {
       providers: [
         PeopleService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: FaceClusteringService, useValue: mockClusteringService },
         { provide: FaceMatchingService, useValue: mockMatchingService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
@@ -166,7 +166,7 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('listPeople', () => {
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.person.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.person.count as jest.Mock).mockResolvedValue(0);
 
@@ -176,7 +176,7 @@ describe('PeopleService', () => {
         PERMS,
       );
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
@@ -317,13 +317,13 @@ describe('PeopleService', () => {
       );
     });
 
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       const person = makePerson({ faces: [], coverFace: null });
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(person);
 
       await service.getPerson(PERSON_ID, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
@@ -348,7 +348,7 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('createPerson', () => {
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.create as jest.Mock).mockResolvedValue(makePerson());
 
       await service.createPerson(
@@ -357,11 +357,11 @@ describe('PeopleService', () => {
         PERMS,
       );
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -457,17 +457,17 @@ describe('PeopleService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.person.update as jest.Mock).mockResolvedValue(makePerson({ name: 'Eve' }));
 
       await service.updatePerson(PERSON_ID, { name: 'Eve' } as any, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -555,7 +555,7 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('assignFaces', () => {
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findMany as jest.Mock)
         .mockResolvedValueOnce([makeFace()])
@@ -564,11 +564,11 @@ describe('PeopleService', () => {
 
       await service.assignFaces(PERSON_ID, { faceIds: [FACE_ID] } as any, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -625,18 +625,18 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('unassignFace', () => {
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findUnique as jest.Mock).mockResolvedValue(makeFace());
       (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
 
       await service.unassignFace(PERSON_ID, FACE_ID, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -688,14 +688,14 @@ describe('PeopleService', () => {
   // -------------------------------------------------------------------------
 
   describe('clusterUnknowns', () => {
-    it('calls assertCircleAccess with circle_admin role', async () => {
+    it('calls requireOwnerRole with circle_admin role', async () => {
       await service.clusterUnknowns(CIRCLE_ID, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'circle_admin',
+        'admin',
       );
     });
 
@@ -806,7 +806,7 @@ describe('PeopleService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeSource())
         .mockResolvedValueOnce(makeTarget());
@@ -821,8 +821,8 @@ describe('PeopleService', () => {
         return cb(mockPrisma);
       });
       await service.mergePeople({ sourceId: SOURCE_ID, targetId: TARGET_ID }, USER_ID, PERMS);
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
-        USER_ID, CIRCLE_ID, PERMS, 'collaborator'
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
+        USER_ID, CIRCLE_ID, PERMS, 'editor'
       );
     });
 
@@ -1018,7 +1018,7 @@ describe('PeopleService', () => {
       };
     }
 
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
 
@@ -1028,7 +1028,7 @@ describe('PeopleService', () => {
         pageSize: 20,
       } as any);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
@@ -1227,7 +1227,7 @@ describe('PeopleService', () => {
       await expect(service.deletePerson(PERSON_ID, USER_ID, PERMS)).rejects.toThrow(NotFoundException);
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (cb: any) => {
@@ -1237,8 +1237,8 @@ describe('PeopleService', () => {
         return cb(mockPrisma);
       });
       await service.deletePerson(PERSON_ID, USER_ID, PERMS);
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
-        USER_ID, CIRCLE_ID, PERMS, 'collaborator'
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
+        USER_ID, CIRCLE_ID, PERMS, 'editor'
       );
     });
 
@@ -2297,18 +2297,18 @@ describe('PeopleService', () => {
 
       await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
-    it('denies access when assertCircleAccess throws (ForbiddenException propagates)', async () => {
+    it('denies access when requireOwnerRole throws (ForbiddenException propagates)', async () => {
       setupMediaItem();
       const { ForbiddenException } = await import('@nestjs/common');
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('Forbidden'),
       );
 
@@ -2465,11 +2465,11 @@ describe('PeopleService', () => {
 
       await service.removePersonFromMedia(MEDIA_ID, PERSON_ID, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -2600,16 +2600,16 @@ describe('PeopleService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.hidePeople(dto, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -2686,16 +2686,16 @@ describe('PeopleService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.person.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.unhidePeople(dto, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -2760,16 +2760,16 @@ describe('PeopleService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       setupPurgeMocks();
 
       await service.purgePeople(dto, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -2865,16 +2865,16 @@ describe('PeopleService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.hideFaces(dto, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -3100,16 +3100,16 @@ describe('PeopleService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.face.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
 
       await service.unhideFaces(dto, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -3186,16 +3186,16 @@ describe('PeopleService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       setupPurgeFacesMocks();
 
       await service.purgeFaces(dto, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -3291,16 +3291,16 @@ describe('PeopleService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({ id: 'audit-1' });
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       setupPurgeArchivedFacesMocks();
 
       await service.purgeArchivedFaces(dto, USER_ID, PERMS);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -3384,9 +3384,9 @@ describe('PeopleService', () => {
       expect(result).toEqual({ deleted: 2 });
     });
 
-    it('propagates ForbiddenException when assertCircleAccess denies access', async () => {
+    it('propagates ForbiddenException when requireOwnerRole denies access', async () => {
       const { ForbiddenException } = await import('@nestjs/common');
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('Forbidden'),
       );
 
@@ -3429,7 +3429,7 @@ describe('PeopleService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItemRow());
       (mockPrisma.person.findUnique as jest.Mock).mockResolvedValue(makePerson());
       (mockPrisma.face.findFirst as jest.Mock).mockResolvedValue(null);
@@ -3437,11 +3437,11 @@ describe('PeopleService', () => {
 
       await service.addPersonToMedia(MEDIA_ID, USER_ID, PERMS, { personId: PERSON_ID });
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        'collaborator',
+        'editor',
       );
     });
 

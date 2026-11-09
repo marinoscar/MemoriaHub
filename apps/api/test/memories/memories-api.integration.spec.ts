@@ -410,7 +410,7 @@ describe('Memories API (issue #307)', () => {
         .expect(400);
     });
 
-    it('403s a non-member (a circle-scoped list is not enumeration-sensitive)', async () => {
+    it('404s a non-member: the owner scope is hidden like any record (RETRO-I3)', async () => {
       enableMemories(context);
       const user = await createMockViewerUser(context);
       context.prismaMock.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID });
@@ -419,7 +419,7 @@ describe('Memories API (issue #307)', () => {
       await request(context.app.getHttpServer())
         .get(`/api/memories?circleId=${CIRCLE_ID}`)
         .set(authHeader(user.accessToken))
-        .expect(403);
+        .expect(404);
     });
 
     it('signs cover thumbnails with ONE batched storageObject query', async () => {

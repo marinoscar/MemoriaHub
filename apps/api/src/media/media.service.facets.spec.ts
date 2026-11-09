@@ -7,7 +7,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaService } from './media.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
@@ -46,12 +46,12 @@ function makeRow(
 describe('MediaService.facetsLocations', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
-  let mockCircleMembership: { assertCircleAccess: jest.Mock };
+  let mockCircleMembership: { requireOwnerRole: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockCircleMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue(undefined),
+      requireOwnerRole: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -63,7 +63,7 @@ describe('MediaService.facetsLocations', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: { getSignedDownloadUrl: jest.fn() } },
         { provide: MediaMetadataSyncService, useValue: {} },
-        { provide: CircleMembershipService, useValue: mockCircleMembership },
+        { provide: OwnerAccessService, useValue: mockCircleMembership },
         { provide: GEO_LOCATION_PROVIDER, useValue: {} },
         { provide: ForwardGeocodeService, useValue: {} },
         { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
@@ -83,12 +83,12 @@ describe('MediaService.facetsLocations', () => {
     service = module.get<MediaService>(MediaService);
   });
 
-  it('calls assertCircleAccess with the supplied circleId, userId, and permissions', async () => {
+  it('calls requireOwnerRole with the supplied circleId, userId, and permissions', async () => {
     (mockPrisma.mediaItem.groupBy as jest.Mock).mockResolvedValue([]);
 
     await service.facetsLocations(CIRCLE_ID, USER_ID, ['circles:read']);
 
-    expect(mockCircleMembership.assertCircleAccess).toHaveBeenCalledWith(
+    expect(mockCircleMembership.requireOwnerRole).toHaveBeenCalledWith(
       USER_ID,
       CIRCLE_ID,
       ['circles:read'],

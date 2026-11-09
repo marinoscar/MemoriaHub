@@ -2,7 +2,7 @@
  * Unit tests for ShareService.
  *
  * Covers:
- *   - createShare: XOR validation, circleId resolution, assertCircleAccess call,
+ *   - createShare: XOR validation, circleId resolution, requireOwnerRole call,
  *     idempotency (existing active share), token format.
  *   - resolvePublicShare: missing / revoked / expired → NotFoundException;
  *     media_item with deletedAt → NotFoundException; archived item (archivedAt
@@ -11,7 +11,7 @@
  *     expired / revoked.
  *   - bulkAction: caller-owned scoping vs manage_any, affected count.
  *
- * No database required — PrismaService, CircleMembershipService,
+ * No database required — PrismaService, OwnerAccessService,
  * MediaThumbnailService, ConfigService are all mocked.
  */
 
@@ -21,7 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import { ShareTargetType } from '@prisma/client';
 import { ShareService } from './share.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -90,7 +90,7 @@ function makeAlbum(overrides: Record<string, unknown> = {}) {
 describe('ShareService', () => {
   let service: ShareService;
   let mockPrisma: MockPrismaService;
-  let mockCircleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>>;
+  let mockCircleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
   let mockThumbnailService: jest.Mocked<Pick<MediaThumbnailService, 'signThumb'>>;
   let mockConfigService: jest.Mocked<Pick<ConfigService, 'get'>>;
 
@@ -102,7 +102,7 @@ describe('ShareService', () => {
     mockPrisma = createMockPrismaService();
 
     mockCircleMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
 
     mockThumbnailService = {
@@ -117,7 +117,7 @@ describe('ShareService', () => {
       providers: [
         ShareService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockCircleMembership },
+        { provide: OwnerAccessService, useValue: mockCircleMembership },
         { provide: MediaThumbnailService, useValue: mockThumbnailService },
         { provide: ConfigService, useValue: mockConfigService },
       ],
@@ -178,14 +178,14 @@ describe('ShareService', () => {
   // createShare — target resolution and access check
   // =========================================================================
 
-  describe('createShare — target resolution and assertCircleAccess', () => {
+  describe('createShare — target resolution and requireOwnerRole', () => {
     beforeEach(() => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.mediaShare.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.mediaShare.create as jest.Mock).mockResolvedValue(makeShare());
     });
 
-    it('resolves circleId from mediaItem and calls assertCircleAccess with collaborator', async () => {
+    it('resolves circleId from mediaItem and calls requireOwnerRole with collaborator', async () => {
       await service.createShare(USER_ID, managerPermissions, {
         targetType: ShareTargetType.media_item,
         mediaItemId: MEDIA_ITEM_ID,
@@ -196,15 +196,15 @@ describe('ShareService', () => {
         select: { circleId: true, deletedAt: true },
       });
 
-      expect(mockCircleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockCircleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         managerPermissions,
-        'collaborator',
+        'editor',
       );
     });
 
-    it('resolves circleId from album and calls assertCircleAccess with collaborator', async () => {
+    it('resolves circleId from album and calls requireOwnerRole with collaborator', async () => {
       (mockPrisma.album.findUnique as jest.Mock).mockResolvedValue(makeAlbum());
       (mockPrisma.mediaShare.findFirst as jest.Mock).mockResolvedValue(null);
       (mockPrisma.mediaShare.create as jest.Mock).mockResolvedValue(makeShare({ targetType: ShareTargetType.album, mediaItemId: null, albumId: ALBUM_ID }));
@@ -219,11 +219,11 @@ describe('ShareService', () => {
         select: { circleId: true },
       });
 
-      expect(mockCircleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockCircleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         managerPermissions,
-        'collaborator',
+        'editor',
       );
     });
 

@@ -105,7 +105,7 @@ export class OwnerAccessService {
     });
     if (!circle) return null;
     if (circle.isPersonal) return { kind: 'user', userId: circle.ownerId };
-    return { kind: 'group', groupId: circle.id };
+    return { kind: 'group', groupId: scopeId };
   }
 
   /**

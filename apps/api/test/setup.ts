@@ -11,6 +11,13 @@ process.env.NODE_ENV = 'test';
 // A spec that exercises the worker builds it itself. (An explicit JOBS_WORKER_MODE still wins.)
 process.env.JOBS_WORKER_MODE ??= 'off';
 
+// Owner-scope access (RETRO-I3) reads group memberships through the sharing slice's
+// PrincipalGroupsProvider, which caches them per (user, org) for this TTL. Suites
+// change a caller's mocked membership between tests on one app instance, so the
+// cache is off in tests (0 disables it). Production keeps its TTL and invalidates
+// on membership writes (`OwnerAccessService.invalidateMembers`).
+process.env.AUTH_PRINCIPAL_CACHE_TTL_SECONDS ??= '0';
+
 // Increase timeout for integration tests
 jest.setTimeout(30000);
 

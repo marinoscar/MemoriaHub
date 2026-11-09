@@ -39,7 +39,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CircleRole, MediaEnhancementStatus, MediaEnhancementDecision, MediaType, MediaTagSource } from '@prisma/client';
 import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
@@ -182,7 +182,7 @@ function makeSettings(overrides: Record<string, any> = {}) {
 describe('MediaEnhancementService', () => {
   let service: MediaEnhancementService;
   let mockPrisma: MockPrismaService;
-  let mockMembership: { assertCircleAccess: jest.Mock };
+  let mockMembership: { requireOwnerRole: jest.Mock };
   let mockResolver: {
     getProviderFor: jest.Mock;
     getActiveProvider: jest.Mock;
@@ -208,7 +208,7 @@ describe('MediaEnhancementService', () => {
     mockPrisma = createMockPrismaService();
 
     mockMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: CircleRole.collaborator, isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'editor', isSuperAdmin: false }),
     };
 
     mockObjectProvider = {
@@ -278,7 +278,7 @@ describe('MediaEnhancementService', () => {
         MediaEnhancementService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } },
-        { provide: CircleMembershipService, useValue: mockMembership },
+        { provide: OwnerAccessService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
         { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
@@ -334,16 +334,16 @@ describe('MediaEnhancementService', () => {
     it('asserts circle access at the collaborator level', async () => {
       await service.startEnhance(MEDIA_ID, {}, USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
     it('propagates a ForbiddenException from RBAC (non-collaborator)', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValue(new ForbiddenException('nope'));
+      mockMembership.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
 
       await expect(service.startEnhance(MEDIA_ID, {}, USER)).rejects.toThrow(ForbiddenException);
     });
@@ -540,7 +540,7 @@ describe('MediaEnhancementService', () => {
 
       await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(BadRequestException);
       await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow('Picture enhancement is disabled');
-      expect(mockMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockMembership.requireOwnerRole).not.toHaveBeenCalled();
     });
 
     it('throws 400 when PICTURE_ENHANCEMENT_ENABLED=false, even with the feature flag on', async () => {
@@ -573,7 +573,7 @@ describe('MediaEnhancementService', () => {
       await expect(service.startBatch(dto, USER)).rejects.toThrow(
         'Cannot enhance 5 items in one batch; the limit is 3',
       );
-      expect(mockMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockMembership.requireOwnerRole).not.toHaveBeenCalled();
     });
 
     it('falls back to a cap of 25 when pictureEnhancement.maxBatchSize is unset', async () => {
@@ -589,16 +589,16 @@ describe('MediaEnhancementService', () => {
     it('asserts circle access at the collaborator level before touching media items', async () => {
       await service.startBatch(makeBulkDto(), USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
     it('propagates a ForbiddenException from RBAC (non-collaborator)', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValue(new ForbiddenException('nope'));
+      mockMembership.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
 
       await expect(service.startBatch(makeBulkDto(), USER)).rejects.toThrow(ForbiddenException);
       expect(mockPrisma.mediaEnhancementBatch.create).not.toHaveBeenCalled();
@@ -822,8 +822,8 @@ describe('MediaEnhancementService', () => {
     });
 
     it('uses CIRCLE_ID_2 to prove the batch row is scoped to dto.circleId, not a hard-coded default', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.collaborator,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'editor',
         isSuperAdmin: false,
       });
       wireMediaItems([makeBatchItem({ id: 'media-a', circleId: CIRCLE_ID_2 })]);
@@ -1020,7 +1020,7 @@ describe('MediaEnhancementService', () => {
       await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
         'Picture enhancement is disabled',
       );
-      expect(mockMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockMembership.requireOwnerRole).not.toHaveBeenCalled();
       expect(mockPrisma.mediaItem.count).not.toHaveBeenCalled();
     });
 
@@ -1043,7 +1043,7 @@ describe('MediaEnhancementService', () => {
     });
 
     it('asserts collaborator access BEFORE running any query on the caller behalf', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValue(new ForbiddenException('nope'));
+      mockMembership.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
 
       await expect(service.startBatchByFilter(makeFilterDto(), USER)).rejects.toThrow(
         ForbiddenException,
@@ -1055,11 +1055,11 @@ describe('MediaEnhancementService', () => {
     it('asserts circle access at the collaborator level', async () => {
       await service.startBatchByFilter(makeFilterDto(), USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -1247,11 +1247,11 @@ describe('MediaEnhancementService', () => {
 
       await service.getEnhancement(MEDIA_ID, ENH_ID, USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -1359,11 +1359,11 @@ describe('MediaEnhancementService', () => {
     it('asserts circle access at the collaborator level', async () => {
       await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -1842,11 +1842,11 @@ describe('MediaEnhancementService', () => {
     it('asserts circle access at the collaborator level', async () => {
       await service.discardEnhancement(MEDIA_ID, ENH_ID, USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -1881,7 +1881,7 @@ describe('MediaEnhancementService', () => {
     });
 
     it('propagates a ForbiddenException from RBAC (viewer cannot discard)', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValue(new ForbiddenException('viewer cannot write'));
+      mockMembership.requireOwnerRole.mockRejectedValue(new ForbiddenException('viewer cannot write'));
 
       await expect(service.discardEnhancement(MEDIA_ID, ENH_ID, USER)).rejects.toThrow(ForbiddenException);
     });
@@ -1941,16 +1941,16 @@ describe('MediaEnhancementService', () => {
     it('asserts circle access at the viewer level before touching the database', async () => {
       await service.listEnhancements(makeListQuery(), USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
     it('propagates a ForbiddenException from RBAC without ever calling mediaEnhancement.findMany', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('not a member'));
+      mockMembership.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('not a member'));
 
       await expect(service.listEnhancements(makeListQuery(), USER)).rejects.toThrow(ForbiddenException);
 

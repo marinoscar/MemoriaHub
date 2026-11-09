@@ -2,7 +2,7 @@
  * Unit tests — MediaOrientationEditService
  *
  * Mirrors the mocking conventions used by media-thumbnail-rerun.controller.spec.ts
- * (CircleMembershipService.assertCircleAccess mock, createMockPrismaService) and
+ * (OwnerAccessService.requireOwnerRole mock, createMockPrismaService) and
  * media-reprocess.service.spec.ts (StorageProviderResolver.getProviderFor
  * returning a stubbed provider, jest.fn()-based dependency mocks assembled via
  * Test.createTestingModule).
@@ -18,7 +18,7 @@
  *    and the resolved return shape.
  *  - BadRequestException for non-photo / non-image media items.
  *  - NotFoundException for missing / soft-deleted / storageObject-less items.
- *  - assertCircleAccess called with the 'collaborator' role, and that a
+ *  - requireOwnerRole called with the 'collaborator' role, and that a
  *    rejection from it propagates without touching storage or Prisma writes.
  *  - Face re-enqueue is best-effort: an EnrichmentJobService.enqueue failure
  *    must not fail editOrientation.
@@ -34,7 +34,7 @@ import { Readable } from 'stream';
 
 import { MediaOrientationEditService } from './media-orientation-edit.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
@@ -100,7 +100,7 @@ function makeMediaItem(overrides: Partial<Record<string, unknown>> = {}) {
 describe('MediaOrientationEditService', () => {
   let service: MediaOrientationEditService;
   let mockPrisma: MockPrismaService;
-  let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockOwnerAccessService: { requireOwnerRole: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
   let mockStorageProvider: ReturnType<typeof createMockStorageProvider>;
   let mockRecoveryService: { reprocessObjectNow: jest.Mock };
@@ -121,8 +121,8 @@ describe('MediaOrientationEditService', () => {
       return ops;
     });
 
-    mockCircleMembershipService = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+    mockOwnerAccessService = {
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
 
     mockStorageProvider = createMockStorageProvider();
@@ -163,7 +163,7 @@ describe('MediaOrientationEditService', () => {
       providers: [
         MediaOrientationEditService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
         { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
@@ -313,7 +313,7 @@ describe('MediaOrientationEditService', () => {
       await expect(
         service.editOrientation('nonexistent', 'rotate_right', makeUser()),
       ).rejects.toThrow(NotFoundException);
-      expect(mockCircleMembershipService.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockOwnerAccessService.requireOwnerRole).not.toHaveBeenCalled();
     });
 
     it('throws when the media item is soft-deleted', async () => {
@@ -334,7 +334,7 @@ describe('MediaOrientationEditService', () => {
       await expect(
         service.editOrientation('media-1', 'rotate_right', makeUser()),
       ).rejects.toThrow(NotFoundException);
-      expect(mockCircleMembershipService.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockOwnerAccessService.requireOwnerRole).not.toHaveBeenCalled();
     });
   });
 
@@ -343,7 +343,7 @@ describe('MediaOrientationEditService', () => {
   // -------------------------------------------------------------------------
 
   describe('collaborator role enforcement', () => {
-    it('calls assertCircleAccess with the collaborator role', async () => {
+    it('calls requireOwnerRole with the collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.storageObject.findUnique as jest.Mock)
         .mockResolvedValueOnce(makeStorageObject())
@@ -352,18 +352,18 @@ describe('MediaOrientationEditService', () => {
       const user = makeUser();
       await service.editOrientation('media-1', 'rotate_right', user);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         user.id,
         'circle-1',
         user.permissions,
-        'collaborator',
+        'editor',
       );
     });
 
-    it('propagates the error and performs no downstream writes when assertCircleAccess rejects', async () => {
+    it('propagates the error and performs no downstream writes when requireOwnerRole rejects', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       const accessError = new Error('Forbidden: collaborator role required');
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(accessError);
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValue(accessError);
 
       await expect(
         service.editOrientation('media-1', 'rotate_right', makeUser()),

@@ -8,7 +8,7 @@ import {
 import { CircleRole } from '@prisma/client';
 import { CirclesService } from './circles.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from './circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { notificationsForwardingTo } from '../../test/mocks/email-notifications.adapter';
@@ -17,7 +17,7 @@ import { createMockPrismaService, MockPrismaService } from '../../test/mocks/pri
 describe('CirclesService', () => {
   let service: CirclesService;
   let mockPrisma: MockPrismaService;
-  let mockMembership: jest.Mocked<CircleMembershipService>;
+  let mockMembership: jest.Mocked<OwnerAccessService>;
   let mockEmail: { sendEmail: jest.Mock; sendEmailAsync: jest.Mock };
 
   const mockUser = {
@@ -28,10 +28,12 @@ describe('CirclesService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
+    mockPrisma.circleMember.findMany.mockResolvedValue([]);
 
     mockMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: CircleRole.circle_admin, isSuperAdmin: false }),
-      resolveRole: jest.fn().mockResolvedValue(CircleRole.circle_admin),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'admin' as const, isSuperAdmin: false }),
+      roleIn: jest.fn().mockResolvedValue('admin'),
+      invalidateMembers: jest.fn(),
     } as any;
 
     mockEmail = {
@@ -43,7 +45,7 @@ describe('CirclesService', () => {
       providers: [
         CirclesService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockMembership },
+        { provide: OwnerAccessService, useValue: mockMembership },
         { provide: NotificationsService, useValue: notificationsForwardingTo(mockEmail) },
       ],
     }).compile();
@@ -102,7 +104,7 @@ describe('CirclesService', () => {
 
   describe('getById()', () => {
     it('should throw ForbiddenException when user is not a member', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValue(
+      mockMembership.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('not a member'),
       );
 
@@ -116,19 +118,19 @@ describe('CirclesService', () => {
         name: 'Test Circle',
         _count: { members: 3, mediaItems: 10 },
       };
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.viewer,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'viewer' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circle.findUnique.mockResolvedValue(mockCircle as any);
 
       const result = await service.getById(mockUser, 'circle-1');
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         'circle-1',
         [],
-        CircleRole.viewer,
+        'viewer',
       );
       expect(result).toEqual(mockCircle);
     });
@@ -138,7 +140,7 @@ describe('CirclesService', () => {
 
   describe('update()', () => {
     it('should throw ForbiddenException when viewer tries to update (not circle_admin)', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValue(
+      mockMembership.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('This action requires circle_admin role or higher'),
       );
 
@@ -156,19 +158,19 @@ describe('CirclesService', () => {
         ownerId: 'user-1',
       };
 
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circle.update.mockResolvedValue(updatedCircle as any);
 
       const result = await service.update(mockUser, 'circle-1', { name: 'New Name' });
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         'circle-1',
         [],
-        CircleRole.circle_admin,
+        'admin',
       );
       expect(mockPrisma.circle.update).toHaveBeenCalledWith({
         where: { id: 'circle-1' },
@@ -182,8 +184,8 @@ describe('CirclesService', () => {
 
   describe('remove()', () => {
     it('should throw BadRequestException when trying to delete a personal circle', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circle.findUnique.mockResolvedValue({
@@ -199,8 +201,8 @@ describe('CirclesService', () => {
     });
 
     it('should delete non-personal circle when caller is circle_admin', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circle.findUnique.mockResolvedValue({
@@ -217,8 +219,8 @@ describe('CirclesService', () => {
     });
 
     it('should throw NotFoundException when circle does not exist', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circle.findUnique.mockResolvedValue(null);
@@ -231,8 +233,8 @@ describe('CirclesService', () => {
 
   describe('updateMemberRole()', () => {
     it('should throw BadRequestException when demoting the last circle_admin', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleMember.findUnique.mockResolvedValue({
@@ -252,8 +254,8 @@ describe('CirclesService', () => {
     });
 
     it('should allow demoting a circle_admin when there are multiple admins', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleMember.findUnique.mockResolvedValue({
@@ -282,8 +284,8 @@ describe('CirclesService', () => {
     });
 
     it('should throw NotFoundException when target user is not a member', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleMember.findUnique.mockResolvedValue(null);
@@ -298,8 +300,8 @@ describe('CirclesService', () => {
 
   describe('removeMember()', () => {
     it('should throw BadRequestException when removing the last circle_admin', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleMember.findUnique.mockResolvedValue({
@@ -320,8 +322,8 @@ describe('CirclesService', () => {
     });
 
     it('should remove a viewer member successfully', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleMember.findUnique.mockResolvedValue({
@@ -353,8 +355,8 @@ describe('CirclesService', () => {
         addedById: 'user-1',
       };
 
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
@@ -392,8 +394,8 @@ describe('CirclesService', () => {
       };
       const updatedInvite = { ...existingPendingInvite, role: CircleRole.collaborator };
 
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
@@ -424,8 +426,8 @@ describe('CirclesService', () => {
         claimedAt: new Date(),
       };
 
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
@@ -448,8 +450,8 @@ describe('CirclesService', () => {
     // ---- Email graceful degradation ----
 
     it('should still create the invite even if the notification dispatch throws', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
@@ -488,8 +490,8 @@ describe('CirclesService', () => {
 
   describe('addMember()', () => {
     it('should upsert the circle member and trigger a membership-confirmation email', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'target-user' } as any);
@@ -530,8 +532,8 @@ describe('CirclesService', () => {
     });
 
     it('should throw NotFoundException when the target user does not exist', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.user.findUnique.mockResolvedValue(null);
@@ -543,8 +545,8 @@ describe('CirclesService', () => {
     });
 
     it('should still add the member even if the notification dispatch throws', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'target-user' } as any);
@@ -582,8 +584,8 @@ describe('CirclesService', () => {
 
   describe('revokeInvite()', () => {
     it('should throw BadRequestException when revoking an already-claimed invite', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleInvite.findUnique.mockResolvedValue({
@@ -602,8 +604,8 @@ describe('CirclesService', () => {
     });
 
     it('should delete a pending invite successfully', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleInvite.findUnique.mockResolvedValue({
@@ -621,8 +623,8 @@ describe('CirclesService', () => {
     });
 
     it('should throw NotFoundException when invite does not exist', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleInvite.findUnique.mockResolvedValue(null);
@@ -633,8 +635,8 @@ describe('CirclesService', () => {
     });
 
     it('should throw NotFoundException when invite belongs to a different circle', async () => {
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleInvite.findUnique.mockResolvedValue({
@@ -730,19 +732,19 @@ describe('CirclesService', () => {
         { id: 'inv-2', circleId: 'c1', email: 'b@test.com', claimedAt: new Date() },
       ];
 
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.circle_admin,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleInvite.findMany.mockResolvedValue(mockInvites as any);
 
       const result = await service.listInvites(mockUser, 'c1');
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         'c1',
         [],
-        CircleRole.circle_admin,
+        'admin',
       );
       expect(result.items).toEqual(mockInvites);
       expect(result.total).toBe(2);
@@ -758,19 +760,19 @@ describe('CirclesService', () => {
         { id: 'm2', userId: 'u2', role: CircleRole.viewer, user: { id: 'u2', email: 'u2@test.com' } },
       ];
 
-      mockMembership.assertCircleAccess.mockResolvedValue({
-        role: CircleRole.viewer,
+      mockMembership.requireOwnerRole.mockResolvedValue({
+        role: 'viewer' as const,
         isSuperAdmin: false,
       });
       mockPrisma.circleMember.findMany.mockResolvedValue(mockMembers as any);
 
       const result = await service.listMembers(mockUser, 'c1');
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         'c1',
         [],
-        CircleRole.viewer,
+        'viewer',
       );
       expect(result.items).toEqual(mockMembers);
       expect(result.total).toBe(2);

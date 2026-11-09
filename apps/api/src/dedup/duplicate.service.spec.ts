@@ -2,7 +2,7 @@
  * Unit tests for DuplicateService.
  *
  * Covers:
- *  - listDuplicateGroups: RBAC (assertCircleAccess called with viewer),
+ *  - listDuplicateGroups: RBAC (requireOwnerRole called with viewer),
  *    response shape { items, meta }, kind filter applied after enrichment
  *  - getDuplicateGroup: RBAC (viewer), 404, isSuggestedBest/similarityToBest
  *    derived correctly
@@ -28,7 +28,7 @@ import {
 import { Test, TestingModule } from '@nestjs/testing';
 import { DuplicateService } from './duplicate.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -166,7 +166,7 @@ function makeGroupRow(overrides: Partial<{
 describe('DuplicateService', () => {
   let service: DuplicateService;
   let mockPrisma: MockPrismaService;
-  let mockMembership: { assertCircleAccess: jest.Mock };
+  let mockMembership: { requireOwnerRole: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
@@ -174,7 +174,7 @@ describe('DuplicateService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockMembership = { assertCircleAccess: jest.fn().mockResolvedValue(undefined) };
+    mockMembership = { requireOwnerRole: jest.fn().mockResolvedValue(undefined) };
     mockEnrichmentJobService = { enqueue: jest.fn() };
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/signed-url'),
@@ -215,7 +215,7 @@ describe('DuplicateService', () => {
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
         MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockMembership },
+        { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
@@ -235,16 +235,16 @@ describe('DuplicateService', () => {
   // -------------------------------------------------------------------------
 
   describe('listDuplicateGroups', () => {
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([]);
 
       await service.listDuplicateGroups(makeQueryDto(), USER_ID, PERMS_MEDIA_READ);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_READ,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -589,16 +589,16 @@ describe('DuplicateService', () => {
       );
     });
 
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.duplicateGroup.findUnique as jest.Mock).mockResolvedValue(makeGroupRow());
 
       await service.getDuplicateGroup(GROUP_ID, USER_ID, PERMS_MEDIA_READ);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_READ,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -863,7 +863,7 @@ describe('DuplicateService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       setupGroup();
 
       await service.resolveDuplicateGroup(
@@ -873,11 +873,11 @@ describe('DuplicateService', () => {
         PERMS_MEDIA_WRITE_DELETE,
       );
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_WRITE_DELETE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -1081,7 +1081,7 @@ describe('DuplicateService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       const group = makeBulkGroup();
       setupGroups([group]);
 
@@ -1091,11 +1091,11 @@ describe('DuplicateService', () => {
         PERMS_MEDIA_WRITE_DELETE,
       );
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_WRITE_DELETE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -1444,16 +1444,16 @@ describe('DuplicateService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       setupGroupForDismiss();
 
       await service.dismissDuplicateGroup(GROUP_ID, USER_ID, PERMS_MEDIA_WRITE);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_WRITE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -1537,7 +1537,7 @@ describe('DuplicateService', () => {
   // -------------------------------------------------------------------------
 
   describe('rerunDuplicateDetection', () => {
-    it('calls assertCircleAccess with the item circleId and collaborator role', async () => {
+    it('calls requireOwnerRole with the item circleId and collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
         id: 'media-1',
         circleId: CIRCLE_ID,
@@ -1551,22 +1551,22 @@ describe('DuplicateService', () => {
 
       await service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_WRITE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
-    it('propagates a rejection from assertCircleAccess without enqueueing a job', async () => {
+    it('propagates a rejection from requireOwnerRole without enqueueing a job', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue({
         id: 'media-1',
         circleId: CIRCLE_ID,
         deletedAt: null,
         type: MediaType.photo,
       });
-      mockMembership.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('not a circle member'));
+      mockMembership.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('not a circle member'));
 
       await expect(service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE)).rejects.toThrow(
         ForbiddenException,

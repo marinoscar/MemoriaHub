@@ -29,7 +29,7 @@
  *   - getRunDetail: not found -> NotFoundException; itemStatusCounts built
  *     correctly from a groupBy result.
  *
- * No database required — PrismaService, CircleMembershipService,
+ * No database required — PrismaService, OwnerAccessService,
  * EnrichmentJobService, MediaThumbnailService, and ReviewRunSubjectRegistry
  * are all mocked; the service is constructed directly (no Nest
  * TestingModule), mirroring the preserved
@@ -52,7 +52,7 @@ import {
   subjectIdOf,
 } from './review-run.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -108,7 +108,7 @@ function makeStrategy(
 describe('ReviewRunService', () => {
   let service: ReviewRunService;
   let prisma: MockPrismaService;
-  let circleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>>;
+  let circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
   let thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'signThumbsBatched' | 'extractThumbKey'>>;
   let burstStrategy: ReturnType<typeof makeStrategy>;
@@ -119,7 +119,7 @@ describe('ReviewRunService', () => {
   beforeEach(() => {
     prisma = createMockPrismaService();
     circleMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
     enrichmentJobs = { enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }) };
     thumbnails = {
@@ -153,7 +153,7 @@ describe('ReviewRunService', () => {
 
     service = new ReviewRunService(
       prisma as unknown as PrismaService,
-      circleMembership as unknown as CircleMembershipService,
+      circleMembership as unknown as OwnerAccessService,
       enrichmentJobs as unknown as EnrichmentJobService,
       thumbnails as unknown as MediaThumbnailService,
       registry as unknown as ReviewRunSubjectRegistry,
@@ -198,7 +198,7 @@ describe('ReviewRunService', () => {
           perms: PERMS_MEDIA_WRITE,
         }),
       ).rejects.toThrow(BadRequestException);
-      expect(circleMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(circleMembership.requireOwnerRole).not.toHaveBeenCalled();
       expect(prisma.reviewRun.create).not.toHaveBeenCalled();
     });
 
@@ -339,11 +339,11 @@ describe('ReviewRunService', () => {
           perms: PERMS_MEDIA_WRITE,
         });
 
-        expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+        expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
           USER_ID,
           CIRCLE_ID,
           PERMS_MEDIA_WRITE,
-          CircleRole.collaborator,
+          'editor',
         );
       });
 
@@ -480,11 +480,11 @@ describe('ReviewRunService', () => {
 
       await service.cancelRun(RUN_ID, USER_ID, PERMS_MEDIA_WRITE);
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_WRITE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
   });
@@ -508,11 +508,11 @@ describe('ReviewRunService', () => {
 
       await service.getRunDetail(RUN_ID, USER_ID, ['media:read']);
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         ['media:read'],
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -581,11 +581,11 @@ describe('ReviewRunService', () => {
 
       await service.listRunItems(RUN_ID, query, USER_ID, ['media:read']);
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         ['media:read'],
-        CircleRole.viewer,
+        'viewer',
       );
     });
 

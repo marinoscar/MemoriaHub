@@ -240,7 +240,7 @@ describe('Share Feature Integration', () => {
 
       // Mock the target media item lookup
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(makeMediaItem());
-      // Mock circle membership lookup (assertCircleAccess checks circle.findUnique + circleMember.findUnique)
+      // Mock circle membership lookup (requireOwnerRole checks circle.findUnique + circleMember.findUnique)
       context.prismaMock.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID });
       context.prismaMock.circleMember.findUnique.mockResolvedValue(
         makeCircleMember(contributor.id, CIRCLE_ID, 'collaborator'),

@@ -2,7 +2,7 @@
  * Media Bulk Dashboard Integration (DB-gated)
  *
  * NOTE: These tests use useMockDatabase: true (mocked Prisma).
- * The CircleMembershipService uses prismaMock.circle.findUnique and
+ * The OwnerAccessService uses prismaMock.circle.findUnique and
  * prismaMock.circleMember.findUnique — these must be set up per test
  * so the circle access gate passes for contributor/viewer users.
  *
@@ -34,7 +34,7 @@ const BASE_MEDIA_ID_2 = '550e8400-e29b-41d4-a716-446655440002';
 const BASE_TAG_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 // ---------------------------------------------------------------------------
-// Helper: set up circle membership mocks so assertCircleAccess passes
+// Helper: set up circle membership mocks so requireOwnerRole passes
 // ---------------------------------------------------------------------------
 
 function setupCircleMocks(

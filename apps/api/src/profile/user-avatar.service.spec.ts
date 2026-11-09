@@ -10,7 +10,7 @@
  *     downstream code (renderAvatarJpeg, buildFaceCropThumbnail, sharp.extract)
  *     needs to actually decode/crop/resize real bytes.
  *   - PrismaService is the deep jest-mock-extended mock used across this repo.
- *   - StorageProviderResolver, CircleMembershipService, and UserSettingsService
+ *   - StorageProviderResolver, OwnerAccessService, and UserSettingsService
  *     are plain hand-rolled jest mocks (their surface used by this service is
  *     small and well-defined).
  *
@@ -54,7 +54,7 @@ import { CircleRole, Prisma, UserAvatarSource } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import { RequestUser } from '@marinoscar/platform-api/identity';
@@ -170,7 +170,7 @@ describe('UserAvatarService', () => {
     delete: jest.Mock;
     getBucket: jest.Mock;
   };
-  let circleMembership: { assertCircleAccess: jest.Mock };
+  let circleMembership: { requireOwnerRole: jest.Mock };
   let userSettings: { patchSettings: jest.Mock };
 
   beforeEach(async () => {
@@ -190,9 +190,9 @@ describe('UserAvatarService', () => {
     };
 
     circleMembership = {
-      assertCircleAccess: jest
+      requireOwnerRole: jest
         .fn()
-        .mockResolvedValue({ role: CircleRole.viewer, isSuperAdmin: false }),
+        .mockResolvedValue({ role: 'viewer', isSuperAdmin: false }),
     };
 
     userSettings = {
@@ -231,7 +231,7 @@ describe('UserAvatarService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } },
         { provide: StorageProviderResolver, useValue: resolver },
-        { provide: CircleMembershipService, useValue: circleMembership },
+        { provide: OwnerAccessService, useValue: circleMembership },
         { provide: UserSettingsService, useValue: userSettings },
       ],
     }).compile();
@@ -327,17 +327,17 @@ describe('UserAvatarService', () => {
         } as any),
       ).resolves.toBeDefined();
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         [],
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
     it('a non-member gets 404, NOT 403 (enumeration-resistant), with an actionable message', async () => {
       mockPrisma.person.findUnique.mockResolvedValue(personRow() as any);
-      circleMembership.assertCircleAccess.mockRejectedValueOnce(
+      circleMembership.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('You are not a member of this circle'),
       );
 
@@ -370,7 +370,7 @@ describe('UserAvatarService', () => {
       // No longer a bare UUID with zero context (the pre-fix message).
       await expect(promise).rejects.not.toThrow(`Person ${PERSON_ID} not found`);
 
-      expect(circleMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(circleMembership.requireOwnerRole).not.toHaveBeenCalled();
     });
 
     it('a nonexistent person id -> 404 without ever checking circle access, with the actionable message', async () => {
@@ -385,7 +385,7 @@ describe('UserAvatarService', () => {
         'This person is no longer available to link. They may have been removed, merged with another person, or you may no longer have access to their circle. Please pick again.',
       );
 
-      expect(circleMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(circleMembership.requireOwnerRole).not.toHaveBeenCalled();
     });
   });
 

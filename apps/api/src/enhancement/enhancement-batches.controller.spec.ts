@@ -7,7 +7,7 @@
  * math, cancel semantics) lives in the SERVICE's tallyBatches/serializeBatch/
  * cancelBatch/loadBatch. This file wires the REAL MediaEnhancementService
  * behind the controller (only its I/O boundaries — PrismaService and
- * CircleMembershipService — are mocked), mirroring the mocking strategy in
+ * OwnerAccessService — are mocked), mirroring the mocking strategy in
  * media-enhancement.service.spec.ts, so what's under test is the actual
  * controller -> service call path with real derivation logic.
  *
@@ -47,7 +47,7 @@ import { CircleRole, MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/c
 import { EnhancementBatchesController } from './enhancement-batches.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
@@ -112,16 +112,16 @@ function groupByRows(
 describe('EnhancementBatchesController', () => {
   let controller: EnhancementBatchesController;
   let mockPrisma: MockPrismaService;
-  let mockMembership: { assertCircleAccess: jest.Mock };
+  let mockMembership: { requireOwnerRole: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
     mockPrisma = createMockPrismaService();
     mockMembership = {
-      assertCircleAccess: jest
+      requireOwnerRole: jest
         .fn()
-        .mockResolvedValue({ role: CircleRole.collaborator, isSuperAdmin: false }),
+        .mockResolvedValue({ role: 'editor', isSuperAdmin: false }),
     };
 
     // listBatches runs findMany + count inside a `$transaction([...])` array
@@ -137,7 +137,7 @@ describe('EnhancementBatchesController', () => {
         MediaEnhancementService,
         { provide: PrismaService, useValue: mockPrisma },
         defaultOrgIdProvider,
-        { provide: CircleMembershipService, useValue: mockMembership },
+        { provide: OwnerAccessService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: {} },
         { provide: StorageProcessingRecoveryService, useValue: {} },
         { provide: ThumbnailPruneService, useValue: {} },
@@ -355,11 +355,11 @@ describe('EnhancementBatchesController', () => {
     it('asserts circle access at the viewer level', async () => {
       await controller.get(BATCH_ID, USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.viewer,
+        'viewer',
       );
     });
   });
@@ -396,11 +396,11 @@ describe('EnhancementBatchesController', () => {
 
       await controller.cancel(BATCH_ID, USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -488,7 +488,7 @@ describe('EnhancementBatchesController', () => {
     });
 
     it('throws 403 for a caller lacking the collaborator role', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValue(
+      mockMembership.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('viewer cannot write'),
       );
 
@@ -508,12 +508,12 @@ describe('EnhancementBatchesController', () => {
     // -------------------------------------------------------------------------
 
     it('a viewer (below collaborator) can GET the batch but gets a 403 on cancel', async () => {
-      mockMembership.assertCircleAccess.mockImplementation(
-        async (_userId: string, _circleId: string, _perms: string[], role: CircleRole) => {
-          if (role === CircleRole.collaborator) {
+      mockMembership.requireOwnerRole.mockImplementation(
+        async (_userId: string, _circleId: string, _perms: string[], role: OwnerRole) => {
+          if (role === 'editor') {
             throw new ForbiddenException('requires collaborator role');
           }
-          return { role: CircleRole.viewer, isSuperAdmin: false };
+          return { role: 'viewer', isSuperAdmin: false };
         },
       );
       (mockPrisma.mediaEnhancement.groupBy as jest.Mock).mockResolvedValue(
@@ -547,11 +547,11 @@ describe('EnhancementBatchesController', () => {
     it('asserts circle access at the viewer level', async () => {
       await controller.list(makeQuery() as any, USER);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER.id,
         CIRCLE_ID,
         USER.permissions,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 

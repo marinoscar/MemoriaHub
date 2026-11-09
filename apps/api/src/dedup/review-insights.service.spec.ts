@@ -2,7 +2,7 @@
  * Unit tests for ReviewInsightsService.
  *
  * Covers:
- *  - getReviewInsights: RBAC (assertCircleAccess called with viewer role)
+ *  - getReviewInsights: RBAC (requireOwnerRole called with viewer role)
  *  - Aggregate math: identified = sum of all status counts; pending/resolved/
  *    dismissed pulled from the matching status row
  *  - archivedGroups/trashedGroups + itemsKept/itemsArchived/itemsDeleted
@@ -16,7 +16,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ReviewInsightsService } from './review-insights.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { CircleRole } from '@prisma/client';
 
@@ -52,17 +52,17 @@ function actionRow(
 describe('ReviewInsightsService', () => {
   let service: ReviewInsightsService;
   let mockPrisma: MockPrismaService;
-  let mockMembership: { assertCircleAccess: jest.Mock };
+  let mockMembership: { requireOwnerRole: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockMembership = { assertCircleAccess: jest.fn().mockResolvedValue(undefined) };
+    mockMembership = { requireOwnerRole: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ReviewInsightsService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockMembership },
+        { provide: OwnerAccessService, useValue: mockMembership },
       ],
     }).compile();
 
@@ -93,21 +93,21 @@ describe('ReviewInsightsService', () => {
   // -------------------------------------------------------------------------
 
   describe('RBAC', () => {
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       mockGroupByResults({});
 
       await service.getReviewInsights(CIRCLE_ID, USER_ID, PERMS_MEDIA_READ);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_READ,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
-    it('propagates a rejection from assertCircleAccess without querying groupBy', async () => {
-      mockMembership.assertCircleAccess.mockRejectedValueOnce(new Error('not a member'));
+    it('propagates a rejection from requireOwnerRole without querying groupBy', async () => {
+      mockMembership.requireOwnerRole.mockRejectedValueOnce(new Error('not a member'));
 
       await expect(
         service.getReviewInsights(CIRCLE_ID, USER_ID, PERMS_MEDIA_READ),
