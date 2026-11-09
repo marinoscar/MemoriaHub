@@ -18,6 +18,9 @@ export interface MediaShareDialogProps {
 }
 
 export function MediaShareDialog({ open, onClose, target, title }: MediaShareDialogProps) {
+  // Mounted only while open: the slice's dialog runs its sharing hooks (which need the platform
+  // host) as soon as it mounts, and a page that only MIGHT share (an album page) should not.
+  if (!open) return null;
   return (
     <ShareDialog
       open={open}
