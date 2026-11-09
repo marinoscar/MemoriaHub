@@ -1,7 +1,8 @@
 /**
  * Unit tests for InsightsRefreshTask.
  *
- * Verifies the time-gate logic: enqueueRefresh() is only called when the last
+ * Verifies the time-gate logic: the `storage_insights` job is only enqueued
+ * (through `enqueueHousekeepingJob`, RETRO-C9) when the last
  * snapshot is stale (or absent) and no refresh is already in flight.
  * Tests the configurable interval, the default of 4 hours, and the early-exit
  * when a pending/running job already exists.
@@ -11,8 +12,9 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MhLegacyJobStatus, JobReason } from '@prisma/client';
+import { JobsService } from '@marinoscar/platform-api/jobs';
 import { InsightsRefreshTask } from './insights-refresh.task';
+import { PrismaService } from '../prisma/prisma.service';
 import { InsightsService } from './insights.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
@@ -43,15 +45,19 @@ function makeRefreshState(state: 'idle' | 'pending' | 'running' | 'failed') {
 
 describe('InsightsRefreshTask', () => {
   let task: InsightsRefreshTask;
-  let mockInsights: jest.Mocked<Pick<InsightsService, 'getLatest' | 'enqueueRefresh' | 'getRefreshState'>>;
+  let mockInsights: jest.Mocked<Pick<InsightsService, 'getLatest' | 'getRefreshState'>>;
+  let mockJobs: { enqueue: jest.Mock };
+  let mockPrisma: { job: { findFirst: jest.Mock } };
   let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
 
   beforeEach(async () => {
     mockInsights = {
       getLatest: jest.fn(),
-      enqueueRefresh: jest.fn().mockResolvedValue({ id: 'job-new', status: MhLegacyJobStatus.pending }),
       getRefreshState: jest.fn().mockResolvedValue(makeRefreshState('idle')),
     };
+
+    mockJobs = { enqueue: jest.fn().mockResolvedValue({ id: 'job-new', status: 'pending' }) };
+    mockPrisma = { job: { findFirst: jest.fn().mockResolvedValue(null) } };
 
     mockSettings = {
       getSettingValue: jest.fn().mockResolvedValue(4),
@@ -62,6 +68,8 @@ describe('InsightsRefreshTask', () => {
         InsightsRefreshTask,
         { provide: InsightsService, useValue: mockInsights },
         { provide: AppSystemSettingsService, useValue: mockSettings },
+        { provide: JobsService, useValue: mockJobs },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
@@ -77,20 +85,20 @@ describe('InsightsRefreshTask', () => {
   // =========================================================================
 
   describe('when a refresh is already pending or running', () => {
-    it('does NOT call enqueueRefresh when state is pending', async () => {
+    it('does NOT call the enqueue when state is pending', async () => {
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('pending'));
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).not.toHaveBeenCalled();
+      expect(mockJobs.enqueue).not.toHaveBeenCalled();
     });
 
-    it('does NOT call enqueueRefresh when state is running', async () => {
+    it('does NOT call the enqueue when state is running', async () => {
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('running'));
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).not.toHaveBeenCalled();
+      expect(mockJobs.enqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -99,7 +107,7 @@ describe('InsightsRefreshTask', () => {
   // =========================================================================
 
   describe('when last snapshot is fresh', () => {
-    it('does NOT call enqueueRefresh when computedAt is within the configured interval', async () => {
+    it('does NOT call the enqueue when computedAt is within the configured interval', async () => {
       // 30 minutes ago — well within 4 hours
       const freshComputedAt = new Date(Date.now() - 30 * 60 * 1000);
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
@@ -108,10 +116,10 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).not.toHaveBeenCalled();
+      expect(mockJobs.enqueue).not.toHaveBeenCalled();
     });
 
-    it('does NOT call enqueueRefresh when computedAt is exactly at the threshold minus 1 ms', async () => {
+    it('does NOT call the enqueue when computedAt is exactly at the threshold minus 1 ms', async () => {
       const marginMs = 4 * 3_600_000 - 100;
       const recentComputedAt = new Date(Date.now() - marginMs);
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
@@ -120,7 +128,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).not.toHaveBeenCalled();
+      expect(mockJobs.enqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -129,7 +137,7 @@ describe('InsightsRefreshTask', () => {
   // =========================================================================
 
   describe('when last snapshot is stale', () => {
-    it('calls enqueueRefresh when computedAt exceeds the configured interval (5h ago, 4h interval)', async () => {
+    it('calls the enqueue when computedAt exceeds the configured interval (5h ago, 4h interval)', async () => {
       const staleComputedAt = new Date(Date.now() - 5 * 3_600_000);
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
       mockInsights.getLatest.mockResolvedValue(makeSnapshot(staleComputedAt) as any);
@@ -137,7 +145,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
     });
 
     it('enqueues with backfill reason and low priority (100)', async () => {
@@ -147,7 +155,12 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).toHaveBeenCalledWith(JobReason.backfill, 100);
+      expect(mockJobs.enqueue).toHaveBeenCalledWith({
+        type: 'storage_insights',
+        reason: 'backfill',
+        orgId: null,
+        priority: 100,
+      });
     });
 
     it('respects a custom interval: 2h interval with snapshot 3h old → enqueues', async () => {
@@ -158,7 +171,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
     });
 
     it('respects a custom interval: 8h interval with snapshot 5h old → skips', async () => {
@@ -169,7 +182,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).not.toHaveBeenCalled();
+      expect(mockJobs.enqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -178,16 +191,16 @@ describe('InsightsRefreshTask', () => {
   // =========================================================================
 
   describe('when no snapshot has ever been computed', () => {
-    it('calls enqueueRefresh when getLatest returns null', async () => {
+    it('calls the enqueue when getLatest returns null', async () => {
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
       mockInsights.getLatest.mockResolvedValue(null);
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
     });
 
-    it('calls enqueueRefresh when latest snapshot has no computedAt', async () => {
+    it('calls the enqueue when latest snapshot has no computedAt', async () => {
       const computingRow = makeSnapshot(null as unknown as Date);
       computingRow.computedAt = null as unknown as Date;
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
@@ -195,7 +208,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -212,7 +225,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).not.toHaveBeenCalled();
+      expect(mockJobs.enqueue).not.toHaveBeenCalled();
     });
 
     it('uses 4 hours when getSettingValue returns null', async () => {
@@ -223,7 +236,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockInsights.enqueueRefresh).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
     });
 
     it('reads the interval from storage.insights.refreshIntervalHours', async () => {
@@ -243,10 +256,10 @@ describe('InsightsRefreshTask', () => {
   // =========================================================================
 
   describe('error handling', () => {
-    it('does not throw when enqueueRefresh fails (errors are swallowed)', async () => {
+    it('does not throw when the enqueue fails (errors are swallowed)', async () => {
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
       mockInsights.getLatest.mockResolvedValue(null);
-      mockInsights.enqueueRefresh.mockRejectedValue(new Error('enqueue error'));
+      mockJobs.enqueue.mockRejectedValue(new Error('enqueue error'));
 
       await expect(task.handleScheduledRefresh()).resolves.not.toThrow();
     });
