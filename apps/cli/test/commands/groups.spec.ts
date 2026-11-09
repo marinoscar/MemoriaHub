@@ -1,5 +1,5 @@
 /**
- * test/commands/circles.spec.ts
+ * test/commands/groups.spec.ts (formerly circles.spec.ts; RETRO-I6, #588)
  *
  * Unit tests for the circles command validation logic.
  * Tests that 'circles use' validates IDs against the server list and saves config,
@@ -16,10 +16,10 @@ import type { Circle } from '../../src/api.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** The validation logic extracted from circles use: find a circle by id. */
-function resolveCircle(circles: Circle[], id: string): Circle | undefined {
-  return circles.find((c) => c.id === id);
-}
+import { CIRCLES_DEPRECATION_NOTICE, circlesAliasCommand, groupsCommand, resolveOwnerScopeArg } from '../../src/commands/groups.js';
+
+/** `groups use` resolves its argument with `resolveOwnerScopeArg` (RETRO-I6, #588). */
+const resolveCircle = resolveOwnerScopeArg;
 
 const MOCK_CIRCLES: Circle[] = [
   { id: 'circle-001', name: 'Family',    isPersonal: false },
@@ -144,3 +144,18 @@ describe('circles list — display logic', () => {
 // Suppress unused import warning for jest
 // ---------------------------------------------------------------------------
 void jest;
+
+describe('groups use me / the circles alias (RETRO-I6, #588)', () => {
+  it('"me" resolves to the personal library', () => {
+    expect(resolveOwnerScopeArg(MOCK_CIRCLES, 'me')?.id).toBe('circle-002');
+    expect(resolveOwnerScopeArg(MOCK_CIRCLES.filter((c) => !c.isPersonal), 'me')).toBeUndefined();
+  });
+
+  it('keeps `circles` as an alias with the same subcommands and a deprecation notice', async () => {
+    expect(groupsCommand().commands.map((c) => c.name())).toEqual(['list', 'use']);
+    const alias = circlesAliasCommand();
+    expect(alias.name()).toBe('circles');
+    expect(alias.commands.map((c) => c.name())).toEqual(['list', 'use']);
+    expect(CIRCLES_DEPRECATION_NOTICE).toMatch(/memoriahub groups/);
+  });
+});

@@ -5,7 +5,7 @@
 │  Choose an entry. Esc goes up one level.                                                         │
 │                                                                                                  │
 │  ❯ 1. Manage folders                                                                             │
-│    2. Manage circles                                                                             │
+│    2. Manage groups                                                                              │
 │    3. App settings                                                                               │
 │    4. Login / Change server                                                                      │
 │    5. Android app (build, publish, releases)                                                     │

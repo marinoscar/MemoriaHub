@@ -62,7 +62,7 @@ const FIXED: readonly [route: string, label: string, name: RouteName][] = [
   ['date-infer-diagnose', 'Diagnose (report only)', 'DateInferDiagnoseRoute'],
   ['date-infer-apply', 'Infer & write dates', 'DateInferApplyRoute'],
   ['folders', 'Manage folders', 'FoldersRoute'],
-  ['circles', 'Manage circles', 'CirclesRoute'],
+  ['circles', 'Manage groups', 'CirclesRoute'],
   ['app-settings', 'App settings', 'AppSettingsRoute'],
   ['factory-reset', 'Factory reset (delete all local data)', 'FactoryResetRoute'],
   ['help', 'Help', 'HelpRoute'],

@@ -29,7 +29,7 @@ import { getAppDb, resetAppDb } from './app-state.js';
 import { BackupDashboard } from './BackupDashboard.js';
 import { BackupSettings } from './BackupSettings.js';
 import { BackupVerify } from './BackupVerify.js';
-import { CircleManager } from './CircleManager.js';
+import { GroupManager } from './GroupManager.js';
 import { ConvertFileInput } from './ConvertFileInput.js';
 import { ConvertScreen } from './ConvertScreen.js';
 import { DateInferenceScreen } from './DateInferenceScreen.js';
@@ -480,7 +480,7 @@ export function CirclesRoute({ onDone }: TuiScreenProps): ReactElement {
   return (
     <RequireConfig config={config} onDone={onDone}>
       {(cfg) => (
-        <CircleManager
+        <GroupManager
           config={cfg}
           onConfigChange={(next) => {
             setConfig(next);

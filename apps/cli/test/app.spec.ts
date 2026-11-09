@@ -8,14 +8,15 @@ import { APP_CLI_OPTIONS, APP_COMMAND_FACTORIES, APP_STREAM_PATHS, APP_UPDATE_NO
 // platform built-ins now (`login`) or routed to the 1.3 implementation (`node`).
 const INVENTORY = [
   'import', 'sync', 'scan', 'organize', 'screenshots', 'convert', 'date-infer', 'status', 'folders',
-  'circles', 'retry', 'settings', 'backup', 'jobs', 'reports', 'workflow', 'android', 'menu',
+  'groups', 'circles', 'retry', 'settings', 'backup', 'jobs', 'reports', 'workflow', 'android', 'menu',
 ];
 
 const SUBCOMMANDS: Record<string, string[]> = {
   scan: ['list', 'report', 'export'],
   'date-infer': ['diagnose', 'apply'],
   folders: ['add', 'list', 'remove', 'enable', 'disable'],
-  circles: ['list', 'use'],
+  groups: ['list', 'use'],
+  circles: ['list', 'use'], // the hidden alias of `groups` (RETRO-I6, #588)
   settings: ['list', 'get', 'set', 'reset'],
   backup: ['init', 'run', 'status', 'schedule', 'set-rate', 'verify', 'prune', 'restore'],
   reports: ['list', 'show'],
@@ -53,8 +54,8 @@ describe('APP_CLI_OPTIONS', () => {
     expect(program.commands.find((c) => c.name() === 'jobs')!.aliases()).toContain('queue');
   });
 
-  it('has one factory per inventory command (android is the platform group since RETRO-D5)', () => {
-    expect(APP_COMMAND_FACTORIES.map((f) => f().name())).toEqual(INVENTORY.filter((n) => n !== 'node' && n !== 'android'));
+  it('has one factory per inventory command (android is the platform group since RETRO-D5; circles is the hidden groups alias since RETRO-I6)', () => {
+    expect(APP_COMMAND_FACTORIES.map((f) => f().name())).toEqual(INVENTORY.filter((n) => n !== 'node' && n !== 'android' && n !== 'circles'));
   });
 
   it('adds the MemoriaHub deploy steps in the right place', () => {

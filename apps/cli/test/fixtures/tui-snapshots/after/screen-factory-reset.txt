@@ -10,6 +10,9 @@
 │                                                                                                  │
 │  This action is irreversible. You will need to log in again.                                     │
 │                                                                                                  │
+│  Nothing on the server is deleted. To delete your server data, use Settings > Danger Zone in     │
+│  the web app.                                                                                    │
+│                                                                                                  │
 │  Type y then Enter to confirm, or Esc to cancel: n                                               │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
