@@ -15,6 +15,8 @@
 //     registry rejects ':' in a tag name, and renaming the `Admin: X` tags would
 //     change every client generated from the document, so the taxonomy is applied
 //     as a pass over the finished document (PLATFORM-ADOPTION-SHIM(#597));
+//   * the owner-scope parameters (`ownerGroupId`, `scope=me`, deprecated
+//     `circleId`), rewritten at runtime by an interceptor (`./owner-scope-params`);
 //   * the per-circle role clause of the "Requires" line (`@Auth({ circleRole })`),
 //     which the platform's RBAC pass does not know about.
 //
@@ -34,6 +36,7 @@ import type { MutableDocument, PlatformOpenApiOptions } from '@marinoscar/platfo
 import { RBAC_EXTENSION_KEY, type RbacExtension } from '@marinoscar/platform-api/identity';
 import { buildApiDescription } from './description';
 import { OPENAPI_TAGS, OPENAPI_TAG_GROUPS } from './tags';
+import { applyOwnerScopeParams } from './owner-scope-params';
 import { resolveApiVersion } from './version';
 
 export const SECURITY_SCHEMES = {
@@ -67,6 +70,7 @@ export function enrichAppDocument(document: OpenAPIObject): OpenAPIObject {
   const mutable = document as unknown as MutableDocument;
   applyNodeCredentialScheme(document, mutable);
   applyCircleRoleRequirements(mutable);
+  applyOwnerScopeParams(mutable);
   applyAppTags(mutable);
   return document;
 }
