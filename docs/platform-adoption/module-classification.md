@@ -45,7 +45,7 @@ Drift for mapped modules comes from the slice view; `n/a (no slice)` means the m
 |---|---|---|---|---|---|---|---|
 | `ai` | 10 | 0% / +12/-76 | backport | ai | E1 (#595), E2 (#601), E3 (#605), C4 (#590) | [EAB#1082](https://github.com/marinoscar/EnterpriseAppBase/issues/1082) (`enhanceImage`, `transcribeAudio`, `forSystem`); `embedText` already in the slice | Workaround: image edit and transcription ride the app-side AI feature registry (E2) until the seam ships; `ai_provider_credentials` re-encrypted into platform deployment keys (E3). E1 (#595): the slice is mounted (`platform/ai/ai.config.ts`), no provider SDK is imported or declared in `apps/`, and the call sites run on the legacy adapter `src/ai-port/` over the platform provider adapters until E2. |
 | `allowlist` | 8 | 28.6% / +10/-36 | noise | identity (`allowlist`) | B2 (#611) | - | Package covers it; delete on adoption. |
-| `android-app` | 22 | n/a | noise | android-app | D5 (#586) | - | EAB harvested this slice from MemoriaHub; remaining diff is identity and ordering. |
+| `android-app` | 22 | n/a | noise | android-app | D5 (#586) | - | **Done (RETRO-D5):** deleted; `AndroidAppModule.forRoot` in `src/platform/android-app/`, Media Sync registered as the device source (`media-sync/media-sync.device-source.ts`), its two Doctor checks moved to `media-sync/doctor/`; the legacy releases are copied by `android:migrate-legacy-releases`. Seam gap: reads through the active driver (local-exceptions). |
 | `auth` | 31 | 7.7% / +504/-1174 | noise | identity (`auth`) | B2 (#611) | - | Google OAuth, JWT, refresh rotation. `returnTo` state already in the slice. |
 | `burst` | 16 | n/a (no slice) | domain | `@marinoscar/memoriahub-api` (burst) | J10 (#624) (jobs: C5 (#594)) | - | Burst detection and review groups. |
 | `circles` | 14 | n/a (no slice) | domain | sharing (groups) after I; `@marinoscar/memoriahub-api` until then | I1 (#562), I2 (#569), I3 (#573), I5 (#583) | - | Stays app-owned until Epic I (decision 2). Circle roles map to group roles; `CircleInvite` becomes `GroupInvite` (needs [EAB#1078](https://github.com/marinoscar/EnterpriseAppBase/issues/1078)). |
@@ -169,7 +169,7 @@ Platform slices MemoriaHub mounts without an app module they replace (epic RETRO
 
 | Module | Files | Drift | Category | Target | Plan | Upstream (EAB) | Notes |
 |---|---|---|---|---|---|---|---|
-| `android` | 18 | n/a | domain | `platform-cli` android group | D5 (#586) | - | `memoriahub android *` becomes `androidCommand`; build and keystore tooling is the platform one. |
+| `android` | 18 | n/a | domain | `platform-cli` android group | D5 (#586) | - | **Done (RETRO-D5):** deleted; `memoriahub android *` is `androidCommand` (`extensions/android.ts`, three 1.4 flags kept), the TUI screen is `androidTuiScreen`. |
 | `backup` | 16 | n/a | domain | `@marinoscar/memoriahub-api` (cli) | F3 (#577), C10 (#616) | - | Local Media Backup client; reaches `nod_` routes via [EAB#1076](https://github.com/marinoscar/EnterpriseAppBase/issues/1076). |
 | `commands` | 20 | 0% / +1435/-562 | divergence | `createCli` `extraCommands` | F3 (#577) | - | Command registration through `translateLegacyArgs`. |
 | `convert` | 5 | n/a | domain | `extraCommands` | F3 (#577) | - |  |

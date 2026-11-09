@@ -22,7 +22,7 @@ import {
   type MediaSyncConfigResult,
   type MediaSyncDevice,
 } from '../../../services/mediaSync';
-import { mediaSyncDeepLink, type MediaSyncDeepLinkAction } from '../../../utils/androidIdentity';
+import { mediaSyncDeepLink, type MediaSyncDeepLinkAction } from '../../../platform/android-app/identity';
 import { useIsMounted } from '../../../hooks/useIsMounted';
 
 export const COMMAND_APPLIES_LATER =

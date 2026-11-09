@@ -29,7 +29,7 @@ import {
 } from '../../../services/mediaSync';
 import { useDeviceDiagnostics } from '../../../hooks/useMediaSync';
 import { useIsMounted } from '../../../hooks/useIsMounted';
-import { mediaSyncDeepLink } from '../../../utils/androidIdentity';
+import { mediaSyncDeepLink } from '../../../platform/android-app/identity';
 import { DiagnosticReportViewer } from './DiagnosticReportViewer';
 import { formatDateTime } from './format';
 

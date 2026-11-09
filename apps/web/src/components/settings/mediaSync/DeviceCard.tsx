@@ -42,7 +42,7 @@ import {
   type MediaSyncDevice,
 } from '../../../services/mediaSync';
 import { ANDROID_APP_SETTINGS_PATH } from '../../../services/androidApp';
-import { mediaSyncDeepLink } from '../../../utils/androidIdentity';
+import { mediaSyncDeepLink } from '../../../platform/android-app/identity';
 import { formatRelativeTime } from '../../../utils/runFormat';
 import { useDeviceRuns } from '../../../hooks/useMediaSync';
 import { useIsMounted } from '../../../hooks/useIsMounted';

@@ -3,16 +3,14 @@
  * then NAVIGATES to it: a real navigation, not a fetch or a blob, is what
  * lets Chrome and the TWA on Android download the file natively and hand it
  * to the package installer. The link is minted per click because it expires
- * after ten minutes.
+ * after ten minutes. The link comes from the platform android-app client
+ * (RETRO-D5, #586) over the platform host.
  */
 import { useState } from 'react';
 import { Alert, Box, Button, CircularProgress } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
-import {
-  createDownloadLink,
-  downloadNavigator,
-  type PublicRelease,
-} from '../../../services/androidApp';
+import { useAndroidAppClient } from '@marinoscar/platform-web/android-app/headless';
+import { downloadNavigator, type PublicRelease } from '../../../services/androidApp';
 import { mediaSyncErrorMessage } from '../../../services/mediaSync';
 import { useIsMounted } from '../../../hooks/useIsMounted';
 
@@ -30,12 +28,13 @@ export function DownloadApkButton({ release, emphasized = false, quiet = false }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useIsMounted();
+  const client = useAndroidAppClient();
 
   const download = async () => {
     setBusy(true);
     setError(null);
     try {
-      const link = await createDownloadLink(release.id);
+      const link = await client.downloadLink(release.id);
       downloadNavigator.assign(link.url);
     } catch (err) {
       if (isMounted()) setError(mediaSyncErrorMessage(err, 'Could not start the download. Try again.'));

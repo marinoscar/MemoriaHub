@@ -422,7 +422,7 @@ function buildThumbnailRegen(): ThumbnailRegenHandler {
     },
   };
   const recovery = {
-    reprocessObjectNow: async (object: { id: string }) => {
+    reprocessNow: async (object: { id: string }) => {
       world.writes.set(`reprocessed:${object.id}`, true);
     },
   };

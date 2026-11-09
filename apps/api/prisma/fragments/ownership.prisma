@@ -1,0 +1,73 @@
+// =============================================================================
+// Content ownership back-relations (RETRO-I2, #569)
+// =============================================================================
+//
+// Every MemoriaHub content table carries `org_id`, `owner_group_id` and
+// `owner_user_id` (exactly one owner: CHECK num_nonnulls(...) = 1, raw SQL), with
+// FORCE ROW LEVEL SECURITY and a `<table>_org_isolation` policy (migration
+// `20261108200000_i2_circles_to_groups_ownership`, listed in platform.lock
+// `rlsPolicies`). A group-owned row reaches its group through the composite
+// key (owner_group_id, org_id) -> groups (id, org_id) ON DELETE RESTRICT.
+// `Group`, `Organization` and `User` are `@extensible`: back-relations only.
+// The mapping: docs/platform-adoption/circles-to-groups.md.
+// =============================================================================
+
+extend model Group {
+  ownedMediaItems             MediaItem[]             @relation("MediaItemOwnerGroup")
+  ownedMediaItemEmbeddings    MediaItemEmbedding[]    @relation("MediaItemEmbeddingOwnerGroup")
+  ownedAlbums                 Album[]                 @relation("AlbumOwnerGroup")
+  ownedTags                   Tag[]                   @relation("TagOwnerGroup")
+  ownedPersons                Person[]                @relation("PersonOwnerGroup")
+  ownedFaces                  Face[]                  @relation("FaceOwnerGroup")
+  ownedMemorys                Memory[]                @relation("MemoryOwnerGroup")
+  ownedBurstGroups            BurstGroup[]            @relation("BurstGroupOwnerGroup")
+  ownedDuplicateGroups        DuplicateGroup[]        @relation("DuplicateGroupOwnerGroup")
+  ownedLocationSuggestions    LocationSuggestion[]    @relation("LocationSuggestionOwnerGroup")
+  ownedMediaEnhancements      MediaEnhancement[]      @relation("MediaEnhancementOwnerGroup")
+  ownedMediaEnhancementBatchs MediaEnhancementBatch[] @relation("MediaEnhancementBatchOwnerGroup")
+  ownedMediaMetadataStatuss   MediaMetadataStatus[]   @relation("MediaMetadataStatusOwnerGroup")
+  ownedMediaGeocodeStatuss    MediaGeocodeStatus[]    @relation("MediaGeocodeStatusOwnerGroup")
+  ownedMediaTagStatuss        MediaTagStatus[]        @relation("MediaTagStatusOwnerGroup")
+  ownedMediaTranscripts       MediaTranscript[]       @relation("MediaTranscriptOwnerGroup")
+  ownedReviewRuns             ReviewRun[]             @relation("ReviewRunOwnerGroup")
+  ownedTrashEmptyRuns         TrashEmptyRun[]         @relation("TrashEmptyRunOwnerGroup")
+  ownedWorkflows              Workflow[]              @relation("WorkflowOwnerGroup")
+  ownedWorkflowRuns           WorkflowRun[]           @relation("WorkflowRunOwnerGroup")
+}
+
+extend model Organization {
+  mediaItems             MediaItem[]             @relation("MediaItemOrg")
+  mediaItemEmbeddings    MediaItemEmbedding[]    @relation("MediaItemEmbeddingOrg")
+  albums                 Album[]                 @relation("AlbumOrg")
+  tags                   Tag[]                   @relation("TagOrg")
+  persons                Person[]                @relation("PersonOrg")
+  faces                  Face[]                  @relation("FaceOrg")
+  memorys                Memory[]                @relation("MemoryOrg")
+  burstGroups            BurstGroup[]            @relation("BurstGroupOrg")
+  duplicateGroups        DuplicateGroup[]        @relation("DuplicateGroupOrg")
+  locationSuggestions    LocationSuggestion[]    @relation("LocationSuggestionOrg")
+  mediaEnhancements      MediaEnhancement[]      @relation("MediaEnhancementOrg")
+  mediaEnhancementBatchs MediaEnhancementBatch[] @relation("MediaEnhancementBatchOrg")
+  mediaMetadataStatuss   MediaMetadataStatus[]   @relation("MediaMetadataStatusOrg")
+  mediaGeocodeStatuss    MediaGeocodeStatus[]    @relation("MediaGeocodeStatusOrg")
+  mediaTagStatuss        MediaTagStatus[]        @relation("MediaTagStatusOrg")
+  mediaTranscripts       MediaTranscript[]       @relation("MediaTranscriptOrg")
+  reviewRuns             ReviewRun[]             @relation("ReviewRunOrg")
+  trashEmptyRuns         TrashEmptyRun[]         @relation("TrashEmptyRunOrg")
+  workflows              Workflow[]              @relation("WorkflowOrg")
+  workflowRuns           WorkflowRun[]           @relation("WorkflowRunOrg")
+}
+
+extend model User {
+  ownedMediaItems             MediaItem[]             @relation("MediaItemOwnerUser")
+  ownedAlbums                 Album[]                 @relation("AlbumOwnerUser")
+  ownedTags                   Tag[]                   @relation("TagOwnerUser")
+  ownedPersons                Person[]                @relation("PersonOwnerUser")
+  ownedFaces                  Face[]                  @relation("FaceOwnerUser")
+  ownedMemorys                Memory[]                @relation("MemoryOwnerUser")
+  ownedMediaItemEmbeddings    MediaItemEmbedding[]    @relation("MediaItemEmbeddingOwnerUser")
+  ownedMediaGeocodeStatuss    MediaGeocodeStatus[]    @relation("MediaGeocodeStatusOwnerUser")
+  ownedMediaMetadataStatuss   MediaMetadataStatus[]   @relation("MediaMetadataStatusOwnerUser")
+  ownedMediaTagStatuss        MediaTagStatus[]        @relation("MediaTagStatusOwnerUser")
+  ownedMediaTranscripts       MediaTranscript[]       @relation("MediaTranscriptOwnerUser")
+}

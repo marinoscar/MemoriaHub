@@ -186,7 +186,9 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
     // Broadcasts pages are the platform notifications slice's packaged pages.
     // 18 since RETRO-D1 (#563): the Storage Providers page is the storage
     // slice's packaged StorageConfigPage.
-    // 17 since RETRO-E4 (#607): the AI page is the AI slice's packaged AiConfigPage.
-    expect(adopters.length).toBeGreaterThanOrEqual(17);
+    // 17 since RETRO-D5 (#586): the Android admin page is the android-app
+    // slice's packaged AndroidAppPage.
+    // 16 since RETRO-E4 (#607): the AI page is the AI slice's packaged AiConfigPage.
+    expect(adopters.length).toBeGreaterThanOrEqual(16);
   });
 });

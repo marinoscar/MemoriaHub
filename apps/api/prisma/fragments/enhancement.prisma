@@ -34,6 +34,15 @@ model MediaEnhancement {
   id          String                    @id @default(uuid()) @db.Uuid
   mediaItemId String                    @map("media_item_id") @db.Uuid
   circleId    String                    @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  // PLATFORM-ADOPTION-SHIM(#573): the FK owner_user_id -> users(id) ON DELETE RESTRICT exists in the
+  // database but is not modelled: the user-owned registry cannot mix a Restrict key with this
+  // model's SetNull actor keys (docs/platform-adoption/local-exceptions.md).
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   status      MediaEnhancementStatus    @default(pending)
   decision    MediaEnhancementDecision?
   params      Json?                     @db.JsonB
@@ -78,10 +87,16 @@ model MediaEnhancement {
   createdBy       User?                  @relation("MediaEnhancementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   batch           MediaEnhancementBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("MediaEnhancementOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("MediaEnhancementOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+
   @@index([mediaItemId, status])
   @@index([circleId, status])
   @@index([status, updatedAt])
   @@index([batchId])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("media_enhancements")
 }
 
@@ -96,6 +111,15 @@ model MediaEnhancement {
 model MediaEnhancementBatch {
   id             String    @id @default(uuid()) @db.Uuid
   circleId       String    @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  // PLATFORM-ADOPTION-SHIM(#573): the FK owner_user_id -> users(id) ON DELETE RESTRICT exists in the
+  // database but is not modelled: the user-owned registry cannot mix a Restrict key with this
+  // model's SetNull actor keys (docs/platform-adoption/local-exceptions.md).
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   requestedCount Int       @map("requested_count")
   queuedCount    Int       @default(0) @map("queued_count")
   skipped        Json?     @db.JsonB
@@ -112,6 +136,12 @@ model MediaEnhancementBatch {
   createdBy    User?              @relation("MediaEnhancementBatchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   enhancements MediaEnhancement[]
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("MediaEnhancementBatchOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("MediaEnhancementBatchOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+
   @@index([circleId, createdAt])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("media_enhancement_batches")
 }

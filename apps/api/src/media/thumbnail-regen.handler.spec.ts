@@ -4,9 +4,9 @@
  * Verifies (a native platform JobHandler, RETRO-C3 #585): handler type, label
  * and profile; onModuleInit registers with the platform registry;
  * process() throws when the job is not about a media item, gracefully skips (no throw,
- * no reprocessObjectNow call) when the item is missing/deleted/has no
+ * no reprocessNow call) when the item is missing/deleted/has no
  * storageObject, and on the happy path calls
- * StorageProcessingRecoveryService.reprocessObjectNow with the exact
+ * ObjectReprocessService.reprocessNow with the exact
  * storageObject resolved from Prisma.
  *
  * No database required — all dependencies are fully mocked.
@@ -15,7 +15,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JobHandlerRegistry, JobScope, type Job } from '@marinoscar/platform-api/jobs';
 import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import {
   createMockPrismaService,
@@ -70,7 +70,7 @@ describe('ThumbnailRegenHandler', () => {
   let handler: ThumbnailRegenHandler;
   let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let mockJobScope: { run: jest.Mock };
-  let mockRecoveryService: jest.Mocked<Pick<StorageProcessingRecoveryService, 'reprocessObjectNow'>>;
+  let mockRecoveryService: jest.Mocked<Pick<ObjectReprocessService, 'reprocessNow'>>;
   let mockThumbnailNodePersistService: jest.Mocked<Pick<ThumbnailNodePersistService, 'persistThumbnail'>>;
   let mockPrisma: MockPrismaService;
 
@@ -80,7 +80,7 @@ describe('ThumbnailRegenHandler', () => {
     };
 
     mockRecoveryService = {
-      reprocessObjectNow: jest.fn().mockResolvedValue(undefined),
+      reprocessNow: jest.fn().mockResolvedValue(undefined),
     };
 
     mockThumbnailNodePersistService = {
@@ -97,7 +97,7 @@ describe('ThumbnailRegenHandler', () => {
         { provide: JobScope, useValue: mockJobScope },
         { provide: PrismaService, useValue: mockPrisma },
         {
-          provide: StorageProcessingRecoveryService,
+          provide: ObjectReprocessService,
           useValue: mockRecoveryService,
         },
         {
@@ -158,10 +158,10 @@ describe('ThumbnailRegenHandler', () => {
 
       await expect(handler.process(job)).rejects.toThrow(/not about a media item/i);
       expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
-      expect(mockRecoveryService.reprocessObjectNow).not.toHaveBeenCalled();
+      expect(mockRecoveryService.reprocessNow).not.toHaveBeenCalled();
     });
 
-    it('settles as a no-op without calling reprocessObjectNow when the MediaItem is gone', async () => {
+    it('settles as a no-op without calling reprocessNow when the MediaItem is gone', async () => {
       const job = makeJob();
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
 
@@ -170,30 +170,30 @@ describe('ThumbnailRegenHandler', () => {
       expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: job.subjectId } }),
       );
-      expect(mockRecoveryService.reprocessObjectNow).not.toHaveBeenCalled();
+      expect(mockRecoveryService.reprocessNow).not.toHaveBeenCalled();
     });
 
-    it('returns without calling reprocessObjectNow when the MediaItem is soft-deleted', async () => {
+    it('returns without calling reprocessNow when the MediaItem is soft-deleted', async () => {
       const job = makeJob();
       const item = makeMediaItem({ deletedAt: new Date() });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
 
       await expect(handler.process(job)).resolves.toBeUndefined();
 
-      expect(mockRecoveryService.reprocessObjectNow).not.toHaveBeenCalled();
+      expect(mockRecoveryService.reprocessNow).not.toHaveBeenCalled();
     });
 
-    it('returns without calling reprocessObjectNow when the MediaItem has no storageObject', async () => {
+    it('returns without calling reprocessNow when the MediaItem has no storageObject', async () => {
       const job = makeJob();
       const item = makeMediaItem({ storageObject: null });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
 
       await expect(handler.process(job)).resolves.toBeUndefined();
 
-      expect(mockRecoveryService.reprocessObjectNow).not.toHaveBeenCalled();
+      expect(mockRecoveryService.reprocessNow).not.toHaveBeenCalled();
     });
 
-    it('calls reprocessObjectNow with the exact storageObject on the happy path', async () => {
+    it('calls reprocessNow with the exact storageObject on the happy path', async () => {
       const job = makeJob();
       const storageObject = makeStorageObject();
       const item = makeMediaItem({ storageObject });
@@ -201,17 +201,17 @@ describe('ThumbnailRegenHandler', () => {
 
       await expect(handler.process(job)).resolves.toBeUndefined();
 
-      expect(mockRecoveryService.reprocessObjectNow).toHaveBeenCalledTimes(1);
-      expect(mockRecoveryService.reprocessObjectNow).toHaveBeenCalledWith(
+      expect(mockRecoveryService.reprocessNow).toHaveBeenCalledTimes(1);
+      expect(mockRecoveryService.reprocessNow).toHaveBeenCalledWith(
         storageObject,
       );
     });
 
-    it('propagates errors thrown by reprocessObjectNow (worker records lastError and retries)', async () => {
+    it('propagates errors thrown by reprocessNow (worker records lastError and retries)', async () => {
       const job = makeJob();
       const item = makeMediaItem();
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      mockRecoveryService.reprocessObjectNow.mockRejectedValue(
+      mockRecoveryService.reprocessNow.mockRejectedValue(
         new Error('S3 unavailable'),
       );
 

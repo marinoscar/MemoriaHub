@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { JOB_SETTLED_EVENT, type JobSettledEvent } from '@marinoscar/platform-api/jobs';
 import {
@@ -9,6 +10,8 @@ import {
 } from '@marinoscar/platform-api/storage';
 
 import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from './events/object-processed.event';
+import { mediaTypeFromMime } from '../platform-extensions/telemetry/memoriahub-metrics.manifest';
+import { takeProcessingMime } from './processing-metrics';
 
 // =============================================================================
 // MediaObjectProcessingService: the processing pipeline's completion hook (RETRO-D1, #563)
@@ -26,7 +29,9 @@ import { OBJECT_PROCESSED_EVENT, ObjectProcessedEvent } from './events/object-pr
 //      exactly when the old in-process pipeline emitted it after its last
 //      processor. A pure re-emit: no I/O in the listener.
 //   2. An inline re-run (`runNow`): the destructive edits (orientation, the AI
-//      enhancer's replace) and the recovery service reprocess an object in the
+//      enhancer's replace), the thumbnail rerun and the in-job thumbnail paths
+//      reprocess an object through `ObjectReprocessService` (the recovery sweep
+//      queues `storage.object.process` jobs instead, RETRO-D1b) in the
 //      request or job that changed it, then emit the event themselves, as before.
 // =============================================================================
 
@@ -37,6 +42,8 @@ export class MediaObjectProcessingService {
   constructor(
     private readonly processing: ObjectProcessingService,
     private readonly events: EventEmitter2,
+    // App metrics (RETRO-T3, #628): `app.media.processing.duration`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   /**
@@ -53,6 +60,7 @@ export class MediaObjectProcessingService {
   @OnEvent(JOB_SETTLED_EVENT)
   onJobSettled(event: JobSettledEvent): void {
     if (event.type !== STORAGE_OBJECT_PROCESS_TYPE || !event.subjectId) return;
+    this.recordDuration(event);
     try {
       this.events.emit(OBJECT_PROCESSED_EVENT, new ObjectProcessedEvent(event.subjectId));
     } catch (error) {
@@ -61,5 +69,20 @@ export class MediaObjectProcessingService {
           (error instanceof Error ? error.message : String(error)),
       );
     }
+  }
+
+  /**
+   * `app.media.processing.duration`: from the job's creation (upload complete)
+   * to its settlement, `ready` or `failed`. No I/O: the mime type was remembered
+   * by the first processor; an object processed elsewhere reads as `other`.
+   */
+  private recordDuration(event: JobSettledEvent): void {
+    const { createdAt, finishedAt } = event.job;
+    const seconds = ((finishedAt ?? new Date()).getTime() - createdAt.getTime()) / 1000;
+    const mime = takeProcessingMime(event.subjectId as string);
+    this.metrics?.record('mediaProcessingDuration', seconds, {
+      media_type: mime === undefined ? 'other' : mediaTypeFromMime(mime),
+      outcome: event.succeeded ? 'ready' : 'failed',
+    });
   }
 }

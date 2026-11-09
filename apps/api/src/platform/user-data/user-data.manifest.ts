@@ -198,7 +198,9 @@ export const MEMORIAHUB_USER_DATA_MODELS: readonly UserDataModelHint<Prisma.Mode
   // ---- not owner models: lines for the factory reset page's "Kept" list ------------
   { model: 'TagLabel', factoryReset: 'keep', summary: 'The AI tag vocabulary' },
   { model: 'LocationGroup', factoryReset: 'keep', summary: 'Location groups and their aliases' },
-  { model: 'MhLegacyAndroidAppRelease', factoryReset: 'keep', summary: 'Android app releases and their APK files' },
+  { model: 'AndroidAppRelease', factoryReset: 'keep', summary: 'Android app releases and their APK files' },
+  // The pre-slice table, frozen since RETRO-D5 (#586) copied its rows into `android_app_releases`.
+  { model: 'MhLegacyAndroidAppRelease', factoryReset: 'keep', summary: 'Android app releases from before the platform slice' },
 ];
 
 registerUserDataModels<Prisma.ModelName>(MEMORIAHUB_USER_DATA_MODELS);

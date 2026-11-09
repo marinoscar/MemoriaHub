@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   JobHandlerRegistry,
   runRetentionPolicyPurge,
@@ -69,6 +70,8 @@ export class WorkflowRunsRetentionHandler implements JobHandler, OnModuleInit {
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
+    // App metrics (RETRO-T3, #628): `app.runs.finished{engine=workflow,outcome=expired}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -109,7 +112,7 @@ export class WorkflowRunsRetentionHandler implements JobHandler, OnModuleInit {
       data: { status: WorkflowRunStatus.expired, finishedAt: new Date(now) },
     });
     if (expired.count > 0) {
-      // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome=expired})
+      this.metrics?.add('runsFinished', expired.count, { engine: 'workflow', outcome: 'expired' });
       this.logger.log(`${this.type}: expired ${expired.count} stale approval run(s)`);
     }
     return expired.count;

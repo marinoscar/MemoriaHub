@@ -15,7 +15,7 @@ import { NotFoundException } from '@nestjs/common';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -70,7 +70,7 @@ describe('MediaThumbnailRerunController', () => {
       providers: [
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
-        { provide: StorageProcessingRecoveryService, useValue: { reprocessObjectNow: mockReprocessObjectNow } },
+        { provide: ObjectReprocessService, useValue: { reprocessNow: mockReprocessObjectNow } },
       ],
     })
       .overrideGuard(JwtAuthGuard).useValue(allowAllGuard)
@@ -82,7 +82,7 @@ describe('MediaThumbnailRerunController', () => {
   });
 
   describe('rerunThumbnail', () => {
-    it('calls reprocessObjectNow with the linked storage object', async () => {
+    it('calls reprocessNow with the linked storage object', async () => {
       const mediaItem = makeMediaItem();
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(mediaItem);
       (mockPrisma.storageObject.findUnique as jest.Mock).mockResolvedValue({ status: 'ready' });

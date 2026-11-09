@@ -32,13 +32,20 @@
 import { TelemetryModule } from '@marinoscar/platform-api/telemetry';
 
 import { APP_METRIC_GROUPS } from '../../app-registrations/telemetry';
+import { MemoriaHubTelemetryModule } from '../../platform-extensions/telemetry/memoriahub-telemetry.module';
+import { MemoriaHubVerdictPolicy } from '../../platform-extensions/telemetry/memoriahub-verdict.policy';
 import { platformHost } from '../platform-host';
 import { MEMORIAHUB_VERDICT_THRESHOLDS } from './memoriahub-verdict-thresholds';
 import { TelemetryHostModule } from './telemetry-host.module';
 
 export const telemetryModule = TelemetryModule.forRoot({
   host: platformHost,
-  imports: [TelemetryHostModule],
+  // MemoriaHubTelemetryModule (RETRO-T3): the gauges and the reads the verdict policy injects.
+  imports: [TelemetryHostModule, MemoriaHubTelemetryModule],
   metricGroups: [...APP_METRIC_GROUPS],
-  dashboard: { verdictThresholds: MEMORIAHUB_VERDICT_THRESHOLDS },
+  dashboard: {
+    verdictThresholds: MEMORIAHUB_VERDICT_THRESHOLDS,
+    // The platform's rules plus MemoriaHub's four (memoriahub-verdict-rules.ts); it never lowers a level.
+    verdictPolicy: { useClass: MemoriaHubVerdictPolicy },
+  },
 });

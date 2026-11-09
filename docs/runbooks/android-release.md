@@ -2,7 +2,7 @@
 
 > **Audience:** operators · **Spec:** [android-media-sync.md §14](../specs/android-media-sync.md#14-release-model) · **Admin UI:** `/admin/settings/android` (section **Releases**) · **User UI:** `/settings/android-app` · **Permission:** `system_settings:write` (publish, make current, delete); `system_settings:read` (list)
 
-Use this to ship a new version of the Android app to your users, by any route, and to roll one back. To install the app, pair a phone and trust a build, see the [Android app runbook](android-app.md). Each self-hosted MemoriaHub server chooses its own release: nothing is pushed from GitHub to your deployment.
+Use this to ship a new version of the Android app to your users, by any route, and to roll one back. Since RETRO-D5 ([#586](https://github.com/marinoscar/MemoriaHub/issues/586)) the server routes, the admin page and the `memoriahub android` commands are the platform's android-app slice and CLI group; the routes, permissions, refusal reasons and file names are unchanged. An existing deployment runs the one-time copy in [section 14](#14-cutover-to-the-platform-slice-retro-d5) after the upgrade. To install the app, pair a phone and trust a build, see the [Android app runbook](android-app.md). Each self-hosted MemoriaHub server chooses its own release: nothing is pushed from GitHub to your deployment.
 
 ## 1. Quick start
 
@@ -11,7 +11,7 @@ This is the whole flow from a fresh machine to a release your phones can install
 ```bash
 git clone https://github.com/marinoscar/MemoriaHub.git && cd MemoriaHub
 memoriahub login                          # approve in the browser, as an Admin
-memoriahub android doctor --fix --yes     # installs the Android SDK (+ JDK 17 on Debian/Ubuntu)
+memoriahub android doctor --fix           # installs the Android SDK (install JDK 17+ yourself)
 memoriahub android keystore init          # ONCE; then BACK UP ~/.memoriahub/android/
 memoriahub android release --bump patch --notes "What changed"
 ```
@@ -127,14 +127,14 @@ If phones already run builds signed with an existing key, use `import`. Running 
 
 ### 7.1 One shot (recommended)
 
-1. `memoriahub android doctor --fix --yes`, then `memoriahub login --server https://photos.example.com` ([sections 3 and 4](#3-prerequisites)). The release command checks the checkout, the toolchain essentials, the keystore, the login and the version **before it bumps anything**.
+1. `memoriahub android doctor --fix` (it installs the Android SDK; install a JDK 17+ yourself), then `memoriahub login --server https://photos.example.com` ([sections 3 and 4](#3-prerequisites)). The release command checks the checkout, the toolchain essentials, the keystore, the login and the version **before it bumps anything**.
 2. Run:
 
    ```bash
    memoriahub android release --bump patch --notes "What changed"
    ```
 
-   `--bump` is `patch`, `minor` or `major`. Without it the current version is released if it is already newer than the server's current release; with nothing changed the command refuses ("not newer, pass `--bump`"). `--server-url <url>` bakes a default server address into the app (the default is the server you are logged in to). `--no-commit` skips the commit.
+   `--bump` is `patch`, `minor` or `major` and defaults to `patch` (since CLI 1.5.1; 1.4 released the current version without a bump when it was already newer). `--require-up-to-date` refuses to build from a checkout behind its upstream. `--server-url <url>` bakes a default server address into the app (the default is the server you are logged in to). `--no-commit` skips the commit.
 3. The command bumps `version.properties`, builds and signs the APK, verifies the signer with `apksigner`, uploads it as the **current release** and commits the version file. It writes `dist/android/memoriahub-android-<versionName>.apk` and a sidecar `.json`.
 
 If the build or the upload fails after the bump, nothing is committed and the CLI says how to continue **without bumping again**: fix the cause, then run `memoriahub android build` and `memoriahub android publish`.
@@ -152,20 +152,21 @@ memoriahub android publish --notes "What changed"
 - `build` verifies the signature against your keystore's fingerprint and **refuses an APK signed by another key**. `--debug` builds a debug-signed APK that is not publishable ([section 13](#13-debug-builds-and-trust)).
 - `publish [apk]` defaults to the newest APK in `dist/android`. It uploads the file and its sidecar metadata to `POST /api/admin/android-app/releases` (the file streams; it gives up after 15 minutes). `--no-current` uploads without offering it to users. `--force` makes it current even when its `versionCode` is not above the current release's.
 - `memoriahub android releases` lists the server's releases (`*` marks the current one); `--json` prints JSON.
+- `publish --trust` also trusts the signing key on the server (a new app or a rotated key).
 
 ### 7.3 The terminal menu
 
-Run `memoriahub` with no arguments in a real terminal and choose **Settings, then Android app (build, publish, releases)**. It shows status rows (checkout, local version, keystore, login and server, the server's current release, and whether yours is newer) and runs the same steps as the commands above: doctor, bump, build, publish, **release**, releases (with rollback) and login. Every confirmation names the version, code and server and defaults to **No**.
+Run `memoriahub` with no arguments in a real terminal and choose **Settings, then Android app (build, publish, releases)**. Since CLI 1.5.1 this is the platform's Android screen: status rows (checkout, local version, keystore, login and server, the server's current release) and the same steps as the commands above.
 
 ## 8. Release from the admin page
 
 Use this when you already have a signed APK.
 
 1. As an Admin open **Admin, then Settings, then Android app** (`/admin/settings/android`), section **Releases**.
-2. Under **Upload a release**, choose the `.apk` (at most 150 MiB). You can also choose the sidecar `.json` that `memoriahub android build` wrote next to it; the form then fills in the package, version name, version code and signing fingerprint for you. Otherwise type them in.
-3. Add release notes, leave **Make current** ticked unless you want to stage it, and upload. A progress bar shows the transfer.
+2. Under the upload form, choose the `.apk` (at most 150 MiB) and type the package, version name, version code and signing SHA-256 (the sidecar `.json` that `memoriahub android build` wrote next to the APK lists them). Tick **Trust a new signing key** for a new app or a rotated key.
+3. Add release notes, leave **Make current** ticked unless you want to stage it, and upload. The file streams from the browser.
 4. You should see the release at the top of the table. **Make current** and **Delete** are on each row.
-5. If the server answers `RELEASE_VERSION_NOT_NEWER`, the page offers a **force** option, with a warning that phones that already installed a higher build will not be offered this one.
+5. If the server answers `RELEASE_VERSION_NOT_NEWER`, the page shows the refusal; publish a higher `versionCode`, or use `memoriahub android publish --force` for a deliberate rollback-style publish.
 
 The same rules apply: a duplicate `(package, versionCode)` is refused, and making a release current trusts its signer.
 
@@ -229,7 +230,7 @@ Run through this after publishing:
 | Symptom | Cause | Fix |
 |---|---|---|
 | Exit code 6 "No MemoriaHub checkout found" | The CLI runs outside a clone, or is the installed CLI without the sources | `cd` into the clone, or `--repo <path>` or `MEMORIAHUB_REPO_ROOT` |
-| `doctor` fails `jdk` or `sdk` | JDK 17+ or the SDK parts are missing | `memoriahub android doctor --fix --yes` (Debian and Ubuntu); elsewhere install a JDK 17+ and re-run `--fix` for the SDK |
+| `doctor` fails `jdk` or `sdk` | JDK 17+ or the SDK parts are missing | Install a JDK 17+ (on Debian and Ubuntu: `sudo apt-get install openjdk-17-jdk-headless`), then `memoriahub android doctor --fix` for the SDK |
 | `release` stops before bumping: no keystore | `release` requires the keystore | `android keystore init` or `import` ([section 5](#5-signing-keystore)) |
 | `build` says the APK is signed by another key | The keystore does not match the configured one | Fix `~/.memoriahub/android` or the `ANDROID_KEYSTORE_*` variables; never ship an APK signed by a different key |
 | Gradle fails downloading dependencies (429) | Maven Central rate limit | Retry after a minute |
@@ -247,7 +248,9 @@ Run through this after publishing:
 | Phones say "App not installed" when updating | The update is signed with a different key, or its `versionCode` is lower | Same key and a higher code. If the key changed, uninstall the old app first |
 | The app opens with an address bar | The signer is not in `assetlinks.json` | Trust it ([section 13](#13-debug-builds-and-trust)); check the `curl` output; reopen the app |
 | Trusting a build answers 400 `TOO_MANY_TRUSTED_APPS` | The trusted list holds 10 entries | Remove unused entries at `/admin/settings/android` |
-| The Doctor warns `memoriahub.android.releases` | Phones are paired but no release is current | Publish one, or make an existing one current |
+| The Doctor warns `android.releases` | Phones are paired but no release is current | Publish one, or make an existing one current |
+| After the upgrade the server says no release is current, or the admin page lists none | The pre-slice releases were not copied yet | `npm run android:migrate-legacy-releases` ([section 14](#14-cutover-to-the-platform-slice-retro-d5)) |
+| A release older than a storage switch answers an error on download or delete | The slice reads and deletes through the ACTIVE storage driver, not the one recorded on the release | Re-publish the APK (a higher `versionCode`), or switch the active driver back while you download it |
 
 ## 13. Debug builds and trust
 
@@ -258,6 +261,29 @@ A debug build (`memoriahub android build --debug`, or the CI `test` artifact) is
 - It opens **with an address bar** until you trust it by hand: pair it, then at `/admin/settings/android` choose **Trust** on its entry under **Reported apps** ([Android app runbook, section 4](android-app.md#4-make-the-app-open-full-screen)).
 
 The signing key is the trust anchor for the release app. Anyone holding the keystore can ship an update your phones will accept, so keep it as private as a deployment secret.
+
+## 14. Cutover to the platform slice (RETRO-D5)
+
+Since RETRO-D5 the releases live in the platform table `android_app_releases`. The pre-slice table, renamed `mh_legacy_android_app_releases` by the database baseline (RETRO-A5), is frozen: nothing writes it, and the server no longer reads it. Copy it once after the upgrade, before you publish anything new:
+
+1. Back up the database ([database restore runbook](database-restore.md)).
+2. From `apps/api` with the API's database settings (`POSTGRES_*`), run the dry run (the default):
+
+   ```bash
+   npm run android:migrate-legacy-releases
+   ```
+
+   It prints the legacy count, how many are already copied, how many it would copy, any **CONFLICT** (a version the slice already serves under another id: the platform row is kept), the legacy and platform current releases, and the releases per recorded storage provider.
+3. Apply it:
+
+   ```bash
+   npm run android:migrate-legacy-releases -- --apply
+   ```
+
+   Every legacy row is copied under its **original id**, so the stored APK key `android-releases/<id>.apk`, the audit history and the release ids the CLI prints keep naming the same release; no APK moves. Rows are inserted not current; then, only when the platform table has no current release, the legacy current release is made current (the one-current index never sees two). One transaction; re-running copies nothing. The legacy table is never modified.
+4. Verify: `memoriahub android releases` (the `*` is on the release your phones run), `/admin/settings/android`, a download from `/settings/android-app`, and `curl -s https://<host>/.well-known/assetlinks.json` (unchanged: the trusted list is the same `android_app` settings row).
+
+Releases stored on a provider other than the ACTIVE one cannot be downloaded or deleted through the slice yet (a platform seam gap, [EAB#1134](https://github.com/marinoscar/EnterpriseAppBase/issues/1134); the dry run lists them). Download links minted before the upgrade stop verifying (they last 10 minutes); start the download again. **Rollback:** revert the release; the pre-slice server reads the untouched legacy table.
 
 ## See also
 

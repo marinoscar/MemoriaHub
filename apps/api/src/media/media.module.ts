@@ -11,7 +11,6 @@ import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
-import { MediaReprocessService } from './media-reprocess.service';
 import { MediaReprocessController } from './media-reprocess.controller';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
 import { MediaOrientationEditController } from './media-orientation-edit.controller';
@@ -51,7 +50,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *
  * TrashPurgeTask and ThumbnailRepairTask @Cron decorators work via
  * ScheduleModule.forRoot() in AppModule. ThumbnailRepairHandler additionally
- * uses StorageProcessingRecoveryService (exported by MediaProcessingModule) and
+ * uses ObjectReprocessService (exported by MediaProcessingModule) and
  * MediaMetadataSyncService for its reprocess/resync repair paths.
  *
  * Circular-dependency note:
@@ -60,13 +59,13 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *   EnrichmentModule and SettingsModule do not import MediaModule.
  *
  * ThumbnailProcessor and ImageDimensionsProcessor are registered directly here
- * (not imported from ObjectProcessingModule, which does not export them) so
- * that MediaReprocessService can receive them via DI.  They are stateless and
- * safe to instantiate as a separate provider scope.
+ * (a separate, stateless provider scope) for the services of this module that
+ * inject them. (MediaReprocessService, their first consumer, is gone since
+ * RETRO-D1b: the admin bulk reprocess is the `media.storage.reprocess` job.)
  *
- * Imports MediaProcessingModule so StorageProcessingRecoveryService resolves inside
- * MediaReprocessController (admin bulk recovery) and
- * MediaThumbnailRerunController (per-item retry). MediaProcessingModule does not
+ * Imports MediaProcessingModule so ObjectReprocessService resolves inside
+ * MediaThumbnailRerunController (per-item retry) and the orientation edit.
+ * MediaReprocessController (admin bulk recovery) only enqueues jobs. MediaProcessingModule does not
  * depend on MediaModule, so this does not introduce a cycle.
  *
  * Imports NotificationProducersModule so UploadNotificationService resolves
@@ -101,7 +100,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     MediaService,
     MediaMetadataSyncService,
     ForwardGeocodeService,
-    MediaReprocessService,
     ThumbnailProcessor,
     ImageDimensionsProcessor,
     TrashPurgeHandler,
@@ -118,6 +116,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     TrashEmptyEvaluateHandler,
     TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaReprocessService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService, MediaTouchModule],
+  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService, MediaTouchModule],
 })
 export class MediaModule {}

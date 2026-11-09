@@ -216,7 +216,7 @@ describe('Media Sync device API (integration)', () => {
       async ({ where }: any) => reports.find((r) => r.id === where.id && r.deviceId === where.deviceId) ?? null,
     );
 
-    m.mhLegacyAndroidAppRelease.findFirst.mockResolvedValue(null);
+    m.androidAppRelease.findFirst.mockResolvedValue(null);
     m.auditEvent.create.mockResolvedValue({});
     m.$executeRaw.mockResolvedValue(0);
   });

@@ -9,7 +9,7 @@ import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
@@ -71,7 +71,7 @@ export class MediaEnhancementService {
     private readonly prisma: PrismaService,
     private readonly circleMembership: CircleMembershipService,
     private readonly resolver: StorageProviderResolver,
-    private readonly recoveryService: StorageProcessingRecoveryService,
+    private readonly recoveryService: ObjectReprocessService,
     private readonly thumbnailPrune: ThumbnailPruneService,
     private readonly metadataSync: MediaMetadataSyncService,
     private readonly mediaEnrichment: MediaEnrichmentService,
@@ -1447,7 +1447,7 @@ export class MediaEnhancementService {
 
     // Re-derive width/height/size/contentHash + thumbnails from the enhanced
     // bytes via the standard reprocess pipeline.
-    await this.recoveryService.reprocessObjectNow(newObject);
+    await this.recoveryService.reprocessNow(newObject);
     try {
       await this.metadataSync.syncFromStorageObject(newObject.id);
     } catch (err) {
@@ -1601,7 +1601,7 @@ export class MediaEnhancementService {
     let width = row.enhancedWidth ?? source.width ?? 0;
     let height = row.enhancedHeight ?? source.height ?? 0;
     if (refreshed) {
-      await this.recoveryService.reprocessObjectNow(refreshed);
+      await this.recoveryService.reprocessNow(refreshed);
 
       // Await the metadata sync INSIDE the request rather than letting the
       // pipeline's fire-and-forget OBJECT_PROCESSED_EVENT listener race it

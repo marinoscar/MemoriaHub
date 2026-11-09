@@ -9,7 +9,7 @@
  * `session.refresh()` after anything that changes who is logged in).
  *
  * A multi-step flow (folder picker, date range, run; backup dashboard, verify,
- * settings; Android, login) is ONE route whose steps are a view stack
+ * settings, login) is ONE route whose steps are a view stack
  * (`useViewStack`), so Esc steps back through the flow as it always did.
  *
  * Loaded lazily by `screens.ts`; importing it pulls ink in.
@@ -26,7 +26,6 @@ import { readVersion } from '../version.js';
 import type { UpdateStatus } from '../version-check.js';
 import type { ScreenshotMode } from '../screenshots/screenshot-engine.js';
 import { getAppDb, resetAppDb } from './app-state.js';
-import { AndroidScreen } from './AndroidScreen.js';
 import { BackupDashboard } from './BackupDashboard.js';
 import { BackupSettings } from './BackupSettings.js';
 import { BackupVerify } from './BackupVerify.js';
@@ -503,23 +502,6 @@ export function CirclesRoute({ onDone }: TuiScreenProps): ReactElement {
 
 export function AppSettingsRoute({ onDone }: TuiScreenProps): ReactElement {
   return <SettingsScreen db={getAppDb()} onBack={onDone} />;
-}
-
-export function AndroidRoute({ onDone }: TuiScreenProps): ReactElement {
-  const { session } = useTuiApp();
-  const steps = useViewStack<'android' | 'login'>('android', onDone);
-  return steps.view === 'login' ? (
-    // A login started from the Android screen returns to it.
-    <LoginScreen
-      initialConfig={loadConfig()}
-      onDone={() => {
-        void session.refresh().finally(steps.pop);
-      }}
-      onBack={steps.pop}
-    />
-  ) : (
-    <AndroidScreen onBack={steps.pop} onLogin={() => steps.push('login')} />
-  );
 }
 
 export function FactoryResetRoute({ onDone }: TuiScreenProps): ReactElement {

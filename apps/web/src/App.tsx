@@ -101,7 +101,7 @@ const BroadcastsPage = lazy(() =>
 // RETRO-H3 (#599): the onboarding slice's two pages (`@marinoscar/platform-web/onboarding/ui`).
 const SetupGuidePage = lazy(() => import('./platform/onboarding/SetupGuideRoute'));
 const GettingStartedPage = lazy(() => import('./platform/onboarding/GettingStartedRoute'));
-const AndroidAppPage = lazy(() => import('./pages/Admin/AndroidAppPage'));
+const AndroidAppPage = lazy(() => import('./platform/android-app/AndroidAppPage'));
 // The platform's Jobs and Job Insights pages (RETRO-C1, #575); the Jobs one is a thin binding that adds
 // the app's "Repair missing thumbnails" action to the page toolbar.
 const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));

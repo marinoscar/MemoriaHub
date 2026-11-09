@@ -13,11 +13,20 @@ import { registerSystemAccessReason } from '@marinoscar/platform-api/core';
 //                       whose thumbnail never landed across every organization
 //                       and bumps an attempt counter on their storage objects.
 //
+//   storage-processing-recovery
+//                       the `media.storage.recover_stuck` and `media.storage.reprocess`
+//                       jobs (RETRO-D1b, #567): find storage objects stuck at
+//                       `processing` (or `failed`) across every organization,
+//                       bump their retry counter and queue a processing job.
+//
 // Registered at import time (the registry freezes at bootstrap); imported by
 // `prisma/prisma-system.service.ts`.
 // =============================================================================
 
 export const MEDIA_HOUSEKEEPING_REASON = 'media-housekeeping';
+
+/** The stuck/failed storage-object recovery and the admin reprocess jobs (RETRO-D1b, #567). */
+export const STORAGE_PROCESSING_RECOVERY_REASON = 'storage-processing-recovery';
 
 let registered = false;
 
@@ -30,6 +39,13 @@ export function registerMemoriaHubSystemAccessReasons(): void {
     description:
       'The global thumbnail_repair sweep finds media items with a missing thumbnail in every organization ' +
       'and bumps an attempt counter on their storage objects; it is a system job with no organization to scope to.',
+  });
+  registerSystemAccessReason({
+    id: STORAGE_PROCESSING_RECOVERY_REASON,
+    description:
+      'The media.storage.recover_stuck and media.storage.reprocess jobs find storage objects stuck at processing ' +
+      '(or failed) in every organization, bump their retry counter and queue a storage.object.process job for each; ' +
+      'they are system jobs with no organization to scope to.',
   });
 }
 

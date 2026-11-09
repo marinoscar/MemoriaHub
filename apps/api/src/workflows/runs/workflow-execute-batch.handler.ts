@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { trace, SpanKind, SpanStatusCode, Span } from '@opentelemetry/api';
 import {
   JobHandlerRegistry,
@@ -109,6 +110,8 @@ export class WorkflowExecuteBatchHandler implements JobHandler, OnModuleInit {
     private readonly runNotifications: WorkflowRunNotificationService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the handler by hand need no stub.
     @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
+    // App metrics (RETRO-T3, #628): `app.runs.finished` / `app.runs.items` (engine `workflow`). Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -396,6 +399,11 @@ export class WorkflowExecuteBatchHandler implements JobHandler, OnModuleInit {
         break;
     }
     await this.prisma.workflowRun.update({ where: { id: runId }, data });
+    // A partially applied item counts as failed (it also forces completed_with_errors).
+    this.metrics?.add('runItems', 1, {
+      engine: 'workflow',
+      outcome: result === 'applied' ? 'applied' : result === 'skipped' ? 'skipped' : 'failed',
+    });
   }
 
   /**
@@ -452,7 +460,7 @@ export class WorkflowExecuteBatchHandler implements JobHandler, OnModuleInit {
       });
       this.executor.clearRunCache(runId);
 
-      // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome})
+      this.metrics?.add('runsFinished', 1, { engine: 'workflow', outcome: finalStatus });
       // Terminal — fire-and-forget notification (epic #240, issue #247).
       // Inside the `fin.count > 0` guard, so ONLY the batch that won the
       // conditional finalize notifies; a loser produces nothing. The producer
