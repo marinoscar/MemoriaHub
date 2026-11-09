@@ -36,6 +36,13 @@ import { MediaLocationsExtentQueryDto } from './dto/media-locations-extent-query
 import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
+import {
+  RecordAccessService,
+  actionForRole,
+  isAccessRefusal,
+  type RecordAction,
+  type RecordType,
+} from '../platform/sharing/record-access';
 import { andWhere, buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
@@ -113,7 +120,64 @@ export class MediaService {
     @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
     // App metrics (RETRO-T3, #628): `app.media.uploads` / `app.media.upload.size`. Optional for hand-built tests.
     @Optional() private readonly metrics?: AppMetricsService,
+    // Grants on media items and albums (RETRO-I3, #573): consulted ONLY when the owner-scope
+    // check refused. Optional so hand-built unit tests keep today's member-only behaviour.
+    @Optional() private readonly recordAccess?: RecordAccessService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // Access (RETRO-I3, #573): owner scope first, then a grant on the record
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The owner-scope check (members keep exactly today's access), then, only
+   * when it refused, `AccessPolicy` for a grant on the record. The original
+   * refusal is rethrown when no grant allows the action. Returns `true` when
+   * the caller passed through a grant.
+   */
+  private async requireRecord(
+    userId: string,
+    perms: string[],
+    scopeId: string,
+    minRole: OwnerRole,
+    type: RecordType,
+    id: string,
+    action?: RecordAction,
+  ): Promise<boolean> {
+    try {
+      await this.circleMembershipService.requireOwnerRole(userId, scopeId, perms, minRole);
+      return false;
+    } catch (err) {
+      const wanted = action ?? actionForRole(minRole);
+      if (!this.recordAccess || !wanted || !isAccessRefusal(err)) throw err;
+      if (await this.recordAccess.grantAllows(userId, perms, wanted, type, id)) return true;
+      throw err;
+    }
+  }
+
+  /**
+   * A scope-wide list check: the owner-scope check, then, for a refused caller,
+   * the records of `type` shared with them through grants (`accessibleWhere`,
+   * scope `shared`) as an extra AND filter. A member gets `undefined` (no extra
+   * filter: the list keeps its `circle_id` filter and its index plan); a
+   * non-member with no grants keeps the refusal.
+   */
+  private async requireListScope(
+    userId: string,
+    perms: string[],
+    scopeId: string,
+    type: RecordType,
+  ): Promise<Record<string, unknown> | undefined> {
+    try {
+      await this.circleMembershipService.requireOwnerRole(userId, scopeId, perms, 'viewer');
+      return undefined;
+    } catch (err) {
+      if (!this.recordAccess || !isAccessRefusal(err)) throw err;
+      const shared = await this.recordAccess.sharedWhere(userId, perms, type);
+      if (!shared) throw err;
+      return shared;
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // MediaItem CRUD
@@ -433,7 +497,9 @@ export class MediaService {
       peopleMatch,
     } = query;
 
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    // Members: no extra filter (the `circle_id` keyset plan is unchanged). A non-member
+    // holding grants: the scope's media AND the records shared with them (RETRO-I3).
+    const grantWhere = await this.requireListScope(userId, userPermissions, circleId, 'media_item');
 
     // Resolve which person filter to apply (personIds takes precedence over personId)
     const effectivePersonIds =
@@ -471,6 +537,7 @@ export class MediaService {
         excludeArchived: true,
       }),
       effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : undefined,
+      grantWhere as Prisma.MediaItemWhereInput | undefined,
     );
 
     const dir = sortOrder;
@@ -955,7 +1022,7 @@ export class MediaService {
       throw new NotFoundException(`MediaItem with id ${id} not found`);
     }
 
-    await this.circleMembershipService.requireOwnerRole(userId, item.circleId, userPermissions, 'viewer');
+    await this.requireRecord(userId, userPermissions, item.circleId, 'viewer', 'media_item', item.id);
 
     // Fetch only the fields needed to sign the download URL (avoids spreading
     // BigInt `size` into the response; storageProvider + bucket are needed to
@@ -1027,11 +1094,13 @@ export class MediaService {
    * Soft-delete a MediaItem. Sets deletedAt; does NOT touch the StorageObject.
    */
   async deleteMedia(id: string, userId: string, userPermissions: string[]) {
+    // A grantee never trashes a record: the policy's `delete` needs the owner.
     const item = await this.getMediaWithOwnershipCheck(
       id,
       userId,
       userPermissions,
       'editor',
+      'delete',
     );
 
     await this.prisma.mediaItem.update({
@@ -1194,9 +1263,11 @@ export class MediaService {
     const { circleId, page, pageSize, sortBy, sortOrder } = query;
     const skip = (page - 1) * pageSize;
 
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    const grantWhere = await this.requireListScope(userId, userPermissions, circleId, 'album');
 
-    const where: Prisma.AlbumWhereInput = { circleId };
+    const where: Prisma.AlbumWhereInput = grantWhere
+      ? { AND: [{ circleId }, grantWhere as Prisma.AlbumWhereInput] }
+      : { circleId };
 
     const [albums, totalItems] = await Promise.all([
       this.prisma.album.findMany({
@@ -1275,7 +1346,7 @@ export class MediaService {
       throw new NotFoundException(`Album with id ${id} not found`);
     }
 
-    await this.circleMembershipService.requireOwnerRole(userId, album.circleId, userPermissions, 'viewer');
+    await this.requireRecord(userId, userPermissions, album.circleId, 'viewer', 'album', album.id);
 
     // Flatten AlbumItem join rows into full MediaItem-shaped objects, each with
     // a signed thumbnailUrl (matching listMedia / listLocations item shape).
@@ -2677,9 +2748,17 @@ export class MediaService {
     perms: string[],
     role: OwnerRole,
   ): Promise<void> {
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, role);
-
     const uniqueIds = [...new Set(ids)];
+
+    try {
+      await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, role);
+    } catch (err) {
+      // RETRO-I3: a caller refused on the owner scope may still hold grants on EVERY
+      // id. ONE AccessPolicy.decideMany for the whole batch, never one call per id.
+      const action = actionForRole(role);
+      if (!this.recordAccess || !action || !isAccessRefusal(err)) throw err;
+      if (!(await this.recordAccess.grantsAllowAll(userId, perms, action, 'media_item', uniqueIds))) throw err;
+    }
 
     const found = await this.prisma.mediaItem.findMany({
       where: { id: { in: uniqueIds }, circleId, deletedAt: null },
@@ -2704,6 +2783,7 @@ export class MediaService {
     userId: string,
     userPermissions: string[],
     required: OwnerRole,
+    action?: RecordAction,
   ) {
     const item = await this.prisma.mediaItem.findUnique({ where: { id } });
 
@@ -2711,7 +2791,7 @@ export class MediaService {
       throw new NotFoundException(`MediaItem with id ${id} not found`);
     }
 
-    await this.circleMembershipService.requireOwnerRole(userId, item.circleId, userPermissions, required);
+    await this.requireRecord(userId, userPermissions, item.circleId, required, 'media_item', item.id, action);
 
     return item;
   }
@@ -3320,7 +3400,7 @@ export class MediaService {
       throw new NotFoundException(`Album with id ${id} not found`);
     }
 
-    await this.circleMembershipService.requireOwnerRole(userId, album.circleId, userPermissions, required);
+    await this.requireRecord(userId, userPermissions, album.circleId, required, 'album', album.id);
 
     return album;
   }
