@@ -34,6 +34,15 @@ enum TrashEmptyRunItemStatus {
 model TrashEmptyRun {
   id             String              @id @default(uuid()) @db.Uuid
   circleId       String              @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  // PLATFORM-ADOPTION-SHIM(#573): the FK owner_user_id -> users(id) ON DELETE RESTRICT exists in the
+  // database but is not modelled: the user-owned registry cannot mix a Restrict key with this
+  // model's SetNull actor keys (docs/platform-adoption/local-exceptions.md).
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   status         TrashEmptyRunStatus @default(evaluating)
   matchedCount   Int                 @default(0) @map("matched_count")
   processedCount Int                 @default(0) @map("processed_count")
@@ -52,8 +61,14 @@ model TrashEmptyRun {
   startedBy User?               @relation("TrashEmptyRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
   items     TrashEmptyRunItem[]
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("TrashEmptyRunOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("TrashEmptyRunOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+
   @@index([circleId, status])
   @@index([status, updatedAt])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("trash_empty_runs")
 }
 
