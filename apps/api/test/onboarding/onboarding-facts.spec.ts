@@ -16,6 +16,7 @@ import {
 } from '../../src/platform/onboarding/onboarding.facts';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
+import { AiDeploymentKeySource } from '../../src/ai-port/ai-deployment-key-source';
 
 const CALLER = '00000000-0000-4000-8000-000000000001';
 
@@ -28,7 +29,8 @@ function makePrisma() {
     person: { count: jest.fn().mockResolvedValue(1) },
     mediaSyncDevice: { count: jest.fn().mockResolvedValue(0) },
     personalAccessToken: { count: jest.fn().mockResolvedValue(1) },
-    aiProviderCredential: { findFirst: jest.fn().mockResolvedValue(null) },
+    // The AI key status (RETRO-E3, #605): platform first, then the legacy row; never key material.
+    aiKeys: { status: jest.fn().mockResolvedValue({ configured: false, enabled: false }) },
   };
 }
 
@@ -47,6 +49,7 @@ function ctx(
     get: (token: unknown) => {
       if (token === PrismaService) return prisma;
       if (token === AppSystemSettingsService) return appSettings;
+      if (token === AiDeploymentKeySource) return prisma.aiKeys;
       if (token === StorageConfigService) return storageConfig;
       throw new Error('unexpected token');
     },
@@ -134,7 +137,7 @@ describe('MemoriaHub onboarding facts', () => {
         memories: false,
       });
       // No tagging model means no AI credential read at all.
-      expect(prisma.aiProviderCredential.findFirst).not.toHaveBeenCalled();
+      expect(prisma.aiKeys.status).not.toHaveBeenCalled();
     });
 
     it('reports storage not ready when the storage configuration cannot be resolved', async () => {
@@ -144,7 +147,7 @@ describe('MemoriaHub onboarding facts', () => {
 
     it('reads flags, the storage resolution and an enabled tagging key, selecting ids only', async () => {
       const prisma = makePrisma();
-      prisma.aiProviderCredential.findFirst.mockResolvedValue({ id: 'k' });
+      prisma.aiKeys.status.mockResolvedValue({ configured: true, enabled: true });
       const settings = {
         features: { faceRecognition: true, autoTagging: true, memories: true },
         ai: { features: { tagging: { provider: 'openai', model: 'model-x' } } },
@@ -156,10 +159,15 @@ describe('MemoriaHub onboarding facts', () => {
         taggingProviderReady: true,
         memories: true,
       });
-      expect(prisma.aiProviderCredential.findFirst).toHaveBeenCalledWith({
-        where: { provider: 'openai', enabled: true },
-        select: { id: true },
-      });
+      expect(prisma.aiKeys.status).toHaveBeenCalledWith('openai');
+    });
+
+    it('a configured but disabled tagging key is not ready', async () => {
+      const prisma = makePrisma();
+      prisma.aiKeys.status.mockResolvedValue({ configured: true, enabled: false });
+      const settings = { ai: { features: { tagging: { provider: 'openai', model: 'model-x' } } } };
+      const fact = await FEATURE_READINESS_FACT.resolve(ctx(prisma, settings, { configured: true }));
+      expect(fact.taggingProviderReady).toBe(false);
     });
 
     it('honours the MEMORIES_ENABLED kill switch', async () => {

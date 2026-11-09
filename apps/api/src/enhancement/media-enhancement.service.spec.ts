@@ -28,6 +28,7 @@
  *   - discardEnhancement: RBAC (collaborator), deletes staging, row -> discarded
  */
 
+import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import {
   ArgumentsHost,
   BadRequestException,
@@ -286,6 +287,7 @@ describe('MediaEnhancementService', () => {
         { provide: MediaThumbnailService, useValue: mockThumbnails },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: AiDeploymentKeySource, useValue: { status: jest.fn() } },
       ],
     }).compile();
 

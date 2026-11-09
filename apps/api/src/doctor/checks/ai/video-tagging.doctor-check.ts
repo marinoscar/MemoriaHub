@@ -5,7 +5,7 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { PrismaService } from '../../../prisma/prisma.service';
+import { AiSettingsService } from '../../../ai/ai-settings.service';
 import { AiProviderRegistry } from '../../../ai-port/legacy-ai-provider.registry';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
 import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
@@ -103,7 +103,7 @@ export class VideoTaggingDoctorCheck implements DoctorCheck, OnModuleInit {
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly prisma: PrismaService,
+    private readonly aiSettings: AiSettingsService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly aiProviderRegistry: AiProviderRegistry,
   ) {}
@@ -138,12 +138,13 @@ export class VideoTaggingDoctorCheck implements DoctorCheck, OnModuleInit {
     if (!input.autoTaggingEnabled || !input.videoEnabled || input.envDisabled) return decideVideoTagging(input);
     if (!tagging?.provider || !tagging?.model) return decideVideoTagging(input);
 
-    const taggingCred = await this.prisma.aiProviderCredential.findUnique({ where: { provider: tagging.provider } });
-    input.taggingCredentialEnabled = !!taggingCred && taggingCred.enabled;
+    // Platform deployment key first, then the legacy row (RETRO-E3, #605); never decrypts.
+    const taggingCred = await this.aiSettings.credentialStatus(tagging.provider);
+    input.taggingCredentialEnabled = taggingCred.configured && taggingCred.enabled;
 
     if (input.taggingCredentialEnabled && input.transcriptionOn && transcription?.provider && transcription?.model) {
-      const cred = await this.prisma.aiProviderCredential.findUnique({ where: { provider: transcription.provider } });
-      input.transcriptionCredentialEnabled = !!cred && cred.enabled;
+      const cred = await this.aiSettings.credentialStatus(transcription.provider);
+      input.transcriptionCredentialEnabled = cred.configured && cred.enabled;
       const instance = this.safeGetAiProvider(transcription.provider);
       input.transcriptionProviderLacksAudio = !!instance && typeof instance.transcribeAudio !== 'function';
     }

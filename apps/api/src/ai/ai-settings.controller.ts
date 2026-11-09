@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  GoneException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,7 +21,6 @@ import { Auth } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import {
-  UpsertAiCredentialsDto,
   TestAiProviderDto,
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
@@ -30,6 +30,23 @@ import {
   SetTranscriptionFeatureDto,
   TestEmbeddingDto,
 } from './dto/ai-credentials.dto';
+
+/** `details.reason` of the 410 the two retired key-write routes answer (RETRO-E3, #605). */
+export const AI_LEGACY_KEY_WRITES_GONE = 'AI_LEGACY_KEY_WRITES_GONE';
+
+function legacyKeyWritesGone(provider: string): GoneException {
+  return new GoneException({
+    message:
+      'AI provider keys are stored in the platform credential store. Use ' +
+      `PUT or DELETE /api/admin/ai/providers/${provider}/key (Admin AI settings, /admin/settings/ai).`,
+    details: {
+      reason: AI_LEGACY_KEY_WRITES_GONE,
+      provider,
+      route: `/api/admin/ai/providers/${provider}/key`,
+      page: '/admin/settings/ai',
+    },
+  });
+}
 
 @ApiTags('AI Settings')
 @Controller('ai')
@@ -46,30 +63,31 @@ export class AiSettingsController {
     return this.aiSettingsService.getSettings();
   }
 
+  // RETRO-E3 (#605), release N: the legacy key table is read-only. A key is set or removed in the
+  // platform credential store (`PUT|DELETE /api/admin/ai/providers/:provider/key`, `ai_config:write`),
+  // so no new `ai_provider_credentials` row can appear before release N+1 drops the table.
   @Put('credentials/:provider')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
-  @ApiOperation({ summary: 'Configure AI provider credentials (Admin)' })
+  @ApiOperation({
+    summary: 'Gone: AI provider keys are set through PUT /api/admin/ai/providers/{provider}/key (Admin)',
+    deprecated: true,
+  })
   @ApiParam({ name: 'provider', description: 'Provider key: anthropic | openai' })
-  @ApiResponse({ status: 200, description: 'Credential saved (masked)' })
-  async upsertCredentials(
-    @Param('provider') provider: string,
-    @Body() dto: UpsertAiCredentialsDto,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.aiSettingsService.upsertCredential(provider, dto, userId);
+  @ApiResponse({ status: 410, description: 'Legacy key writes are retired; use the platform admin AI key route' })
+  upsertCredentials(@Param('provider') provider: string): never {
+    throw legacyKeyWritesGone(provider);
   }
 
   @Delete('credentials/:provider')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
-  @ApiOperation({ summary: 'Remove AI provider credentials (Admin)' })
+  @ApiOperation({
+    summary: 'Gone: AI provider keys are removed through DELETE /api/admin/ai/providers/{provider}/key (Admin)',
+    deprecated: true,
+  })
   @ApiParam({ name: 'provider', description: 'Provider key' })
-  @ApiResponse({ status: 200, description: 'Credential removed' })
-  async deleteCredentials(
-    @Param('provider') provider: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    await this.aiSettingsService.deleteCredential(provider, userId);
-    return { deleted: true, provider };
+  @ApiResponse({ status: 410, description: 'Legacy key writes are retired; use the platform admin AI key route' })
+  deleteCredentials(@Param('provider') provider: string): never {
+    throw legacyKeyWritesGone(provider);
   }
 
   @Post('test')

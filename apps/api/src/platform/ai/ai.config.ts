@@ -34,9 +34,10 @@ import { AiModule } from '@marinoscar/platform-api/ai';
 import '../../settings/registry';
 import '../../app-registrations/ai';
 import { AiHostModule } from './ai-host.module';
+import { MEMORIAHUB_AI_PROVIDER_IDS } from './ai-providers';
 
 export const aiModule = AiModule.forRoot({
   imports: [AiHostModule],
-  providers: ['openai', 'anthropic'],
+  providers: [...MEMORIAHUB_AI_PROVIDER_IDS],
   perUserDefaultModel: false,
 });

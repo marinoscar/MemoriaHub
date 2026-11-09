@@ -40,6 +40,7 @@
  *   - List: paginated, newest-first, circle-scoped, one groupBy per page.
  */
 
+import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CircleRole, MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/client';
@@ -145,6 +146,7 @@ describe('EnhancementBatchesController', () => {
         { provide: MediaThumbnailService, useValue: {} },
         { provide: EnrichmentJobService, useValue: {} },
         { provide: AppSystemSettingsService, useValue: {} },
+        { provide: AiDeploymentKeySource, useValue: {} },
       ],
     }).compile();
 

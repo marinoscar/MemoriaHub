@@ -44,6 +44,8 @@
     "settings:verify": "ts-node -P scripts/tsconfig.json --transpile-only scripts/verify-settings-rows.ts",
     "settings:migrate-run-retention": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-run-retention-settings.ts",
     "settings:migrate-telemetry": "ts-node -P scripts/tsconfig.json --transpile-only scripts/migrate-telemetry-settings.ts",
+    "ai:migrate-keys": "node dist/ai-port/migrate/ai-legacy-migrate.js",
+    "ai:migrate-keys:dev": "ts-node -P scripts/tsconfig.json --transpile-only src/ai-port/migrate/ai-legacy-migrate.ts",
     "openapi:dump": "ts-node -P scripts/tsconfig.json --transpile-only scripts/dump-openapi.ts",
     "openapi:typecheck": "tsc -p scripts/tsconfig.json"
   },

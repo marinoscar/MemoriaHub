@@ -284,8 +284,9 @@ runPlatformConformance({
     },
     aiKeyPolicy: {
       skip:
-        'RETRO-E4 builds the AiConformanceFixture; the deployment keys move into the platform store in ' +
-        'RETRO-E3 (until then MemoriaHub reads ai_provider_credentials through the legacy adapter).',
+        'RETRO-E4 builds the AiConformanceFixture. Since RETRO-E3 release N the deployment keys live in the ' +
+        'platform store (`npm run ai:migrate-keys` imports ai_provider_credentials); the legacy adapter reads ' +
+        'them first and falls back to the legacy row until release N+1 drops the table.',
     },
     aiJobsServerOnly: {
       skip:
