@@ -18,7 +18,6 @@ import { backupCommand } from './commands/backup.js';
 import { jobsCommand } from './commands/jobs.js';
 import { reportsCommand } from './commands/reports.js';
 import { workflowCommand } from './commands/workflow.js';
-import { androidCommand } from './commands/android.js';
 import { menuCommand } from './commands/menu.js';
 import { readVersion } from './version.js';
 import { APP_DEPLOY_CHECKS } from './extensions/deploy-checks.js';
@@ -29,6 +28,7 @@ import { APP_TUI_MENU_ROOT } from './tui/menu-slots.js';
 import { APP_TUI_SCREENS } from './tui/screens.js';
 import { APP_TUI_SELECTIONS, APP_TUI_STATE_LOADERS } from './tui/app-state.js';
 import { BRAND_HEX } from './brand.js';
+import { APP_ANDROID_COMMAND } from './extensions/android.js';
 
 // =============================================================================
 // MemoriaHub's CLI, composed on the platform engine  (issue #577, RETRO-F3)
@@ -103,7 +103,6 @@ export const APP_COMMAND_FACTORIES: readonly (() => Command)[] = [
   jobsCommand,
   reportsCommand,
   workflowCommand,
-  androidCommand,
   menuCommand,
 ];
 
@@ -122,7 +121,9 @@ export const APP_CLI_OPTIONS: CreateCliOptions = {
     repoSlug: REPO_SLUG,
   },
   version: readVersion(),
-  extraCommands: APP_COMMAND_FACTORIES.map(register),
+  // `android` is the platform's group since RETRO-D5 (#586), registered after the 1.3 commands
+  // (so `--help` lists it after `menu`); see extensions/android.ts.
+  extraCommands: [...APP_COMMAND_FACTORIES.map(register), APP_ANDROID_COMMAND],
   // The TUI: MemoriaHub's menu tree, screens, header chip and shared data (RETRO-F4, #582).
   tuiScreens: [...APP_TUI_SCREENS],
   tuiMenu: [...APP_TUI_MENU],
