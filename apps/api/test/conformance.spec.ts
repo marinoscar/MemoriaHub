@@ -339,8 +339,8 @@ runPlatformConformance({
     // against the composed schema the purge planner reads at bootstrap.
     userData: { datamodel: composedSchemaDatamodel(join(__dirname, '..', 'src', 'platform', 'user-data'))() },
 
-    // The sharing slice (RETRO-I1, #562). No app file touches the sharing tables directly (two link-only
-    // exemptions since RETRO-I4), the
+    // The sharing slice (RETRO-I1, #562). No app file touches the sharing tables directly (one read-only link
+    // listing exempt since RETRO-I4), the
     // public link route carries the identity slice's `@Public()` marker, and the three partial
     // unique indexes are in the installed platform migrations. RETRO-I2 (#569): every model with an
     // `owner_group_id` maps to a registered group-owned type, and the two shareable resource types
@@ -353,14 +353,11 @@ runPlatformConformance({
       groupOwnedModels: { ...MEMORIAHUB_GROUP_OWNED_MODELS },
       resourceTypeIds: ['album', 'media_item'],
       minRoutes: 100,
-      // RETRO-I4 (#578): the two app files that read `grants` directly, both link-only.
+      // RETRO-I4 (#578): the app file that lists link grants across records (read-only).
       directAccessExempt: {
         'public-links/link-grant-directory.service.ts':
           'PLATFORM-ADOPTION-SHIM(#578): read-only, org-scoped listing of link grants ACROSS records (the share_expiring ' +
           'sweep and the admin public-links page); the slice lists one record\'s links only. Every write goes through the slice.',
-        'legacy/media-shares-import.ts':
-          'Data migration only (RETRO-I4): the media_shares import checks which old tokens already have a link grant ' +
-          '(idempotency, by token hash) and re-keys share_expiring stamps; the grants themselves are written by importLegacyToken.',
       },
     },
 
