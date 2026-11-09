@@ -20,6 +20,9 @@
 // would swallow the enqueue for all the others, system-wide. The per-circle
 // pending/running check below is this task's own, correctly-scoped replacement
 // for that dedup. Precedent: `face_auto_archive_sweep` (FaceBackfillService).
+//
+// ENQUEUE-ONLY (RETRO-C9, #612): the tick reads (circles, the queue) and
+// enqueues; it never generates. `MemoryGenerationHandler` does the work.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -69,22 +72,132 @@ export class MemoriesGenerationTask {
     private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
+  /**
+   * The hourly tick: decides which circles are due and enqueues one
+   * `memory_generation` job per due circle (RETRO-C9, #612: a `@Cron` only
+   * decides and enqueues; the generation itself is `MemoryGenerationHandler`'s).
+   * Reads only, plus the per-circle enqueues. Returns the tally for tests and
+   * NEVER throws: a throw out of a `@Cron` is an unhandled rejection.
+   */
   @Cron(CronExpression.EVERY_HOUR)
-  async handleScheduledGeneration(): Promise<void> {
+  async handleScheduledGeneration(): Promise<MemoriesGenerationSweepResult> {
+    const result: MemoriesGenerationSweepResult = {
+      circles: 0,
+      enqueued: 0,
+      skipped: 0,
+      errors: 0,
+    };
+
     // Gate 1 — env kill-switch. Checked before anything else so a CI/test
     // deployment pays not even a cached settings read.
     if (process.env['MEMORIES_ENABLED'] === 'false') {
-      return;
+      return result;
     }
 
     if (this.sweepInFlight) {
       this.logger.debug('Memories generation sweep already in flight; skipping tick');
-      return;
+      return result;
     }
     this.sweepInFlight = true;
 
     try {
-      const result = await this.sweep();
+      // Gate 2 — feature flag, read ONCE for the whole sweep through the cached
+      // getSettings(), so a 500-circle deployment costs one settings read.
+      const settings = await this.systemSettings.getSettings();
+      if (!isMemoriesEnabled(settings)) {
+        return result;
+      }
+
+      const intervalHours =
+        settings.memories?.generation?.intervalHours ?? DEFAULT_INTERVAL_HOURS;
+      const cutoff = new Date(Date.now() - intervalHours * 3_600_000);
+
+      let cursor: string | undefined;
+      for (;;) {
+        const circles = await this.prisma.circle.findMany({
+          select: { id: true },
+          orderBy: { id: 'asc' },
+          take: CIRCLE_PAGE_SIZE,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        if (circles.length === 0) break;
+
+        const circleIds = circles.map((c) => c.id);
+
+        // Two batched reads per page instead of two per circle.
+        const [inFlight, lastSucceeded] = await Promise.all([
+          this.prisma.job.findMany({
+            where: {
+              type: MEMORY_GENERATION_JOB_TYPE,
+              subjectType: 'circle',
+              subjectId: { in: circleIds },
+              status: { in: ['pending', 'running'] },
+            },
+            select: { subjectId: true },
+          }),
+          this.prisma.job.groupBy({
+            by: ['subjectId'],
+            where: {
+              type: MEMORY_GENERATION_JOB_TYPE,
+              subjectType: 'circle',
+              subjectId: { in: circleIds },
+              status: 'succeeded',
+            },
+            _max: { finishedAt: true },
+          }),
+        ]);
+
+        const busy = new Set(inFlight.map((j) => j.subjectId).filter((id): id is string => !!id));
+        const lastSuccessAt = new Map<string, Date | null>();
+        for (const row of lastSucceeded) {
+          if (row.subjectId) lastSuccessAt.set(row.subjectId, row._max.finishedAt);
+        }
+
+        for (const circleId of circleIds) {
+          result.circles += 1;
+
+          // Gate 3a — a job for this circle is already queued or running.
+          if (busy.has(circleId)) {
+            result.skipped += 1;
+            continue;
+          }
+
+          // Gate 3b — interval gate. A circle that has never generated (no
+          // succeeded row) has no `last` and is always eligible.
+          const last = lastSuccessAt.get(circleId);
+          if (last && last > cutoff) {
+            result.skipped += 1;
+            continue;
+          }
+
+          // A per-circle failure is logged and counted, never fatal — one bad
+          // circle must not stop the rest of the deployment from generating.
+          try {
+            await this.enrichmentJobService.enqueue({
+              type: MEMORY_GENERATION_JOB_TYPE,
+              mediaItemId: null,
+              circleId,
+              reason: JobReason.backfill,
+              priority: MEMORY_GENERATION_PRIORITY,
+              // MANDATORY — see the header. Without it, one circle's job would
+              // suppress every other circle's, since global-job dedup keys on
+              // (type, mediaItemId IS NULL) system-wide.
+              skipDedup: true,
+            });
+            result.enqueued += 1;
+          } catch (err) {
+            result.errors += 1;
+            this.logger.warn(
+              `memory_generation enqueue failed for circle ${circleId}: ` +
+                (err instanceof Error ? err.message : String(err)),
+            );
+          }
+        }
+
+        if (circles.length < CIRCLE_PAGE_SIZE) break;
+        cursor = circleIds[circleIds.length - 1]!;
+      }
+
       if (result.enqueued > 0 || result.errors > 0) {
         this.logger.log(
           `Memories generation: ${result.enqueued} job(s) enqueued across ` +
@@ -97,119 +210,6 @@ export class MemoriesGenerationTask {
     } finally {
       this.sweepInFlight = false;
     }
-  }
-
-  /**
-   * Enqueue a `memory_generation` job for every eligible circle.
-   *
-   * Exposed (rather than inlined into the cron body) so the admin backfill in
-   * #315 and this task's tests can drive the same code path.
-   */
-  async sweep(): Promise<MemoriesGenerationSweepResult> {
-    const result: MemoriesGenerationSweepResult = {
-      circles: 0,
-      enqueued: 0,
-      skipped: 0,
-      errors: 0,
-    };
-
-    // Gate 2 — feature flag, read ONCE for the whole sweep through the cached
-    // getSettings(), so a 500-circle deployment costs one settings read.
-    const settings = await this.systemSettings.getSettings();
-    if (!isMemoriesEnabled(settings)) {
-      return result;
-    }
-
-    const intervalHours =
-      settings.memories?.generation?.intervalHours ?? DEFAULT_INTERVAL_HOURS;
-    const cutoff = new Date(Date.now() - intervalHours * 3_600_000);
-
-    let cursor: string | undefined;
-    for (;;) {
-      const circles = await this.prisma.circle.findMany({
-        select: { id: true },
-        orderBy: { id: 'asc' },
-        take: CIRCLE_PAGE_SIZE,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      });
-      if (circles.length === 0) break;
-
-      const circleIds = circles.map((c) => c.id);
-
-      // Two batched reads per page instead of two per circle.
-      const [inFlight, lastSucceeded] = await Promise.all([
-        this.prisma.job.findMany({
-          where: {
-            type: MEMORY_GENERATION_JOB_TYPE,
-            subjectType: 'circle',
-            subjectId: { in: circleIds },
-            status: { in: ['pending', 'running'] },
-          },
-          select: { subjectId: true },
-        }),
-        this.prisma.job.groupBy({
-          by: ['subjectId'],
-          where: {
-            type: MEMORY_GENERATION_JOB_TYPE,
-            subjectType: 'circle',
-            subjectId: { in: circleIds },
-            status: 'succeeded',
-          },
-          _max: { finishedAt: true },
-        }),
-      ]);
-
-      const busy = new Set(inFlight.map((j) => j.subjectId).filter((id): id is string => !!id));
-      const lastSuccessAt = new Map<string, Date | null>();
-      for (const row of lastSucceeded) {
-        if (row.subjectId) lastSuccessAt.set(row.subjectId, row._max.finishedAt);
-      }
-
-      for (const circleId of circleIds) {
-        result.circles += 1;
-
-        // Gate 3a — a job for this circle is already queued or running.
-        if (busy.has(circleId)) {
-          result.skipped += 1;
-          continue;
-        }
-
-        // Gate 3b — interval gate. A circle that has never generated (no
-        // succeeded row) has no `last` and is always eligible.
-        const last = lastSuccessAt.get(circleId);
-        if (last && last > cutoff) {
-          result.skipped += 1;
-          continue;
-        }
-
-        // A per-circle failure is logged and counted, never fatal — one bad
-        // circle must not stop the rest of the deployment from generating.
-        try {
-          await this.enrichmentJobService.enqueue({
-            type: MEMORY_GENERATION_JOB_TYPE,
-            mediaItemId: null,
-            circleId,
-            reason: JobReason.backfill,
-            priority: MEMORY_GENERATION_PRIORITY,
-            // MANDATORY — see the header. Without it, one circle's job would
-            // suppress every other circle's, since global-job dedup keys on
-            // (type, mediaItemId IS NULL) system-wide.
-            skipDedup: true,
-          });
-          result.enqueued += 1;
-        } catch (err) {
-          result.errors += 1;
-          this.logger.warn(
-            `memory_generation enqueue failed for circle ${circleId}: ` +
-              (err instanceof Error ? err.message : String(err)),
-          );
-        }
-      }
-
-      if (circles.length < CIRCLE_PAGE_SIZE) break;
-      cursor = circleIds[circleIds.length - 1]!;
-    }
-
     return result;
   }
 }
