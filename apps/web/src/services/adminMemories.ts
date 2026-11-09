@@ -21,3 +21,18 @@ export async function runMemoriesBackfill(body?: {
 }): Promise<MemoriesBackfillResult> {
   return api.post<MemoriesBackfillResult>('/admin/memories/backfill', body ?? {});
 }
+
+/** One library the backfill can target (RETRO-I6, #588): a group, or a user's personal library. */
+export interface MemoriesBackfillLibrary {
+  /** The id the backfill takes as `circleId`. */
+  id: string;
+  kind: 'group' | 'personal';
+  /** The group's name, or the owner's name for a personal library. */
+  name: string;
+}
+
+/** The libraries for the backfill picker (`GET /api/admin/memories/libraries`, admin only). */
+export async function listMemoriesBackfillLibraries(): Promise<MemoriesBackfillLibrary[]> {
+  const res = await api.get<{ items: MemoriesBackfillLibrary[] }>('/admin/memories/libraries');
+  return res.items;
+}
