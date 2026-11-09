@@ -22,7 +22,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { STORAGE_PROVIDER } from '../../src/storage/providers/storage-provider.interface';
+import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
 import { CircleMembershipService } from '../../src/circles/circle-membership.service';
 import {
@@ -32,7 +32,7 @@ import {
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
 import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
-import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { UploadNotificationService } from '../../src/notification-producers/upload-notification.service';
 import { MediaTouchService } from '../../src/media/media-touch.service';

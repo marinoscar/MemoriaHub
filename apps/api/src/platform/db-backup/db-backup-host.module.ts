@@ -33,13 +33,13 @@ import {
 } from '@marinoscar/platform-api/host';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
-import { StorageProvidersModule } from '../../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../../media-processing/media-processing.module';
 import { MemoriaHubBackupTarget } from './memoriahub-backup.target';
 import { DbBackupSystemDataAdapter } from './db-backup-system-data.adapter';
 
 @Global()
 @Module({
-  imports: [StorageProvidersModule],
+  imports: [MediaProcessingModule],
   providers: [
     MemoriaHubBackupTarget,
     { provide: DB_BACKUP_NOTIFIER, useExisting: NotificationsService },

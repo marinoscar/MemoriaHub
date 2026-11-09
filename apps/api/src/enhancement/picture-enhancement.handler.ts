@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { EnrichmentJob, MediaType, MediaEnhancementStatus } from '@prisma/client';
 import { Readable } from 'stream';
 import sharp from 'sharp';
@@ -10,16 +11,16 @@ import {
   ENRICHMENT_RATELIMIT_MAX_HITS,
 } from '../platform/jobs/queue-limits';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import {
   renderThumbnailBuffer,
   THUMBNAIL_CACHE_CONTROL,
-} from '../storage/processing/thumbnail-render.util';
-import { StorageProvider } from '../storage/providers/storage-provider.interface';
+} from '../media-processing/thumbnail-render.util';
+import { StorageProvider } from '@marinoscar/platform-api/storage';
 import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder';
 import { ExifCarryoverService } from './exif-carryover.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -57,6 +58,8 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
     // handler constructed without it still produces a valid enhancement, just
     // without carried-over EXIF.
     private readonly exifCarryover?: ExifCarryoverService,
+    // App metrics (RETRO-T3, #628): `app.ai.images.generated`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -119,6 +122,8 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       data: { status: MediaEnhancementStatus.processing, lastError: null },
     });
 
+    // The quality the run asked for, for `app.ai.images.generated` (set once it is resolved).
+    let imageQuality: string | undefined;
     try {
       const mediaItem = await this.prisma.mediaItem.findUnique({
         where: { id: row.mediaItemId },
@@ -173,6 +178,7 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
         (rawParams['quality'] as string | undefined) ??
         settings.pictureEnhancement?.defaultQuality ??
         'high';
+      imageQuality = quality;
       const preserveFaces = rawParams['preserveFaces'] !== false; // default true
       const strength =
         (rawParams['strength'] as string | undefined) ??
@@ -273,6 +279,8 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
         },
       });
 
+      this.metrics?.add('aiImagesGenerated', 1, { feature: 'enhance', quality, outcome: 'ready' });
+
       this.logger.log(
         `picture_enhancement job ${job.id}: enhancement ${row.id} ready (${enhancedWidth}x${enhancedHeight}, ${finalBuffer.length} bytes)`,
       );
@@ -314,6 +322,15 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
           lastError: msg,
         },
       });
+
+      // Counted once, when the queue gives up (a retry or a deferral is not an outcome yet).
+      if (!queueWillRetry) {
+        this.metrics?.add('aiImagesGenerated', 1, {
+          feature: 'enhance',
+          quality: imageQuality ?? 'other',
+          outcome: 'failed',
+        });
+      }
 
       this.logger.error(
         `picture_enhancement job ${job.id}: enhancement ${row.id} ${

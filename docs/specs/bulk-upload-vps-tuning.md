@@ -264,6 +264,17 @@ Net effect: gallery reads stay fast even while a bulk import is actively hammeri
 
 ---
 
+## 12. Watch it on the dashboard
+
+With telemetry on (`/admin/settings/telemetry`), the Telemetry Dashboard shows a running import without a shell (see [MemoriaHub telemetry metrics](telemetry-metrics.md)):
+
+- **Bulk import progress** card: uploads of the last 24 hours, one done-vs-pending bar per enrichment stage with its throughput and ETA, and the oldest waiting upload job.
+- **Media pipeline** group: uploads per minute by source, processing time p95 and the processing backlog. A backlog stuck at `processing` is the OOM symptom of §6 (objects orphaned mid-pipeline).
+- **Enrichment** group: items pending per stage and the job failure table (top 10 by failures); a type failing over 10 % turns the verdict `degraded`, over 25 % `critical`.
+- **Worker fleet (MemoriaHub)** group: which online nodes have ffmpeg, tesseract, CLIP and CompreFace, and the node share of the work. Registered nodes with none online while node-eligible jobs pile up is the "idle fleet" verdict reason.
+
+---
+
 ## Document History
 
 | Version | Date | Author | Change |

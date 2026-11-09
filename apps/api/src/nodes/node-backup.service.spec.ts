@@ -37,7 +37,7 @@ import { ConfigService } from '@nestjs/config';
 import { NodeBackupService } from './node-backup.service';
 import { NodesService } from './nodes.service';
 import { NodeBackupQueryService } from './node-backup-query.service';
-import { ObjectsService } from '../storage/objects/objects.service';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -211,7 +211,7 @@ describe('NodeBackupService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NodesService, useValue: nodesService },
         { provide: NodeBackupQueryService, useValue: queryService },
-        { provide: ObjectsService, useValue: objectsService },
+        { provide: StorageProviderResolver, useValue: objectsService },
         { provide: AppSystemSettingsService, useValue: systemSettings },
         {
           provide: ConfigService,

@@ -4,8 +4,8 @@ import type { MediaJobContext } from '../platform/jobs/media-item-job';
 import { Readable } from 'stream';
 import type { FaceDetectionResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { FaceDetectionCore, ResolvedProvider } from './face-detection-core.service';
 import { MediaTouchService } from '../media/media-touch.service';
@@ -179,7 +179,11 @@ export class FaceDetectionService {
   // matching, and upserts MediaFaceStatus from an already-computed DTO.
   // ---------------------------------------------------------------------------
 
-  async persistFaces(job: MediaJobContext, result: FaceDetectionResult): Promise<void> {
+  async persistFaces(
+    job: MediaJobContext,
+    result: FaceDetectionResult,
+    executor: 'server' | 'node' = 'server',
+  ): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('face_detection job missing mediaItemId');
     }
@@ -220,6 +224,7 @@ export class FaceDetectionService {
         modelVersion: result.modelVersion,
         faces: normalized,
         isVideo: false,
+        executor,
       });
     }
 

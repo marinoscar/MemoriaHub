@@ -47,9 +47,9 @@ import {
   type ClusterableDetection,
 } from '@memoriahub/enrichment-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { downloadToTempFile } from '../storage/processing/processors/stream-utils';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { downloadToTempFile } from '../media-processing/processors/stream-utils';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   FaceDetectionCore,
@@ -342,7 +342,7 @@ export class VideoFaceDetectionService {
             updatedAt: new Date(),
           },
           create: {
-            orgId: await this.defaultOrgId.get(), // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+            orgId: await this.defaultOrgId.get(), // single-organization default (common/tenancy/default-org-id.ts)
             name: `video-face-${frameThumbId}.jpg`,
             size: BigInt(c.thumbnailBuffer.length),
             mimeType: 'image/jpeg',
@@ -532,7 +532,11 @@ export class VideoFaceDetectionService {
   // already-computed DTO.
   // ---------------------------------------------------------------------------
 
-  async persistVideoFaces(job: MediaJobContext, result: VideoFaceDetectionResult): Promise<void> {
+  async persistVideoFaces(
+    job: MediaJobContext,
+    result: VideoFaceDetectionResult,
+    executor: 'server' | 'node' = 'server',
+  ): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('video_face_detection job missing mediaItemId');
     }
@@ -589,6 +593,7 @@ export class VideoFaceDetectionService {
       modelVersion: result.modelVersion,
       faces: facesWithVideoFields,
       isVideo: true,
+      executor,
     });
 
     const finalStatus =

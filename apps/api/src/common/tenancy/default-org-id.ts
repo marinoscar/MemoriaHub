@@ -4,12 +4,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 /**
  * Resolves the id of the default organization (`organizations.is_default`).
  *
- * PLATFORM-ADOPTION-SHIM(RETRO-D1): platform migration 0025 made
- * `storage_objects.org_id` and `storage_object_chunks.org_id` NOT NULL (and
- * forced row-level security on both). MemoriaHub's legacy storage code does
- * not know about organizations yet, so every row it creates is stamped with
- * the default organization. RETRO-D1 replaces the legacy storage models with
- * the platform's and deletes this provider.
+ * `storage_objects.org_id` is NOT NULL (platform migration 0025, forced
+ * row-level security). Since RETRO-D1 the platform objects API stamps the
+ * caller's organization and a derived object (a thumbnail, a node output) takes
+ * its SOURCE object's. A MemoriaHub write that has neither (a user's avatar, a
+ * video face frame, an enhanced copy kept beside its original) uses the default
+ * organization: the single-organization fallback the platform documents
+ * (`buildObjectKey`: "only single-organization mode may fall back to
+ * defaultOrgId"). PLATFORM-ADOPTION-SHIM(RETRO-MULTI-ORG): multi-organization
+ * mode needs the request's or the media item's organization at those writes.
  *
  * The id never changes once the organization exists (the default
  * organization is created by migration 0023 and there is exactly one), so it

@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { forSystem } from '@marinoscar/platform-api/core';
 
 import { MediaService } from '../../media/media.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
+import { PrismaSystemService } from '../../prisma/prisma-system.service';
+import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
+
+import { StorageProviderResolver } from '../storage/storage-provider.resolver';
 
 // =============================================================================
 // MemoriaHub's own data deletions (RETRO-H1, #591)
@@ -89,11 +91,12 @@ export class MemoriaHubUserDataService {
     private readonly prisma: PrismaService,
     private readonly media: MediaService,
     private readonly resolver: StorageProviderResolver,
+    private readonly system: PrismaSystemService,
   ) {}
 
   /** `storage_objects` is an organization table with row-level security; a purge must see every row. */
   private storageClient(): PrismaService {
-    return forSystem(this.prisma, 'purge') as unknown as PrismaService;
+    return this.system.asSystem('purge') as unknown as PrismaService;
   }
 
   // ---------------------------------------------------------------------------
@@ -132,8 +135,8 @@ export class MemoriaHubUserDataService {
     for (const group of groups.values()) {
       try {
         const provider = await this.resolver.getProviderFor(group.provider, group.bucket);
-        const result = await provider.deleteMany(group.rows.map((row) => row.storageKey));
-        const failedKeys = new Set(result.errors.map((error) => error.key));
+        const result = await deleteStorageKeys(provider, group.rows.map((row) => row.storageKey));
+        const failedKeys = new Set(result.failed.map((error) => error.key));
         for (const row of group.rows) {
           if (failedKeys.has(row.storageKey)) {
             failed += 1;
@@ -185,9 +188,9 @@ export class MemoriaHubUserDataService {
       }
       try {
         const provider = await this.resolver.getProviderFor(row.stagingProvider, row.stagingBucket);
-        const result = await provider.deleteMany(keys);
-        deleted += result.deleted;
-        failed += result.errors.length;
+        const result = await deleteStorageKeys(provider, keys);
+        deleted += result.deleted.length;
+        failed += result.failed.length;
       } catch (err) {
         failed += keys.length;
         this.logger.warn(`enhancement ${row.id}: staged files kept (${describe(err)})`);

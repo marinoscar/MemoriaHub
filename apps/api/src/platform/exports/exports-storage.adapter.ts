@@ -2,21 +2,21 @@
 // The exports slice's STORAGE_PROVIDER: MemoriaHub's own providers (RETRO-H2, #596)
 // =============================================================================
 //
-// PLATFORM-ADOPTION-SHIM(RETRO-D1): the exports slice writes, signs and deletes its
-// files through the platform `STORAGE_PROVIDER`, which resolves the platform `storage`
-// settings namespace and credential store. MemoriaHub still runs its own storage stack
-// (`src/storage/providers`: s3 / r2 / local, `storage.activeProvider`, the
-// `storage_provider_credentials` rows) until the storage slice lands, so the platform
-// provider would point at an UNCONFIGURED store and every export would fail. The slice
+// PLATFORM-ADOPTION-SHIM(RETRO-SEAM-EXPORTS-ROUTING): the exports slice writes, signs,
+// reads and deletes its files through the platform `STORAGE_PROVIDER`, i.e. the ACTIVE
+// driver only: a file written before an administrator switched drivers (or buckets)
+// could no longer be downloaded or purged. Since RETRO-D1 MemoriaHub runs the platform
+// storage slice, so this adapter holds no storage stack of its own: it writes to the
+// active driver and routes every other call through the platform `StorageProviderRouter`
+// (via `StorageProviderResolver`) to the driver and bucket RECORDED ON THE ROW. The slice
 // has no `target` option (unlike db-backup), so `ExportsHostModule` provides the
 // platform's public `STORAGE_PROVIDER` token itself with this adapter: `ExportsModule`
 // lists the host module FIRST in its imports and Nest resolves a token from the first
-// import that exports it, ahead of the slice's own `StorageProvidersModule`. Scoped to
-// the slice: no other module sees this binding. When RETRO-D1 mounts the storage slice,
-// delete this file and the provider entry in `exports-host.module.ts`.
+// import that exports it. Scoped to the slice: no other module sees this binding.
+// Delete this file once the exports slice routes per row (a seam request).
 //
-// WRITES go to the active provider (`storage.activeProvider`); `kind` reports its id
-// (`s3`, `r2`, `local`), which the slice records on the `storage_objects` row next to
+// WRITES go to the active driver (`storage.provider`); `kind` reports its id
+// (`s3`, `r2`, `s3compatible`, `local`), which the slice records on the `storage_objects` row next to
 // the bucket the upload returned. Nothing is buffered: the slice's writer stream is
 // handed straight to the provider's streaming `upload`.
 //
@@ -29,12 +29,10 @@
 
 import type { Readable } from 'node:stream';
 import { Injectable, Logger } from '@nestjs/common';
-import { forSystem } from '@marinoscar/platform-api/core';
 import type { StorageProvider as PlatformStorageProvider } from '@marinoscar/platform-api/storage';
 
-import { PrismaService } from '../../prisma/prisma.service';
-import type { StorageProvider } from '../../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
+import { PrismaSystemService } from '../../prisma/prisma-system.service';
+import { StorageProviderResolver } from '../storage/storage-provider.resolver';
 
 type UploadOptions = Parameters<PlatformStorageProvider['upload']>[2];
 type UploadResult = Awaited<ReturnType<PlatformStorageProvider['upload']>>;
@@ -60,7 +58,7 @@ export class ExportsStorageAdapter implements PlatformStorageProvider {
 
   constructor(
     private readonly resolver: StorageProviderResolver,
-    private readonly prisma: PrismaService,
+    private readonly system: PrismaSystemService,
   ) {}
 
   /** The id the slice records on the row: the provider the last upload went to. */
@@ -127,7 +125,7 @@ export class ExportsStorageAdapter implements PlatformStorageProvider {
   }
 
   /** The provider recorded on the row of `key`; the one this process wrote it to; else the active one. */
-  private async providerFor(key: string): Promise<StorageProvider> {
+  private async providerFor(key: string): Promise<PlatformStorageProvider> {
     const recorded = await this.recordedLocation(key);
     const location = recorded ?? this.written.get(key);
     if (location) return this.resolver.getProviderFor(location.provider, location.bucket);
@@ -137,8 +135,7 @@ export class ExportsStorageAdapter implements PlatformStorageProvider {
 
   private async recordedLocation(key: string): Promise<Location | null> {
     // `storage_objects` forces row-level security on `org_id`; the key names the row.
-    const system = forSystem(this.prisma, 'export') as unknown as PrismaService;
-    const row = (await system.storageObject.findUnique({
+    const row = (await this.system.asSystem('export').storageObject.findUnique({
       where: { storageKey: key },
       select: { storageProvider: true, bucket: true },
     })) as { storageProvider: string; bucket: string | null } | null;

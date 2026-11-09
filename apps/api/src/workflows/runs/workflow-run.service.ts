@@ -5,7 +5,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   CircleRole,
   JobReason,
@@ -66,6 +68,8 @@ export class WorkflowRunService {
     private readonly circleMembership: CircleMembershipService,
     private readonly enrichmentJobs: EnrichmentJobService,
     private readonly thumbnails: MediaThumbnailService,
+    // App metrics (RETRO-T3, #628): `app.runs.finished{engine=workflow,outcome=cancelled}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -327,6 +331,7 @@ export class WorkflowRunService {
       where: { id: run.id },
       data: { status: WorkflowRunStatus.cancelled, finishedAt: new Date() },
     });
+    this.metrics?.add('runsFinished', 1, { engine: 'workflow', outcome: 'cancelled' });
 
     this.logTransition(run, WorkflowRunStatus.cancelled, 'run_cancelled', {
       actorUserId: user.id,
@@ -359,6 +364,7 @@ export class WorkflowRunService {
       where: { id: run.id },
       data: { status: WorkflowRunStatus.cancelled, finishedAt: new Date() },
     });
+    this.metrics?.add('runsFinished', 1, { engine: 'workflow', outcome: 'cancelled' });
 
     this.logTransition(run, WorkflowRunStatus.cancelled, 'run_admin_cancelled', {
       actorUserId,

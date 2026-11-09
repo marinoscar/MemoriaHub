@@ -79,9 +79,9 @@ describe('MetadataExtractionHandler', () => {
       expect(mockJobScope.run).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1', orgId: TEST_ORG_ID }), expect.any(Function));
     });
 
-    it('passes no scope for a job with no organization (legacy row)', async () => {
+    it('still passes a write scope for a job with no organization (legacy row: the default organization, RETRO-D1)', async () => {
       await handler.process(mediaItemJob('metadata_extraction', 'media-1', 'circle-1', { orgId: null }));
-      expect(mockMetadataExtractionService.processMediaItem).toHaveBeenCalledWith(CONTEXT, undefined);
+      expect(mockMetadataExtractionService.processMediaItem).toHaveBeenCalledWith(CONTEXT, expect.any(Function));
     });
 
     it('settles as a no-op when the media item no longer exists', async () => {

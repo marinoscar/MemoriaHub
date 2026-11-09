@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   JobHandlerRegistry,
   runRetentionPolicyPurge,
@@ -96,6 +97,8 @@ export class ReviewRunsRetentionHandler implements JobHandler, OnModuleInit {
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
+    // App metrics (RETRO-T3, #628): `app.runs.finished{outcome=failed}` for swept runs. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -162,7 +165,8 @@ export class ReviewRunsRetentionHandler implements JobHandler, OnModuleInit {
     });
 
     if (review.count > 0 || trash.count > 0) {
-      // metrics: RETRO-T3 (app.runs.finished{engine=review|trash_empty,outcome=failed})
+      this.metrics?.add('runsFinished', review.count, { engine: 'review', outcome: 'failed' });
+      this.metrics?.add('runsFinished', trash.count, { engine: 'trash_empty', outcome: 'failed' });
       this.logger.warn(
         `${this.type}: swept ${review.count} stale review run(s) and ` +
           `${trash.count} stale empty-trash run(s) to failed`,

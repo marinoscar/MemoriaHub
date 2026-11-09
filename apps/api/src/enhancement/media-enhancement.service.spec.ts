@@ -28,6 +28,7 @@
  *   - discardEnhancement: RBAC (collaborator), deletes staging, row -> discarded
  */
 
+import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import {
   ArgumentsHost,
   BadRequestException,
@@ -39,9 +40,9 @@ import { CircleRole, MediaEnhancementStatus, MediaEnhancementDecision, MediaType
 import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
-import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -286,6 +287,7 @@ describe('MediaEnhancementService', () => {
         { provide: MediaThumbnailService, useValue: mockThumbnails },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: AiDeploymentKeySource, useValue: { status: jest.fn() } },
       ],
     }).compile();
 

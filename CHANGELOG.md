@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **AI provider keys move to the platform key store (RETRO-E3 release N, issue #605). Mandatory before the next release.** After upgrading, take a database backup, then run `npm run ai:migrate-keys --workspace=api -- --dry-run` and `-- --apply` (runbook: [AI platform migration](docs/runbooks/ai-platform-migration.md)). The command copies each `ai_provider_credentials` key into the platform credential store (purpose `ai`), sets `ai.providers.<id>.enabled`/`baseUrl` and `ai.keyPolicy = byok_with_org_fallback`; it is idempotent and never modifies the old table. AI keeps working before and after it: the app reads the platform key first and falls back to the old row. **The next release drops `ai_provider_credentials`**; a key not imported by then is lost unless the backup is restored. `PUT`/`DELETE /api/ai/credentials/:provider` now answer 410: set keys with `PUT|DELETE /api/admin/ai/providers/:provider/key`. The platform `ai` credential purpose is now registered, which also fixes a 500 from that route.
+
 ### Removed
 
 - **Legacy Android app (issue #500, epic #498)** — `apps/android/` (package `cr.marin.memoriahub`: Kotlin/Compose, Hilt, Room, Retrofit) is deleted. It had no CI build, no release or update path, and its docs contradicted the code. It is replaced by an Android app built as a TWA plus a native Media Sync module (see [Android Media Sync](docs/specs/android-media-sync.md)). `docs/specs/android-sync.md` and `docs/plan/phase-08-android-sync.md` are now superseded stubs. **The new app's ID is `memoriahub.marin.cr`, a different package, so the legacy app must be uninstalled manually** or both would upload. Kept for other clients: `MediaSource.android`, `clientInfo.returnUri` / `sanitizeReturnUri` and the `/activate` deep-link redirect.

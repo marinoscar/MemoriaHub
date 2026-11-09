@@ -5,7 +5,7 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { PrismaService } from '../../../prisma/prisma.service';
+import { AiSettingsService } from '../../../ai/ai-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
 import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
@@ -59,7 +59,7 @@ export class PictureEnhancerDoctorCheck implements DoctorCheck, OnModuleInit {
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly prisma: PrismaService,
+    private readonly aiSettings: AiSettingsService,
     private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
@@ -79,9 +79,8 @@ export class PictureEnhancerDoctorCheck implements DoctorCheck, OnModuleInit {
     };
     if (!input.featureEnabled || input.envDisabled) return decidePictureEnhancer(input);
 
-    const cred = await this.prisma.aiProviderCredential.findUnique({
-      where: { provider: input.provider ?? 'openai' },
-    });
-    return decidePictureEnhancer({ ...input, credentialConfigured: !!cred && cred.enabled });
+    // Platform deployment key first, then the legacy row (RETRO-E3, #605); never decrypts.
+    const cred = await this.aiSettings.credentialStatus(input.provider ?? 'openai');
+    return decidePictureEnhancer({ ...input, credentialConfigured: cred.configured && cred.enabled });
   }
 }

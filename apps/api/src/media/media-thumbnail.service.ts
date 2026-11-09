@@ -4,8 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+} from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 
 /**
  * TTL (seconds) requested when signing a thumbnail download URL. Longer than the

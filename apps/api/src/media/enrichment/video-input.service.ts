@@ -34,8 +34,8 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { probeRangeSeekSuitability } from '@memoriahub/enrichment-compute/video';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
-import { downloadToTempFile } from '../../storage/processing/processors/stream-utils';
+import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
+import { downloadToTempFile } from '../../media-processing/processors/stream-utils';
 
 /**
  * Presigned-URL lifetime for a streamed read.

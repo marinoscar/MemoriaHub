@@ -4,7 +4,7 @@ import { JobReason, MediaType, WorkflowTrigger } from '@prisma/client';
 import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
-} from '../../storage/processing/events/object-processed.event';
+} from '../../media-processing/events/object-processed.event';
 import {
   ENRICHMENT_JOB_SETTLED_EVENT,
   EnrichmentJobSettledEvent,

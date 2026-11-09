@@ -36,7 +36,7 @@ import {
 //   user.profile, user.notifications (the platform's, orders 10 and 20)
 //
 // Administrator (Setup guide), in order:
-//   memoriahub.storage_ready   required     storage_settings:read   (replaces the platform's admin.storage)
+//   memoriahub.storage_ready   required     storage_config:read     (replaces the platform's admin.storage)
 //   admin.email                required     the platform's step: it is MemoriaHub's `email_ready`
 //   admin.access               required     the platform's
 //   memoriahub.enable_faces    recommended  face_settings:read      flag on AND the Doctor's face.detection passes
@@ -182,15 +182,15 @@ export const STORAGE_READY_STEP: OnboardingStepDef = {
   title: 'Connect object storage',
   description: 'Choose where photos and videos are stored. Nothing can be uploaded until a provider is configured.',
   actionLabel: 'Configure storage',
-  href: '/admin/settings/storage/providers',
-  // `GET /api/storage-settings` enforces storage_settings:read.
-  permission: 'storage_settings:read',
+  href: '/admin/settings/storage',
+  // `GET /api/admin/storage-config` enforces storage_config:read (the storage slice, RETRO-D1).
+  permission: 'storage_config:read',
   skippable: false,
   facts: [F.FEATURE_READINESS],
   evaluate: (facts) =>
     readiness(facts).storageReady
       ? { status: 'done' }
-      : { status: 'todo', detail: 'The active storage provider has no enabled credential.' },
+      : { status: 'todo', detail: 'The active storage driver is not fully configured.' },
 };
 
 export const ENABLE_FACES_STEP: OnboardingStepDef = {

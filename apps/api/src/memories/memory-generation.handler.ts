@@ -153,7 +153,7 @@ export class MemoryGenerationHandler implements JobHandler, OnModuleInit {
 
       try {
         const result = await curator.run(ctx);
-        // metrics: RETRO-T3 (app.memories.generated{type}: result.created per curator type)
+        // Each create/refresh is counted where it is written: MemoryCurationService.upsertMemory (`app.memories.generated`).
         created += result.created;
         refreshed += result.refreshed;
         tombstoned += result.tombstoned;

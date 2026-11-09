@@ -40,7 +40,7 @@ import {
   BackupFeedCursor,
   NodeBackupQueryService,
 } from './node-backup-query.service';
-import { ObjectsService } from '../storage/objects/objects.service';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { isValidCron, nextCronDate } from '../workflows/util/cron.util';
 import {
   BackupRunStats,
@@ -79,7 +79,7 @@ export class NodeBackupService {
     private readonly prisma: PrismaService,
     private readonly nodesService: NodesService,
     private readonly queryService: NodeBackupQueryService,
-    private readonly objectsService: ObjectsService,
+    private readonly storageResolver: StorageProviderResolver,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly config: ConfigService,
   ) {}
@@ -456,7 +456,7 @@ export class NodeBackupService {
         let downloadUrlExpiresAt: string | null = null;
         if (!tombstone && storageObject && storageObject.status === 'ready') {
           try {
-            downloadUrl = await this.objectsService.getInternalDownloadUrl(
+            downloadUrl = await this.storageResolver.getInternalDownloadUrl(
               storageObject.id,
               ttlSeconds,
             );

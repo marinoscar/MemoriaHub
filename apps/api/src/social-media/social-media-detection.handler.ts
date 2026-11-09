@@ -47,7 +47,8 @@
 // runs here.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { JobReason, MediaSocialStatusType, MediaTagSource, MediaType } from '@prisma/client';
 import {
   JobHandlerRegistry,
@@ -63,10 +64,10 @@ import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } fro
 import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
 import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { downloadToTempFile } from '../storage/processing/processors/stream-utils';
-import { probeVideoFile, extractContainerMetadata } from '../storage/processing/processors/ffprobe.util';
+import { downloadToTempFile } from '../media-processing/processors/stream-utils';
+import { probeVideoFile, extractContainerMetadata } from '../media-processing/processors/ffprobe.util';
 import {
   SocialMediaDetectorService,
   VideoDetectionInput,
@@ -144,6 +145,8 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     private readonly ocr: SocialMediaOcrService,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaEnrichment: MediaEnrichmentService,
+    // App metrics (RETRO-T3, #628): `app.media.social.classified`, system tags in `app.media.tags.applied`.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -553,7 +556,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     }
 
     // Clean
-    await this.applyClean(mediaItem.id, mediaItem.socialMediaSource, result.matchedRule);
+    await this.applyClean(mediaItem.id, mediaItem.socialMediaSource, result.matchedRule, result.detectionMethod ?? null);
 
     // Fan out the downstream video enrichment that was withheld while
     // classification was pending.
@@ -599,7 +602,6 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     const platformTag = PLATFORM_TAG[result.platform];
     if (platformTag) tagNames.push(platformTag);
 
-    // metrics: RETRO-T3 (app.media.social.classified{platform})
     await this.prisma.$transaction(async (tx) => {
       for (const name of tagNames) {
         const tag = await tx.tag.upsert({
@@ -651,6 +653,8 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
         data: { socialMediaSource: result.platform },
       });
     });
+    this.metrics?.add('mediaSocialClassified', 1, { platform: result.platform, method: result.method });
+    this.metrics?.add('mediaTagsApplied', tagNames.length, { media_type: 'video', source: 'system' });
   }
 
   /**
@@ -663,8 +667,8 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     mediaItemId: string,
     previousSource: string | null,
     matchedRule: string | null = null,
+    method: string | null = null,
   ): Promise<void> {
-    // metrics: RETRO-T3 (app.media.social.classified{platform}: clean)
     await this.prisma.$transaction(async (tx) => {
       await tx.mediaSocialStatus.upsert({
         where: { mediaItemId },
@@ -705,6 +709,11 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
           data: { socialMediaSource: null },
         });
       }
+    });
+    // A pre-flight cap reads as `skip`; a full pass without a recorded method as Tier-1 `metadata`.
+    this.metrics?.add('mediaSocialClassified', 1, {
+      platform: 'clean',
+      method: matchedRule?.startsWith('skip-') ? 'skip' : (method ?? 'metadata'),
     });
   }
 

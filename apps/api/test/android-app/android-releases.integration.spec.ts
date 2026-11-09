@@ -36,8 +36,8 @@ import {
   DEFAULT_ANDROID_PACKAGE_NAME,
 } from '../../src/android-app/releases/android-release.constants';
 import { signDownloadToken } from '../../src/android-app/releases/download-token';
-import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
-import type { StorageProvider } from '../../src/storage/providers/storage-provider.interface';
+import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
+import type { StorageProvider } from '@marinoscar/platform-api/storage';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 import {
   authHeader,

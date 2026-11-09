@@ -63,9 +63,7 @@
 // never moved: the run rows keep their stored `storage_key`, so download, restore,
 // retention and delete keep finding them. The prefix is registered (deployment
 // scope, survives a factory reset) so purge and offboarding enumerate it.
-// PLATFORM-ADOPTION-SHIM(RETRO-D1): registered here because the app's storage
-// key-prefix manifest (`platform/storage/storage-key-prefix.manifest.ts`) arrives
-// with the storage slice; D1 moves this entry there.
+// Since RETRO-D1 the entry lives in `platform/storage/storage-key-prefix.manifest.ts`.
 // =============================================================================
 
 import { Client } from 'pg';
@@ -76,11 +74,6 @@ import type {
   RestoreGateContext,
   RestoreGateOutcome,
 } from '@marinoscar/platform-api/db-backup';
-import {
-  registerStorageKeyPrefixes,
-  storageKeyPrefixRegistry,
-  type StorageKeyPrefixDef,
-} from '@marinoscar/platform-api/storage';
 
 import { buildDatabaseUrl } from '../config/database-url.util';
 
@@ -195,16 +188,5 @@ export const MEMORIAHUB_REQUIRED_CARRY_OVER_IDS = [ANDROID_RELEASES_CARRY_OVER.i
 // Legacy archive key prefix
 // ---------------------------------------------------------------------------
 
-/** Where MemoriaHub wrote archives before the platform slice (`db-backups/<stamp>-<runId>.dump`). */
-export const LEGACY_DB_BACKUP_KEY_PREFIX: StorageKeyPrefixDef = Object.freeze({
-  id: 'legacy-db-backups',
-  prefix: 'db-backups/',
-  owner: 'db-backup',
-  scope: 'deployment' as const,
-  description: 'Database backup archives written before the platform slice (RETRO-D4); never moved.',
-  survivesFactoryReset: true,
-});
-
-if (!storageKeyPrefixRegistry.has(LEGACY_DB_BACKUP_KEY_PREFIX.id) && !storageKeyPrefixRegistry.frozen) {
-  registerStorageKeyPrefixes([LEGACY_DB_BACKUP_KEY_PREFIX]);
-}
+// Registered by the storage key-prefix manifest since RETRO-D1 (#563); re-exported for the specs.
+export { LEGACY_DB_BACKUP_KEY_PREFIX } from '../platform/storage/storage-key-prefix.manifest';

@@ -24,7 +24,9 @@
 //   face_provider  face recognition provider keys, name = provider key (`compreface`)
 //   geo_provider   reverse geocoding provider keys, name = provider key (`google`)
 //
-// NOT HERE: AI provider keys (`ai_provider_credentials`), which belong to RETRO-E3.
+//   ai             AI_CREDENTIAL_PURPOSE_DEF   the deployment's AI provider keys (RETRO-E3, #605): the address
+//                  `AiConfigAdminService.setKey` writes and `AiConfigService.getOrgKey` / `AiKeyResolver`
+//                  read; `npm run ai:migrate-keys` copies `ai_provider_credentials` here. Tiers system and org.
 // =============================================================================
 
 import {
@@ -33,6 +35,7 @@ import {
   userCredentialPurposeRegistry,
   type CredentialPurposeDef,
 } from '@marinoscar/platform-api/credentials';
+import { AI_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/ai';
 import { SES_CREDENTIAL_PURPOSE_DEF, SMTP_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/email';
 import { PUSH_VAPID_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/notifications';
 import { STORAGE_CREDENTIAL_PURPOSE_DEF } from '@marinoscar/platform-api/storage';
@@ -77,6 +80,7 @@ export const MEMORIAHUB_CREDENTIAL_PURPOSE_DEFS: readonly CredentialPurposeDef[]
   GEO_PROVIDER_CREDENTIAL_PURPOSE_DEF,
   TELEMETRY_GREPTIME_CREDENTIAL_PURPOSE_DEF,
   WEBHOOK_SIGNING_CREDENTIAL_PURPOSE_DEF,
+  AI_CREDENTIAL_PURPOSE_DEF,
 ];
 
 let registered = false;

@@ -10,8 +10,9 @@
  * where public already holds the renamed tables and the platform's own `storage_migration_*`.
  *
  * Part 2 needs a database migrated to the latest schema (`npm run prisma:migrate`): it writes rows
- * into `public.mh_legacy_storage_migration_*` and reads them back through Prisma and
- * `StorageSettingsService.getMigrationRun`, beside the platform's empty `storage_migration_runs`.
+ * into `public.mh_legacy_storage_migration_*` and reads them back through Prisma, beside the
+ * platform's empty `storage_migration_runs`. (Since RETRO-D1 nothing in the app reads the legacy
+ * tables: they are frozen history; the migration is the platform's.)
  *
  * Skips (reported as skipped, never passed) when nothing listens on the port.
  */
@@ -20,7 +21,6 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { StorageSettingsService } from '../../src/storage-settings/storage-settings.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
@@ -301,17 +301,6 @@ describeMaybeDb('legacy storage-migration rename (DB_GATED: real PostgreSQL)', (
       expect(run).toMatchObject({ id: ids.run, sourceProvider: 's3', targetProvider: 'r2', status: 'completed' });
       expect(run!.items).toHaveLength(1);
       expect(run!.items[0]).toMatchObject({ id: ids.item, status: 'completed', newStorageKey: 'r2/a5b', object: { id: ids.object } });
-    });
-
-    it('the admin service reads the run and recomputes its counts from the renamed item table', async () => {
-      const service = new StorageSettingsService(prisma, {} as never, {} as never, {} as never);
-      await expect(service.getMigrationRun(ids.run)).resolves.toMatchObject({
-        id: ids.run,
-        status: 'completed',
-        migratedCount: 1,
-        failedCount: 0,
-        counts: { byStatus: { completed: 1 } },
-      });
     });
 
     it('leaves the platform storage_migration_* tables alone', async () => {

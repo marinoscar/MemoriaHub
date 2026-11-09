@@ -43,7 +43,8 @@
 // skipping them buys nothing. Degrade, never skip on duration.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { EnrichmentJob, MediaTagStatusType, MediaType } from '@prisma/client';
 import { extname } from 'path';
 import type { VideoAutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
@@ -67,7 +68,7 @@ import type {
   AiProviderCredentials,
   AnalyzeImageInputImage,
 } from '../ai-port/legacy-ai-provider.types';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { AutoTaggingService } from './auto-tagging.service';
@@ -117,6 +118,8 @@ export class VideoAutoTaggingService {
     private readonly videoInput: VideoInputResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly autoTaggingService: AutoTaggingService,
+    // App metrics (RETRO-T3, #628): `app.ai.audio.transcribed`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -578,6 +581,8 @@ export class VideoAutoTaggingService {
     computed: VideoAutoTaggingResult,
   ): Promise<void> {
     if (!computed.transcript) return;
+    // The lead the transcript covers (an upper bound for a clip shorter than the lead); in-process and node alike.
+    this.metrics?.add('aiAudioSeconds', computed.transcript.leadSeconds, { feature: 'transcription' });
 
     const config = await this.aiSettingsService.resolveTranscriptionConfig().catch(() => null);
     const data = {

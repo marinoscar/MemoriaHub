@@ -43,8 +43,7 @@ import { NodesService } from './nodes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { ObjectsService } from '../storage/objects/objects.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
@@ -137,7 +136,6 @@ describe('NodesService.getJobCredentials', () => {
         NodesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentHandlerRegistry, useValue: { get: jest.fn(), types: jest.fn().mockReturnValue([]) } },
-        { provide: ObjectsService, useValue: { getDownloadUrl: jest.fn() } },
         { provide: StorageProviderResolver, useValue: { getActiveProvider: jest.fn() } },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AiSettingsService, useValue: mockAiSettingsService },

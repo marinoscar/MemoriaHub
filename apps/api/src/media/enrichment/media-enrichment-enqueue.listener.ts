@@ -3,7 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
-} from '../../storage/processing/events/object-processed.event';
+} from '../../media-processing/events/object-processed.event';
 import { MediaEnrichmentService } from './media-enrichment.service';
 
 /**

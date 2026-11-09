@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { BurstGroupStatus, DuplicateGroupStatus, MediaType, Prisma } from '@prisma/client';
 import { computeVisualHash, hammingDistance } from '@memoriahub/enrichment-compute/dhash';
 import { VISUAL_EMBEDDING_MODEL_TAG } from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';
@@ -80,6 +81,8 @@ export class DuplicateDetectionService {
     private readonly resolver: StorageProviderResolver,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly visualEmbeddingService: VisualEmbeddingService,
+    // App metrics (RETRO-T3, #628): `app.media.duplicates.grouped`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -425,7 +428,8 @@ export class DuplicateDetectionService {
     // compute (download/CLIP/KNN/hash scan) stayed outside to keep the lock
     // hold-time minimal.
     // -----------------------------------------------------------------
-    // metrics: RETRO-T3 (app.media.duplicates.grouped)
+    // Counted after the commit: `new_group` counts every member placed, `joined_group` the subject.
+    let grouped: { outcome: 'new_group' | 'joined_group'; items: number } | null = null;
     await this.prisma.$transaction(async (tx) => {
       const lockRows = await tx.$queryRaw<
         { burst_group_id: string | null; burst_status: string | null }[]
@@ -473,6 +477,7 @@ export class DuplicateDetectionService {
         this.logger.log(
           `Created duplicate group ${targetGroupId} with ${linkedCandidates.length + 1} members (circleId=${circleId})`,
         );
+        grouped = { outcome: 'new_group', items: linkedCandidates.length + 1 };
       } else if (existingGroupIds.length === 1) {
         targetGroupId = existingGroupIds[0];
 
@@ -482,6 +487,7 @@ export class DuplicateDetectionService {
         });
 
         this.logger.log(`Assigned MediaItem ${mediaItemId} to existing duplicate group ${targetGroupId}`);
+        grouped = { outcome: 'joined_group', items: 1 };
       } else {
         const groups = await tx.duplicateGroup.findMany({
           where: { id: { in: existingGroupIds } },
@@ -509,10 +515,13 @@ export class DuplicateDetectionService {
         this.logger.log(
           `Merged ${groupsToMerge.length} duplicate group(s) into ${targetGroupId} for MediaItem ${mediaItemId}`,
         );
+        grouped = { outcome: 'joined_group', items: 1 };
       }
 
       await this.recomputeGroupMeta(targetGroupId, tx);
     });
+    const committed = grouped as { outcome: 'new_group' | 'joined_group'; items: number } | null;
+    if (committed) this.metrics?.add('mediaDuplicatesGrouped', committed.items, { outcome: committed.outcome });
   }
 
   /**
@@ -642,6 +651,7 @@ export class DuplicateDetectionService {
     this.logger.log(
       `Evicted ${linked.length} item(s) from ${affectedGroupIds.length} duplicate group(s) (burst wins)`,
     );
+    this.metrics?.add('mediaDuplicatesGrouped', linked.length, { outcome: 'evicted_by_burst' });
   }
 
   /**

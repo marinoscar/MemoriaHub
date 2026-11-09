@@ -22,6 +22,24 @@ export interface InsightsMetrics {
   videoCount: number;
   totalFaces: number;
   taggedItems: number;
+  /**
+   * Stored bytes by provider and kind (RETRO-T3, #628): the source of the
+   * `app.storage.bytes` gauge, which reads this snapshot rather than summing live.
+   * `kind` is `thumbnail` for a `thumbnails/` object, else the owning item's type,
+   * else `other`. Trashed items count here too (they still occupy storage).
+   * Absent on a snapshot computed before this field existed.
+   */
+  storageBreakdown?: Array<{ provider: string; kind: string; bytes: string }>;
+  /** Bytes of trashed (soft-deleted) media items' originals (`app.storage.trash.bytes`). */
+  trashBytes?: string;
+}
+
+// Raw row shape of the storage breakdown query.
+interface StorageBreakdownRow {
+  provider: string;
+  kind: string;
+  trashed: boolean;
+  bytes: bigint;
 }
 
 export interface RefreshState {
@@ -51,7 +69,7 @@ export class InsightsService {
   // ---------------------------------------------------------------------------
 
   async computeMetrics(): Promise<InsightsMetrics> {
-    const [rows, totalFaces, taggedItems] = await Promise.all([
+    const [rows, totalFaces, taggedItems, breakdownRows] = await Promise.all([
       this.prisma.$queryRaw<MediaTypeRow[]>`
         SELECT mi.type AS type,
                COUNT(*)::bigint AS cnt,
@@ -68,6 +86,17 @@ export class InsightsService {
           mediaItem: { deletedAt: null },
         },
       }),
+      this.prisma.$queryRaw<StorageBreakdownRow[]>`
+        SELECT so.storage_provider AS provider,
+               CASE WHEN so.storage_key LIKE 'thumbnails/%' THEN 'thumbnail'
+                    WHEN mi.type IS NOT NULL THEN mi.type::text
+                    ELSE 'other' END AS kind,
+               (mi.deleted_at IS NOT NULL) AS trashed,
+               COALESCE(SUM(so.size), 0)::bigint AS bytes
+        FROM storage_objects so
+        LEFT JOIN media_items mi ON mi.storage_object_id = so.id
+        GROUP BY 1, 2, 3
+      `,
     ]);
 
     let photoCnt = BigInt(0);
@@ -96,6 +125,7 @@ export class InsightsService {
       videoCount: Number(videoCnt),
       totalFaces,
       taggedItems,
+      ...summariseStorage(breakdownRows),
     };
   }
 
@@ -194,4 +224,28 @@ export class InsightsService {
         return { state: 'idle', jobId: null, lastError: null };
     }
   }
+}
+
+/**
+ * Fold the breakdown rows (provider x kind x trashed) into the snapshot's two
+ * storage fields. Tolerates rows of another shape (returns nothing for them).
+ */
+function summariseStorage(rows: unknown): Pick<InsightsMetrics, 'storageBreakdown' | 'trashBytes'> {
+  if (!Array.isArray(rows)) return {};
+  const byKey = new Map<string, { provider: string; kind: string; bytes: bigint }>();
+  let trash = BigInt(0);
+  for (const row of rows as StorageBreakdownRow[]) {
+    if (typeof row?.provider !== 'string' || typeof row?.kind !== 'string') continue;
+    const bytes = BigInt(row.bytes ?? 0);
+    const key = `${row.provider}|${row.kind}`;
+    const entry = byKey.get(key) ?? { provider: row.provider, kind: row.kind, bytes: BigInt(0) };
+    entry.bytes += bytes;
+    byKey.set(key, entry);
+    if (row.trashed === true && row.kind !== 'thumbnail') trash += bytes;
+  }
+  if (byKey.size === 0) return {};
+  return {
+    storageBreakdown: [...byKey.values()].map((e) => ({ provider: e.provider, kind: e.kind, bytes: e.bytes.toString() })),
+    trashBytes: trash.toString(),
+  };
 }

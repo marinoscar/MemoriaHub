@@ -3,7 +3,7 @@
  *
  * Mocking strategy (mirrors picture-enhancement.handler.spec.ts /
  * media-orientation-edit.service.spec.ts):
- *   - `../storage/processing/image-orientation.util` is module-mocked so
+ *   - `../media-processing/image-orientation.util` is module-mocked so
  *     `prepareImageForProcessing` never touches sharp/libvips by default — it
  *     resolves a deterministic "prepared" buffer + dimensions. Individual tests
  *     override the resolved value with a REAL sharp-encoded buffer whenever the
@@ -34,7 +34,7 @@
  *   - EXIF/GPS stripping + the 512x512 output contract (real sharp round-trip)
  */
 
-jest.mock('../storage/processing/image-orientation.util', () => ({
+jest.mock('../media-processing/image-orientation.util', () => ({
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared-jpeg-bytes'),
     width: 800,
@@ -55,11 +55,11 @@ import { CircleRole, Prisma, UserAvatarSource } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import { RequestUser } from '@marinoscar/platform-api/identity';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { UserAvatarService } from './user-avatar.service';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
 

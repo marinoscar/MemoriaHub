@@ -4,9 +4,11 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  HttpException,
   Inject,
   Optional,
 } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaEnhancementStatus, MediaTagSource } from '@prisma/client';
 import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
@@ -16,8 +18,9 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+} from '@marinoscar/platform-api/storage';
+import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { MediaQueryDto } from './dto/media-query.dto';
@@ -58,6 +61,7 @@ import { UploadNotificationService } from '../notification-producers/upload-noti
 import { MediaTouchService } from './media-touch.service';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source';
+import { metricNumber } from '../platform-extensions/telemetry/memoriahub-metrics.manifest';
 
 /**
  * Key for the tiered-browsing group-cover override map (Location Grouping,
@@ -108,6 +112,8 @@ export class MediaService {
     private readonly locationGroupResolver: LocationGroupResolverService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
     @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
+    // App metrics (RETRO-T3, #628): `app.media.uploads` / `app.media.upload.size`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -135,6 +141,18 @@ export class MediaService {
    *   dedup hit (clients may use it to decide HTTP status codes or UI feedback).
    */
   async createMedia(dto: CreateMediaDto, userId: string, userPermissions: string[]) {
+    try {
+      return await this.registerMedia(dto, userId, userPermissions);
+    } catch (err) {
+      // A client error (missing object, not owner, already linked, no access) is a rejected upload.
+      if (err instanceof HttpException && err.getStatus() < 500) {
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'rejected' });
+      }
+      throw err;
+    }
+  }
+
+  private async registerMedia(dto: CreateMediaDto, userId: string, userPermissions: string[]) {
     // Verify the StorageObject exists and belongs to the caller
     const storageObject = await this.prisma.storageObject.findUnique({
       where: { id: dto.storageObjectId },
@@ -186,6 +204,7 @@ export class MediaService {
             `cleaning up redundant StorageObject ${dto.storageObjectId}`,
         );
         await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'deduplicated' });
         return { ...duplicate, deduplicated: true as const, mediaItemId: duplicate.id };
       }
     }
@@ -241,6 +260,7 @@ export class MediaService {
         }
 
         await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'deduplicated' });
         return { ...winner, deduplicated: true as const, mediaItemId: winner.id };
       }
 
@@ -248,6 +268,11 @@ export class MediaService {
     }
 
     this.logger.log(`MediaItem created: ${mediaItem.id} by user ${userId}`);
+    this.metrics?.add('mediaUploads', 1, { media_type: mediaItem.type, source: mediaItem.source, outcome: 'created' });
+    this.metrics?.add('mediaUploadSize', metricNumber(storageObject.size), {
+      media_type: mediaItem.type,
+      source: mediaItem.source,
+    });
 
     // Best-effort: if processing already finished before this createMedia call
     // (i.e. OBJECT_PROCESSED_EVENT fired and no-op'd because no MediaItem
@@ -1094,6 +1119,7 @@ export class MediaService {
 
     // Backup change feed: tag joins don't touch the MediaItem row (issue #310).
     await this.mediaTouch.touchMediaItems([item.id]);
+    this.metrics?.add('mediaTagsApplied', result.length, { media_type: item.type, source: 'manual' });
 
     this.logger.log(
       `Attached ${dto.names.length} tag(s) to MediaItem ${mediaItemId}`,
@@ -2133,12 +2159,38 @@ export class MediaService {
     if (added > 0 || removed > 0) {
       await this.mediaTouch.touchMediaItems(dto.ids);
     }
+    if (added > 0 && this.metrics) await this.countBulkTagsApplied(dto, added, addSource);
 
     this.logger.log(
       `bulkTags: added=${added} removed=${removed} for ${dto.ids.length} items by user ${userId}`,
     );
 
     return { added, removed };
+  }
+
+  /**
+   * `app.media.tags.applied` for a bulk add (RETRO-T3): the joins created, split by media type in
+   * proportion to the selection (one extra read of the selected items' types). Never throws.
+   */
+  private async countBulkTagsApplied(dto: BulkTagsDto, added: number, source: MediaTagSource): Promise<void> {
+    try {
+      const rows = await this.prisma.mediaItem.groupBy({
+        by: ['type'],
+        where: { id: { in: dto.ids }, circleId: dto.circleId },
+        _count: { _all: true },
+      });
+      const total = rows.reduce((sum, row) => sum + row._count._all, 0);
+      for (const row of rows) {
+        if (total > 0) {
+          this.metrics?.add('mediaTagsApplied', Math.round((added * row._count._all) / total), {
+            media_type: row.type,
+            source,
+          });
+        }
+      }
+    } catch {
+      // Metrics never fail a tag write.
+    }
   }
 
   async bulkDelete(
@@ -2464,8 +2516,8 @@ export class MediaService {
    *      fallback ONLY if the batch delete throws, so one bad row can't strand
    *      the rest and we can report precisely which ids failed).
    *   2. Best-effort blob deletes grouped by `(storageProvider, bucket)` — one
-   *      `provider.deleteMany(keys)` per distinct group (S3 batches up to 1000
-   *      keys per call). Blob-delete failures are non-fatal (warn only), matching
+   *      platform `deleteStorageKeys` per distinct group (the S3 drivers'
+   *      `deleteMany`: `DeleteObjects`, up to 1000 keys per call). Blob-delete failures are non-fatal (warn only), matching
    *      `purgeMediaItems` semantics — an item still counts as deleted.
    *   3. A single `storageObject.deleteMany` for the objects of the rows that
    *      were actually deleted (skipping any whose MediaItem delete failed, since
@@ -2549,10 +2601,10 @@ export class MediaService {
     for (const group of groups.values()) {
       try {
         const provider = await this.resolver.getProviderFor(group.provider, group.bucket);
-        const result = await provider.deleteMany(group.keys);
-        if (result.errors.length > 0) {
+        const result = await deleteStorageKeys(provider, group.keys);
+        if (result.failed.length > 0) {
           this.logger.warn(
-            `purgeMediaItemsBatched: ${result.errors.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,
+            `purgeMediaItemsBatched: ${result.failed.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,
           );
         }
       } catch (err) {

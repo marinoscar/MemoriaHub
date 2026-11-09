@@ -2,7 +2,8 @@
  * `export.run` end to end against real PostgreSQL (RETRO-H2, #596).
  *
  * The platform's REAL `ExportRunHandler` and `ExportsService`, constructed by hand over the
- * app's `PrismaService`, the same bypass client `ExportsHostModule` binds (`forSystem`), and
+ * app's `PrismaService` through `forSystem` (the same bypass `ExportsHostModule` binds through
+ * `PrismaSystemService`), and
  * the REAL `ExportsStorageAdapter` over a fake resolver whose providers keep the bytes in
  * memory, keyed by `provider:bucket`. What a mocked Prisma cannot prove:
  *
@@ -166,7 +167,7 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
     orgId = await defaultOrgId(prisma);
 
     const system: ExportsSystemData = { asSystem: (reason) => forSystem(prisma, reason) as never };
-    storage = new ExportsStorageAdapter(resolver as never, prisma);
+    storage = new ExportsStorageAdapter(resolver as never, { asSystem: (reason: string) => forSystem(prisma, reason as never) } as never);
     handler = new ExportRunHandler(
       { register: () => undefined } as never,
       options,
