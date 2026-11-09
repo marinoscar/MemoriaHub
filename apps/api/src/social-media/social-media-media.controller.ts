@@ -14,13 +14,12 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { CircleRole } from '@prisma/client';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../settings/feature-gates';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import { SocialMediaBackfillService } from './social-media-backfill.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
@@ -32,7 +31,7 @@ export class SocialMediaMediaController {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly systemSettingsService: AppSystemSettingsService,
     private readonly socialMediaBackfillService: SocialMediaBackfillService,
   ) {}
@@ -54,7 +53,7 @@ export class SocialMediaMediaController {
       throw new BadRequestException('Social-media detection is disabled globally');
     }
 
-    await this.assertMediaItemAccess(mediaItemId, user, CircleRole.collaborator);
+    await this.assertMediaItemAccess(mediaItemId, user, 'editor');
     const result = await this.socialMediaBackfillService.enqueueRerun(
       mediaItemId,
       user.id,
@@ -71,7 +70,7 @@ export class SocialMediaMediaController {
     @Param('id') mediaItemId: string,
     @CurrentUser() user: RequestUser,
   ) {
-    await this.assertMediaItemAccess(mediaItemId, user, CircleRole.viewer);
+    await this.assertMediaItemAccess(mediaItemId, user, 'viewer');
     const status = await this.socialMediaBackfillService.getStatus(mediaItemId);
     return { data: status };
   }
@@ -79,7 +78,7 @@ export class SocialMediaMediaController {
   private async assertMediaItemAccess(
     mediaItemId: string,
     user: RequestUser,
-    requiredRole: CircleRole = CircleRole.viewer,
+    requiredRole: OwnerRole = 'viewer',
   ): Promise<{ id: string; circleId: string }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -90,7 +89,7 @@ export class SocialMediaMediaController {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,

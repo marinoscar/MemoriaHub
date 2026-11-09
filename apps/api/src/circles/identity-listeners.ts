@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   IDENTITY_EVENTS,
@@ -51,6 +52,7 @@ export class CircleIdentityListeners {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    @Optional() private readonly ownerAccess?: OwnerAccessService,
   ) {}
 
   @OnEvent(IDENTITY_EVENTS.USER_CREATED)
@@ -150,6 +152,9 @@ export class CircleIdentityListeners {
 
       if (!outcome) continue;
       this.logger.log(`Circle invite ${id} claimed by user ${userId} for circle ${outcome.circleId}`);
+      // The claim's member row is mirrored into the group in the same
+      // transaction (RETRO-I2); drop the cached memberships (RETRO-I3).
+      if (outcome.changed) this.ownerAccess?.invalidateMembers([userId]);
       if (outcome.changed) await this.sendMembershipConfirmation(outcome.circleId, address, outcome.role);
     }
   }

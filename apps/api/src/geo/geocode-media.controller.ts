@@ -13,12 +13,11 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { CircleRole } from '@prisma/client';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import { GeocodeBackfillService } from './geocode-backfill.service';
 
 @ApiTags('Media')
@@ -29,7 +28,7 @@ export class GeocodeMediaController {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly geocodeBackfillService: GeocodeBackfillService,
   ) {}
 
@@ -42,7 +41,7 @@ export class GeocodeMediaController {
     @Param('id') mediaItemId: string,
     @CurrentUser() user: RequestUser,
   ) {
-    await this.assertMediaItemAccess(mediaItemId, user, CircleRole.collaborator);
+    await this.assertMediaItemAccess(mediaItemId, user, 'editor');
     const result = await this.geocodeBackfillService.enqueueRerun(mediaItemId, user.id);
     return { data: result };
   }
@@ -56,7 +55,7 @@ export class GeocodeMediaController {
     @Param('id') mediaItemId: string,
     @CurrentUser() user: RequestUser,
   ) {
-    await this.assertMediaItemAccess(mediaItemId, user, CircleRole.viewer);
+    await this.assertMediaItemAccess(mediaItemId, user, 'viewer');
     const status = await this.geocodeBackfillService.getStatus(mediaItemId);
     return { data: status };
   }
@@ -64,7 +63,7 @@ export class GeocodeMediaController {
   private async assertMediaItemAccess(
     mediaItemId: string,
     user: RequestUser,
-    requiredRole: CircleRole = CircleRole.viewer,
+    requiredRole: OwnerRole = 'viewer',
   ): Promise<{ id: string; circleId: string }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -75,7 +74,7 @@ export class GeocodeMediaController {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,

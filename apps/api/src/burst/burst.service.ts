@@ -7,10 +7,10 @@ import {
   forwardRef,
   Optional,
 } from '@nestjs/common';
-import { BurstGroupStatus, CircleRole, JobReason, MediaType, Prisma, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
+import { BurstGroupStatus, JobReason, MediaType, Prisma, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   STORAGE_PROVIDER,
@@ -35,7 +35,7 @@ export class BurstService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly membership: CircleMembershipService,
+    private readonly membership: OwnerAccessService,
     private readonly enrichmentJobService: EnrichmentJobService,
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
@@ -120,7 +120,7 @@ export class BurstService {
     const by = query.sortBy ?? 'capturedAt';
     const dir = query.sortOrder ?? 'asc';
 
-    await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
+    await this.membership.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     const minGroupSize = await this.getBurstMinGroupSize();
     const skip = (page - 1) * pageSize;
@@ -264,7 +264,7 @@ export class BurstService {
       throw new NotFoundException(`Burst group ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.viewer);
+    await this.membership.requireOwnerRole(userId, group.circleId, perms, 'viewer');
 
     const itemsWithUrls = await this.mediaThumbnailService.attachThumbnailUrls(
       group.items,
@@ -318,7 +318,7 @@ export class BurstService {
       throw new NotFoundException(`Burst group ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, group.circleId, perms, 'editor');
 
     if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
       throw new BadRequestException('media:delete permission is required to trash burst items');
@@ -417,7 +417,7 @@ export class BurstService {
   // ---------------------------------------------------------------------------
 
   async bulkResolveBurstGroups(dto: BulkResolveBurstDto, userId: string, perms: string[]) {
-    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
       throw new BadRequestException('media:delete permission is required to trash burst items');
@@ -553,7 +553,7 @@ export class BurstService {
       throw new NotFoundException(`Burst group ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, group.circleId, perms, 'editor');
 
     if (group.status !== BurstGroupStatus.pending) {
       throw new BadRequestException(

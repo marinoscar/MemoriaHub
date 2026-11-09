@@ -7,9 +7,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
-import { ShareTargetType, CircleRole, Prisma } from '@prisma/client';
+import { ShareTargetType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { CreateShareDto } from './dto/create-share.dto';
@@ -100,7 +100,7 @@ export class ShareService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly thumbnailService: MediaThumbnailService,
   ) {}
 
@@ -199,11 +199,11 @@ export class ShareService {
     }
 
     // Assert at least collaborator-level access in that circle
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Idempotency: return existing active share if one exists

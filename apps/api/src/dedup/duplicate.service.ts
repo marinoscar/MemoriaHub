@@ -8,7 +8,6 @@ import {
   Optional,
 } from '@nestjs/common';
 import {
-  CircleRole,
   DuplicateGroupStatus,
   JobReason,
   MediaType,
@@ -18,7 +17,7 @@ import {
 } from '@prisma/client';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   STORAGE_PROVIDER,
@@ -71,7 +70,7 @@ export class DuplicateService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly membership: CircleMembershipService,
+    private readonly membership: OwnerAccessService,
     private readonly enrichmentJobService: EnrichmentJobService,
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
@@ -265,7 +264,7 @@ export class DuplicateService {
     const by = query.sortBy ?? 'capturedAt';
     const dir = query.sortOrder ?? 'asc';
 
-    await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
+    await this.membership.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     // `capturedAt`/`confidence` are nullable (object form OK); `mediaCount` is
     // non-null (plain direction only). `confidence` is now a real, persisted,
@@ -398,7 +397,7 @@ export class DuplicateService {
       throw new NotFoundException(`Duplicate group ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.viewer);
+    await this.membership.requireOwnerRole(userId, group.circleId, perms, 'viewer');
 
     const { kind, maxSim } = await this.computeGroupKind(group.items);
     const { scores, bestId } = this.computeBestCopyScores(group.items);
@@ -490,7 +489,7 @@ export class DuplicateService {
       throw new NotFoundException(`Duplicate group ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, group.circleId, perms, 'editor');
 
     if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
       throw new BadRequestException('media:delete permission is required to trash duplicate items');
@@ -578,7 +577,7 @@ export class DuplicateService {
   // ---------------------------------------------------------------------------
 
   async bulkResolveDuplicateGroups(dto: BulkResolveDuplicateDto, userId: string, perms: string[]) {
-    await this.membership.assertCircleAccess(userId, dto.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     if (dto.action === 'trash' && !perms.includes(PERMISSIONS.MEDIA_DELETE)) {
       throw new BadRequestException('media:delete permission is required to trash duplicate items');
@@ -716,7 +715,7 @@ export class DuplicateService {
       throw new NotFoundException(`Duplicate group ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, group.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, group.circleId, perms, 'editor');
 
     if (group.status !== DuplicateGroupStatus.pending) {
       throw new BadRequestException(
@@ -818,7 +817,7 @@ export class DuplicateService {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, mediaItem.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, mediaItem.circleId, perms, 'editor');
 
     if (mediaItem.type !== MediaType.photo) {
       throw new BadRequestException('Duplicate detection only applies to photos');

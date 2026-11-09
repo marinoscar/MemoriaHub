@@ -22,7 +22,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { AiModule } from '../ai/ai.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
 import { emailModule } from '../platform/email/email.config';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
@@ -54,7 +54,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
   // points one way only — AiModule imports SettingsModule and nothing else —
   // so there is no cycle to break.
   //
-  // #307's API layer adds two edges: CirclesModule (CircleMembershipService,
+  // #307's API layer adds two edges: OwnerAccessModule (OwnerAccessService,
   // the per-circle role checks) and MediaModule (MediaThumbnailService for
   // batched signing, MediaService for the album path save-as-album reuses
   // rather than duplicating). Both point one way — neither imports
@@ -73,7 +73,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     
     EnrichmentModule,
     AiModule,
-    CirclesModule,
+    OwnerAccessModule,
     MediaModule,
     emailModule,
     MediaProcessingModule,

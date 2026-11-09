@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, CircleRole } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import {
   SEARCHABLE_FIELDS,
   buildWhereFromFields,
@@ -54,7 +54,7 @@ export class SearchService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly semanticSearch: SemanticSearchService,
     private readonly mediaThumbnail: MediaThumbnailService,
   ) {}
@@ -72,11 +72,11 @@ export class SearchService {
     const sortBy = paging?.sortBy ?? 'capturedAt';
     const sortOrder = paging?.sortOrder ?? 'desc';
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       permissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     // --- Semantic search path ---

@@ -4,13 +4,13 @@ import { SearchAgentController } from './agent/search-agent.controller';
 import { SearchService } from './search.service';
 import { SemanticSearchService } from './semantic-search.service';
 import { PrismaModule } from '../prisma/prisma.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { AiModule } from '../ai/ai.module';
 import { SearchAgentService } from './agent/search-agent.service';
 import { MediaModule } from '../media/media.module';
 
 @Module({
-  imports: [PrismaModule, CirclesModule, AiModule, MediaModule],
+  imports: [PrismaModule, OwnerAccessModule, AiModule, MediaModule],
   controllers: [SearchController, SearchAgentController],
   providers: [SearchService, SemanticSearchService, SearchAgentService],
   exports: [SearchService, SemanticSearchService, SearchAgentService],

@@ -4,10 +4,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CircleRole, MediaType, MediaEnhancementBatch, MediaEnhancementStatus, MediaEnhancementDecision, MediaTagSource, JobReason, MediaFaceStatusType, Prisma } from '@prisma/client';
+import { MediaType, MediaEnhancementBatch, MediaEnhancementStatus, MediaEnhancementDecision, MediaTagSource, JobReason, MediaFaceStatusType, Prisma } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
@@ -69,7 +69,7 @@ export class MediaEnhancementService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly resolver: StorageProviderResolver,
     private readonly recoveryService: StorageProcessingRecoveryService,
     private readonly thumbnailPrune: ThumbnailPruneService,
@@ -138,11 +138,11 @@ export class MediaEnhancementService {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Photo-only guard (mirrors media-orientation-edit.service).
@@ -306,7 +306,7 @@ export class MediaEnhancementService {
     }
 
     // ONE authorization pass for the whole batch (never per item).
-    await this.assertAllInCircle(uniqueIds, dto.circleId, user, 'collaborator');
+    await this.assertAllInCircle(uniqueIds, dto.circleId, user, 'editor');
 
     return this.createBatchFrom(
       uniqueIds,
@@ -376,11 +376,11 @@ export class MediaEnhancementService {
     // per-id existence check to follow (unlike startBatch): the id list is
     // produced by a circle-scoped query, so membership in the circle is the
     // whole authorization story.
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       dto.circleId,
       user.permissions,
-      CircleRole.collaborator,
+      'editor',
     );
 
     const effectivePersonIds =
@@ -681,11 +681,11 @@ export class MediaEnhancementService {
   async listBatches(query: ListEnhancementBatchesQuery, user: RequestUser) {
     const { circleId, page, pageSize } = query;
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       circleId,
       user.permissions,
-      CircleRole.viewer,
+      'viewer',
     );
 
     // Served by the existing @@index([circleId, createdAt]); `id` tiebreak keeps
@@ -719,7 +719,7 @@ export class MediaEnhancementService {
 
   /** Single batch detail — the BaseRun-shaped progress payload (circle viewer). */
   async getBatch(batchId: string, user: RequestUser) {
-    const batch = await this.loadBatch(batchId, user, CircleRole.viewer);
+    const batch = await this.loadBatch(batchId, user, 'viewer');
     const tallies = await this.tallyBatches([batch.id]);
     return this.serializeBatch(batch, tallies.get(batch.id) ?? EMPTY_TALLY);
   }
@@ -737,7 +737,7 @@ export class MediaEnhancementService {
    * covers the row whose job was already claimed when this landed.
    */
   async cancelBatch(batchId: string, user: RequestUser) {
-    const batch = await this.loadBatch(batchId, user, CircleRole.collaborator);
+    const batch = await this.loadBatch(batchId, user, 'editor');
 
     const tallies = await this.tallyBatches([batch.id]);
     const view = this.serializeBatch(batch, tallies.get(batch.id) ?? EMPTY_TALLY);
@@ -792,7 +792,7 @@ export class MediaEnhancementService {
   private async loadBatch(
     batchId: string,
     user: RequestUser,
-    role: CircleRole,
+    role: OwnerRole,
   ): Promise<MediaEnhancementBatch> {
     const batch = await this.prisma.mediaEnhancementBatch.findUnique({
       where: { id: batchId },
@@ -800,7 +800,7 @@ export class MediaEnhancementService {
     if (!batch) {
       throw new NotFoundException(`Enhancement batch ${batchId} not found`);
     }
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       batch.circleId,
       user.permissions,
@@ -927,13 +927,13 @@ export class MediaEnhancementService {
     ids: string[],
     circleId: string,
     user: RequestUser,
-    role: 'viewer' | 'collaborator',
+    role: OwnerRole,
   ): Promise<void> {
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       circleId,
       user.permissions,
-      role as CircleRole,
+      role,
     );
 
     const uniqueIds = [...new Set(ids)];
@@ -989,11 +989,11 @@ export class MediaEnhancementService {
   async listEnhancements(query: ListEnhancementsQuery, user: RequestUser) {
     const { circleId, page, pageSize, sortBy, sortOrder } = query;
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       circleId,
       user.permissions,
-      CircleRole.viewer,
+      'viewer',
     );
 
     const statuses = resolveStatusFilter(query.status);
@@ -1302,7 +1302,7 @@ export class MediaEnhancementService {
     user: RequestUser,
     options: { acknowledgeDownscale?: boolean } = {},
   ) {
-    const row = await this.loadRowForItem(mediaItemId, enhancementId, user, 'collaborator');
+    const row = await this.loadRowForItem(mediaItemId, enhancementId, user, 'editor');
 
     if (row.status !== MediaEnhancementStatus.ready || !row.stagingStorageKey) {
       throw new BadRequestException('Enhancement is not ready to apply');
@@ -1675,7 +1675,7 @@ export class MediaEnhancementService {
     enhancementId: string,
     user: RequestUser,
   ): Promise<void> {
-    const row = await this.loadRowForItem(mediaItemId, enhancementId, user, 'collaborator');
+    const row = await this.loadRowForItem(mediaItemId, enhancementId, user, 'editor');
     await this.deleteStaging(row);
     await this.prisma.mediaEnhancement.update({
       where: { id: row.id },
@@ -1695,7 +1695,7 @@ export class MediaEnhancementService {
   private async assertItemAccess(
     mediaItemId: string,
     user: RequestUser,
-    required: 'viewer' | 'collaborator',
+    required: OwnerRole,
   ) {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -1704,11 +1704,11 @@ export class MediaEnhancementService {
     if (!mediaItem || mediaItem.deletedAt) {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,
-      required as CircleRole,
+      required,
     );
     return mediaItem;
   }
@@ -1717,7 +1717,7 @@ export class MediaEnhancementService {
     mediaItemId: string,
     enhancementId: string,
     user: RequestUser,
-    required: 'viewer' | 'collaborator',
+    required: OwnerRole,
   ) {
     await this.assertItemAccess(mediaItemId, user, required);
     const row = await this.prisma.mediaEnhancement.findUnique({

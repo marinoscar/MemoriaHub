@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { CircleRole, JobReason, LocationSuggestionStatus, MediaType, Prisma } from '@prisma/client';
+import { JobReason, LocationSuggestionStatus, MediaType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER, StorageProvider } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -19,7 +19,7 @@ export class LocationSuggestionService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly membership: CircleMembershipService,
+    private readonly membership: OwnerAccessService,
     private readonly enrichmentJobService: EnrichmentJobService,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
@@ -56,7 +56,7 @@ export class LocationSuggestionService {
     const by = query.sortBy ?? 'createdAt';
     const dir = query.sortOrder ?? 'desc';
 
-    await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
+    await this.membership.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     const where: Prisma.LocationSuggestionWhereInput = { circleId, status: status as LocationSuggestionStatus };
     if (mediaItemId) {
@@ -135,7 +135,7 @@ export class LocationSuggestionService {
       throw new NotFoundException(`Location suggestion ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, suggestion.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, suggestion.circleId, perms, 'editor');
 
     if (suggestion.status !== LocationSuggestionStatus.pending) {
       throw new BadRequestException(
@@ -189,7 +189,7 @@ export class LocationSuggestionService {
       throw new NotFoundException(`Location suggestion ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, suggestion.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, suggestion.circleId, perms, 'editor');
 
     if (suggestion.status !== LocationSuggestionStatus.pending) {
       throw new BadRequestException(
@@ -219,7 +219,7 @@ export class LocationSuggestionService {
       throw new NotFoundException(`Location suggestion ${id} not found`);
     }
 
-    await this.membership.assertCircleAccess(userId, suggestion.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, suggestion.circleId, perms, 'editor');
 
     if (suggestion.status !== LocationSuggestionStatus.auto_applied) {
       throw new BadRequestException(
@@ -263,7 +263,7 @@ export class LocationSuggestionService {
     // logic — mirrors the fix applied to the duplicate-detection rerun
     // endpoint (commit 6ec95e6), which originally only checked the
     // system-level media:write permission and skipped this check.
-    await this.membership.assertCircleAccess(userId, mediaItem.circleId, perms, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(userId, mediaItem.circleId, perms, 'editor');
 
     if (mediaItem.type !== MediaType.photo) {
       throw new BadRequestException('Location inference only applies to photos');

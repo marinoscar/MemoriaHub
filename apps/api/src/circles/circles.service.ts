@@ -7,7 +7,8 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from './circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
+import { SHARING_PERMISSIONS } from '@marinoscar/platform-api/sharing';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../notifications-registry/memoriahub-email.notifications';
@@ -20,19 +21,13 @@ import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
 
-const ROLE_RANK: Record<CircleRole, number> = {
-  viewer: 1,
-  collaborator: 2,
-  circle_admin: 3,
-};
-
 @Injectable()
 export class CirclesService {
   private readonly logger = new Logger(CirclesService.name);
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly membership: CircleMembershipService,
+    private readonly membership: OwnerAccessService,
     private readonly notifications: NotificationsService,
   ) {}
 
@@ -44,7 +39,7 @@ export class CirclesService {
   // ----- Circles -----
 
   async create(userId: string, dto: CreateCircleDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const circle = await tx.circle.create({
         data: {
           name: dto.name,
@@ -59,11 +54,19 @@ export class CirclesService {
       this.logger.log(`Circle created: ${circle.id} by user ${userId}`);
       return circle;
     });
+    // The circle and its admin are mirrored into a group in the same
+    // transaction (RETRO-I2 trigger); drop the creator's cached memberships so
+    // the next access check sees the new group (RETRO-I3).
+    this.membership.invalidateMembers([userId]);
+    return created;
   }
 
   async list(user: RequestUser, all: boolean) {
     if (all) {
-      const isSuperAdmin = user.permissions.includes(PERMISSIONS.CIRCLES_MANAGE_ANY);
+      // `groups:admin` is the platform name of `circles:manage_any` (RETRO-I3).
+      const isSuperAdmin =
+        user.permissions.includes(SHARING_PERMISSIONS.GROUPS_ADMIN) ||
+        user.permissions.includes(PERMISSIONS.CIRCLES_MANAGE_ANY);
       if (!isSuperAdmin) {
         throw new ForbiddenException('circles:manage_any permission required');
       }
@@ -88,7 +91,7 @@ export class CirclesService {
   }
 
   async getById(user: RequestUser, id: string) {
-    await this.membership.assertCircleAccess(user.id, id, user.permissions, CircleRole.viewer);
+    await this.membership.requireOwnerRole(user.id, id, user.permissions, 'viewer');
 
     return this.prisma.circle.findUnique({
       where: { id },
@@ -104,7 +107,7 @@ export class CirclesService {
   }
 
   async update(user: RequestUser, id: string, dto: UpdateCircleDto) {
-    await this.membership.assertCircleAccess(user.id, id, user.permissions, CircleRole.circle_admin);
+    await this.membership.requireOwnerRole(user.id, id, user.permissions, 'admin');
 
     return this.prisma.circle.update({
       where: { id },
@@ -116,7 +119,7 @@ export class CirclesService {
   }
 
   async remove(user: RequestUser, id: string) {
-    await this.membership.assertCircleAccess(user.id, id, user.permissions, CircleRole.circle_admin);
+    await this.membership.requireOwnerRole(user.id, id, user.permissions, 'admin');
 
     const circle = await this.prisma.circle.findUnique({
       where: { id },
@@ -127,14 +130,16 @@ export class CirclesService {
       throw new BadRequestException('Cannot delete a personal circle');
     }
 
+    const members = await this.prisma.circleMember.findMany({ where: { circleId: id }, select: { userId: true } });
     await this.prisma.circle.delete({ where: { id } });
+    this.membership.invalidateMembers(members.map((m) => m.userId));
     this.logger.log(`Circle ${id} deleted by user ${user.id}`);
   }
 
   // ----- Members -----
 
   async listMembers(user: RequestUser, circleId: string) {
-    await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.viewer);
+    await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'viewer');
     const items = await this.prisma.circleMember.findMany({
       where: { circleId },
       include: {
@@ -155,7 +160,7 @@ export class CirclesService {
   }
 
   async addMember(user: RequestUser, circleId: string, dto: AddMemberDto) {
-    await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
+    await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
 
     // Verify target user exists
     const targetUser = await this.prisma.user.findUnique({
@@ -163,6 +168,7 @@ export class CirclesService {
       select: { id: true },
     });
     if (!targetUser) throw new NotFoundException(`User ${dto.userId} not found`);
+    await this.assertNotPersonal(circleId);
 
     const member = await this.prisma.circleMember.upsert({
       where: { circleId_userId: { circleId, userId: dto.userId } },
@@ -174,6 +180,8 @@ export class CirclesService {
         },
       },
     });
+
+    this.membership.invalidateMembers([dto.userId]);
 
     // Membership-confirmation email (best-effort, fire-and-forget).
     if (member.user?.email) {
@@ -221,7 +229,7 @@ export class CirclesService {
     targetUserId: string,
     dto: UpdateMemberRoleDto,
   ) {
-    await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
+    await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
 
     const existing = await this.prisma.circleMember.findUnique({
       where: { circleId_userId: { circleId, userId: targetUserId } },
@@ -240,20 +248,22 @@ export class CirclesService {
       }
     }
 
-    return this.prisma.circleMember.update({
+    const updated = await this.prisma.circleMember.update({
       where: { circleId_userId: { circleId, userId: targetUserId } },
       data: { role: dto.role },
     });
+    this.membership.invalidateMembers([targetUserId]);
+    return updated;
   }
 
   async removeMember(user: RequestUser, circleId: string, targetUserId: string) {
     const isSelf = user.id === targetUserId;
 
     if (!isSelf) {
-      await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
+      await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
     } else {
       // Self-leave: must at least be a member (viewer-level)
-      await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.viewer);
+      await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'viewer');
     }
 
     const existing = await this.prisma.circleMember.findUnique({
@@ -276,12 +286,26 @@ export class CirclesService {
     await this.prisma.circleMember.delete({
       where: { circleId_userId: { circleId, userId: targetUserId } },
     });
+    this.membership.invalidateMembers([targetUserId]);
+  }
+
+  /**
+   * A personal circle has no group (RETRO-I2, circles-to-groups.md §2): its
+   * rows belong to its owner alone, and a member added to it would hold no
+   * access since RETRO-I3 decides access on groups. Refuse instead of adding
+   * a member who can see nothing.
+   */
+  private async assertNotPersonal(circleId: string): Promise<void> {
+    const circle = await this.prisma.circle.findUnique({ where: { id: circleId }, select: { isPersonal: true } });
+    if (circle?.isPersonal) {
+      throw new BadRequestException('A personal circle cannot have other members');
+    }
   }
 
   // ----- Invites -----
 
   async listInvites(user: RequestUser, circleId: string) {
-    await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
+    await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
     const items = await this.prisma.circleInvite.findMany({
       where: { circleId },
       orderBy: { addedAt: 'desc' },
@@ -290,9 +314,10 @@ export class CirclesService {
   }
 
   async createInvite(user: RequestUser, circleId: string, dto: CreateInviteDto) {
-    await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
+    await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
 
     const email = dto.email; // already lowercased by Zod transform
+    await this.assertNotPersonal(circleId);
 
     // Upsert into AllowedEmail so the invitee can log in
     await this.prisma.allowedEmail.upsert({
@@ -385,7 +410,7 @@ export class CirclesService {
   }
 
   async revokeInvite(user: RequestUser, circleId: string, inviteId: string) {
-    await this.membership.assertCircleAccess(user.id, circleId, user.permissions, CircleRole.circle_admin);
+    await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
 
     const invite = await this.prisma.circleInvite.findUnique({ where: { id: inviteId } });
     if (!invite) throw new NotFoundException(`Invite ${inviteId} not found`);

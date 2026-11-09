@@ -7,10 +7,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CircleRole, Prisma, type MediaSyncDevice, type MediaSyncDiagnosticReport, type MediaSyncRun } from '@prisma/client';
+import { Prisma, type MediaSyncDevice, type MediaSyncDiagnosticReport, type MediaSyncRun } from '@prisma/client';
 
 import { type AuthCredentialInfo } from '@marinoscar/platform-api/identity';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { staticLogger } from '../common/logger/logger.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -145,7 +145,7 @@ export class MediaSyncService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -609,7 +609,7 @@ export class MediaSyncService {
     if (personal) return personal.id;
 
     const membership = await this.prisma.circleMember.findFirst({
-      where: { userId, role: { in: [CircleRole.collaborator, CircleRole.circle_admin] } },
+      where: { userId, role: { in: ['collaborator', 'circle_admin'] } },
       select: { circleId: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -636,11 +636,11 @@ export class MediaSyncService {
         { circleId },
       );
     try {
-      const { isSuperAdmin } = await this.circleMembership.assertCircleAccess(
+      const { isSuperAdmin } = await this.circleMembership.requireOwnerRole(
         caller.id,
         circleId,
         caller.permissions,
-        CircleRole.collaborator,
+        'editor',
       );
       if (isSuperAdmin) {
         const circle = await this.prisma.circle.findUnique({ where: { id: circleId }, select: { id: true } });

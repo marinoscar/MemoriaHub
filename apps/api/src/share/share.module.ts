@@ -4,7 +4,7 @@
 // docs/platform-adoption/circles-to-groups.md.
 
 import { Module } from '@nestjs/common';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { ShareController } from './share.controller';
@@ -16,7 +16,7 @@ import { ShareService } from './share.service';
  *
  * Provides public media sharing via token-based share links.
  *
- * Imports CirclesModule so that CircleMembershipService is available for
+ * Imports OwnerAccessModule so that OwnerAccessService is available for
  * access checks when creating shares.
  *
  * Imports MediaModule so that MediaThumbnailService is available for
@@ -30,7 +30,7 @@ import { ShareService } from './share.service';
  */
 @Module({
   imports: [
-    CirclesModule,
+    OwnerAccessModule,
     MediaModule,
     MediaProcessingModule,
   ],

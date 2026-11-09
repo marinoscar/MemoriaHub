@@ -9,7 +9,6 @@ import {
 } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
-  CircleRole,
   JobReason,
   Prisma,
   Workflow,
@@ -19,7 +18,7 @@ import {
   WorkflowTrigger,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { isWorkflowsEnabled } from '../../settings/feature-gates';
@@ -65,7 +64,7 @@ export class WorkflowRunService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly enrichmentJobs: EnrichmentJobService,
     private readonly thumbnails: MediaThumbnailService,
     // App metrics (RETRO-T3, #628): `app.runs.finished{engine=workflow,outcome=cancelled}`. Optional for hand-built tests.
@@ -86,11 +85,11 @@ export class WorkflowRunService {
     const workflow = await this.prisma.workflow.findUnique({ where: { id: workflowId } });
     if (!workflow) throw new NotFoundException(`Workflow ${workflowId} not found`);
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       workflow.circleId,
       user.permissions,
-      CircleRole.collaborator,
+      'editor',
     );
 
     // App-wide concurrency gate (served by the (status, updatedAt) index).
@@ -230,11 +229,11 @@ export class WorkflowRunService {
     const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       run.circleId,
       user.permissions,
-      CircleRole.collaborator,
+      'editor',
     );
 
     if (run.status !== WorkflowRunStatus.awaiting_approval) {
@@ -316,11 +315,11 @@ export class WorkflowRunService {
     const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       run.circleId,
       user.permissions,
-      CircleRole.collaborator,
+      'editor',
     );
 
     if (TERMINAL_RUN_STATUSES.includes(run.status)) {
@@ -387,11 +386,11 @@ export class WorkflowRunService {
     await this.assertFeatureEnabled();
     const workflow = await this.prisma.workflow.findUnique({ where: { id: workflowId } });
     if (!workflow) throw new NotFoundException(`Workflow ${workflowId} not found`);
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       workflow.circleId,
       user.permissions,
-      CircleRole.viewer,
+      'viewer',
     );
 
     const { page, pageSize } = query;
@@ -421,11 +420,11 @@ export class WorkflowRunService {
     await this.assertFeatureEnabled();
     const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       run.circleId,
       user.permissions,
-      CircleRole.viewer,
+      'viewer',
     );
 
     const statusGroups = await this.prisma.workflowRunItem.groupBy({
@@ -455,11 +454,11 @@ export class WorkflowRunService {
     await this.assertFeatureEnabled();
     const run = await this.prisma.workflowRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Workflow run ${runId} not found`);
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       run.circleId,
       user.permissions,
-      CircleRole.viewer,
+      'viewer',
     );
 
     const { page, pageSize, status } = query;
@@ -759,17 +758,17 @@ export class WorkflowRunService {
         if (typeof targetCircleId !== 'string' || !targetCircleId) {
           throw new BadRequestException('move_to_circle requires a targetCircleId');
         }
-        await this.circleMembership.assertCircleAccess(
+        await this.circleMembership.requireOwnerRole(
           user.id,
           circleId,
           user.permissions,
-          CircleRole.collaborator,
+          'editor',
         );
-        await this.circleMembership.assertCircleAccess(
+        await this.circleMembership.requireOwnerRole(
           user.id,
           targetCircleId,
           user.permissions,
-          CircleRole.collaborator,
+          'editor',
         );
       }
     }

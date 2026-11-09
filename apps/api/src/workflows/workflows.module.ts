@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
 import { FaceModule } from '../face/face.module';
 import { BurstModule } from '../burst/burst.module';
@@ -40,7 +40,7 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
  *   - DedupModule            → DuplicateService
  *   - LocationInferenceModule → LocationSuggestionService
  *   - EnrichmentModule       → EnrichmentJobService
- *   - CirclesModule          → CircleMembershipService
+ *   - OwnerAccessModule          → OwnerAccessService
  * None of these import WorkflowsModule, so no forwardRef is required.
  *
  * NotificationProducersModule (epic #240, issue #247; RETRO-D3) supplies
@@ -53,7 +53,7 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
   imports: [
     PrismaModule,
     
-    CirclesModule,
+    OwnerAccessModule,
     MediaModule,
     FaceModule,
     BurstModule,

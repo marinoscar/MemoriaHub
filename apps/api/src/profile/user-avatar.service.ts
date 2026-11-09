@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  CircleRole,
   MediaType,
   Prisma,
   UserAvatarSource,
@@ -16,7 +15,7 @@ import { Readable } from 'stream';
 
 import { buildFaceCropThumbnail } from '@memoriahub/enrichment-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { StorageProvider } from '@marinoscar/platform-api/storage';
 import { streamToBuffer } from '../media-processing/processors/stream-utils';
@@ -167,7 +166,7 @@ export class UserAvatarService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly userSettings: UserSettingsService,
     private readonly defaultOrgId: DefaultOrgId,
   ) {}
@@ -1093,11 +1092,11 @@ export class UserAvatarService {
     }
 
     try {
-      await this.circleMembership.assertCircleAccess(
+      await this.circleMembership.requireOwnerRole(
         user.id,
         person.circleId,
         user.permissions,
-        CircleRole.viewer,
+        'viewer',
       );
     } catch (err) {
       this.logger.warn(
